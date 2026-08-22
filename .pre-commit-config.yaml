@@ -3,6 +3,8 @@
 #          and requirement auditing across the Astrometrics codebase.
 # ==============================================================================
 
+default_stages: [pre-commit]
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
@@ -33,6 +35,11 @@ repos:
 
   - repo: local
     hooks:
+      - id: commit-message-format
+        name: Commit Message Format
+        entry: ./build/hooks/check_commit_message.sh
+        language: system
+        stages: [commit-msg]
       - id: generate-types
         name: Generate Types
         entry: ./build/codegen/generate-types.sh

@@ -22,7 +22,7 @@ This section covers everything you need to get started with Astrometrics and und
         :link: ../Getting_Started
         :link-type: doc
 
-        A first worked sequence across both libraries: registering a target, processing its frames, and planning when to observe it.
+        A quick-start guide to both libraries: learn how to register an observation target, process its images, and plan an observation session.
 
     .. grid-item-card:: Astrometrics Library Architecture
         :link: ../library_design/Astrometrics_Library_Architecture

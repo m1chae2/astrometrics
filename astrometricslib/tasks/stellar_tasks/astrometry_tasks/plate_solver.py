@@ -78,6 +78,11 @@ class PlateSolver:
             The solved WCS FITS header, or `None` if no solve
             strategy succeeded.
         """
+        # astroquery.astrometry_net defaults verbose=True, which prints
+        # progress dots and dumps the full source table to stdout. Silence
+        # it unless a caller explicitly asks for that output.
+        kwargs.setdefault("verbose", False)
+
         # 1. Local Solve
         if image_path:
             header = self._solve_locally(image_path, **kwargs)

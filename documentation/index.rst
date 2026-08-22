@@ -9,7 +9,7 @@ Astrometrics Documentation
 
 Welcome to the **Astrometrics** scientific image processing and **Wayfinding** observatory navigation library documentation.
 
-Astrometrics is a clean, modern Python domain ecosystem and visualization platform for astrophotography, precision photometry, slitless spectroscopy, and automated observatory control. Designed with a dual-interface architecture, every capability available in the Desktop Application is also fully scriptable via the core Python libraries, allowing you to seamlessly transition from interactive exploration to fully automated workflows.
+Astrometrics consists of two Python libraries and a desktop application, providing a complete ecosystem for astrophotography, precision photometry, slitless spectroscopy, and automated observatory control. Built with a dual-interface architecture, every capability available in the desktop app is also fully scriptable via the Python libraries, allowing you to seamlessly transition from interactive exploration to fully automated workflows.
 
 .. grid:: 1 2 2 2
     :gutter: 3
@@ -24,13 +24,13 @@ Astrometrics is a clean, modern Python domain ecosystem and visualization platfo
         :link: user_interface/index
         :link-type: doc
 
-        Official handbook, observation guides, and technical reference for the Electron/Vite desktop observatory interface.
+        Official handbook, observation guides, and technical reference for the desktop observatory application.
 
     .. grid-item-card:: Getting Started
         :link: Getting_Started
         :link-type: doc
 
-        A first worked sequence across both libraries: registering a target, processing its frames, and planning when to observe it.
+        A quick-start guide to both libraries: learn how to register an observation target, process its images, and plan an observation session.
 
     .. grid-item-card:: Interactive Tutorials
         :link: notebooks/index

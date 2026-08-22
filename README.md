@@ -19,7 +19,7 @@ Rather than juggling separate tools for capturing photos, controlling mounts, ca
 To launch the desktop application:
 
 ```bash
-./build/linux/run_astrometrics.sh start
+./astrometrics.sh start
 ```
 
 ---

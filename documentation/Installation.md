@@ -1,10 +1,13 @@
 # Astrometrics Installation
 
-*Version 1.0 · 2026-08-07 · Status: current*
+*Version 1.1 · 2026-08-22 · Status: current*
 
 ## Abstract
 
-This document covers obtaining a working Astrometrics installation on Linux and Windows, including the system libraries the observatory-control and image-processing paths depend on. It is written for an observer setting up the suite for the first time. Once installation completes, `Getting_Started.md` walks through a first session against the libraries.
+This document covers obtaining a working Astrometrics installation on Linux, including the system libraries the observatory-control and image-processing paths depend on. It is written for an observer setting up the suite for the first time. Once installation completes, `Getting_Started.md` walks through a first session against the libraries.
+
+> [!NOTE]
+> Windows is not yet a supported installation target; this document will cover it once that path has been verified.
 
 ## 1. Introduction
 
@@ -38,10 +41,17 @@ Only the image-processing packages are needed to use `astrometricslib` on existi
 
 ## 3. Installing on Linux
 
-Install the system dependencies, adding the INDI project's package archive for the observatory-control stack:
+Ubuntu's package archives do not carry Python 3.14 yet, so install it from the deadsnakes PPA before anything else:
 
 ```bash
+sudo add-apt-repository -y ppa:deadsnakes/ppa
 sudo apt-get update
+sudo apt-get install -y python3.14 python3.14-venv
+```
+
+Install the remaining system dependencies, adding the INDI project's package archive for the observatory-control stack:
+
+```bash
 sudo apt-get install -y build-essential swig libcfitsio-dev libnova-dev libdbus-1-dev libglib2.0-dev
 sudo add-apt-repository -y ppa:mutlaqja/ppa
 sudo apt-get install -y indi-full libindi-dev
@@ -53,25 +63,14 @@ Create the virtual environment and install the project:
 ./build/linux/setup_venv.sh
 ```
 
-The script locates a Python 3.14 interpreter, creates `.venv`, installs the project and its dependencies, and seeds a local configuration file from the tracked template if one does not already exist.
-
-Install the INDI Python bindings, which are distributed separately from the project's own dependencies:
+The script locates a Python 3.14 interpreter, creates `.venv`, installs the project and its dependencies, and seeds a local configuration file from the tracked template if one does not already exist. It also attempts to install the INDI Python bindings (`pyindi-client`), which are distributed separately from the project's own dependencies; a failed attempt is logged as a warning rather than aborting setup, since `wayfindinglib` falls back to a no-op stub when they are absent. If setup reported that warning and observatory control is needed, retry the install directly and confirm it took hold with the verification script from Section 5:
 
 ```bash
 .venv/bin/pip install pyindi-client
+./build/linux/verify_indi_client.sh
 ```
 
-## 4. Installing on Windows
-
-Windows installation runs the suite under the Windows Subsystem for Linux, because the INDI server is a Linux program:
-
-```powershell
-.\scripts\windows\setup_windows.ps1
-```
-
-Observers who only intend to process existing images, and never to control hardware, may instead create a native virtual environment and install the project with `pip install .`, omitting the INDI packages entirely.
-
-## 5. Configuration
+## 4. Configuration
 
 Installation produces `astrometricslib/astrometrics.config` from the tracked template. Two settings must be reviewed before first use:
 
@@ -80,7 +79,7 @@ Installation produces `astrometricslib/astrometrics.config` from the tracked tem
 
 The configuration file holds machine-specific paths and a credential, and is therefore excluded from version control. The template beside it, `astrometrics.config.example`, is the tracked copy.
 
-## 6. Verifying the installation
+## 5. Verifying the installation
 
 Confirm that both libraries import and report a version:
 
@@ -96,10 +95,16 @@ Run the test suites:
 
 Tests that require hardware or observational data absent from the machine report as skipped rather than failed, so a run with skips is a normal result.
 
+If observatory control is needed, confirm the real INDI bindings are active rather than the silent no-op stub described in Section 2.2:
+
+```bash
+./build/linux/verify_indi_client.sh
+```
+
 Launch the desktop application:
 
 ```bash
-./build/linux/run_astrometrics.sh start
+./astrometrics.sh start
 ```
 
 ## Acknowledgments

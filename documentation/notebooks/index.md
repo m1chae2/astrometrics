@@ -74,7 +74,7 @@ In this tutorial, you will learn how to query the internal database for identifi
 In this tutorial, you will learn how to use the `astrometrics.visualization` registry to generate plots and dashboards.
 :::
 
-:::{grid-item-card} 9. Full Pipeline Cookbook: M 13
+:::{grid-item-card} 9. End-to-End Image Processing: M 13
 :link: /notebooks/astrometrics/user_guide/09_end_to_end_pipeline_M13
 :link-type: doc
 

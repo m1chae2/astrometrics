@@ -1,0 +1,80 @@
+/* index.css - global base styles
+  Consolidated global reset and base typography for the app. */
+@import './theme.css';
+@import './layout.css';
+
+html,
+body {
+  box-sizing: border-box;
+  width: 100vw;
+  height: 100vh;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  /* Strict no-scroll rule */
+}
+
+/* App-wide base font and background */
+body {
+  font-family: var(--font-family-base);
+  font-size: 16px;
+  /* Reset to reasonable default */
+  background-color: var(--grey-darkest);
+  color: var(--white);
+  -webkit-font-smoothing: antialiased;
+}
+
+.main-frame,
+iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  display: block;
+  box-sizing: border-box;
+  min-width: 320px;
+  min-height: 320px;
+  background: var(--grey-dark);
+}
+
+/* Theme numeric spin-buttons blue globally */
+input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  cursor: pointer;
+  display: block;
+  width: 14px;
+  height: 16px;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 16'%3e%3cpath d='M5 0L9 5H1L5 0ZM5 16L1 11H9L5 16Z' fill='%234a9eff'/%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: center;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+}
+
+input::-webkit-inner-spin-button:hover {
+  opacity: 1;
+}
+
+input[type=number] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+  /* Firefox support */
+}
+
+input:focus {
+  border-color: var(--primary-blue) !important;
+}
+
+/* REQ: UI-STYLE-1: Standard Select/Dropdown Style */
+select {
+  margin-right: 8px;
+  padding: 6px;
+  border-radius: 4px;
+  background: var(--term-border);
+  color: var(--text-light);
+  border: 1px solid var(--grey-light);
+  font-family: inherit;
+  font-size: var(--control-font-size, 14px);
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}

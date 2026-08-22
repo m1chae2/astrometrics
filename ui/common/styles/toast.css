@@ -1,0 +1,27 @@
+.toast-container {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  z-index: 9999;
+  pointer-events: none;
+}
+
+.toast {
+  min-width: 160px;
+  max-width: 80vw;
+  padding: 10px 14px;
+  border-radius: 6px;
+  color: white;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+  font-size: 1rem; /* match app's base font size */
+  text-align: center; /* center the text */
+  pointer-events: auto; /* allow interactions with the toast itself */
+}
+
+.toast-success { background: var(--toast-green); }
+.toast-error { background: var(--toast-red); }

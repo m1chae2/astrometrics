@@ -1,0 +1,17 @@
+% Long inline-code filenames/paths (e.g. tasks/stellar_tasks/photometry_tasks/
+% variability_analyzer.py) have no natural break point at underscores/slashes,
+% so both in narrow table columns and in ordinary bullet-list prose they
+% overflow past the page margin instead of wrapping (confirmed via
+% "Overfull \hbox" warnings, not just visual inspection). seqsplit allows a
+% break between any two characters as a last resort, applied to every \texttt
+% document-wide — LaTeX only uses that break point when a line would
+% otherwise overflow, so short inline code is unaffected; long identifiers
+% occasionally get an inelegant mid-word break instead of bleeding off the page.
+\usepackage{seqsplit}
+\let\oldtexttt\texttt
+\renewcommand{\texttt}[1]{{\ttfamily\seqsplit{#1}}}
+
+% Give the table of contents its own page instead of letting the title/
+% abstract/body run onto the same page immediately below it.
+\let\oldtableofcontents\tableofcontents
+\renewcommand{\tableofcontents}{\oldtableofcontents\clearpage}

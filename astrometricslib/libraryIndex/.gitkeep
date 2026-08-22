@@ -1,0 +1,10 @@
+Keeps astrometricslib/libraryIndex/ present in a fresh checkout.
+
+Everything else in this directory is runtime state and is gitignored
+(astrometrics.db, astrometrics_log.db, locks/, calibration_frames.json).
+Without this placeholder the directory would not exist after a clone, and
+AppConfiguration.get_library_path() resolves "path = ./libraryIndex" by
+testing whether <root>/astrometricslib/libraryIndex exists -- falling back
+to <root>/libraryIndex when it does not. Deleting this file therefore does
+not just remove an empty directory, it silently moves the image library to
+a different location.

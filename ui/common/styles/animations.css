@@ -1,0 +1,73 @@
+/* Common Animations */
+
+@keyframes slideIn {
+    from {
+        transform: translateX(-100%);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes slideOut {
+    from {
+        transform: translateX(0);
+        opacity: 1;
+    }
+
+    to {
+        transform: translateX(-100%);
+        opacity: 0;
+    }
+}
+
+@keyframes slideInRight {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes spinner-spin {
+    0% {
+        transform: rotate(0deg);
+    }
+
+    100% {
+        transform: rotate(360deg);
+    }
+}
+
+@keyframes clamp-bump {
+    0% {
+        transform: translate(0, 0) scale(1);
+        box-shadow: none;
+    }
+
+    30% {
+        transform: translate3d(var(--clamp-x, 0px), var(--clamp-y, 0px), 0) scale(0.995);
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+    }
+
+    100% {
+        transform: translate(0, 0) scale(1);
+        box-shadow: none;
+    }
+}
+.loading-spinner {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    border: 2px solid rgba(79, 193, 255, 0.2);
+    border-top: 2px solid var(--accent-blue, #4fc1ff);
+    border-radius: 50%;
+    animation: spinner-spin 1s linear infinite;
+}

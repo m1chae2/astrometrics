@@ -1,0 +1,40 @@
+/* Styles for the ConfirmDialog component. Kept small and theme-aware. */
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+/* Backdrop uses the theme token and an opacity so the underlying UI shows through
+   while the dialog remains a separate, fully-opaque element above it. */
+.confirm-backdrop {
+  position: absolute;
+  inset: 0;
+  background: var(--grey-darkest, #181818);
+  opacity: 0.6;
+}
+
+.confirm-dialog {
+  position: relative;
+  background: var(--grey-darkest, #181818);
+  color: var(--fg, #fff);
+  padding: 1rem;
+  border-radius: 6px;
+  width: min(460px, 92%);
+  box-shadow: 0 6px 24px rgba(0,0,0,0.6);
+  border: 1px solid rgba(255,255,255,0.06);
+  backdrop-filter: blur(6px);
+}
+
+.confirm-dialog h3 { margin: 0 0 0.5rem 0; font-size: 1.05rem; }
+.confirm-body { margin-bottom: 1rem; white-space: pre-wrap; }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
+
+/* Danger variant for the confirm action button */
+.confirm-actions .btn-danger {
+  background: var(--accent-red, #d9534f);
+  color: var(--white);
+}

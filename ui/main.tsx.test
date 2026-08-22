@@ -1,0 +1,27 @@
+// Minimal test entry point
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+
+console.log('=== ASTROMETRICS DEBUG: main.tsx loading ===');
+console.log('React:', React);
+console.log('ReactDOM:', ReactDOM);
+console.log('Root element:', document.getElementById('root'));
+
+try {
+  const root = ReactDOM.createRoot(document.getElementById('root') as HTMLElement);
+  console.log('=== Root created successfully ===');
+
+  root.render(
+    <div style={{ padding: '20px', color: 'white', fontSize: '24px' }}>
+      <h1>Test Render - If you see this, React is working!</h1>
+      <p>Timestamp: {new Date().toISOString()}</p>
+    </div>
+  );
+  console.log('=== Render called ===');
+} catch (error) {
+  console.error('=== ERROR in main.tsx ===', error);
+  document.body.innerHTML = `<div style="color: red; padding: 20px; font-size: 18px;">
+    <h1>Error!</h1>
+    <pre>${error}</pre>
+  </div>`;
+}

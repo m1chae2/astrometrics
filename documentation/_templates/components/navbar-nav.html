@@ -1,0 +1,256 @@
+{#
+  Custom navbar-nav.html for Astrometrics documentation.
+
+  Overrides PyData Sphinx Theme's default navbar-nav component to provide a
+  consistent three-dropdown header navigation bar on every page, regardless of
+  the current page's toctree context.
+
+  Dropdowns:
+    Introduction  — orientation docs, library architecture, UI guides
+    Tutorials     — Jupyter Notebook tutorials for both libraries
+    API           — astrometricslib and wayfindinglib API references
+
+  Uses Bootstrap dropdown classes (already bundled by PyData) and Jinja2
+  pathto() so relative URLs resolve correctly from any page depth.
+#}
+
+{# Detect which top-level section is currently active for aria-current. #}
+{% set _intro_pages = [
+    'introduction/index', 'Installation', 'Getting_Started',
+    'library_design/Astrometrics_Library_Architecture',
+    'library_design/technical_reference/Astrometrics_Library_Implementation',
+    'library_design/Wayfinding_Library_Architecture',
+    'library_design/technical_reference/Wayfinding_Library_Implementation',
+    'user_interface/user_guides/User_Manual',
+    'user_interface/user_guides/Observatory_Control_and_Automation_Guide',
+    'user_interface/user_guides/Image_Processing_and_Analysis_Tutorial',
+    'user_interface/technical_reference/User_Interface_Architecture',
+] %}
+{% set _tutorial_pages = [
+    'notebooks/index',
+    'notebooks/astrometrics/catalog_management/adding_local_images',
+    'notebooks/astrometrics/catalog_management/stellar_object_analysis',
+    'notebooks/astrometrics/target_stacking_and_analysis/astrometry_analysis',
+    'notebooks/astrometrics/target_stacking_and_analysis/moving_object_detection',
+    'notebooks/astrometrics/target_stacking_and_analysis/m13_full_target_analysis',
+    'notebooks/astrometrics/target_stacking_and_analysis/photometry_analysis',
+    'notebooks/astrometrics/target_stacking_and_analysis/spectroscopy_analysis',
+    'notebooks/astrometrics/target_stacking_and_analysis/target_frame_stacking',
+    'notebooks/wayfinding/planning/mosaic_sequence_authoring',
+    'notebooks/wayfinding/planning/observation_planning',
+    'notebooks/wayfinding/control/adding_remote_images',
+    'notebooks/wayfinding/control/telescope_slewing_and_tracking',
+    'notebooks/wayfinding/execution/observation_execution',
+] %}
+{% set _api_pages = [
+    'api/index', 'api/astrometricslib', 'api/wayfindinglib',
+] %}
+{% set _in_intro    = pagename in _intro_pages or pagename.startswith('library_design') or pagename.startswith('user_interface') %}
+{% set _in_tutorial = pagename in _tutorial_pages or pagename.startswith('notebooks') %}
+{% set _in_api      = pagename in _api_pages or pagename.startswith('api') %}
+
+<nav aria-label="Site navigation">
+  <ul class="bd-navbar-elements navbar-nav">
+
+    {# ── Introduction ─────────────────────────────────────────────────────── #}
+    <li class="nav-item dropdown">
+      <button class="btn dropdown-toggle nav-link{% if _in_intro %} active{% endif %}"
+              type="button"
+              data-bs-toggle="dropdown"
+              aria-expanded="false"
+              {% if _in_intro %}aria-current="page"{% endif %}>
+        Introduction
+      </button>
+      <ul class="dropdown-menu">
+        <li><h6 class="dropdown-header">Getting Started</h6></li>
+        <li>
+          <a class="dropdown-item{% if pagename == 'Installation' %} active{% endif %}"
+             href="{{ pathto('Installation') }}">
+            Installation
+          </a>
+        </li>
+        <li>
+          <a class="dropdown-item{% if pagename == 'Getting_Started' %} active{% endif %}"
+             href="{{ pathto('Getting_Started') }}">
+            Getting Started
+          </a>
+        </li>
+
+        <li><hr class="dropdown-divider"></li>
+        <li><h6 class="dropdown-header">Library Architecture</h6></li>
+        <li>
+          <a class="dropdown-item{% if pagename == 'library_design/Astrometrics_Library_Architecture' %} active{% endif %}"
+             href="{{ pathto('library_design/Astrometrics_Library_Architecture') }}">
+            Astrometrics Architecture
+          </a>
+        </li>
+        <li>
+          <a class="dropdown-item{% if pagename == 'library_design/technical_reference/Astrometrics_Library_Implementation' %} active{% endif %}"
+             href="{{ pathto('library_design/technical_reference/Astrometrics_Library_Implementation') }}">
+            Astrometrics Implementation
+          </a>
+        </li>
+        <li>
+          <a class="dropdown-item{% if pagename == 'library_design/Wayfinding_Library_Architecture' %} active{% endif %}"
+             href="{{ pathto('library_design/Wayfinding_Library_Architecture') }}">
+            Wayfinding Architecture
+          </a>
+        </li>
+        <li>
+          <a class="dropdown-item{% if pagename == 'library_design/technical_reference/Wayfinding_Library_Implementation' %} active{% endif %}"
+             href="{{ pathto('library_design/technical_reference/Wayfinding_Library_Implementation') }}">
+            Wayfinding Implementation
+          </a>
+        </li>
+
+        <li><hr class="dropdown-divider"></li>
+        <li><h6 class="dropdown-header">User Interface</h6></li>
+        <li>
+          <a class="dropdown-item{% if pagename == 'user_interface/user_guides/User_Manual' %} active{% endif %}"
+             href="{{ pathto('user_interface/user_guides/User_Manual') }}">
+            User Manual
+          </a>
+        </li>
+        <li>
+          <a class="dropdown-item{% if pagename == 'user_interface/user_guides/Observatory_Control_and_Automation_Guide' %} active{% endif %}"
+             href="{{ pathto('user_interface/user_guides/Observatory_Control_and_Automation_Guide') }}">
+            Observatory Control Guide
+          </a>
+        </li>
+        <li>
+          <a class="dropdown-item{% if pagename == 'user_interface/user_guides/Image_Processing_and_Analysis_Tutorial' %} active{% endif %}"
+             href="{{ pathto('user_interface/user_guides/Image_Processing_and_Analysis_Tutorial') }}">
+            Image Processing Tutorial
+          </a>
+        </li>
+        <li>
+          <a class="dropdown-item{% if pagename == 'user_interface/technical_reference/User_Interface_Architecture' %} active{% endif %}"
+             href="{{ pathto('user_interface/technical_reference/User_Interface_Architecture') }}">
+            UI Architecture
+          </a>
+        </li>
+      </ul>
+    </li>
+
+    {# ── Tutorials ────────────────────────────────────────────────────────── #}
+    <li class="nav-item dropdown">
+      <button class="btn dropdown-toggle nav-link{% if _in_tutorial %} active{% endif %}"
+              type="button"
+              data-bs-toggle="dropdown"
+              aria-expanded="false"
+              {% if _in_tutorial %}aria-current="page"{% endif %}>
+        Tutorials
+      </button>
+      <ul class="dropdown-menu">
+        <li><h6 class="dropdown-header">Astrometrics Library</h6></li>
+        <li>
+          <a class="dropdown-item{% if pagename == 'notebooks/astrometrics/catalog_management/adding_local_images' %} active{% endif %}"
+             href="{{ pathto('notebooks/astrometrics/catalog_management/adding_local_images') }}">
+            Ingesting &amp; Cataloging FITS Images
+          </a>
+        </li>
+        <li>
+          <a class="dropdown-item{% if pagename == 'notebooks/astrometrics/catalog_management/stellar_object_analysis' %} active{% endif %}"
+             href="{{ pathto('notebooks/astrometrics/catalog_management/stellar_object_analysis') }}">
+            Stellar Object Analysis
+          </a>
+        </li>
+        <li>
+          <a class="dropdown-item{% if pagename == 'notebooks/astrometrics/target_stacking_and_analysis/astrometry_analysis' %} active{% endif %}"
+             href="{{ pathto('notebooks/astrometrics/target_stacking_and_analysis/astrometry_analysis') }}">
+            Astrometry &amp; Plate Solving
+          </a>
+        </li>
+        <li>
+          <a class="dropdown-item{% if pagename == 'notebooks/astrometrics/target_stacking_and_analysis/moving_object_detection' %} active{% endif %}"
+             href="{{ pathto('notebooks/astrometrics/target_stacking_and_analysis/moving_object_detection') }}">
+            Moving Object Detection
+          </a>
+        </li>
+        <li>
+          <a class="dropdown-item{% if pagename == 'notebooks/astrometrics/target_stacking_and_analysis/ngc6992_full_target_analysis' %} active{% endif %}"
+             href="{{ pathto('notebooks/astrometrics/target_stacking_and_analysis/ngc6992_full_target_analysis') }}">
+            NGC 6992 Full Target Analysis
+          </a>
+        </li>
+        <li>
+          <a class="dropdown-item{% if pagename == 'notebooks/astrometrics/target_stacking_and_analysis/photometry_analysis' %} active{% endif %}"
+             href="{{ pathto('notebooks/astrometrics/target_stacking_and_analysis/photometry_analysis') }}">
+            Photometry &amp; Light Curves
+          </a>
+        </li>
+        <li>
+          <a class="dropdown-item{% if pagename == 'notebooks/astrometrics/target_stacking_and_analysis/spectroscopy_analysis' %} active{% endif %}"
+             href="{{ pathto('notebooks/astrometrics/target_stacking_and_analysis/spectroscopy_analysis') }}">
+            Spectroscopy Analysis
+          </a>
+        </li>
+        <li>
+          <a class="dropdown-item{% if pagename == 'notebooks/astrometrics/target_stacking_and_analysis/target_frame_stacking' %} active{% endif %}"
+             href="{{ pathto('notebooks/astrometrics/target_stacking_and_analysis/target_frame_stacking') }}">
+            Frame Stacking
+          </a>
+        </li>
+
+        <li><hr class="dropdown-divider"></li>
+        <li><h6 class="dropdown-header">Wayfinding Library</h6></li>
+        <li>
+          <a class="dropdown-item{% if pagename == 'notebooks/wayfinding/planning/mosaic_sequence_authoring' %} active{% endif %}"
+             href="{{ pathto('notebooks/wayfinding/planning/mosaic_sequence_authoring') }}">
+            Mosaic Sequence Authoring
+          </a>
+        </li>
+        <li>
+          <a class="dropdown-item{% if pagename == 'notebooks/wayfinding/planning/observation_planning' %} active{% endif %}"
+             href="{{ pathto('notebooks/wayfinding/planning/observation_planning') }}">
+            Observation Planning
+          </a>
+        </li>
+        <li>
+          <a class="dropdown-item{% if pagename == 'notebooks/wayfinding/control/adding_remote_images' %} active{% endif %}"
+             href="{{ pathto('notebooks/wayfinding/control/adding_remote_images') }}">
+            Remote Image Ingestion
+          </a>
+        </li>
+        <li>
+          <a class="dropdown-item{% if pagename == 'notebooks/wayfinding/control/telescope_slewing_and_tracking' %} active{% endif %}"
+             href="{{ pathto('notebooks/wayfinding/control/telescope_slewing_and_tracking') }}">
+            Telescope Control
+          </a>
+        </li>
+        <li>
+          <a class="dropdown-item{% if pagename == 'notebooks/wayfinding/execution/observation_execution' %} active{% endif %}"
+             href="{{ pathto('notebooks/wayfinding/execution/observation_execution') }}">
+            Observation Execution
+          </a>
+        </li>
+      </ul>
+    </li>
+
+    {# ── API ──────────────────────────────────────────────────────────────── #}
+    <li class="nav-item dropdown">
+      <button class="btn dropdown-toggle nav-link{% if _in_api %} active{% endif %}"
+              type="button"
+              data-bs-toggle="dropdown"
+              aria-expanded="false"
+              {% if _in_api %}aria-current="page"{% endif %}>
+        API
+      </button>
+      <ul class="dropdown-menu">
+        <li>
+          <a class="dropdown-item{% if pagename == 'api/astrometricslib' %} active{% endif %}"
+             href="{{ pathto('api/astrometricslib') }}">
+            Astrometrics Library
+          </a>
+        </li>
+        <li>
+          <a class="dropdown-item{% if pagename == 'api/wayfindinglib' %} active{% endif %}"
+             href="{{ pathto('api/wayfindinglib') }}">
+            Wayfinding Library
+          </a>
+        </li>
+      </ul>
+    </li>
+
+  </ul>
+</nav>

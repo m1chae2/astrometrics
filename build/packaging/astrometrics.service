@@ -1,0 +1,14 @@
+[Unit]
+Description=Astrometrics Backend Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/astrometrics
+ExecStart=/usr/local/bin/astrometrics-backend
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

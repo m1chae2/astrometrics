@@ -1,0 +1,56 @@
+# ==============================================================================
+# Purpose: GitHub Actions workflow for astrometricslib unit testing and code coverage reporting.
+# ==============================================================================
+
+name: astrometricslib CI
+
+on:
+  push:
+    branches: [ main, master ]
+    paths: &paths
+      - 'astrometricslib/**'
+      - 'pyproject.toml'
+      - 'build/linux/run_tests.sh'
+      - 'build/linux/setup_venv.sh'
+      - '.github/actions/setup-python-env/**'
+      - '.github/workflows/astrometricslib.yml'
+  pull_request:
+    branches: [ main, master ]
+    paths: *paths
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Run astrometricslib Tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Setup Python Environment
+        uses: ./.github/actions/setup-python-env
+
+      - name: Run Unit Tests with Coverage
+        env:
+          PYTHONPATH: .
+          ASTROMETRICS_TESTING: "1"
+          ASTROMETRICS_FAST_TEST: "1"
+        run: |
+          COVERAGE=1 ./build/linux/run_tests.sh astrometricslib
+
+      - name: Comment PR with Code Coverage
+        if: github.event_name == 'pull_request'
+        uses: py-cov-action/python-coverage-comment-action@v3
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SUBPROJECT_ID: "astrometricslib"
+          MINIMUM_GREEN: 70
+          MINIMUM_ORANGE: 50

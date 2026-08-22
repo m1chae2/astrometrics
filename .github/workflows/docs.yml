@@ -1,0 +1,71 @@
+# ==============================================================================
+# Purpose: GitHub Actions workflow to build and verify Sphinx documentation.
+# Runs on push/pull_request to main/master, builds Sphinx HTML documentation from
+# documentation/, and uploads compiled HTML as a downloadable build artifact.
+# ==============================================================================
+
+name: Documentation CI
+
+on:
+  push:
+    branches: [ main, master ]
+    # astrometricslib/** and wayfindinglib/** are included because
+    # sphinx-automodapi imports the real modules to generate API docs.
+    paths: &paths
+      - 'documentation/**'
+      - 'astrometricslib/**'
+      - 'wayfindinglib/**'
+      - 'pyproject.toml'
+      - 'build/linux/build_docs.sh'
+      - 'build/documentation/check_notebook_outputs.py'
+      - '.github/workflows/docs.yml'
+  pull_request:
+    branches: [ main, master ]
+    paths: *paths
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-docs:
+    name: Build Sphinx Docs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[docs]
+
+      - name: Check Notebook Outputs Are Fresh
+        # The tutorial notebooks run against a local FITS sample library
+        # too large to ship to this runner, so CI can't re-execute them
+        # (that's done locally with build/linux/execute_notebooks.sh,
+        # wherever the sample data lives). This is the next best thing:
+        # a static check that every committed notebook's saved output
+        # looks like the product of one clean, fresh, top-to-bottom run,
+        # not stale or partially re-run content.
+        run: |
+          python build/documentation/check_notebook_outputs.py
+
+      - name: Build Documentation
+        # Delegates to the same script used for local dev builds so CI and
+        # developer machines can never drift apart (see build/linux/build_docs.sh).
+        run: |
+          bash build/linux/build_docs.sh
+
+      - name: Upload Documentation Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: sphinx-docs-html
+          path: documentation/_build/html

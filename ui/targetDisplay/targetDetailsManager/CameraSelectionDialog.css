@@ -1,0 +1,54 @@
+.camera-dialog-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.7);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.camera-dialog {
+    background: var(--grey-dark);
+    padding: 20px;
+    border-radius: 8px;
+    border: 1px solid var(--grey-light);
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    min-width: 300px;
+}
+
+.camera-dialog__title {
+    margin: 0;
+    color: var(--text-bright);
+}
+
+.camera-dialog__field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.camera-dialog__label {
+    color: var(--text-main);
+    font-size: 14px;
+}
+
+.camera-dialog__select {
+    padding: 8px;
+    background: var(--grey-darkest);
+    color: var(--text-main);
+    border: 1px solid var(--grey-lighter);
+    border-radius: 4px;
+}
+
+.camera-dialog__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 10px;
+}

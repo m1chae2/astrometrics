@@ -1,0 +1,42 @@
+{
+  "mcpServers": {
+    "astrometricslib-core": {
+      "command": "/path/to/astrometrics/.venv/bin/python",
+      "args": [
+        "-m",
+        "astrometricslib.mcp"
+      ],
+      "env": {
+        "PYTHONPATH": "/path/to/astrometrics"
+      }
+    },
+    "wayfindinglib-core": {
+      "command": "/path/to/astrometrics/.venv/bin/python",
+      "args": [
+        "-m",
+        "wayfindinglib.mcp"
+      ],
+      "env": {
+        "PYTHONPATH": "/path/to/astrometrics"
+      }
+    },
+    "astrometrics-backend": {
+      "command": "/path/to/astrometrics/.venv/bin/python",
+      "args": [
+        "-m",
+        "backend.mcp"
+      ],
+      "env": {
+        "ASTROMETRICS_API_BASE": "http://localhost:5000",
+        "PYTHONPATH": "/path/to/astrometrics"
+      }
+    },
+    "astrometrics-ui": {
+      "command": "node",
+      "args": [
+        "/path/to/astrometrics/ui/mcp/dist/index.js"
+      ],
+      "env": {}
+    }
+  }
+}

@@ -1,0 +1,11 @@
+
+.error-boundary {
+  padding: 40px;
+  text-align: center;
+  color: var(--white);
+  background: var(--cmd-bg-medium);
+  height: 100vh;
+}
+.error-boundary__text {
+  color: var(--danger-red);
+}

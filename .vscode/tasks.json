@@ -1,0 +1,80 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build Astrometrics (.deb)",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/build_astrometrics.sh",
+      "args": ["--arch", "${input:detectArch}"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": true,
+        "clear": false
+      },
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "detectArch",
+      "type": "command",
+      "command": "bash",
+      "args": [
+        "-c",
+        "arch=$(uname -m); case \"$arch\" in x86_64) echo x64 ;; aarch64) echo arm64 ;; armv7l|armv7) echo armv7l ;; *) echo x64 ;; esac"
+      ],
+      "description": "Auto-detect local Ubuntu architecture (x64/arm64/armv7l)."
+    }
+  ]
+}
+{
+  // VS Code tasks for running dev servers used by the Electron + Vite workflow.
+  // - Start Vite in the background on a fixed port (5173)
+  // - Start Electron (dev) which will load the Vite URL
+  // - Preserve the existing 'Install and Setup Astrometrics' task from the workspace
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Start Vite (5173)",
+      "type": "shell",
+      "command": "npm run dev -- --port 5173",
+      "isBackground": true,
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Start Electron (dev)",
+      "type": "shell",
+      "command": "npx nodemon --watch main.js --watch preload.js --exec \"ELECTRON_RENDERER_URL=http://127.0.0.1:5173 SKIP_BACKEND=1 NODE_ENV=development npx electron .\"",
+      "isBackground": true,
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+      ,
+      "dependsOn": "Start Vite (5173)"
+    },
+    {
+      "label": "Install and Setup Astrometrics",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-c",
+        "if [ ! -d .venv ]; then python3 -m venv .venv; fi && source .venv/bin/activate && pip install -e ."
+      ],
+      "problemMatcher": []
+    }
+  ]
+}

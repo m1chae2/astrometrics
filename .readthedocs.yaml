@@ -1,0 +1,47 @@
+# ==============================================================================
+# Purpose: Read the Docs build configuration for the Astrometrics documentation.
+# ==============================================================================
+#
+# Modeled on astropy's own .readthedocs.yaml. The notable choice is miniforge
+# rather than `build.tools.python`: this project requires Python 3.14 (see
+# pyproject.toml's requires-python -- the codebase uses PEP 758 parenthesis-less
+# `except A, B:`, a SyntaxError on 3.13 and earlier), and RTD's prebuilt CPython
+# list is not guaranteed to carry it. Resolving the interpreter through
+# conda-forge decouples the build from that list.
+#
+# pyindi-client is deliberately absent from the environment. It is a SWIG
+# binding to the INDI C++ client that cannot be built here, and
+# wayfindinglib/drivers/indi/pyindi_compatibility.py substitutes a stub when it
+# is missing precisely so documentation builds keep working.
+
+version: 2
+
+build:
+  os: "ubuntu-22.04"
+  tools:
+    python: "miniforge3-25.11"
+  jobs:
+    post_checkout:
+      # Unshallow so any version-derivation and "last updated" metadata sees
+      # real history rather than a single grafted commit.
+      - git fetch --unshallow || true
+
+conda:
+  environment: documentation/rtd_environment.yaml
+
+python:
+  install:
+    - method: pip
+      path: .
+      extra_requirements:
+        - docs
+
+sphinx:
+  configuration: documentation/conf.py
+  # Matches the -W already enforced in .github/workflows/docs.yml. The build is
+  # warning-free today; this keeps broken cross-references and missing
+  # autosummary stubs from silently returning.
+  fail_on_warning: true
+
+formats:
+  - htmlzip

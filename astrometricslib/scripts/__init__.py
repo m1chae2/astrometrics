@@ -1,0 +1,1 @@
+"""Astrometrics scripts package."""

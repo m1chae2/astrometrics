@@ -1,0 +1,55 @@
+/* Common Metrics & Statistics Styles */
+@import './theme.css';
+
+.metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+}
+
+.metric-box {
+    background-color: var(--grey-dark);
+    padding: 8px;
+    border-radius: 4px;
+    text-align: center;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.metric-label {
+    font-size: 11px;
+    color: var(--text-muted, #aaa);
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.metric-value {
+    font-size: 18px;
+    font-weight: bold;
+    color: var(--white);
+}
+
+.metric-value.highlight {
+    color: var(--primary-blue);
+}
+
+.metric-value.success {
+    color: var(--success-green);
+}
+
+.metric-value.warning {
+    color: var(--warning-amber);
+}
+
+.metric-value.error {
+    color: var(--accent-red);
+}
+
+/* Flexible grid for various usages */
+.metrics-grid--2-col {
+    grid-template-columns: repeat(2, 1fr);
+}
+
+.metrics-grid--4-col {
+    grid-template-columns: repeat(4, 1fr);
+}

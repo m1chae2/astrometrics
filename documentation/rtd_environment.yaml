@@ -1,0 +1,24 @@
+# ==============================================================================
+# Purpose: Conda environment for Read the Docs documentation builds.
+# ==============================================================================
+#
+# Only the interpreter and the compiled scientific stack are pinned here; the
+# remaining dependencies arrive via `pip install .[docs]`, driven by
+# .readthedocs.yaml. Resolving Python from conda-forge is what lets the build
+# use 3.14 without depending on Read the Docs shipping a prebuilt CPython 3.14.
+
+name: astrometrics-docs
+
+channels:
+  - conda-forge
+
+dependencies:
+  - python=3.14
+  - pip
+  # Compiled dependencies imported during the API build (sphinx-automodapi
+  # imports the real modules). Taking these from conda-forge avoids relying on
+  # a wheel existing for every one of them on cp314.
+  - numpy
+  - scipy
+  - astropy
+  - matplotlib-base

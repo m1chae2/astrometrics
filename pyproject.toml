@@ -1,0 +1,240 @@
+# ==============================================================================
+# Purpose: PyProject configuration file for Python tooling options in Astrometrics.
+# ==============================================================================
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "astrometrics"
+version = "0.2.0"
+description = "Integrated image processing, photometry, spectroscopy, and telescope control for amateur astronomy and citizen science."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Michael Coelho", email = "macoelho25@gmail.com" }]
+keywords = [
+    "astronomy",
+    "astrophotography",
+    "photometry",
+    "spectroscopy",
+    "astrometry",
+    "telescope-control",
+    "indi",
+    "citizen-science",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Astronomy",
+    "Topic :: Scientific/Engineering :: Image Processing",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.14",
+]
+# 3.14 is the floor, not a preference: the codebase uses PEP 758
+# parenthesis-less multi-exception `except A, B:` in 50 places, which is a
+# SyntaxError on 3.13 and earlier. CI pins 3.14 in
+# .github/actions/setup-python-env.
+requires-python = ">=3.14"
+dependencies = [
+    "astroalign", # star-field registration (no shared WCS needed) for spectral_star_registration.py
+    "astropy",
+    "astroquery",
+    "coverage",
+    "customtkinter",
+    "datamodel-code-generator",
+    "fastapi",
+    "matplotlib",
+    "mcp>=1.28.0,<2.0.0", # tool_registry.py reads Tool.inputSchema (camelCase); 1.x only, 2.0 renamed it to input_schema
+    "numpy",
+    "photutils",
+    "Pillow",
+    "pydantic>=1.10",
+    "pytest",
+    "pytest-cov",
+    "pytest-mock",
+    "rawpy",
+    "scipy",
+    "setuptools",
+    "tk",
+    "tksheet",
+    "uvicorn",
+    "websockets",
+    "psutil",
+    "pandas",
+]
+
+[project.optional-dependencies]
+dev = [
+    "flake8>=7.0.0",
+    "ruff>=0.16.0",
+    "safety>=3.0.0",
+    "pyinstaller",
+    # Type checker configured by pyrefly.toml. Previously that config was
+    # orphaned -- pyrefly was declared nowhere, so it never ran.
+    "pyrefly>=1.2.0",
+    # Runs the hooks in .pre-commit-config.yaml. Activate them in a clone with
+    # `pre-commit install`; the hook is per-clone and not carried by git.
+    "pre-commit>=4.0.0",
+]
+docs = [
+    "sphinx>=7.0.0",
+    "pydata-sphinx-theme>=0.15.0",
+    "sphinx-automodapi>=0.16.0",
+    "numpydoc>=1.6.0",
+    "myst-nb>=1.0.0",
+    "sphinx-copybutton>=0.5.2",
+    "sphinx-design>=0.5.0",
+    "sphinxcontrib-mermaid>=0.9.0",
+    "ipywidgets>=8.1.8"
+]
+
+
+
+[project.urls]
+Homepage = "https://github.com/m1chae2/astrometrics"
+Documentation = "https://github.com/m1chae2/astrometrics/tree/main/documentation"
+Repository = "https://github.com/m1chae2/astrometrics"
+Issues = "https://github.com/m1chae2/astrometrics/issues"
+
+[project.scripts]
+astrometrics = "backend.main_backend:main"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["backend", "astrometricslib", "wayfindinglib", "datastore"]
+exclude = [
+  "backend/tests",
+  "astrometricslib/test",
+  "wayfindinglib/test",
+  "datastore/test",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests", "astrometricslib/test", "wayfindinglib/test", "datastore/test"]
+pythonpath = ["."]
+addopts = "-v -m 'not trio'"
+markers = [
+    "anyio: mark test to run with anyio",
+    "trio: mark test as trio-only (skip if trio not installed)"
+]
+log_cli = true
+log_cli_level = "INFO"
+
+[tool.coverage.run]
+relative_files = true
+
+[tool.ruff]
+target-version = "py314"
+line-length = 110
+preview = true
+
+extend-exclude = [
+    "node_modules",
+    "dist",
+    "coverage",
+    ".venv",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+    "C4",  # flake8-comprehensions
+    "RUF", # ruff-specific rules
+    "N",   # pep8-naming (naming conventions)
+    "D",   # pydocstyle (numpydoc-style docstrings, LSST DM convention)
+    "doc-line-too-long", # pycodestyle: docstring/comment line-too-long (LSST DM 79-char limit)
+    "DOC", # pydoclint: docstring content must match the actual signature/behavior (preview)
+    "TID", # flake8-tidy-imports: banned-api enforces the astrometricslib public-API boundary
+    "S",   # flake8-bandit: security (subprocess use, hardcoded credentials, weak hashing, etc.)
+    "ANN", # flake8-annotations: type annotations must be present, so pyrefly actually checks the function
+]
+ignore = [
+    "ambiguous-unicode-character-string", # astronomical notation (', degree/prime/double-prime, x) is intentional
+    "ambiguous-unicode-character-docstring", # same
+    "ambiguous-unicode-character-comment", # same
+    "incorrect-blank-line-before-class", # conflicts with one-blank-line-before-class
+    "multi-line-summary-second-line", # conflicts with multi-line-summary-first-line
+    "any-type", # ANN401: dynamic payloads (INDI properties, notebook cell outputs, JSON) are legitimately Any
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+[tool.ruff.lint.pycodestyle]
+max-doc-length = 79
+
+[tool.ruff.lint.isort]
+known-first-party = ["astrometricslib", "wayfindinglib", "backend", "datastore"]
+
+# Enforces the astrometricslib public-API boundary documented in
+# astrometricslib/api/__init__.py: everything outside astrometricslib
+# itself must import from the top-level `astrometricslib` namespace,
+# never from its internal subpackages. Exempted for astrometricslib's
+# own modules via per-file-ignores below, since Layer 1 (`api/`) is
+# meant to reach into its own lower layers directly.
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"astrometricslib.api".msg = "Internal. Import from the top-level `astrometricslib` namespace instead."
+"astrometricslib.models".msg = "Internal. Import from the top-level `astrometricslib` namespace instead."
+"astrometricslib.utilities".msg = "Internal. Import from the top-level `astrometricslib` namespace instead."
+"astrometricslib.tasks".msg = "Internal. Use the facade on `Astrometrics` instead."
+"astrometricslib.drivers".msg = "Internal. Use the facade on `Astrometrics` instead."
+"astrometricslib.data_access".msg = "Internal. Use the facade on `Astrometrics` instead."
+
+[tool.ruff.lint.per-file-ignores]
+"**/test_*.py" = ["assert", "hardcoded-temp-file"] # S101/S108: assert is the pytest idiom; /tmp/... strings here are mock config defaults, never actually written to
+"**/conftest.py" = ["assert"] # S101, same reasoning
+"backend/services/observatory/guiding_service.py" = ["suspicious-non-cryptographic-random-usage"] # S311: simulated guide-star telemetry jitter for the mock/simulator, not security-sensitive
+# S404/S603/S607: this app is a telescope-control/imaging tool that
+# legitimately shells out to external CLIs (Siril, astrometry.net,
+# ssh/rsync/scp to remote StellarMate boxes). Reviewed: every call site uses
+# list-form args (never shell=True, never a string built by interpolating
+# untrusted input into a shell command), which is the safe subprocess pattern.
+"astrometricslib/drivers/siril_interface.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"]
+"astrometricslib/scripts/spectral_registration_quality_analysis.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
+"astrometricslib/tasks/stellar_tasks/astrometry_tasks/plate_solver.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
+"backend/mcp/mcp_diagnostics.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"]
+"backend/mcp/tools/developer_tools.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "hardcoded-temp-file"] # S108: "/tmp" is an allowlist prefix for the sandbox boundary check, not a path being written to
+"backend/mcp/tools/diagnostics.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
+"backend/services/infrastructure/remote_service.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
+"backend/services/infrastructure/system_status_service.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"]
+"wayfindinglib/drivers/stellarmate_interface.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
+"astrometricslib/data_access/test/test_persistence_operations.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
+"astrometricslib/test/test_scripts.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
+# S608: these all bind values through parameterized `?` placeholders; the
+# only f-string interpolation is a code-defined table name (from a registry
+# constant, never a request body or user text field) or, for the Gaia ADQL
+# queries, numeric coordinates formatted as floats -- neither can carry a
+# string value that escapes the query.
+"datastore/butler.py" = ["hardcoded-sql-expression"]
+"astrometricslib/drivers/disk_interface.py" = ["hardcoded-sql-expression"]
+"astrometricslib/drivers/logger_interface.py" = ["hardcoded-sql-expression"]
+"astrometricslib/tasks/stellar_tasks/astrometry_tasks/star_identifier.py" = ["hardcoded-sql-expression"]
+"wayfindinglib/drivers/disk_interface.py" = ["hardcoded-sql-expression"]
+"wayfindinglib/drivers/catalog/gaia_catalog_driver.py" = ["hardcoded-sql-expression"]
+"wayfindinglib/drivers/catalog/local_bright_star_catalog_driver.py" = ["hardcoded-sql-expression"]
+"__init__.py" = ["unused-import"] # re-exports for package public API
+"astrometricslib/__init__.py" = ["non-empty-init-module"] # Astrometrics facade class is intentionally defined here
+"wayfindinglib/__init__.py" = ["non-empty-init-module"] # Wayfinder facade class is intentionally defined here
+"astrometricslib/**" = ["banned-api"] # Layer 1 (api/) and lower layers reach into each other directly by design
+"build/codegen/generate_types.py" = ["banned-api"] # TS codegen introspects the full model surface, not just the public API
+"astrometricslib/conftest.py" = ["module-import-not-at-top-of-file"] # sys.modules mocking/config patching must precede import
+"astrometricslib/mcp/__main__.py" = ["module-import-not-at-top-of-file"] # sys.path bootstrap must precede import
+"wayfindinglib/mcp/__main__.py" = ["module-import-not-at-top-of-file"] # sys.path bootstrap must precede import
+"backend/tests/conftest.py" = ["module-import-not-at-top-of-file"] # sys.modules mocking/config patching must precede import
+"backend/main_backend.py" = ["module-import-not-at-top-of-file"] # warnings.filterwarnings() must precede import
+"backend/mcp/__main__.py" = ["module-import-not-at-top-of-file"] # sys.path bootstrap must precede import
+"wayfindinglib/drivers/indi_interface.py" = ["invalid-function-name"] # overrides PyIndi's C++ client interface (camelCase required)
+"wayfindinglib/drivers/indi/pyindi_compatibility.py" = ["invalid-function-name"] # stub mocks the same PyIndi camelCase interface
+"wayfindinglib/drivers/simulators/indi_simulator.py" = ["invalid-function-name"] # mocks the same PyIndi camelCase interface
+"wayfindinglib/drivers/indi/test/test_mount_controller.py" = ["invalid-function-name"] # fake telescope device mocks PyIndi's camelCase getNumber

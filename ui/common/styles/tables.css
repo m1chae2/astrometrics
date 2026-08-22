@@ -1,0 +1,74 @@
+/* Shared Data Table Styles */
+
+/* Common table container within a scrollable area */
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--table-font-size, 12px);
+    /* Ensure consistent font size */
+    color: var(--white, #e0e0e0);
+}
+
+.data-table th {
+    text-align: left;
+    padding: 4px 8px;
+    background-color: var(--table-bg);
+    /* Fixed dark header */
+    position: sticky;
+    top: 0;
+    color: var(--text-dimmer);
+    font-weight: 500;
+    z-index: 10;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.data-table td {
+    padding: 3px 8px;
+    border-bottom: 1px solid var(--table-bg);
+    cursor: pointer;
+}
+
+/* Row States */
+.data-table tr.selected {
+    background-color: var(--primary-blue, #094771);
+    color: var(--white);
+}
+
+.data-table tr:hover:not(.selected) {
+    background-color: var(--grey-medium); /* REQ: GEN-1.1 */
+}
+
+/* Status Colors */
+.status-rejected {
+    color: var(--accent-red, #f48771);
+    /* Red-ish for outliers */
+    font-style: italic;
+}
+
+.status-included {
+    color: var(--success-green, #89d185);
+    /* Green-ish */
+}
+
+/* Utility Classes for Table Content */
+.text-muted {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+}
+
+.text-bold {
+    font-weight: bold;
+    color: var(--white);
+}
+
+.text-desc {
+    color: var(--desc-color, #aaa);
+    font-size: 0.8rem;
+}
+
+.col-idx {
+    width: 40px;
+    color: var(--text-muted);
+}

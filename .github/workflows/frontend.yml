@@ -1,0 +1,69 @@
+# ==============================================================================
+# Purpose: GitHub Actions workflow for frontend UI type-checking, unit testing, and coverage reporting.
+# ==============================================================================
+
+name: Frontend CI
+
+on:
+  push:
+    branches: [ main, master ]
+    # backend/**, astrometricslib/**, and wayfindinglib/** are included
+    # because ui/setupTests.ts spawns the real Python backend for unit tests.
+    paths: &paths
+      - 'ui/**'
+      - 'electron/**'
+      - 'backend/**'
+      - 'astrometricslib/**'
+      - 'wayfindinglib/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'vitest.config.ts'
+      - 'eslint.config.js'
+      - 'tsconfig*.json'
+      - '.github/actions/setup-python-env/**'
+      - '.github/workflows/frontend.yml'
+  pull_request:
+    branches: [ main, master ]
+    paths: *paths
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Typecheck and Unit Test UI
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Setup Python Environment
+        uses: ./.github/actions/setup-python-env
+
+      - name: Install Node Dependencies
+        run: npm ci
+
+      - name: Run TypeScript Type Check
+        run: npm run type-check
+
+      - name: Run Unit Tests with Coverage
+        run: npm run test:unit -- --coverage
+
+      - name: Comment PR with UI Code Coverage
+        if: github.event_name == 'pull_request'
+        uses: davelosert/vitest-coverage-report-action@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          name: "UI Code Coverage"

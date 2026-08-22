@@ -1,0 +1,130 @@
+/* Common theme for Astrometrics UI */
+:root {
+  /* Fonts */
+  --font-family-base: 'Noto Sans', sans-serif;
+  --font-family-mono: 'Roboto Mono', monospace;
+
+  /* Global Sizing */
+  --control-font-size: 14px;
+  --control-btn-height: 38px;
+  --table-font-size: 14px;
+  --panel-header-size: 15px;
+  --label-font-size: 14px;
+  --target-list-font-size: 16px;
+  --section-label-size: 12px;
+
+  /* Scrollbars */
+  --scroll-thumb: rgba(25, 118, 210, 0.85);
+  --scroll-track: var(--grey-dark);
+  --scroll-width: 8px;
+
+  /* Colors */
+  /* Exact Color Tokens from Audit (Visual Preservation Constraint) */
+  --text-primary: #eaeaea;
+  --text-light: #eee;
+  --text-lighter: #ddd;
+  --text-dark: #ccc;
+  --text-dim: #aaa;
+  --text-dimmer: #999;
+  --text-dimmest: #666;
+  --text-darkest: #333;
+
+  --term-border: #333;
+  --term-bg-dark: #1e1e1e;
+  --term-bg-medium: #252526;
+  --term-bg-light: #2d2d2d;
+  --term-bg-lighter: #333;
+  --term-bg-lightest: #444;
+  --term-fg: #d4d4d4;
+  --term-fg-bright: #fff;
+  --term-fg-dim: #ccc;
+  --term-cyan: #4ec9b0;
+  --term-yellow: #dcdcaa;
+  --term-blue: #9cdcfe;
+
+  --cmd-bg-darkest: #141414;
+  --cmd-bg-dark: #181818;
+  --cmd-bg-medium: #1a1a1a;
+  --cmd-bg-light: #222;
+  --cmd-bg-lighter: #333;
+  --cmd-bg-lightest: #555;
+  --cmd-fg-bright: #fff;
+  --cmd-fg: #eee;
+  --cmd-fg-dim: #ccc;
+  --cmd-fg-dimmer: #aaa;
+  --cmd-fg-dimmest: #888;
+  --cmd-border-blue: #3b82f6;
+  --cmd-fg-blue: #93c5fd;
+  --cmd-bg-brown: #472d00;
+  --cmd-fg-yellow: #ffcc00;
+  --cmd-fg-red: #ff8888;
+
+  --astro-blue-light: #cfe8ff;
+  --astro-blue-lighter: #dceefb;
+  --astro-red-light: #ffb4b4;
+
+  --status-cyan: #4fc1ff;
+  --status-cyan-bright: #00ffff;
+  --status-green: #4AF626;
+  --status-green-dim: #4ade80;
+  --status-yellow: #fbbf24;
+  --status-red: #f87171;
+  --status-red-bright: #ff0000;
+
+  --pill-blue: #007bff;
+  --pill-green: #28a745;
+  --pill-red: #dc3545;
+  --pill-grey: #6c757d;
+
+  --modal-bg: #1f1f1f;
+  --table-bg: #2d2d2d;
+
+  --plot-blue: #4a9eff;
+  --plot-orange: #ffaa00;
+  --plot-green: #00ff00;
+
+  --list-green: #4CAF50;
+  --list-orange: #E65100;
+
+  --toast-green: #1f8a3e;
+  --toast-red: #a83a3a;
+  --black: #000;
+
+  --accent-red: #ff4444;
+  --frame-padding: 6px;
+  --grey-darkest: #181818;
+  /* RGB token for use with rgba(var(--grey-darkest-rgb), alpha) so overlays can
+    follow theme-controlled colors with adjustable alpha. Value: 24,24,24 */
+  --grey-darkest-rgb: 24, 24, 24;
+  --grey-dark: #222;
+  --grey-medium: #2C2C2C;
+  --grey-light: #444;
+  --grey-lighter: #505050;
+  --grey-lightest: #424242;
+  --primary-blue: #1976d2;
+  --accent-blue: #2196f3;
+  --white: #fff;
+  --text-muted: #888;
+  --background-secondary: #2c2c2c;
+  --border-color: #444;
+
+  /* Plot-specific aliases to keep component code simple and themeable */
+  --plot-paper-bg: var(--grey-darkest);
+  --plot-bg: var(--grey-dark);
+  --plot-font: var(--white);
+  --plot-grid: var(--grey-lighter);
+  --plot-zeroline: var(--grey-lightest);
+  --plot-accent: var(--accent-blue);
+  --plot-selection: var(--accent-red);
+  /* Interactive Button Colors (Pending vs Active) */
+  --btn-blue-pending: #2196f3;
+  --btn-blue-active: #0d47a1;
+  --btn-green-pending: #4caf50;
+  --btn-green-active: #1b5e20;
+  --btn-red-pending: #ff5252;
+  --btn-red-active: #b71c1c;
+
+  --success-green: #4caf50;
+  --warning-amber: #ffd86b;
+  --danger-red: #ff4444;
+}

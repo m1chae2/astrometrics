@@ -1,0 +1,58 @@
+# ==============================================================================
+# Purpose: Pre-commit hook configuration for linting, formatting, type-checking,
+#          and requirement auditing across the Astrometrics codebase.
+# ==============================================================================
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-yaml
+        args: ["--unsafe"]
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-toml
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.1
+    hooks:
+      - id: ruff
+        args: [--fix]
+        types_or: [python, pyi, jupyter, markdown]
+      - id: ruff-format
+        types_or: [python, pyi, jupyter, markdown]
+
+  # numpydoc-validation is deliberately not used. Ruff already enforces
+  # numpydoc-style docstrings (`D`, convention = "numpy") and verifies that
+  # their Parameters/Returns/Raises match the real signature (`DOC`, pydoclint),
+  # which is the stricter of the two checks. Running numpydoc alongside it
+  # reports 12k findings that are almost entirely EX01/SA01/ES01 -- demanding an
+  # Examples and See Also section on every function -- plus 1.8k GL01 that
+  # directly contradict ruff: GL01 wants the summary on the line after the
+  # opening quotes, while this repo's ruff config selects the opposite.
+
+  - repo: local
+    hooks:
+      - id: generate-types
+        name: Generate Types
+        entry: ./build/codegen/generate-types.sh
+        language: system
+        pass_filenames: false
+      - id: type-check
+        name: TypeScript Type Check
+        entry: npm run type-check
+        language: system
+        pass_filenames: false
+      - id: pyrefly
+        name: Pyrefly Type Check
+        entry: .venv/bin/pyrefly check
+        language: system
+        pass_filenames: false
+      - id: eslint
+        name: ESLint
+        # Scoped to the hand-written sources, matching lint.yml -- a bare
+        # `eslint .` also walks vendored and generated trees (public/js,
+        # documentation/_build, coverage/) that drown the real findings.
+        entry: npx eslint ui electron
+        language: system
+        pass_filenames: false

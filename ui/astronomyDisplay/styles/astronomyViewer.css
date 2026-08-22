@@ -1,0 +1,157 @@
+/* REQ: AST-2, AST-3: Shared Astronomy Viewer Styles */
+
+.astronomy-viewer-root {
+  color: var(--text-color, #e6eef8);
+  font-size: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
+  position: relative;
+  /* container for absolute tooltip */
+}
+
+.astronomy-viewer-title {
+  font-weight: 600;
+  padding-left: 6px;
+}
+
+.astronomy-plot {
+  background: var(--grey-dark, #1e1e1e);
+  border-radius: 4px;
+  align-self: center;
+  width: 100%;
+  max-width: none;
+}
+
+.astronomy-viewer-loading,
+.astronomy-viewer-empty,
+.astronomy-viewer-error {
+  padding: 18px;
+  color: var(--muted-text, #9fb0c9);
+}
+
+.astronomy-viewer-empty-overlay {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  color: var(--muted-text, #9fb0c9);
+  z-index: 10;
+  text-align: center;
+  background: rgba(30, 30, 30, 0.6);
+  padding: 8px 16px;
+  border-radius: 4px;
+}
+
+.astronomy-axes {
+  display: flex;
+  justify-content: space-between;
+  padding: 0 6px;
+  font-size: 12px;
+  color: var(--muted-text, #9fb0c9);
+}
+
+.astronomy-plot-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.astronomy-ylabel {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-size: 12px;
+  color: var(--muted-text, #9fb0c9);
+  padding-left: 6px;
+}
+
+.astronomy-xaxis-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 6px 0 6px;
+  color: var(--muted-text, #9fb0c9);
+}
+
+.astronomy-tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: rgba(10, 18, 28, 0.95);
+  border: 1px solid rgba(127, 179, 255, 0.12);
+  padding: 6px 8px;
+  border-radius: 4px;
+  color: var(--astro-blue-light);
+  font-size: 12px;
+  z-index: 40;
+}
+
+.astronomy-tooltip-line {
+  line-height: 1.2;
+}
+
+.astronomy-selection-tooltip {
+  background: rgba(10, 14, 20, 0.95);
+  color: var(--astro-blue-lighter);
+  border: 1px solid rgba(255, 102, 102, 0.12);
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  box-shadow: 0 4px 10px rgba(2, 6, 10, 0.6);
+  pointer-events: auto;
+  padding-right: 28px;
+  position: relative;
+  z-index: 50;
+}
+
+.astronomy-selection-line {
+  line-height: 1.1;
+}
+
+.astronomy-tooltip-close {
+  position: absolute;
+  right: 6px;
+  top: 4px;
+  background: transparent;
+  border: none;
+  color: var(--astro-red-light);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.astronomy-tooltip-close:hover {
+  color: var(--white);
+}
+
+.astronomy-xlabel {
+  text-align: center;
+  flex: 1 1 auto;
+  font-size: 12px;
+}
+
+.astronomy-xaxis-min,
+.astronomy-xaxis-max {
+  width: 80px;
+  font-size: 12px;
+}
+
+/* Hide Plotly's built-in hover tooltip so we only show our custom tooltip */
+.astronomy-plot-container .hoverlayer,
+.astronomy-plot-container .hovertext,
+.astronomy-plot-container .hoverpoint {
+  display: none !important;
+}
+
+.astronomy-viewer-root--full-height {
+    height: 100%;
+    min-height: 0;
+}
+
+.astronomy-viewer__plot {
+    width: 100%;
+    height: 100%;
+}

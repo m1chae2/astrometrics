@@ -1,0 +1,68 @@
+/*
+ * IngestFramesModal Styling
+ * Scoped styles for the frame selection and ingestion modal.
+ */
+
+.ingest-modal__label-no-margin {
+    margin-bottom: 0 !important;
+}
+
+.ingest-modal__column--file-selection {
+    flex: 1.5;
+    min-width: 350px;
+}
+
+.ingest-modal__text-padded {
+    padding: 8px;
+}
+
+.ingest-modal__file-selection-container {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    height: 100%;
+}
+
+.ingest-modal__file-selection-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 8px;
+}
+
+.ingest-modal__label-zero-margin {
+    margin: 0 !important;
+}
+
+.ingest-modal__list-container {
+    flex: 1;
+    overflow-y: auto;
+    background: var(--grey-darkest);
+    border: 1px solid var(--grey-light);
+    border-radius: 4px;
+}
+
+.ingest-modal__file-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--grey-medium);
+    margin: 0 !important;
+}
+
+.ingest-modal__file-row--clickable {
+    cursor: pointer;
+}
+
+.ingest-modal__file-row--default {
+    cursor: default;
+}
+
+.ingest-modal__filename-text {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}

@@ -1,0 +1,62 @@
+{
+  // Launch configurations for this workspace.
+  // Contains both the Electron dev launcher and the existing Python launch config.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run Electron (dev)",
+      "type": "pwa-node",
+      "request": "launch",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "nodemon",
+        "--watch",
+        "main.js",
+        "--watch",
+        "preload.js",
+        "--exec",
+        "ELECTRON_RENDERER_URL=http://127.0.0.1:5173 SKIP_BACKEND=1 NODE_ENV=development npx electron ."
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "preLaunchTask": "Start Vite (5173)",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "name": "Attach to Electron Main",
+      "type": "node",
+      "request": "attach",
+      "port": 9229,
+      "address": "localhost",
+      "restart": true,
+      "localRoot": "${workspaceFolder}",
+      "remoteRoot": "${workspaceFolder}",
+      "preLaunchTask": "Start Electron (dev)"
+    },
+    {
+      "name": "Python: main_app.py",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/astrometrics/main_app.py",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "preLaunchTask": "Install and Setup Astrometrics"
+    },
+    {
+      "name": "Python: Current File",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${file}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    }
+  ]
+}

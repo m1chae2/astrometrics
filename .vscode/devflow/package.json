@@ -1,0 +1,31 @@
+{
+  "name": "astrometrics-devflow",
+  "displayName": "Astrometrics Dev Flow Helper",
+  "publisher": "m1chae2",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/m1chae2/astrometrics.git"
+  },
+  "license": "MIT",
+  "main": "extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "devflow.start",
+        "title": "Start Dev Flow"
+      },
+      {
+        "command": "devflow.stop",
+        "title": "Stop Dev Flow"
+      },
+      {
+        "command": "devflow.toggle",
+        "title": "Toggle Dev Flow"
+      }
+    ]
+  }
+}

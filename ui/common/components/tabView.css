@@ -1,0 +1,56 @@
+/**
+ * TabView Styles
+ *
+ * Styles for the tabbed interface component.
+ */
+
+.tab-view {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+    background: transparent;
+}
+
+.tab-view__header {
+    display: flex;
+    gap: 4px;
+    background: transparent;
+    border-bottom: 1px solid var(--grey-light);
+    padding: 0 12px;
+    flex-shrink: 0;
+}
+
+.tab-view__tab {
+    background: transparent;
+    border: none;
+    color: var(--text-muted, #94a3b8);
+    padding: 12px 16px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+    margin-bottom: -1px;
+}
+
+.tab-view__tab:hover {
+    color: var(--white, #fff);
+}
+
+.tab-view__tab--active {
+    color: var(--white);
+    border-bottom: 2px solid var(--accent-blue, #4fc1ff);
+}
+
+.tab-view__content {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    background: var(--grey-dark, #2a2a2a);
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}

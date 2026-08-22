@@ -1,0 +1,51 @@
+/* ObservatoryDisplay.css */
+
+.observatory-display {
+    /* Main container styles if needed */
+    width: 100%;
+    height: 100%;
+}
+
+.observatory-display-container.layout--3-col {
+    grid-template-columns: var(--layout-left-col-width) 3fr 1fr;
+    justify-content: stretch;
+}
+
+.observatory-display__device-panel {
+    height: 100%;
+}
+
+.alignment__cell--empty {
+    text-align: center;
+    color: var(--text-muted);
+}
+
+.limit-settings__group--margined {
+    margin-top: 8px;
+}
+
+.limit-settings__group-row--auto {
+    width: auto;
+}
+
+.limit-settings__unit {
+    font-size: 13px;
+    color: var(--text-muted);
+}
+.guiding-trends__legend {
+    font-size: 11px;
+    font-weight: normal;
+    opacity: 0.9;
+}
+
+.guiding-trends__legend-item {
+    margin-left: 10px;
+}
+
+.guiding-trends__legend-item--ra {
+    color: var(--status-cyan-bright);
+}
+
+.guiding-trends__legend-item--dec {
+    color: var(--status-red-bright);
+}

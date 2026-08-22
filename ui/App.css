@@ -1,0 +1,39 @@
+/* Core Application Block */
+.app {
+  /* Use a flex column: header + content */
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100%;
+  overflow: hidden;
+  background-color: var(--grey-darkest, #181818);
+}
+
+.app__content {
+  /* The main content fills available space. */
+  flex: 1;
+  width: 100%;
+  box-sizing: border-box;
+  overflow: auto;
+  background: var(--cmd-bg-dark);
+  color: var(--text-primary);
+  position: relative;
+}
+
+.app__loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  width: 100%;
+  font-size: 18px;
+  color: var(--text-muted);
+}
+
+.app__mode-panel--visible {
+  display: contents;
+}
+
+.app__mode-panel--hidden {
+  display: none;
+}

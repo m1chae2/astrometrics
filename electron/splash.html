@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Starting Astrometrics...</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            width: 100vw;
+            height: 100vh;
+            background-color: transparent; /* Electron window will handle transparency/bg */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+            -webkit-app-region: drag; /* Allow dragging the splash screen */
+        }
+        img {
+            /* The GIF already has the panel styling, so we just display it */
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            user-select: none;
+            -webkit-user-drag: none;
+        }
+    </style>
+</head>
+<body>
+    <!-- The path is relative to where this file is loaded in Electron -->
+    <!-- Usually ../assets/loading.gif if loaded from electron folder -->
+    <img src="../assets/loading.gif" alt="Loading...">
+</body>
+</html>

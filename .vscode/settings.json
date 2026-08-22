@@ -1,0 +1,17 @@
+{
+    "python.defaultInterpreterPath": "",
+    "python.interpreterPath": "${workspaceFolder}/.venv/bin/python",
+    "python.venvPath": "${workspaceFolder}",
+    "python.venv": ".venv",
+    "python.analysis.typeCheckingMode": "off",
+    "python.testing.pytestArgs": [],
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestEnabled": true,
+    "python.terminal.activateEnvironment": true,
+    "antigravity.terminal.sandbox.enabled": true,
+    "cmake.ignoreCMakeListsMissing": true,
+    "terminal.integrated.env.linux": {
+        "PYTHONPATH": "${workspaceFolder}"
+    },
+    "python.analysis.autoImportCompletions": true
+}

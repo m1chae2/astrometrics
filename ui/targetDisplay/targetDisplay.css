@@ -1,0 +1,235 @@
+/* TargetDisplay.css */
+
+/* Main Containers */
+.target-display-manager {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+    box-sizing: border-box;
+}
+
+.target-display-frame {
+    border: 2px solid var(--grey-darker);
+    border-radius: 10px;
+    flex: 1 1 auto;
+    min-height: 0;
+    width: 100%;
+    box-sizing: border-box;
+    background: var(--grey-dark);
+    overflow: hidden;
+    position: relative;
+}
+
+/* Target Details Panel */
+.target-details {
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    color: var(--white);
+    overflow: auto;
+}
+
+.target-details__content {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.target-details__row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 16px;
+    padding: 2px 0;
+    min-height: 40px;
+}
+
+.target-details__label {
+    min-width: 120px;
+    font-size: 14px;
+    font-weight: bold;
+    color: var(--grey-light-text, #ccc);
+    text-align: left;
+}
+
+.target-details__value {
+    flex: 1;
+    font-size: 14px;
+    font-family: inherit;
+    font-style: italic;
+    color: var(--white);
+    text-align: left;
+    padding: 10px 12px;
+    min-height: 40px;
+    display: flex;
+    align-items: center;
+    box-sizing: border-box;
+}
+
+.target-details__value--red {
+    color: var(--accent-red, red);
+}
+
+/* Tree Sections for Target Details */
+.target-details__tree-section {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-bottom: 10px;
+    margin-bottom: 6px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.target-details__tree-section:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+    padding-bottom: 0;
+}
+
+.target-details__tree-header {
+    font-weight: bold;
+    font-size: 14px;
+    color: var(--primary-blue-light, #58a6ff);
+    margin-bottom: 4px;
+}
+
+.target-details__tree-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.target-details__tree-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    min-height: 36px;
+    padding-left: 8px;
+}
+
+.target-details__tree-row--sub {
+    padding-left: 28px;
+}
+
+.tree-branch {
+    color: var(--grey-light-text, #888);
+    font-family: monospace;
+    font-style: normal;
+    font-weight: bold;
+}
+
+.tree-label {
+    min-width: 110px;
+    font-size: 14px;
+    font-weight: bold;
+    color: var(--grey-light-text, #ccc);
+}
+
+.tree-value {
+    flex: 1;
+    font-size: 14px;
+    font-style: italic;
+    color: var(--white);
+}
+
+/* Image Controls Panel (Fixed Height) */
+.target-controls-frame {
+    width: 100%;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Target Identification Frame (Fixed Height) */
+.target-identification-frame {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.target-identification {
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+    color: var(--white);
+}
+
+.target-identification__grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    column-gap: 24px;
+    row-gap: 12px;
+    align-items: start;
+    height: 100%;
+    /* Ensure form takes full height */
+}
+
+.target-identification__column {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.target-identification__pair {
+    display: grid;
+    grid-template-columns: 1fr minmax(120px, 45%);
+    /* Adjusted minmax for better fit */
+    align-items: center;
+    gap: 12px;
+}
+
+.target-identification__label {
+    text-align: right;
+    color: var(--grey-light-text, #ccc);
+    font-weight: bold;
+    white-space: nowrap;
+}
+
+/* Input Styles */
+.target-input {
+    flex: 1;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 10px 12px;
+    height: 40px;
+    font-size: 14px;
+    font-family: inherit;
+    border-radius: 8px;
+    border: 1px solid var(--grey-dark, #333);
+    background: var(--grey-darkest, #111);
+    color: var(--white);
+    font-style: italic;
+    transition: all 0.2s ease;
+}
+
+.target-input:focus {
+    border-color: var(--primary-blue);
+    outline: none;
+}
+
+/* Responsive Overrides */
+@media (max-width: 900px) {
+    .target-identification__grid {
+        grid-template-columns: 1fr;
+    }
+
+    .target-identification__pair {
+        grid-template-columns: 1fr;
+        /* Stack label and input */
+        gap: 4px;
+    }
+
+    .target-identification__label {
+        text-align: left;
+    }
+}

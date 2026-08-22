@@ -1,0 +1,20 @@
+# ==============================================================================
+# Purpose: Pyrefly configuration file to resolve type checking and import paths.
+# Explicitly defines the virtual environment search path to work around the Rust-based
+# symlink resolution issue when running under Google Antigravity IDE 2.0.
+# ==============================================================================
+
+preset = "basic"
+
+# Only the virtual environment needs to be named explicitly; the project root
+# is inferred. The previous second entry pointed at "astrometrics", a directory
+# that has not existed since the package was renamed to astrometricslib.
+search-path = [
+    ".venv/lib/python3.14/site-packages",
+]
+
+# build/documentation/ holds Sphinx extension modules (docutils/numpydoc/
+# sphinx imports) that only ever run under the docs build's own environment,
+# never imported by the application. The Pyrefly CI job installs base deps
+# only, not the `docs` extra, so these imports are unresolvable there.
+project-excludes = ["**/build/documentation/**"]

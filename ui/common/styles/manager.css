@@ -1,0 +1,59 @@
+@import './theme.css';
+@import './scrollbars.css';
+
+/* Shared manager layout used by list managers (target/astronomy/image-processing) */
+.manager {
+  width: var(--layout-left-col-width);
+  max-width: var(--layout-left-col-width);
+  box-sizing: border-box;
+}
+
+/* Force larger buttons in left column manager frames */
+.manager .btn {
+  font-size: var(--target-list-font-size);
+  height: 48px;
+}
+
+.manager__filter {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 0 0 auto;
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 8px;
+}
+
+/* SelectableList styles when used inside SectionPanel */
+.manager__list-panel .panel__content {
+  display: flex;
+  flex-direction: column;
+}
+
+.manager__list {
+  /* main list panel */
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  box-sizing: border-box;
+  overflow: auto;
+  background: var(--grey-dark);
+}
+
+.manager__actions {
+  /* Match the image-controls-panel exactly: a centered vertical flex stack */
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  align-items: center;
+  justify-content: center;
+}
+
+.manager__filter,
+.manager__list,
+.manager__actions {
+  width: 100%;
+}

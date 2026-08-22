@@ -1,0 +1,204 @@
+# User-defined
+TestLibrary/
+*.zip
+artifacts/
+scratch/
+public/aladin/
+test-results/
+coverage/
+*.db-shm
+*.db-wal
+# Runtime library indices: local observation data, not shipped seed data.
+# Built lazily on first write by the CREATE TABLE IF NOT EXISTS schemas in
+# each disk_interface, so a fresh clone builds its own; the separate
+# verify_and_upgrade_database() only migrates an index that already
+# exists, and no-ops when absent. The static bright-star catalog
+# (wayfindinglib/drivers/catalog/bright_star_catalog.sqlite) is a bundled
+# data asset and stays tracked.
+# astrometrics_log.db mutates its own bytes on every Python import (logger
+# setup touches it via get_configuration()), so it can never stay
+# byte-identical across a pre-commit stash/restore cycle.
+# astrometrics.db was tracked as "seed data" until the repository was
+# opened up; it is in fact a personal observing log (real targets, capture
+# timestamps, and absolute paths into the machine that captured them), so
+# it ships with nobody. libraryIndex/.gitkeep keeps the directory itself
+# present, which get_library_path() requires -- unlike its wayfindinglib
+# counterpart it does not mkdir what it resolves.
+astrometricslib/libraryIndex/astrometrics.db
+astrometricslib/libraryIndex/astrometrics_log.db
+wayfindinglib/libraryIndex/*.db
+# Gaia cone-search cache. Regenerated on demand by star_identifier.py, and
+# its cached_regions rows encode the sky coordinates actually pointed at,
+# so a populated cache is local history rather than a shipped asset.
+astrometricslib/libraryIndex/catalogs/catalog_cache.db
+# Device and catalog-merge lock files: zero-byte runtime artifacts that
+# file_lock() recreates, having first makedirs'd its own parent directory.
+astrometricslib/libraryIndex/locks/
+# Local calibration-frame index: absolute paths into whichever machine
+# captured the darks/flats/biases, so it is meaningless in another clone.
+# CalibrationLibrary.load_library() treats a missing file as an empty
+# library and save_library() writes a fresh one.
+astrometricslib/libraryIndex/calibration_frames.json
+# Local configuration: machine-specific frames_path plus the astrometry.net
+# API key. Seeded from astrometrics.config.example by setup_venv.sh.
+astrometricslib/astrometrics.config
+# MCP client config: absolute interpreter paths, per-clone. See
+# mcp_servers.example.json.
+mcp_servers.json
+# Agent local overrides (the ".local." convention is per-machine by design).
+.agent/settings.local.json
+.claude/settings.local.json
+# Scheduler lock: holds a live session id and pid, rewritten every run.
+.agent/scheduled_tasks.lock
+logs/
+.ruff_cache/
+
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+#  Usually these files are written by a python script from a template
+#  before PyInstaller builds the exe, so as to inject date/other infos into it.
+*.manifest
+*.spec
+!backend.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Translations
+*.mo
+*.pot
+
+# Django stuff:
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Flask stuff:
+instance/
+.webassets-cache
+
+# Scrapy stuff:
+.scrapy
+
+# Sphinx documentation
+docs/_build/
+documentation/_build/
+documentation/api/generated/
+
+
+# PyBuilder
+target/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# pipenv
+#   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.
+#   However, in case of collaboration, if having platform-specific dependencies or dependencies
+#   having no cross-platform support, pipenv may install dependencies that don't work, or not
+#   install all needed dependencies.
+#Pipfile.lock
+
+# PEP 582; used by e.g. github.com/David-OConnor/pyflow
+__pypackages__/
+
+# Celery stuff
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+astrometrics.zip
+
+# Electron
+node_modules/
+out/
+.run_logs/
+.run_pids/
+# Ignored moved/obsolete scripts and logs
+scripts/siril.log
+scripts/obsolete/
+# Generated debug / temp files
+icon-debug.json
+siril.log
+backend/tests/*.fit
+backend/notifications.json
+libraryIndex/targets/TEST_TARGET.json

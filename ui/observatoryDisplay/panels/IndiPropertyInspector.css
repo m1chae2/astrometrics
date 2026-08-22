@@ -1,0 +1,10 @@
+.indi-properties {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px;
+}
+
+.indi-properties__empty {
+    color: var(--text-dim);
+    padding: 8px;
+}

@@ -1,0 +1,87 @@
+/* Common layout variables to ensure consistency across all displays */
+:root {
+    --layout-left-col-width: 235px;
+    --layout-right-col-width: 420px;
+    --layout-gap: 8px;
+    --layout-padding: 8px;
+    --layout-border-radius: 10px;
+}
+
+/*
+ * Layout Block
+ * Standardizes the top-level display grid.
+ */
+.layout {
+    display: grid;
+    gap: var(--layout-gap);
+    height: 100%;
+    width: 100%;
+    padding: var(--layout-padding);
+    box-sizing: border-box;
+    overflow: hidden;
+    background-color: var(--grey-darkest);
+    align-items: stretch;
+    justify-content: stretch;
+}
+
+/* Modifiers for column counts */
+.layout--3-col {
+    grid-template-columns: var(--layout-left-col-width) 1fr var(--layout-right-col-width);
+}
+
+.layout--2-col {
+    grid-template-columns: var(--layout-left-col-width) 1fr;
+}
+
+/* Panel Elements within the layout */
+.layout__panel {
+    height: 100%;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    background: var(--grey-darkest);
+    border-radius: var(--layout-border-radius);
+}
+
+/* Ensure inner components fill width */
+.layout__panel>* {
+    width: 100%;
+}
+
+.layout__panel--left {
+    width: 100%;
+}
+
+.layout__panel--center {
+    width: 100%;
+}
+
+.layout__panel--right {
+    width: 100%;
+}
+.flex-1 {
+    flex: 1;
+}
+
+.flex-col {
+    display: flex;
+    flex-direction: column;
+}
+
+.mb-0 {
+    margin-bottom: 0 !important;
+}
+
+.mb-20 {
+    margin-bottom: 20px;
+}
+
+.flex-row {
+    display: flex;
+    flex-direction: row;
+}
+
+.align-center {
+    align-items: center;
+}

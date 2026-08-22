@@ -1,0 +1,27 @@
+/* Global Scrollbar Theming */
+:root {
+  --scroll-thumb: rgba(25, 118, 210, 0.85);
+  --scroll-track: var(--grey-dark);
+  --scroll-width: 8px;
+}
+
+/* Apply scrollbar styles to ALL elements */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-thumb) var(--scroll-track);
+}
+
+/* WebKit-based browsers */
+*::-webkit-scrollbar {
+  width: var(--scroll-width);
+  height: var(--scroll-width);
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: var(--scroll-thumb);
+  border-radius: 4px;
+}
+
+*::-webkit-scrollbar-track {
+  background-color: var(--scroll-track);
+}

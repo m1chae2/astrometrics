@@ -1,0 +1,10 @@
+@import '../styles/button.css';
+
+.list-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: 100%;
+    margin-top: 12px;
+    box-sizing: border-box;
+}

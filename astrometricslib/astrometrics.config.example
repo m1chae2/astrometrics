@@ -1,0 +1,129 @@
+# Astrometrics configuration template.
+#
+# build/linux/setup_venv.sh copies this file to astrometrics.config on first
+# run if no configuration exists yet. astrometrics.config itself is excluded
+# from version control because it holds machine-specific paths and an
+# astrometry.net API key; edit the copy, not this template.
+#
+# Every value below is a working default except the two marked EDIT ME.
+
+[Image Library]
+path = ./libraryIndex
+# EDIT ME: absolute path to your own library of captured light frames.
+frames_path = ./libraryIndex/frames
+
+[Spectroscopy.Balmer Lines]
+hα = 6562
+hβ = 4861
+hɣ = 4340
+hδ = 4101
+hε = 3970
+hζ = 3889
+hη = 3835
+
+[Observatory.Filters]
+owned = L, SPEC
+analyzable = L, SPEC
+
+[Observatory.Telescope]
+hostname = localhost
+focal_length_mm = 405
+focal_ratio = 5.4
+allow_commands = true
+indi_port = 7624
+remote_pictures_path = /home/stellarmate/Pictures
+
+[Observatory.Constraints]
+min_altitude = 0.0
+max_altitude = 90.0
+
+[Observatory.Camera]
+models = Nikon D5300, ZWO ASI533MM Pro, ZWO ASI120MC-S
+default_primary_camera = ZWO ASI533MM Pro
+default_secondary_camera = ZWO ASI120MC-S
+
+[Observatory.Camera.Nikon D5300]
+name = Nikon D5300
+pixel_size_μm = 3.89
+sensor_width_px = 6000
+sensor_height_px = 4000
+grating_distance_mm = 75
+sensor_min_wavelength = 350
+sensor_max_wavelength = 900
+
+[Observatory.Camera.ZWO ASI533MM Pro]
+name = ZWO ASI533MM Pro
+pixel_size_μm = 3.76
+sensor_width_px = 3008
+sensor_height_px = 3008
+grating_distance_mm = 16.49
+sensor_min_wavelength = 300
+sensor_max_wavelength = 1000
+dispersion_orientation = vertical
+dispersion_direction = positive
+dispersion_start_px = 334.4
+grating_lines_per_mm = 200
+dispersion_offset_x = 0.0
+
+[Observatory.Camera.ZWO ASI120MC-S]
+name = ZWO ASI120MC-S
+pixel_size_μm = 3.75
+sensor_width_px = 1280
+sensor_height_px = 960
+grating_distance_mm = 0
+sensor_min_wavelength = 400
+sensor_max_wavelength = 700
+
+[Processing.Astrometry.Online Solver]
+# EDIT ME: your astrometry.net API key, from
+# https://nova.astrometry.net/api_help -- required only for online plate
+# solving. Leave blank to use the local solver configured below.
+api_key =
+
+[Processing.Astrometry.Local Solver]
+index_path = /usr/share/astrometry
+autoindex = true
+cpulimit = 300
+
+[Processing.Siril]
+siril_executable = flatpak run org.siril.Siril
+rejection_sigma_low = 3.0
+rejection_sigma_high = 3.0
+filter_wfwhm_percentile =
+filter_round_percentile =
+stack_weight = wfwhm
+generate_rejmap = true
+rejection_sigma_mode = adaptive
+background_homogeneity_check_enabled = true
+auto_open_gui = false
+
+[Processing.AsteroidRecovery]
+detection_fwhm_px = 4.0
+detection_threshold_sigma = 5.0
+min_frames_for_persistence = 3
+pixel_match_tolerance_px = 1.5
+sky_match_tolerance_arcsec = 3.0
+rate_min_arcsec_per_hour = 1.0
+rate_max_arcsec_per_hour = 300.0
+rate_linearity_r_squared_min = 0.98
+ephemeris_cross_match_radius_arcsec = 10.0
+ephemeris_maximum_visual_magnitude = 16.0
+mpc_observatory_code = 500
+
+[Processing.Parallelism]
+target_workers = auto
+siril_concurrency = 2
+photometry_workers = auto
+worker_niceness = 10
+analysis_concurrency = 2
+
+[Frontend]
+enable_observatory = true
+enable_planetarium = true
+enable_astronomy = true
+enable_observation = false
+
+[Library]
+path = libraryIndex
+frames_path = libraryIndex/frames
+siril_executable = siril

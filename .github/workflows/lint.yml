@@ -1,0 +1,135 @@
+# ==============================================================================
+# Purpose: GitHub Actions workflow for lint checks. Kept as its own stage,
+#          separate from the per-library unit test workflows, so a lint
+#          failure is reported distinctly from a test failure.
+#
+#          Covers Python (ruff check and ruff format) and TypeScript/JS
+#          (eslint). The formatting drift that previously kept
+#          `ruff format --check` out of this workflow has since been
+#          cleared, so format is now enforced alongside lint.
+#
+#          Both languages live under one workflow (so a lint failure reports
+#          as a single distinct check) but each job only runs when its own
+#          language actually changed, via the `changes` job below.
+# ==============================================================================
+
+name: Lint CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: Detect Changed Languages
+    runs-on: ubuntu-latest
+    outputs:
+      python: ${{ steps.filter.outputs.python }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Filter Changed Paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            python:
+              - '**/*.py'
+              - '**/*.pyi'
+              - '**/*.ipynb'
+              - 'pyproject.toml'
+              - '.github/workflows/lint.yml'
+            frontend:
+              - 'ui/**'
+              - 'electron/**'
+              - '**/*.ts'
+              - '**/*.tsx'
+              - 'eslint.config.js'
+              - 'package.json'
+              - 'package-lock.json'
+              - '.github/workflows/lint.yml'
+
+  ruff:
+    name: Ruff Check
+    needs: changes
+    if: needs.changes.outputs.python == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+
+      - name: Install ruff
+        run: pip install ruff==0.16.1
+
+      - name: Run ruff check
+        run: ruff check .
+
+      - name: Run ruff format check
+        run: ruff format --check .
+
+  pyrefly:
+    name: Pyrefly Type Check
+    needs: changes
+    if: needs.changes.outputs.python == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Setup Python Environment
+        uses: ./.github/actions/setup-python-env
+
+      # pyrefly resolves imports through the virtual environment named in
+      # pyrefly.toml, so it needs the project's dependencies installed rather
+      # than a bare interpreter.
+      - name: Install pyrefly
+        run: .venv/bin/pip install pyrefly
+
+      - name: Run pyrefly
+        run: .venv/bin/pyrefly check
+
+  eslint:
+    name: ESLint
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install Node Dependencies
+        run: npm ci
+
+      # Scoped to the hand-written sources. A bare `eslint .` also walks
+      # vendored and generated trees (public/js, documentation/_build,
+      # coverage/), which drown the real findings; eslint.config.js ignores
+      # those too, and this scoping is a second line of defence.
+      # Errors fail the build; warnings are reported but tolerated. The eight
+      # current react-hooks/exhaustive-deps warnings predate this job and each
+      # needs its hook's intent understood before changing, so they are left
+      # visible rather than silenced or rushed.
+      - name: Run ESLint
+        run: npx eslint ui electron

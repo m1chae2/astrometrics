@@ -1,0 +1,122 @@
+/* Compact left-aligned header layout for PyData Sphinx Theme */
+.bd-header {
+  height: 2.75rem !important;
+  min-height: 2.75rem !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+}
+
+.bd-header .navbar-header-items {
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  width: 100% !important;
+  height: 100% !important;
+  gap: 1.25rem !important;
+}
+
+.bd-header .navbar-header-items__start {
+  flex-shrink: 0 !important;
+  margin-right: 0.25rem !important;
+  line-height: 1 !important;
+}
+
+.bd-header .navbar-header-items__start .navbar-brand {
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  font-size: 1rem !important;
+}
+
+.bd-header .navbar-header-items__center {
+  display: flex !important;
+  flex: 0 1 auto !important;
+  min-width: 0 !important;
+  height: 100% !important;
+  align-items: center !important;
+  margin: 0 !important;
+}
+
+.bd-header .navbar-header-items__center .navbar-nav {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  gap: 1rem !important;
+  white-space: nowrap !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  align-items: center !important;
+}
+
+.bd-header .navbar-header-items__center .navbar-nav .nav-link {
+  padding-top: 0.35rem !important;
+  padding-bottom: 0.35rem !important;
+  font-size: 0.875rem !important;
+}
+
+.bd-header .navbar-header-items__end {
+  display: flex !important;
+  flex-shrink: 0 !important;
+  align-items: center !important;
+  margin-left: auto !important;
+  gap: 0.75rem !important;
+  white-space: nowrap !important;
+}
+
+.bd-header .search-button__wrapper {
+  display: inline-flex !important;
+  position: relative !important;
+}
+
+.bd-header .navbar-persistent--container {
+  display: none !important;
+}
+
+/* Secondary sidebar (In-Page TOC) layout fixes */
+.bd-sidebar-secondary,
+.pst-secondary-sidebar {
+  flex: 0 0 auto !important;
+  width: auto !important;
+  min-width: 18rem !important;
+  max-width: 28rem !important;
+  overflow-x: hidden !important;
+}
+
+.bd-sidebar-secondary .sidebar-secondary-items,
+.pst-secondary-sidebar .sidebar-secondary-items {
+  width: 100% !important;
+  overflow-x: hidden !important;
+}
+
+.bd-sidebar-secondary .toc-section,
+.pst-secondary-sidebar .toc-section {
+  width: 100% !important;
+  overflow-x: hidden !important;
+}
+
+.bd-sidebar-secondary .toc-entry a,
+.pst-secondary-sidebar .toc-entry a {
+  word-break: break-word !important;
+  overflow-wrap: anywhere !important;
+  white-space: normal !important;
+  font-size: 0.825rem !important;
+}
+
+/* Primary sidebar (Section Navigation) width override */
+.bd-sidebar-primary,
+.pst-primary-sidebar {
+  flex: 0 0 250px !important;
+  width: 250px !important;
+  min-width: 250px !important;
+  max-width: 250px !important;
+}
+
+/* Ensure left sidebar pins to left window edge when expanding window */
+.bd-container,
+.bd-container__inner,
+.container-xl,
+.bd-content {
+  max-width: none !important;
+  margin-left: 0 !important;
+  padding-left: 0 !important;
+}

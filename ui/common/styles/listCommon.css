@@ -1,0 +1,159 @@
+@import './theme.css';
+
+/* Shared list and radio styles used by TargetList and SpectroscopyList.
+   Centralizing these rules means changes here affect both lists. */
+
+/* Custom radio button */
+.radio {
+  position: relative;
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  margin-right: 12px;
+  vertical-align: middle;
+  box-sizing: border-box;
+}
+
+.radio__input {
+  opacity: 0;
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  left: 0;
+  top: 0;
+  margin: 0;
+  cursor: pointer;
+  z-index: 1;
+}
+
+.radio__indicator {
+  display: block;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid var(--grey-light);
+  background: transparent;
+  box-sizing: border-box;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+}
+
+.radio__input:checked+.radio__indicator {
+  border-color: var(--primary-blue);
+}
+
+.radio__input:checked+.radio__indicator::after,
+.radio__input:not(:checked)+.radio__indicator::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  box-sizing: border-box;
+  transition: all 0.2s ease-in-out;
+}
+
+.radio__input:checked+.radio__indicator::after {
+  background: var(--primary-blue);
+}
+
+.radio__input:not(:checked)+.radio__indicator::after {
+  background: transparent;
+}
+
+.selectable-list {
+  width: 100%;
+  padding: 0;
+  margin: 0;
+  background: var(--grey-dark);
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-top: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.selectable-list__item {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--grey-dark);
+  word-break: break-word;
+  white-space: normal;
+  font-size: var(--target-list-font-size, 13px);
+  font-family: inherit;
+  padding: 4px 12px;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+  user-select: none;
+  color: var(--white);
+  transition: background-color 0.15s;
+  cursor: pointer;
+}
+
+.selectable-list__label {
+  display: inline-block;
+  vertical-align: middle;
+}
+/* From SelectableList.tsx refactor */
+.selectable-list__label-content {
+  display: flex;
+  align-items: center;
+}
+
+.selectable-list__availability-dot {
+  margin-left: 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--list-green);
+  display: inline-block;
+}
+
+.selectable-list__badge {
+  margin-left: 6px;
+  padding: 0 4px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--white);
+  display: inline-block;
+  line-height: 1.4;
+  vertical-align: middle;
+}
+
+.selectable-list__badge--spectra {
+  background-color: var(--primary-blue);
+  opacity: 0.85;
+}
+
+.selectable-list__badge--photometry {
+  background-color: var(--list-orange); /* Subtle orange for photometry to distinguish from blue spectra */
+  opacity: 0.85;
+}
+
+.selectable-list__indicator--unprocessed {
+  margin-left: 8px;
+  font-size: 14px;
+  color: var(--text-dim);
+  opacity: 0.3;
+  font-weight: normal;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.selectable-list__no-processed-badge {
+  margin-left: 6px;
+  font-size: 10px;
+  color: var(--text-dim, #888);
+  opacity: 0.5;
+  font-weight: normal;
+  padding: 1px 4px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  text-transform: lowercase;
+}

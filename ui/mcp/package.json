@@ -1,0 +1,20 @@
+{
+  "name": "astrometrics-ui-mcp",
+  "version": "1.0.0",
+  "license": "MIT",
+  "description": "Native Node.js Model Context Protocol server for Astrometrics UI diagnostics and testing.",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "chrome-devtools-mcp": "latest",
+    "typescript": "^5.0.0"
+  }
+}

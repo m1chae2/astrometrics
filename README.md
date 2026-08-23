@@ -1,14 +1,6 @@
+<a href="https://astrometrics.readthedocs.io/en/latest/?badge=latest"><img align="right" src="https://readthedocs.org/projects/astrometrics/badge/?version=latest" alt="Documentation Status"></a>
+
 # Astrometrics
-
-<p align="center">
-  <img src="documentation/_static/logo.png" width="120" alt="Astrometrics Logo">
-</p>
-
-<p align="center">
-  <a href="https://astrometrics.readthedocs.io/en/latest/?badge=latest">
-    <img src="https://readthedocs.org/projects/astrometrics/badge/?version=latest" alt="Documentation Status">
-  </a>
-</p>
 
 **Making Amateur Astronomy and Citizen Science More Accessible**
 

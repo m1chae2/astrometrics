@@ -850,6 +850,33 @@ class ObservatoryControl:
 
         return remote_transfer_tasks.list_remote_targets(self)
 
+    def list_remote_target_folders(self) -> list[str]:
+        """List remote folders that represent astronomical targets.
+
+        Excludes Bias/Dark/Flat calibration folders from the full
+        remote directory listing.
+
+        Returns
+        -------
+        target_folder_names : `list` [`str`]
+            Remote folder names that are not calibration folders.
+        """
+        from wayfindinglib.tasks.control_tasks import remote_transfer_tasks
+
+        return remote_transfer_tasks.list_remote_target_folders(self)
+
+    def list_remote_calibration_folders(self) -> list[str]:
+        """List remote folders that hold Bias/Dark/Flat calibration frames.
+
+        Returns
+        -------
+        calibration_folder_names : `list` [`str`]
+            Remote folder names matching Bias, Dark, or Flat.
+        """
+        from wayfindinglib.tasks.control_tasks import remote_transfer_tasks
+
+        return remote_transfer_tasks.list_remote_calibration_folders(self)
+
     def list_remote_files(self, folder_name: str) -> list[str]:
         """List FITS file relative paths in a remote target directory.
 
@@ -861,6 +888,19 @@ class ObservatoryControl:
         from wayfindinglib.tasks.control_tasks import remote_transfer_tasks
 
         return remote_transfer_tasks.list_remote_files(self, folder_name)
+
+    def list_remote_files_with_sizes(self, folder_name: str) -> list[tuple[str, int]]:
+        """List remote FITS relative paths paired with their byte sizes.
+
+        Returns
+        -------
+        files_with_sizes : `list` [`tuple` [`str`, `int`]]
+            ``(relative_path, size_in_bytes)`` for each FITS file in
+            the remote directory.
+        """
+        from wayfindinglib.tasks.control_tasks import remote_transfer_tasks
+
+        return remote_transfer_tasks.list_remote_files_with_sizes(self, folder_name)
 
     def check_remote_connection(self) -> bool:
         """Probe remote connection status.
@@ -894,11 +934,27 @@ class ObservatoryControl:
         selected_files: list[str] | None = None,
         log_callback: Any | None = None,
         local_path: str | None = None,
+        incremental: bool = True,
     ) -> bool:
         """Download target files into the light frames directory and reindex.
 
         If `local_path` is provided, skips download and ingests files
         from the local directory instead.
+
+        Parameters
+        ----------
+        target_id : `str`
+            The target id/name to resolve or create locally.
+        selected_files : `list` [`str`], optional
+            Specific remote file paths to download.
+        log_callback : `Any`, optional
+            Callback invoked with progress messages.
+        local_path : `str`, optional
+            If given, ingest from this local directory instead.
+        incremental : `bool`, optional
+            If `True` (default), transfer only remote files not
+            already held locally -- see
+            `remote_transfer_tasks.download_remote_targets`.
 
         Returns
         -------
@@ -909,5 +965,60 @@ class ObservatoryControl:
         from wayfindinglib.tasks.control_tasks import remote_transfer_tasks
 
         return remote_transfer_tasks.download_remote_targets(
-            target_id, selected_files, log_callback, local_path
+            target_id, selected_files, log_callback, local_path, incremental
         )
+
+    def sync_calibration_folder(self, remote_folder_name: str) -> bool:
+        """Download a Bias/Dark/Flat folder into the calibration library.
+
+        Never registers `remote_folder_name` as an astronomical
+        target -- see `remote_transfer_tasks.sync_calibration_folder`
+        for the full download/classify/reindex sequence, and for the
+        `ValueError` raised on a non-calibration folder name.
+
+        Returns
+        -------
+        success : `bool`
+            Whether the download, classification, and reindex all
+            succeeded.
+        """
+        from wayfindinglib.tasks.control_tasks import remote_transfer_tasks
+
+        return remote_transfer_tasks.sync_calibration_folder(self, remote_folder_name)
+
+    def sync_all_remote_folders(
+        self, log_callback: Any | None = None, register_job: bool = True
+    ) -> dict[str, Any]:
+        """Download every remote folder: calibration frames and all targets.
+
+        Splits the telescope's remote folders into calibration folders
+        (routed into the calibration library) and target folders
+        (every locally-catalogued target plus every remote folder with
+        no matching local target). Never halts on a single folder's
+        failure -- every folder is attempted, and failures are
+        collected rather than raised.
+
+        Parameters
+        ----------
+        log_callback : callable, optional
+            Callable receiver for progress messages.
+        register_job : `bool`, optional
+            Whether to auto-register a `ProcessingJob` in
+            astrometrics_log.db for this run (default `True`) -- see
+            `remote_transfer_tasks.sync_all_remote_folders` for the
+            full job-registration behavior.
+
+        Returns
+        -------
+        result : `dict`
+            A dict with ``"succeeded"``, ``"failed"``, and
+            ``"job_id"`` keys. ``"succeeded"`` is a `list` of every
+            folder name that downloaded successfully. ``"failed"`` is
+            a `list` of ``(folder_name, error_message)`` tuples.
+            ``"job_id"`` is the registered `ProcessingJob` id, or
+            `None` if `register_job` was `False` or registration
+            failed.
+        """
+        from wayfindinglib.tasks.control_tasks import remote_transfer_tasks
+
+        return remote_transfer_tasks.sync_all_remote_folders(self, log_callback, register_job)

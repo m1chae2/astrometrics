@@ -222,7 +222,9 @@ def test_remote_transfer_methods_delegate_to_the_task_module(mocker, control):  
     remote_transfer_tasks.check_remote_connection.assert_called_once_with(control)
 
     assert control.download_remote_targets("M 81", local_path="/local/M81") is True
-    remote_transfer_tasks.download_remote_targets.assert_called_once_with("M 81", None, None, "/local/M81")
+    remote_transfer_tasks.download_remote_targets.assert_called_once_with(
+        "M 81", None, None, "/local/M81", True
+    )
 
 
 def test_discover_unassociated_remote_targets_delegates_via_astrometrics(mocker, control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]

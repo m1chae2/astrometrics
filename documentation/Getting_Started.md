@@ -64,7 +64,7 @@ The desktop application provides a visual interface for operations powered by tw
 
 Users can import these libraries directly to perform customized data processing, script automated telescope sequences, or run analysis pipelines.
 
-A collection of [Jupyter Notebook tutorials](notebooks/index.rst) demonstrates what complete data analysis workflows look like in practice. These notebooks, along with the complete [Python API reference](api/index.rst), are available on the main documentation page.
+A collection of [Jupyter Notebook tutorials](notebooks/index.md) demonstrates what complete data analysis workflows look like in practice. These notebooks, along with the complete [Python API reference](api/index.rst), are available on the main documentation page.
 
 > [!NOTE]
 > The API and scripting documentation assumes familiarity with programming and astronomical concepts.

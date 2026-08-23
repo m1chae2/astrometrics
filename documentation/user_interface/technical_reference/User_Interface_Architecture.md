@@ -1,3 +1,7 @@
+---
+orphan: true
+---
+
 # Astrometrics User Interface: Architecture and Design
 
 *Version 2.1 · 2026-08-09 · Status: current*

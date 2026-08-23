@@ -57,8 +57,10 @@ html_theme = "pydata_sphinx_theme"
 html_logo = "_static/logo.png"
 html_favicon = "_static/logo.png"
 html_title = "Astrometrics Documentation"
-html_theme_options = {
+html_context = {
     "default_mode": "dark",
+}
+html_theme_options = {
     "header_links_before_dropdown": 6,
     "navbar_align": "left",
     "icon_links": [

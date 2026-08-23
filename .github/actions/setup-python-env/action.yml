@@ -21,7 +21,23 @@ runs:
       run: |
         sudo apt-get update
         sudo apt-get install -y software-properties-common build-essential swig libcfitsio-dev libnova-dev libdbus-1-dev libglib2.0-dev
-        sudo add-apt-repository -y ppa:mutlaqja/ppa
+
+        # add-apt-repository fetches the PPA's signing key from Launchpad's
+        # keyserver, which intermittently 500s ("GPGKeyTemporarilyNotFoundError")
+        # under normal load. Retry a few times with backoff instead of failing
+        # the whole job on a transient Launchpad hiccup.
+        for attempt in 1 2 3 4 5; do
+          if sudo add-apt-repository -y ppa:mutlaqja/ppa; then
+            break
+          fi
+          if [ "$attempt" -eq 5 ]; then
+            echo "::error::add-apt-repository failed after 5 attempts"
+            exit 1
+          fi
+          echo "add-apt-repository failed (attempt $attempt/5), retrying in $((attempt * 5))s..."
+          sleep $((attempt * 5))
+        done
+
         sudo apt-get update
         sudo apt-get install -y indi-full libindi-dev
 

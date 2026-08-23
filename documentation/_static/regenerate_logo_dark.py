@@ -17,6 +17,7 @@ STROKE_COLOR = (224, 224, 224)
 
 
 def main() -> None:
+    """Write logo-dark.png next to this script."""
     im = Image.open("logo.png").convert("RGBA")
     width, height = im.size
     pixels = im.load()

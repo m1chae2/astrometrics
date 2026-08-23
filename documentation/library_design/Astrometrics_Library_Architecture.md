@@ -2,17 +2,17 @@
 
 *Version 2.3 · 2026-08-16 · Status: current*
 
-## Abstract
+## Overview
 
-Amateur astronomy workflows have historically relied on fragmented standalone software, requiring observers to manually export files across separate tools for frame reduction, image stacking, plate solving, photometry, and spectroscopy. This paper presents an image processing architecture designed for small-aperture observatories and citizen science research. The architecture organizes all observational data around a central Observation Target data model, connecting five processing pipelines: stacking, astrometry, photometry, spectroscopy, and moving object detection. Each pipeline incorporates a dual-stage validation framework combining pre-processing input screening with post-processing quality metrics.
+This document outlines the mathematical models and algorithms used in the Astrometrics processing pipelines. It details the theoretical framework, physical derivations, and mathematical equations governing image processing across five core pipelines: stacking, astrometry, photometry, spectroscopy, and moving object detection.
+
+The architecture organizes all observational data around a central Observation Target data model. Each pipeline incorporates a dual-stage validation framework combining pre-processing input screening with post-processing quality metrics.
 
 ## 1. Introduction
 
-**Statement of need.** Amateur astrophotography has evolved into a valuable platform for citizen science. Key applications include variable star monitoring [2], exoplanet transit timing, stellar spectroscopy, and minor planet tracking. Establishing a unified data model allows multiple astronomical pipelines astrometry, photometry, spectroscopy, and moving object detection to work together seamlessly around a single target region.
+Establishing a unified data model allows multiple astronomical pipelines to work together seamlessly around a single target region. The theoretical framework described here serves as the foundation for both headless programmatic execution and interactive graphical environments. Every interaction, visualization, and processing pipeline available to an end-user is a direct invocation of these underlying computational primitives, guaranteeing that any observational workflow performed interactively can be transitioned into an automated, reproducible script.
 
-This document establishes the theoretical framework, physical derivations, and mathematical equations governing image processing across five core pipelines, alongside the implementation design, module mappings, and empirical benchmarks for each. Complete code-level API references for all public classes and methods are auto-generated directly from docstrings in the Sphinx {doc}`API Reference </api/astrometricslib>`.
-
-Crucially, the system design adheres to a strict dual-interface paradigm. The theoretical framework described here serves as the absolute foundation for both headless programmatic execution and interactive graphical environments. Every interaction, visualization, and processing pipeline available to an end-user is a direct invocation of these underlying computational primitives, guaranteeing that any observational workflow performed interactively can be seamlessly transitioned into an automated, reproducible script.
+Complete code-level API references for all public classes and methods are auto-generated directly from docstrings in the Sphinx {doc}`API Reference </api/astrometricslib>`. For a direct map of these theoretical algorithms to their internal Python implementations, see the [Astrometrics Library Implementation](./Astrometrics_Library_Implementation.md).
 
 Section 2 presents the observational data models. Sections 3 through 7 detail the five major processing pipelines: Stacking, Astrometry, Photometry, Spectroscopy, and Moving Object Detection.
 

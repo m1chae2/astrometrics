@@ -2,9 +2,9 @@
 
 *Version 2.2 · 2026-08-21 · Status: current*
 
-## Abstract
+## Overview
 
-This manual is the official desktop user handbook for the Astrometrics User Interface (`ui/`). The application provides real-time telescope telemetry, image inspection, science-grade calibration and stacking, photometric and 1D spectroscopic analysis, sequence planning, and planetarium navigation.
+This manual is the desktop user guide for the Astrometrics application. The application provides real-time telescope telemetry, image inspection, science-grade calibration and stacking, photometric and 1D spectroscopic analysis, observation planning, and planetarium navigation.
 
 ---
 
@@ -12,11 +12,8 @@ This manual is the official desktop user handbook for the Astrometrics User Inte
 
 - [1. Introduction](#1-introduction)
 - [2. Getting Started & Setup](#2-getting-started--setup)
-  - [2.1 Launching the Application](#21-launching-the-application)
-  - [2.2 Initial Hardware & Backend Connection](#22-initial-hardware--backend-connection)
 - [3. Interface Topology & Global Navigation](#3-interface-topology--global-navigation)
   - [3.1 Top Status Bar](#31-top-status-bar)
-  - [3.2 Global Hotkeys & Built-in Terminal](#32-global-hotkeys--built-in-terminal)
 - [4. Image Viewer & Target Inspector (`TargetDisplay`)](#4-image-viewer--target-inspector-targetdisplay)
   - [4.1 Step-by-Step Instructions](#41-step-by-step-instructions)
 - [5. Image Processing & Stacking (`ImageProcessingDisplay`)](#5-image-processing--stacking-imageprocessingdisplay)
@@ -26,36 +23,29 @@ This manual is the official desktop user handbook for the Astrometrics User Inte
   - [6.2 1D Spectroscopy Analysis](#62-1d-spectroscopy-analysis)
 - [7. Observatory Manager (`ObservatoryDisplay`)](#7-observatory-manager-observatorydisplay)
   - [7.1 Control Panels & Operations](#71-control-panels--operations)
-- [8. Observation Manager (`ObservationManager`)](#8-observation-manager-observationmanager)
-  - [8.1 Authoring an Imaging Session](#81-authoring-an-imaging-session)
-- [9. Planetarium & 3D Sky Map (`PlanetariumDisplay`)](#9-planetarium--3d-sky-map-planetariumdisplay)
-  - [9.1 Sky Map Navigation & Controls](#91-sky-map-navigation--controls)
+- [8. Planetarium & 3D Sky Map (`PlanetariumDisplay`)](#8-planetarium--3d-sky-map-planetariumdisplay)
+  - [8.1 Sky Map Navigation & Controls](#81-sky-map-navigation--controls)
 - [Appendices](#appendices)
-  - [Appendix A: Keyboard Shortcuts Quick Reference](#appendix-a-keyboard-shortcuts-quick-reference)
-  - [Appendix B: Telemetry Status Badges](#appendix-b-telemetry-status-badges)
-  - [Appendix C: Display Capability Reference](#appendix-c-display-capability-reference)
+  - [Appendix A: Telemetry Status Badges](#appendix-a-telemetry-status-badges)
+  - [Appendix B: Display Capability Reference](#appendix-b-display-capability-reference)
 
 ---
 
 ## 1. Introduction
 
-**Statement of need.** Managing an astronomical observatory and reducing its data often requires a fragmented ecosystem of disparate tools. Astrometrics unifies hardware control, mission planning, and high-fidelity data reduction into a single desktop interface, ensuring tight integration between acquisition telemetry and final scientific analysis.
-
+Astrometrics is an application that allows for the control of an observatory, the planning of imaging sessions, and the processing of astronomy photos in a single location. This manual provides a guide for using all of its features.
 
 ---
 
 ## 2. Getting Started & Setup
 
-The Astrometrics User Interface runs as a cross-platform desktop application built on Electron and Vite.
+To launch the application, open a terminal and run:
 
-### 2.1 Launching the Application
-1. **Desktop App**: Double-click the `Astrometrics` application icon or run `npm start` / `./build/linux/run_astrometrics.sh start` from the terminal.
-2. **Web Mode**: Open your browser and navigate to `http://localhost:5173` (or the configured port).
+```bash
+./build/linux/run_astrometrics.sh start
+```
 
-### 2.2 Initial Hardware & Backend Connection
-When launched, the application automatically connects to the local backend engine (`http://localhost:8000`) and the INDI hardware server (`127.0.0.1:7624`).
-- **Connection Badges**: Check the top status bar. A green **Connected** badge indicates active communication.
-- **Configuring Host/Port**: If your telescope or INDI server runs on a remote IP (e.g., StellarMate or Asiair), click the **Settings Drawer** (gear icon) in the top left, select **System Form**, and enter the IP address under **INDI Host**.
+This script will automatically start the interface, the backend engines, and connect to the observatory hardware.
 
 ---
 
@@ -77,15 +67,11 @@ The top bar is visible across all modes and provides instant system telemetry an
 - **Tracking Status**: Shows live telescope motion (`Tracking`, `Slewing`, `Parked`, `Not Tracking`).
 - **Telemetry Readouts**: Real-time Telescope Altitude/Azimuth, Target RA/Dec, Temperature (°C), and Humidity (%).
 
-### 3.2 Global Hotkeys & Built-in Terminal
-- **Toggle Command Terminal**: Press `Ctrl + \`` to open the integrated debug console for viewing live system logs.
-- **Switch Modes**: Use `Ctrl + 1` through `Ctrl + 6` to instantly switch between display modes.
-
 ---
 
 ## 4. Image Viewer & Target Inspector (`TargetDisplay`)
 
-The **Image Viewer** is your primary workspace for reviewing captured target packages, inspecting FITS image headers, adjusting visual stretching, and identifying catalog stars.
+The **Image Viewer** is the primary workspace for reviewing captured target packages, inspecting FITS image headers, adjusting visual stretching, and identifying catalog stars.
 
 ![Image Viewer Workspace](./assets/image_viewer.png)
 
@@ -98,7 +84,7 @@ The **Image Viewer** is your primary workspace for reviewing captured target pac
 
 #### Adjusting Canvas Stretch & Zoom
 - **Pan**: Click and drag inside the main image canvas.
-- **Zoom**: Scroll your mouse wheel or click the **Zoom Toolbar** buttons.
+- **Zoom**: Scroll the mouse wheel or click the **Zoom Toolbar** buttons.
 - **Stretch Algorithms**:
   - `Linear`: Standard raw pixel display.
   - `Asinh`: Preserves star color saturation in bright nebula cores.
@@ -124,8 +110,8 @@ The **Image Processing** workbench provides calibration, alignment, quality sele
 ### 5.1 Step-by-Step Stacking Workflow
 
 #### Step 1: Load Target & Calibration Frames
-1. Select your science target from the left sidebar.
-2. In the right panel under **Session Frames**, verify your light sub-exposures are loaded.
+1. Select a science target from the left sidebar.
+2. In the right panel under **Session Frames**, verify the light sub-exposures are loaded.
 3. Under **Calibration Assets**, select matching Master Dark, Master Flat, and Master Bias files.
 
 #### Step 2: Set Quality Filters
@@ -135,13 +121,8 @@ Use the **Frame Analysis** sliders to filter out degraded sub-exposures prior to
 - **Background Ceiling**: Exclude sub-exposures affected by satellite passes or cloud glow.
 
 #### Step 3: Run Stacking Engine
-Use the following parameters to configure the stack:
 
-```{eval-rst}
-.. ui-action:: astrometricslib.api.processing.ProcessingPipelines.run_stacking
-```
-
-3. Click **Process Target** to initiate stacking. Progress is shown on the live progress bar.
+Click **Process Target** to initiate stacking. Progress is shown on the live progress bar.
 
 ---
 
@@ -172,7 +153,7 @@ The **Astronomy Manager** provides tools for stellar photometry light curves and
 
 ## 7. Observatory Manager (`ObservatoryDisplay`)
 
-The **Observatory Manager** gives you direct manual control over your telescope mount, focuser, filter wheel, autoguider, and weather safety systems.
+The **Observatory Manager** gives direct manual control over the telescope mount, focuser, filter wheel, autoguider, and weather safety systems.
 
 ![Observatory Manager Workspace](./assets/observatory_manager.png)
 
@@ -199,74 +180,34 @@ The **Observatory Manager** gives you direct manual control over your telescope 
 
 ### 7.2 Remote Target Ingestion
 
-The Observatory Manager allows you to discover and download images captured by the remote hardware into your local library.
+The Observatory Manager allows for discovering and downloading images captured by the remote hardware into the local library.
 
 1. **Check for New Images**: Click the **Discover Remote Captures** button. The system will scan the telescope's onboard storage for new FITS files.
-2. **Review Targets**: A list of unassociated remote targets will appear. You can see the target name, filter type, and number of sub-exposures.
-3. **Download & Sync**: Select the targets you want and click **Download Selected**. The files will be transferred to your local machine and automatically registered into the Library Sidebar, ready for Image Processing.
+2. **Review Targets**: A list of unassociated remote targets will appear, displaying the target name, filter type, and number of sub-exposures.
+3. **Download & Sync**: Select the desired targets and click **Download Selected**. The files will be transferred to the local machine and automatically registered into the Library Sidebar, ready for Image Processing.
 
 *(For technical details on how the remote file protocols and target synchronizations are managed under the hood, see the {py:class}`~wayfindinglib.api.control_registry.ObservatoryControl` API Reference)*
 
 ---
 
-## 8. Observation Manager (`ObservationManager`)
+## 8. Planetarium & 3D Sky Map (`PlanetariumDisplay`)
 
-The **Observation Manager** is your session planner for building target lists, planning filter sequences, generating mosaic panels, and running execution queues.
-
-![Observation Manager Workspace](./assets/observation_manager.png)
-
-### 8.1 Authoring an Imaging Session
-
-#### Step 1: Target Selection & Altitude Check
-1. Select an object from the catalog dropdown (e.g., `NGC 6992`, `M 31`, `M 51`).
-2. Review the **Target Status** card to confirm the object rises above your altitude horizon floor (e.g., >30 degrees).
-
-#### Step 2: Build Filter Sequence
-1. In the **Image Planner** panel, select exposure type (`Light`, `Dark`, `Flat`, `Bias`).
-2. Choose filter (`L`, `R`, `G`, `B`, `Ha`), count (e.g., `20`), and exposure duration (e.g., `300s`).
-3. Click **Add to List** to append the exposure sequence to your session plan.
-
-#### Step 3: Mosaic Grid Creator (Optional)
-1. In the **Mosaic Planner**, enter grid dimensions (e.g., `2 x 2` panels).
-2. Set overlap percentage (e.g., `20%`).
-3. Click **Create Mosaic** to automatically generate coordinates for all panel tiles.
-
-#### Step 4: Execution Queue Control
-1. Drag and drop targets in the **Execution Queue** to set priority order.
-2. Click **Start Imaging Session** to begin unattended sequence execution.
-
----
-
-## 9. Planetarium & 3D Sky Map (`PlanetariumDisplay`)
-
-The **Planetarium** renders a 3D celestial sphere view of the sky above your observatory.
+The **Planetarium** renders a 3D celestial sphere view of the sky above the observatory.
 
 ![Planetarium Workspace](./assets/planetarium.png)
 
-### 9.1 Sky Map Navigation & Controls
+### 8.1 Sky Map Navigation & Controls
 - **Rotate & Tilt**: Left-click and drag anywhere on the sky canvas.
 - **Zoom**: Scroll the mouse wheel to zoom in or out.
 - **Layer Checkboxes**: Toggle visible sky layers (Stars, Grid, Constellations, FOV Outline, Telescope).
-- **Right-Click Context Menu**: Right-click any celestial object in the sky to slew the telescope or add it to the Observation Manager queue.
+- **Right-Click Context Menu**: Right-click any celestial object in the sky to slew the telescope.
 - **Date & Time Controls**: Use the bottom time slider to simulate sky positions for future dates.
 
 ---
 
 ## Appendices
 
-### Appendix A: Keyboard Shortcuts Quick Reference
-
-| Shortcut | Action |
-|---|---|
-| `Ctrl + 1` | Switch to Image Viewer (`TargetDisplay`) |
-| `Ctrl + 2` | Switch to Image Processing (`ImageProcessingDisplay`) |
-| `Ctrl + 3` | Switch to Astronomy Manager (`AstronomyDisplay`) |
-| `Ctrl + 4` | Switch to Observation Manager (`ObservationManager`) |
-| `Ctrl + 5` | Switch to Observatory Manager (`ObservatoryDisplay`) |
-| `Ctrl + 6` | Switch to Planetarium (`PlanetariumDisplay`) |
-| `Ctrl + ~` | Toggle built-in terminal console |
-
-### Appendix B: Telemetry Status Badges
+### Appendix A: Telemetry Status Badges
 
 | Badge | Color | Meaning |
 |---|---|---|
@@ -277,12 +218,11 @@ The **Planetarium** renders a 3D celestial sphere view of the sky above your obs
 | `Parked` | Blue | Mount parked in safe home position. |
 | `Safe State` | Red / Flashing | Emergency interlock active; motion suspended. |
 
-### Appendix C: Display Capability Reference
+### Appendix B: Display Capability Reference
 
 | UI Display | Primary Functional Capabilities |
 |---|---|
 | `PlanetariumDisplay` | 3D WebGL Sky Map, Constellation overlays, FOV rectangle projection, object context slews. |
 | `ObservatoryDisplay` | INDI device manager, mount slew/track/park keypad, alignment status attempt tracking (`AlignmentStatus.tsx`), focuser steps, autofocus V-curves, PHD2 RMS guider plots, weather interlocks. |
-| `ObservationManager` | Session queue creation, filter sequences, target altitude/moon visibility curves, 2x2 mosaic planner. |
 | `ImageProcessingDisplay` & `TargetDisplay` | FITS image inspection, header search, star FWHM/HFR measurement, Master Dark/Flat/Bias calibration, star alignment, Winsorized Sigma Clipping stacking. |
 | `AstronomyDisplay` | 1D stellar profile extraction, neon/argon arc lamp wavelength calibration, continuum baseline fitting, Balmer line identification, Equivalent Width, and BLS exoplanet transit light curve fitting. |

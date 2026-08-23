@@ -7,30 +7,35 @@
 Astrometrics Documentation
 ==========================
 
-Welcome to the **Astrometrics** scientific image processing and **Wayfinding** observatory navigation library documentation.
+Welcome to the Astrometrics documentation.
 
-Astrometrics consists of two Python libraries and a desktop application, providing a complete ecosystem for astrophotography, precision photometry, slitless spectroscopy, and automated observatory control. Built with a dual-interface architecture, every capability available in the desktop app is also fully scriptable via the Python libraries, allowing you to seamlessly transition from interactive exploration to fully automated workflows.
+Astrometrics is a desktop application for astrophotography, photometry, spectroscopy, and automated observatory control. It provides a complete set of tools to capture and process images of the night sky.
 
-.. grid:: 1 2 2 2
+.. grid:: 1 2 2 3
     :gutter: 3
 
     .. grid-item-card:: Installation
         :link: Installation
         :link-type: doc
 
-        System dependencies, Python requirements, platform setup, configuration, and how to verify a working install.
-
-    .. grid-item-card:: Desktop Application
-        :link: user_interface/index
-        :link-type: doc
-
-        Official handbook, observation guides, and technical reference for the desktop observatory application.
+        Learn how to install Astrometrics and its requirements on your computer.
 
     .. grid-item-card:: Getting Started
         :link: Getting_Started
         :link-type: doc
 
-        A quick-start guide to both libraries: learn how to register an observation target, process its images, and plan an observation session.
+        Core concepts, hardware requirements, and launching the application.
+
+    .. grid-item-card:: Desktop Application
+        :link: user_interface/index
+        :link-type: doc
+
+        User manual and step-by-step guides for learning how to use the application.
+
+For users with a technical background looking to perform customized data processing or automate hardware outside of the desktop interface, the underlying Python libraries can be imported directly:
+
+.. grid:: 1 2 2 2
+    :gutter: 3
 
     .. grid-item-card:: Interactive Tutorials
         :link: notebooks/index
@@ -38,27 +43,39 @@ Astrometrics consists of two Python libraries and a desktop application, providi
 
         Step-by-step Jupyter Notebook guides covering FITS frame calibration, star detection, photometry, spectroscopy, and telescope control.
 
-    .. grid-item-card:: Astrometrics Library API
-        :link: api/astrometricslib
+    .. grid-item-card:: Python API Reference
+        :link: api/index
         :link-type: doc
 
-        Complete API reference for image calibration, plate solving, star field visualization, butler storage access, and spectroscopy pipelines.
+        Complete API reference for the astrometricslib and wayfindinglib Python packages.
 
-    .. grid-item-card:: Wayfinding Library API
-        :link: api/wayfindinglib
+For users interested in understanding the mathematical models and logic powering the application, the algorithm architecture is documented below:
+
+.. grid:: 1 2 2 2
+    :gutter: 3
+
+    .. grid-item-card:: Image Processing Architecture
+        :link: library_design/Astrometrics_Library_Architecture
         :link-type: doc
 
-        Complete API reference for INDI mount control, target visibility calculations, mosaic planning, and observation execution.
+        Theoretical framework and mathematical derivations for astrometry, photometry, and spectroscopy.
 
-.. ---------------------------------------------------------------------------
-.. Root toctree: exactly four entries → four header navbar items.
-.. Each hub page owns its own toctree so sub-pages appear in the sidebar.
-.. ---------------------------------------------------------------------------
+    .. grid-item-card:: Wayfinding Architecture
+        :link: library_design/Wayfinding_Library_Architecture
+        :link-type: doc
+
+        Logic models for target selection, INDI hardware abstraction, and dynamic observation planning.
+
 .. toctree::
    :maxdepth: 2
    :hidden:
 
-   Introduction <introduction/index>
+   Installation <Installation>
+   Getting Started <Getting_Started>
    Desktop App <user_interface/index>
    Tutorials <notebooks/index>
    API <api/index>
+   Image Processing Architecture <library_design/Astrometrics_Library_Architecture>
+   Wayfinding Architecture <library_design/Wayfinding_Library_Architecture>
+   Image Processing Code Map <library_design/Astrometrics_Library_Implementation>
+   Wayfinding Code Map <library_design/Wayfinding_Library_Implementation>

@@ -1,9 +1,12 @@
 Astrometrics Desktop Application
 ================================
 
-The Astrometrics user interface is a desktop application built on Electron and Vite. It serves as a comprehensive observatory management platform, wrapping the powerful `astrometricslib` and `wayfindinglib` python engines in a cohesive visual interface.
+The Astrometrics Desktop Application is a program used to capture and analyze images of the night sky. It provides a visual interface to control observatory equipment and process astronomy photos.
 
-This section contains the official user manual, specialized operational guides, and the architectural reference for the UI layer.
+.. note::
+   The application currently handles image processing and basic telescope control. Planning and running automated observing nights is recommended to be managed by a dedicated INDI-compatible client like `KStars/Ekos <https://docs.kde.org/trunk5/en/kstars/kstars/ekos.html>`_.
+
+This section contains the user manual and step-by-step guides for using the application.
 
 .. toctree::
    :maxdepth: 2
@@ -12,9 +15,3 @@ This section contains the official user manual, specialized operational guides, 
    user_guides/User_Manual
    user_guides/Observatory_Control_and_Automation_Guide
    user_guides/Image_Processing_and_Analysis_Tutorial
-
-.. toctree::
-   :maxdepth: 2
-   :caption: Technical Reference
-
-   technical_reference/User_Interface_Architecture

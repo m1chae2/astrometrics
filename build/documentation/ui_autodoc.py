@@ -70,13 +70,6 @@ class UIActionDirective(SphinxDirective):
                     rst_lines.append(f"* **{name}**: {desc}")
                 rst_lines.append("")
 
-            # Add API Cross-link
-            rst_lines.append(
-                "*(For the deep-dive scientific algorithm definition, "
-                f"see the :py:meth:`~{target_path}` API Reference)*"
-            )
-            rst_lines.append("")
-
             self.state_machine.insert_input(StringList(rst_lines, source=target_path), target_path)
             return []
 

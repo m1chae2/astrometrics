@@ -54,8 +54,11 @@ html_static_path = ["_static"]
 html_css_files = ["custom.css"]
 
 html_theme = "pydata_sphinx_theme"
+html_logo = "_static/logo.png"
+html_favicon = "_static/logo.png"
 html_title = "Astrometrics Documentation"
 html_theme_options = {
+    "default_mode": "dark",
     "header_links_before_dropdown": 6,
     "navbar_align": "left",
     "icon_links": [

@@ -126,3 +126,27 @@
   margin-left: 0 !important;
   padding-left: 0 !important;
 }
+
+/* Astrometrics Desktop Application Theme overrides */
+html[data-theme="dark"] {
+  --pst-color-primary: #1890ff;
+  --pst-color-primary-highlight: #40a9ff;
+  --pst-color-background: #1e1e1e;
+  --pst-color-surface: #252526;
+  --pst-color-on-background: #e0e0e0;
+  --pst-color-on-surface: #e0e0e0;
+}
+
+html[data-theme="light"] {
+  --pst-color-primary: #1890ff;
+  --pst-color-primary-highlight: #40a9ff;
+}
+
+/* Subtle logo */
+.logo__image {
+  opacity: 0.7;
+  transition: opacity 0.2s ease-in-out;
+}
+.logo__image:hover {
+  opacity: 1.0;
+}

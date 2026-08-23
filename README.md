@@ -1,5 +1,9 @@
 # Astrometrics
 
+<p align="center">
+  <img src="documentation/_static/logo.png" width="120" alt="Astrometrics Logo">
+</p>
+
 **Making Amateur Astronomy and Citizen Science More Accessible**
 
 ## Overview

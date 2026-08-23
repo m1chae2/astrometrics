@@ -5,8 +5,8 @@
    full desktop header forced into a fixed 2.75rem bar. */
 @media (min-width: 960px) {
   .bd-header {
-    height: 2.75rem !important;
-    min-height: 2.75rem !important;
+    height: 3.25rem !important;
+    min-height: 3.25rem !important;
     padding-top: 0 !important;
     padding-bottom: 0 !important;
   }
@@ -33,16 +33,18 @@
     font-size: 1rem !important;
   }
 
-  /* The theme's default logo height (4rem) overflows the 2.75rem compact
-     header above, so the image pokes out above the bar. Cap it to fit. */
+  /* The theme's default logo height (4rem) overflows the compact header
+     above, so the image pokes out above the bar. Size it to stay visible
+     but fit within the header instead. */
   .bd-header .navbar-brand.logo {
-    height: 1.75rem !important;
+    height: 2.25rem !important;
   }
 
   .bd-header .logo__image {
-    height: 1.75rem !important;
-    width: 1.75rem !important;
-    max-height: 1.75rem !important;
+    height: 2.25rem !important;
+    width: 2.25rem !important;
+    max-height: 2.25rem !important;
+    opacity: 1 !important;
   }
 
   .bd-header .navbar-header-items__center {

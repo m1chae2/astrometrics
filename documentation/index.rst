@@ -77,5 +77,5 @@ For users interested in understanding the mathematical models and logic powering
    API <api/index>
    Image Processing Architecture <library_design/Astrometrics_Library_Architecture>
    Wayfinding Architecture <library_design/Wayfinding_Library_Architecture>
-   Image Processing Code Map <library_design/Astrometrics_Library_Implementation>
-   Wayfinding Code Map <library_design/Wayfinding_Library_Implementation>
+   Image Processing Implementation <library_design/Astrometrics_Library_Implementation>
+   Wayfinding Implementation <library_design/Wayfinding_Library_Implementation>

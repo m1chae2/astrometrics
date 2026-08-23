@@ -1,4 +1,4 @@
-# Astrometrics Library Implementation Map
+# Astrometrics Library Implementation Overview
 
 While the theoretical algorithms and data flow are covered in the [Astrometrics Library Architecture](./Astrometrics_Library_Architecture.md) document, this map serves as a direct index to the Python source code where those algorithms are physically implemented.
 

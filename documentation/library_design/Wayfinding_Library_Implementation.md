@@ -1,4 +1,4 @@
-# Wayfinding Library Implementation Map
+# Wayfinding Library Implementation Overview
 
 While the theoretical algorithms and hardware control flow are covered in the [Wayfinding Library Architecture](./Wayfinding_Library_Architecture.md) document, this map serves as a direct index to the Python source code where those hardware commands are physically implemented.
 

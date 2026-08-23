@@ -161,6 +161,19 @@ if [ -f "$ROOT_DIR/astrometricslib/tasks/stellar_tasks/spectroscopy_tasks/_extra
       }
 fi
 
+log "Verifying package installation..."
+"$VENV_PYTHON" - <<'EOF'
+import sys
+try:
+    import astrometricslib
+    import wayfindinglib
+    print(f"  ✓ astrometricslib {astrometricslib.__version__}")
+    print(f"  ✓ wayfindinglib {wayfindinglib.__version__}")
+except Exception as e:
+    print(f"  ✗ Verification failed: {e}", file=sys.stderr)
+    sys.exit(1)
+EOF
+
 log ""
 log "Setup complete. Virtual environment is ready at:"
 log "  $VENV_DIR"

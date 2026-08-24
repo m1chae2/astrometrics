@@ -1560,6 +1560,7 @@ def stack_and_solve(
     filter_round: str | None = None,
     stack_weight: str | None = None,
     generate_rejmap: bool | None = None,
+    register_job: bool = True,
 ) -> str | None:
     """Run the Siril stacking pipeline on the target's frames.
 
@@ -1569,60 +1570,171 @@ def stack_and_solve(
     rejection-map generation (each falls back to the configured
     default in astrometrics.config when omitted).
 
+    Parameters
+    ----------
+    register_job : `bool`, optional
+        Whether to auto-register a `ProcessingJob` for this stacking
+        run (default `True`), so a script/notebook/CLI call shows up
+        in the UI's job manager without the caller doing anything
+        extra -- mirrors `analyze_target`'s `register_job` parameter
+        and its job-registration shape. The backend's own UI-triggered
+        "Stack Frames" button does not route through this function (it
+        calls the Siril driver directly and manages its own job via
+        `backend.services.processing.job_service`), so there is no
+        double-registration risk here. Registration failures are
+        logged and swallowed rather than raised, so a database issue
+        never blocks the actual stack.
+
     Returns
     -------
     stacked_path : `str` or `None`
         The path to the stacked output file, or `None` if
         stacking did not produce an output.
     """
-    from astrometricslib.tasks.target_tasks import stacking_tasks
+    job_id = None
+    logger_if = None
+    job_logger = None
+    job_log_handlers: list = []
+    pipeline_logger = None
 
-    stacked_path = stacking_tasks.stack_frames(
-        target,
-        log_file,
-        frames_to_stack,
-        filter_type,
-        rejection_sigma=rejection_sigma,
-        filter_wfwhm=filter_wfwhm,
-        filter_round=filter_round,
-        stack_weight=stack_weight,
-        generate_rejmap=generate_rejmap,
-    )
-    # analyze_target(pipeline_type="astrometry") plate-solves
-    # target.stacked_image
-    # specifically (see analyze_target's path-resolution logic) -- it has
-    # no notion of a spectral stack, so only run it when this call just
-    # produced a *standard* stack. Checking which of
-    # stacked_image/stacked_spectral_target now equals stacked_path
-    # tells us which one stacking_tasks.stack_frames just set,
-    # without needing a separate return value for it. analyze_target
-    # builds and assigns target.astrometry_quality_summary itself
-    # (including flagging a failed-but-attempted solve) -- the only
-    # case it can't cover is a hard solver error, which raises before
-    # analyze_target gets to build the summary at all, so that's
-    # handled here instead.
-    if stacked_path and stacked_path == target.stacked_image:
+    if register_job:
         try:
-            analyze_target(target, pipeline_type="astrometry")
-        except Exception as stacking_error:
-            logger.warning(f"Astrometry plate solving failed after stacking: {stacking_error}")
-            from astrometricslib.models.quality_summary import (
-                AstrometryPipelineQualityMetrics,
-                AstrometryQualitySummary,
-            )
+            import os
+            import uuid
+            from datetime import datetime
 
-            target.astrometry_quality_summary = AstrometryQualitySummary(
-                target_id=target.id,
-                flagged=True,
-                flag_reasons=["plate solve failed"],
-                astrometry_metrics=AstrometryPipelineQualityMetrics(
-                    sources_detected=0,
-                    solve_attempted=False,
-                    plate_solve_succeeded=False,
-                    simbad_matched_count=0,
-                ),
+            from astrometricslib.drivers.logger_interface import DbLogHandler, LoggerInterface
+            from astrometricslib.utilities.config_loader import get_configuration
+            from astrometricslib.utilities.pipeline_models import ProcessingJob
+
+            cfg = get_configuration()
+            logger_if = LoggerInterface(cfg.get_logs_db_path())
+            job_id = str(uuid.uuid4())
+
+            safe_target = target.id.replace(" ", "_").replace("/", "_")
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            log_dir = cfg.get_logs_path()
+            os.makedirs(log_dir, exist_ok=True)
+            job_log_file_path = log_file or str(log_dir / f"stacking_{safe_target}_{timestamp}.log")
+
+            job_logger = logging.getLogger(f"job_{job_id}")
+            job_logger.propagate = False
+            job_logger.setLevel(logging.INFO)
+            file_handler = logging.FileHandler(job_log_file_path)
+            file_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+            db_handler = DbLogHandler(logger_if, job_id=job_id)
+            job_logger.addHandler(file_handler)
+            job_logger.addHandler(db_handler)
+
+            # Also attach to the "astrometricslib" package logger, the
+            # common ancestor of every module logger used deeper in the
+            # stacking pipeline (stacking_tasks, siril_interface, etc,
+            # all via logging.getLogger(__name__) with propagate=True by
+            # default) -- mirrors analyze_target's identical setup.
+            job_log_handlers = [file_handler, db_handler]
+            pipeline_logger = logging.getLogger("astrometricslib")
+            for handler in job_log_handlers:
+                pipeline_logger.addHandler(handler)
+            pipeline_logger.setLevel(logging.INFO)
+
+            logger_if.upsert_job(
+                ProcessingJob(
+                    id=job_id,
+                    target_id=target.id,
+                    job_type="stacking",
+                    status="started",
+                    progress_current=0,
+                    progress_total=100,
+                    log_file_path=job_log_file_path,
+                    created_at=datetime.now().isoformat(),
+                    updated_at=datetime.now().isoformat(),
+                )
             )
-    return stacked_path
+            job_logger.info(f"[{target.id}] Stacking job started (Job: {job_id}).")
+        except Exception as job_err:
+            logger.warning(f"Could not register stacking job in astrometrics_log.db: {job_err}")
+
+    def _update_job_status(status_val: str, progress_val: int = 100):  # ruff: ignore[missing-return-type-private-function]
+        if logger_if and job_id:
+            try:
+                j = logger_if.get_job(job_id)
+                if j:
+                    j.status = status_val
+                    j.progress_current = progress_val
+                    j.updated_at = datetime.now().isoformat()
+                    logger_if.upsert_job(j)
+            except Exception as exc:
+                logger.debug("Failed to persist stacking job status update for job '%s': %s", job_id, exc)
+        if job_logger:
+            if status_val == "completed":
+                job_logger.info(f"[{target.id}] Stacking completed successfully.")
+            elif status_val == "failed":
+                job_logger.error(f"[{target.id}] Stacking failed.")
+
+    try:
+        from astrometricslib.tasks.target_tasks import stacking_tasks
+
+        stacked_path = stacking_tasks.stack_frames(
+            target,
+            log_file,
+            frames_to_stack,
+            filter_type,
+            rejection_sigma=rejection_sigma,
+            filter_wfwhm=filter_wfwhm,
+            filter_round=filter_round,
+            stack_weight=stack_weight,
+            generate_rejmap=generate_rejmap,
+        )
+        # analyze_target(pipeline_type="astrometry") plate-solves
+        # target.stacked_image
+        # specifically (see analyze_target's path-resolution logic) -- it has
+        # no notion of a spectral stack, so only run it when this call just
+        # produced a *standard* stack. Checking which of
+        # stacked_image/stacked_spectral_target now equals stacked_path
+        # tells us which one stacking_tasks.stack_frames just set,
+        # without needing a separate return value for it. analyze_target
+        # builds and assigns target.astrometry_quality_summary itself
+        # (including flagging a failed-but-attempted solve) -- the only
+        # case it can't cover is a hard solver error, which raises before
+        # analyze_target gets to build the summary at all, so that's
+        # handled here instead.
+        if stacked_path and stacked_path == target.stacked_image:
+            try:
+                # register_job=False: this stacking run already registered
+                # its own job above, and analyze_target's docstring is
+                # explicit about why a nested call must suppress its own
+                # registration -- otherwise one stack_and_solve(solve=True)
+                # call produces two ownerless "started" rows in the UI job
+                # manager ("stacking" and "analysis") for what the caller
+                # sees as a single action.
+                analyze_target(target, pipeline_type="astrometry", register_job=False)
+            except Exception as stacking_error:
+                logger.warning(f"Astrometry plate solving failed after stacking: {stacking_error}")
+                from astrometricslib.models.quality_summary import (
+                    AstrometryPipelineQualityMetrics,
+                    AstrometryQualitySummary,
+                )
+
+                target.astrometry_quality_summary = AstrometryQualitySummary(
+                    target_id=target.id,
+                    flagged=True,
+                    flag_reasons=["plate solve failed"],
+                    astrometry_metrics=AstrometryPipelineQualityMetrics(
+                        sources_detected=0,
+                        solve_attempted=False,
+                        plate_solve_succeeded=False,
+                        simbad_matched_count=0,
+                    ),
+                )
+        _update_job_status("completed" if stacked_path else "failed", 100)
+        return stacked_path
+    except Exception as exc:
+        _update_job_status("failed", 0)
+        raise exc
+    finally:
+        if pipeline_logger:
+            for handler in job_log_handlers:
+                pipeline_logger.removeHandler(handler)
 
 
 def _stack_frames_with_timeout(

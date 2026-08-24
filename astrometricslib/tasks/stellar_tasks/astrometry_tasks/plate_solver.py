@@ -11,6 +11,7 @@ environment).
 import http.client
 import logging
 import os
+import shutil
 import socket
 import subprocess
 import tempfile
@@ -310,44 +311,93 @@ class PlateSolver:
                 ]
 
                 # Scale constraints
+                hinted_command = list(cmd)
+                applied_hints = False
                 if "scale_units" in kwargs and kwargs.get("scale_lower") and kwargs.get("scale_upper"):
                     s_low = float(kwargs["scale_lower"]) * 0.8
                     s_high = float(kwargs["scale_upper"]) * 1.2
                     logger.info(
                         f"Using relaxed scale constraints: {s_low:.2f} - {s_high:.2f} {kwargs['scale_units']}"
                     )
-                    cmd.extend(["--scale-units", kwargs["scale_units"]])
-                    cmd.extend(["--scale-low", str(s_low)])
-                    cmd.extend(["--scale-high", str(s_high)])
+                    hinted_command.extend(["--scale-units", kwargs["scale_units"]])
+                    hinted_command.extend(["--scale-low", str(s_low)])
+                    hinted_command.extend(["--scale-high", str(s_high)])
+                    applied_hints = True
 
                 # RA/Dec hints
                 if "center_ra" in kwargs and kwargs["center_ra"] is not None:
-                    cmd.extend(["--ra", str(kwargs["center_ra"])])
+                    hinted_command.extend(["--ra", str(kwargs["center_ra"])])
+                    applied_hints = True
                 if "center_dec" in kwargs and kwargs["center_dec"] is not None:
-                    cmd.extend(["--dec", str(kwargs["center_dec"])])
+                    hinted_command.extend(["--dec", str(kwargs["center_dec"])])
+                    applied_hints = True
                 if ("center_ra" in kwargs or "center_dec" in kwargs) and "radius" in kwargs:
-                    cmd.extend(["--radius", str(kwargs["radius"])])
+                    hinted_command.extend(["--radius", str(kwargs["radius"])])
 
-                cmd.append(working_path)
-
+                hinted_command.append(working_path)
                 timeout = kwargs.get("solve_timeout", 300)
-                logger.info(f"Executing: {' '.join(cmd)}")
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
 
-                if result.returncode != 0:
-                    logger.warning(f"solve-field returned error code {result.returncode}")
-
-                new_fits = os.path.join(tmp_dir, "input_image.new")
-                if os.path.exists(new_fits):
-                    with fits.open(new_fits) as hdul:
-                        header = hdul[0].header.copy()
+                header = self._run_solve_field(hinted_command, tmp_dir, timeout)
+                if header is not None:
                     return header
+
+                # A hint that excludes the truth makes the field
+                # unsolvable no matter how good the data is, so a failed
+                # hinted solve is retried blind rather than given up on.
+                #
+                # The hints come from FOCALLEN/XPIXSZ, and this library's
+                # own catalog shows how wrong they can be: the DSLR's
+                # "Nikkor 300mm" images actually resolve at ~404mm, so
+                # the computed 2.68 arcsec/px window of 2.03-3.37
+                # excluded M 31's true 1.996 arcsec/px entirely. Same
+                # image, same solver, on 2026-08-24: constrained did not
+                # solve, blind solved in seconds against
+                # index-tycho2-10. Four DSLR targets were lost this way
+                # in one run, each with a perfectly good stack.
+                if applied_hints:
+                    logger.info("Hinted local solve failed; retrying blind (no scale or position hints).")
+                    blind_command = [*cmd, working_path]
+                    header = self._run_solve_field(blind_command, tmp_dir, timeout)
+                    if header is not None:
+                        logger.info("Blind local solve succeeded where the hinted solve did not.")
+                        return header
             except Exception as e:
                 logger.warning(f"Local solve failed: {e}")
 
         return None
 
-        return None
+    def _run_solve_field(
+        self, command: list[str], working_directory: str, timeout: int
+    ) -> fits.Header | None:
+        """Run one `solve-field` invocation and return its solved header.
+
+        Parameters
+        ----------
+        command : `list` [`str`]
+            The full `solve-field` argv to execute.
+        working_directory : `str`
+            Directory `solve-field` writes its outputs into.
+        timeout : `int`
+            Seconds before the invocation is abandoned.
+
+        Returns
+        -------
+        header : `astropy.io.fits.Header` or `None`
+            The solved WCS header, or `None` when this invocation did
+            not produce one.
+        """
+        logger.info(f"Executing: {' '.join(command)}")
+        result = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
+        if result.returncode != 0:
+            logger.warning(f"solve-field returned error code {result.returncode}")
+
+        # solve-field signals success by writing the .new file; a
+        # zero exit status alone does not mean the field was solved.
+        solved_path = os.path.join(working_directory, "input_image.new")
+        if not os.path.exists(solved_path):
+            return None
+        with fits.open(solved_path) as hdul:
+            return hdul[0].header.copy()
 
     def _solve_online_sources(
         self,
@@ -384,7 +434,46 @@ class PlateSolver:
         """
         if not self.api_key:
             return None
-        return _call_with_transient_retry(
-            lambda: self.astrometry_net.solve_from_image(image_path, **kwargs),
-            description="Online image solve",
-        )
+
+        # astrometry.net's uploader runs source extraction over the
+        # array as loaded, and its weighting step is written for a 2D
+        # frame: handed a colour stack it raises "weights.ndim (2) must
+        # match len(axes) (3)" and the solve is lost to a crash rather
+        # than to the data. Every DSLR stack in this library is
+        # (3, H, W), so the fallback path was unusable for exactly the
+        # targets most likely to need it.
+        #
+        # Collapsing to a mean across channels rather than picking one
+        # keeps every photon that contributes to a star's centroid,
+        # which is all a solve needs -- colour carries no astrometric
+        # information.
+        upload_path = image_path
+        temporary_directory = None
+        try:
+            with fits.open(image_path, memmap=False) as hdul:
+                image_data = hdul[0].data
+                needs_flattening = image_data is not None and image_data.ndim == 3
+                if needs_flattening:
+                    import numpy as np
+
+                    temporary_directory = tempfile.mkdtemp(prefix="plate_solve_mono_")
+                    upload_path = os.path.join(temporary_directory, "mono_for_solve.fits")
+                    flattened = np.mean(image_data, axis=0).astype("float32")
+                    fits.PrimaryHDU(data=flattened, header=hdul[0].header).writeto(
+                        upload_path, overwrite=True
+                    )
+                    logger.info(f"Flattened {image_data.shape} colour stack to 2D for the online solve.")
+        except Exception as flatten_error:
+            # Falling back to the original path keeps behaviour no worse
+            # than before if the frame cannot be read or rewritten.
+            logger.debug("Could not prepare image for online solve: %s", flatten_error)
+            upload_path = image_path
+
+        try:
+            return _call_with_transient_retry(
+                lambda: self.astrometry_net.solve_from_image(upload_path, **kwargs),
+                description="Online image solve",
+            )
+        finally:
+            if temporary_directory:
+                shutil.rmtree(temporary_directory, ignore_errors=True)

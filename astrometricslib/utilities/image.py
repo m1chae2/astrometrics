@@ -151,8 +151,18 @@ class AstrometricsImage:
             try:
                 self._wcs = WCS(self._header)
             except Exception as wcs_err:
-                logger.debug(f"Could not initialize WCS for {self.path}: {wcs_err}")
-                self._wcs = None
+                # A solved colour stack carries NAXIS=3 (channel, y, x)
+                # alongside a 2-axis WCS, and astropy refuses that
+                # combination outright. Retrying at naxis=2 selects the
+                # celestial axes, which is the whole of the WCS anyway --
+                # a colour channel has no world coordinate. Without this
+                # every DSLR stack silently came back with `wcs = None`
+                # despite having been solved successfully.
+                try:
+                    self._wcs = WCS(self._header, naxis=2)
+                except Exception:
+                    logger.debug(f"Could not initialize WCS for {self.path}: {wcs_err}")
+                    self._wcs = None
         except Exception as e:
             logger.error(f"Failed to load FITS header {self.path}: {e}")
             raise

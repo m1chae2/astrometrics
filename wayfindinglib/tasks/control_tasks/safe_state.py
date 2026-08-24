@@ -14,12 +14,12 @@ forcing it is the damage case `enclosure_control.py` exists to
 prevent. `failed_step` records the first failure, so a partially
 completed safe state is diagnosable rather than an unknown condition.
 
-> [!WARNING]
-> A mount that cannot park leaves an enclosure that cannot safely
-> close, and no software arrangement resolves this: the failure is
-> mechanical and the software has already lost the ability to move
-> the obstruction. Unattended operation requires a hardware interlock
-> independent of this system -- outside this library's scope.
+.. warning::
+   A mount that cannot park leaves an enclosure that cannot safely
+   close, and no software arrangement resolves this: the failure is
+   mechanical and the software has already lost the ability to move
+   the obstruction. Unattended operation requires a hardware interlock
+   independent of this system -- outside this library's scope.
 
 Every hardware-facing step is injected as a callable (`SafeStateSteps`)
 rather than imported, so this module carries no hardware import and is

@@ -6,8 +6,9 @@
 
 This guide outlines the installation process for Astrometrics and its dependencies on a Linux system. Once complete, the Desktop App can be launched to capture images.
 
-> [!NOTE]
-> Windows is not yet supported.
+:::{note}
+Windows is not yet supported.
+:::
 
 ## 2. Requirements
 

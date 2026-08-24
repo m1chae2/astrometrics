@@ -31,8 +31,9 @@ Before frames can be aligned and stacked, they must be calibrated to remove sens
 
 
 
-> [!WARNING]
-> Do not mix and match calibration frames from different temperatures or binning modes. Applying an incompatible Master Flat will over-correct or under-correct vignetting, leaving bright or dark rings in the final image.
+:::{warning}
+Do not mix and match calibration frames from different temperatures or binning modes. Applying an incompatible Master Flat will over-correct or under-correct vignetting, leaving bright or dark rings in the final image.
+:::
 
 ---
 

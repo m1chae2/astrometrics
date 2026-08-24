@@ -1,4 +1,4 @@
-# The Wayfinding Observatory Library: Architecture and Design
+# Wayfinding Library: Architecture and Design
 
 *Version 2.5 · 2026-08-07 · Status: current*
 
@@ -406,8 +406,9 @@ Reaching a safe state is therefore a defined ordered sequence rather than a set 
 | 5 | Ramp the sensor to ambient | Uncontrolled warming risks condensation on optics that closure has just sealed in. |
 | 6 | Close the session with its reason | The night becomes a complete record carrying why it ended, not a truncated one. |
 
-> [!WARNING]
-> Step 3 is the sequence's single point of failure: a mount that cannot park leaves an enclosure that cannot safely close. No software arrangement resolves this, because the failure is mechanical and the software has already lost the ability to move the obstruction. An unattended observatory therefore requires a hardware interlock independent of this system — one that prevents enclosure motion into an obstructed telescope regardless of what any software commands. That interlock is outside this architecture's scope, and this architecture is not safe to run unattended without it.
+:::{warning}
+Step 3 is the sequence's single point of failure: a mount that cannot park leaves an enclosure that cannot safely close. No software arrangement resolves this, because the failure is mechanical and the software has already lost the ability to move the obstruction. An unattended observatory therefore requires a hardware interlock independent of this system — one that prevents enclosure motion into an obstructed telescope regardless of what any software commands. That interlock is outside this architecture's scope, and this architecture is not safe to run unattended without it.
+:::
 
 **Loss of the controlling process** is the failure mode a safe-state sequence inside that process cannot handle. Unattended operation therefore requires a liveness signal emitted by the running system and observed from outside it, such that its cessation triggers the same sequence. A watchdog that shares the fate of what it watches provides no protection.
 

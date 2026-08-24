@@ -8,8 +8,9 @@ After completing the setup in `Installation.md`, you are ready to start using As
 
 Astrometrics is a desktop application designed to streamline astrophotography, photometry, and spectroscopy.
 
-> [!NOTE]
-> **Observatory Control:** The application currently handles image processing and basic telescope control. Planning and running automated observing nights is recommended to be managed by a dedicated INDI-compatible client like [KStars/Ekos](https://docs.kde.org/trunk5/en/kstars/kstars/ekos.html).
+:::{note}
+**Observatory Control:** The application currently handles image processing and basic telescope control. Planning and running automated observing nights is recommended to be managed by a dedicated INDI-compatible client like [KStars/Ekos](https://docs.kde.org/trunk5/en/kstars/kstars/ekos.html).
+:::
 
 ## 2. Hardware Requirements
 
@@ -45,8 +46,9 @@ Before using the analysis tools in the desktop application, it is helpful to und
 - **Photometry:** The measurement of a star's brightness over time. This is used to create light curves to detect variable stars or exoplanet transits.
 - **Spectroscopy:** The process of splitting light into a spectrum using a diffraction grating. This allows for the identification of a star's chemical composition and temperature.
 
-> [!NOTE]
-> For a deep dive into the algorithms behind astrometry, photometry, and spectroscopy, see the [Image Processing Architecture](library_design/Astrometrics_Library_Architecture.md) document.
+:::{note}
+For a deep dive into the algorithms behind astrometry, photometry, and spectroscopy, see the [Image Processing Architecture](library_design/Astrometrics_Library_Architecture.md) document.
+:::
 
 ## 5. Next Steps
 
@@ -66,5 +68,6 @@ Users can import these libraries directly to perform customized data processing,
 
 A collection of [Jupyter Notebook tutorials](notebooks/index.md) demonstrates what complete data analysis workflows look like in practice. These notebooks, along with the complete [Python API reference](api/index.rst), are available on the main documentation page.
 
-> [!NOTE]
-> The API and scripting documentation assumes familiarity with programming and astronomical concepts.
+:::{note}
+The API and scripting documentation assumes familiarity with programming and astronomical concepts.
+:::

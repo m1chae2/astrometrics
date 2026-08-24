@@ -64,12 +64,8 @@ html_theme_options = {
     "header_links_before_dropdown": 6,
     "navbar_align": "left",
     "logo": {
-        # logo.png is dark line art baked onto an opaque white halo, so it
-        # disappears against the dark navbar. logo-dark.png is a luminance-
-        # derived recolor of the same art (see _static/regenerate_logo_dark.py)
-        # for use against the dark theme.
         "image_light": "_static/logo.png",
-        "image_dark": "_static/logo-dark.png",
+        "image_dark": "_static/logo.png",
         "text": "Astrometrics",
     },
     "icon_links": [

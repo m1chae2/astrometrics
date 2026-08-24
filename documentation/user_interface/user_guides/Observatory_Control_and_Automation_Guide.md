@@ -32,8 +32,9 @@ Before initiating any automated sequence, the hardware must be successfully conn
    - Focuser Driver (e.g., `EAF` or `Focuser Simulator`)
    - Filter Wheel (e.g., `EFW` or `Filter Simulator`)
 
-> [!WARNING]
-> If a device shows a yellow warning dot or fails to connect, verify that the device is powered on, USB cables are securely connected, and no other software (like an instance of Ekos or PHD2) is exclusively locking the COM port.
+:::{warning}
+If a device shows a yellow warning dot or fails to connect, verify that the device is powered on, USB cables are securely connected, and no other software (like an instance of Ekos or PHD2) is exclusively locking the COM port.
+:::
 
 ---
 
@@ -69,8 +70,9 @@ Achieving critical focus is essential for resolving fine details and maximizing 
 
 
 
-> [!TIP]
-> If the V-curve is flat or erratic, the step size may be too small (failing to leave the critical focus zone) or atmospheric seeing is exceptionally poor. Increase the step size and try again.
+:::{tip}
+If the V-curve is flat or erratic, the step size may be too small (failing to leave the critical focus zone) or atmospheric seeing is exceptionally poor. Increase the step size and try again.
+:::
 
 ### 4.2 Temperature Compensation
 As ambient temperature drops throughout the night, optical tubes contract, shifting the focal plane.
@@ -109,8 +111,9 @@ Unattended operation relies on automated safety systems to protect equipment fro
    - The Roof/Dome shutter sends a **CLOSE** command.
    - The camera cooler is turned off to save power.
 
-> [!CAUTION]
-> Ensure the mount is configured with strict software slew limits and cord-wrap limits. If the safety system triggers a park, the mount must be able to return to its home position without colliding with the pier or snagging cables.
+:::{caution}
+Ensure the mount is configured with strict software slew limits and cord-wrap limits. If the safety system triggers a park, the mount must be able to return to its home position without colliding with the pier or snagging cables.
+:::
 
 ### 6.2 Manual Emergency Stop
 Click the red **EMERGENCY STOP** button at any time to immediately interrupt all hardware operations, halt mount slewing, and abort any active camera exposures.

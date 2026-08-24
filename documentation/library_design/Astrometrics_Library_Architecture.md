@@ -1,4 +1,4 @@
-# the high-level interface Image Processing Pipeline: Architecture and Design
+# Astrometrics Library: Architecture and Design
 
 *Version 2.3 · 2026-08-16 · Status: current*
 

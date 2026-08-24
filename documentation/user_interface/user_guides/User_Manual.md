@@ -96,8 +96,9 @@ The **Image Viewer** is the primary workspace for reviewing captured target pack
 - **FITS Header Inspector**: Type a keyword (e.g., `EXPTIME`, `GAIN`, `CRVAL1`) into the search bar in the right panel to view FITS header values.
 - **Star Identification & PSF**: Click **Star ID** to overlay SIMBAD/Gaia catalog labels over detected stars and view measured Full-Width Half-Maximum (FWHM) values.
 
-> [!TIP]
-> Use the **Invert** function to flip black and white levels, which dramatically highlights faint satellite trails and cosmic ray strikes that may require rejection prior to stacking.
+:::{tip}
+Use the **Invert** function to flip black and white levels, which dramatically highlights faint satellite trails and cosmic ray strikes that may require rejection prior to stacking.
+:::
 
 ---
 
@@ -175,8 +176,9 @@ The **Observatory Manager** gives direct manual control over the telescope mount
 #### Guider Monitoring (PHD2)
 - Inspect the live **Guiding Trends** chart to view real-time RA/Dec RMS errors in arcseconds.
 
-> [!WARNING]
-> **Safety Interlock.** Click the red **EMERGENCY STOP** button to immediately halt all hardware motion, park the mount, and force enclosure closure in case of imminent weather or mechanical failure.
+:::{warning}
+**Safety Interlock.** Click the red **EMERGENCY STOP** button to immediately halt all hardware motion, park the mount, and force enclosure closure in case of imminent weather or mechanical failure.
+:::
 
 ### 7.2 Remote Target Ingestion
 

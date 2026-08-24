@@ -8,16 +8,139 @@ Implements requirement REQ: SR-3.1 (isolated local-solve execution
 environment).
 """
 
+import http.client
 import logging
 import os
+import socket
 import subprocess
 import tempfile
+import time
+from collections.abc import Callable
 from typing import Any
 
 from astropy.io import fits
 from astroquery.astrometry_net import AstrometryNet
 
 logger = logging.getLogger(__name__)
+
+# Transport-level failures reaching nova.astrometry.net, as distinct from
+# the server answering "I could not solve this field". Only the former is
+# worth repeating: a dropped connection says nothing about the image,
+# whereas an genuine unsolvable field (e.g. a lunar disk with no star
+# pattern) fails identically no matter how many times it is uploaded.
+#
+# Observed on the 2026-08-23 full-catalog run: one M 13 session's
+# reference frame died on
+# ``('Connection aborted.', RemoteDisconnected('Remote end closed
+# connection without response'))``. The very next solve in the same block
+# succeeded, but that session had already lost its WCS -- and with it all
+# 100 of its stars, which were dropped for having no sky position.
+#
+# Note that the builtin `TimeoutError` is deliberately absent: astroquery
+# raises it when the *solve job* exceeds ``solve_timeout``, which is a
+# statement about the field's difficulty, not the network. That exclusion
+# is also why `socket.timeout` cannot be listed here -- since Python 3.10
+# it *is* `TimeoutError`, so including it would silently make every
+# solve-job timeout retryable. Genuine network read timeouts still match
+# via the requests-style name check in `_is_transient_network_error`.
+_TRANSIENT_NETWORK_ERROR_TYPES: tuple[type[BaseException], ...] = (
+    ConnectionError,
+    http.client.BadStatusLine,
+    http.client.IncompleteRead,
+    http.client.RemoteDisconnected,
+    socket.gaierror,
+)
+
+# 3 attempts total. The observed failure recovered on the immediately
+# following request, so the goal is only to ride out a single dropped
+# connection -- not to keep hammering a service that is genuinely down,
+# which would multiply an already slow step across every frame.
+ONLINE_SOLVE_ATTEMPT_LIMIT = 3
+
+# Seconds before retrying, doubled each attempt (2s, then 4s). Short
+# enough not to stall a batch run, long enough to let a momentary
+# server-side hiccup clear.
+ONLINE_SOLVE_RETRY_BACKOFF_SECONDS = 2.0
+
+
+def _is_transient_network_error(error: BaseException) -> bool:
+    """Report whether an exception looks like a retryable transport fault.
+
+    `requests` wraps the underlying transport error in its own
+    `ConnectionError`, and astroquery in turn may re-wrap that, so the
+    exception's ``__cause__``/``__context__`` chain is walked rather than
+    only checking the outermost type.
+
+    Parameters
+    ----------
+    error : `BaseException`
+        The exception raised by an online solve attempt.
+
+    Returns
+    -------
+    is_transient : `bool`
+        `True` if the failure is transport-level and worth retrying.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, _TRANSIENT_NETWORK_ERROR_TYPES):
+            return True
+        # requests' exception hierarchy is not importable here without
+        # taking a hard dependency on it, so match its ConnectionError
+        # (and friends) by name as a fallback.
+        if type(current).__name__ in {
+            "ConnectionError",
+            "ConnectTimeout",
+            "ChunkedEncodingError",
+            "ProtocolError",
+            "ReadTimeout",
+            "Timeout",
+        }:
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def _call_with_transient_retry(
+    solve_call: Callable[[], fits.Header | None], *, description: str
+) -> fits.Header | None:
+    """Run an online solve, repeating it only on transient network faults.
+
+    Parameters
+    ----------
+    solve_call : `Callable`
+        Zero-argument callable performing one solve attempt.
+    description : `str`
+        Short label for this solve strategy, used in log messages.
+
+    Returns
+    -------
+    header : `astropy.io.fits.Header` or `None`
+        The solved header, or `None` if every attempt failed.
+    """
+    for attempt_number in range(1, ONLINE_SOLVE_ATTEMPT_LIMIT + 1):
+        try:
+            return solve_call()
+        except Exception as solve_error:
+            if not _is_transient_network_error(solve_error):
+                logger.warning(f"{description} failed: {solve_error}")
+                return None
+            if attempt_number == ONLINE_SOLVE_ATTEMPT_LIMIT:
+                logger.warning(
+                    f"{description} failed after {ONLINE_SOLVE_ATTEMPT_LIMIT} attempts "
+                    f"(last error: {solve_error})."
+                )
+                return None
+            backoff_seconds = ONLINE_SOLVE_RETRY_BACKOFF_SECONDS * (2 ** (attempt_number - 1))
+            logger.warning(
+                f"{description} hit a transient network error on attempt "
+                f"{attempt_number}/{ONLINE_SOLVE_ATTEMPT_LIMIT} ({solve_error}); "
+                f"retrying in {backoff_seconds:.0f}s."
+            )
+            time.sleep(backoff_seconds)
+    return None
 
 
 class PlateSolver:
@@ -218,13 +341,12 @@ class PlateSolver:
         """
         if not self.api_key:
             return None
-        try:
-            x = [s.get("x_centroid", s.get("xcentroid")) for s in sources]
-            y = [s.get("y_centroid", s.get("ycentroid")) for s in sources]
-            return self.astrometry_net.solve_from_source_list(x, y, width, height, **kwargs)
-        except Exception as e:
-            logger.warning(f"Online source solve failed: {e}")
-        return None
+        x = [s.get("x_centroid", s.get("xcentroid")) for s in sources]
+        y = [s.get("y_centroid", s.get("ycentroid")) for s in sources]
+        return _call_with_transient_retry(
+            lambda: self.astrometry_net.solve_from_source_list(x, y, width, height, **kwargs),
+            description="Online source solve",
+        )
 
     def _solve_online_image(self, image_path: str, **kwargs) -> fits.Header | None:  # ruff: ignore[missing-type-kwargs]
         """Attempt an online solve by uploading the full image.
@@ -237,8 +359,7 @@ class PlateSolver:
         """
         if not self.api_key:
             return None
-        try:
-            return self.astrometry_net.solve_from_image(image_path, **kwargs)
-        except Exception as e:
-            logger.warning(f"Online image solve failed: {e}")
-        return None
+        return _call_with_transient_retry(
+            lambda: self.astrometry_net.solve_from_image(image_path, **kwargs),
+            description="Online image solve",
+        )

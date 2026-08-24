@@ -180,6 +180,23 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         help="Read target ids from a file, one per line; blank lines and # comments ignored.",
     )
     parser.add_argument(
+        "--skip-target",
+        action="append",
+        dest="skip_target_ids",
+        metavar="TARGET_ID",
+        help=(
+            "Never process this target; repeatable, matched like --target. Intended for targets "
+            "star-based registration cannot handle at all -- a solar or planetary disk carries no "
+            "star field, so Siril reports 'not enough stars in reference image' after staging every "
+            "frame. Sun, Venus and Jupiter fail this way on every run."
+        ),
+    )
+    parser.add_argument(
+        "--skip-targets-from",
+        metavar="PATH",
+        help="Read target ids to skip from a file, one per line; blank lines and # comments ignored.",
+    )
+    parser.add_argument(
         "--optic",
         type=float,
         dest="focal_length_mm",
@@ -295,6 +312,21 @@ def run_full_processing(argv: list[str] | None = None) -> None:
     requested_ids = list(arguments.target_ids or [])
     if arguments.targets_from:
         requested_ids.extend(_read_target_ids_from_file(arguments.targets_from))
+
+    skip_ids = list(arguments.skip_target_ids or [])
+    if arguments.skip_targets_from:
+        skip_ids.extend(_read_target_ids_from_file(arguments.skip_targets_from))
+    if skip_ids:
+        skipped, unmatched_skips = _resolve_requested_targets(targets, skip_ids)
+        skipped_names = {target.id for target in skipped}
+        if skipped_names:
+            targets = [target for target in targets if target.id not in skipped_names]
+            print(
+                f"Skipping {len(skipped_names)} target(s) at the caller's request: "
+                f"{', '.join(sorted(skipped_names))}"
+            )
+        if unmatched_skips:
+            print(f"WARNING: nothing to skip for {len(unmatched_skips)} id(s): {', '.join(unmatched_skips)}")
 
     if requested_ids:
         targets, unmatched = _resolve_requested_targets(targets, requested_ids)

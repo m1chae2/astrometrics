@@ -120,6 +120,57 @@ def _calibration_source_fingerprint(frames_directory: str) -> str | None:
     return digest.hexdigest()
 
 
+# Seconds this process has spent blocked waiting for the Siril lock,
+# accumulated across every acquisition since the last reset. A worker
+# process runs one target at a time, so a module-level total is scoped
+# to exactly one target's stacking attempt.
+#
+# The caller enforcing a stacking timeout reads this to extend its
+# deadline: serialising Siril means a target can sit in the queue for
+# minutes, and charging that wait to the target's own stacking budget
+# turns a queue into a cascade of timeouts. On the 2026-08-24 run
+# NGC 1499 was given 600s at 06:27:21 but did not reach Siril until
+# 06:31:51, losing 4.5 of its 10 minutes before any work began.
+_siril_lock_wait_state_lock = threading.Lock()
+_siril_lock_wait_seconds = 0.0
+
+
+def reset_siril_lock_wait_seconds() -> None:
+    """Zero this process's accumulated Siril lock wait.
+
+    Called before a stacking attempt begins so the total describes only
+    that attempt.
+    """
+    global _siril_lock_wait_seconds
+    with _siril_lock_wait_state_lock:
+        _siril_lock_wait_seconds = 0.0
+
+
+def get_siril_lock_wait_seconds() -> float:
+    """Return seconds spent waiting for the Siril lock since the last reset.
+
+    Returns
+    -------
+    wait_seconds : `float`
+        Accumulated blocked time, ``0.0`` when the lock was always free.
+    """
+    with _siril_lock_wait_state_lock:
+        return _siril_lock_wait_seconds
+
+
+def _record_siril_lock_wait(wait_seconds: float) -> None:
+    """Add one blocked interval to this process's accumulated wait.
+
+    Parameters
+    ----------
+    wait_seconds : `float`
+        Seconds spent blocked on this acquisition.
+    """
+    global _siril_lock_wait_seconds
+    with _siril_lock_wait_state_lock:
+        _siril_lock_wait_seconds += wait_seconds
+
+
 @contextlib.contextmanager
 def siril_process_lock(job_logger: logging.Logger | None = None) -> Iterator[None]:
     """Hold an exclusive machine-wide lock for the duration of a Siril run.
@@ -155,7 +206,12 @@ def siril_process_lock(job_logger: logging.Logger | None = None) -> Iterator[Non
             logger.info(waiting_message)
             if job_logger:
                 job_logger.info(waiting_message)
+            wait_started_at = time.monotonic()
             fcntl.flock(lock_file, fcntl.LOCK_EX)
+            waited_seconds = time.monotonic() - wait_started_at
+            _record_siril_lock_wait(waited_seconds)
+            if job_logger:
+                job_logger.info(f"Waited {waited_seconds:.1f}s for the Siril lock.")
         yield
     finally:
         lock_file.close()

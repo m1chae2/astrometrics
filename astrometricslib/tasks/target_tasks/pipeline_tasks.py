@@ -17,6 +17,7 @@ import os
 import re
 import statistics
 import threading
+import time
 from typing import Any, NamedTuple
 
 from astrometricslib.drivers import disk_interface
@@ -27,8 +28,59 @@ from astrometricslib.utilities.enums import FilterType
 
 logger = logging.getLogger(__name__)
 
-# Maximum time to wait for a single Siril stacking run before giving up on it
+# Maximum time to wait for a single Siril stacking run before giving up
+# on it. Scaled by frame count rather than flat, because stacking cost
+# is dominated by per-frame registration and integration and the
+# catalog's targets differ by more than an order of magnitude in size
+# (2 frames for Alnath, 535 for NGC 7023).
+#
+# A flat 600s was the previous value and it silently discarded finished
+# work. On the 2026-08-24 DSLR pass four targets were declared timed out
+# and three of them went on to stack *successfully* seconds later --
+# NGC 7000 finished at 06:35:11 after being abandoned at 06:27:21, and
+# its 288MB output was left on disk with nothing in the catalog pointing
+# at it.
+#
+# The per-frame figure comes from that same run: NGC 7000's 84 color
+# frames took roughly 800s of Siril time, about 9.5s per frame, for
+# 288MB three-channel output. Monochrome frames are far cheaper (NGC
+# 2403 stacked 35 frames in 22.5s, 0.64s/frame), so a per-frame budget
+# sized for color leaves mono with a wide margin rather than needing a
+# second constant. 30s/frame is roughly 3x the measured color cost,
+# chosen so that a legitimate stack is never killed -- this is a
+# hang-detection ceiling, not an expected duration.
+STACKING_TIMEOUT_BASE_SECONDS = 300
+STACKING_TIMEOUT_PER_FRAME_SECONDS = 30
+
+# Retained for callers that still pass an explicit budget; equivalent to
+# the previous flat value and used only as a floor.
 STACKING_TIMEOUT_SECONDS = 600
+
+# Poll interval while waiting on a stacking thread. Small relative to
+# the minimum 600s budget, so a genuine timeout overshoots by at most
+# this much, while still letting the deadline pick up lock waits that
+# accrue after the wait began.
+_STACKING_TIMEOUT_POLL_SECONDS = 2.0
+
+
+def compute_stacking_timeout_seconds(frame_count: int) -> int:
+    """Return the stacking timeout appropriate to a frame count.
+
+    Parameters
+    ----------
+    frame_count : `int`
+        Number of frames being submitted to this stack.
+
+    Returns
+    -------
+    timeout_seconds : `int`
+        Base overhead plus a per-frame allowance, never less than
+        `STACKING_TIMEOUT_SECONDS` so a tiny stack still gets the
+        historical budget.
+    """
+    scaled_timeout = STACKING_TIMEOUT_BASE_SECONDS + STACKING_TIMEOUT_PER_FRAME_SECONDS * max(0, frame_count)
+    return int(max(STACKING_TIMEOUT_SECONDS, scaled_timeout))
+
 
 # Matches the synthetic placeholder id assigned by
 # `StarIdentifier._build_stellar_objects_from_sources` and
@@ -1766,13 +1818,29 @@ def stack_and_solve(
 
 
 def _stack_frames_with_timeout(
-    target: Target, frames_to_stack: list[FrameRecord], timeout_seconds: int = STACKING_TIMEOUT_SECONDS
+    target: Target, frames_to_stack: list[FrameRecord], timeout_seconds: int | None = None
 ) -> str | None:
     """Run stack_and_solve on a background thread, enforcing a hard timeout.
 
     Siril can occasionally hang mid-stack (e.g. waiting on a pipe that
     never receives its completion marker), which would otherwise freeze
     the caller indefinitely.
+
+    The budget covers time this stack spends *working*. Time spent
+    blocked on the machine-wide Siril lock is added back as it accrues,
+    because that queue exists to stop Siril runs competing for the CPU
+    and must not convert into a cascade of timeouts for the targets
+    waiting their turn.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target being stacked.
+    frames_to_stack : `list` [`FrameRecord`]
+        Frames submitted to this stack; their count sets the budget.
+    timeout_seconds : `int`, optional
+        Explicit budget override. Defaults to
+        `compute_stacking_timeout_seconds` for this frame count.
 
     Returns
     -------
@@ -1787,6 +1855,11 @@ def _stack_frames_with_timeout(
     """  # ruff: ignore[docstring-extraneous-exception] -- `raise
     # outcome["error"]` re-raises a captured exception object,
     # which pydoclint cannot resolve to a declared type statically.
+    from astrometricslib.drivers import siril_interface
+
+    if timeout_seconds is None:
+        timeout_seconds = compute_stacking_timeout_seconds(len(frames_to_stack))
+
     outcome: dict[str, Any] = {}
 
     def _run_stacking() -> None:
@@ -1795,12 +1868,30 @@ def _stack_frames_with_timeout(
         except Exception as stacking_error:
             outcome["error"] = stacking_error
 
+    siril_interface.reset_siril_lock_wait_seconds()
     stacking_thread = threading.Thread(target=_run_stacking, daemon=True)
+    started_at = time.monotonic()
     stacking_thread.start()
-    stacking_thread.join(timeout_seconds)
+
+    # Polled rather than a single join so the deadline can absorb lock
+    # waits that only become known while this stack is queued. The
+    # interval is short enough that the overshoot past a real timeout is
+    # negligible against a budget measured in minutes.
+    while True:
+        stacking_thread.join(_STACKING_TIMEOUT_POLL_SECONDS)
+        if not stacking_thread.is_alive():
+            break
+        elapsed_seconds = time.monotonic() - started_at
+        if elapsed_seconds >= timeout_seconds + siril_interface.get_siril_lock_wait_seconds():
+            break
 
     if stacking_thread.is_alive():
-        print(f"[{target.id}] Stacking timed out after {timeout_seconds} seconds. Abandoning this stack.")
+        lock_wait_seconds = siril_interface.get_siril_lock_wait_seconds()
+        print(
+            f"[{target.id}] Stacking timed out after {timeout_seconds} seconds "
+            f"of working time ({lock_wait_seconds:.0f}s of Siril-lock wait excluded). "
+            f"Abandoning this stack."
+        )
         # A timeout is a quality event, not just a log line: recorded on
         # the target's existing stack summary when there is one, so the
         # abandoned stack is queryable rather than only discoverable by

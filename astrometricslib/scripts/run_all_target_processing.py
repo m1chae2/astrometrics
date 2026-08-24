@@ -15,6 +15,7 @@ full fault-tolerance behavior (per-target exception handling, plus
 automatic worker-pool restart on a process crash).
 """
 
+import argparse
 import logging
 import os
 import sys
@@ -70,7 +71,121 @@ def _print_pass_summary(camera_name: str, summary: BatchRunSummary) -> None:
     print("==========================================")
 
 
-def run_full_processing() -> None:
+def _reindex_targets(astrometrics: Astrometrics, targets: list) -> None:
+    """Reindex the given targets and refresh their header metadata.
+
+    Parameters
+    ----------
+    astrometrics : `Astrometrics`
+        The high-level interface owning the catalog.
+    targets : `list`
+        Targets to reindex.
+    """
+    print("Reindexing frames and refreshing acquisition metadata...")
+    reindexed_target_count = 0
+    for target in targets:
+        try:
+            astrometrics.targets.reindex_frames(target, refresh_headers=True)
+            reindexed_target_count += 1
+        except Exception as reindex_error:
+            print(f"  [{target.id}] Reindex failed, continuing with stored frames: {reindex_error}")
+    astrometrics.targets.save()
+    print(f"Reindexed {reindexed_target_count} of {len(targets)} target(s).")
+
+
+def _build_argument_parser() -> argparse.ArgumentParser:
+    """Construct the command-line parser for this script.
+
+    Returns
+    -------
+    parser : `argparse.ArgumentParser`
+        Parser covering target selection and dry-run preview.
+    """
+    parser = argparse.ArgumentParser(
+        prog="run_all_target_processing",
+        description="Run the full pipeline over the target catalog, or a chosen subset.",
+    )
+    parser.add_argument(
+        "--target",
+        action="append",
+        dest="target_ids",
+        metavar="TARGET_ID",
+        help=(
+            "Process only this target; repeatable. Matched case-insensitively against "
+            "the catalog id. Defaults to every target."
+        ),
+    )
+    parser.add_argument(
+        "--targets-from",
+        metavar="PATH",
+        help="Read target ids from a file, one per line; blank lines and # comments ignored.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print which targets each camera pass would process, then exit without processing.",
+    )
+    parser.add_argument(
+        "--skip-reindex",
+        action="store_true",
+        help=(
+            "Skip the pre-run reindex. Only safe when nothing has changed on disk since "
+            "the last run; the reindex costs about 10 seconds for a 4,000-frame catalog."
+        ),
+    )
+    return parser
+
+
+def _resolve_requested_targets(targets: list, requested_ids: list[str]) -> tuple[list, list[str]]:
+    """Narrow the catalog to the requested ids.
+
+    Matching is case-insensitive and ignores surrounding whitespace,
+    since ids are typed by hand and carry spaces ("NGC 7023").
+
+    Parameters
+    ----------
+    targets : `list`
+        Every target in the catalog.
+    requested_ids : `list` [`str`]
+        Ids the caller asked for.
+
+    Returns
+    -------
+    selected : `list`
+        The matching targets, in catalog order.
+    unmatched : `list` [`str`]
+        Requested ids that matched nothing, so a typo is reported rather
+        than silently processing fewer targets than intended.
+    """
+    wanted = {target_id.strip().casefold() for target_id in requested_ids if target_id.strip()}
+    selected = [target for target in targets if target.id.strip().casefold() in wanted]
+    matched = {target.id.strip().casefold() for target in selected}
+    unmatched = sorted(
+        target_id
+        for target_id in requested_ids
+        if target_id.strip() and target_id.strip().casefold() not in matched
+    )
+    return selected, unmatched
+
+
+def _read_target_ids_from_file(path: str) -> list[str]:
+    """Read one target id per line, ignoring blanks and comments.
+
+    Parameters
+    ----------
+    path : `str`
+        File to read.
+
+    Returns
+    -------
+    target_ids : `list` [`str`]
+        The ids found, in file order.
+    """
+    with open(path) as handle:
+        return [line.strip() for line in handle if line.strip() and not line.lstrip().startswith("#")]
+
+
+def run_full_processing(argv: list[str] | None = None) -> None:
     """Run the full processing pipeline for every target in the catalog.
 
     Runs the ASI533MM (monochrome) pass first, across every target
@@ -86,6 +201,7 @@ def run_full_processing() -> None:
     from both cameras as of 2026-08-23; excluding them from the second
     pass keeps their existing ASI533MM results intact.
     """
+    arguments = _build_argument_parser().parse_args(argv)
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s", stream=sys.stdout
     )
@@ -98,7 +214,22 @@ def run_full_processing() -> None:
         print("No targets found in the database catalog.")
         return
 
-    print(f"Found {len(targets)} target(s) in the catalog.")
+    requested_ids = list(arguments.target_ids or [])
+    if arguments.targets_from:
+        requested_ids.extend(_read_target_ids_from_file(arguments.targets_from))
+
+    if requested_ids:
+        targets, unmatched = _resolve_requested_targets(targets, requested_ids)
+        if unmatched:
+            # Reported rather than ignored: a mistyped id would otherwise
+            # quietly shrink the run and look like a clean pass.
+            print(f"WARNING: no target matches {len(unmatched)} requested id(s): {', '.join(unmatched)}")
+        if not targets:
+            print("None of the requested targets exist in the catalog; nothing to do.")
+            return
+        print(f"Processing {len(targets)} requested target(s) of the catalog.")
+    else:
+        print(f"Found {len(targets)} target(s) in the catalog.")
 
     # Reindex before processing so the run works from a current view of
     # what is actually on disk, and so every frame carries the
@@ -130,16 +261,26 @@ def run_full_processing() -> None:
             f"work director{'y' if purged_count == 1 else 'ies'}."
         )
 
-    print("Reindexing frames and refreshing acquisition metadata...")
-    reindexed_target_count = 0
-    for target in targets:
-        try:
-            astrometrics.targets.reindex_frames(target, refresh_headers=True)
-            reindexed_target_count += 1
-        except Exception as reindex_error:
-            print(f"  [{target.id}] Reindex failed, continuing with stored frames: {reindex_error}")
-    astrometrics.targets.save()
-    print(f"Reindexed {reindexed_target_count} of {len(targets)} target(s).")
+    if arguments.dry_run:
+        asi_ids = [t.id for t in targets if select_frames_for_camera(t, ASI_CAMERA_NAME)]
+        nikon_ids = [
+            t.id
+            for t in targets
+            if select_frames_for_camera(t, NIKON_CAMERA_NAME)
+            and not select_frames_for_camera(t, ASI_CAMERA_NAME)
+        ]
+        neither = [t.id for t in targets if t.id not in asi_ids and t.id not in nikon_ids]
+        print(f"\nPass 1 ({ASI_CAMERA_NAME}) would process {len(asi_ids)}: {', '.join(asi_ids) or '-'}")
+        print(f"Pass 2 ({NIKON_CAMERA_NAME}) would process {len(nikon_ids)}: {', '.join(nikon_ids) or '-'}")
+        if neither:
+            print(f"No frames for either camera ({len(neither)}): {', '.join(neither)}")
+        print("\nDry run: nothing was processed.")
+        return
+
+    if arguments.skip_reindex:
+        print("Skipping reindex at the caller's request.")
+    else:
+        _reindex_targets(astrometrics, targets)
 
     print("Running the full pipeline (stacking, astrometry, photometry, spectroscopy) for each target...")
 
@@ -149,16 +290,24 @@ def run_full_processing() -> None:
     # matches it as a case-insensitive substring against each frame's
     # camera -- a partial string risks matching more than one camera if
     # the catalog ever grows a similarly-named one.
-    print(f"\n--- Pass 1: {ASI_CAMERA_NAME} ---")
-    asi_summary = astrometrics.process_all_targets(camera_name=ASI_CAMERA_NAME)
-    _print_pass_summary(ASI_CAMERA_NAME, asi_summary)
-
+    # Ids are passed explicitly for both passes. Omitting them makes
+    # `process_all_targets` walk the entire catalog, which would silently
+    # ignore a --target selection and reprocess everything.
+    asi_target_ids = [target.id for target in targets if select_frames_for_camera(target, ASI_CAMERA_NAME)]
     nikon_only_target_ids = [
         target.id
         for target in targets
         if select_frames_for_camera(target, NIKON_CAMERA_NAME)
         and not select_frames_for_camera(target, ASI_CAMERA_NAME)
     ]
+
+    print(f"\n--- Pass 1: {ASI_CAMERA_NAME} ---")
+    if asi_target_ids:
+        asi_summary = astrometrics.process_all_targets(target_ids=asi_target_ids, camera_name=ASI_CAMERA_NAME)
+        _print_pass_summary(ASI_CAMERA_NAME, asi_summary)
+    else:
+        print("No targets with ASI533MM frames in this selection; skipping this pass.")
+
     print(f"\n--- Pass 2: {NIKON_CAMERA_NAME} (targets without ASI533MM data only) ---")
     if not nikon_only_target_ids:
         print("No Nikon-only targets found; skipping this pass.")

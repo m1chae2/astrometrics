@@ -88,3 +88,54 @@ def test_non_numeric_header_value_does_not_raise(tmp_path):  # ruff: ignore[miss
     assert record.airmass is None
     # The rest of the record must still be populated.
     assert record.exposure == "30.0"
+
+
+def test_refresh_populates_an_already_indexed_frame(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Fields added after a frame was indexed must still reach it.
+
+    scan_target_directory only builds records for files it has not seen,
+    so without an explicit refresh a newly added FrameRecord field stays
+    None on every existing record forever.
+    """
+    from astrometricslib.data_access.frame_scanning import refresh_acquisition_conditions
+
+    path = _write_frame(tmp_path / "a.fits", PIERSIDE="EAST", AIRMASS=1.4)
+    record = create_frame_record_from_fits(path)
+    # Simulate a record indexed before these fields existed.
+    record.pier_side = None
+    record.airmass = None
+
+    assert refresh_acquisition_conditions(record) is True
+    assert record.pier_side == "EAST"
+    assert record.airmass == pytest.approx(1.4)
+
+
+def test_refresh_preserves_measured_values(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """A header refresh must not discard anything a pipeline measured.
+
+    Registration facts and pixel measurements come from stacking and
+    dedicated measurement passes, not the header; re-deriving them would
+    cost orders of magnitude more than the ~10ms header read.
+    """
+    from astrometricslib.data_access.frame_scanning import refresh_acquisition_conditions
+
+    record = create_frame_record_from_fits(_write_frame(tmp_path / "a.fits", PIERSIDE="WEST"))
+    record.background_level = 4456.0
+    record.registration_fwhm_x_px = 2.48
+    record.registration_dx_px = 6.32
+
+    refresh_acquisition_conditions(record)
+
+    assert record.background_level == pytest.approx(4456.0)
+    assert record.registration_fwhm_x_px == pytest.approx(2.48)
+    assert record.registration_dx_px == pytest.approx(6.32)
+
+
+def test_refresh_of_a_missing_file_reports_failure(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """A deleted frame cannot be refreshed, and says so rather than raising."""
+    from astrometricslib.data_access.frame_scanning import refresh_acquisition_conditions
+    from astrometricslib.models.target import FrameRecord
+
+    record = FrameRecord(path=str(tmp_path / "gone.fits"), role="LIGHT", exposure="30.0")
+
+    assert refresh_acquisition_conditions(record) is False

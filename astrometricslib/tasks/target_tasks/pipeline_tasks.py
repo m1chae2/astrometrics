@@ -1515,8 +1515,20 @@ def _run_analysis_pipeline_match(
             raise ValueError(f"Unknown analysis type: {pipeline_type}")
 
 
-def reindex_frames(target: Target, prune_missing: bool = False, butler=None) -> None:  # ruff: ignore[missing-type-function-argument]
-    """Sync frame records from disk and recompute total exposure time."""
+def reindex_frames(
+    target: Target,
+    prune_missing: bool = False,
+    butler=None,  # ruff: ignore[missing-type-function-argument]
+    refresh_headers: bool = False,
+) -> None:
+    """Sync frame records from disk and recompute total exposure time.
+
+    `refresh_headers` also re-reads header-derived acquisition
+    conditions on frames already tracked. Scanning alone only builds
+    records for files it has not seen, so a field added to
+    `FrameRecord` after a frame was first indexed stays `None` on that
+    frame until this runs. Costs ~10ms per frame.
+    """
     if butler is None:
         from astrometricslib.data_access.butler import DiskButler
 
@@ -1530,7 +1542,7 @@ def reindex_frames(target: Target, prune_missing: bool = False, butler=None) -> 
             and not any(k in f.path.lower() for k in ("_stacked", "starless", "starmask"))
         ]
 
-    butler.get("raw_frames", {"target": target})
+    butler.get("raw_frames", {"target": target, "refresh_headers": refresh_headers})
 
 
 def get_header_information(target: Target, frame_path: str) -> list[dict[str, str]]:

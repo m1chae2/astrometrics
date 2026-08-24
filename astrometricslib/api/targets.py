@@ -186,7 +186,13 @@ class TargetCatalog:
 
         return add_frame(target, path, role, filter_type, camera)
 
-    def reindex_frames(self, target: Target, prune_missing: bool = False, butler: object = None) -> None:
+    def reindex_frames(
+        self,
+        target: Target,
+        prune_missing: bool = False,
+        butler: object = None,
+        refresh_headers: bool = False,
+    ) -> None:
         """Sync frame records from disk and recompute total exposure time.
 
         Parameters
@@ -196,12 +202,19 @@ class TargetCatalog:
         prune_missing : `bool`, optional
             If `True`, remove frame records whose files no longer
             exist on disk. Defaults to `False`.
+        refresh_headers : `bool`, optional
+            If `True`, also re-read header-derived acquisition
+            conditions (pier side, airmass, altitude, pixel scale,
+            cooling and focuser telemetry) on frames already tracked.
+            Scanning alone only builds records for previously unseen
+            files, so fields added to `FrameRecord` after a frame was
+            indexed stay `None` until this runs. Defaults to `False`.
         butler : `astrometricslib.data_access.butler.AbstractButler`, optional
             Storage backend override; defaults to this catalog's butler.
         """
         from astrometricslib.tasks.target_tasks.pipeline_tasks import reindex_frames
 
-        reindex_frames(target, prune_missing=prune_missing, butler=butler)
+        reindex_frames(target, prune_missing=prune_missing, butler=butler, refresh_headers=refresh_headers)
 
     def get_header(self, path: str, target: Target | None = None) -> builtins.list[dict[str, str]]:
         """Extract FITS header card entries, optionally ownership-checked.

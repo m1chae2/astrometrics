@@ -163,7 +163,44 @@ def create_frame_record_from_fits(path: str, camera: str | None = None) -> Frame
     return record
 
 
-def scan_target_directory(target: Target, frames_root_path: str) -> None:
+def refresh_acquisition_conditions(frame: FrameRecord) -> bool:
+    """Re-read one already-tracked frame's header conditions.
+
+    Only the header-derived acquisition fields are replaced. Everything
+    a pipeline measured -- registration facts, background level,
+    saturation, measured FWHM -- is left untouched, because none of it
+    comes from the header and re-deriving it would cost orders of
+    magnitude more (a header read is ~10ms against ~4s for the pixels).
+
+    Exists because `scan_target_directory` only builds records for files
+    it has not seen before, so fields added to `FrameRecord` after a
+    frame was first indexed would otherwise stay `None` forever on every
+    existing record.
+
+    Parameters
+    ----------
+    frame : `FrameRecord`
+        The frame record to refresh, mutated in place.
+
+    Returns
+    -------
+    refreshed : `bool`
+        `True` if the header was read and applied; `False` if the file
+        is missing or unreadable.
+    """
+    from astropy.io import fits
+
+    try:
+        header = fits.getheader(frame.path)
+    except Exception as header_error:
+        logger.debug("Could not refresh header conditions for %s: %s", frame.path, header_error)
+        return False
+
+    _populate_acquisition_conditions(frame, header)
+    return True
+
+
+def scan_target_directory(target: Target, frames_root_path: str, refresh_headers: bool = False) -> None:
     """Scan the lights directory for target match variants.
 
     Recursively scans the lights directory inside the frames root
@@ -176,6 +213,13 @@ def scan_target_directory(target: Target, frames_root_path: str) -> None:
         The Target object to populate.
     frames_root_path : `str`
         Base directory containing imaging files.
+    refresh_headers : `bool`, optional
+        Whether to also re-read header-derived acquisition conditions on
+        frames already tracked (default `False`). Without this, a field
+        added to `FrameRecord` after a frame was first indexed stays
+        `None` on that frame forever, since only unseen files get a new
+        record built. Costs ~10ms per frame -- header reads only, no
+        pixel data.
     """
     variants = [
         target.id,
@@ -216,6 +260,10 @@ def scan_target_directory(target: Target, frames_root_path: str) -> None:
                 if not any(frame.path == file_path for frame in target.frames):
                     frame_record = create_frame_record_from_fits(file_path)
                     target.frames.append(frame_record)
+
+    if refresh_headers:
+        for frame in target.frames:
+            refresh_acquisition_conditions(frame)
 
     target.recalculate_total_exposure()
 

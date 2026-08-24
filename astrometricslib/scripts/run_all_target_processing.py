@@ -99,6 +99,33 @@ def run_full_processing() -> None:
         return
 
     print(f"Found {len(targets)} target(s) in the catalog.")
+
+    # Reindex before processing so the run works from a current view of
+    # what is actually on disk, and so every frame carries the
+    # header-derived acquisition conditions the analyses expect.
+    #
+    # refresh_headers is the load-bearing part: scanning alone only
+    # builds records for files it has not seen before, so a field added
+    # to FrameRecord after a frame was first indexed stays None on that
+    # frame forever. Reading headers costs ~10ms per frame -- under a
+    # minute for this whole catalog -- because nothing here touches
+    # pixel data.
+    #
+    # prune_missing is deliberately NOT set: it deletes frame records
+    # whose files are not currently readable, and this library lives on
+    # an external drive. A drive that is slow to mount would silently
+    # erase real frame history rather than fail loudly.
+    print("Reindexing frames and refreshing acquisition metadata...")
+    reindexed_target_count = 0
+    for target in targets:
+        try:
+            astrometrics.targets.reindex_frames(target, refresh_headers=True)
+            reindexed_target_count += 1
+        except Exception as reindex_error:
+            print(f"  [{target.id}] Reindex failed, continuing with stored frames: {reindex_error}")
+    astrometrics.targets.save()
+    print(f"Reindexed {reindexed_target_count} of {len(targets)} target(s).")
+
     print("Running the full pipeline (stacking, astrometry, photometry, spectroscopy) for each target...")
 
     # `camera_name` is a required, keyword-only argument on

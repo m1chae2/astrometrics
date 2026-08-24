@@ -52,15 +52,50 @@ def _run_worker_with_captured_output(
     print each item's output as one contiguous block instead of
     interleaving lines from concurrently-running items.
 
+    Log records are captured alongside stdout. Worker processes never run
+    `logging.basicConfig` -- the pool's only initializer sets niceness, and
+    under the "forkserver"/"spawn" start methods a worker does not inherit
+    the parent's handlers -- so without this every `logger.info`/`warning`
+    raised inside a worker was silently discarded, leaving batch runs with
+    only whatever the pipeline happened to `print`.
+
+    The handler is attached here rather than in the pool initializer
+    because `redirect_stdout` swaps `sys.stdout` per item: a handler bound
+    once at worker startup would hold the *original* stdout and write past
+    the capture, interleaving lines from concurrent items onto the
+    terminal. Binding it to this item's buffer keeps each item's logs in
+    the same contiguous block as its prints.
+
     Returns
     -------
     result : `tuple` [`dict`, `str`]
         The worker_function's returned dict, paired with the captured
-        stdout produced while it ran.
+        stdout and log output produced while it ran.
     """
     output_buffer = io.StringIO()
-    with contextlib.redirect_stdout(output_buffer):
-        result = worker_function(item_id, *worker_arguments)
+
+    # Matches the package logger that pipeline_tasks' job logging already
+    # targets, so both mechanisms observe the same records.
+    package_logger = logging.getLogger("astrometricslib")
+    log_handler = logging.StreamHandler(output_buffer)
+    log_handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+    previous_level = package_logger.level
+    package_logger.addHandler(log_handler)
+    if not package_logger.isEnabledFor(logging.INFO):
+        # NOTSET here would defer to root, which defaults to WARNING and
+        # would drop the INFO-level pipeline diagnostics entirely.
+        package_logger.setLevel(logging.INFO)
+
+    try:
+        with contextlib.redirect_stdout(output_buffer):
+            result = worker_function(item_id, *worker_arguments)
+    finally:
+        # Always detach: workers are reused across items, so a leaked
+        # handler would keep writing this item's buffer for every later
+        # item the same process handles.
+        package_logger.removeHandler(log_handler)
+        package_logger.setLevel(previous_level)
+
     return result, output_buffer.getvalue()
 
 

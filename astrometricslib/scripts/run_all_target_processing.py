@@ -1,8 +1,11 @@
 """Batch processing script that runs the full pipeline on every target.
 
 Runs stacking, astrometry, photometry, and spectroscopy (where
-applicable) for every target's ZWO ASI533MM Pro frames, using only the
-public `Astrometrics.process_all_targets` facade.
+applicable) in two sequential passes: first every target's ZWO
+ASI533MM Pro (monochrome) frames, then every *remaining* target's
+Nikon DSLR DSC D5300 (color) frames -- see `run_full_processing`'s
+docstring for why the second pass excludes targets the first pass
+already covered.
 
 A failure in any single target's pipeline -- including a real
 worker-process crash -- is caught and recorded rather than
@@ -22,34 +25,23 @@ import sys
 os.environ["HEADLESS"] = "1"
 
 from astrometricslib import Astrometrics
+from astrometricslib.tasks.target_tasks.pipeline_tasks import select_frames_for_camera
+from astrometricslib.utilities.parallel_batch import BatchRunSummary
+
+ASI_CAMERA_NAME = "ZWO ASI 533MM Pro"
+NIKON_CAMERA_NAME = "Nikon DSLR DSC D5300"
 
 
-def run_full_processing() -> None:
-    """Run the full processing pipeline for every target in the catalog."""
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s", stream=sys.stdout
-    )
+def _print_pass_summary(camera_name: str, summary: BatchRunSummary) -> None:
+    """Print one camera pass's outcome in the same format as the others.
 
-    print("Initializing Astrometrics...")
-    astrometrics = Astrometrics()
-
-    targets = astrometrics.targets.list()
-    if not targets:
-        print("No targets found in the database catalog.")
-        return
-
-    print(f"Found {len(targets)} target(s) in the catalog.")
-    print("Running the full pipeline (stacking, astrometry, photometry, spectroscopy) for each target...")
-
-    # `camera_name` is a required, keyword-only argument on
-    # `process_all_targets` (no default), so it's passed explicitly here.
-    # The full camera name is used rather than a partial match like
-    # "533mm", since `run_full_pipeline` matches it as a case-insensitive
-    # substring against each frame's camera -- a partial string risks
-    # matching more than one camera if the catalog ever grows a
-    # similarly-named one.
-    summary = astrometrics.process_all_targets(camera_name="ZWO ASI 533MM Pro")
-
+    Parameters
+    ----------
+    camera_name : `str`
+        The camera this pass processed, for the header line.
+    summary : `BatchRunSummary`
+        The pass's aggregated success/skip/failure state.
+    """
     stacked_targets = [
         (target_id, result["stack_outputs"])
         for target_id, result in summary.results.items()
@@ -57,7 +49,7 @@ def run_full_processing() -> None:
     ]
 
     print("\n==========================================")
-    print("BATCH PROCESSING RUN COMPLETE")
+    print(f"{camera_name} PASS COMPLETE")
     print(f"Processed targets: {len(summary.succeeded)}")
     print(f"Skipped targets (no frames for this camera): {len(summary.skipped)}")
     print(f"Failed targets: {len(summary.failed)}")
@@ -76,6 +68,63 @@ def run_full_processing() -> None:
             stack_descriptions = [f"{stack_type.capitalize()}={path}" for stack_type, path in outputs.items()]
             print(f"  - {target_id}: {', '.join(stack_descriptions)}")
     print("==========================================")
+
+
+def run_full_processing() -> None:
+    """Run the full processing pipeline for every target in the catalog.
+
+    Runs the ASI533MM (monochrome) pass first, across every target
+    with frames for that camera. The Nikon DSLR (color) pass then runs
+    second, but only across targets the ASI533MM pass did *not* touch
+    -- `Target.stacked_image`, `processed_image`, and every quality-
+    summary field are single-valued, not per-camera, so running a
+    second camera's pass on a target the first pass already processed
+    would silently overwrite that target's ASI533MM stack reference
+    and quality summaries with the DSLR-camera results (the ASI533MM
+    FITS files themselves stay on disk; the target record would simply
+    stop pointing at them). 9 of this catalog's targets have frames
+    from both cameras as of 2026-08-23; excluding them from the second
+    pass keeps their existing ASI533MM results intact.
+    """
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s", stream=sys.stdout
+    )
+
+    print("Initializing Astrometrics...")
+    astrometrics = Astrometrics()
+
+    targets = astrometrics.targets.list()
+    if not targets:
+        print("No targets found in the database catalog.")
+        return
+
+    print(f"Found {len(targets)} target(s) in the catalog.")
+    print("Running the full pipeline (stacking, astrometry, photometry, spectroscopy) for each target...")
+
+    # `camera_name` is a required, keyword-only argument on
+    # `process_all_targets` (no default). The full camera name is used
+    # rather than a partial match like "533mm", since `run_full_pipeline`
+    # matches it as a case-insensitive substring against each frame's
+    # camera -- a partial string risks matching more than one camera if
+    # the catalog ever grows a similarly-named one.
+    print(f"\n--- Pass 1: {ASI_CAMERA_NAME} ---")
+    asi_summary = astrometrics.process_all_targets(camera_name=ASI_CAMERA_NAME)
+    _print_pass_summary(ASI_CAMERA_NAME, asi_summary)
+
+    nikon_only_target_ids = [
+        target.id
+        for target in targets
+        if select_frames_for_camera(target, NIKON_CAMERA_NAME)
+        and not select_frames_for_camera(target, ASI_CAMERA_NAME)
+    ]
+    print(f"\n--- Pass 2: {NIKON_CAMERA_NAME} (targets without ASI533MM data only) ---")
+    if not nikon_only_target_ids:
+        print("No Nikon-only targets found; skipping this pass.")
+        return
+    nikon_summary = astrometrics.process_all_targets(
+        target_ids=nikon_only_target_ids, camera_name=NIKON_CAMERA_NAME
+    )
+    _print_pass_summary(NIKON_CAMERA_NAME, nikon_summary)
 
 
 # This guard is REQUIRED, not stylistic boilerplate: `process_all_targets`

@@ -11,6 +11,7 @@ position-based identity that survives INSERT OR REPLACE persistence.
 """
 
 import logging
+import math
 import queue
 import threading
 import warnings
@@ -256,6 +257,13 @@ class StarIdentifier:
         self.stellar_objects: list[StellarObject] = []
         self.sources_detected: int = 0
         self.solve_attempted: bool = False
+        # Angular separations between each catalog-matched star's solved
+        # position and its catalog position, in arcsec. Their RMS is the
+        # astrometric residual -- the direct measure of solution quality
+        # that `AstrometryPipelineQualityMetrics` declared but nothing
+        # ever produced, leaving it None on all 28 solved targets of the
+        # 2026-08-24 run.
+        self.catalog_match_separations_arcsec: list[float] = []
 
     @staticmethod
     def _build_stellar_objects_from_sources(sources: list[dict]) -> list[StellarObject]:
@@ -302,6 +310,26 @@ class StarIdentifier:
             obj.name = f"Star_{i + 1}"
             stellar_objects.append(obj)
         return stellar_objects
+
+    def get_astrometric_residual_rms_arcsec(self) -> float | None:
+        """Return the RMS of catalog-match separations for the last solve.
+
+        This is the standard measure of a plate solution's quality: how
+        far, on average, the solved WCS puts a star from where the
+        catalog says it is. A few tenths of an arcsecond is a good
+        solution; several arcseconds means the WCS is fitting badly even
+        though the solve "succeeded".
+
+        Returns
+        -------
+        residual_rms_arcsec : `float` or `None`
+            RMS separation in arcsec, or `None` when no star was matched
+            against a catalog.
+        """
+        separations = self.catalog_match_separations_arcsec
+        if not separations:
+            return None
+        return round(math.sqrt(sum(value**2 for value in separations) / len(separations)), 4)
 
     def _calculate_scale_hints(self, image_data_or_path: Any) -> tuple[float | None, float | None]:
         """Estimate a pixel-scale search window from equipment metadata.
@@ -406,6 +434,7 @@ class StarIdentifier:
         unique_sources = self.detector.deduplicate(sources)
         logger.debug(f"Detected {len(sources)} sources, {len(unique_sources)} unique.")
         self.sources_detected = len(unique_sources)
+        self.catalog_match_separations_arcsec = []
 
         # Limit to top 100
         if len(unique_sources) > 100:
@@ -1082,6 +1111,12 @@ class StarIdentifier:
                 idx, d2d, _ = star_coord.match_to_catalog_sky(simbad_coords)
                 if d2d < 10 * u.arcsec:
                     self._apply_simbad_match(stellar_object, result_table[idx], ra, dec)
+                    # The separation between where the solved WCS put this
+                    # star and where the catalog says it is, which is the
+                    # only direct measure of how good the solution is.
+                    # match_to_catalog_sky returns an array-like even for
+                    # a single coordinate, so ravel before taking a scalar.
+                    self.catalog_match_separations_arcsec.append(float(np.ravel(d2d.arcsec)[0]))
                     logger.info(f"  SIMBAD match: {stellar_object.name} at ({ra:.4f}, {dec:.4f})")
                     continue
 

@@ -1021,6 +1021,7 @@ def _run_analysis_pipeline_match(
                 astrometry_metrics=AstrometryPipelineQualityMetrics(
                     sources_detected=context.sources_detected,
                     solve_attempted=context.solve_attempted,
+                    astrometric_residual_rms_arcsec=context.astrometric_residual_rms_arcsec,
                     plate_solve_succeeded=context.wcs is not None,
                     simbad_matched_count=simbad_matched_count,
                     remote_catalog_queries_attempted=int(gaia_statistics["attempted"]),
@@ -1399,6 +1400,9 @@ def _run_analysis_pipeline_match(
                 PhotometryQualitySummary,
                 TargetSessionContribution,
             )
+            from astrometricslib.tasks.stellar_tasks.photometry_tasks.variability_analyzer import (
+                median_light_curve_scatter_mag,
+            )
 
             rejected_paths = set(all_rejected_files)
             photometry_session_breakdown = [
@@ -1445,6 +1449,7 @@ def _run_analysis_pipeline_match(
                     catalog_matched_star_count=star_id_breakdown.catalog_matched,
                     position_only_star_count=star_id_breakdown.position_only,
                     unresolved_star_count=star_id_breakdown.unresolved,
+                    light_curve_scatter_rms_mag=median_light_curve_scatter_mag(all_stellar_objects),
                 ),
             )
             if all_rejected_files:

@@ -21,3 +21,4 @@ class AnalysisContext:
     extended_target: StellarObject | None = None
     sources_detected: int = 0
     solve_attempted: bool = False
+    astrometric_residual_rms_arcsec: float | None = None

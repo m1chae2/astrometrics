@@ -279,6 +279,7 @@ class AstrometryPipeline:
             extended_target=extended_target_obj,
             sources_detected=self.star_identifier.sources_detected,
             solve_attempted=self.star_identifier.solve_attempted,
+            astrometric_residual_rms_arcsec=(self.star_identifier.get_astrometric_residual_rms_arcsec()),
         )
 
     def check_extended_source(self, object_name: str) -> tuple[bool, Any | None, str | None, float | None]:

@@ -4,8 +4,10 @@ Used for detecting variable stars in image sequences.
 """
 
 import logging
+import math
 import multiprocessing
 import os
+import statistics
 from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime
 from typing import Any
@@ -311,6 +313,68 @@ def _compute_star_coefficients_of_variation(stellar_objects: list[StellarObject]
     return cv_list
 
 
+# Multiplier applied to the population's MAD when deciding which stars
+# are variable. MAD is about 0.6745 sigma for a normal distribution, so
+# the previous value of 2.0 was only ~1.35 sigma -- roughly the 91st
+# percentile, flagging about one star in ten before any skew. Measured on
+# the 2026-08-24 catalog it flagged 630 of 3,177 stars (19.8%), and
+# per-target rates ran to 32% (M 81, 45 of 142). Real variable fractions
+# in an arbitrary field are 1-3%, so essentially every candidate was
+# noise.
+#
+# 7.4 MAD is about 5 sigma and yields 3.0% on the same population, which
+# is at the generous end of plausible rather than absurd. Chosen over a
+# tighter cut because this stage produces *candidates* for follow-up: a
+# few false positives cost a look, whereas a missed variable is never
+# revisited.
+DEFAULT_VARIABILITY_SIGMA_THRESHOLD = 7.4
+
+
+def median_light_curve_scatter_mag(stellar_objects: list[StellarObject]) -> float | None:
+    """Summarise a field's photometric precision as a magnitude scatter.
+
+    The population median of each star's fractional flux scatter,
+    converted to magnitudes. Reported as a median rather than a mean so
+    a handful of genuine variables cannot stand in for the field's
+    precision.
+
+    This is the number that says whether a variability search is worth
+    believing: candidates are picked out against this floor, so a field
+    scattering at 0.3 mag cannot support detecting a 0.05 mag signal no
+    matter where the threshold sits.
+
+    Parameters
+    ----------
+    stellar_objects : `list` [`StellarObject`]
+        Stars carrying light curves, normalized where available.
+
+    Returns
+    -------
+    scatter_mag : `float` or `None`
+        Median scatter in magnitudes, or `None` when no star has enough
+        points to measure.
+    """
+    scatters: list[float] = []
+    for star in stellar_objects:
+        light_curve = getattr(star, "light_curve", None)
+        if light_curve is None:
+            continue
+        fluxes = light_curve.fluxes_detrended or light_curve.fluxes_normalized or light_curve.fluxes or []
+        usable = [float(flux) for flux in fluxes if flux and flux > 0]
+        if len(usable) < 3:
+            continue
+        mean_flux = statistics.fmean(usable)
+        if mean_flux <= 0:
+            continue
+        fractional_scatter = statistics.stdev(usable) / mean_flux
+        # -2.5log10 of a ratio; for the small ratios this is usually
+        # applied to it is near-linear, but the exact form keeps a noisy
+        # field from reporting a misleadingly modest magnitude.
+        scatters.append(2.5 * math.log10(1.0 + fractional_scatter))
+
+    return round(statistics.median(scatters), 4) if scatters else None
+
+
 def _adaptive_cv_cutoff(cv_list: list[float], sigma_threshold: float) -> float:
     """Compute a population's adaptive ensemble noise floor cutoff.
 
@@ -384,7 +448,8 @@ def _flag_variable_stars_by_adaptive_cutoff(
 
 
 def identify_long_term_variable_candidates(
-    stellar_objects: list[StellarObject], sigma_threshold: float = 2.0
+    stellar_objects: list[StellarObject],
+    sigma_threshold: float = DEFAULT_VARIABILITY_SIGMA_THRESHOLD,
 ) -> list[StellarObject]:
     """Identify cross-session-merged stars with variability past the floor.
 
@@ -889,7 +954,9 @@ class VariabilityAnalyzer:
                             fn for i, fn in enumerate(star.light_curve.fluxes_normalized) if valid_mask[i]
                         ]
 
-    def identify_variable_stars(self, sigma_threshold: float = 2.0) -> list[StellarObject]:
+    def identify_variable_stars(
+        self, sigma_threshold: float = DEFAULT_VARIABILITY_SIGMA_THRESHOLD
+    ) -> list[StellarObject]:
         """Identify stars with variability exceeding the adaptive floor.
 
         Returns

@@ -187,7 +187,7 @@ def time_one_slot_count(
         if line.startswith("BENCHMARK_RESULT "):
             payload = json.loads(line[len("BENCHMARK_RESULT ") :])
     if not completed.stdout.count("BENCHMARK_RESULT"):
-        print(f"  (measurement produced no result; stderr tail: {completed.stderr[-300:]})")
+        print(f"  (measurement produced no result; stderr tail: {completed.stderr[-300:]})", flush=True)
 
     return {
         "slot_count": slot_count,
@@ -223,7 +223,7 @@ def run_benchmark(argv: list[str] | None = None) -> int:
     wanted = {target_id.strip().casefold() for target_id in arguments.target_ids}
     targets = [target for target in astrometrics.targets.list() if target.id.casefold() in wanted]
     if not targets:
-        print("None of the requested targets exist in the catalog.")
+        print("None of the requested targets exist in the catalog.", flush=True)
         return 2
 
     camera_name = arguments.camera
@@ -236,23 +236,24 @@ def run_benchmark(argv: list[str] | None = None) -> int:
                 if frame.camera:
                     cameras[frame.camera] += 1
         if not cameras:
-            print("The requested targets have no frames with a camera recorded.")
+            print("The requested targets have no frames with a camera recorded.", flush=True)
             return 2
         camera_name = cameras.most_common(1)[0][0]
 
     target_ids = [target.id for target in targets]
-    print(f"Benchmarking {len(target_ids)} target(s): {', '.join(target_ids)}")
-    print(f"Camera: {camera_name}   optic: {focal_length_mm or 'any'}")
+    print(f"Benchmarking {len(target_ids)} target(s): {', '.join(target_ids)}", flush=True)
+    print(f"Camera: {camera_name}   optic: {focal_length_mm or 'any'}", flush=True)
     if len(target_ids) < max(slot_counts):
         print(
             f"WARNING: {len(target_ids)} target(s) cannot fill {max(slot_counts)} slots; "
-            "the higher counts will measure the same serial time."
+            "the higher counts will measure the same serial time.",
+            flush=True,
         )
-    print(f"Free disk before: {free_disk_gigabytes('/'):.0f}GB\n")
+    print(f"Free disk before: {free_disk_gigabytes('/'):.0f}GB\n", flush=True)
 
     measurements = []
     for slot_count in slot_counts:
-        print(f"--- {slot_count} slot(s) ---")
+        print(f"--- {slot_count} slot(s) ---", flush=True)
         measurement = time_one_slot_count(target_ids, camera_name, focal_length_mm, slot_count)
         measurement["free_disk_gb_after"] = round(free_disk_gigabytes("/"))
         measurements.append(measurement)
@@ -260,26 +261,31 @@ def run_benchmark(argv: list[str] | None = None) -> int:
             f"  {measurement['wall_seconds']:.1f}s  "
             f"succeeded={measurement['succeeded']} failed={measurement['failed']}  "
             f"peak Siril={measurement['peak_siril']}  "
-            f"free disk after: {measurement['free_disk_gb_after']}GB"
+            f"free disk after: {measurement['free_disk_gb_after']}GB",
+            flush=True,
         )
 
-    print("\n==========================================")
-    print("SIRIL CONCURRENCY BENCHMARK")
-    print(f"{'slots':>6s} {'wall_s':>9s} {'speedup':>8s} {'ok':>4s} {'failed':>7s} {'peakSiril':>10s}")
+    print("\n==========================================", flush=True)
+    print("SIRIL CONCURRENCY BENCHMARK", flush=True)
+    print(
+        f"{'slots':>6s} {'wall_s':>9s} {'speedup':>8s} {'ok':>4s} {'failed':>7s} {'peakSiril':>10s}",
+        flush=True,
+    )
     baseline = measurements[0]["wall_seconds"] if measurements else 0.0
     for measurement in measurements:
         speedup = baseline / measurement["wall_seconds"] if measurement["wall_seconds"] else 0.0
         print(
             f"{measurement['slot_count']:>6d} {measurement['wall_seconds']:>9.1f} "
             f"{speedup:>7.2f}x {measurement['succeeded']:>4d} {measurement['failed']:>7d} "
-            f"{measurement['peak_siril']:>10d}"
+            f"{measurement['peak_siril']:>10d}",
+            flush=True,
         )
-    print("\nSet the winner as [Processing.Parallelism] siril_concurrency.")
-    print("peakSiril below the slot count means the limit was never the constraint -- the")
-    print("measurement says nothing about that setting, so treat it as untested, not as equal.")
-    print("A count that raises `failed` is oversubscribing: a stack pushed past its timeout")
-    print("is worse than a slow one. Check free disk too -- scratch scales with concurrency.")
-    print("==========================================")
+    print("\nSet the winner as [Processing.Parallelism] siril_concurrency.", flush=True)
+    print("peakSiril below the slot count means the limit was never the constraint -- the", flush=True)
+    print("measurement says nothing about that setting, so treat it as untested, not as equal.", flush=True)
+    print("A count that raises `failed` is oversubscribing: a stack pushed past its timeout", flush=True)
+    print("is worse than a slow one. Check free disk too -- scratch scales with concurrency.", flush=True)
+    print("==========================================", flush=True)
     return 0
 
 

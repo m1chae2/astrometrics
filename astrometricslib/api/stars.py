@@ -261,20 +261,46 @@ class StellarCatalog:
             "stats": {"names": with_names, "spectral": with_spectral, "magnitude": with_magnitude},
         }
 
-    def save_all(self, objects: list[StellarObject]) -> str:
+    def save_all(self, objects: list[StellarObject], allow_empty: bool = False) -> str:
         """Persist stellar library records, replacing the whole table.
+
+        This is a *replace-all* write: any stellar object not present in
+        `objects` is deleted. Only call it from a caller that genuinely
+        holds the entire catalog; for partial updates use
+        `butler.merge_and_persist_records` or `delete` instead.
 
         Parameters
         ----------
         objects : `list` [`StellarObject`]
             The full set of stellar objects to persist.
+        allow_empty : `bool`, optional
+            Whether an empty `objects` list may wipe the entire catalog
+            (default `False`). Guarded because the underlying
+            `put_all` runs an unconditional ``DELETE FROM
+            stellar_objects`` when handed an empty list -- so a caller
+            that simply hadn't loaded the catalog yet (the backend's
+            `stellar_service.save_stellar_objects` passes whatever
+            `get_stellar_objects()` returns) would silently destroy
+            every row. Pass `True` only to deliberately clear it.
 
         Returns
         -------
         result : `str`
             Status message describing the persisted write.
+
+        Raises
+        ------
+        ValueError
+            Raised if `objects` is empty and `allow_empty` is `False`.
         """
-        self.butler.put(objects, "stellar_catalog")
+        if not objects and not allow_empty:
+            raise ValueError(
+                "save_all() received an empty list, which would delete every stellar object. "
+                "Pass allow_empty=True to clear the catalog deliberately."
+            )
+        # `coordinate` is required by the AbstractButler.put signature;
+        # omitting it previously made every call raise TypeError.
+        self.butler.put(objects, "stellar_catalog", {})
         return "stellar catalog saved"
 
     def detect_point_sources(

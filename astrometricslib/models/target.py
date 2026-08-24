@@ -74,9 +74,15 @@ class FrameRecord(BaseModel):
     registration_dx_px: float | None = Field(default=None, alias="registrationDxPx")
     registration_dy_px: float | None = Field(default=None, alias="registrationDyPx")
 
-    # Per-frame facts computed directly on the raw frame.
+    # Per-frame facts computed directly on the raw frame, independent of
+    # whether it was ever registered or stacked.
     background_level: float | None = Field(default=None, alias="backgroundLevel")
     saturated_pixel_fraction: float | None = Field(default=None, alias="saturatedPixelFraction")
+    # Kept separate from registration_fwhm_x/y_px because the two are not
+    # on the same absolute scale: photutils measures ~1.53x Siril's PSF
+    # fit on identical frames. Comparing values across the two fields is
+    # meaningless; comparing within either one is valid.
+    measured_fwhm_px: float | None = Field(default=None, alias="measuredFwhmPx")
 
     @field_validator("filter", mode="before")
     @classmethod

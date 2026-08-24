@@ -159,3 +159,20 @@ def test_camera_filter_restricts_measurement(tmp_path):  # ruff: ignore[missing-
     assert counts["measured"] == 1
     assert target.frames[0].background_level is None
     assert target.frames[1].background_level is not None
+
+
+def test_measured_fwhm_is_kept_apart_from_registration_fwhm(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """The two FWHM sources must never be mixed in one field.
+
+    photutils measures ~1.53x Siril's PSF fit on identical frames, so a
+    value written into registration_fwhm_x/y_px would look like a ~50%
+    seeing change caused purely by which stage did the measuring.
+    """
+    target = _target_with_frames([_write_frame(tmp_path / "a.fits")])
+    target.frames[0].registration_fwhm_x_px = 3.2
+    target.frames[0].registration_fwhm_y_px = 3.4
+
+    statistics_operations.measure_frame_input_quality(target, include_fwhm=True)
+
+    assert target.frames[0].registration_fwhm_x_px == pytest.approx(3.2)
+    assert target.frames[0].registration_fwhm_y_px == pytest.approx(3.4)

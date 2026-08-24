@@ -56,6 +56,7 @@ export interface FrameRecord {
   registrationDyPx?: number | null;
   backgroundLevel?: number | null;
   saturatedPixelFraction?: number | null;
+  measuredFwhmPx?: number | null;
 }
 
 /**

@@ -11,10 +11,10 @@ position-based identity that survives INSERT OR REPLACE persistence.
 """
 
 import logging
+import queue
 import threading
 import warnings
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as FuturesTimeoutError
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
@@ -45,6 +45,148 @@ SIMBAD_LOCK = threading.Lock()
 # Gaia TAP service queries are also not thread-safe for the shared
 # Gaia singleton; serialise them with a dedicated lock.
 GAIA_LOCK = threading.Lock()
+
+# --- Gaia remote-query circuit breaker -------------------------------------
+#
+# Damage control, not a fix: when ESA's Gaia TAP service is unresponsive
+# every query still burns its full timeout before failing, and the pipeline
+# keeps trying once per field. A full-catalog run on 2026-08-23 made 67
+# remote Gaia calls with a 0% success rate -- 46 cone-search timeouts at
+# 30s, 21 bulk-seed timeouts at 45s -- spending roughly 2,325 seconds of
+# cumulative worker time to retrieve nothing. Measurement that day ruled out
+# every local cause (TCP to gea.esac.esa.int connected in 0.2s, SIMBAD
+# queries over the same network succeeded all run, and a bare
+# ``SELECT TOP 5`` timed out at 60s on both the sync and async endpoints),
+# so the failures are service-side and retrying within a run cannot help.
+#
+# Once tripped, `_query_gaia_region` and `_seed_gaia_cache_for_field` skip
+# the *remote* call only -- local SQLite cache lookups still run, since
+# those work and served 4 hits during that same run. State is deliberately
+# per-process and in-memory: a new run always re-probes the service rather
+# than staying permanently disabled, and worker processes each make their
+# own small number of attempts rather than coordinating through shared
+# storage.
+#
+# Threshold: 3 consecutive failures. High enough not to trip on a single
+# blip, low enough to cap the waste at a few timeouts per process against
+# the observed all-or-nothing failure mode.
+GAIA_CONSECUTIVE_FAILURE_LIMIT = 3
+
+_gaia_failure_state_lock = threading.Lock()
+_gaia_consecutive_failures = 0
+_gaia_circuit_open = False
+
+
+def _record_gaia_failure(context: str) -> None:
+    """Count a failed remote Gaia call, tripping the breaker at the limit.
+
+    Parameters
+    ----------
+    context : `str`
+        Short description of the failing call, for the trip log line.
+    """
+    global _gaia_consecutive_failures, _gaia_circuit_open
+    with _gaia_failure_state_lock:
+        _gaia_consecutive_failures += 1
+        if not _gaia_circuit_open and _gaia_consecutive_failures >= GAIA_CONSECUTIVE_FAILURE_LIMIT:
+            _gaia_circuit_open = True
+            logger.warning(
+                f"Gaia remote queries disabled for the rest of this process after "
+                f"{_gaia_consecutive_failures} consecutive failures (last: {context}). "
+                "Locally cached Gaia data is still used; SIMBAD identification is unaffected."
+            )
+
+
+def _record_gaia_success() -> None:
+    """Reset the consecutive-failure count after a working remote call."""
+    global _gaia_consecutive_failures
+    with _gaia_failure_state_lock:
+        _gaia_consecutive_failures = 0
+
+
+def _gaia_remote_queries_disabled() -> bool:
+    """Report whether the breaker has tripped in this process.
+
+    Returns
+    -------
+    disabled : `bool`
+        `True` once `GAIA_CONSECUTIVE_FAILURE_LIMIT` consecutive remote
+        Gaia calls have failed.
+    """
+    with _gaia_failure_state_lock:
+        return _gaia_circuit_open
+
+
+def reset_gaia_circuit_breaker() -> None:
+    """Clear the breaker so remote Gaia calls are attempted again.
+
+    Intended for tests and for callers that know the service has
+    recovered; ordinary runs get a clean breaker automatically because
+    the state is per-process.
+    """
+    global _gaia_consecutive_failures, _gaia_circuit_open
+    with _gaia_failure_state_lock:
+        _gaia_consecutive_failures = 0
+        _gaia_circuit_open = False
+
+
+def _run_with_daemon_thread_timeout(query_function: Callable[[], Any], timeout_seconds: float) -> Any:
+    """Run a zero-argument callable on a daemon thread, enforcing a timeout.
+
+    Behaves like ``ThreadPoolExecutor(max_workers=1).submit(query_function)
+    .result(timeout=timeout_seconds)``, with one deliberate difference: the
+    worker thread is created with ``daemon=True``.
+
+    astroquery's Gaia calls set no socket-level timeout of their own, so a
+    call that hangs past `timeout_seconds` leaves its thread permanently
+    blocked on the network read -- `query_gaia_region` and
+    `seed_gaia_cache_for_field` already give up on schedule by abandoning
+    that thread, but a `ThreadPoolExecutor` thread is non-daemon, and
+    Python joins every non-daemon thread in a process before that process
+    is allowed to exit. During the 2026-08-23 Gaia outage that join is what
+    stranded worker processes for hours after they had already finished
+    all their work: each one had an abandoned, still-blocked Gaia thread
+    holding its interpreter open. A daemon thread is exempt from that join,
+    so the process exits normally with the still-running query simply
+    abandoned to the OS.
+
+    Parameters
+    ----------
+    query_function : `Callable`
+        Zero-argument callable to run on the worker thread.
+    timeout_seconds : `float`
+        Seconds to wait before giving up.
+
+    Returns
+    -------
+    result : `Any`
+        Whatever `query_function` returned.
+
+    Raises
+    ------
+    TimeoutError
+        If `query_function` has not completed within `timeout_seconds`.
+    """
+    result_queue: queue.Queue = queue.Queue(maxsize=1)
+
+    def _run_and_report() -> None:
+        try:
+            result_queue.put((True, query_function()))
+        except BaseException as query_error:
+            # Caught broadly and re-raised on the caller's thread below via
+            # `raise payload` -- nothing here is swallowed.
+            result_queue.put((False, query_error))
+
+    threading.Thread(target=_run_and_report, daemon=True).start()
+
+    try:
+        succeeded, payload = result_queue.get(timeout=timeout_seconds)
+    except queue.Empty:
+        raise TimeoutError(f"Timed out after {timeout_seconds}s") from None
+
+    if succeeded:
+        return payload
+    raise payload
 
 
 class StarIdentifier:
@@ -425,8 +567,6 @@ class StarIdentifier:
         """
         import os
         import sqlite3
-        from concurrent.futures import ThreadPoolExecutor
-        from concurrent.futures import TimeoutError as FuturesTimeoutError
 
         from astropy.table import Table
         from astroquery.gaia import Gaia
@@ -476,6 +616,16 @@ class StarIdentifier:
         except Exception as e:
             logger.warning(f"Error checking cached_regions: {e}")
 
+        # Same breaker as the cone-search path: the region-already-cached
+        # check above is local and still runs, only the download is skipped.
+        if _gaia_remote_queries_disabled():
+            logger.debug(
+                "Skipping Gaia cache seed for field (%.4f, %.4f): circuit breaker open.",
+                ra_center,
+                dec_center,
+            )
+            return 0
+
         logger.info(
             f"Seeding Gaia DR3 cache for field ({ra_center:.4f}, {dec_center:.4f}), "
             f"radius={radius_deg:.3f}°..."
@@ -491,19 +641,20 @@ class StarIdentifier:
             job = Gaia.launch_job_async(query, dump_to_file=False)
             return job.get_results()
 
-        executor = ThreadPoolExecutor(max_workers=1)
         try:
-            result_table: Table = executor.submit(_run_query).result(timeout=45)
-        except FuturesTimeoutError:
+            result_table: Table = _run_with_daemon_thread_timeout(_run_query, timeout_seconds=45)
+        except TimeoutError:
             logger.warning(
                 f"Gaia bulk seed query timed out after 45s for field ({ra_center:.4f}, {dec_center:.4f})."
             )
+            _record_gaia_failure("bulk seed timed out after 45s")
             return 0
         except Exception as e:
             logger.warning(f"Gaia bulk seed query failed: {e}")
+            _record_gaia_failure(f"bulk seed failed: {e}")
             return 0
-        finally:
-            executor.shutdown(wait=False)
+
+        _record_gaia_success()
 
         if result_table is None or len(result_table) == 0:
             return 0
@@ -643,6 +794,16 @@ class StarIdentifier:
         except Exception as e:
             logger.warning(f"Failed checking local Gaia SQLite cache: {e}")
 
+        # Cache miss. Everything above this point is local and still runs
+        # with the breaker open; only the remote fetch below is skipped.
+        if _gaia_remote_queries_disabled():
+            logger.debug(
+                "Skipping remote Gaia query at %.4f, %.4f: circuit breaker open for this process.",
+                ra_center,
+                dec_center,
+            )
+            return None, None
+
         # If cache miss, auto-download from remote TAP server
         logger.info(
             f"Querying Gaia DR3 bulk region at {ra_center:.4f}, {dec_center:.4f} "
@@ -669,27 +830,32 @@ class StarIdentifier:
             job = Gaia.cone_search_async(
                 coord,
                 radius=u.Quantity(radius_deg, u.deg),
+                # Pinned explicitly rather than left to astroquery's
+                # default (the ESA archive server's own current-release
+                # table, resolved at call time) -- this must always
+                # match the release hardcoded in the bulk-seed ADQL
+                # query, the local SQLite cache schema, and every
+                # "Gaia DR3 ..." id string this file generates. Bump
+                # deliberately, together with those, when moving to a
+                # newer Gaia release.
+                table_name="gaiadr3.gaia_source",
             )
             return job.get_results()
 
-        # Deliberately not a context manager: `with ThreadPoolExecutor()`
-        # calls shutdown(wait=True) on exit, which blocks until the worker
-        # thread finishes regardless of whether .result(timeout=...)
-        # already gave up -- silently defeating the timeout below on a
-        # genuinely stuck connection. shutdown(wait=False) lets this
-        # function return on schedule; the leaked thread is reaped by the
-        # OS once its underlying socket eventually times out.
-        executor = ThreadPoolExecutor(max_workers=1)
         try:
-            result_table = executor.submit(_run_gaia_query).result(timeout=30)
-        except FuturesTimeoutError:
+            result_table = _run_with_daemon_thread_timeout(_run_gaia_query, timeout_seconds=30)
+        except TimeoutError:
             logger.error("Gaia query timed out after 30s.")
+            _record_gaia_failure("cone search timed out after 30s")
             return None, None
         except Exception as e:
             logger.error(f"Gaia query failed: {e}")
+            _record_gaia_failure(f"cone search failed: {e}")
             return None, None
-        finally:
-            executor.shutdown(wait=False)
+
+        # The service answered. An empty region is a legitimate answer, so
+        # this counts as success and clears any accumulated failures.
+        _record_gaia_success()
 
         if result_table is None or len(result_table) == 0:
             logger.info("No Gaia results for this region.")

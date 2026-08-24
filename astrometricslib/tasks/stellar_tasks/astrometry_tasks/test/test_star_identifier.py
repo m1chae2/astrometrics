@@ -236,3 +236,182 @@ def test_no_stellar_matches_leaves_generic_name_and_logs_warning(monkeypatch, ca
     identified = identifier.stellar_objects[0]
     assert identified.name == "Star 1"
     assert any("no stellar-type simbad entries" in record.message.lower() for record in caplog.records)
+
+
+def test_query_gaia_region_pins_dr3_table_name(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify _query_gaia_region pins Gaia DR3's table explicitly.
+
+    astroquery's `Gaia.cone_search_async` defaults to whichever table
+    the ESA archive server reports as current when `table_name` isn't
+    given -- not something pinned in our own code. Every other Gaia
+    access in this file hardcodes gaiadr3.gaia_source (the bulk-seed
+    ADQL query, the local cache schema, every "Gaia DR3 ..." id
+    string), so the cone-search fallback must match it explicitly, or
+    a future server-side default change could silently start mixing
+    Gaia releases between the two query paths.
+    """
+    import astroquery.gaia as gaia_module
+
+    import astrometricslib.utilities.config_loader as config_loader_module
+    from astrometricslib.utilities.config_loader import AppConfiguration
+
+    config = AppConfiguration()
+    config.update_config({"Image Library": {"path": str(tmp_path)}})
+    monkeypatch.setattr(config_loader_module, "get_configuration", lambda: config)
+
+    captured_kwargs = {}
+
+    class _FakeJob:
+        def get_results(self):  # ruff: ignore[missing-return-type-private-function]
+            return Table({"ra": [], "dec": []})
+
+    def _fake_cone_search_async(coordinate, *, radius=None, table_name=None, **_kw):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function, missing-type-kwargs]
+        captured_kwargs["table_name"] = table_name
+        return _FakeJob()
+
+    monkeypatch.setattr(gaia_module.Gaia, "cone_search_async", _fake_cone_search_async)
+
+    StarIdentifier._query_gaia_region(VEGA_RA_DEG, VEGA_DEC_DEG, 0.05)
+
+    assert captured_kwargs["table_name"] == "gaiadr3.gaia_source"
+
+
+class TestGaiaCircuitBreaker:
+    """Unit tests for the Gaia remote-query circuit breaker.
+
+    When ESA's Gaia TAP service is unresponsive every call burns its
+    full timeout before failing, so the breaker stops attempting remote
+    queries after a run of consecutive failures. Local cache reads and
+    SIMBAD identification must stay unaffected.
+    """
+
+    def setup_method(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        """Start each test with a clean breaker (state is module-global)."""
+        star_identifier_module.reset_gaia_circuit_breaker()
+
+    def teardown_method(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        """Leave no tripped breaker behind for other tests."""
+        star_identifier_module.reset_gaia_circuit_breaker()
+
+    def test_starts_closed(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        """A fresh process attempts remote Gaia queries."""
+        assert star_identifier_module._gaia_remote_queries_disabled() is False
+
+    def test_trips_only_at_the_configured_limit(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        """Failures below the limit must not disable Gaia."""
+        for _ in range(star_identifier_module.GAIA_CONSECUTIVE_FAILURE_LIMIT - 1):
+            star_identifier_module._record_gaia_failure("test")
+        assert star_identifier_module._gaia_remote_queries_disabled() is False
+
+        star_identifier_module._record_gaia_failure("test")
+        assert star_identifier_module._gaia_remote_queries_disabled() is True
+
+    def test_success_resets_the_failure_run(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        """Intermittent failures never accumulate into a trip."""
+        for _ in range(10):
+            for _ in range(star_identifier_module.GAIA_CONSECUTIVE_FAILURE_LIMIT - 1):
+                star_identifier_module._record_gaia_failure("test")
+            star_identifier_module._record_gaia_success()
+
+        assert star_identifier_module._gaia_remote_queries_disabled() is False
+
+    def test_open_breaker_skips_the_remote_cone_search(self, tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+        """With the breaker open, no network call is attempted."""
+        import astroquery.gaia as gaia_module
+
+        import astrometricslib.utilities.config_loader as config_loader_module
+        from astrometricslib.utilities.config_loader import AppConfiguration
+
+        config = AppConfiguration()
+        config.update_config({"Image Library": {"path": str(tmp_path)}})
+        monkeypatch.setattr(config_loader_module, "get_configuration", lambda: config)
+
+        cone_search_spy = MagicMock()
+        monkeypatch.setattr(gaia_module.Gaia, "cone_search_async", cone_search_spy)
+
+        for _ in range(star_identifier_module.GAIA_CONSECUTIVE_FAILURE_LIMIT):
+            star_identifier_module._record_gaia_failure("test")
+
+        table, coords = StarIdentifier._query_gaia_region(VEGA_RA_DEG, VEGA_DEC_DEG, 0.05)
+
+        assert table is None
+        assert coords is None
+        cone_search_spy.assert_not_called()
+
+    def test_open_breaker_skips_the_cache_seed_download(self, tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+        """The seed path is gated by the same breaker."""
+        import astroquery.gaia as gaia_module
+
+        import astrometricslib.utilities.config_loader as config_loader_module
+        from astrometricslib.utilities.config_loader import AppConfiguration
+
+        config = AppConfiguration()
+        config.update_config({"Image Library": {"path": str(tmp_path)}})
+        monkeypatch.setattr(config_loader_module, "get_configuration", lambda: config)
+
+        launch_job_spy = MagicMock()
+        monkeypatch.setattr(gaia_module.Gaia, "launch_job_async", launch_job_spy)
+
+        for _ in range(star_identifier_module.GAIA_CONSECUTIVE_FAILURE_LIMIT):
+            star_identifier_module._record_gaia_failure("test")
+
+        cached_count = StarIdentifier._seed_gaia_cache_for_field(VEGA_RA_DEG, VEGA_DEC_DEG, 0.2)
+
+        assert cached_count == 0
+        launch_job_spy.assert_not_called()
+
+    def test_open_breaker_still_serves_locally_cached_gaia_data(self, tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+        """The breaker must not disable the local cache.
+
+        Cached Gaia rows are the one Gaia source that still works while
+        the service is down -- a real run served 4 cache hits during the
+        same pass that saw 67 remote failures. Gating those behind the
+        breaker would throw away working data.
+        """
+        import os
+        import sqlite3
+
+        import astroquery.gaia as gaia_module
+
+        import astrometricslib.utilities.config_loader as config_loader_module
+        from astrometricslib.utilities.config_loader import AppConfiguration
+
+        config = AppConfiguration()
+        config.update_config({"Image Library": {"path": str(tmp_path)}})
+        monkeypatch.setattr(config_loader_module, "get_configuration", lambda: config)
+
+        cache_dir = tmp_path / "catalogs"
+        os.makedirs(cache_dir, exist_ok=True)
+        connection = sqlite3.connect(cache_dir / "catalog_cache.db")
+        cursor = connection.cursor()
+        cursor.execute(
+            "CREATE TABLE IF NOT EXISTS gaia_sources "
+            "(source_id TEXT PRIMARY KEY, ra REAL, dec REAL, phot_g_mean_mag REAL, designation TEXT)"
+        )
+        # The cache read requires at least 5 rows before it is trusted.
+        for index in range(8):
+            cursor.execute(
+                "INSERT OR REPLACE INTO gaia_sources VALUES (?, ?, ?, ?, ?)",
+                (
+                    f"{index}",
+                    VEGA_RA_DEG + index * 0.0001,
+                    VEGA_DEC_DEG + index * 0.0001,
+                    12.0,
+                    f"Gaia DR3 {index}",
+                ),
+            )
+        connection.commit()
+        connection.close()
+
+        cone_search_spy = MagicMock()
+        monkeypatch.setattr(gaia_module.Gaia, "cone_search_async", cone_search_spy)
+
+        for _ in range(star_identifier_module.GAIA_CONSECUTIVE_FAILURE_LIMIT):
+            star_identifier_module._record_gaia_failure("test")
+
+        table, coords = StarIdentifier._query_gaia_region(VEGA_RA_DEG, VEGA_DEC_DEG, 0.05)
+
+        assert table is not None, "cached Gaia rows must still be served with the breaker open"
+        assert len(table) == 8
+        assert coords is not None
+        cone_search_spy.assert_not_called()

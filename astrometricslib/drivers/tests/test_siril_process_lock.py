@@ -8,8 +8,6 @@ badly enough to push stacks past their timeout on the 2026-08-23 run
 
 import multiprocessing
 import os
-import subprocess  # ruff: ignore[suspicious-subprocess-import] -- a real second process is the point
-import sys
 import time
 
 from astrometricslib.drivers.siril_interface import (
@@ -21,11 +19,11 @@ from astrometricslib.drivers.siril_interface import (
 def test_lock_is_reentrant_across_sequential_uses():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Releasing the lock lets the next acquisition through immediately."""
     for _ in range(3):
-        with siril_process_lock():
+        with siril_process_lock(max_concurrent_runs=1):
             pass
 
     start = time.monotonic()
-    with siril_process_lock():
+    with siril_process_lock(max_concurrent_runs=1):
         pass
     assert time.monotonic() - start < 5.0
 
@@ -36,49 +34,74 @@ def test_lock_file_path_is_shared_and_absolute():  # ruff: ignore[missing-return
     assert SIRIL_PROCESS_LOCK_PATH.endswith("astrometricslib-siril.lock")
 
 
-def test_lock_serializes_two_processes():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """A second process must wait rather than run concurrently.
+def _hold_slot_briefly(ready_queue, hold_seconds: float) -> None:  # ruff: ignore[missing-type-function-argument]
+    """Take a slot, announce it, and hold it for `hold_seconds`."""
+    with siril_process_lock(max_concurrent_runs=1):
+        ready_queue.put("holding")
+        time.sleep(hold_seconds)
 
-    Uses real subprocesses, not threads: the lock exists to serialize
-    separate worker *processes*, which is exactly what `fcntl.flock`
-    scopes to, so a thread-based test would not exercise it.
+
+def _measure_acquisition_wait(result_queue, slot_count: int) -> None:  # ruff: ignore[missing-type-function-argument]
+    """Acquire a slot and report how long the acquisition blocked."""
+    started_at = time.monotonic()
+    with siril_process_lock(max_concurrent_runs=slot_count):
+        result_queue.put(time.monotonic() - started_at)
+
+
+def _run_holder_and_waiter(slot_count: int) -> float:
+    """Time a waiter's acquisition while a holder occupies one slot.
+
+    Both sides are spawned children so they resolve the same
+    configuration, and therefore the same slot files. Slots live under
+    the configured library path, and under pytest this process resolves
+    a temporary configuration that a child would not share -- so the
+    waiter cannot simply be the test itself.
+
+    Parameters
+    ----------
+    slot_count : `int`
+        Slots the waiter is allowed to use.
+
+    Returns
+    -------
+    waited_seconds : `float`
+        How long the waiter blocked before acquiring.
     """
-    repository_root = os.getcwd()
-    holder_source = (
-        "import time, sys;"
-        f"sys.path.insert(0, {repository_root!r});"
-        "from astrometricslib.drivers.siril_interface import siril_process_lock;"
-        "print('holding', flush=True);"
-        "ctx = siril_process_lock();"
-        "ctx.__enter__();"
-        "time.sleep(3);"
-        "ctx.__exit__(None, None, None);"
-        "print('released', flush=True)"
-    )
-    holder = subprocess.Popen(  # ruff: ignore[subprocess-without-shell-equals-true] -- fixed argv, no shell
-        [sys.executable, "-c", holder_source], stdout=subprocess.PIPE, text=True
-    )
-    # Wait for the holder to actually take the lock before racing it.
-    assert holder.stdout.readline().strip() == "holding"
-    time.sleep(0.5)
+    context = multiprocessing.get_context("spawn")
+    ready_queue = context.Queue()
+    result_queue = context.Queue()
+    holder = context.Process(target=_hold_slot_briefly, args=(ready_queue, 3.0))
+    holder.start()
+    try:
+        assert ready_queue.get(timeout=60) == "holding"
+        waiter = context.Process(target=_measure_acquisition_wait, args=(result_queue, slot_count))
+        waiter.start()
+        try:
+            return float(result_queue.get(timeout=60))
+        finally:
+            waiter.join(timeout=30)
+    finally:
+        holder.join(timeout=30)
 
-    start = time.monotonic()
-    with siril_process_lock():
-        waited_seconds = time.monotonic() - start
 
-    holder.wait(timeout=30)
+def test_a_second_process_waits_rather_than_running_concurrently():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """With one slot configured, the second acquisition must block."""
+    assert _run_holder_and_waiter(slot_count=1) > 1.0
 
-    # The holder sleeps 3s while holding; this process must have blocked
-    # for a meaningful portion of that rather than sailing through.
-    assert waited_seconds > 1.0, (
-        f"Second process acquired the lock after only {waited_seconds:.2f}s -- "
-        "it did not wait for the holder, so Siril runs are not serialized."
-    )
+
+def test_two_slots_allow_two_concurrent_runs():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """The limit is a tuning knob, so a second slot must actually help.
+
+    Stacking was 44% of a 199-minute run at roughly 57% CPU utilisation
+    while pinned to one Siril at a time, so being able to raise this is
+    the point of reading it from configuration.
+    """
+    assert _run_holder_and_waiter(slot_count=2) < 1.0
 
 
 def _acquire_and_record(order_queue: multiprocessing.Queue, worker_index: int) -> None:
     """Take the lock, record entry/exit, and hold it briefly."""
-    with siril_process_lock():
+    with siril_process_lock(max_concurrent_runs=1):
         order_queue.put(("enter", worker_index, time.monotonic()))
         time.sleep(0.4)
         order_queue.put(("exit", worker_index, time.monotonic()))

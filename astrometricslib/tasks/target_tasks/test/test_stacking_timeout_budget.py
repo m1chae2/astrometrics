@@ -11,6 +11,7 @@ need longer than 600s, and time queued behind another target's Siril run
 was being charged to the waiting target's own budget.
 """
 
+import os
 import threading
 import time
 
@@ -59,51 +60,69 @@ def test_lock_wait_starts_at_zero_after_reset():  # ruff: ignore[missing-return-
     assert siril_interface.get_siril_lock_wait_seconds() == pytest.approx(0.0)
 
 
-def test_an_uncontended_lock_records_no_wait(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """A free lock must not inflate anyone's budget."""
-    monkeypatch.setattr(
-        siril_interface, "SIRIL_PROCESS_LOCK_PATH", str(tmp_path / "siril.lock"), raising=False
-    )
+def test_an_uncontended_slot_records_a_negligible_wait():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """A free slot must not inflate anyone's stacking budget.
+
+    The wait is measured unconditionally now, so an uncontended
+    acquisition records the cost of taking the lock itself rather than
+    exactly zero. What matters is that it is far below the budget it
+    would be added to.
+    """
     siril_interface.reset_siril_lock_wait_seconds()
 
-    with siril_interface.siril_process_lock():
+    with siril_interface.siril_process_lock(max_concurrent_runs=1):
         pass
 
-    assert siril_interface.get_siril_lock_wait_seconds() == pytest.approx(0.0)
+    assert siril_interface.get_siril_lock_wait_seconds() < 0.5
 
 
-def test_time_blocked_on_the_lock_is_recorded():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_time_blocked_on_a_slot_is_recorded():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """The wait has to be measured before it can be given back.
 
-    Uses a real second process, because `fcntl.flock` scopes to
-    processes and a thread in this one would not block at all.
+    Both sides run as subprocesses sharing this working directory, so
+    they resolve the same configuration and therefore the same slot
+    files. Slots live under the configured library path, so two
+    processes pointed at different libraries deliberately do not
+    contend -- which is why the waiter cannot simply be this test.
     """
-    import subprocess  # ruff: ignore[suspicious-subprocess-import] -- a real second process is the point
+    import subprocess  # ruff: ignore[suspicious-subprocess-import] -- real processes are the point
     import sys
 
+    repository_root = os.getcwd()
     holder_source = (
         "import time, sys;"
-        f"sys.path.insert(0, {__import__('os').getcwd()!r});"
+        f"sys.path.insert(0, {repository_root!r});"
         "from astrometricslib.drivers.siril_interface import siril_process_lock;"
-        "ctx = siril_process_lock();"
+        "ctx = siril_process_lock(max_concurrent_runs=1);"
         "ctx.__enter__();"
         "print('holding', flush=True);"
-        "time.sleep(2);"
+        "time.sleep(3);"
         "ctx.__exit__(None, None, None)"
     )
-    holder = subprocess.Popen(  # ruff: ignore[subprocess-without-shell-equals-true] -- fixed argv, no shell
+    waiter_source = (
+        "import sys;"
+        f"sys.path.insert(0, {repository_root!r});"
+        "from astrometricslib.drivers import siril_interface;"
+        "siril_interface.reset_siril_lock_wait_seconds();"
+        "ctx = siril_interface.siril_process_lock(max_concurrent_runs=1);"
+        "ctx.__enter__();"
+        "ctx.__exit__(None, None, None);"
+        "print(siril_interface.get_siril_lock_wait_seconds(), flush=True)"
+    )
+
+    holder = subprocess.Popen(  # ruff: ignore[subprocess-without-shell-equals-true] -- fixed argv
         [sys.executable, "-c", holder_source], stdout=subprocess.PIPE, text=True
     )
     try:
         assert holder.stdout.readline().strip() == "holding"
-        siril_interface.reset_siril_lock_wait_seconds()
+        waiter = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] -- fixed argv
+            [sys.executable, "-c", waiter_source], capture_output=True, text=True, timeout=60
+        )
+        recorded_wait = float(waiter.stdout.strip().splitlines()[-1])
 
-        with siril_interface.siril_process_lock():
-            pass
-
-        assert siril_interface.get_siril_lock_wait_seconds() > 0.5
+        assert recorded_wait > 0.5
     finally:
-        holder.wait(timeout=10)
+        holder.wait(timeout=15)
 
 
 def test_queue_time_does_not_consume_the_stacking_budget(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]

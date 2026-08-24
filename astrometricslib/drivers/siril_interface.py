@@ -7,7 +7,6 @@ retrieve the resulting stacked image.
 
 import atexit
 import contextlib
-import fcntl
 import logging
 import os
 import shutil
@@ -245,49 +244,83 @@ def _record_siril_lock_wait(wait_seconds: float) -> None:
 
 
 @contextlib.contextmanager
-def siril_process_lock(job_logger: logging.Logger | None = None) -> Iterator[None]:
-    """Hold an exclusive machine-wide lock for the duration of a Siril run.
+def siril_process_lock(
+    job_logger: logging.Logger | None = None, max_concurrent_runs: int | None = None
+) -> Iterator[None]:
+    """Hold one of a limited number of machine-wide Siril slots.
 
-    Blocks until any other process holding the lock releases it. The
-    lock is advisory (`fcntl.flock`), so it binds only callers that go
-    through this helper -- which is every Siril launch in this driver.
+    Siril is internally multithreaded and takes most of the machine when
+    it runs (400-688% CPU observed on 12 cores), so unbounded concurrent
+    launches oversubscribe the box badly enough to push stacks past
+    their timeout. A limit is therefore necessary -- but the limit is a
+    tuning knob, not a constant.
 
-    The lock is released by closing the file descriptor, which the
-    kernel does even if the holding process is killed outright, so an
-    abandoned or crashed stack cannot wedge every later one.
+    How many slots is read from ``[Processing.Parallelism]
+    siril_concurrency``, the setting that already existed for exactly
+    this purpose. An earlier version of this function took a single
+    exclusive lock regardless, which silently overrode that setting and
+    pinned the machine to one Siril at a time: on the 2026-08-24 run
+    stacking was 44% of a 199-minute wall clock at roughly 57% CPU
+    utilisation, so the serialisation itself became the bottleneck.
+
+    Slots are POSIX advisory file locks via
+    `datastore.disk_interface.acquire_resource_slot`, so they bind every
+    process on the machine -- the batch script and the backend service
+    both -- and the kernel releases them even if a holder is killed
+    outright, so a crashed stack cannot wedge every later one.
 
     Parameters
     ----------
     job_logger : `logging.Logger`, optional
         Logger used to record that a run is waiting on another Siril
         run, so a stalled-looking job is explainable from its log.
+    max_concurrent_runs : `int`, optional
+        Slot count override, for benchmarking. Defaults to the
+        configured `siril_concurrency`.
 
     Yields
     ------
     `None`
-        Control returns to the caller with the lock held.
+        Control returns to the caller holding a slot.
     """
-    # Deliberately not a `with open(...)`: the descriptor must outlive
-    # this line and stay open for as long as the lock is held, since
-    # closing it is what releases the lock.
-    lock_file = open(SIRIL_PROCESS_LOCK_PATH, "w")
-    try:
+    from datastore.disk_interface import acquire_resource_slot
+
+    slot_count = max_concurrent_runs
+    configuration = None
+    if slot_count is None:
         try:
-            fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            waiting_message = "Waiting for another Siril run to finish before starting this one..."
-            logger.info(waiting_message)
+            from astrometricslib.utilities.config_loader import get_configuration
+
+            configuration = get_configuration()
+            slot_count = configuration.get_siril_concurrency()
+        except Exception as configuration_error:
+            # A missing configuration must not make Siril unrunnable;
+            # one slot is the safe reading, matching the old behaviour.
+            logger.debug("Could not read siril_concurrency, using 1 slot: %s", configuration_error)
+            slot_count = 1
+    slot_count = max(1, int(slot_count))
+
+    waiting_message = (
+        f"Waiting for a free Siril slot ({slot_count} allowed concurrently) before starting this run..."
+    )
+    logger.info(waiting_message)
+    if job_logger:
+        job_logger.info(waiting_message)
+
+    wait_started_at = time.monotonic()
+    with acquire_resource_slot(configuration, "siril", slot_count):
+        # Recorded whether or not the wait was long: the stacking
+        # timeout adds this back to its budget, and a queue that exists
+        # to protect the CPU must not convert into a cascade of
+        # timeouts for the targets waiting their turn.
+        waited_seconds = time.monotonic() - wait_started_at
+        _record_siril_lock_wait(waited_seconds)
+        if waited_seconds >= 1.0:
+            acquired_message = f"Waited {waited_seconds:.1f}s for a Siril slot."
+            logger.info(acquired_message)
             if job_logger:
-                job_logger.info(waiting_message)
-            wait_started_at = time.monotonic()
-            fcntl.flock(lock_file, fcntl.LOCK_EX)
-            waited_seconds = time.monotonic() - wait_started_at
-            _record_siril_lock_wait(waited_seconds)
-            if job_logger:
-                job_logger.info(f"Waited {waited_seconds:.1f}s for the Siril lock.")
+                job_logger.info(acquired_message)
         yield
-    finally:
-        lock_file.close()
 
 
 def select_dominant_frame_dimensions(frame_paths: list[str]) -> tuple[set[str], tuple[int, int] | None]:

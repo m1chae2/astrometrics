@@ -115,6 +115,21 @@ def run_full_processing() -> None:
     # whose files are not currently readable, and this library lives on
     # an external drive. A drive that is slow to mount would silently
     # erase real frame history rather than fail loudly.
+    # Reclaim scratch left by earlier failed or interrupted runs before
+    # this one starts staging its own. A successful stack removes its own
+    # work directory, so anything old enough to be swept here belongs to
+    # a run that never got that far -- 142GB across seven targets was
+    # still sitting from the 2026-08-23 run a day later.
+    from astrometricslib.drivers.siril_interface import purge_stale_work_directories
+
+    siril_work_directory = os.path.join(os.path.expanduser("~"), "Siril", "Work")
+    purged_count, reclaimed_bytes = purge_stale_work_directories(siril_work_directory)
+    if purged_count:
+        print(
+            f"Reclaimed {reclaimed_bytes / 1_000_000_000:.1f}GB from {purged_count} stale "
+            f"work director{'y' if purged_count == 1 else 'ies'}."
+        )
+
     print("Reindexing frames and refreshing acquisition metadata...")
     reindexed_target_count = 0
     for target in targets:

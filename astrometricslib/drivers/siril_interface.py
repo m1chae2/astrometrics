@@ -67,6 +67,79 @@ SIRIL_PROCESS_LOCK_PATH = os.path.join(tempfile.gettempdir(), "astrometricslib-s
 # automatically instead of silently serving a stale one.
 CALIBRATION_MASTER_CACHE_DIRECTORY_NAME = "MasterCache"
 
+# How long an abandoned work directory is kept before a later run sweeps
+# it away. A directory is only ever left behind by a failed stack or by a
+# run that was interrupted before its cleanup ran; a successful stack
+# removes its own. Seven days keeps a failure available for as long as
+# anyone realistically investigates it while stopping cancelled runs from
+# accumulating -- the 2026-08-23 run left 142GB across seven targets that
+# was still sitting there a day later.
+WORK_DIRECTORY_RETENTION_DAYS = 7
+
+
+def purge_stale_work_directories(
+    workdir: str, retention_days: int = WORK_DIRECTORY_RETENTION_DAYS
+) -> tuple[int, int]:
+    """Remove work directories left behind by failed or cancelled runs.
+
+    Skips the master cache and anything modified within the retention
+    window, so a directory belonging to a run in progress is never
+    touched. Errors are swallowed per directory: reclaiming disk is
+    never worth failing a run over.
+
+    Parameters
+    ----------
+    workdir : `str`
+        The Siril work root holding one directory per target.
+    retention_days : `int`, optional
+        Age past which an untouched directory is removed.
+
+    Returns
+    -------
+    removed_count : `int`
+        How many directories were removed.
+    reclaimed_bytes : `int`
+        Approximate total bytes freed.
+    """
+    if not os.path.isdir(workdir):
+        return 0, 0
+
+    cutoff_timestamp = time.time() - retention_days * 86400
+    removed_count = 0
+    reclaimed_bytes = 0
+
+    for entry_name in os.listdir(workdir):
+        if entry_name in {CALIBRATION_MASTER_CACHE_DIRECTORY_NAME, "Config"}:
+            continue
+        entry_path = os.path.join(workdir, entry_name)
+        if not os.path.isdir(entry_path):
+            continue
+        try:
+            if os.path.getmtime(entry_path) >= cutoff_timestamp:
+                continue
+            directory_bytes = 0
+            for directory_path, _, file_names in os.walk(entry_path):
+                for file_name in file_names:
+                    with contextlib.suppress(OSError):
+                        directory_bytes += os.path.getsize(os.path.join(directory_path, file_name))
+            shutil.rmtree(entry_path)
+        except OSError as purge_error:
+            logger.debug("Could not purge stale work directory %s: %s", entry_path, purge_error)
+            continue
+        removed_count += 1
+        reclaimed_bytes += directory_bytes
+
+    if removed_count:
+        logger.info(
+            "Purged %d work director%s older than %d days, reclaiming %.1fGB.",
+            removed_count,
+            "y" if removed_count == 1 else "ies",
+            retention_days,
+            reclaimed_bytes / 1_000_000_000,
+        )
+    return removed_count, reclaimed_bytes
+
+
 # The three master kinds, mapped to the staging subdirectory holding
 # their source frames and the master filename Siril's script produces.
 _CALIBRATION_MASTER_KINDS = (
@@ -215,6 +288,66 @@ def siril_process_lock(job_logger: logging.Logger | None = None) -> Iterator[Non
         yield
     finally:
         lock_file.close()
+
+
+def select_dominant_frame_dimensions(frame_paths: list[str]) -> tuple[set[str], tuple[int, int] | None]:
+    """Keep only the frames sharing the most common image dimensions.
+
+    Siril builds a sequence from frames of identical geometry and
+    refuses anything else outright -- "Cannot add an image with
+    different properties to an existing sequence" -- which fails the
+    *whole* conversion, not just the offending frame. A handful of
+    odd-sized files therefore costs a target its entire stack.
+
+    Observed on the 2026-08-24 run: Sun had 4 stray frames (2402x1753,
+    2286x2122, 1905x1689, 2233x1761) among 446 at 6000x4000 and lost all
+    450; M 27 had 45 frames at 6016x4016 against 81 at 6000x4000 and
+    lost all 126. Keeping the majority geometry costs those 4 frames of
+    Sun's 450 and recovers everything else.
+
+    Ties are resolved toward the larger frame count first and then the
+    larger pixel area, so a genuinely split set prefers the more
+    detailed geometry rather than whichever happened to be read first.
+
+    Parameters
+    ----------
+    frame_paths : `list` [`str`]
+        Candidate light-frame paths, already known to be readable.
+
+    Returns
+    -------
+    kept_paths : `set` [`str`]
+        Paths whose dimensions match the dominant geometry. Frames
+        whose header cannot be read are kept, so this filter never
+        removes a frame on the strength of a failed read.
+    dominant_dimensions : `tuple` [`int`, `int`] or `None`
+        The winning ``(NAXIS1, NAXIS2)``, or `None` when no header
+        could be read at all.
+    """
+    from astropy.io import fits
+
+    paths_by_dimensions: dict[tuple[int, int], list[str]] = {}
+    unreadable_paths: list[str] = []
+    for frame_path in frame_paths:
+        try:
+            header = fits.getheader(frame_path)
+            dimensions = (int(header["NAXIS1"]), int(header["NAXIS2"]))
+        except Exception:
+            unreadable_paths.append(frame_path)
+            continue
+        paths_by_dimensions.setdefault(dimensions, []).append(frame_path)
+
+    if not paths_by_dimensions:
+        return set(frame_paths), None
+
+    dominant_dimensions = max(
+        paths_by_dimensions,
+        key=lambda dimensions: (
+            len(paths_by_dimensions[dimensions]),
+            dimensions[0] * dimensions[1],
+        ),
+    )
+    return set(paths_by_dimensions[dominant_dimensions]) | set(unreadable_paths), dominant_dimensions
 
 
 def _frames_use_color_filter_array(frames_directory: str) -> bool:
@@ -466,6 +599,15 @@ class ImageProcessing:
             restored_kinds.add(kind)
             if job_logger:
                 job_logger.info(f"Reusing cached master {kind} frame (fingerprint {fingerprint[:12]}).")
+            # Also emitted on this module's own logger, which propagates
+            # to the "astrometricslib" package logger that carries the
+            # database handler. `process_target`'s job_logger sets
+            # propagate=False and only gains a DbLogHandler when a job
+            # repository was supplied, which the batch path does not do,
+            # so hits were recorded solely in per-target file logs and a
+            # run appeared to have zero cache reuse while actually
+            # serving 59 masters from cache.
+            logger.info("Reusing cached master %s frame (fingerprint %s).", kind, fingerprint[:12])
 
         return restored_kinds
 
@@ -605,6 +747,29 @@ class ImageProcessing:
                 == camera_filter
             ]
             readable_light_paths = find_readable_paths(candidate_light_paths)
+
+            # Applied after the readability filter so a corrupt frame
+            # cannot skew which geometry looks dominant.
+            readable_light_paths, dominant_dimensions = select_dominant_frame_dimensions(
+                sorted(readable_light_paths)
+            )
+            excluded_for_dimensions = [
+                path for path in candidate_light_paths if path and path not in readable_light_paths
+            ]
+            mismatched_paths = [
+                path
+                for path in excluded_for_dimensions
+                if path not in self.last_run_diagnostics.get("corrupt_frames_skipped", [])
+            ]
+            if mismatched_paths and dominant_dimensions:
+                log(
+                    f"Excluding {len(mismatched_paths)} frame(s) whose dimensions differ from the "
+                    f"dominant {dominant_dimensions[0]}x{dominant_dimensions[1]}; Siril cannot build "
+                    f"a sequence from mixed geometry."
+                )
+                self.last_run_diagnostics.setdefault("dimension_mismatched_frames", []).extend(
+                    mismatched_paths
+                )
 
             for frame in image_files:
                 # Expecting dict if serialized, or FrameRecord if internal
@@ -1603,6 +1768,64 @@ class ImageProcessing:
                     job_logger.warning(
                         f"Failed to remove temporary work directory {target_folder}: {cleanup_error}"
                     )
+            elif target_folder and os.path.exists(target_folder):
+                # Keeping the whole directory to preserve diagnostics was
+                # the right intent at the wrong granularity: measured on
+                # 2026-08-24, a failed M 106 run held 65GB, of which
+                # process/ was 65GB and everything actually read when
+                # diagnosing -- siril_debug.log plus the staged symlink
+                # trees recording exactly which frames were used -- came
+                # to 1.1MB. Dropping only the intermediates keeps every
+                # artifact that has ever been useful.
+                self._discard_stacking_intermediates(target_folder, job_logger)
+
+    def _discard_stacking_intermediates(
+        self, target_folder: str, job_logger: logging.Logger | None = None
+    ) -> int:
+        """Delete a failed run's bulk intermediates, keeping its evidence.
+
+        Removes only ``process/``, which holds the FITSEQ conversions and
+        registered sequences. The debug log and the staged symlink trees
+        stay, since those are what actually explain a failure and cost
+        about a megabyte between them.
+
+        Parameters
+        ----------
+        target_folder : `str`
+            The target's work directory.
+        job_logger : `logging.Logger`, optional
+            Logger for recording what was reclaimed.
+
+        Returns
+        -------
+        reclaimed_bytes : `int`
+            Approximate bytes freed, ``0`` if there was nothing to
+            remove or it could not be removed.
+        """
+        process_directory = os.path.join(target_folder, "process")
+        if not os.path.isdir(process_directory):
+            return 0
+
+        reclaimed_bytes = 0
+        for directory_path, _, file_names in os.walk(process_directory):
+            for file_name in file_names:
+                with contextlib.suppress(OSError):
+                    reclaimed_bytes += os.path.getsize(os.path.join(directory_path, file_name))
+
+        try:
+            shutil.rmtree(process_directory)
+        except OSError as cleanup_error:
+            logger.debug("Could not discard intermediates in %s: %s", process_directory, cleanup_error)
+            return 0
+
+        message = (
+            f"Stack did not succeed; discarded {reclaimed_bytes / 1_000_000_000:.1f}GB of "
+            f"intermediates from {process_directory} (logs and staged frame lists kept)."
+        )
+        logger.info(message)
+        if job_logger:
+            job_logger.info(message)
+        return reclaimed_bytes
 
     def launch_siril_gui(self, file_path: str) -> None:
         """Open the stacked result in the Siril GUI, if available.

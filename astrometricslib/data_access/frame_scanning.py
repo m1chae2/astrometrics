@@ -11,6 +11,7 @@ import logging
 import os
 import re
 from datetime import datetime
+from typing import Any
 
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.tasks.target_tasks.frame_scan_tasks import get_filter_type
@@ -18,6 +19,74 @@ from astrometricslib.utilities.enums import FilterType
 from astrometricslib.utilities.image import AstrometricsImage
 
 logger = logging.getLogger(__name__)
+
+
+def _coerce_header_number(value: Any, cast: type) -> Any:
+    """Convert a FITS header value to a number, or `None` if it cannot be.
+
+    Header values arrive as strings, numbers, or astropy `Undefined`
+    sentinels depending on the writer, so every read is guarded rather
+    than trusted.
+
+    Parameters
+    ----------
+    value : `Any`
+        Raw header value.
+    cast : `type`
+        `int` or `float`.
+
+    Returns
+    -------
+    number : `Any`
+        The converted number, or `None` if `value` is absent or
+        non-numeric.
+    """
+    if value is None:
+        return None
+    try:
+        return cast(value)
+    except TypeError, ValueError:
+        return None
+
+
+def _populate_acquisition_conditions(record: FrameRecord, header: Any) -> None:
+    """Copy sky and equipment state from a FITS header onto a frame record.
+
+    Read at index time because the header parse is already happening;
+    none of this touches pixel data, so it adds no measurable cost to
+    scanning. Every field is optional: the two cameras in this library
+    write different subsets (only the cooled ZWO reports sensor and
+    focuser telemetry; only the DSLR writes a pixel scale), and a
+    missing key simply leaves its field `None`.
+
+    Parameters
+    ----------
+    record : `FrameRecord`
+        Frame record to populate, mutated in place.
+    header : `Any`
+        The FITS header to read from.
+    """
+    pier_side = header.get("PIERSIDE")
+    # Recorded because a meridian flip mid-session moves the field
+    # abruptly. Without it, tracking analysis reads that jump as a bump
+    # or cable snag rather than a normal, expected flip.
+    if pier_side is not None and str(pier_side).strip():
+        record.pier_side = str(pier_side).strip().upper()
+
+    record.airmass = _coerce_header_number(header.get("AIRMASS"), float)
+    record.altitude_degrees = _coerce_header_number(header.get("OBJCTALT"), float)
+    record.azimuth_degrees = _coerce_header_number(header.get("OBJCTAZ"), float)
+
+    # SECPIX1 is arcsec/pixel directly; SCALE is the same quantity under
+    # a different writer's spelling. Recorded so a FWHM in pixels can be
+    # expressed in arcsec, which is comparable across cameras and focal
+    # lengths where a pixel count is not.
+    record.pixel_scale_arcsec = _coerce_header_number(header.get("SECPIX1", header.get("SCALE")), float)
+    record.binning = _coerce_header_number(header.get("XBINNING"), int)
+
+    record.sensor_temperature_c = _coerce_header_number(header.get("CCD-TEMP"), float)
+    record.focuser_position = _coerce_header_number(header.get("FOCUSPOS"), int)
+    record.focuser_temperature_c = _coerce_header_number(header.get("FOCUSTEM"), float)
 
 
 def create_frame_record_from_fits(path: str, camera: str | None = None) -> FrameRecord:
@@ -86,6 +155,8 @@ def create_frame_record_from_fits(path: str, camera: str | None = None) -> Frame
             record.telescope = "Nikkor 300mm"
         else:
             record.telescope = "Apertura 75Q"
+
+        _populate_acquisition_conditions(record, header)
     except Exception as e:
         logger.warning(f"Failed to parse FITS header for {filename}: {e}")
 

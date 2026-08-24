@@ -1191,6 +1191,10 @@ class ImageProcessing:
             # Bayer pattern (Siril's own fallback) is the bug being fixed.
             uses_color_filter_array = _frames_use_color_filter_array(os.path.join(target_folder, "lights"))
             color_filter_array_flags = " -cfa -equalize_cfa" if uses_color_filter_array else ""
+            # Surfaced so a quality summary can state whether this stack
+            # demosaiced. A monochrome sensor being debayered was a real
+            # defect found only by reading Siril's own logs.
+            self.last_run_diagnostics["debayer_applied"] = uses_color_filter_array
             job_logger.info(
                 f"Sensor type detected as {'color (CFA)' if uses_color_filter_array else 'monochrome'}; "
                 f"{'applying' if uses_color_filter_array else 'skipping'} CFA/debayer calibration flags."
@@ -1258,6 +1262,11 @@ class ImageProcessing:
             # re-indenting the ~180 lines this span covers; the release
             # guarantee is the same.
             siril_lock.enter_context(siril_process_lock(job_logger=job_logger))
+
+            # Measured from launch rather than from the start of
+            # process_target, so waiting on the Siril lock is not counted
+            # as time this stack spent working.
+            siril_started_at = time.monotonic()
 
             process = self.run_siril_headless(
                 command_pipe,
@@ -1449,6 +1458,10 @@ class ImageProcessing:
                 job_logger=job_logger,
                 generate_rejmap=generate_rejmap,
                 registered_seq_name=seq,
+            )
+
+            self.last_run_diagnostics["stacking_duration_seconds"] = round(
+                time.monotonic() - siril_started_at, 1
             )
 
             # Cached here rather than in the finally block: the masters

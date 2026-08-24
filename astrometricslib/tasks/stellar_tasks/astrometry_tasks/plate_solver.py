@@ -62,6 +62,29 @@ ONLINE_SOLVE_ATTEMPT_LIMIT = 3
 # server-side hiccup clear.
 ONLINE_SOLVE_RETRY_BACKOFF_SECONDS = 2.0
 
+# Cumulative per-process count of solve uploads, retries included, so a
+# quality summary can distinguish a clean first-try solve from one that
+# only succeeded after dropped connections. Reset by
+# `reset_plate_solve_statistics` at the start of a run.
+_plate_solve_attempts = 0
+
+
+def get_plate_solve_attempt_count() -> int:
+    """Report how many solve uploads this process has made.
+
+    Returns
+    -------
+    attempts : `int`
+        Total attempts, including retries after transient failures.
+    """
+    return _plate_solve_attempts
+
+
+def reset_plate_solve_statistics() -> None:
+    """Clear the solve-attempt tally, so a run counts only its own work."""
+    global _plate_solve_attempts
+    _plate_solve_attempts = 0
+
 
 def _is_transient_network_error(error: BaseException) -> bool:
     """Report whether an exception looks like a retryable transport fault.
@@ -120,8 +143,10 @@ def _call_with_transient_retry(
     header : `astropy.io.fits.Header` or `None`
         The solved header, or `None` if every attempt failed.
     """
+    global _plate_solve_attempts
     for attempt_number in range(1, ONLINE_SOLVE_ATTEMPT_LIMIT + 1):
         try:
+            _plate_solve_attempts += 1
             return solve_call()
         except Exception as solve_error:
             if not _is_transient_network_error(solve_error):

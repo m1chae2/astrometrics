@@ -268,17 +268,86 @@ def analyze_guiding(target: Any) -> dict[str, Any]:
                 "consistent with polar misalignment or an uncorrected tracking rate."
             )
 
+    flip_indices = detect_meridian_flips(target)
+    analysis["meridian_flips"] = len(flip_indices)
+    if flip_indices:
+        analysis["findings"].append(
+            f"{len(flip_indices)} meridian flip(s) during this session; the field shift across "
+            "a flip is expected and is not a tracking fault."
+        )
+
     if analysis["max_excursion_px"] and excursions:
         median_excursion = statistics.median(excursions)
-        if median_excursion > 0 and analysis["max_excursion_px"] > 10 * median_excursion:
+        # Excursions at a flip boundary are excluded before calling one
+        # anomalous: a flip legitimately moves the field, so counting it
+        # would report a hardware fault for normal mount behaviour.
+        flip_excursion_indices = {index - 1 for index in flip_indices}
+        natural_excursions = [
+            excursion for index, excursion in enumerate(excursions) if index not in flip_excursion_indices
+        ]
+        largest_natural = max(natural_excursions) if natural_excursions else 0.0
+        if median_excursion > 0 and largest_natural > 10 * median_excursion:
             analysis["findings"].append(
-                f"One frame jumped {analysis['max_excursion_px']:.1f} px against a typical "
+                f"One frame jumped {largest_natural:.1f} px against a typical "
                 f"{median_excursion:.1f} px, suggesting a bump, wind gust, or cable snag."
             )
 
     if not analysis["findings"]:
         analysis["findings"].append("No drift, periodic error, or excursion stands out.")
     return analysis
+
+
+def fwhm_in_arcsec(frame: Any) -> float | None:
+    """Express a frame's FWHM in arcseconds rather than pixels.
+
+    A FWHM in pixels is only meaningful alongside the pixel scale that
+    produced it: the same seeing reads as a different pixel count on a
+    different camera or focal length. Arcseconds are comparable across
+    every frame in the library and are the unit seeing is actually
+    discussed in.
+
+    Parameters
+    ----------
+    frame : `Any`
+        The frame record to convert.
+
+    Returns
+    -------
+    fwhm_arcsec : `float` or `None`
+        FWHM in arcseconds, or `None` if either the FWHM or the pixel
+        scale is missing.
+    """
+    fwhm_px = frame.registration_fwhm_x_px
+    if fwhm_px is None or frame.pixel_scale_arcsec is None:
+        return None
+    return round(fwhm_px * frame.pixel_scale_arcsec, 2)
+
+
+def detect_meridian_flips(target: Any) -> list[int]:
+    """Find where a session changed pier side.
+
+    A meridian flip moves the field abruptly, so the shift between the
+    frames either side of one is not a tracking fault. Without this, that
+    jump reads as a bump or cable snag in `analyze_guiding`.
+
+    Parameters
+    ----------
+    target : `Any`
+        The target whose frames are examined.
+
+    Returns
+    -------
+    flip_indices : `list` [`int`]
+        Indices, into the time-ordered frame list, of each frame that
+        begins a new pier side.
+    """
+    ordered = sorted(
+        (f for f in (target.frames or []) if f.timestamp is not None and f.pier_side),
+        key=lambda f: f.timestamp,
+    )
+    return [
+        index for index in range(1, len(ordered)) if ordered[index].pier_side != ordered[index - 1].pier_side
+    ]
 
 
 def analyze_input_conditions(target: Any) -> dict[str, Any]:

@@ -76,6 +76,15 @@ _gaia_failure_state_lock = threading.Lock()
 _gaia_consecutive_failures = 0
 _gaia_circuit_open = False
 
+# Cumulative per-process tallies, distinct from the consecutive-failure
+# counter above (which resets on any success). These record what the run
+# as a whole experienced, so a quality summary can say whether the
+# catalog service was healthy -- without them, a run where every query
+# failed looks identical to one where the fields genuinely held no
+# catalog stars.
+_gaia_queries_attempted = 0
+_gaia_queries_failed = 0
+
 
 def _record_gaia_failure(context: str) -> None:
     """Count a failed remote Gaia call, tripping the breaker at the limit.
@@ -85,8 +94,10 @@ def _record_gaia_failure(context: str) -> None:
     context : `str`
         Short description of the failing call, for the trip log line.
     """
-    global _gaia_consecutive_failures, _gaia_circuit_open
+    global _gaia_consecutive_failures, _gaia_circuit_open, _gaia_queries_attempted, _gaia_queries_failed
     with _gaia_failure_state_lock:
+        _gaia_queries_attempted += 1
+        _gaia_queries_failed += 1
         _gaia_consecutive_failures += 1
         if not _gaia_circuit_open and _gaia_consecutive_failures >= GAIA_CONSECUTIVE_FAILURE_LIMIT:
             _gaia_circuit_open = True
@@ -99,9 +110,28 @@ def _record_gaia_failure(context: str) -> None:
 
 def _record_gaia_success() -> None:
     """Reset the consecutive-failure count after a working remote call."""
-    global _gaia_consecutive_failures
+    global _gaia_consecutive_failures, _gaia_queries_attempted
     with _gaia_failure_state_lock:
+        _gaia_queries_attempted += 1
         _gaia_consecutive_failures = 0
+
+
+def get_gaia_query_statistics() -> dict[str, int | bool]:
+    """Report this process's cumulative remote Gaia outcomes.
+
+    Returns
+    -------
+    statistics : `dict` [`str`, `int` or `bool`]
+        ``attempted`` and ``failed`` query counts, plus
+        ``circuit_breaker_tripped``. Counts are per-process and reset by
+        `reset_gaia_circuit_breaker`.
+    """
+    with _gaia_failure_state_lock:
+        return {
+            "attempted": _gaia_queries_attempted,
+            "failed": _gaia_queries_failed,
+            "circuit_breaker_tripped": _gaia_circuit_open,
+        }
 
 
 def _gaia_remote_queries_disabled() -> bool:
@@ -124,10 +154,12 @@ def reset_gaia_circuit_breaker() -> None:
     recovered; ordinary runs get a clean breaker automatically because
     the state is per-process.
     """
-    global _gaia_consecutive_failures, _gaia_circuit_open
+    global _gaia_consecutive_failures, _gaia_circuit_open, _gaia_queries_attempted, _gaia_queries_failed
     with _gaia_failure_state_lock:
         _gaia_consecutive_failures = 0
         _gaia_circuit_open = False
+        _gaia_queries_attempted = 0
+        _gaia_queries_failed = 0
 
 
 def _run_with_daemon_thread_timeout(query_function: Callable[[], Any], timeout_seconds: float) -> Any:

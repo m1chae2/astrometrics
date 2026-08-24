@@ -14,7 +14,9 @@ from astrometricslib.tasks.target_tasks.tracking_analysis_tasks import (
     _dominant_period_seconds,
     analyze_guiding,
     analyze_input_conditions,
+    detect_meridian_flips,
     evaluate_rejection_effectiveness,
+    fwhm_in_arcsec,
 )
 
 SAMPLE_TIMES = [index * 30.0 for index in range(80)]
@@ -188,3 +190,53 @@ def test_rejection_effectiveness_needs_measured_input():  # ruff: ignore[missing
     assert analysis["rejected_count"] == 1
     assert analysis["comparable"] is False
     assert any("has not been measured" in finding for finding in analysis["findings"])
+
+
+def _frame_with(**attributes):  # ruff: ignore[missing-return-type-private-function, missing-type-kwargs]
+    """Build a light frame and set the given attributes on it.
+
+    Returns
+    -------
+    frame : `FrameRecord`
+        The configured frame record.
+    """
+    frame = FrameRecord(path="/frames/f.fits", role="LIGHT", camera="c", exposure="30.0")
+    for name, value in attributes.items():
+        setattr(frame, name, value)
+    return frame
+
+
+def test_fwhm_converts_to_arcsec():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Pixels become arcseconds using the frame's own pixel scale."""
+    frame = _frame_with(registration_fwhm_x_px=3.2, pixel_scale_arcsec=1.915)
+
+    assert fwhm_in_arcsec(frame) == pytest.approx(6.13, abs=0.01)
+
+
+def test_fwhm_in_arcsec_needs_a_pixel_scale():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Without a scale the pixel count cannot be converted, so None."""
+    assert fwhm_in_arcsec(_frame_with(registration_fwhm_x_px=3.2)) is None
+
+
+def test_meridian_flip_is_detected():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """A pier-side change mid-session is located by frame index."""
+    target = _target_with_shifts([0.0, 30.0, 60.0, 90.0], [0.0] * 4)
+    for frame, side in zip(target.frames, ["EAST", "EAST", "WEST", "WEST"], strict=True):
+        frame.pier_side = side
+
+    assert detect_meridian_flips(target) == [2]
+
+
+def test_meridian_flip_shift_is_not_called_a_bump():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """The field jump across a flip is expected, not a hardware fault."""
+    shifts = [0.0] * len(SAMPLE_TIMES)
+    for index in range(40, len(shifts)):
+        shifts[index] = 500.0  # the flip displaces the field from here on
+    target = _target_with_shifts(SAMPLE_TIMES, shifts)
+    for index, frame in enumerate(target.frames):
+        frame.pier_side = "EAST" if index < 40 else "WEST"
+
+    analysis = analyze_guiding(target)
+
+    assert analysis["meridian_flips"] == 1
+    assert not any("bump" in finding for finding in analysis["findings"])

@@ -952,6 +952,18 @@ def _run_analysis_pipeline_match(
             simbad_matched_count = sum(
                 1 for stellar_object in context.stellar_objects if stellar_object.spectral_type
             )
+            # Read from the identification and solver modules rather than
+            # threaded through the call chain: both keep per-process
+            # tallies precisely so a summary can record what the run
+            # actually experienced against the remote services.
+            from astrometricslib.tasks.stellar_tasks.astrometry_tasks.plate_solver import (
+                get_plate_solve_attempt_count,
+            )
+            from astrometricslib.tasks.stellar_tasks.astrometry_tasks.star_identifier import (
+                get_gaia_query_statistics,
+            )
+
+            gaia_statistics = get_gaia_query_statistics()
             target.astrometry_quality_summary = AstrometryQualitySummary(
                 target_id=target.id,
                 astrometry_metrics=AstrometryPipelineQualityMetrics(
@@ -959,6 +971,10 @@ def _run_analysis_pipeline_match(
                     solve_attempted=context.solve_attempted,
                     plate_solve_succeeded=context.wcs is not None,
                     simbad_matched_count=simbad_matched_count,
+                    remote_catalog_queries_attempted=int(gaia_statistics["attempted"]),
+                    remote_catalog_queries_failed=int(gaia_statistics["failed"]),
+                    remote_catalog_circuit_breaker_tripped=bool(gaia_statistics["circuit_breaker_tripped"]),
+                    plate_solve_attempts=get_plate_solve_attempt_count(),
                     catalog_matched_star_count=star_id_breakdown.catalog_matched,
                     position_only_star_count=star_id_breakdown.position_only,
                     unresolved_star_count=star_id_breakdown.unresolved,
@@ -1773,6 +1789,18 @@ def _stack_frames_with_timeout(
 
     if stacking_thread.is_alive():
         print(f"[{target.id}] Stacking timed out after {timeout_seconds} seconds. Abandoning this stack.")
+        # A timeout is a quality event, not just a log line: recorded on
+        # the target's existing stack summary when there is one, so the
+        # abandoned stack is queryable rather than only discoverable by
+        # reading the run's output. The summary may be absent entirely --
+        # stack_frames builds it, and this stack never got that far -- in
+        # which case the timeout stays a log-only fact.
+        summary = getattr(target, "stack_quality_summary", None)
+        metrics = getattr(summary, "stacking_metrics", None) if summary else None
+        if metrics is not None:
+            metrics.timed_out = True
+            summary.flagged = True
+            summary.flag_reasons.append(f"stacking timed out after {timeout_seconds}s")
         return None
 
     if "error" in outcome:

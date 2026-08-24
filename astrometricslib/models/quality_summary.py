@@ -69,7 +69,7 @@ class PipelineQualitySummaryBase(BaseModel):
 # ---------------------------------------------------------------------------
 
 # Bumped whenever StackingPipelineQualityMetrics's shape changes meaningfully.
-STACKING_PIPELINE_VERSION = "1.0.0"
+STACKING_PIPELINE_VERSION = "1.1.0"
 
 
 class StackingPipelineQualityMetrics(BaseModel):
@@ -108,6 +108,22 @@ class StackingPipelineQualityMetrics(BaseModel):
     # Spectral-only.
     spectral_registration_flags: list[ExcludedFrame] = Field(default_factory=list)
 
+    # Run facts. A stack that timed out or silently debayered a
+    # monochrome sensor is a quality event, but both were previously
+    # discoverable only by reading Siril's own logs -- on the 2026-08-23
+    # run, "[Sun] Stacking timed out after 600 seconds" and an incorrect
+    # mono debayer each took a log dig to find. Recorded here so they are
+    # queryable alongside every other verdict.
+    stacking_duration_seconds: float | None = None
+    timed_out: bool = False
+    debayer_applied: bool | None = None
+    # Registration picks one frame as its reference and aligns the rest
+    # to it; if that frame is poor, the whole stack fails. M 42's
+    # registration aborted with "Found 0 stars in reference" and nothing
+    # recorded which frame that was or how poor it looked.
+    registration_reference_frame: str | None = None
+    registration_reference_star_count: int | None = None
+
 
 class StackQualitySummary(PipelineQualitySummaryBase):
     """Persisted per-stack quality record for the stacking pipeline.
@@ -133,7 +149,7 @@ class StackQualitySummary(PipelineQualitySummaryBase):
 
 # Bumped whenever AstrometryPipelineQualityMetrics's shape changes
 # meaningfully.
-ASTROMETRY_PIPELINE_VERSION = "1.1.0"
+ASTROMETRY_PIPELINE_VERSION = "1.2.0"
 
 
 class AstrometryPipelineQualityMetrics(BaseModel):
@@ -161,6 +177,19 @@ class AstrometryPipelineQualityMetrics(BaseModel):
     catalog_matched_star_count: int = 0
     position_only_star_count: int = 0
     unresolved_star_count: int = 0
+
+    # Remote-service health for this run. Without these, a run where
+    # every catalog query failed is indistinguishable from one where the
+    # field genuinely held no catalog stars -- the difference between a
+    # broken service and a real result. On the 2026-08-23 run, Gaia was
+    # down for the whole batch and the only evidence was 67 timeout lines
+    # in the logs.
+    remote_catalog_queries_attempted: int = 0
+    remote_catalog_queries_failed: int = 0
+    remote_catalog_circuit_breaker_tripped: bool = False
+    # Counts every upload, so a solve that needed retries after dropped
+    # connections is distinguishable from one that succeeded first try.
+    plate_solve_attempts: int = 0
 
 
 class AstrometryQualitySummary(PipelineQualitySummaryBase):

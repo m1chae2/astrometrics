@@ -329,6 +329,8 @@ def _build_stack_quality_summary(  # ruff: ignore[missing-return-type-private-fu
             frames_stacked=frames_stacked,
             excluded_frames=excluded_frames,
             calibration_mismatch_flags=diagnostics.get("calibration_mismatch_flags", []),
+            stacking_duration_seconds=diagnostics.get("stacking_duration_seconds"),
+            debayer_applied=diagnostics.get("debayer_applied"),
         ),
     )
 
@@ -370,6 +372,21 @@ def _build_stack_quality_summary(  # ruff: ignore[missing-return-type-private-fu
             seq_path = f"{stacked_path.rsplit('.', 1)[0]}_Registration.seq"
             registration_frames = parse_seq_file(seq_path)
             registration_frame_paths = diagnostics.get("symlinked_light_paths", [])
+
+            # Siril aligns every frame to one reference, so a poor
+            # reference fails the whole stack -- M 42 aborted with "Found
+            # 0 stars in reference" and nothing recorded which frame that
+            # was. The reference is the frame whose transform is the
+            # identity, i.e. the one with no shift of its own.
+            for index, facts in enumerate(registration_frames):
+                if not facts["dx"] and not facts["dy"]:
+                    if index < len(registration_frame_paths):
+                        summary.stacking_metrics.registration_reference_frame = registration_frame_paths[
+                            index
+                        ]
+                    summary.stacking_metrics.registration_reference_star_count = facts["nb_stars"]
+                    break
+
             if len(registration_frame_paths) == len(registration_frames):
                 frame_by_path = {frame.path: frame for frame in target_frames}
                 for frame_path, registration_facts in zip(

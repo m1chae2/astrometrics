@@ -63,6 +63,21 @@ class FrameRecord(BaseModel):
     telescope: str = Field(default="Unknown", alias="telescope")
     date: str = Field(default="Unknown", alias="date")
 
+    # Acquisition conditions, read straight from the FITS header at index
+    # time. These cost nothing beyond the header parse already happening
+    # and describe the sky and equipment state the frame was taken under,
+    # which is what separates "the mount misbehaved" from "the target was
+    # low" when a later analysis flags a frame.
+    pier_side: str | None = Field(default=None, alias="pierSide")
+    airmass: float | None = Field(default=None, alias="airmass")
+    altitude_degrees: float | None = Field(default=None, alias="altitudeDegrees")
+    azimuth_degrees: float | None = Field(default=None, alias="azimuthDegrees")
+    pixel_scale_arcsec: float | None = Field(default=None, alias="pixelScaleArcsec")
+    binning: int | None = Field(default=None, alias="binning")
+    sensor_temperature_c: float | None = Field(default=None, alias="sensorTemperatureC")
+    focuser_position: int | None = Field(default=None, alias="focuserPosition")
+    focuser_temperature_c: float | None = Field(default=None, alias="focuserTemperatureC")
+
     # Registration facts (Siril's findstar/registration pass, one .seq line
     # per frame). None until the first pipeline that needs them computes and
     # persists them.

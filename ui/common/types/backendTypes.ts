@@ -47,6 +47,15 @@ export interface FrameRecord {
   camera?: string;
   telescope?: string;
   date?: string;
+  pierSide?: string | null;
+  airmass?: number | null;
+  altitudeDegrees?: number | null;
+  azimuthDegrees?: number | null;
+  pixelScaleArcsec?: number | null;
+  binning?: number | null;
+  sensorTemperatureC?: number | null;
+  focuserPosition?: number | null;
+  focuserTemperatureC?: number | null;
   registrationFwhmXPx?: number | null;
   registrationFwhmYPx?: number | null;
   registrationRoundness?: number | null;
@@ -607,6 +616,11 @@ export interface StackingPipelineQualityMetrics {
   median_input_fwhm_px?: number | null;
   fwhm_degraded?: boolean;
   spectral_registration_flags?: ExcludedFrame[];
+  stacking_duration_seconds?: number | null;
+  timed_out?: boolean;
+  debayer_applied?: boolean | null;
+  registration_reference_frame?: string | null;
+  registration_reference_star_count?: number | null;
 }
 
 /**
@@ -661,6 +675,10 @@ export interface AstrometryPipelineQualityMetrics {
   catalog_matched_star_count?: number;
   position_only_star_count?: number;
   unresolved_star_count?: number;
+  remote_catalog_queries_attempted?: number;
+  remote_catalog_queries_failed?: number;
+  remote_catalog_circuit_breaker_tripped?: boolean;
+  plate_solve_attempts?: number;
 }
 
 /**

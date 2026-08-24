@@ -142,6 +142,10 @@ def stack_frames(
         else:
             output_file = f"{safe_target_id}_Stacked.fits"
 
+        configuration_tag = _disambiguating_configuration_tag(target, target_frames)
+        if configuration_tag:
+            output_file = output_file.removesuffix(".fits") + f"_{configuration_tag}.fits"
+
     frames_submitted = len(target_frames)
     from astrometricslib.models.quality_summary import ExcludedFrame
 
@@ -251,6 +255,62 @@ def stack_frames(
             target.stacked_image = stacked_path
 
     return stacked_path
+
+
+def _disambiguating_configuration_tag(target, target_frames) -> str:  # ruff: ignore[missing-type-function-argument]
+    """Return a filename tag when a target's stacks would otherwise collide.
+
+    Splitting a target by optic runs the stacker once per
+    configuration, and every run wrote to the same
+    ``<target>_<filter>_Stacked.fits``. The second pass therefore
+    overwrote the first: M 27 finished with two recorded
+    configurations, 21 frames at 405mm and 105 at 300mm, both naming
+    one file that held only the 300mm result. The 405mm stack was
+    measured -- 2.06 arcsec residual against the blend's 5.36 -- and
+    then destroyed.
+
+    Only multi-configuration targets are tagged. Seven targets in this
+    library have two optics; the rest keep the paths their existing
+    stacks and catalog entries already use, so this cannot orphan them.
+
+    Parameters
+    ----------
+    target : `astrometricslib.models.target.Target`
+        Target whose full frame set decides whether a tag is needed.
+    target_frames : `list` [`astrometricslib.models.target.FrameRecord`]
+        The frames this particular stack is being built from.
+
+    Returns
+    -------
+    configuration_tag : `str`
+        A filename-safe configuration tag, or ``""`` when the target has
+        only one configuration and no disambiguation is required.
+    """
+    from astrometricslib.tasks.target_tasks.pipeline_tasks import (
+        frame_configuration_key,
+        group_frames_by_configuration,
+    )
+
+    try:
+        if len(group_frames_by_configuration(target)) < 2:
+            return ""
+    except Exception as grouping_error:
+        # A tag is only ever additive, so failing to decide costs
+        # nothing beyond the collision this guards against.
+        logger.debug("Could not group '%s' by configuration: %s", getattr(target, "id", "?"), grouping_error)
+        return ""
+
+    keys = {frame_configuration_key(frame) for frame in target_frames}
+    keys.discard(None)
+    if len(keys) != 1:
+        # A blend of optics has no single configuration to name, and
+        # naming it after one of them would assert something untrue.
+        return ""
+
+    configuration_key = next(iter(keys))
+    return "".join(character if character.isalnum() else "_" for character in str(configuration_key)).strip(
+        "_"
+    )
 
 
 def _record_configuration_stack(target, target_frames, stacked_path) -> bool:  # ruff: ignore[missing-type-function-argument]

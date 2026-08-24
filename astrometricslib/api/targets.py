@@ -276,6 +276,60 @@ class TargetCatalog:
 
         return image_conversions.delete_images(paths, self, target_id)
 
+    def measure_frame_input_quality(
+        self,
+        target: Target,
+        include_fwhm: bool = False,
+        remeasure: bool = False,
+        camera_name: str | None = None,
+        save: bool = True,
+    ) -> dict[str, int]:
+        """Measure and persist per-frame quality for a target's frames.
+
+        Lets a frame be judged before it is ever stacked. The
+        equivalent per-frame numbers are otherwise written only during
+        registration, so a frame that was never stacked carried no
+        quality evidence -- which is backwards, since those are exactly
+        the frames worth triaging.
+
+        Incremental by default, so an interrupted sweep resumes. See
+        `statistics_operations.measure_frame_input_quality` for the
+        per-frame cost, which is substantial for a whole catalog and
+        much more so with `include_fwhm`.
+
+        Parameters
+        ----------
+        target : `Target`
+            The target whose frames are measured.
+        include_fwhm : `bool`, optional
+            Whether to also measure FWHM (default `False`); roughly 50x
+            the cost of the other metrics.
+        remeasure : `bool`, optional
+            Whether to re-measure frames that already have values
+            (default `False`).
+        camera_name : `str`, optional
+            Restrict to frames from this camera, matched
+            case-insensitively as a substring.
+        save : `bool`, optional
+            Whether to persist the target afterwards (default `True`).
+
+        Returns
+        -------
+        counts : `dict` [`str`, `int`]
+            ``measured``/``skipped``/``failed`` frame counts.
+        """
+        from astrometricslib.tasks.target_tasks import statistics_operations
+
+        counts = statistics_operations.measure_frame_input_quality(
+            target,
+            include_fwhm=include_fwhm,
+            remeasure=remeasure,
+            camera_name=camera_name,
+        )
+        if save and counts["measured"]:
+            self.save()
+        return counts
+
     def list_camera_names(self) -> dict[str, int]:
         """Count frames per distinct camera name across the whole catalog.
 

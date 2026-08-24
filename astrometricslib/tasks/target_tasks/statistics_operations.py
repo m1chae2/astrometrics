@@ -79,6 +79,87 @@ def list_camera_names(targets: list) -> dict[str, int]:
     return dict(sorted(counts.items(), key=lambda item: item[1], reverse=True))
 
 
+def measure_frame_input_quality(
+    target: Any,
+    include_fwhm: bool = False,
+    remeasure: bool = False,
+    camera_name: str | None = None,
+) -> dict[str, int]:
+    """Record per-frame quality for a target's frames, in place.
+
+    Fills in `background_level` and `saturated_pixel_fraction` (and
+    optionally FWHM) on each frame, so a frame can be judged before it
+    is ever stacked. Until now those numbers were written only during
+    registration, leaving never-stacked frames -- the ones most worth
+    triaging -- with no evidence at all.
+
+    Incremental by default: a frame already carrying a background level
+    is skipped, so an interrupted sweep resumes instead of restarting.
+    Measured cost on the 2026-08-23 catalog is roughly 0.3s of compute
+    per frame plus however long that frame takes to read, which is the
+    dominant term; `include_fwhm` adds ~16s per frame on top, so a
+    whole-catalog sweep with FWHM enabled is an overnight job, not an
+    interactive one.
+
+    The caller is responsible for persisting `target` afterwards; this
+    mutates the frame records but performs no write of its own.
+
+    Parameters
+    ----------
+    target : `Any`
+        The target whose frames are measured, mutated in place.
+    include_fwhm : `bool`, optional
+        Whether to also measure FWHM (default `False`); see the cost
+        note above.
+    remeasure : `bool`, optional
+        Whether to re-measure frames that already carry a background
+        level (default `False`).
+    camera_name : `str`, optional
+        Restrict measurement to frames from this camera, matched
+        case-insensitively as a substring. `None` (default) measures
+        every frame.
+
+    Returns
+    -------
+    counts : `dict` [`str`, `int`]
+        ``measured``, ``skipped`` (already had values), and ``failed``
+        (unreadable or unmeasurable) frame counts.
+    """
+    from astrometricslib.data_access.image_quality_metrics import (
+        measure_frame_input_quality as measure_one_frame,
+    )
+
+    counts = {"measured": 0, "skipped": 0, "failed": 0}
+
+    for frame in target.frames:
+        if camera_name and camera_name.lower() not in (frame.camera or "").lower():
+            continue
+        if not remeasure and frame.background_level is not None:
+            counts["skipped"] += 1
+            continue
+
+        metrics = measure_one_frame(frame.path, include_fwhm=include_fwhm)
+        if metrics["background_level"] is None:
+            counts["failed"] += 1
+            continue
+
+        frame.background_level = metrics["background_level"]
+        if metrics["saturated_pixel_fraction"] is not None:
+            frame.saturated_pixel_fraction = metrics["saturated_pixel_fraction"]
+        if metrics["fwhm_px"] is not None:
+            # Reuses the registration FWHM fields rather than adding a
+            # parallel pair: both describe the same physical quantity for
+            # the same frame, and a reader comparing frames should not
+            # have to know which stage happened to measure it. x and y
+            # get the same value because this is a single circularized
+            # median, not a per-axis fit.
+            frame.registration_fwhm_x_px = metrics["fwhm_px"]
+            frame.registration_fwhm_y_px = metrics["fwhm_px"]
+        counts["measured"] += 1
+
+    return counts
+
+
 def get_frame_stats_grouped(target: Any, calibration: Any, camera: str | None = None) -> list[dict[str, Any]]:
     """Return frame statistics grouped by filter and exposure.
 

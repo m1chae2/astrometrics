@@ -203,6 +203,140 @@ def measure_image_fwhm(path: str, n_stars: int = FWHM_MEASUREMENT_STAR_COUNT) ->
     return float(np.median(fwhms)) if fwhms else None
 
 
+def measure_frame_input_quality(path: str, include_fwhm: bool = False) -> dict[str, float | None]:
+    """Measure a raw frame's own quality from a single file read.
+
+    Answers "is this frame worth stacking?" *before* anything is stacked.
+    The existing per-frame numbers on `FrameRecord` are all written during
+    registration, so until now a frame that was never stacked carried no
+    quality evidence at all -- exactly the frames a person most wants to
+    triage. Measured on the 2026-08-23 catalog: only 238 of 4,244 frames
+    (5.6%) had any.
+
+    Every metric is derived from one `fits.open`, because reading the
+    frame dominates the cheap measurements: on a cold cache a large frame
+    took ~4s to read while the median and saturation count together took
+    ~0.3s. `measure_frame_background_level` and
+    `measure_frame_saturated_pixel_fraction` each reopen the file
+    independently; this pays that cost once.
+
+    Parameters
+    ----------
+    path : `str`
+        Filesystem path to the FITS frame to measure.
+    include_fwhm : `bool`, optional
+        Whether to also measure FWHM (default `False`). Off by default
+        because it is a different order of cost: FWHM runs full source
+        detection plus a per-star morphology fit, ~16s per frame against
+        ~0.3s for everything else here -- roughly 50x. Enable it for a
+        focused review of one target, not a whole-catalog sweep.
+
+    Returns
+    -------
+    metrics : `dict` [`str`, `float` or `None`]
+        Keys ``background_level``, ``saturated_pixel_fraction``, and
+        ``fwhm_px``. A value is `None` when that metric could not be
+        measured; ``fwhm_px`` is `None` whenever `include_fwhm` is
+        `False`. An unreadable frame yields all-`None` rather than
+        raising, so one bad frame cannot abort a sweep.
+    """
+    metrics: dict[str, float | None] = {
+        "background_level": None,
+        "saturated_pixel_fraction": None,
+        "fwhm_px": None,
+    }
+
+    try:
+        with fits.open(path, memmap=False) as hdul:
+            data = hdul[0].data
+            if data is None and len(hdul) > 1:
+                data = hdul[1].data
+            if data is None:
+                return metrics
+            data = np.asarray(data, dtype=float)
+    except Exception as read_error:
+        logger.debug("Could not read %s for input-quality measurement: %s", path, read_error)
+        return metrics
+
+    # Matches the mono-flattening the existing per-frame measurements use,
+    # so a value measured here is comparable with one measured there.
+    if data.ndim == 3:
+        data = np.mean(data, axis=0 if data.shape[0] in (3, 4) else -1)
+
+    try:
+        _, median, _ = sigma_clipped_stats(data, sigma=3.0)
+        metrics["background_level"] = float(median)
+    except Exception as background_error:
+        logger.debug("Background measurement failed for %s: %s", path, background_error)
+
+    try:
+        metrics["saturated_pixel_fraction"] = compute_saturated_pixel_fraction(
+            data, DEFAULT_SATURATION_ADU_THRESHOLD
+        )
+    except Exception as saturation_error:
+        logger.debug("Saturation measurement failed for %s: %s", path, saturation_error)
+
+    if include_fwhm:
+        try:
+            metrics["fwhm_px"] = _measure_fwhm_from_data(data)
+        except Exception as fwhm_error:
+            logger.debug("FWHM measurement failed for %s: %s", path, fwhm_error)
+
+    return metrics
+
+
+def _measure_fwhm_from_data(data: np.ndarray, n_stars: int = FWHM_MEASUREMENT_STAR_COUNT) -> float | None:
+    """Measure median stellar FWHM from already-loaded frame data.
+
+    The measurement half of `measure_image_fwhm`, split out so a caller
+    that has already read the frame does not read it a second time.
+
+    Parameters
+    ----------
+    data : `numpy.ndarray`
+        Frame pixels, already flattened to 2D.
+    n_stars : `int`, optional
+        Maximum number of brightest detected stars to measure.
+
+    Returns
+    -------
+    fwhm : `float` or `None`
+        Median FWHM in pixels, or `None` if no star yields a finite,
+        positive measurement.
+    """
+    from photutils.morphology import data_properties
+
+    from astrometricslib.tasks.shared.source_detection_shared import SourceDetector
+
+    sources = SourceDetector().detect(data)
+    if not sources:
+        return None
+
+    box = FWHM_MEASUREMENT_BOX_RADIUS_PX
+    fwhms = []
+    for source in sources[:n_stars]:
+        x = source.get("x_centroid", source.get("xcentroid"))
+        y = source.get("y_centroid", source.get("ycentroid"))
+        if x is None or y is None:
+            continue
+        x, y = round(x), round(y)
+        y0, y1 = max(0, y - box), min(data.shape[0], y + box)
+        x0, x1 = max(0, x - box), min(data.shape[1], x + box)
+        cutout = data[y0:y1, x0:x1]
+        if cutout.size == 0:
+            continue
+        try:
+            _, median, _ = sigma_clipped_stats(cutout, sigma=3.0)
+            fwhm = float(data_properties(cutout - median).fwhm.value)
+            if np.isfinite(fwhm) and fwhm > 0:
+                fwhms.append(fwhm)
+        except Exception as exc:
+            logger.debug("Skipping FWHM measurement for one star cutout: %s", exc)
+            continue
+
+    return float(np.median(fwhms)) if fwhms else None
+
+
 def measure_saturated_pixel_fraction(
     path: str, saturation_threshold: float = DEFAULT_SATURATION_ADU_THRESHOLD
 ) -> float | None:

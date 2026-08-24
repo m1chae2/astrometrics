@@ -980,17 +980,33 @@ class ImageProcessing:
                             else:
                                 log("Rejection map was requested but no rejmap output was found.")
 
-                        # The registered .seq file's R0 lines hold
-                        # each input frame's own FWHM as measured by
-                        # Siril's findstar pass during registration
-                        # -- exactly the "median input FWHM" a
-                        # post-stack FWHM-degradation check needs,
-                        # computed at no extra cost. Same
-                        # preservation pattern as the rejmap above:
-                        # copy it out before the scratch directory is
-                        # removed.
+                        # The .seq file's R<n> lines hold each input
+                        # frame's own FWHM as measured by Siril's
+                        # findstar pass during registration -- exactly
+                        # the "median input FWHM" a post-stack
+                        # FWHM-degradation check needs, computed at no
+                        # extra cost. Same preservation pattern as the
+                        # rejmap above: copy it out before the scratch
+                        # directory is removed.
+                        #
+                        # The *input* sequence is preserved, not the
+                        # registered "r_" output. Both carry identical
+                        # findstar columns, but registration writes its
+                        # computed transforms back into the input
+                        # sequence, while the r_ frames are already
+                        # physically aligned and so record an identity
+                        # matrix for every frame. Preserving r_ therefore
+                        # silently discarded every frame's dx/dy shift:
+                        # all 238 frames measured before this fix stored
+                        # dx=0, dy=0, which is precisely the per-frame
+                        # drift series needed to see tracking error,
+                        # polar misalignment, or a mount's periodic
+                        # error. Confirmed on a real M 106 run, same
+                        # frames in both files:
+                        #   pp_light_source.seq  -> H ... 6.31985 ... 5.55176
+                        #   r_pp_light_source.seq -> H 1 0 0 0 1 0 0 0 1
                         if registered_seq_name:
-                            seq_src = os.path.join(target_folder, "process", f"r_{registered_seq_name}.seq")
+                            seq_src = os.path.join(target_folder, "process", f"{registered_seq_name}.seq")
                             if os.path.exists(seq_src):
                                 seq_dest = os.path.splitext(final_file_path)[0] + "_Registration.seq"
                                 shutil.copy(seq_src, seq_dest)

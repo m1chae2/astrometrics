@@ -376,7 +376,25 @@ def _build_stack_quality_summary(  # ruff: ignore[missing-return-type-private-fu
                     registration_frame_paths, registration_frames, strict=False
                 ):
                     frame = frame_by_path.get(frame_path)
-                    if frame is None or frame.registration_fwhm_x_px is not None:
+                    if frame is None:
+                        continue
+                    # Normally the first run's measurements win, so a
+                    # target stacked twice (standard then spectral) does
+                    # not have its facts clobbered by the second pass.
+                    # The exception is a frame carrying shifts that are
+                    # known to be degenerate: runs before the
+                    # registration-sequence fix preserved the *registered*
+                    # sequence, whose frames are already aligned and so
+                    # recorded dx=dy=0 for every frame. A non-zero shift
+                    # now available for that same frame is real data
+                    # replacing a known-bad zero, so it is allowed
+                    # through. A genuine reference frame also has
+                    # dx=dy=0, but this run offers 0 for it too, so it is
+                    # never rewritten.
+                    has_existing_facts = frame.registration_fwhm_x_px is not None
+                    stored_shift_is_degenerate = not frame.registration_dx_px and not frame.registration_dy_px
+                    run_offers_real_shift = bool(registration_facts["dx"] or registration_facts["dy"])
+                    if has_existing_facts and not (stored_shift_is_degenerate and run_offers_real_shift):
                         continue
                     frame.registration_fwhm_x_px = registration_facts["fwhm_x"]
                     frame.registration_fwhm_y_px = registration_facts["fwhm_y"]

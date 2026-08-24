@@ -1,0 +1,412 @@
+"""Purpose: Guiding and Input-Data Quality Analysis.
+
+Description: Turns the per-frame facts already recorded on `FrameRecord`
+into statements about the *acquisition* rather than the processing --
+mount tracking drift, periodic error, trailing, focus drift, and sky
+conditions -- plus a check on whether a pipeline's frame rejection
+actually tracked frame quality.
+
+These are read-only analyses over data other stages recorded. Nothing
+here re-measures a frame or touches disk.
+"""
+
+import logging
+import math
+import statistics
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+# A mount's worm period is the dominant periodic-error term and typically
+# falls in the low minutes; anything far outside this band is more likely
+# drift, wind, or a guiding correction than periodic error. Used only to
+# decide which detected period is worth reporting as PE -- the periodogram
+# itself is unconstrained.
+MINIMUM_PERIODIC_ERROR_PERIOD_SECONDS = 60.0
+MAXIMUM_PERIODIC_ERROR_PERIOD_SECONDS = 1200.0
+
+# A detected period must carry this share of the series' total variance
+# before it is called periodic error rather than noise. Chosen so a flat
+# or purely-drifting series never reports a period.
+MINIMUM_PERIODIC_ERROR_POWER_FRACTION = 0.25
+
+# Above this, a frame's stars are elongated enough that the frame looks
+# trailed rather than merely soft. Siril's roundness is fwhm_min/fwhm_max,
+# so 1.0 is circular and smaller is more elongated.
+TRAILED_FRAME_ROUNDNESS_THRESHOLD = 0.75
+
+
+def _ordered_frames_with_shifts(frames: list) -> list:
+    """Select frames carrying both a timestamp and a registration shift.
+
+    Parameters
+    ----------
+    frames : `list`
+        Frame records to filter.
+
+    Returns
+    -------
+    ordered : `list`
+        The usable frames, sorted by acquisition time.
+    """
+    usable = [
+        frame
+        for frame in frames
+        if frame.timestamp is not None
+        and frame.registration_dx_px is not None
+        and frame.registration_dy_px is not None
+    ]
+    return sorted(usable, key=lambda frame: frame.timestamp)
+
+
+def _linear_trend_per_hour(times: list[float], values: list[float]) -> float | None:
+    """Fit a least-squares slope, expressed per hour.
+
+    Parameters
+    ----------
+    times : `list` [`float`]
+        Epoch seconds, one per sample.
+    values : `list` [`float`]
+        Sample values, aligned with `times`.
+
+    Returns
+    -------
+    slope_per_hour : `float` or `None`
+        The fitted slope in value-units per hour, or `None` if the
+        samples span no time.
+    """
+    if len(times) < 3:
+        return None
+    mean_time = statistics.fmean(times)
+    mean_value = statistics.fmean(values)
+    denominator = sum((time - mean_time) ** 2 for time in times)
+    if denominator == 0:
+        return None
+    numerator = sum(
+        (time - mean_time) * (value - mean_value) for time, value in zip(times, values, strict=True)
+    )
+    return (numerator / denominator) * 3600.0
+
+
+def _dominant_period_seconds(times: list[float], values: list[float]) -> tuple[float | None, float]:
+    """Find the strongest sinusoidal period in an unevenly sampled series.
+
+    A direct Lomb-Scargle-style periodogram: the series is detrended,
+    then correlated against sine and cosine at a sweep of trial periods.
+    Written out rather than pulled from scipy because frames are unevenly
+    spaced (an FFT would need resampling, which invents data at the exact
+    timescale being measured).
+
+    Parameters
+    ----------
+    times : `list` [`float`]
+        Epoch seconds, one per sample.
+    values : `list` [`float`]
+        Sample values, aligned with `times`.
+
+    Returns
+    -------
+    period_seconds : `float` or `None`
+        The strongest period found within the mount-plausible band, or
+        `None` if the series is too short or carries no clear period.
+    power_fraction : `float`
+        The share of the detrended series' variance that period explains,
+        between 0 and 1.
+    """
+    if len(times) < 8:
+        return None, 0.0
+
+    # Detrend first: an uncorrected drift is a much larger signal than
+    # periodic error and would otherwise dominate every trial period.
+    slope_per_hour = _linear_trend_per_hour(times, values)
+    if slope_per_hour is None:
+        return None, 0.0
+    start_time = times[0]
+    mean_time = statistics.fmean(times)
+    mean_value = statistics.fmean(values)
+    # The slope term is centered on the mean time, not the first sample:
+    # anchoring it at the start while also subtracting the mean removes
+    # the trend twice at t=0 and leaves a constant offset in the
+    # residuals. That offset inflates total_power and so deflates every
+    # period's power fraction -- measured on a synthetic 8-minute
+    # periodic error with drift, it pushed a true detection from 0.63
+    # down to 0.20, under the reporting threshold.
+    residuals = [
+        value - mean_value - (slope_per_hour / 3600.0) * (time - mean_time)
+        for time, value in zip(times, values, strict=True)
+    ]
+    total_power = sum(residual**2 for residual in residuals)
+    if total_power <= 0:
+        return None, 0.0
+
+    span_seconds = times[-1] - times[0]
+    if span_seconds <= 0:
+        return None, 0.0
+    # A period is only resolvable if the series covers it at least twice.
+    longest_period = min(MAXIMUM_PERIODIC_ERROR_PERIOD_SECONDS, span_seconds / 2.0)
+    if longest_period <= MINIMUM_PERIODIC_ERROR_PERIOD_SECONDS:
+        return None, 0.0
+
+    best_period = None
+    best_power = 0.0
+    trial_count = 240
+    for step in range(trial_count):
+        period = MINIMUM_PERIODIC_ERROR_PERIOD_SECONDS + (
+            longest_period - MINIMUM_PERIODIC_ERROR_PERIOD_SECONDS
+        ) * (step / (trial_count - 1))
+        angular_frequency = 2.0 * math.pi / period
+        sine_sum = sum(
+            residual * math.sin(angular_frequency * (time - start_time))
+            for time, residual in zip(times, residuals, strict=True)
+        )
+        cosine_sum = sum(
+            residual * math.cos(angular_frequency * (time - start_time))
+            for time, residual in zip(times, residuals, strict=True)
+        )
+        sine_norm = sum(math.sin(angular_frequency * (time - start_time)) ** 2 for time in times)
+        cosine_norm = sum(math.cos(angular_frequency * (time - start_time)) ** 2 for time in times)
+        if sine_norm <= 0 or cosine_norm <= 0:
+            continue
+        power = 0.5 * ((sine_sum**2 / sine_norm) + (cosine_sum**2 / cosine_norm))
+        if power > best_power:
+            best_power = power
+            best_period = period
+
+    return best_period, min(1.0, (2.0 * best_power) / total_power)
+
+
+def analyze_guiding(target: Any) -> dict[str, Any]:
+    """Describe a target's mount behaviour from its per-frame shifts.
+
+    Reports total drift, drift rate, periodic error, and per-frame
+    excursions, all derived from `registration_dx_px`/`registration_dy_px`
+    -- the frame-to-frame translation registration solved for. Those
+    shifts are the acquisition's own record of where the mount actually
+    pointed, so they carry tracking information nothing else here does.
+
+    Parameters
+    ----------
+    target : `Any`
+        The target whose frames are analyzed.
+
+    Returns
+    -------
+    analysis : `dict` [`str`, `Any`]
+        ``usable_frames``, ``span_hours``, ``drift_x_px``/``drift_y_px``
+        (net displacement), ``drift_rate_x_px_per_hour``/
+        ``drift_rate_y_px_per_hour``, ``max_excursion_px``,
+        ``periodic_error_period_seconds``, ``periodic_error_strength``,
+        and ``findings`` (human-readable statements). ``usable_frames``
+        is 0 when no frame carries both a timestamp and a shift.
+    """
+    frames = _ordered_frames_with_shifts(target.frames or [])
+    analysis: dict[str, Any] = {
+        "usable_frames": len(frames),
+        "span_hours": None,
+        "drift_x_px": None,
+        "drift_y_px": None,
+        "drift_rate_x_px_per_hour": None,
+        "drift_rate_y_px_per_hour": None,
+        "max_excursion_px": None,
+        "periodic_error_period_seconds": None,
+        "periodic_error_strength": 0.0,
+        "findings": [],
+    }
+    if len(frames) < 3:
+        analysis["findings"].append(
+            "Not enough frames carry both a timestamp and a registration shift to analyze tracking."
+        )
+        return analysis
+
+    times = [frame.timestamp for frame in frames]
+    shifts_x = [frame.registration_dx_px for frame in frames]
+    shifts_y = [frame.registration_dy_px for frame in frames]
+
+    # Every shift being exactly zero means the shifts were never really
+    # recorded, not that the mount was perfect -- see stacking_tasks'
+    # note on the preserved-sequence fix.
+    if not any(shifts_x) and not any(shifts_y):
+        analysis["findings"].append(
+            "Every frame records a zero shift, so tracking cannot be assessed. "
+            "Re-stack this target to capture real registration shifts."
+        )
+        return analysis
+
+    analysis["span_hours"] = round((times[-1] - times[0]) / 3600.0, 2)
+    analysis["drift_x_px"] = round(shifts_x[-1] - shifts_x[0], 2)
+    analysis["drift_y_px"] = round(shifts_y[-1] - shifts_y[0], 2)
+
+    rate_x = _linear_trend_per_hour(times, shifts_x)
+    rate_y = _linear_trend_per_hour(times, shifts_y)
+    analysis["drift_rate_x_px_per_hour"] = round(rate_x, 2) if rate_x is not None else None
+    analysis["drift_rate_y_px_per_hour"] = round(rate_y, 2) if rate_y is not None else None
+
+    excursions = [
+        math.hypot(x - shifts_x[index - 1], y - shifts_y[index - 1])
+        for index, (x, y) in enumerate(zip(shifts_x, shifts_y, strict=True))
+        if index > 0
+    ]
+    analysis["max_excursion_px"] = round(max(excursions), 2) if excursions else None
+
+    # Periodic error shows in the axis the worm drives; both are tested
+    # and the stronger reported.
+    period_x, power_x = _dominant_period_seconds(times, shifts_x)
+    period_y, power_y = _dominant_period_seconds(times, shifts_y)
+    period, power, axis = (period_x, power_x, "x") if power_x >= power_y else (period_y, power_y, "y")
+    if period is not None and power >= MINIMUM_PERIODIC_ERROR_POWER_FRACTION:
+        analysis["periodic_error_period_seconds"] = round(period)
+        analysis["periodic_error_strength"] = round(power, 3)
+        analysis["findings"].append(
+            f"Periodic drift on the {axis} axis with a ~{period / 60:.1f} minute period "
+            f"explains {power:.0%} of the residual motion, consistent with mount periodic error."
+        )
+
+    for rate, axis_name in ((rate_x, "x"), (rate_y, "y")):
+        if rate is not None and abs(rate) > 10.0:
+            analysis["findings"].append(
+                f"Sustained {axis_name}-axis drift of {rate:.1f} px/hour, "
+                "consistent with polar misalignment or an uncorrected tracking rate."
+            )
+
+    if analysis["max_excursion_px"] and excursions:
+        median_excursion = statistics.median(excursions)
+        if median_excursion > 0 and analysis["max_excursion_px"] > 10 * median_excursion:
+            analysis["findings"].append(
+                f"One frame jumped {analysis['max_excursion_px']:.1f} px against a typical "
+                f"{median_excursion:.1f} px, suggesting a bump, wind gust, or cable snag."
+            )
+
+    if not analysis["findings"]:
+        analysis["findings"].append("No drift, periodic error, or excursion stands out.")
+    return analysis
+
+
+def analyze_input_conditions(target: Any) -> dict[str, Any]:
+    """Describe seeing, trailing, and sky conditions across a target's frames.
+
+    Parameters
+    ----------
+    target : `Any`
+        The target whose frames are analyzed.
+
+    Returns
+    -------
+    analysis : `dict` [`str`, `Any`]
+        Median and spread for FWHM, roundness, and background, the count
+        of trailed frames, and ``findings``.
+    """
+    frames = target.frames or []
+    fwhm_values = [f.registration_fwhm_x_px for f in frames if f.registration_fwhm_x_px is not None]
+    roundness_values = [f.registration_roundness for f in frames if f.registration_roundness is not None]
+    background_values = [f.background_level for f in frames if f.background_level is not None]
+    trailed = [
+        f
+        for f in frames
+        if f.registration_roundness is not None
+        and f.registration_roundness < TRAILED_FRAME_ROUNDNESS_THRESHOLD
+    ]
+
+    analysis: dict[str, Any] = {
+        "median_fwhm_px": round(statistics.median(fwhm_values), 2) if fwhm_values else None,
+        "fwhm_spread_px": round(max(fwhm_values) - min(fwhm_values), 2) if len(fwhm_values) > 1 else None,
+        "median_roundness": round(statistics.median(roundness_values), 3) if roundness_values else None,
+        "trailed_frame_count": len(trailed),
+        "median_background": round(statistics.median(background_values), 1) if background_values else None,
+        "background_spread": round(max(background_values) - min(background_values), 1)
+        if len(background_values) > 1
+        else None,
+        "findings": [],
+    }
+
+    if trailed:
+        analysis["findings"].append(
+            f"{len(trailed)} frame(s) have roundness below "
+            f"{TRAILED_FRAME_ROUNDNESS_THRESHOLD}, meaning visibly elongated stars."
+        )
+    if analysis["fwhm_spread_px"] and analysis["median_fwhm_px"]:
+        if analysis["fwhm_spread_px"] > analysis["median_fwhm_px"]:
+            analysis["findings"].append(
+                f"FWHM varies by {analysis['fwhm_spread_px']:.1f} px around a median of "
+                f"{analysis['median_fwhm_px']:.1f} px -- focus drift or changing seeing."
+            )
+    if analysis["background_spread"] and analysis["median_background"]:
+        if analysis["background_spread"] > analysis["median_background"]:
+            analysis["findings"].append(
+                f"Sky background ranges over {analysis['background_spread']:.0f} ADU against a median "
+                f"of {analysis['median_background']:.0f} -- moonlight, twilight, or cloud."
+            )
+    if not analysis["findings"]:
+        analysis["findings"].append("Seeing, star shape, and sky background are all consistent.")
+    return analysis
+
+
+def evaluate_rejection_effectiveness(target: Any) -> dict[str, Any]:
+    """Check whether frame rejection actually tracked frame quality.
+
+    A pipeline that rejects frames should be rejecting the *worse* ones.
+    Comparing the input quality of rejected frames against kept ones
+    turns that assumption into something checkable: if the two groups
+    look identical, the rejection is not selecting on quality.
+
+    Parameters
+    ----------
+    target : `Any`
+        The target whose stacking summary and frames are compared.
+
+    Returns
+    -------
+    analysis : `dict` [`str`, `Any`]
+        Median background and FWHM for rejected and kept frames, the
+        counts of each, and ``findings``. ``comparable`` is `False` when
+        there are too few measured frames on either side to compare.
+    """
+    summary = getattr(target, "stack_quality_summary", None)
+    metrics = getattr(summary, "stacking_metrics", None) if summary else None
+    excluded = list(getattr(metrics, "excluded_frames", []) or []) if metrics else []
+    excluded_paths = {getattr(entry, "path", None) for entry in excluded}
+
+    rejected = [f for f in (target.frames or []) if f.path in excluded_paths]
+    kept = [f for f in (target.frames or []) if f.path not in excluded_paths]
+
+    def median_of(frames, attribute):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+        values = [getattr(f, attribute) for f in frames if getattr(f, attribute) is not None]
+        return round(statistics.median(values), 2) if values else None
+
+    analysis: dict[str, Any] = {
+        "rejected_count": len(rejected),
+        "kept_count": len(kept),
+        "rejected_median_background": median_of(rejected, "background_level"),
+        "kept_median_background": median_of(kept, "background_level"),
+        "rejected_median_fwhm_px": median_of(rejected, "registration_fwhm_x_px"),
+        "kept_median_fwhm_px": median_of(kept, "registration_fwhm_x_px"),
+        "comparable": False,
+        "findings": [],
+    }
+
+    if not rejected:
+        analysis["findings"].append("No frames were rejected for this target.")
+        return analysis
+    if analysis["rejected_median_background"] is None or analysis["kept_median_background"] is None:
+        analysis["findings"].append(
+            "Rejected and kept frames cannot be compared: input quality has not been measured on both groups."
+        )
+        return analysis
+
+    analysis["comparable"] = True
+    background_ratio = analysis["rejected_median_background"] / max(analysis["kept_median_background"], 1e-9)
+    if background_ratio > 1.5:
+        analysis["findings"].append(
+            f"Rejected frames sit at {background_ratio:.1f}x the sky background of kept frames -- "
+            "rejection is selecting genuinely brighter-sky frames."
+        )
+    elif background_ratio < 0.67:
+        analysis["findings"].append(
+            f"Rejected frames are darker than kept ones ({background_ratio:.2f}x background), "
+            "which is the opposite of what outlier rejection should select."
+        )
+    else:
+        analysis["findings"].append(
+            f"Rejected and kept frames have near-identical sky background "
+            f"({background_ratio:.2f}x), so rejection is not selecting on background."
+        )
+    return analysis

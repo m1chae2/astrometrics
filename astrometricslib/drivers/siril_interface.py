@@ -6,14 +6,18 @@ retrieve the resulting stacked image.
 """
 
 import atexit
+import contextlib
+import fcntl
 import logging
 import os
 import shutil
 import signal
 import subprocess
+import tempfile
 import threading
 import time
 import weakref
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -27,6 +31,134 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 _active_image_processing_instances: weakref.WeakSet = weakref.WeakSet()
+
+# Serializes Siril across every process on this machine. Siril is
+# internally multithreaded and takes the whole box when it runs (400-650%
+# CPU observed on a 12-core machine), so the batch runner's 3 concurrent
+# target workers each launching their own Siril oversubscribes the CPU
+# badly. That is not merely slower: on the 2026-08-23 DSLR run it pushed
+# stacks past `pipeline_tasks.STACKING_TIMEOUT_SECONDS`, producing real
+# failures ("[Sun] Stacking timed out after 600 seconds. Abandoning this
+# stack.") alongside two 300s `solve-field` timeouts.
+#
+# A file lock rather than a `multiprocessing.Lock`: the batch workers are
+# separate processes created by a pool this module knows nothing about,
+# and `process_target` is also reachable from the backend and from
+# scripts, which share no lock object with each other. A lock file in the
+# system temp directory is the one rendezvous point all of them can find.
+#
+# Only the Siril run itself is serialized -- directory building, frame
+# symlinking, and every non-Siril pipeline stage stay parallel, so the
+# concurrency that is actually helping is preserved.
+SIRIL_PROCESS_LOCK_PATH = os.path.join(tempfile.gettempdir(), "astrometricslib-siril.lock")
+
+
+# Master bias/dark/flat frames are rebuilt from scratch for every target,
+# even though the calibration frames themselves come from a shared library
+# keyed by camera/ISO/exposure/filter -- so the *same* master is re-stacked
+# once per target. Measured on the 2026-08-23 DSLR run: master-building
+# cost 168-474s per target (~295s average) across 35 targets, but those 35
+# targets resolve to only 9 distinct calibration combinations. Caching
+# turns ~172 minutes of master-building into ~44.
+#
+# The cache key is derived from the source frames themselves (resolved
+# path, size, mtime) rather than the camera/ISO/exposure metadata, so a
+# changed, added, or removed calibration frame invalidates the master
+# automatically instead of silently serving a stale one.
+CALIBRATION_MASTER_CACHE_DIRECTORY_NAME = "MasterCache"
+
+# The three master kinds, mapped to the staging subdirectory holding
+# their source frames and the master filename Siril's script produces.
+_CALIBRATION_MASTER_KINDS = (
+    ("bias", "biases", "bias_stacked.fits"),
+    ("dark", "darks", "dark_stacked.fits"),
+    ("flat", "flats", "flat_stacked.fits"),
+)
+
+
+def _calibration_source_fingerprint(frames_directory: str) -> str | None:
+    """Fingerprint the calibration frames staged in a directory.
+
+    Each staged frame is a symlink into the shared calibration library,
+    so the *link targets* are fingerprinted, not the links.
+
+    Parameters
+    ----------
+    frames_directory : `str`
+        Staging directory holding one master's source frames.
+
+    Returns
+    -------
+    fingerprint : `str` or `None`
+        A stable hex digest of the frame set, or `None` if the
+        directory is empty or unreadable (nothing to cache).
+    """
+    import hashlib
+
+    try:
+        frame_names = sorted(os.listdir(frames_directory))
+    except OSError:
+        return None
+    if not frame_names:
+        return None
+
+    digest = hashlib.sha256()
+    for frame_name in frame_names:
+        frame_path = os.path.join(frames_directory, frame_name)
+        try:
+            # stat() follows the symlink, so this describes the real
+            # library frame rather than the link this run just made.
+            stat_result = os.stat(frame_path)
+            digest.update(os.path.realpath(frame_path).encode("utf-8"))
+            digest.update(str(stat_result.st_size).encode("utf-8"))
+            digest.update(str(int(stat_result.st_mtime)).encode("utf-8"))
+        except OSError:
+            # An unreadable frame is already skipped when the script is
+            # built; refusing to cache keeps the key honest rather than
+            # fingerprinting a set that will not match what Siril used.
+            return None
+    return digest.hexdigest()
+
+
+@contextlib.contextmanager
+def siril_process_lock(job_logger: logging.Logger | None = None) -> Iterator[None]:
+    """Hold an exclusive machine-wide lock for the duration of a Siril run.
+
+    Blocks until any other process holding the lock releases it. The
+    lock is advisory (`fcntl.flock`), so it binds only callers that go
+    through this helper -- which is every Siril launch in this driver.
+
+    The lock is released by closing the file descriptor, which the
+    kernel does even if the holding process is killed outright, so an
+    abandoned or crashed stack cannot wedge every later one.
+
+    Parameters
+    ----------
+    job_logger : `logging.Logger`, optional
+        Logger used to record that a run is waiting on another Siril
+        run, so a stalled-looking job is explainable from its log.
+
+    Yields
+    ------
+    `None`
+        Control returns to the caller with the lock held.
+    """
+    # Deliberately not a `with open(...)`: the descriptor must outlive
+    # this line and stay open for as long as the lock is held, since
+    # closing it is what releases the lock.
+    lock_file = open(SIRIL_PROCESS_LOCK_PATH, "w")
+    try:
+        try:
+            fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            waiting_message = "Waiting for another Siril run to finish before starting this one..."
+            logger.info(waiting_message)
+            if job_logger:
+                job_logger.info(waiting_message)
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
+        yield
+    finally:
+        lock_file.close()
 
 
 def _frames_use_color_filter_array(frames_directory: str) -> bool:
@@ -230,6 +362,104 @@ class ImageProcessing:
             return True
         except Exception:
             return False
+
+    def restore_cached_calibration_masters(
+        self, target_folder: str, job_logger: logging.Logger | None = None
+    ) -> set[str]:
+        """Copy any already-built masters for this frame set into place.
+
+        See `_calibration_source_fingerprint` for why the same masters
+        were previously rebuilt once per target and what that cost.
+
+        Parameters
+        ----------
+        target_folder : `str`
+            This run's staging directory.
+        job_logger : `logging.Logger`, optional
+            Logger for recording each cache hit.
+
+        Returns
+        -------
+        restored_kinds : `set` [`str`]
+            The master kinds ("bias"/"dark"/"flat") now present in the
+            run's ``process`` directory, whose build steps the
+            generated Siril script can therefore skip.
+        """
+        restored_kinds: set[str] = set()
+        process_directory = os.path.join(target_folder, "process")
+        os.makedirs(process_directory, exist_ok=True)
+
+        for kind, frames_subdirectory, master_filename in _CALIBRATION_MASTER_KINDS:
+            fingerprint = _calibration_source_fingerprint(os.path.join(target_folder, frames_subdirectory))
+            if fingerprint is None:
+                continue
+            cached_master_path = os.path.join(
+                self.workdir,
+                CALIBRATION_MASTER_CACHE_DIRECTORY_NAME,
+                f"{kind}_{fingerprint}.fits",
+            )
+            if not os.path.exists(cached_master_path):
+                continue
+            try:
+                shutil.copy2(cached_master_path, os.path.join(process_directory, master_filename))
+            except OSError as copy_error:
+                # A failed restore is not fatal: leaving the kind out of
+                # restored_kinds makes the script rebuild it as before.
+                logger.debug("Could not restore cached %s master: %s", kind, copy_error)
+                continue
+            restored_kinds.add(kind)
+            if job_logger:
+                job_logger.info(f"Reusing cached master {kind} frame (fingerprint {fingerprint[:12]}).")
+
+        return restored_kinds
+
+    def store_calibration_masters_in_cache(
+        self, target_folder: str, job_logger: logging.Logger | None = None
+    ) -> None:
+        """Save this run's freshly built masters for later runs to reuse.
+
+        Writes via a temporary file plus `os.replace`, so a reader can
+        never observe a half-written master even though several runs
+        may finish around the same time.
+
+        Parameters
+        ----------
+        target_folder : `str`
+            This run's staging directory.
+        job_logger : `logging.Logger`, optional
+            Logger for recording each master cached.
+        """
+        cache_directory = os.path.join(self.workdir, CALIBRATION_MASTER_CACHE_DIRECTORY_NAME)
+        try:
+            os.makedirs(cache_directory, exist_ok=True)
+        except OSError as cache_directory_error:
+            logger.debug("Could not create calibration master cache: %s", cache_directory_error)
+            return
+
+        for kind, frames_subdirectory, master_filename in _CALIBRATION_MASTER_KINDS:
+            built_master_path = os.path.join(target_folder, "process", master_filename)
+            if not os.path.exists(built_master_path):
+                continue
+            fingerprint = _calibration_source_fingerprint(os.path.join(target_folder, frames_subdirectory))
+            if fingerprint is None:
+                continue
+            cached_master_path = os.path.join(cache_directory, f"{kind}_{fingerprint}.fits")
+            if os.path.exists(cached_master_path):
+                continue
+            try:
+                with tempfile.NamedTemporaryFile(
+                    dir=cache_directory, suffix=".partial", delete=False
+                ) as partial_file:
+                    partial_path = partial_file.name
+                shutil.copy2(built_master_path, partial_path)
+                os.replace(partial_path, cached_master_path)
+            except OSError as store_error:
+                logger.debug("Could not cache %s master: %s", kind, store_error)
+                with contextlib.suppress(OSError):
+                    os.unlink(partial_path)
+                continue
+            if job_logger:
+                job_logger.info(f"Cached master {kind} frame (fingerprint {fingerprint[:12]}).")
 
     def build_directories(
         self,
@@ -920,6 +1150,7 @@ class ImageProcessing:
 
         target_folder = None
         res = None
+        siril_lock = contextlib.ExitStack()
         try:
             safe_id = id.replace(" ", "_")
             target_folder = self.build_directories(
@@ -1004,6 +1235,14 @@ class ImageProcessing:
             import re
             import subprocess
 
+            # Held from launch until read_output has drained Siril's
+            # results below, and released by the finally block's
+            # siril_lock.close() on every exit path. Entered via an
+            # ExitStack rather than a `with` block purely to avoid
+            # re-indenting the ~180 lines this span covers; the release
+            # guarantee is the same.
+            siril_lock.enter_context(siril_process_lock(job_logger=job_logger))
+
             process = self.run_siril_headless(
                 command_pipe,
                 output_pipe,
@@ -1041,8 +1280,22 @@ class ImageProcessing:
 
             script = ["setext fits"]
 
+            # Masters already built for this exact set of calibration
+            # frames are copied straight in, and their build steps below
+            # are skipped -- the frames still had to be staged above,
+            # since their fingerprint is what identifies the master.
+            #
+            # Only the *build* steps are skipped. num_biases/num_darks/
+            # num_flats deliberately keep their real values, because the
+            # lights' `calibrate` command reads them to decide whether to
+            # pass -bias=/-dark=/-flat=; zeroing them would silently drop
+            # the very masters just restored.
+            restored_master_kinds = self.restore_cached_calibration_masters(
+                target_folder, job_logger=job_logger
+            )
+
             # REQ: IMG-4.2 - Automated Master Calibration Generation
-            if num_biases > 0:
+            if num_biases > 0 and "bias" not in restored_master_kinds:
                 script += [f"cd {os.path.join(target_folder, 'biases')}"]
                 if num_biases == 1:
                     # Single bias: convert and use directly as master
@@ -1059,7 +1312,7 @@ class ImageProcessing:
                         "stack bias rej 3 3 -nonorm -out=bias_stacked",
                     ]
 
-            if num_darks > 0:
+            if num_darks > 0 and "dark" not in restored_master_kinds:
                 script += [f"cd {os.path.join(target_folder, 'darks')}"]
                 if num_darks == 1:
                     # Single dark: convert and use directly as master
@@ -1076,7 +1329,7 @@ class ImageProcessing:
                         "stack dark rej 3 3 -nonorm -out=dark_stacked",
                     ]
 
-            if num_flats > 0:
+            if num_flats > 0 and "flat" not in restored_master_kinds:
                 script += [f"cd {os.path.join(target_folder, 'flats')}"]
                 if num_flats == 1:
                     script += [
@@ -1182,6 +1435,13 @@ class ImageProcessing:
                 registered_seq_name=seq,
             )
 
+            # Cached here rather than in the finally block: the masters
+            # live inside target_folder, which the finally block deletes
+            # on success, and caching a master from a run that failed
+            # partway risks storing a half-built one.
+            if res:
+                self.store_calibration_masters_in_cache(target_folder, job_logger=job_logger)
+
             # Per-frame zero-order star tracking for spectral
             # stacks: parsed here (while the scratch directory still
             # exists, before the finally block's cleanup) rather
@@ -1236,6 +1496,10 @@ class ImageProcessing:
             return None
         finally:
             self.cleanup_subprocesses()
+            # Released after cleanup_subprocesses so the next waiting
+            # Siril run never starts while this one's process tree is
+            # still being torn down.
+            siril_lock.close()
             job_logger.removeHandler(handler)
             handler.close()
             if db_handler is not None:

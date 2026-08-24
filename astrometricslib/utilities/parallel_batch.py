@@ -23,10 +23,16 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class BatchRunSummary:
-    """Aggregated outcome of a run_parallel_batch() call."""
+    """Aggregated outcome of a run_parallel_batch() call.
+
+    `skipped` holds items a worker reported as having no work to do, kept
+    apart from `succeeded` so a run's headline counts describe work that
+    actually happened rather than counting no-ops as successes.
+    """
 
     succeeded: list[str] = field(default_factory=list)
     failed: list[tuple[str, str]] = field(default_factory=list)
+    skipped: list[tuple[str, str]] = field(default_factory=list)
     results: dict[str, Any] = field(default_factory=dict)
 
 
@@ -112,9 +118,11 @@ def run_parallel_batch(
 
     worker_function must be a module-level (picklable) callable with the
     signature (item_id, *worker_arguments) -> dict, where the returned
-    dict has at least a "status" key ("success" or "failed") and an
-    "error" key populated when status is "failed". Any other keys are
-    passed through to the summary's results mapping unchanged.
+    dict has at least a "status" key ("success", "skipped", or "failed")
+    and an "error" key populated when status is "failed" or "skipped"
+    (carrying the reason, in the latter case). Any other keys are passed
+    through to the summary's results mapping unchanged. A worker that
+    never reports "skipped" simply leaves that summary list empty.
 
     Handles four concerns generically, regardless of what worker_function
     actually does:
@@ -217,8 +225,11 @@ def run_parallel_batch(
                     print(captured_output, end="")
 
                 summary.results[item_id] = result
-                if result.get("status") == "success":
+                item_status = result.get("status")
+                if item_status == "success":
                     summary.succeeded.append(item_id)
+                elif item_status == "skipped":
+                    summary.skipped.append((item_id, result.get("error") or "No work for this item"))
                 else:
                     summary.failed.append((item_id, result.get("error") or "Unknown failure"))
                 report_item_complete(item_id, result)

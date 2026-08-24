@@ -49,6 +49,36 @@ def get_frame_stats(target: Any) -> dict[str, Any]:
     return {"lights": stats}
 
 
+def list_camera_names(targets: list) -> dict[str, int]:
+    """Count frames per distinct camera name across a list of targets.
+
+    Intended for discoverability: callers of pipeline entry points
+    that filter by camera (e.g. `run_full_pipeline`'s `camera_name`)
+    have no other way to know which camera names are actually present
+    in the catalog's frame data before choosing one.
+
+    Parameters
+    ----------
+    targets : `list`
+        The targets whose frames are counted.
+
+    Returns
+    -------
+    counts_by_camera : `Dict[str, int]`
+        Each distinct camera name found (the frame's raw `camera`
+        value, unset frames reported as ``"Unknown"``) mapped to how
+        many frames across all given targets used it, sorted by count
+        descending.
+    """
+    counts: dict[str, int] = {}
+    for target in targets:
+        for frame in target.frames:
+            camera_name = frame.camera or "Unknown"
+            counts[camera_name] = counts.get(camera_name, 0) + 1
+
+    return dict(sorted(counts.items(), key=lambda item: item[1], reverse=True))
+
+
 def get_frame_stats_grouped(target: Any, calibration: Any, camera: str | None = None) -> list[dict[str, Any]]:
     """Return frame statistics grouped by filter and exposure.
 

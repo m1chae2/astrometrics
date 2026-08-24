@@ -276,6 +276,25 @@ class TargetCatalog:
 
         return image_conversions.delete_images(paths, self, target_id)
 
+    def list_camera_names(self) -> dict[str, int]:
+        """Count frames per distinct camera name across the whole catalog.
+
+        Intended for discoverability: there is otherwise no way to
+        know what camera names are actually present in the catalog's
+        frame data before choosing one for `run_full_pipeline`'s (or
+        `Astrometrics.process_all_targets`'s) `camera_name` filter.
+
+        Returns
+        -------
+        counts_by_camera : `dict` [`str`, `int`]
+            Each distinct camera name found mapped to how many frames
+            across the whole catalog used it, sorted by count
+            descending.
+        """
+        from astrometricslib.tasks.target_tasks import statistics_operations
+
+        return statistics_operations.list_camera_names(self.list())
+
     def get_calibration_frame_statistics(
         self,
         target: Target,

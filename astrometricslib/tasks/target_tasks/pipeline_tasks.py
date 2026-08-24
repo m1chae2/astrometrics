@@ -1669,7 +1669,13 @@ def _stack_frames_with_timeout(
     return outcome.get("path")
 
 
-def run_full_pipeline(target: Target, astrometrics: Any, max_workers: int | None = None) -> dict[str, str]:
+def run_full_pipeline(
+    target: Target,
+    astrometrics: Any,
+    max_workers: int | None = None,
+    *,
+    camera_name: str,
+) -> dict[str, str]:
     """Run the full stacking and analysis pipeline sequence.
 
     Executes stacking, astrometry, photometry, and spectroscopy in
@@ -1689,6 +1695,17 @@ def run_full_pipeline(target: Target, astrometrics: Any, max_workers: int | None
         Number of processes to use for the photometry step's
         per-frame parallel work. Passed through to analyze_target;
         `None` preserves that step's own default.
+    camera_name : `str`
+        Case-insensitive substring matched against each frame's
+        camera name; only matching frames are processed, and every
+        other frame on the target -- including from a second camera
+        the target was also captured with -- is silently excluded.
+        Required, keyword-only, and has no default: a multi-camera
+        target silently dropping most of its frames under an
+        unnoticed fallback is worse than a caller being forced to say
+        which camera they mean. Use
+        `TargetCatalog.list_camera_names` to see what's actually
+        present in the catalog before choosing one.
 
     Returns
     -------
@@ -1708,19 +1725,21 @@ def run_full_pipeline(target: Target, astrometrics: Any, max_workers: int | None
     print(f"STARTING BATCH PROCESSING FOR TARGET: {target.id}")
     print("==========================================")
 
-    # Restrict all processing to frames captured with the ZWO ASI533MM Pro
-    asi_frames = [frame for frame in target.frames if "533mm" in (frame.camera or "").lower()]
+    # Restrict all processing to frames captured with the requested
+    # camera; every other camera's frames on this target are excluded.
+    camera_frames = select_frames_for_camera(target, camera_name)
 
-    if not asi_frames:
+    if not camera_frames:
         print(
-            f"[{target.id}] No ZWO ASI533MM Pro frames found for this target. Skipping all processing steps."
+            f"[{target.id}] No frames matching camera '{camera_name}' found for this target. "
+            "Skipping all processing steps."
         )
         return stack_outputs
 
     print(f"[{target.id}] Stacking frames...")
     target_frames = [
         frame
-        for frame in asi_frames
+        for frame in camera_frames
         if not any(k in frame.path.lower() for k in ("_stacked", "starless", "starmask"))
     ]
 
@@ -1770,7 +1789,8 @@ def run_full_pipeline(target: Target, astrometrics: Any, max_workers: int | None
             stack_outputs["spectral"] = stacked_spectral
         else:
             print(
-                f"[{target.id}] No valid ZWO ASI533MM Pro frames found for stacking. Skipping stacking step."
+                f"[{target.id}] No valid frames matching camera '{camera_name}' found for stacking. "
+                "Skipping stacking step."
             )
 
     # 2. Astrometry Analysis
@@ -1790,7 +1810,7 @@ def run_full_pipeline(target: Target, astrometrics: Any, max_workers: int | None
         photometry_results = analyze_target(
             target,
             pipeline_type="photometry",
-            frames=asi_frames,
+            frames=camera_frames,
             butler=astrometrics.butler,
             max_workers=max_workers,
         )

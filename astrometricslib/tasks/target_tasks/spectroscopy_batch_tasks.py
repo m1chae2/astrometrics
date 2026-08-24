@@ -348,12 +348,13 @@ def _merge_batch_summaries(summaries: list[parallel_batch.BatchRunSummary]) -> p
     -------
     merged : `parallel_batch.BatchRunSummary`
         A single summary combining every input summary's succeeded,
-        failed, and results entries.
+        failed, skipped, and results entries.
     """
     merged = parallel_batch.BatchRunSummary()
     for summary in summaries:
         merged.succeeded.extend(summary.succeeded)
         merged.failed.extend(summary.failed)
+        merged.skipped.extend(summary.skipped)
         merged.results.update(summary.results)
     return merged
 

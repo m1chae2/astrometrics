@@ -164,7 +164,7 @@ class Astrometrics:
         self.processing = ProcessingPipelines(self.config)
         self.visualization = Visualization(self)
 
-    def process_all_targets(self, target_ids: list[str] | None = None) -> Any:
+    def process_all_targets(self, target_ids: list[str] | None = None, *, camera_name: str) -> Any:
         """Process many targets' full stacking/analysis pipelines.
 
         Delegates to `batch_processing_operations`, which wires target
@@ -177,6 +177,17 @@ class Astrometrics:
         target_ids : `list` [`str`], optional
             Target ids to process; defaults to every target currently
             in the catalog.
+        camera_name : `str`
+            Case-insensitive substring matched against each frame's
+            camera name; only matching frames are processed for each
+            target, and every other frame -- including from a second
+            camera the target was also captured with -- is silently
+            excluded. Required, keyword-only, and has no default: a
+            multi-camera target silently dropping most of its frames
+            under an unnoticed fallback is worse than a caller being
+            forced to say which camera they mean. Use
+            `TargetCatalog.list_camera_names` to see what's actually
+            present in the catalog before choosing one.
 
         Returns
         -------
@@ -186,7 +197,7 @@ class Astrometrics:
         """
         from astrometricslib.tasks.target_tasks import batch_processing_tasks as batch_processing_operations
 
-        return batch_processing_operations.process_all_targets(self, target_ids)
+        return batch_processing_operations.process_all_targets(self, target_ids, camera_name=camera_name)
 
 
 __all__ = [

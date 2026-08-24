@@ -2146,39 +2146,45 @@ def run_full_pipeline(
         else:
             standard_frames.append(frame)
 
-    siril_concurrency = astrometrics.config.get_siril_concurrency()
-    with disk_interface.acquire_resource_slot(astrometrics.config, "siril", siril_concurrency):
-        if standard_frames and spectral_frames:
-            print(
-                f"[{target.id}] Target contains mixed frames. "
-                f"Stacking standard and spectral frames separately."
-            )
-            stacked_output = _stack_frames_with_timeout(target, standard_frames)
-            if not stacked_output or not os.path.exists(stacked_output):
-                raise ValueError("Standard stacking failed on mixed target.")
-            stacked_spectral = _stack_frames_with_timeout(target, spectral_frames)
-            if not stacked_spectral or not os.path.exists(stacked_spectral):
-                raise ValueError("Spectral stacking failed on mixed target.")
-            print(f"[{target.id}] Stacking succeeded: Standard={stacked_output}, Spectral={stacked_spectral}")
-            stack_outputs["standard"] = stacked_output
-            stack_outputs["spectral"] = stacked_spectral
-        elif standard_frames:
-            stacked_output = _stack_frames_with_timeout(target, standard_frames)
-            if not stacked_output or not os.path.exists(stacked_output):
-                raise ValueError("Standard stacking pipeline returned no valid output path.")
-            print(f"[{target.id}] Standard stacking succeeded: {stacked_output}")
-            stack_outputs["standard"] = stacked_output
-        elif spectral_frames:
-            stacked_spectral = _stack_frames_with_timeout(target, spectral_frames)
-            if not stacked_spectral or not os.path.exists(stacked_spectral):
-                raise ValueError("Spectral stacking pipeline returned no valid output path.")
-            print(f"[{target.id}] Spectral stacking succeeded: {stacked_spectral}")
-            stack_outputs["spectral"] = stacked_spectral
-        else:
-            print(
-                f"[{target.id}] No valid frames matching camera '{camera_name}' found for stacking. "
-                "Skipping stacking step."
-            )
+    # Deliberately no slot acquired here. `siril_interface.siril_process_lock`
+    # takes one around the Siril launch itself, and taking a second from the
+    # same "siril" semaphore here nests them: with two slots and two workers
+    # each takes this outer slot, then both wait forever for an inner slot
+    # neither can release. Observed on 2026-08-24 as two workers parked on
+    # "Waiting for a free Siril slot" with no Siril process running.
+    #
+    # The driver is also the better place for it -- it covers every Siril
+    # launch, including the backend service's, not just this batch path.
+    if standard_frames and spectral_frames:
+        print(
+            f"[{target.id}] Target contains mixed frames. Stacking standard and spectral frames separately."
+        )
+        stacked_output = _stack_frames_with_timeout(target, standard_frames)
+        if not stacked_output or not os.path.exists(stacked_output):
+            raise ValueError("Standard stacking failed on mixed target.")
+        stacked_spectral = _stack_frames_with_timeout(target, spectral_frames)
+        if not stacked_spectral or not os.path.exists(stacked_spectral):
+            raise ValueError("Spectral stacking failed on mixed target.")
+        print(f"[{target.id}] Stacking succeeded: Standard={stacked_output}, Spectral={stacked_spectral}")
+        stack_outputs["standard"] = stacked_output
+        stack_outputs["spectral"] = stacked_spectral
+    elif standard_frames:
+        stacked_output = _stack_frames_with_timeout(target, standard_frames)
+        if not stacked_output or not os.path.exists(stacked_output):
+            raise ValueError("Standard stacking pipeline returned no valid output path.")
+        print(f"[{target.id}] Standard stacking succeeded: {stacked_output}")
+        stack_outputs["standard"] = stacked_output
+    elif spectral_frames:
+        stacked_spectral = _stack_frames_with_timeout(target, spectral_frames)
+        if not stacked_spectral or not os.path.exists(stacked_spectral):
+            raise ValueError("Spectral stacking pipeline returned no valid output path.")
+        print(f"[{target.id}] Spectral stacking succeeded: {stacked_spectral}")
+        stack_outputs["spectral"] = stacked_spectral
+    else:
+        print(
+            f"[{target.id}] No valid frames matching camera '{camera_name}' found for stacking. "
+            "Skipping stacking step."
+        )
 
     # 2. Astrometry Analysis
     print(f"[{target.id}] Running Astrometry Analysis...")

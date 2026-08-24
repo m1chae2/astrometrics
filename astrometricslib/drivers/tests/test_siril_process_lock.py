@@ -129,3 +129,50 @@ def test_lock_intervals_never_overlap():  # ruff: ignore[missing-return-type-und
     assert kinds == ["enter", "exit"] * 3, (
         f"Siril lock intervals overlapped -- two processes held it at once: {events}"
     )
+
+
+def _acquire_via_driver(result_queue, barrier, slot_count: int) -> None:  # ruff: ignore[missing-type-function-argument]
+    """Take a Siril slot the way the stacking path does, then report.
+
+    The barrier holds every worker at the acquisition until all have
+    arrived, so a slot shortage shows up as a hang rather than being
+    hidden by one worker finishing before the next starts.
+    """
+    barrier.wait(timeout=30)
+    with siril_process_lock(max_concurrent_runs=slot_count):
+        result_queue.put("acquired")
+
+
+def test_the_stacking_path_takes_exactly_one_slot():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Two workers must both stack when two slots are configured.
+
+    This is the invariant that the 2026-08-24 deadlock broke. Stacking
+    acquired a "siril" slot in `pipeline_tasks.stack_frames` and again in
+    this driver around the Siril launch, from the same semaphore. With
+    two slots and two workers each took the outer slot, then both waited
+    forever for an inner slot neither could release -- two workers parked
+    on "Waiting for a free Siril slot" with no Siril process running.
+
+    The fix was removing the outer acquisition, leaving the driver as the
+    single place a slot is taken. If a second acquisition is ever
+    reintroduced anywhere in the stacking path, this hangs.
+    """
+    context = multiprocessing.get_context("spawn")
+    result_queue = context.Queue()
+    barrier = context.Barrier(2)
+    workers = [context.Process(target=_acquire_via_driver, args=(result_queue, barrier, 2)) for _ in range(2)]
+    for worker in workers:
+        worker.start()
+
+    acquired = []
+    try:
+        for _ in range(2):
+            acquired.append(result_queue.get(timeout=45))
+    finally:
+        for worker in workers:
+            worker.join(timeout=15)
+            if worker.is_alive():
+                worker.terminate()
+                worker.join(timeout=10)
+
+    assert acquired == ["acquired", "acquired"]

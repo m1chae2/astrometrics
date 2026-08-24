@@ -29,6 +29,67 @@ logger = logging.getLogger(__name__)
 _active_image_processing_instances: weakref.WeakSet = weakref.WeakSet()
 
 
+def _frames_use_color_filter_array(frames_directory: str) -> bool:
+    """Report whether a staged frame directory holds color (CFA) data.
+
+    Siril's ``-cfa``/``-equalize_cfa``/``-debayer`` calibration flags are
+    only meaningful for a sensor with a Bayer color filter array. Applied
+    to a monochrome camera they are actively wrong: Siril logs "No Bayer
+    pattern found in the header file", falls back to a *guessed* RGGB
+    pattern, and demosaics anyway -- turning a 2D mono frame into a
+    3-channel RGB one whose pixels are interpolations across neighbours
+    that were never a color mosaic. Observed on a real ZWO ASI 533MM Pro
+    (monochrome) run: every stacked product came out (3, 3008, 3008)
+    instead of (3008, 3008), and intermediates grew ~6x (416MB -> 2.5GB).
+
+    ``BAYERPAT`` is the authoritative marker and the same one Siril
+    itself looks for: a CFA sensor writes it (e.g. "RGGB"), a mono sensor
+    does not. Frame dimensionality deliberately is *not* used as a
+    signal, because an undebayered CFA frame and a mono frame are both
+    2D and indistinguishable by shape alone.
+
+    Absence of the keyword is treated as monochrome -- the conservative
+    reading, since guessing a pattern is exactly the failure being
+    corrected here.
+
+    Parameters
+    ----------
+    frames_directory : `str`
+        Directory of staged frames to inspect.
+
+    Returns
+    -------
+    uses_color_filter_array : `bool`
+        `True` only if a frame declares a ``BAYERPAT``.
+    """
+    from astropy.io import fits
+
+    try:
+        frame_names = sorted(os.listdir(frames_directory))
+    except OSError as directory_error:
+        logger.debug("Could not list %s for CFA detection: %s", frames_directory, directory_error)
+        return False
+
+    for frame_name in frame_names:
+        frame_path = os.path.join(frames_directory, frame_name)
+        if not os.path.isfile(frame_path):
+            continue
+        try:
+            bayer_pattern = fits.getheader(frame_path).get("BAYERPAT")
+        except Exception as header_error:
+            # A single unreadable frame must not decide the whole stack's
+            # calibration mode; try the next one instead.
+            logger.debug("Could not read header of %s: %s", frame_path, header_error)
+            continue
+        if bayer_pattern is not None and str(bayer_pattern).strip():
+            return True
+        # A readable header with no BAYERPAT is a definitive mono answer;
+        # no need to open the rest of the sequence.
+        return False
+
+    return False
+
+
 def _cleanup_all_active_image_processing_instances() -> None:
     """Clean up any ImageProcessing instances still alive at exit.
 
@@ -875,6 +936,19 @@ class ImageProcessing:
             num_flats = len(os.listdir(os.path.join(target_folder, "flats")))
             num_lights = len(os.listdir(os.path.join(target_folder, "lights")))
 
+            # Decided from the lights, then applied to the flats too: both
+            # sets come from the same camera for a given stack (frames are
+            # filtered by camera_filter above), and mixing modes between
+            # them would calibrate a debayered light against a non-debayered
+            # flat. See `_frames_use_color_filter_array` for why guessing a
+            # Bayer pattern (Siril's own fallback) is the bug being fixed.
+            uses_color_filter_array = _frames_use_color_filter_array(os.path.join(target_folder, "lights"))
+            color_filter_array_flags = " -cfa -equalize_cfa" if uses_color_filter_array else ""
+            job_logger.info(
+                f"Sensor type detected as {'color (CFA)' if uses_color_filter_array else 'monochrome'}; "
+                f"{'applying' if uses_color_filter_array else 'skipping'} CFA/debayer calibration flags."
+            )
+
             # rejection_sigma passed by the caller is an explicit
             # override and always wins. Otherwise, "adaptive" mode
             # (the default) derives sigma from num_lights via
@@ -1015,7 +1089,8 @@ class ImageProcessing:
                     script += ["convert flat -out=../process -fitseq", "cd ../process"]
                     # Calibrate flat with bias if available
                     script += [
-                        f"calibrate flat {'-bias=bias_stacked' if num_biases > 0 else ''} -cfa -equalize_cfa",
+                        f"calibrate flat {'-bias=bias_stacked' if num_biases > 0 else ''}"
+                        f"{color_filter_array_flags}",
                         "stack pp_flat rej 3 3 -norm=mul -out=flat_stacked",
                     ]
 
@@ -1044,9 +1119,13 @@ class ImageProcessing:
                     dark_flag = "-dark=dark_stacked" if num_darks > 0 else ""
                     flat_flag = "-flat=flat_stacked" if num_flats > 0 else ""
                     bias_flag = "-bias=bias_stacked" if num_biases > 0 else ""
+                    # -debayer belongs only to the lights: it is what turns
+                    # a CFA mosaic into an RGB image, and is meaningless
+                    # (and harmful) on monochrome data.
+                    debayer_flag = " -debayer" if uses_color_filter_array else ""
                     script.append(
-                        f"calibrate light_source {dark_flag} {flat_flag} {bias_flag} "
-                        "-cfa -equalize_cfa -debayer"
+                        f"calibrate light_source {dark_flag} {flat_flag} {bias_flag}"
+                        f"{color_filter_array_flags}{debayer_flag}"
                     )
                     seq = "pp_light_source"
                 else:

@@ -21,6 +21,32 @@ from astrometricslib.utilities.image import AstrometricsImage
 
 logger = logging.getLogger(__name__)
 
+# Minimum fraction of a reference frame's detected stars that must resolve
+# to a real catalog identity (SIMBAD or Gaia) before a *reused* header WCS
+# is trusted. Below this, the header solution is discarded and the frame is
+# plate-solved fresh.
+#
+# Derivation: measured across the 12 targets processed in the 2026-08-23
+# full-catalog batch run, comparing each session's header WCS against its
+# target's independently plate-solved stacked-image WCS. Sessions whose
+# header WCS agreed to within the 10 arcsec SIMBAD/Gaia match tolerance
+# used by `StarIdentifier.identify_stars_with_wcs` matched 28.5-42% of
+# detected stars; sessions disagreeing by 33-73 arcsec collapsed to
+# 0-6.2%. The two populations separate cleanly with no observed values
+# between 6.2% and 17%, so 0.10 sits inside that gap with margin on both
+# sides -- high enough to catch every inaccurate-WCS session observed, low
+# enough that a correctly-solved but genuinely sparse field is not
+# re-solved needlessly.
+MIN_CATALOG_MATCH_FRACTION_FOR_REUSED_WCS = 0.10
+
+# Below this many identified stars the match fraction is too noisy to judge
+# a WCS by -- a handful of stars can miss every catalog match by chance.
+# Derivation: Alcor, the sparsest real field in the same run, contributed
+# 34 detected stars at an 11.8% match rate; 20 keeps a field that sparse
+# eligible for verification while excluding ones too thin to conclude
+# anything from.
+MIN_STARS_TO_VERIFY_REUSED_WCS = 20
+
 
 def _write_wcs_to_header(path: str, wcs: WCS) -> None:
     """Merge `wcs`'s header cards into the FITS file at `path` in place.
@@ -52,6 +78,7 @@ def resolve_frame_wcs(
     center_dec: float | None = None,
     sources: list[dict] | None = None,
     write_back: bool = True,
+    ignore_existing_wcs: bool = False,
 ) -> tuple[WCS | None, bool, bool]:
     """Resolve a WCS for `image`, reusing an existing header WCS when possible.
 
@@ -84,6 +111,13 @@ def resolve_frame_wcs(
     write_back : `bool`, optional
         Whether to write a freshly-solved WCS back to `image`'s FITS
         header (default `True`).
+    ignore_existing_wcs : `bool`, optional
+        If `True`, skip the header-WCS reuse path entirely and always
+        plate-solve (default `False`). Used by
+        `identify_session_stars` to re-derive a WCS after a reused
+        header solution failed catalog verification -- `image.wcs` is
+        still populated in that case, so without this the same
+        untrustworthy solution would just be handed back again.
 
     Returns
     -------
@@ -95,7 +129,12 @@ def resolve_frame_wcs(
     solve_attempted : `bool`
         `True` if a fresh plate-solve was actually attempted.
     """
-    if image.wcs is not None and image.wcs.is_celestial:
+    if not ignore_existing_wcs and image.wcs is not None and image.wcs.is_celestial:
+        # NOTE: is_celestial is a *structural* check (does this WCS have
+        # RA/Dec axes), not an accuracy one -- a header solution that is
+        # off by tens of arcsec passes it just as readily as a good one.
+        # `identify_session_stars` verifies the result against catalog
+        # matches and re-solves when this turns out to be untrustworthy.
         return image.wcs, True, False
 
     if not allow_solve:
@@ -132,6 +171,44 @@ def resolve_frame_wcs(
     return wcs, False, True
 
 
+def _catalog_matched_count(stellar_objects: list[StellarObject]) -> int:
+    """Count stars resolved to a real catalog identity.
+
+    Uses `is_catalog_identified`, which both `_apply_simbad_match` and
+    `_apply_gaia_match` set, rather than the presence of a spectral
+    type -- a Gaia match records its spectral type as ``"Unknown"``,
+    so a spectral-type test would silently miscount Gaia-identified
+    stars as unidentified.
+
+    Returns
+    -------
+    matched : `int`
+        How many of `stellar_objects` carry a catalog identity.
+    """
+    return sum(1 for star in stellar_objects if star.is_catalog_identified)
+
+
+def _reused_wcs_looks_untrustworthy(stellar_objects: list[StellarObject]) -> bool:
+    """Report whether a reused header WCS matched too few catalog stars.
+
+    A structurally-valid but astrometrically inaccurate header WCS
+    projects stars far enough from their true sky positions that they
+    fall outside the 10 arcsec SIMBAD/Gaia match radius, so almost
+    nothing identifies. That collapse is the signal this looks for.
+
+    Returns
+    -------
+    untrustworthy : `bool`
+        `True` if there were enough stars to judge by and the catalog
+        match fraction fell below
+        `MIN_CATALOG_MATCH_FRACTION_FOR_REUSED_WCS`.
+    """
+    if len(stellar_objects) < MIN_STARS_TO_VERIFY_REUSED_WCS:
+        return False
+    matched_fraction = _catalog_matched_count(stellar_objects) / len(stellar_objects)
+    return matched_fraction < MIN_CATALOG_MATCH_FRACTION_FOR_REUSED_WCS
+
+
 @dataclass
 class SessionIdentificationResult:
     """Result of identifying a session's stars from its reference frame."""
@@ -143,6 +220,10 @@ class SessionIdentificationResult:
     plate_solve_succeeded: bool = False
     simbad_matched_count: int = 0
     sources_detected: int = 0
+    # True when a reused header WCS matched too few catalog stars to be
+    # trusted and was replaced by a fresh plate solve; see
+    # MIN_CATALOG_MATCH_FRACTION_FOR_REUSED_WCS.
+    header_wcs_replaced_after_verification: bool = False
 
 
 def identify_session_stars(
@@ -209,9 +290,58 @@ def identify_session_stars(
         write_back=write_back,
     )
 
+    height, width = (data.shape[0], data.shape[1]) if data is not None else (0, 0)
+
     if wcs is not None and stellar_objects:
-        h, w = data.shape[0], data.shape[1]
-        star_identifier.identify_stars_with_wcs(stellar_objects, wcs, w, h)
+        star_identifier.identify_stars_with_wcs(stellar_objects, wcs, width, height)
+
+    header_wcs_replaced = False
+    if reused_existing_header_wcs and _reused_wcs_looks_untrustworthy(stellar_objects):
+        matched_before = _catalog_matched_count(stellar_objects)
+        logger.warning(
+            f"Reused header WCS for {reference_image.path} identified only "
+            f"{matched_before}/{len(stellar_objects)} stars against a catalog; "
+            "discarding it and plate-solving this frame fresh."
+        )
+        # write_back=False: the header is only corrected below, once the
+        # fresh solve has actually proven better. Overwriting first would
+        # destroy the existing solution even when the re-solve turns out
+        # worse (or fails outright).
+        fresh_wcs, _, fresh_solve_attempted = resolve_frame_wcs(
+            reference_image,
+            star_identifier,
+            allow_solve=True,
+            center_ra=center_ra,
+            center_dec=center_dec,
+            sources=unique_sources,
+            write_back=False,
+            ignore_existing_wcs=True,
+        )
+        solve_attempted = solve_attempted or fresh_solve_attempted
+
+        if fresh_wcs is not None:
+            # Identify onto *fresh* objects: the first pass already mutated
+            # the originals (ids, names, coordinates), so reusing them would
+            # compare a re-identified list against itself.
+            fresh_objects = star_identifier._build_stellar_objects_from_sources(unique_sources)
+            star_identifier.identify_stars_with_wcs(fresh_objects, fresh_wcs, width, height)
+            matched_after = _catalog_matched_count(fresh_objects)
+
+            if matched_after > matched_before:
+                logger.info(
+                    f"Fresh plate solve for {reference_image.path} improved catalog matches "
+                    f"{matched_before} -> {matched_after}; using it instead of the header WCS."
+                )
+                wcs, stellar_objects = fresh_wcs, fresh_objects
+                reused_existing_header_wcs = False
+                header_wcs_replaced = True
+                if write_back:
+                    _write_wcs_to_header(reference_image.path, fresh_wcs)
+            else:
+                logger.info(
+                    f"Fresh plate solve for {reference_image.path} did not improve catalog "
+                    f"matches ({matched_before} -> {matched_after}); keeping the header WCS."
+                )
 
     simbad_matched_count = sum(1 for star in stellar_objects if star.spectral_type)
 
@@ -223,4 +353,5 @@ def identify_session_stars(
         plate_solve_succeeded=wcs is not None,
         simbad_matched_count=simbad_matched_count,
         sources_detected=sources_detected,
+        header_wcs_replaced_after_verification=header_wcs_replaced,
     )

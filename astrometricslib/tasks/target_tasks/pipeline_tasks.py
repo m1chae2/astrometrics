@@ -14,9 +14,10 @@ instance as its first argument rather than being a method, so that
 
 import logging
 import os
+import re
 import statistics
 import threading
-from typing import Any
+from typing import Any, NamedTuple
 
 from astrometricslib.drivers import disk_interface
 from astrometricslib.models.moving_object import CascadeStage
@@ -28,6 +29,110 @@ logger = logging.getLogger(__name__)
 
 # Maximum time to wait for a single Siril stacking run before giving up on it
 STACKING_TIMEOUT_SECONDS = 600
+
+# Matches the synthetic placeholder id assigned by
+# `StarIdentifier._build_stellar_objects_from_sources` and
+# `VariabilityAnalyzer.process`'s blind-detection path (optionally
+# prefixed, e.g. "sess_20260101:Star_3") to a star that was never
+# resolved to a real catalog id (SIMBAD/Gaia) or a position-derived
+# one (FIELD_J...). A real catalog or position-derived id never
+# matches this pattern.
+_UNRESOLVED_STAR_ID_PATTERN = re.compile(r"^(?:.*:)?Star_\d+$")
+
+
+class StarIdentificationBreakdown(NamedTuple):
+    """How a batch of stars resolved; see `_drop_unresolved_stars`."""
+
+    catalog_matched: int
+    position_only: int
+    unresolved: int
+
+
+def select_frames_for_camera(target: Any, camera_name: str) -> list:
+    """Select the frames on `target` captured with the named camera.
+
+    The single definition of "does this target have work for this
+    camera", shared by `run_full_pipeline` (which processes the frames)
+    and the batch worker (which decides whether the target is a no-op
+    skip rather than a genuine success). Keeping one implementation
+    means the two can never disagree about which targets have frames.
+
+    Matching is a case-insensitive substring test, so a caller may pass
+    either a full camera name or a distinguishing fragment of one.
+
+    Parameters
+    ----------
+    target : `Any`
+        The target whose `frames` are filtered.
+    camera_name : `str`
+        Camera name, matched case-insensitively as a substring.
+
+    Returns
+    -------
+    camera_frames : `list`
+        The matching frames, in their original order.
+    """
+    return [frame for frame in target.frames if camera_name.lower() in (frame.camera or "").lower()]
+
+
+def _drop_unresolved_stars(
+    stellar_objects: list, *, target_id: str, pipeline_name: str
+) -> tuple[list, StarIdentificationBreakdown]:
+    """Filter out stars that were never resolved to a real identity.
+
+    A star that can't be matched to SIMBAD/Gaia and can't even be
+    given a stable position-derived id (its sky position couldn't be
+    determined) is worthless as a persistent catalog entry -- its
+    placeholder id is arbitrary and not reproducible across runs, so
+    saving it would only pollute `stellar_catalog` with rows that can
+    never be merged back into the real star they came from. Dropping
+    it here, right before persistence, keeps this rule in one place
+    regardless of which pipeline (astrometry, spectroscopy,
+    photometry) produced the star.
+
+    Also logs and returns a breakdown of every star's outcome
+    (catalog-matched / position-only / unresolved-and-dropped), so a
+    caller worried about spurious detections has a concrete per-run
+    number to look at instead of only transient DEBUG-level logging
+    from the identification step itself.
+
+    Parameters
+    ----------
+    stellar_objects : `list`
+        Candidate stars to filter.
+    target_id : `str`
+        The target this batch of stars belongs to, for the log line.
+    pipeline_name : `str`
+        Which pipeline produced `stellar_objects` ("astrometry",
+        "spectroscopy", or "photometry"), for the log line.
+
+    Returns
+    -------
+    resolved : `list`
+        The subset of `stellar_objects` with a real or position-derived
+        identity.
+    breakdown : `StarIdentificationBreakdown`
+        Counts of every star's outcome, computed before filtering.
+    """
+    resolved = []
+    catalog_matched = 0
+    position_only = 0
+    unresolved = 0
+    for stellar_object in stellar_objects:
+        if _UNRESOLVED_STAR_ID_PATTERN.match(stellar_object.id):
+            unresolved += 1
+            continue
+        if stellar_object.is_catalog_identified:
+            catalog_matched += 1
+        else:
+            position_only += 1
+        resolved.append(stellar_object)
+
+    logger.info(
+        f"[{target_id}] {pipeline_name} star identification: {catalog_matched} catalog-matched, "
+        f"{position_only} position-only (no catalog match), {unresolved} dropped (no sky position at all)"
+    )
+    return resolved, StarIdentificationBreakdown(catalog_matched, position_only, unresolved)
 
 
 def merge_astrometry_stellar_object(existing_stellar_object, updated_stellar_object):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
@@ -841,6 +946,9 @@ def _run_analysis_pipeline_match(
                 AstrometryQualitySummary,
             )
 
+            context.stellar_objects, star_id_breakdown = _drop_unresolved_stars(
+                context.stellar_objects, target_id=target.id, pipeline_name="astrometry"
+            )
             simbad_matched_count = sum(
                 1 for stellar_object in context.stellar_objects if stellar_object.spectral_type
             )
@@ -851,6 +959,9 @@ def _run_analysis_pipeline_match(
                     solve_attempted=context.solve_attempted,
                     plate_solve_succeeded=context.wcs is not None,
                     simbad_matched_count=simbad_matched_count,
+                    catalog_matched_star_count=star_id_breakdown.catalog_matched,
+                    position_only_star_count=star_id_breakdown.position_only,
+                    unresolved_star_count=star_id_breakdown.unresolved,
                 ),
             )
             if not target.astrometry_quality_summary.astrometry_metrics.plate_solve_succeeded:
@@ -976,7 +1087,9 @@ def _run_analysis_pipeline_match(
 
             spectroscopy = SpectroscopyPipeline()
             limit = kwargs.get("limit", 10)
-            stellar_objects = spectroscopy.process(context, limit=limit)
+            stellar_objects, star_id_breakdown = _drop_unresolved_stars(
+                spectroscopy.process(context, limit=limit), target_id=target.id, pipeline_name="spectroscopy"
+            )
 
             for obj in stellar_objects:
                 if target.id not in obj.target_ids:
@@ -1022,6 +1135,9 @@ def _run_analysis_pipeline_match(
                     dispersion_angle_deg=dispersion_angles[0] if dispersion_angles else None,
                     trail_width_profile_available=trail_width_profile_available,
                     median_trail_width_px=median_trail_width_px,
+                    catalog_matched_star_count=star_id_breakdown.catalog_matched,
+                    position_only_star_count=star_id_breakdown.position_only,
+                    unresolved_star_count=star_id_breakdown.unresolved,
                 ),
             )
             if zero_order_flagged:
@@ -1120,6 +1236,7 @@ def _run_analysis_pipeline_match(
             session_wcs_map: dict[str, Any] = {}
             astrometry_identified_star_count = 0
             sessions_with_reused_header_wcs: list[str] = []
+            sessions_with_replaced_header_wcs: list[str] = []
 
             for session in photometry_sessions:
                 id_prefix = f"{session.id}:" if id_prefix_enabled else ""
@@ -1136,6 +1253,8 @@ def _run_analysis_pipeline_match(
                     astrometry_identified_star_count += identify_result.simbad_matched_count
                     if identify_result.reused_existing_header_wcs:
                         sessions_with_reused_header_wcs.append(session.id)
+                    if identify_result.header_wcs_replaced_after_verification:
+                        sessions_with_replaced_header_wcs.append(session.id)
                 if not analyzer.stellar_objects:
                     session_empty_reasons.append(
                         f"session {session.id}: reference-frame star detection failed, 0 stars processed"
@@ -1194,6 +1313,10 @@ def _run_analysis_pipeline_match(
                 for star in long_term_candidates
             ]
 
+            all_stellar_objects, star_id_breakdown = _drop_unresolved_stars(
+                all_stellar_objects, target_id=target.id, pipeline_name="photometry"
+            )
+
             for obj in all_stellar_objects:
                 if target.id not in obj.target_ids:
                     obj.target_ids.append(target.id)
@@ -1250,6 +1373,10 @@ def _run_analysis_pipeline_match(
                     long_term_variable_candidate_count=len(long_term_candidates),
                     astrometry_identified_star_count=astrometry_identified_star_count,
                     sessions_with_reused_header_wcs=sessions_with_reused_header_wcs,
+                    sessions_with_replaced_header_wcs=sessions_with_replaced_header_wcs,
+                    catalog_matched_star_count=star_id_breakdown.catalog_matched,
+                    position_only_star_count=star_id_breakdown.position_only,
+                    unresolved_star_count=star_id_breakdown.unresolved,
                 ),
             )
             if all_rejected_files:

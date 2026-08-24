@@ -31,6 +31,56 @@ def _make_image_fits(path: str, shape: tuple = (100, 100)) -> None:
     hdu.writeto(path, overwrite=True)
 
 
+def test_drop_unresolved_stars_separates_catalog_position_and_dropped(caplog):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify _drop_unresolved_stars buckets, filters, and logs correctly.
+
+    Catalog-matched (SIMBAD/Gaia) and position-only (FIELD_J) stars
+    are kept and counted separately; bare Star_N placeholders --
+    including session-prefixed ones -- are dropped and counted as
+    unresolved.
+    """
+    import logging
+
+    catalog_star = StellarObject(id="* alf Lyr", name="Vega")
+    catalog_star.is_catalog_identified = True
+
+    position_only_star = StellarObject(id="FIELD_J083344.3-263740")
+    position_only_star.is_catalog_identified = False
+
+    bare_placeholder = StellarObject(id="Star_3")
+    prefixed_placeholder = StellarObject(id="sess1:Star_7")
+
+    with caplog.at_level(logging.INFO, logger="astrometricslib.tasks.target_tasks.pipeline_tasks"):
+        resolved, breakdown = pipeline_tasks._drop_unresolved_stars(
+            [catalog_star, position_only_star, bare_placeholder, prefixed_placeholder],
+            target_id="TestTarget",
+            pipeline_name="astrometry",
+        )
+
+    assert resolved == [catalog_star, position_only_star]
+    assert breakdown.catalog_matched == 1
+    assert breakdown.position_only == 1
+    assert breakdown.unresolved == 2
+
+    assert "TestTarget" in caplog.text
+    assert "astrometry" in caplog.text
+    assert "1 catalog-matched" in caplog.text
+    assert "1 position-only" in caplog.text
+    assert "2 dropped" in caplog.text
+
+
+def test_drop_unresolved_stars_empty_input_returns_zero_counts():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify an empty input produces an empty result and all-zero counts."""
+    resolved, breakdown = pipeline_tasks._drop_unresolved_stars(
+        [], target_id="EmptyTarget", pipeline_name="photometry"
+    )
+
+    assert resolved == []
+    assert breakdown == pipeline_tasks.StarIdentificationBreakdown(
+        catalog_matched=0, position_only=0, unresolved=0
+    )
+
+
 @pytest.mark.filterwarnings("ignore:No sources were found")
 def test_target_analyze_target(tmp_path: Any) -> None:
     """Test that analyzing a target frame runs the astrometry pipeline.
@@ -365,16 +415,15 @@ def test_target_analyze_target_photometry_runs_each_session_independently(tmp_pa
     different calendar night) place 18 stars at a different set of
     positions.
 
-    Rather than asserting a literal star count (DAOStarFinder can pick
-    up a handful of noise peaks alongside the injected sources, making
-    an exact number fragile), this compares against ground truth
-    obtained by running each session's frames through a standalone
-    `VariabilityAnalyzer` directly -- the same detection logic
-    `analyze_target` itself uses -- and also against what a single
-    combined reference-frame run across all 4 frames would find. If
+    Astrometry seeding is stubbed (via `identify_session_stars`) to
+    return a distinct, real (non-placeholder) id and a working WCS
+    -- centered far enough apart between the two sessions that no
+    cross-session sky match is possible -- per session, so every
+    tracked star survives `_drop_unresolved_stars` and the resulting
+    counts are exact rather than an incidental DAOStarFinder count. If
     sessions were incorrectly merged into one analysis (the pre-fix
-    bug), `analyze_target`'s result would match the combined-run count,
-    not the sum of the two independent per-session counts.
+    bug), only one session's reference frame would ever be identified
+    against, so the total would be 12 or 18, never the sum of both.
     """
     monkeypatch.setenv("ASTROMETRICS_CONFIG_PATH", str(tmp_path / "astrometrics.config"))
     config = AppConfiguration()
@@ -408,50 +457,72 @@ def test_target_analyze_target_photometry_runs_each_session_independently(tmp_pa
                 )
             )
 
-    from astrometricslib.tasks.stellar_tasks.photometry_tasks.variability_analyzer import (
-        VariabilityAnalyzer,
-    )
+    from astrometricslib.tasks.stellar_tasks.astrometry_tasks import session_identification
 
-    expected_independent_total = 0
-    for paths in session_paths:
-        standalone_analyzer = VariabilityAnalyzer()
-        standalone_analyzer.process(list(paths))
-        expected_independent_total += len(standalone_analyzer.stellar_objects)
+    # Sky offsets are 190 degrees apart, far beyond the 5 arcsec
+    # cross-session match tolerance, so no session A/B star can ever
+    # accidentally merge into the other session's canonical entry.
+    session_wcs = [_FakeLinearWcs(10.0, 20.0), _FakeLinearWcs(200.0, -20.0)]
 
-    combined_analyzer = VariabilityAnalyzer()
-    combined_analyzer.process(session_paths[0] + session_paths[1])
-    combined_reference_frame_total = len(combined_analyzer.stellar_objects)
+    def _fake_identify_session_stars(  # ruff: ignore[missing-return-type-private-function]
+        reference_image,  # ruff: ignore[missing-type-function-argument]
+        star_identifier,  # ruff: ignore[missing-type-function-argument]
+        center_ra=None,  # ruff: ignore[missing-type-function-argument]
+        center_dec=None,  # ruff: ignore[missing-type-function-argument]
+        **_kw,  # ruff: ignore[missing-type-kwargs]
+    ):
+        session_index = 0 if "session0" in reference_image.path else 1
+        positions = [session_a_positions, session_b_positions][session_index]
+        label = ["SessA", "SessB"][session_index]
+        seed_stars = []
+        for i, (x, y) in enumerate(positions):
+            star = StellarObject(id=f"{label}-{i:03d}", name=f"{label}-{i:03d}")
+            star.star_data = {"xcentroid": x, "ycentroid": y}
+            seed_stars.append(star)
+        return session_identification.SessionIdentificationResult(
+            wcs=session_wcs[session_index],
+            stellar_objects=seed_stars,
+            reused_existing_header_wcs=True,
+            solve_attempted=False,
+            plate_solve_succeeded=True,
+            simbad_matched_count=0,
+            sources_detected=len(seed_stars),
+        )
+
+    monkeypatch.setattr(session_identification, "identify_session_stars", _fake_identify_session_stars)
 
     target = Target(id="PhotometrySessionSplitTestTarget", frames=frames)
 
     result = pipeline_tasks.analyze_target(
-        target, pipeline_type="photometry", butler=butler, use_astrometry_seed=False
+        target, pipeline_type="photometry", butler=butler, use_astrometry_seed=True
     )
+
+    expected_independent_total = len(session_a_positions) + len(session_b_positions)
 
     assert result["status"] == "completed"
     assert result["starsProcessed"] == expected_independent_total
     assert result["starsFound"] == expected_independent_total
-    # The load-bearing contrast: a single shared reference frame across
-    # both sessions finds a different total than two independent
-    # per-session reference frames do, so matching the latter (not the
-    # former) proves genuine per-session splitting happened.
-    assert result["starsProcessed"] != combined_reference_frame_total
 
     summary = target.photometry_quality_summary
     assert summary is not None
     assert len(summary.target_session_ids) == 2
-    frames_contributed = sorted(c.frames_contributed for c in summary.target_session_breakdown)
-    assert frames_contributed == [2, 2]
 
-    # Ids are session-prefixed once there's more than one session, so
-    # stars from the two sessions can never collide in the persisted
-    # stellar_catalog.
+    # These seed stars are real, stable ids but never claim a SIMBAD/Gaia
+    # catalog match (is_catalog_identified stays False), so they land in
+    # the position-only bucket, not catalog-matched -- and nothing here
+    # is unresolved, since every seed star has a usable pixel position.
+    assert summary.photometry_metrics.catalog_matched_star_count == 0
+    assert summary.photometry_metrics.position_only_star_count == expected_independent_total
+    assert summary.photometry_metrics.unresolved_star_count == 0
+
+    # Each session's stars keep their own distinct, real ids -- proof
+    # both sessions' identification results made it into the merged,
+    # persisted set rather than one session's output overwriting or
+    # crowding out the other's.
     persisted_stars = butler.get("stellar_catalog", {}) or []
-    session_scoped_ids = {
-        star.id for star in persisted_stars if star.id.startswith("PhotometrySessionSplitTestTarget:")
-    }
-    assert len(session_scoped_ids) == expected_independent_total
-    assert all(":Star_" in star_id for star_id in session_scoped_ids)
+    persisted_ids = {star.id for star in persisted_stars}
+    assert sum(1 for star_id in persisted_ids if star_id.startswith("SessA-")) == len(session_a_positions)
+    assert sum(1 for star_id in persisted_ids if star_id.startswith("SessB-")) == len(session_b_positions)
 
 
 def test_target_analyze_target_photometry_with_astrometry_seed_uses_identified_stars(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
@@ -483,6 +554,10 @@ def test_target_analyze_target_photometry_with_astrometry_seed_uses_identified_s
     seed_star.right_ascension = 279.23473479
     seed_star.declination = 38.78368896
     seed_star.spectral_type = "A0Va"
+    # A real SIMBAD match always sets this (see _apply_simbad_match);
+    # set it here too so this hand-built seed star is bucketed as
+    # catalog-matched, not position-only, by _drop_unresolved_stars.
+    seed_star.is_catalog_identified = True
 
     from astrometricslib.tasks.stellar_tasks.astrometry_tasks import session_identification
 
@@ -525,10 +600,22 @@ def test_target_analyze_target_photometry_with_astrometry_seed_uses_identified_s
     assert summary is not None
     assert summary.photometry_metrics.astrometry_identified_star_count == 1
     assert summary.photometry_metrics.sessions_with_reused_header_wcs == summary.target_session_ids
+    assert summary.photometry_metrics.catalog_matched_star_count == 1
+    assert summary.photometry_metrics.position_only_star_count == 0
+    assert summary.photometry_metrics.unresolved_star_count == 0
 
 
-def test_target_analyze_target_photometry_without_astrometry_seed_uses_synthetic_ids(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify passing use_astrometry_seed=False uses synthetic IDs."""
+def test_target_analyze_target_photometry_without_astrometry_seed_persists_nothing(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify use_astrometry_seed=False's synthetic-id stars aren't persisted.
+
+    Without astrometry seeding, every tracked star only ever gets a
+    synthetic `Star_N` placeholder id -- there's no sky position or
+    catalog match to derive a real one from. `_drop_unresolved_stars`
+    drops exactly this pattern before it reaches the persistent
+    `stellar_catalog`, since a bare `Star_N` row can never be
+    meaningfully merged back into the physical star it came from on a
+    later run.
+    """
     monkeypatch.setenv("ASTROMETRICS_CONFIG_PATH", str(tmp_path / "astrometrics.config"))
     config = AppConfiguration()
     config.update_config({"Image Library": {"path": str(tmp_path)}})
@@ -550,12 +637,14 @@ def test_target_analyze_target_photometry_without_astrometry_seed_uses_synthetic
     )
 
     assert result["status"] == "completed"
+    assert result["starsProcessed"] == 0
+    assert result["starsFound"] == 0
     summary = target.photometry_quality_summary
     assert summary.photometry_metrics.astrometry_identified_star_count == 0
     assert summary.photometry_metrics.sessions_with_reused_header_wcs == []
 
     persisted_stars = butler.get("stellar_catalog", {}) or []
-    assert all(star.id.startswith("Star_") for star in persisted_stars)
+    assert persisted_stars == []
 
 
 class _FakeLinearWcs:

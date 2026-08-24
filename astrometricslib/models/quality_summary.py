@@ -133,13 +133,24 @@ class StackQualitySummary(PipelineQualitySummaryBase):
 
 # Bumped whenever AstrometryPipelineQualityMetrics's shape changes
 # meaningfully.
-ASTROMETRY_PIPELINE_VERSION = "1.0.0"
+ASTROMETRY_PIPELINE_VERSION = "1.1.0"
 
 
 class AstrometryPipelineQualityMetrics(BaseModel):
     """Astrometry-pipeline-specific quality metrics.
 
     Not shared with other pipelines.
+
+    catalog_matched_star_count/position_only_star_count/unresolved_star_count
+    are a strict breakdown of every star this run identified against:
+    matched to SIMBAD or Gaia (a real name), matched to neither but
+    still given a stable position-derived id (`FIELD_J...`), or
+    matched to neither and never even given a sky position (dropped
+    before persistence -- see `pipeline_tasks._drop_unresolved_stars`).
+    A high position_only/unresolved rate relative to
+    catalog_matched_star_count is worth investigating, though it is
+    not proof by itself of spurious detections -- SIMBAD and Gaia are
+    both incomplete at the faint end.
     """
 
     sources_detected: int
@@ -147,6 +158,9 @@ class AstrometryPipelineQualityMetrics(BaseModel):
     plate_solve_succeeded: bool
     simbad_matched_count: int
     astrometric_residual_rms_arcsec: float | None = None
+    catalog_matched_star_count: int = 0
+    position_only_star_count: int = 0
+    unresolved_star_count: int = 0
 
 
 class AstrometryQualitySummary(PipelineQualitySummaryBase):
@@ -176,7 +190,7 @@ class AstrometryQualitySummary(PipelineQualitySummaryBase):
 
 # Bumped whenever PhotometryPipelineQualityMetrics's shape changes
 # meaningfully.
-PHOTOMETRY_PIPELINE_VERSION = "1.0.0"
+PHOTOMETRY_PIPELINE_VERSION = "1.1.0"
 
 
 class FrameEnsembleComposition(BaseModel):
@@ -211,6 +225,17 @@ class PhotometryPipelineQualityMetrics(BaseModel):
     long_term_variable_candidate_count: int = 0
     astrometry_identified_star_count: int = 0
     sessions_with_reused_header_wcs: list[str] = Field(default_factory=list)
+    # Sessions whose reused header WCS matched too few catalog stars to be
+    # trusted and was replaced by a fresh plate solve; see
+    # `session_identification.MIN_CATALOG_MATCH_FRACTION_FOR_REUSED_WCS`.
+    # A session listed here was salvaged -- its stars would otherwise have
+    # been persisted with sky positions tens of arcsec off.
+    sessions_with_replaced_header_wcs: list[str] = Field(default_factory=list)
+    # See AstrometryPipelineQualityMetrics's docstring for what these
+    # three counts mean; same breakdown, summed across every session.
+    catalog_matched_star_count: int = 0
+    position_only_star_count: int = 0
+    unresolved_star_count: int = 0
 
 
 class PhotometryQualitySummary(PipelineQualitySummaryBase):
@@ -235,7 +260,7 @@ class PhotometryQualitySummary(PipelineQualitySummaryBase):
 
 # Bumped whenever SpectroscopyPipelineQualityMetrics's shape changes
 # meaningfully.
-SPECTROSCOPY_PIPELINE_VERSION = "1.0.0"
+SPECTROSCOPY_PIPELINE_VERSION = "1.1.0"
 
 
 class SpectroscopyPipelineQualityMetrics(BaseModel):
@@ -256,6 +281,14 @@ class SpectroscopyPipelineQualityMetrics(BaseModel):
     trail_width_profile_available: bool = False
     median_trail_width_px: float | None = None
     wavelength_calibration_rms_nm: float | None = None
+    # See AstrometryPipelineQualityMetrics's docstring for what these
+    # three counts mean. Usually a small population here: most of a
+    # spectral stack's blind-detected stars only ever get identified
+    # via geometric registration against a reference field (when one
+    # is available), not independently solved.
+    catalog_matched_star_count: int = 0
+    position_only_star_count: int = 0
+    unresolved_star_count: int = 0
 
 
 class SpectroscopyQualitySummary(PipelineQualitySummaryBase):

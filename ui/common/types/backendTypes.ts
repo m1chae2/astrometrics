@@ -639,6 +639,17 @@ export interface StackQualitySummary {
  * Astrometry-pipeline-specific quality metrics.
  *
  * Not shared with other pipelines.
+ *
+ * catalog_matched_star_count/position_only_star_count/unresolved_star_count
+ * are a strict breakdown of every star this run identified against:
+ * matched to SIMBAD or Gaia (a real name), matched to neither but
+ * still given a stable position-derived id (`FIELD_J...`), or
+ * matched to neither and never even given a sky position (dropped
+ * before persistence -- see `pipeline_tasks._drop_unresolved_stars`).
+ * A high position_only/unresolved rate relative to
+ * catalog_matched_star_count is worth investigating, though it is
+ * not proof by itself of spurious detections -- SIMBAD and Gaia are
+ * both incomplete at the faint end.
  */
 export interface AstrometryPipelineQualityMetrics {
   sources_detected: number;
@@ -646,6 +657,9 @@ export interface AstrometryPipelineQualityMetrics {
   plate_solve_succeeded: boolean;
   simbad_matched_count: number;
   astrometric_residual_rms_arcsec?: number | null;
+  catalog_matched_star_count?: number;
+  position_only_star_count?: number;
+  unresolved_star_count?: number;
 }
 
 /**
@@ -709,6 +723,10 @@ export interface PhotometryPipelineQualityMetrics {
   long_term_variable_candidate_count?: number;
   astrometry_identified_star_count?: number;
   sessions_with_reused_header_wcs?: string[];
+  sessions_with_replaced_header_wcs?: string[];
+  catalog_matched_star_count?: number;
+  position_only_star_count?: number;
+  unresolved_star_count?: number;
 }
 
 /**
@@ -754,6 +772,9 @@ export interface SpectroscopyPipelineQualityMetrics {
   trail_width_profile_available?: boolean;
   median_trail_width_px?: number | null;
   wavelength_calibration_rms_nm?: number | null;
+  catalog_matched_star_count?: number;
+  position_only_star_count?: number;
+  unresolved_star_count?: number;
 }
 
 /**

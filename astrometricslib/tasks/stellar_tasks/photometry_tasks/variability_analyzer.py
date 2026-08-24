@@ -32,6 +32,45 @@ logger = logging.getLogger(__name__)
 # this module's worker-process path).
 _SATURATION_ADU_THRESHOLD = 65000.0
 
+# A comparison star must be measurable in at least this fraction of a
+# target's frames to join the normalization ensemble.
+#
+# Selecting by brightness alone let the ensemble's per-frame membership
+# drift. A star contributes to a frame's median only where it has a
+# positive, unsaturated flux, and faint sources on structured nebular
+# background frequently net zero (see _measure_flux_numpy's max(0.0,
+# ...) clamp). The median was therefore taken over a different set of
+# stars in every frame, so the zero point moved with the membership
+# rather than with the sky -- injecting exactly the frame-to-frame
+# offset the normalization exists to remove.
+#
+# Measured across the 7 targets carrying a scatter metric on
+# 2026-08-24, the fraction of a target's frames holding a full ensemble
+# predicted its light-curve scatter at r = -0.977: 0.059 mag where
+# every frame kept 50 or more comparison stars, against 0.50 mag where
+# most frames kept fewer than 10.
+MINIMUM_ENSEMBLE_COMPLETENESS = 0.8
+
+# Completeness thresholds tried in order, so a sparse field degrades
+# instead of losing normalization outright. Nebula fields are the case
+# that forces this: NGC 1499 and NGC 2244 hold 63% of their frames
+# below 10 comparison stars, and demanding 80% completeness there would
+# select nothing.
+_ENSEMBLE_COMPLETENESS_FALLBACKS = (MINIMUM_ENSEMBLE_COMPLETENESS, 0.6, 0.4, 0.2, 0.0)
+
+# Below this many comparison stars, a frame's normalization factor is
+# not worth applying and the frame is rejected instead.
+#
+# The median of N fluxes carries a standard error near 1.25 / sqrt(N)
+# times the single-star scatter, so 10 stars hold the normalization's
+# own noise to roughly 0.4x that of one star. An ensemble of 1 is worse
+# than noisy, it is degenerate: the factor becomes that star's own
+# flux, forcing its light curve exactly flat and any star sharing those
+# frames toward an equally meaningless value. C 2022 E3 ZTF reported
+# 0.031 mag that way -- the catalog's lowest scatter, produced by 89%
+# of its frames normalizing against fewer than 10 stars.
+MINIMUM_FRAME_ENSEMBLE_SIZE = 10
+
 
 def _read_exposure_seconds(header: Any) -> float:
     """Read a FITS header's exposure duration, in seconds.
@@ -493,6 +532,7 @@ class VariabilityAnalyzer:
         self.timestamp_to_path = {}
         self.rejected_files = []
         self.frame_ensemble_composition: list[FrameEnsembleComposition] = []
+        self.frames_rejected_for_small_ensemble = 0
 
     def load_target_images(self, target_id: str) -> list[str]:
         """Return nothing; deprecated and replaced by ImageService.
@@ -774,6 +814,96 @@ class VariabilityAnalyzer:
 
         return max(0.0, net_flux), is_saturated
 
+    def _count_measurable_frames_per_star(self) -> tuple[dict, int]:
+        """Count the frames each star is actually measurable in.
+
+        A star counts for a frame only where its flux is positive and
+        unsaturated -- the same test the ensemble median applies, so
+        completeness measured here predicts membership there.
+
+        Returns
+        -------
+        measurable_frame_counts : `dict`
+            Star id to the number of frames it is measurable in.
+        total_frame_count : `int`
+            Distinct timestamps across every star's light curve.
+        """
+        measurable_frame_counts: dict = {}
+        timestamps_seen = set()
+        for star in self.stellar_objects:
+            measurable = 0
+            for timestamp, flux, is_saturated in zip(
+                star.light_curve.timestamps,
+                star.light_curve.fluxes,
+                star.light_curve.is_saturated,
+                strict=False,
+            ):
+                timestamps_seen.add(timestamp)
+                if flux > 0 and not is_saturated:
+                    measurable += 1
+            measurable_frame_counts[star.id] = measurable
+        return measurable_frame_counts, len(timestamps_seen)
+
+    def _select_comparison_star_ids(self) -> tuple[set, float]:
+        """Choose comparison stars measurable in most of the frames.
+
+        Completeness is required first and brightness applied second.
+        The brightest sources are still skipped as the most
+        saturation-prone, but only among stars that survive the
+        completeness cut, so the ensemble that reaches step 2 is one
+        whose membership barely changes from frame to frame.
+
+        Thresholds are relaxed in turn rather than failing, so a sparse
+        field ends up with a weaker ensemble instead of none; the
+        threshold that was actually met is returned so the caller can
+        report it rather than imply the strictest one held.
+
+        Returns
+        -------
+        reference_ids : `set`
+            Ids of the stars forming the normalization ensemble.
+        applied_completeness : `float`
+            The completeness threshold these stars actually met.
+        """
+        measurable_frame_counts, total_frame_count = self._count_measurable_frames_per_star()
+        if not total_frame_count:
+            return {star.id for star in self.stellar_objects}, 0.0
+
+        by_brightness = sorted(
+            self.stellar_objects, key=lambda star: star.flux if star.flux else 0, reverse=True
+        )
+
+        for completeness in _ENSEMBLE_COMPLETENESS_FALLBACKS:
+            eligible = [
+                star
+                for star in by_brightness
+                if measurable_frame_counts.get(star.id, 0) >= completeness * total_frame_count
+            ]
+            # Skip the brightest few as the most saturation-prone, but
+            # never so many that the ensemble drops below the floor it
+            # is being built to clear.
+            skip_count = min(len(eligible) // 10, 100)
+            if len(eligible) - skip_count < MINIMUM_FRAME_ENSEMBLE_SIZE:
+                skip_count = 0
+            selected = eligible[skip_count : skip_count + 300]
+            if len(selected) >= MINIMUM_FRAME_ENSEMBLE_SIZE:
+                if completeness < MINIMUM_ENSEMBLE_COMPLETENESS:
+                    logger.warning(
+                        f"  Only {len(selected)} star(s) are measurable in "
+                        f"{MINIMUM_ENSEMBLE_COMPLETENESS:.0%} of frames; relaxed the ensemble "
+                        f"completeness requirement to {completeness:.0%}."
+                    )
+                return {star.id for star in selected}, completeness
+
+        # Even every detected star cannot fill the floor. Return them
+        # all and let the per-frame floor in step 3 decide which frames
+        # are normalizable, rather than guessing here.
+        logger.warning(
+            f"  Fewer than {MINIMUM_FRAME_ENSEMBLE_SIZE} stars are measurable in any useful "
+            f"fraction of the {total_frame_count} frame(s); using every detected star."
+        )
+        return {star.id for star in self.stellar_objects}, 0.0
+
     def normalize_light_curves(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Perform differential photometry using ensemble normalization.
 
@@ -783,23 +913,16 @@ class VariabilityAnalyzer:
         if not self.stellar_objects:
             return
 
-        # 1. Identify "Stable Reference Stars": a percentile window scaled
-        # to the actual detected population, favoring moderately bright
-        # (but not the very brightest, more saturation-prone) sources
-        # over hardcoded absolute indices. A fixed [100:300] slice
-        # silently produced an EMPTY ensemble on fields with far fewer
-        # than ~300 detections (e.g. a nebula field with ~200 total
-        # detections) -- which, per the fallback below and in step 4,
-        # used to wipe every star's light curve down to nothing rather
-        # than fail loudly or adapt.
-        sorted_objects = sorted(self.stellar_objects, key=lambda x: x.flux if x.flux else 0, reverse=True)
-        total_star_count = len(sorted_objects)
-        start_index = min(100, total_star_count // 10)
-        end_index = min(300, start_index + max(1, int(total_star_count * 0.6)))
-        reference_ids = {s.id for s in sorted_objects[start_index:end_index]}
+        # 1. Identify "Stable Reference Stars": stars measurable in most
+        # frames, then windowed by brightness. Completeness comes first
+        # because a star absent from a frame silently changes that
+        # frame's ensemble rather than that frame's factor -- see
+        # MINIMUM_ENSEMBLE_COMPLETENESS.
+        total_star_count = len(self.stellar_objects)
+        reference_ids, applied_completeness = self._select_comparison_star_ids()
         logger.info(
             f"  Normalization ensemble: using {len(reference_ids)} / {total_star_count} stars "
-            f"(indices {start_index}-{end_index})."
+            f"(measurable in >={applied_completeness:.0%} of frames)."
         )
 
         # 2. Collect fluxes per timestamp for a candidate ensemble. A
@@ -855,8 +978,36 @@ class VariabilityAnalyzer:
             for timestamp, fluxes in frame_flux_data.items()
         ]
 
-        # 3. Calculate Normalization Factor per Frame (Median of Ensemble)
-        raw_normalization_factors = {t: np.median(fluxes) for t, fluxes in frame_flux_data.items() if fluxes}
+        # 3. Calculate Normalization Factor per Frame (Median of Ensemble).
+        # A frame whose ensemble collapsed below the floor is rejected
+        # rather than normalized: the flux measurements in it are fine,
+        # but dividing them by a one- or two-star median produces a
+        # normalized value that is wrong in a way nothing downstream can
+        # detect, and step 4's variability search would read it as real.
+        # Dropping the frame loses a measurement; keeping it manufactures
+        # a variable star.
+        starved_frames = {
+            timestamp
+            for timestamp, fluxes in frame_flux_data.items()
+            if len(fluxes) < MINIMUM_FRAME_ENSEMBLE_SIZE
+        }
+        if starved_frames:
+            logger.warning(
+                f"  Rejecting {len(starved_frames)}/{len(frame_flux_data)} frame(s) whose "
+                f"comparison ensemble fell below {MINIMUM_FRAME_ENSEMBLE_SIZE} stars; their "
+                "normalization factor would not be meaningful."
+            )
+            for timestamp in starved_frames:
+                path = self.timestamp_to_path.get(timestamp, "Unknown")
+                if path not in self.rejected_files:
+                    self.rejected_files.append(path)
+        self.frames_rejected_for_small_ensemble = len(starved_frames)
+
+        raw_normalization_factors = {
+            t: np.median(fluxes)
+            for t, fluxes in frame_flux_data.items()
+            if fluxes and t not in starved_frames
+        }
 
         # 3b. Statistical Outlier Rejection (Pass 1: More Aggressive MAD)
         if len(raw_normalization_factors) > 10:

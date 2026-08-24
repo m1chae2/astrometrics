@@ -753,6 +753,7 @@ export interface PhotometryPipelineQualityMetrics {
   frames_processed: number;
   rejected_frames?: ExcludedFrame[];
   frame_ensemble_composition?: FrameEnsembleComposition[];
+  frames_rejected_for_small_ensemble?: number;
   variable_candidate_count: number;
   light_curve_scatter_rms_mag?: number | null;
   cross_session_match_count?: number;

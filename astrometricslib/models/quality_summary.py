@@ -247,6 +247,12 @@ class PhotometryPipelineQualityMetrics(BaseModel):
     frames_processed: int
     rejected_frames: list[ExcludedFrame] = Field(default_factory=list)
     frame_ensemble_composition: list[FrameEnsembleComposition] = Field(default_factory=list)
+    # Frames whose comparison ensemble collapsed below
+    # `variability_analyzer.MINIMUM_FRAME_ENSEMBLE_SIZE` and were
+    # rejected rather than normalized against one or two stars. A high
+    # count means the field is too sparse for reliable differential
+    # photometry, not that the frames were bad.
+    frames_rejected_for_small_ensemble: int = 0
     variable_candidate_count: int
     light_curve_scatter_rms_mag: float | None = None
     cross_session_match_count: int = 0

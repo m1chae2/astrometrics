@@ -425,6 +425,27 @@ class AppConfiguration:
         focal_length = self.get_focal_length_mm()
         return focal_length if focal_length and focal_length > 0 else None
 
+    def get_primary_camera_name(self) -> str | None:
+        """Return the observer's primary camera name, if one is configured.
+
+        Used with `get_primary_focal_length_mm` to decide which of a
+        target's stacks its `stacked_image` points at. Camera alone is
+        not enough -- one camera used through two optics produces two
+        stacks that must not be conflated -- and focal length alone is
+        not either, since two cameras can share a focal length.
+
+        Returns
+        -------
+        camera_name : `str` or `None`
+            The configured ``default_primary_camera``, or `None` when
+            unset.
+        """
+        camera_name = self._get_with_fallback(
+            "Observatory.Camera", "Camera", "default_primary_camera", fallback=""
+        )
+        camera_name = (camera_name or "").strip()
+        return camera_name or None
+
     def get_focal_ratio(self) -> float:
         """Return the telescope focal ratio from the configuration.
 

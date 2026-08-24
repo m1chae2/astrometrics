@@ -247,21 +247,20 @@ def stack_frames(
     if stacked_path:
         if has_spectral:
             target.stacked_spectral_target = stacked_path
-        else:
+        elif _record_configuration_stack(target, target_frames, stacked_path):
             target.stacked_image = stacked_path
-            _record_configuration_stack(target, target_frames, stacked_path)
 
     return stacked_path
 
 
-def _record_configuration_stack(target, target_frames, stacked_path) -> None:  # ruff: ignore[missing-type-function-argument]
-    """Record this stack under the configuration that produced it.
+def _record_configuration_stack(target, target_frames, stacked_path) -> bool:  # ruff: ignore[missing-type-function-argument]
+    """Record this stack under its configuration and say if it is preferred.
 
-    Additive to `stacked_image`, which still points at the preferred
-    optic so every existing reader and the UI are unaffected. Without
-    this, a target imaged through two optics keeps only one stack and
-    the other run's work is lost -- NGC 7023 has 424 frames at one focal
-    length and 111 at another, and both are worth keeping.
+    Additive to `stacked_image`, which still names a single stack so
+    every existing reader and the UI are unaffected. Without this, a
+    target imaged through two optics keeps only one stack and the other
+    run's work is lost -- NGC 7023 has 424 frames at one focal length
+    and 111 at another, and both are worth keeping.
 
     Parameters
     ----------
@@ -272,6 +271,13 @@ def _record_configuration_stack(target, target_frames, stacked_path) -> None:  #
         configuration and count what contributed.
     stacked_path : `str`
         Path of the stack just produced.
+
+    Returns
+    -------
+    should_become_stacked_image : `bool`
+        `True` when `stacked_image` should point at this stack: either
+        this is the observatory's own camera and optic, or nothing
+        preferred has been recorded and some stack is better than none.
     """
     from astrometricslib.models.target import StackConfigurationResult
     from astrometricslib.tasks.target_tasks.pipeline_tasks import frame_configuration_key
@@ -282,35 +288,80 @@ def _record_configuration_stack(target, target_frames, stacked_path) -> None:  #
         # Either no frame carried a focal length, or -- the case this
         # whole mechanism exists to prevent -- the stack blended several
         # optics. Recording it under a single key would assert something
-        # untrue about it, so it is left out.
+        # untrue, but the stack itself is still the only one there is.
         logger.debug(
             "Not recording a per-configuration stack for '%s': %d configurations present.",
             getattr(target, "id", "?"),
             len(keys),
         )
-        return
+        return True
 
     configuration_key = next(iter(keys))
+    camera = (target_frames[0].camera or "") if target_frames else ""
     focal_length = next((frame.focal_length_mm for frame in target_frames if frame.focal_length_mm), None)
+
+    primary_camera = None
     primary_focal_length = None
     try:
         from astrometricslib.utilities.config_loader import get_configuration
 
-        primary_focal_length = get_configuration().get_primary_focal_length_mm()
+        configuration = get_configuration()
+        primary_camera = configuration.get_primary_camera_name()
+        primary_focal_length = configuration.get_primary_focal_length_mm()
     except Exception as configuration_error:
-        logger.debug("Could not read the primary focal length: %s", configuration_error)
+        logger.debug("Could not read the primary camera or optic: %s", configuration_error)
 
-    is_preferred = bool(
+    # Both must match. Focal length alone would mark two cameras sharing
+    # one focal length as equally preferred, and camera alone would do
+    # the same for one camera used through two optics -- and this
+    # library has both cases.
+    optic_matches = bool(
         focal_length and primary_focal_length and round(focal_length) == round(primary_focal_length)
     )
+    camera_matches = bool(primary_camera and camera and _camera_names_match(camera, primary_camera))
+    is_preferred = optic_matches and camera_matches
+
     target.stacks_by_configuration[configuration_key] = StackConfigurationResult(
         configuration_key=configuration_key,
-        camera=(target_frames[0].camera or "") if target_frames else "",
+        camera=camera,
         focal_length_mm=focal_length,
         frames_stacked=len(target_frames),
         stacked_image=stacked_path,
         is_preferred=is_preferred,
     )
+
+    if is_preferred:
+        return True
+
+    # Nothing preferred exists, so this stack is the best answer
+    # available -- a target whose only optic is not the observatory's
+    # primary must still have a stacked_image.
+    return not any(
+        recorded.is_preferred
+        for key, recorded in target.stacks_by_configuration.items()
+        if key != configuration_key
+    )
+
+
+def _camera_names_match(first: str, second: str) -> bool:
+    """Compare two camera names tolerantly.
+
+    Configuration and FITS headers spell the same camera differently --
+    "ZWO ASI533MM Pro" against the header-derived "ZWO ASI 533MM Pro" --
+    so spaces and case are ignored rather than requiring the observer to
+    match the header exactly.
+
+    Parameters
+    ----------
+    first, second : `str`
+        Camera names to compare.
+
+    Returns
+    -------
+    matches : `bool`
+        `True` when the names denote the same camera.
+    """
+    return "".join(first.split()).casefold() == "".join(second.split()).casefold()
 
 
 def _build_stack_quality_summary(  # ruff: ignore[missing-return-type-private-function]

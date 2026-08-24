@@ -29,7 +29,6 @@ import logging
 import os
 import shutil
 import sys
-import time
 from typing import Any
 
 from astrometricslib import Astrometrics
@@ -101,18 +100,24 @@ def free_disk_gigabytes(path: str) -> float:
 
 
 def time_one_slot_count(
-    astrometrics: Any,
     target_ids: list[str],
     camera_name: str,
     focal_length_mm: float | None,
     slot_count: int,
 ) -> dict[str, Any]:
-    """Stack the given targets once with a fixed number of Siril slots.
+    """Stack the given targets once, in a fresh process, at a fixed slot count.
+
+    Each measurement runs as its own subprocess. Python's forkserver
+    start method creates its server process once and forks every later
+    worker from it, so the workers inherit the environment as it stood
+    when that server started -- an override changed between measurements
+    in one process never reaches them. Measured directly: with the
+    environment set to 2, workers still logged "Waiting for a free Siril
+    slot (1 allowed concurrently)", the value from the previous
+    measurement.
 
     Parameters
     ----------
-    astrometrics : `Astrometrics`
-        The high-level interface.
     target_ids : `list` [`str`]
         Targets to stack concurrently.
     camera_name : `str`
@@ -126,35 +131,70 @@ def time_one_slot_count(
     -------
     measurement : `dict`
         ``slot_count``, ``wall_seconds``, ``succeeded``, ``failed`` and
-        ``free_disk_gb_low`` (the lowest free space seen).
+        ``peak_siril`` (the most concurrent Siril processes observed).
     """
-    # Set in the environment rather than patched onto the config object:
-    # the targets run in worker processes that re-import and re-read
-    # configuration, so an in-parent patch reaches none of them. An
-    # earlier version did exactly that and measured the configured
-    # concurrency at every setting -- two Siril processes were running
-    # during the "1 slot" measurement.
-    previous_override = os.environ.get("ASTROMETRICS_SIRIL_CONCURRENCY")
-    os.environ["ASTROMETRICS_SIRIL_CONCURRENCY"] = str(slot_count)
+    import json
+    import subprocess  # ruff: ignore[suspicious-subprocess-import] -- a fresh process is the point
+    import threading
+
+    worker_source = (
+        "import json, sys, time;"
+        f"sys.path.insert(0, {os.getcwd()!r});"
+        "from astrometricslib import Astrometrics;"
+        "a = Astrometrics();"
+        "t0 = time.monotonic();"
+        f"s = a.process_all_targets(target_ids={target_ids!r}, camera_name={camera_name!r},"
+        f" focal_length_mm={focal_length_mm!r});"
+        "print('BENCHMARK_RESULT ' + json.dumps({"
+        "'wall_seconds': round(time.monotonic() - t0, 1),"
+        "'succeeded': len(s.succeeded), 'failed': len(s.failed)}))"
+    )
+
+    environment = dict(os.environ)
+    environment["ASTROMETRICS_SIRIL_CONCURRENCY"] = str(slot_count)
+    environment["HEADLESS"] = "1"
+
+    peak_siril = 0
+    stop_sampling = threading.Event()
+
+    def _sample_siril_processes() -> None:
+        """Track the most concurrent Siril processes seen."""
+        nonlocal peak_siril
+        while not stop_sampling.wait(2.0):
+            try:
+                # Absolute path: a partial one resolves through PATH,
+                # which is not fixed for a sampler running this long.
+                running = subprocess.run(
+                    ["/usr/bin/pgrep", "-x", "-c", "siril"], capture_output=True, text=True
+                )
+                peak_siril = max(peak_siril, int(running.stdout.strip() or 0))
+            except Exception as sampling_error:
+                logger.debug("Siril process sample failed: %s", sampling_error)
+                continue
+
+    sampler = threading.Thread(target=_sample_siril_processes, daemon=True)
+    sampler.start()
     try:
-        started_at = time.monotonic()
-        summary = astrometrics.process_all_targets(
-            target_ids=target_ids,
-            camera_name=camera_name,
-            focal_length_mm=focal_length_mm,
+        completed = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] -- fixed argv
+            [sys.executable, "-c", worker_source], capture_output=True, text=True, env=environment
         )
-        wall_seconds = time.monotonic() - started_at
     finally:
-        if previous_override is None:
-            os.environ.pop("ASTROMETRICS_SIRIL_CONCURRENCY", None)
-        else:
-            os.environ["ASTROMETRICS_SIRIL_CONCURRENCY"] = previous_override
+        stop_sampling.set()
+        sampler.join(timeout=5)
+
+    payload = {"wall_seconds": 0.0, "succeeded": 0, "failed": 0}
+    for line in completed.stdout.splitlines():
+        if line.startswith("BENCHMARK_RESULT "):
+            payload = json.loads(line[len("BENCHMARK_RESULT ") :])
+    if not completed.stdout.count("BENCHMARK_RESULT"):
+        print(f"  (measurement produced no result; stderr tail: {completed.stderr[-300:]})")
 
     return {
         "slot_count": slot_count,
-        "wall_seconds": round(wall_seconds, 1),
-        "succeeded": len(summary.succeeded),
-        "failed": len(summary.failed),
+        "wall_seconds": payload["wall_seconds"],
+        "succeeded": payload["succeeded"],
+        "failed": payload["failed"],
+        "peak_siril": peak_siril,
     }
 
 
@@ -213,26 +253,30 @@ def run_benchmark(argv: list[str] | None = None) -> int:
     measurements = []
     for slot_count in slot_counts:
         print(f"--- {slot_count} slot(s) ---")
-        measurement = time_one_slot_count(astrometrics, target_ids, camera_name, focal_length_mm, slot_count)
+        measurement = time_one_slot_count(target_ids, camera_name, focal_length_mm, slot_count)
         measurement["free_disk_gb_after"] = round(free_disk_gigabytes("/"))
         measurements.append(measurement)
         print(
             f"  {measurement['wall_seconds']:.1f}s  "
             f"succeeded={measurement['succeeded']} failed={measurement['failed']}  "
+            f"peak Siril={measurement['peak_siril']}  "
             f"free disk after: {measurement['free_disk_gb_after']}GB"
         )
 
     print("\n==========================================")
     print("SIRIL CONCURRENCY BENCHMARK")
-    print(f"{'slots':>6s} {'wall_s':>9s} {'speedup':>8s} {'ok':>4s} {'failed':>7s}")
+    print(f"{'slots':>6s} {'wall_s':>9s} {'speedup':>8s} {'ok':>4s} {'failed':>7s} {'peakSiril':>10s}")
     baseline = measurements[0]["wall_seconds"] if measurements else 0.0
     for measurement in measurements:
         speedup = baseline / measurement["wall_seconds"] if measurement["wall_seconds"] else 0.0
         print(
             f"{measurement['slot_count']:>6d} {measurement['wall_seconds']:>9.1f} "
-            f"{speedup:>7.2f}x {measurement['succeeded']:>4d} {measurement['failed']:>7d}"
+            f"{speedup:>7.2f}x {measurement['succeeded']:>4d} {measurement['failed']:>7d} "
+            f"{measurement['peak_siril']:>10d}"
         )
     print("\nSet the winner as [Processing.Parallelism] siril_concurrency.")
+    print("peakSiril below the slot count means the limit was never the constraint -- the")
+    print("measurement says nothing about that setting, so treat it as untested, not as equal.")
     print("A count that raises `failed` is oversubscribing: a stack pushed past its timeout")
     print("is worse than a slow one. Check free disk too -- scratch scales with concurrency.")
     print("==========================================")

@@ -10,6 +10,7 @@ These are read-only analyses over data other stages recorded. Nothing
 here re-measures a frame or touches disk.
 """
 
+import itertools
 import logging
 import math
 import statistics
@@ -29,6 +30,38 @@ MAXIMUM_PERIODIC_ERROR_PERIOD_SECONDS = 1200.0
 # before it is called periodic error rather than noise. Chosen so a flat
 # or purely-drifting series never reports a period.
 MINIMUM_PERIODIC_ERROR_POWER_FRACTION = 0.25
+
+# Silence longer than this ends an observing session. Six hours is
+# longer than any plausible within-night pause (a meridian flip, a cloud
+# break, a refocus) and shorter than the gap between two nights, so it
+# separates sessions without splitting one. This catalog's own frames
+# sit either minutes apart within a night or at least a full day apart
+# between them, so the threshold is not delicately placed.
+SESSION_GAP_HOURS = 6.0
+
+# Sessions shorter than this carry too few shifts for a drift rate or a
+# periodogram to mean anything; they are counted and skipped rather than
+# producing a confident number from three points.
+MINIMUM_SESSION_FRAMES = 5
+
+# A frame-to-frame shift larger than this is not a tracking excursion.
+# No amateur mount moves a thousand pixels between consecutive subs and
+# still produces a stackable sequence; a value that large means the
+# registration transform for that frame is not a small translation.
+#
+# On the 2026-08-24 catalog 670 of 1,666 registered frames (40%) carried
+# such values, exclusively on the colour DSLR targets, clustering at
+# dx~6023/dy~3947 -- essentially the 6000x4000 frame size. NGC 7023 was
+# the worst at 456 of 535, yet stacked all 535 frames with its FWHM
+# *improving* from 8.15px to 5.68px, so the alignment Siril actually
+# applied was sound and only the recorded numbers are wrong.
+#
+# The cause is unconfirmed: `parse_registration_data`'s docstring assumes
+# "only one registration layer is ever present per file", which holds for
+# mono but not for a 3-channel colour sequence where Siril writes R0/R1/R2.
+# Verify against a real colour .seq before trusting these values; until
+# then they are excluded so they cannot masquerade as tracking faults.
+IMPLAUSIBLE_REGISTRATION_SHIFT_PX = 1000.0
 
 # Above this, a frame's stars are elongated enough that the frame looks
 # trailed rather than merely soft. Siril's roundness is fwhm_min/fwhm_max,
@@ -55,8 +88,74 @@ def _ordered_frames_with_shifts(frames: list) -> list:
         if frame.timestamp is not None
         and frame.registration_dx_px is not None
         and frame.registration_dy_px is not None
+        and abs(frame.registration_dx_px) <= IMPLAUSIBLE_REGISTRATION_SHIFT_PX
+        and abs(frame.registration_dy_px) <= IMPLAUSIBLE_REGISTRATION_SHIFT_PX
     ]
     return sorted(usable, key=lambda frame: frame.timestamp)
+
+
+def count_implausible_shifts(frames: list) -> int:
+    """Count frames whose recorded shift cannot be a tracking excursion.
+
+    Parameters
+    ----------
+    frames : `list`
+        Frame records to inspect.
+
+    Returns
+    -------
+    count : `int`
+        Frames carrying a shift beyond
+        `IMPLAUSIBLE_REGISTRATION_SHIFT_PX`.
+    """
+    return sum(
+        1
+        for frame in frames
+        if frame.registration_dx_px is not None
+        and frame.registration_dy_px is not None
+        and (
+            abs(frame.registration_dx_px) > IMPLAUSIBLE_REGISTRATION_SHIFT_PX
+            or abs(frame.registration_dy_px) > IMPLAUSIBLE_REGISTRATION_SHIFT_PX
+        )
+    )
+
+
+def split_frames_into_sessions(frames: list, gap_hours: float = SESSION_GAP_HOURS) -> list[list]:
+    """Split time-ordered frames wherever an observing gap occurs.
+
+    Tracking statistics only mean anything inside one continuous run of
+    the mount. Across a gap the mount has slewed, been re-centred, and
+    very likely been powered down, so a shift measured from one night to
+    the next describes re-pointing, not tracking.
+
+    Concatenating nights produced physically impossible numbers on the
+    2026-08-24 catalog: NGC 7023's 535 frames span 9 separate nights and
+    reported a "span" of 8,094 hours with a 9,779 px excursion -- 1.6x
+    the sensor width -- and M 51's three nights spread over 15 months
+    reported 10,962 hours.
+
+    Parameters
+    ----------
+    frames : `list`
+        Frames carrying timestamps, already sorted by acquisition time.
+    gap_hours : `float`, optional
+        Silence longer than this starts a new session.
+
+    Returns
+    -------
+    sessions : `list` [`list`]
+        One list of frames per session, in time order.
+    """
+    if not frames:
+        return []
+
+    sessions: list[list] = [[frames[0]]]
+    gap_seconds = gap_hours * 3600.0
+    for previous_frame, frame in itertools.pairwise(frames):
+        if frame.timestamp - previous_frame.timestamp > gap_seconds:
+            sessions.append([])
+        sessions[-1].append(frame)
+    return sessions
 
 
 def _linear_trend_per_hour(times: list[float], values: list[float]) -> float | None:
@@ -175,19 +274,22 @@ def _dominant_period_seconds(times: list[float], values: list[float]) -> tuple[f
     return best_period, min(1.0, (2.0 * best_power) / total_power)
 
 
-def analyze_guiding(target: Any) -> dict[str, Any]:
-    """Describe a target's mount behaviour from its per-frame shifts.
+def _analyze_one_session(target: Any, frames: list) -> dict[str, Any]:
+    """Describe one observing session's mount behaviour.
 
-    Reports total drift, drift rate, periodic error, and per-frame
-    excursions, all derived from `registration_dx_px`/`registration_dy_px`
-    -- the frame-to-frame translation registration solved for. Those
-    shifts are the acquisition's own record of where the mount actually
-    pointed, so they carry tracking information nothing else here does.
+    Every statistic here assumes a continuous run of the mount, so the
+    caller must pass a single session's frames -- see
+    `split_frames_into_sessions` for why concatenating nights makes
+    these numbers meaningless.
 
     Parameters
     ----------
     target : `Any`
-        The target whose frames are analyzed.
+        The target the session belongs to, used for meridian-flip
+        detection.
+    frames : `list`
+        One session's frames, time-ordered, each carrying a timestamp
+        and a registration shift.
 
     Returns
     -------
@@ -199,7 +301,6 @@ def analyze_guiding(target: Any) -> dict[str, Any]:
         and ``findings`` (human-readable statements). ``usable_frames``
         is 0 when no frame carries both a timestamp and a shift.
     """
-    frames = _ordered_frames_with_shifts(target.frames or [])
     analysis: dict[str, Any] = {
         "usable_frames": len(frames),
         "span_hours": None,
@@ -294,6 +395,107 @@ def analyze_guiding(target: Any) -> dict[str, Any]:
 
     if not analysis["findings"]:
         analysis["findings"].append("No drift, periodic error, or excursion stands out.")
+    return analysis
+
+
+def _combine_session_analyses(
+    usable_frame_count: int, session_count: int, session_analyses: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Summarise per-session tracking analyses into one report.
+
+    Reports the worst session for each statistic rather than an average.
+    A single bad night is what an observer needs to find, and averaging
+    it against good ones hides exactly the case worth acting on.
+
+    Parameters
+    ----------
+    usable_frame_count : `int`
+        Frames carrying both a timestamp and a registration shift.
+    session_count : `int`
+        Sessions found, including those too short to analyse.
+    session_analyses : `list` [`dict`]
+        One `_analyze_one_session` result per analysed session.
+
+    Returns
+    -------
+    analysis : `dict` [`str`, `Any`]
+        The same keys `_analyze_one_session` produces, taken from the
+        worst session, plus ``sessions_analyzed``, ``sessions_found``
+        and ``sessions`` holding each session's own analysis.
+    """
+
+    def _worst(key: str) -> Any:
+        values = [session[key] for session in session_analyses if session.get(key) is not None]
+        return max(values, key=abs) if values else None
+
+    strongest_periodic = max(
+        session_analyses, key=lambda session: session.get("periodic_error_strength") or 0.0
+    )
+
+    findings: list[str] = []
+    for index, session in enumerate(session_analyses, start=1):
+        for finding in session.get("findings", []):
+            if finding.startswith("No drift"):
+                continue
+            findings.append(f"Session {index}: {finding}")
+    if not findings:
+        findings.append("No drift, periodic error, or excursion stands out in any session.")
+
+    return {
+        "usable_frames": usable_frame_count,
+        "sessions_found": session_count,
+        "sessions_analyzed": len(session_analyses),
+        "sessions": session_analyses,
+        "span_hours": _worst("span_hours"),
+        "drift_x_px": _worst("drift_x_px"),
+        "drift_y_px": _worst("drift_y_px"),
+        "drift_rate_x_px_per_hour": _worst("drift_rate_x_px_per_hour"),
+        "drift_rate_y_px_per_hour": _worst("drift_rate_y_px_per_hour"),
+        "max_excursion_px": _worst("max_excursion_px"),
+        "periodic_error_period_seconds": strongest_periodic.get("periodic_error_period_seconds"),
+        "periodic_error_strength": strongest_periodic.get("periodic_error_strength", 0.0),
+        "meridian_flips": sum(session.get("meridian_flips", 0) or 0 for session in session_analyses),
+        "findings": findings,
+    }
+
+
+def analyze_guiding(target: Any) -> dict[str, Any]:
+    """Describe a target's mount behaviour, session by session.
+
+    Frames are split into observing sessions first, because drift,
+    excursion and periodic error only mean anything within one
+    continuous run of the mount. Analysing a target's frames as a single
+    series reports the re-pointing between nights as tracking error: on
+    the 2026-08-24 catalog that gave NGC 7023 a span of 8,094 hours and
+    a 9,779 px excursion, larger than the sensor is wide.
+
+    Parameters
+    ----------
+    target : `Any`
+        The target whose frames are analyzed.
+
+    Returns
+    -------
+    analysis : `dict` [`str`, `Any`]
+        ``usable_frames``, ``sessions_found``, ``sessions_analyzed``,
+        and ``sessions`` (each session's own analysis), plus the worst
+        session's ``span_hours``, ``drift_x_px``/``drift_y_px``,
+        ``drift_rate_x_px_per_hour``/``drift_rate_y_px_per_hour``,
+        ``max_excursion_px``, ``periodic_error_period_seconds``,
+        ``periodic_error_strength`` and ``findings``.
+    """
+    all_frames = _ordered_frames_with_shifts(target.frames or [])
+    sessions = split_frames_into_sessions(all_frames)
+    long_enough = [session for session in sessions if len(session) >= MINIMUM_SESSION_FRAMES]
+    session_analyses = [_analyze_one_session(target, session) for session in long_enough]
+
+    if session_analyses:
+        return _combine_session_analyses(len(all_frames), len(sessions), session_analyses)
+
+    analysis = _analyze_one_session(target, all_frames)
+    analysis["sessions_found"] = len(sessions)
+    analysis["sessions_analyzed"] = 0
+    analysis["sessions"] = []
     return analysis
 
 

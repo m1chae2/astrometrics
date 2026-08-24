@@ -39,10 +39,15 @@ def run_script_as_subprocess(module_name: str) -> None:
     )
 
 
-@pytest.mark.slow
-def test_script_reset_stellar_object_library():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Run astrometricslib/scripts/reset_stellar_object_library script."""
-    run_script_as_subprocess("astrometricslib.scripts.reset_stellar_object_library")
+# NOTE: astrometricslib/scripts/reset_stellar_object_library.py is
+# deliberately NOT exercised here. `run_script_as_subprocess` runs against
+# the real config and database (see its docstring), and that script deletes
+# every row in the stellar catalog -- so covering it meant a plain
+# `pytest astrometricslib` silently destroyed the user's real stellar
+# catalog. The script itself is fine and still shipped; it just cannot be
+# smoke-tested against production data. Restoring coverage for it requires
+# pointing the subprocess at a throwaway library path first (the conftest
+# sandbox does not reach subprocesses, which is why this went unnoticed).
 
 
 @pytest.mark.slow

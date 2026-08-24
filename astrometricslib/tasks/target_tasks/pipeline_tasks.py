@@ -127,6 +127,113 @@ def select_frames_for_camera(target: Any, camera_name: str) -> list:
     return [frame for frame in target.frames if camera_name.lower() in (frame.camera or "").lower()]
 
 
+def frame_configuration_key(frame: Any) -> str | None:
+    """Name the camera-and-optic configuration a frame belongs to.
+
+    Frames may only be stacked with others of the same configuration.
+    Two optics of different focal length image at different scales --
+    this library's 300mm lens and 405mm telescope differ by 1.35x -- so
+    a stack blending them has no single pixel scale, cannot be plate
+    solved accurately, and yields fluxes that are not comparable between
+    frames. Seven targets were being stacked that way, including
+    NGC 7023 (424 frames at 300mm with 111 at 405mm).
+
+    Parameters
+    ----------
+    frame : `Any`
+        The frame record to key.
+
+    Returns
+    -------
+    configuration_key : `str` or `None`
+        ``"<camera>@<focal>mm"``, or `None` when the frame records no
+        focal length and therefore cannot be safely grouped.
+    """
+    focal_length = getattr(frame, "focal_length_mm", None)
+    if not focal_length or focal_length <= 0:
+        return None
+    camera = (getattr(frame, "camera", None) or "Unknown").strip()
+    # Rounded to whole millimetres so 405.0 and 405 key identically; no
+    # real optic is distinguished by a fraction of a millimetre.
+    return f"{camera}@{round(float(focal_length))}mm"
+
+
+def group_frames_by_configuration(target: Any, camera_name: str | None = None) -> dict[str, list]:
+    """Group a target's light frames into stackable configurations.
+
+    Parameters
+    ----------
+    target : `Any`
+        The target whose `frames` are grouped.
+    camera_name : `str`, optional
+        Restrict to this camera, matched case-insensitively as a
+        substring. Defaults to every camera.
+
+    Returns
+    -------
+    frames_by_configuration : `dict` [`str`, `list`]
+        Frames keyed by `frame_configuration_key`, largest group first.
+        Frames without a focal length are omitted entirely -- see
+        `frames_missing_focal_length`, which reports them so they are
+        never dropped silently.
+    """
+    grouped: dict[str, list] = {}
+    for frame in target.frames or []:
+        if camera_name and camera_name.lower() not in (frame.camera or "").lower():
+            continue
+        key = frame_configuration_key(frame)
+        if key is None:
+            continue
+        grouped.setdefault(key, []).append(frame)
+    return dict(sorted(grouped.items(), key=lambda item: -len(item[1])))
+
+
+def frames_missing_focal_length(target: Any, camera_name: str | None = None) -> list:
+    """Report frames that cannot be assigned to any configuration.
+
+    Omitting a frame is a real loss, so callers are expected to surface
+    this rather than let it pass. On this library 602 frames carry no
+    FOCALLEN, and three targets consist entirely of them -- including a
+    comet that cannot be re-imaged.
+
+    Parameters
+    ----------
+    target : `Any`
+        The target whose `frames` are inspected.
+    camera_name : `str`, optional
+        Restrict to this camera, matched as a case-insensitive substring.
+
+    Returns
+    -------
+    unassignable_frames : `list`
+        Frames with no usable focal length.
+    """
+    return [
+        frame
+        for frame in target.frames or []
+        if (not camera_name or camera_name.lower() in (frame.camera or "").lower())
+        and frame_configuration_key(frame) is None
+    ]
+
+
+def select_frames_for_configuration(target: Any, configuration_key: str) -> list:
+    """Select the frames belonging to one camera-and-optic configuration.
+
+    Parameters
+    ----------
+    target : `Any`
+        The target whose `frames` are filtered.
+    configuration_key : `str`
+        A key as produced by `frame_configuration_key`.
+
+    Returns
+    -------
+    configuration_frames : `list`
+        The matching frames, in their original order.
+    """
+    return [frame for frame in target.frames or [] if frame_configuration_key(frame) == configuration_key]
+
+
 def _drop_unresolved_stars(
     stellar_objects: list, *, target_id: str, pipeline_name: str
 ) -> tuple[list, StarIdentificationBreakdown]:
@@ -1923,6 +2030,7 @@ def run_full_pipeline(
     max_workers: int | None = None,
     *,
     camera_name: str,
+    focal_length_mm: float | None = None,
 ) -> dict[str, str]:
     """Run the full stacking and analysis pipeline sequence.
 
@@ -1976,6 +2084,37 @@ def run_full_pipeline(
     # Restrict all processing to frames captured with the requested
     # camera; every other camera's frames on this target are excluded.
     camera_frames = select_frames_for_camera(target, camera_name)
+
+    # Then narrow to a single optic. Frames of different focal length
+    # image at different scales -- this library's 300mm and 405mm optics
+    # differ by 1.35x -- so a stack blending them has no single pixel
+    # scale, cannot be plate solved accurately, and produces fluxes that
+    # are not comparable between frames. Seven targets were being
+    # stacked that way, NGC 7023 worst at 424 frames of one optic mixed
+    # with 111 of the other.
+    if focal_length_mm is not None:
+        requested_key_suffix = f"@{round(float(focal_length_mm))}mm"
+        selected_frames = [
+            frame
+            for frame in camera_frames
+            if (frame_configuration_key(frame) or "").endswith(requested_key_suffix)
+        ]
+        if not selected_frames:
+            print(
+                f"[{target.id}] No frames at {focal_length_mm:g}mm for camera '{camera_name}'. "
+                "Skipping all processing steps."
+            )
+            return stack_outputs
+        unassignable = frames_missing_focal_length(target, camera_name)
+        if unassignable:
+            # Never dropped silently: a frame with no FOCALLEN cannot be
+            # grouped, and on this library that is 602 frames. See
+            # scripts/backfill_focal_length.
+            print(
+                f"[{target.id}] {len(unassignable)} frame(s) excluded: no FOCALLEN recorded, "
+                "so their optic is unknown."
+            )
+        camera_frames = selected_frames
 
     if not camera_frames:
         print(

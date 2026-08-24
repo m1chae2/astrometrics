@@ -52,6 +52,7 @@ export interface FrameRecord {
   altitudeDegrees?: number | null;
   azimuthDegrees?: number | null;
   pixelScaleArcsec?: number | null;
+  focalLengthMm?: number | null;
   binning?: number | null;
   sensorTemperatureC?: number | null;
   focuserPosition?: number | null;
@@ -103,6 +104,22 @@ export interface TelescopeStatus {
 }
 
 /**
+ * One camera-and-optic configuration's stacking result.
+ *
+ * A target imaged through two optics has two valid stacks that must
+ * not be combined, since their pixel scales differ. This holds the
+ * result for one of them so the other is not lost.
+ */
+export interface StackConfigurationResult {
+  configurationKey: string;
+  camera?: string;
+  focalLengthMm?: number | null;
+  framesStacked?: number;
+  stackedImage?: string;
+  isPreferred?: boolean;
+}
+
+/**
  * Pure data schema for astronomical targets.
  *
  * Algorithmic operations (stacking, analysis, pipelines) are free
@@ -124,6 +141,7 @@ export interface TargetObject {
   mount?: string;
   processedImage?: string;
   stackedImage?: string;
+  stacksByConfiguration?: Record<string, StackConfigurationResult>;
   stackedSpectralTarget?: string;
   stackQualitySummary?: StackQualitySummary | null;
   spectralStackQualitySummary?: StackQualitySummary | null;

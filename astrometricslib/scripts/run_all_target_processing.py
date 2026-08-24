@@ -19,6 +19,7 @@ import argparse
 import logging
 import os
 import sys
+from typing import Any
 
 # Disable opening Siril GUI when stacking completes -- must be set
 # before astrometricslib is imported, since a batch run across every
@@ -71,6 +72,64 @@ def _print_pass_summary(camera_name: str, summary: BatchRunSummary) -> None:
     print("==========================================")
 
 
+def _resolve_focal_lengths(astrometrics: Astrometrics, targets: list, arguments: Any) -> list:
+    """Decide which optic(s) this run processes.
+
+    An explicit --optic wins. --all-optics runs every focal length
+    present in the selection, primary first, so a target imaged through
+    two optics ends up with a stack for each. Otherwise the observatory's
+    primary optic is used, which is what makes a plain run deterministic
+    rather than dependent on whichever frames happen to be present.
+
+    Parameters
+    ----------
+    astrometrics : `Astrometrics`
+        Interface providing the configuration.
+    targets : `list`
+        The targets this run will process.
+    arguments : `Any`
+        Parsed command-line arguments.
+
+    Returns
+    -------
+    focal_lengths : `list`
+        Focal lengths in millimetres, in the order passes should run. A
+        single `None` means "every focal length", used only when no
+        primary is configured and none could be discovered.
+    """
+    if arguments.focal_length_mm:
+        return [arguments.focal_length_mm]
+
+    primary = astrometrics.config.get_primary_focal_length_mm()
+    if not arguments.all_optics:
+        if primary:
+            print(f"Using the primary optic: {primary:g}mm (from [Observatory.Telescope]).")
+            return [primary]
+        print(
+            "WARNING: no primary optic configured ([Observatory.Telescope] focal_length_mm); "
+            "frames of differing focal length may be stacked together."
+        )
+        return [None]
+
+    present = sorted({
+        round(float(frame.focal_length_mm))
+        for target in targets
+        for frame in (target.frames or [])
+        if getattr(frame, "focal_length_mm", None)
+    })
+    if not present:
+        print("No frame records a focal length yet; run a reindex, or backfill_focal_length.")
+        return [None]
+    # Primary first so its stack is written before any other optic's,
+    # making it the one a reader sees if a later pass is interrupted.
+    ordered = [float(value) for value in present]
+    if primary and round(primary) in present:
+        ordered.remove(float(round(primary)))
+        ordered.insert(0, float(round(primary)))
+    print(f"Running one pass per optic: {', '.join(f'{value:g}mm' for value in ordered)}")
+    return ordered
+
+
 def _reindex_targets(astrometrics: Astrometrics, targets: list) -> None:
     """Reindex the given targets and refresh their header metadata.
 
@@ -119,6 +178,25 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         "--targets-from",
         metavar="PATH",
         help="Read target ids from a file, one per line; blank lines and # comments ignored.",
+    )
+    parser.add_argument(
+        "--optic",
+        type=float,
+        dest="focal_length_mm",
+        metavar="MM",
+        help=(
+            "Process only frames taken at this focal length, in millimetres. Defaults to the "
+            "primary optic from [Observatory.Telescope] focal_length_mm, so a target imaged "
+            "through two optics stacks the observatory's own rather than blending scales."
+        ),
+    )
+    parser.add_argument(
+        "--all-optics",
+        action="store_true",
+        help=(
+            "Run a separate pass per focal length instead of only the primary one. Each optic "
+            "gets its own stack; the primary remains the target's stacked_image."
+        ),
     )
     parser.add_argument(
         "--dry-run",
@@ -262,6 +340,18 @@ def run_full_processing(argv: list[str] | None = None) -> None:
         )
 
     if arguments.dry_run:
+        # Resolved here too, so a preview shows which optic a real run
+        # would use -- the whole point of previewing before a long job.
+        for focal_length_mm in _resolve_focal_lengths(astrometrics, targets, arguments):
+            if focal_length_mm:
+                matching = sum(
+                    1
+                    for t in targets
+                    for f in (t.frames or [])
+                    if getattr(f, "focal_length_mm", None)
+                    and round(float(f.focal_length_mm)) == round(focal_length_mm)
+                )
+                print(f"  optic {focal_length_mm:g}mm -> {matching} frame(s) in this selection")
         asi_ids = [t.id for t in targets if select_frames_for_camera(t, ASI_CAMERA_NAME)]
         nikon_ids = [
             t.id
@@ -301,21 +391,35 @@ def run_full_processing(argv: list[str] | None = None) -> None:
         and not select_frames_for_camera(target, ASI_CAMERA_NAME)
     ]
 
-    print(f"\n--- Pass 1: {ASI_CAMERA_NAME} ---")
-    if asi_target_ids:
-        asi_summary = astrometrics.process_all_targets(target_ids=asi_target_ids, camera_name=ASI_CAMERA_NAME)
-        _print_pass_summary(ASI_CAMERA_NAME, asi_summary)
-    else:
-        print("No targets with ASI533MM frames in this selection; skipping this pass.")
+    # Which optic(s) to run. Defaults to the observatory's primary --
+    # frames of different focal length image at different scales and must
+    # never share a stack, so processing every optic at once is not an
+    # option; the choice is which one a plain run produces.
+    focal_lengths = _resolve_focal_lengths(astrometrics, targets, arguments)
 
-    print(f"\n--- Pass 2: {NIKON_CAMERA_NAME} (targets without ASI533MM data only) ---")
-    if not nikon_only_target_ids:
-        print("No Nikon-only targets found; skipping this pass.")
-        return
-    nikon_summary = astrometrics.process_all_targets(
-        target_ids=nikon_only_target_ids, camera_name=NIKON_CAMERA_NAME
-    )
-    _print_pass_summary(NIKON_CAMERA_NAME, nikon_summary)
+    for focal_length_mm in focal_lengths:
+        optic_label = f" @ {focal_length_mm:g}mm" if focal_length_mm else ""
+        print(f"\n--- Pass 1: {ASI_CAMERA_NAME}{optic_label} ---")
+        if asi_target_ids:
+            asi_summary = astrometrics.process_all_targets(
+                target_ids=asi_target_ids,
+                camera_name=ASI_CAMERA_NAME,
+                focal_length_mm=focal_length_mm,
+            )
+            _print_pass_summary(f"{ASI_CAMERA_NAME}{optic_label}", asi_summary)
+        else:
+            print("No targets with ASI533MM frames in this selection; skipping this pass.")
+
+        print(f"\n--- Pass 2: {NIKON_CAMERA_NAME}{optic_label} (targets without ASI533MM only) ---")
+        if not nikon_only_target_ids:
+            print("No Nikon-only targets found; skipping this pass.")
+            continue
+        nikon_summary = astrometrics.process_all_targets(
+            target_ids=nikon_only_target_ids,
+            camera_name=NIKON_CAMERA_NAME,
+            focal_length_mm=focal_length_mm,
+        )
+        _print_pass_summary(f"{NIKON_CAMERA_NAME}{optic_label}", nikon_summary)
 
 
 # This guard is REQUIRED, not stylistic boilerplate: `process_all_targets`

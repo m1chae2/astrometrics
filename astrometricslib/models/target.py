@@ -73,6 +73,13 @@ class FrameRecord(BaseModel):
     altitude_degrees: float | None = Field(default=None, alias="altitudeDegrees")
     azimuth_degrees: float | None = Field(default=None, alias="azimuthDegrees")
     pixel_scale_arcsec: float | None = Field(default=None, alias="pixelScaleArcsec")
+    # Which optic took this frame, in millimetres. Recorded per frame
+    # rather than taken from configuration because a library can span
+    # several optics: this one holds 1,596 frames at 300mm and 1,055 at
+    # 405mm, and seven targets had both mixed into a single stack, whose
+    # scales differ by 1.35x. Frames must be grouped by this before
+    # stacking -- see `select_frames_for_configuration`.
+    focal_length_mm: float | None = Field(default=None, alias="focalLengthMm")
     binning: int | None = Field(default=None, alias="binning")
     sensor_temperature_c: float | None = Field(default=None, alias="sensorTemperatureC")
     focuser_position: int | None = Field(default=None, alias="focuserPosition")
@@ -139,6 +146,24 @@ class MosaicInfo(BaseModel):
     panels: list[str] = Field(default_factory=list, alias="panels")
 
 
+class StackConfigurationResult(BaseModel):
+    """One camera-and-optic configuration's stacking result.
+
+    A target imaged through two optics has two valid stacks that must
+    not be combined, since their pixel scales differ. This holds the
+    result for one of them so the other is not lost.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    configuration_key: str = Field(alias="configurationKey")
+    camera: str = Field(default="", alias="camera")
+    focal_length_mm: float | None = Field(default=None, alias="focalLengthMm")
+    frames_stacked: int = Field(default=0, alias="framesStacked")
+    stacked_image: str = Field(default="", alias="stackedImage")
+    is_preferred: bool = Field(default=False, alias="isPreferred")
+
+
 class Target(BaseModel):
     """Pure data schema for astronomical targets.
 
@@ -163,7 +188,20 @@ class Target(BaseModel):
     guide_scope: str = Field(default="", alias="guideScope")
     mount: str = Field(default="SW Star Adventurer GTi", alias="mount")
     processed_image: str = Field(default="", alias="processedImage")
+    # The preferred configuration's stack, kept single-valued so every
+    # existing reader and the UI continue to work unchanged. Which
+    # configuration is preferred comes from the observer's primary optic
+    # in configuration -- see `AppConfiguration.get_primary_focal_length_mm`.
     stacked_image: str = Field(default="", alias="stackedImage")
+    # Every configuration's stack, including the preferred one that
+    # `stacked_image` also points at. Additive on purpose: 45 call sites
+    # and the UI read `stacked_image`, and none of them need to change
+    # for a target to gain a second optic. Keyed by
+    # `pipeline_tasks.frame_configuration_key`, e.g.
+    # "Nikon DSLR DSC D5300@300mm".
+    stacks_by_configuration: dict[str, StackConfigurationResult] = Field(
+        default_factory=dict, alias="stacksByConfiguration"
+    )
     stacked_spectral_target: str = Field(default="", alias="stackedSpectralTarget")
     stack_quality_summary: StackQualitySummary | None = Field(default=None, alias="stackQualitySummary")
     spectral_stack_quality_summary: StackQualitySummary | None = Field(

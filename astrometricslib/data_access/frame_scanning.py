@@ -82,6 +82,12 @@ def _populate_acquisition_conditions(record: FrameRecord, header: Any) -> None:
     # expressed in arcsec, which is comparable across cameras and focal
     # lengths where a pixel count is not.
     record.pixel_scale_arcsec = _coerce_header_number(header.get("SECPIX1", header.get("SCALE")), float)
+
+    # FOCALLEN identifies the optic, which decides which frames may be
+    # stacked together. Left None when the header does not carry it;
+    # `scripts/backfill_focal_length` exists to fill those in
+    # deliberately rather than having the library guess.
+    record.focal_length_mm = _coerce_header_number(header.get("FOCALLEN"), float)
     record.binning = _coerce_header_number(header.get("XBINNING"), int)
 
     record.sensor_temperature_c = _coerce_header_number(header.get("CCD-TEMP"), float)

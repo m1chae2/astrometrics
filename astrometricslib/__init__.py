@@ -164,7 +164,13 @@ class Astrometrics:
         self.processing = ProcessingPipelines(self.config)
         self.visualization = Visualization(self)
 
-    def process_all_targets(self, target_ids: list[str] | None = None, *, camera_name: str) -> Any:
+    def process_all_targets(
+        self,
+        target_ids: list[str] | None = None,
+        *,
+        camera_name: str,
+        focal_length_mm: float | None = None,
+    ) -> Any:
         """Process many targets' full stacking/analysis pipelines.
 
         Delegates to `batch_processing_operations`, which wires target
@@ -197,7 +203,9 @@ class Astrometrics:
         """
         from astrometricslib.tasks.target_tasks import batch_processing_tasks as batch_processing_operations
 
-        return batch_processing_operations.process_all_targets(self, target_ids, camera_name=camera_name)
+        return batch_processing_operations.process_all_targets(
+            self, target_ids, camera_name=camera_name, focal_length_mm=focal_length_mm
+        )
 
 
 __all__ = [

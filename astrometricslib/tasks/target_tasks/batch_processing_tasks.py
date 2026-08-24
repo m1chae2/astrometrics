@@ -13,7 +13,9 @@ from astrometricslib.utilities import parallel_batch
 from astrometricslib.utilities.concurrency import resolve_worker_counts
 
 
-def _process_single_target_worker(target_id: str, photometry_workers: int, camera_name: str) -> dict:
+def _process_single_target_worker(
+    target_id: str, photometry_workers: int, camera_name: str, focal_length_mm: float | None = None
+) -> dict:
     """Run one target's full pipeline in its own process.
 
     Module-level, picklable worker. Constructs a fresh Astrometrics
@@ -66,7 +68,11 @@ def _process_single_target_worker(target_id: str, photometry_workers: int, camer
             return result
 
         result["stack_outputs"] = run_full_pipeline(
-            target, astrometrics, max_workers=photometry_workers, camera_name=camera_name
+            target,
+            astrometrics,
+            max_workers=photometry_workers,
+            camera_name=camera_name,
+            focal_length_mm=focal_length_mm,
         )
         result["status"] = "success"
     except Exception as processing_error:
@@ -76,7 +82,11 @@ def _process_single_target_worker(target_id: str, photometry_workers: int, camer
 
 
 def process_all_targets(
-    api: Any, target_ids: list[str] | None = None, *, camera_name: str
+    api: Any,
+    target_ids: list[str] | None = None,
+    *,
+    camera_name: str,
+    focal_length_mm: float | None = None,
 ) -> parallel_batch.BatchRunSummary:
     """Process many targets' full pipelines concurrently.
 
@@ -111,7 +121,7 @@ def process_all_targets(
     return parallel_batch.run_parallel_batch(
         target_ids,
         _process_single_target_worker,
-        worker_arguments=(worker_counts.inner_worker_count, camera_name),
+        worker_arguments=(worker_counts.inner_worker_count, camera_name, focal_length_mm),
         max_workers=worker_counts.outer_worker_count,
         niceness=api.config.get_worker_niceness(),
     )

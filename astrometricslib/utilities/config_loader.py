@@ -401,6 +401,28 @@ class AppConfiguration:
         val = self._get_with_fallback("Observatory.Telescope", "Telescope", "focal_length_mm", fallback="0.0")
         return float(val)
 
+    def get_primary_focal_length_mm(self) -> float | None:
+        """Return the focal length of the observer's primary optic, in mm.
+
+        A library may hold frames from several optics -- this one holds
+        1,596 at 300mm and 1,055 at 405mm -- and each needs its own
+        stack, since blending scales that differ by 1.35x produces an
+        image with no single pixel scale. This value decides which of
+        those stacks a target's `stacked_image` points at by default.
+
+        Reads ``[Observatory.Telescope] focal_length_mm``, i.e. the optic
+        already described as the observatory's own.
+
+        Returns
+        -------
+        focal_length_mm : `float` or `None`
+            The configured primary focal length, or `None` when it is
+            unset or zero, in which case callers fall back to whichever
+            configuration has the most frames.
+        """
+        focal_length = self.get_focal_length_mm()
+        return focal_length if focal_length and focal_length > 0 else None
+
     def get_focal_ratio(self) -> float:
         """Return the telescope focal ratio from the configuration.
 

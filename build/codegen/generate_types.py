@@ -58,6 +58,7 @@ from astrometricslib.models.target import (
     ImageType,
     MosaicInfo,
     RenderedImage,
+    StackConfigurationResult,
     Target,
 )
 from astrometricslib.utilities.pipeline_models import ProcessingJob, ProcessStatus
@@ -250,6 +251,7 @@ def main() -> None:
         generate_interface(FrameRecord, "FrameRecord"),
         generate_interface(MosaicInfo, "MosaicInfo"),
         generate_interface(TelescopeStatus, "TelescopeStatus"),
+        generate_interface(StackConfigurationResult, "StackConfigurationResult"),
         generate_interface(Target, "TargetObject"),
         generate_interface(FileItem, "FileItem"),
         generate_interface(TargetFilesResponse, "TargetFilesResponse"),

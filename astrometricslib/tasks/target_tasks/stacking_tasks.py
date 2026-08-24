@@ -249,8 +249,68 @@ def stack_frames(
             target.stacked_spectral_target = stacked_path
         else:
             target.stacked_image = stacked_path
+            _record_configuration_stack(target, target_frames, stacked_path)
 
     return stacked_path
+
+
+def _record_configuration_stack(target, target_frames, stacked_path) -> None:  # ruff: ignore[missing-type-function-argument]
+    """Record this stack under the configuration that produced it.
+
+    Additive to `stacked_image`, which still points at the preferred
+    optic so every existing reader and the UI are unaffected. Without
+    this, a target imaged through two optics keeps only one stack and
+    the other run's work is lost -- NGC 7023 has 424 frames at one focal
+    length and 111 at another, and both are worth keeping.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target to record against.
+    target_frames : `list`
+        The frames this stack was built from, used to identify the
+        configuration and count what contributed.
+    stacked_path : `str`
+        Path of the stack just produced.
+    """
+    from astrometricslib.models.target import StackConfigurationResult
+    from astrometricslib.tasks.target_tasks.pipeline_tasks import frame_configuration_key
+
+    keys = {frame_configuration_key(frame) for frame in target_frames}
+    keys.discard(None)
+    if len(keys) != 1:
+        # Either no frame carried a focal length, or -- the case this
+        # whole mechanism exists to prevent -- the stack blended several
+        # optics. Recording it under a single key would assert something
+        # untrue about it, so it is left out.
+        logger.debug(
+            "Not recording a per-configuration stack for '%s': %d configurations present.",
+            getattr(target, "id", "?"),
+            len(keys),
+        )
+        return
+
+    configuration_key = next(iter(keys))
+    focal_length = next((frame.focal_length_mm for frame in target_frames if frame.focal_length_mm), None)
+    primary_focal_length = None
+    try:
+        from astrometricslib.utilities.config_loader import get_configuration
+
+        primary_focal_length = get_configuration().get_primary_focal_length_mm()
+    except Exception as configuration_error:
+        logger.debug("Could not read the primary focal length: %s", configuration_error)
+
+    is_preferred = bool(
+        focal_length and primary_focal_length and round(focal_length) == round(primary_focal_length)
+    )
+    target.stacks_by_configuration[configuration_key] = StackConfigurationResult(
+        configuration_key=configuration_key,
+        camera=(target_frames[0].camera or "") if target_frames else "",
+        focal_length_mm=focal_length,
+        frames_stacked=len(target_frames),
+        stacked_image=stacked_path,
+        is_preferred=is_preferred,
+    )
 
 
 def _build_stack_quality_summary(  # ruff: ignore[missing-return-type-private-function]

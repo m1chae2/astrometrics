@@ -1,6 +1,8 @@
 """Load, save, and expose access to the application configuration."""
 
 import configparser
+import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -635,6 +637,22 @@ class AppConfiguration:
         siril_concurrency : `int`
             Maximum number of concurrent Siril stacking processes.
         """
+        # An environment override is honoured first so a value can reach
+        # worker processes. Batch work runs across a ProcessPoolExecutor,
+        # and those workers re-import and re-read configuration, so
+        # patching this accessor in the parent reaches none of them --
+        # which silently made a concurrency benchmark measure the
+        # configured value at every setting: two Siril processes were
+        # running during its "1 slot" measurement. The environment is
+        # inherited by workers, so it does cross.
+        environment_override = os.environ.get("ASTROMETRICS_SIRIL_CONCURRENCY")
+        if environment_override:
+            try:
+                return max(1, int(environment_override))
+            except ValueError:
+                logging.getLogger(__name__).warning(
+                    "Ignoring non-numeric ASTROMETRICS_SIRIL_CONCURRENCY=%r", environment_override
+                )
         return int(self.get_value("Processing.Parallelism", "siril_concurrency", fallback="2"))
 
     def get_photometry_workers(self):  # ruff: ignore[missing-return-type-undocumented-public-function]

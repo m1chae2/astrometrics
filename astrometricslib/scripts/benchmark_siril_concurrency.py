@@ -26,6 +26,7 @@ Usage::
 
 import argparse
 import logging
+import os
 import shutil
 import sys
 import time
@@ -127,10 +128,14 @@ def time_one_slot_count(
         ``slot_count``, ``wall_seconds``, ``succeeded``, ``failed`` and
         ``free_disk_gb_low`` (the lowest free space seen).
     """
-    # Overriding the accessor rather than the file keeps the benchmark
-    # from editing the user's configuration to measure it.
-    original_accessor = type(astrometrics.config).get_siril_concurrency
-    type(astrometrics.config).get_siril_concurrency = lambda _self: slot_count
+    # Set in the environment rather than patched onto the config object:
+    # the targets run in worker processes that re-import and re-read
+    # configuration, so an in-parent patch reaches none of them. An
+    # earlier version did exactly that and measured the configured
+    # concurrency at every setting -- two Siril processes were running
+    # during the "1 slot" measurement.
+    previous_override = os.environ.get("ASTROMETRICS_SIRIL_CONCURRENCY")
+    os.environ["ASTROMETRICS_SIRIL_CONCURRENCY"] = str(slot_count)
     try:
         started_at = time.monotonic()
         summary = astrometrics.process_all_targets(
@@ -140,7 +145,10 @@ def time_one_slot_count(
         )
         wall_seconds = time.monotonic() - started_at
     finally:
-        type(astrometrics.config).get_siril_concurrency = original_accessor
+        if previous_override is None:
+            os.environ.pop("ASTROMETRICS_SIRIL_CONCURRENCY", None)
+        else:
+            os.environ["ASTROMETRICS_SIRIL_CONCURRENCY"] = previous_override
 
     return {
         "slot_count": slot_count,

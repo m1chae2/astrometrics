@@ -620,6 +620,13 @@ class VariabilityAnalyzer:
             except ValueError, TypeError:
                 reference_timestamp = datetime.now()
             reference_exposure_seconds = _read_exposure_seconds(reference_header)
+            # Seeded below alongside the reference frame's flux. Leaving
+            # it out started every light curve with one fewer airmass
+            # than flux, and since the per-frame worker appends to both
+            # thereafter, airmasses[i] described the frame at fluxes[i+1]
+            # for the whole run -- so airmass detrending read the wrong
+            # airmass for every point.
+            reference_airmass = compute_frame_airmass(reference_header)
 
         # Retry with different parameters if detection fails
         detector = None
@@ -683,7 +690,10 @@ class VariabilityAnalyzer:
                 flux = flux / reference_exposure_seconds
                 seed_star.flux = flux
                 seed_star.light_curve = LightCurve(
-                    timestamps=[reference_timestamp], fluxes=[flux], is_saturated=[is_saturated]
+                    timestamps=[reference_timestamp],
+                    fluxes=[flux],
+                    is_saturated=[is_saturated],
+                    airmasses=[reference_airmass],
                 )
                 self.stellar_objects.append(seed_star)
                 reference_stars_minimal.append((seed_star.id, x_ref, y_ref))
@@ -702,7 +712,10 @@ class VariabilityAnalyzer:
                 flux = flux / reference_exposure_seconds
                 new_star.flux = flux
                 new_star.light_curve = LightCurve(
-                    timestamps=[reference_timestamp], fluxes=[flux], is_saturated=[is_saturated]
+                    timestamps=[reference_timestamp],
+                    fluxes=[flux],
+                    is_saturated=[is_saturated],
+                    airmasses=[reference_airmass],
                 )
                 self.stellar_objects.append(new_star)
                 reference_stars_minimal.append((new_star.id, x_ref, y_ref))
@@ -944,6 +957,19 @@ class VariabilityAnalyzer:
             return flux_data, excluded
 
         frame_flux_data, frame_excluded_star_ids = _collect_frame_flux_data(reference_ids)
+
+        # Selection promises each member covers most frames, so the
+        # ensemble as a whole should span nearly all of them. When it
+        # does not, the two disagree about what a "frame" is -- report
+        # both sides rather than only the symptom, since the fallback
+        # below otherwise hides why it triggered.
+        if selected and frame_count and len(frame_flux_data) < frame_count:
+            coverages = sorted(candidate[1] for candidate in selected)
+            logger.info(
+                f"  Ensemble spans {len(frame_flux_data)} of {frame_count} frames from "
+                f"{len(reference_ids)} stars; member coverage min={coverages[0]:.2f} "
+                f"median={coverages[len(coverages) // 2]:.2f}."
+            )
 
         # Fallback: if the chosen ensemble covers too few frames to be
         # useful (e.g. it landed on faint sources embedded in bright,

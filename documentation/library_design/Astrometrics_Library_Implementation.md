@@ -10,6 +10,8 @@ Due to the internal nature of these modules, they are deliberately hidden from t
 *Located in:* `astrometricslib/tasks/target_tasks/`
 - **Frame calibration:** `pipeline_tasks.py` and `batch_processing_tasks.py`
 - **Sub-exposure quality evaluation:** `frame_homogeneity.py` and `background_homogeneity_tasks.py`
+- **Raw frame quality & statistics:** `statistics_operations.py`
+- **Mount tracking analysis:** `tracking_analysis_tasks.py`
 - **Star alignment and registration:** `spectral_registration_quality.py`
 - **Pixel rejection and integration:** `rejection_thresholds.py` and `stacking_tasks.py`
 
@@ -36,7 +38,17 @@ Due to the internal nature of these modules, they are deliberately hidden from t
 - **Blink analysis and tracking:** `moving_object_detection_tasks.py` and `moving_object_pipeline_tasks.py`
 - **Ephemeris calculation:** `moving_object_ephemeris_tasks.py` and coordinate mapping
 
-### Shared Scientific Utilities
-*Located in:* `astrometricslib/tasks/shared/`
-- Image math operations (NumPy/SciPy wrappers)
-- Coordinate transformations (WCS)
+### Shared Scientific Utilities & Data Access
+*Located in:* `astrometricslib/tasks/shared/` and `astrometricslib/data_access/`
+- **Image math operations:** (NumPy/SciPy wrappers)
+- **Coordinate transformations:** (WCS)
+- **Image quality & hardware telemetry:** `image_quality_metrics.py`
+
+## Batch Processing & Maintenance Scripts
+
+*Located in:* `astrometricslib/scripts/`
+These top-level scripts orchestrate the pipeline across multiple targets and manage execution environments.
+- **Batch execution:** `run_all_target_processing.py`
+- **Catalog seeding:** `seed_local_star_catalog.py`
+- **Concurrency benchmarking:** `benchmark_siril_concurrency.py`
+- **Data backfilling:** `backfill_focal_length.py`

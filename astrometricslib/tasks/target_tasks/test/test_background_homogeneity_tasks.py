@@ -5,7 +5,12 @@ two-condition split from ordinary gradual drift or noise, using
 patterns modeled on real sessions.
 """
 
-from astrometricslib.tasks.target_tasks.background_homogeneity_tasks import detect_background_split
+from dataclasses import dataclass
+
+from astrometricslib.tasks.target_tasks.background_homogeneity_tasks import (
+    detect_background_split,
+    find_dominant_background_subset,
+)
 
 
 def test_detect_background_split_flags_a_real_cloud_event_pattern():  # ruff: ignore[missing-return-type-undocumented-public-function]
@@ -51,3 +56,74 @@ def test_detect_background_split_handles_too_few_frames():  # ruff: ignore[missi
     """Verify empty and single-frame inputs are handled without raising."""
     assert detect_background_split([]) is None
     assert detect_background_split([500.0]) is None
+
+
+@dataclass
+class _Frame:
+    """Minimal stand-in for a FrameRecord's background fields."""
+
+    path: str
+    background_level: float | None
+
+
+def test_a_lone_washed_out_frame_is_excluded_not_stacked():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify the real M 42 pattern keeps the 22 good frames.
+
+    22 frames at ~236 ADU and a single frame at ~2324 -- the split that
+    cost M 42 its whole stack on 2026-08-25 when the outlier became the
+    registration reference and no stars could be found in it.
+    """
+    frames = [_Frame(f"good_{i}.fits", 236 + i) for i in range(22)]
+    outlier = _Frame("washed_out.fits", 2324.0)
+    kept, excluded, summary = find_dominant_background_subset([*frames, outlier])
+
+    assert [f.path for f in excluded] == ["washed_out.fits"]
+    assert len(kept) == 22
+    assert outlier not in kept
+    assert summary is not None
+    assert summary["high_group_count"] == 1
+
+
+def test_a_homogeneous_session_keeps_every_frame():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify no frames are dropped when there is no split to act on."""
+    frames = [_Frame(f"f_{i}.fits", 300 + i * 4) for i in range(15)]
+    kept, excluded, summary = find_dominant_background_subset(frames)
+
+    assert kept == frames
+    assert excluded == []
+    assert summary is None
+
+
+def test_the_cloudy_majority_wins_over_a_clean_minority():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify the larger group is kept even when it's the brighter sky.
+
+    Homogeneity is the goal, not the lowest background -- a session that
+    clouded over and stayed there should still stack its majority.
+    """
+    clean = [_Frame(f"clean_{i}.fits", 240 + i) for i in range(4)]
+    cloudy = [_Frame(f"cloudy_{i}.fits", 2300 + i) for i in range(20)]
+    kept, excluded, summary = find_dominant_background_subset([*clean, *cloudy])
+
+    assert len(kept) == 20
+    assert {f.path for f in excluded} == {f.path for f in clean}
+    assert summary is not None
+
+
+def test_unmeasured_frames_are_never_excluded():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify a failed background measurement doesn't discard a frame.
+
+    background_level is None only when measurement raised, which is not
+    evidence the frame itself is bad.
+    """
+    frames = [_Frame(f"good_{i}.fits", 236 + i) for i in range(22)]
+    unmeasured = _Frame("unmeasured.fits", None)
+    outlier = _Frame("washed_out.fits", 2324.0)
+    kept, excluded, _ = find_dominant_background_subset([*frames, unmeasured, outlier])
+
+    assert unmeasured in kept
+    assert [f.path for f in excluded] == ["washed_out.fits"]
+
+
+def test_an_empty_frame_list_is_handled():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify the empty case returns empty groups rather than raising."""
+    assert find_dominant_background_subset([]) == ([], [], None)

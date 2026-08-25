@@ -62,6 +62,24 @@ STACKING_TIMEOUT_SECONDS = 600
 # accrue after the wait began.
 _STACKING_TIMEOUT_POLL_SECONDS = 2.0
 
+# Ensemble outlier rejection is normal sigma-clipping behaviour, so
+# flagging on any rejection at all reports routine operation as a
+# quality problem. Measured across the 33 targets with photometry on
+# the 2026-08-25 full-catalog run: 11 targets clipped nothing, and the
+# other 22 ranged from 1.4% to 51.7% of contributed frames, median
+# 7.2%. Flagging every non-zero value marked 22 of 33 targets, which
+# carries no signal; the tail worth a human's attention starts where
+# the clip rate reaches a quarter of the frames (M 13 51.7%, M 16
+# 46.7%, Moon 41.9%, NGC 6888 34.1%, NGC 7000 29.8%).
+MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG = 0.25
+
+# Small samples reach a high fraction on a couple of frames alone --
+# NGC 4438 clipped 3 of 11 (27.3%) and Mars 4 of 13 (30.8%) on that
+# same run, neither of which indicates an ensemble problem. Require an
+# absolute count as well so the fraction is measured against enough
+# frames to mean something.
+MINIMUM_ENSEMBLE_REJECTION_COUNT_TO_FLAG = 5
+
 
 def compute_stacking_timeout_seconds(frame_count: int) -> int:
     """Return the stacking timeout appropriate to a frame count.
@@ -1559,10 +1577,24 @@ def _run_analysis_pipeline_match(
                     light_curve_scatter_rms_mag=median_light_curve_scatter_mag(all_stellar_objects),
                 ),
             )
-            if all_rejected_files:
+            # The rejected frames are recorded in the metrics either way;
+            # this only decides whether the count is worth a human's
+            # attention, which routine clipping is not.
+            frames_contributed_total = sum(
+                contribution.frames_contributed for contribution in photometry_session_breakdown
+            )
+            rejection_fraction = (
+                len(all_rejected_files) / frames_contributed_total if frames_contributed_total else 0.0
+            )
+            if (
+                len(all_rejected_files) >= MINIMUM_ENSEMBLE_REJECTION_COUNT_TO_FLAG
+                and rejection_fraction >= MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG
+            ):
                 target.photometry_quality_summary.flagged = True
                 target.photometry_quality_summary.flag_reasons.append(
-                    f"{len(all_rejected_files)} frame(s) rejected as global ensemble outliers"
+                    f"{len(all_rejected_files)} of {frames_contributed_total} frame(s) "
+                    f"({rejection_fraction:.0%}) rejected as global ensemble outliers, which is high "
+                    "enough to suspect the comparison ensemble or the observing conditions"
                 )
             if photometry_frames_without_timestamp:
                 target.photometry_quality_summary.flagged = True

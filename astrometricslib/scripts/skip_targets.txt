@@ -1,0 +1,41 @@
+# Targets to skip during a full-catalog run.
+#
+# Usage:
+#   run_all_target_processing.py --skip-targets-from astrometricslib/scripts/skip_targets.txt
+#
+# Blank lines and lines starting with # are ignored.
+#
+# Only targets that star-based registration can NEVER handle belong in
+# the active list below. Siril aligns frames by matching star fields, so
+# a target that presents a bright resolved disk and no surrounding stars
+# has nothing to register against, no matter how many frames are taken.
+# Confirmed on the 2026-08-25 full-catalog run: Sun reported "Found 2
+# stars in reference" across 31 converted frames and aborted
+# registration.
+
+Sun
+Venus
+Jupiter
+
+# ---------------------------------------------------------------------
+# NOT skipped, deliberately: data-limited, not impossible.
+#
+# These also failed on 2026-08-25, but for want of frames rather than
+# for any reason inherent to the target. Skipping them would hide
+# targets that start working the moment more data is captured, so they
+# stay in the run and are expected to fail until then. Frame counts are
+# as of that run.
+#
+#   Polaris   1 frame          registration needs at least two frames
+#   M 44      1 frame          same
+#   M 57      1 frame          same
+#   Mirfak    3 frames         spectral stack found no valid output
+#   Capella   5 frames         only 2 stars in reference; sparse field
+#   Arcturus  61 frames        mixed target, only 1 standard frame
+#                              remained after the standard/spectral split
+#
+# M 42 also failed on that run, but for a different reason entirely --
+# one frame at ~2324 ADU against 22 at ~236 became the registration
+# reference and had no detectable stars. That is fixed in
+# background_homogeneity_tasks.find_dominant_background_subset, so M 42
+# is expected to stack and must not be skipped.

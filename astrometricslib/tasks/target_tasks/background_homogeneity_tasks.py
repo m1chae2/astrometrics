@@ -17,6 +17,12 @@ only operates on already-measured, in-memory values.
 import statistics
 from typing import Any
 
+__all__ = [
+    "DEFAULT_GAP_RATIO_THRESHOLD",
+    "detect_background_split",
+    "find_dominant_background_subset",
+]
+
 # Validated against three real sessions' per-frame sigma-clipped
 # background medians:
 # M 13 L-filter (40f, 2026-05-23, homogeneous): gap/spread ratio 0.4.
@@ -91,4 +97,79 @@ def detect_background_split(
         "high_group_median": statistics.median(high_group),
         "gap": max_gap,
         "gap_ratio": max_gap / typical_spread,
+        # The boundary between the two groups, so a caller can partition
+        # the frames themselves -- the counts and medians above describe
+        # the split but don't say which frame fell on which side.
+        "split_threshold": high_group[0],
     }
+
+
+def find_dominant_background_subset(
+    frames: list[Any], gap_ratio_threshold: float = DEFAULT_GAP_RATIO_THRESHOLD
+) -> tuple[list[Any], list[Any], dict[str, Any] | None]:
+    """Split frames into the larger same-conditions group and the rest.
+
+    Detecting a background split is only half the job. Stacking every
+    frame anyway lets a single wildly discrepant frame become Siril's
+    registration reference, and a cloud-washed or light-leaked frame
+    often has no detectable stars at all -- at which point registration
+    aborts and the whole sequence is lost, however many good frames
+    were sitting behind it. That is exactly what happened to M 42 on
+    2026-08-25: 22 frames at ~236 ADU, one at ~2324, reference found
+    0 stars, all 23 frames discarded.
+
+    Mirrors `frame_homogeneity.find_dominant_gain_subset`: keep the
+    majority group, hand back the minority to be recorded as excluded
+    rather than silently dropped.
+
+    Parameters
+    ----------
+    frames : `List[Any]`
+        Frame records to split. Each is read via its
+        ``background_level`` attribute, which the caller is expected to
+        have measured already.
+    gap_ratio_threshold : `float`, optional
+        Passed through to `detect_background_split`, default
+        `DEFAULT_GAP_RATIO_THRESHOLD` (4.0).
+
+    Returns
+    -------
+    dominant_subset : `List[Any]`
+        The frames to stack. Equal to `frames` when no split is found.
+    excluded : `List[Any]`
+        The minority-group frames, empty when no split is found.
+    split_summary : `Optional[Dict[str, Any]]`
+        The `detect_background_split` result, for logging and quality
+        reporting, or `None` when no split was detected.
+
+    Notes
+    -----
+    Frames whose ``background_level`` is `None` were never successfully
+    measured, so they cannot be assigned to either group and are always
+    retained -- a failed measurement is not evidence a frame is bad,
+    and the existing measurement loop already tolerates such failures.
+
+    The larger group wins, matching the gain check, so a session that
+    turned cloudy and stayed that way still stacks its cloudy majority:
+    the goal is a homogeneous stack, not the lowest background. Ties go
+    to the low-background group, which is the cleaner sky.
+    """
+    if not frames:
+        return [], [], None
+
+    measured = [frame for frame in frames if getattr(frame, "background_level", None) is not None]
+    split_summary = detect_background_split(
+        [frame.background_level for frame in measured], gap_ratio_threshold
+    )
+    if not split_summary:
+        return frames, [], None
+
+    threshold = split_summary["split_threshold"]
+    low_group = [frame for frame in measured if frame.background_level < threshold]
+    high_group = [frame for frame in measured if frame.background_level >= threshold]
+
+    keep_low = len(low_group) >= len(high_group)
+    excluded = high_group if keep_low else low_group
+    excluded_ids = {id(frame) for frame in excluded}
+    dominant_subset = [frame for frame in frames if id(frame) not in excluded_ids]
+    return dominant_subset, excluded, split_summary

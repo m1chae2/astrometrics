@@ -186,10 +186,9 @@ def stack_frames(
             measure_frame_saturated_pixel_fraction,
         )
         from astrometricslib.tasks.target_tasks.background_homogeneity_tasks import (
-            detect_background_split,
+            find_dominant_background_subset,
         )
 
-        background_levels = []
         for frame in target_frames:
             try:
                 # Computed once, persisted onto the FrameRecord (which
@@ -199,15 +198,35 @@ def stack_frames(
                     frame.background_level = measure_frame_background_level(frame.path)
                 if frame.saturated_pixel_fraction is None:
                     frame.saturated_pixel_fraction = measure_frame_saturated_pixel_fraction(frame.path)
-                if frame.background_level is not None:
-                    background_levels.append(frame.background_level)
             except Exception as exc:
                 logger.debug("Skipping background/saturation measurement for '%s': %s", frame.path, exc)
                 continue
-        background_split = detect_background_split(background_levels)
+
+        # Exclude the minority group rather than only reporting it. A
+        # frame from the other sky condition can become Siril's
+        # registration reference, and a washed-out reference with no
+        # detectable stars aborts registration for the entire sequence
+        # -- one bad frame otherwise costs every good one behind it.
+        target_frames, excluded_by_background, background_split = find_dominant_background_subset(
+            target_frames
+        )
         if background_split:
             logger.warning(
                 f"Background-homogeneity split detected for target '{target.id}': {background_split}"
+            )
+        if excluded_by_background:
+            logger.warning(
+                f"Excluding {len(excluded_by_background)} frame(s) from a different sky condition "
+                f"from the stack for target '{target.id}': "
+                f"{[f.path for f in excluded_by_background]}"
+            )
+            excluded_frames.extend(
+                ExcludedFrame(path=f.path, reason="background-homogeneity split")
+                for f in excluded_by_background
+            )
+        if not target_frames:
+            raise ValueError(
+                "Target has no frames available to stack after background-homogeneity filtering."
             )
 
     from astrometricslib.drivers.siril_interface import ImageProcessing

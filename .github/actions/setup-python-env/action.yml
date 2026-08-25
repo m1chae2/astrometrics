@@ -47,6 +47,21 @@ runs:
         # pulled in is for real hardware CI never touches.
         sudo apt-get install -y indi-bin libindi-dev
 
+        # Assert we got INDI 2.x from the PPA rather than Ubuntu universe's
+        # 1.9.9. Nothing above fails when apt silently picks the older
+        # archive version -- the install succeeds, pyindi-client installs
+        # from a cached wheel, and the only symptom is 'import PyIndi'
+        # failing much later against an soname that isn't there. Catch the
+        # wrong version here, where the message can name the cause.
+        indi_version="$(dpkg-query -W -f='${Version}' libindi-dev)"
+        case "$indi_version" in
+          2.*) echo "libindi-dev $indi_version (INDI 2.x, as required)." ;;
+          *)
+            echo "::error::libindi-dev resolved to $indi_version, but pyindi-client 2.x needs INDI 2.x. The INDI Stable Builds PPA publishes core libindi only for the resolute (26.04) series, so this job must run on ubuntu-26.04, not ubuntu-latest."
+            exit 1
+            ;;
+        esac
+
     - name: Bootstrap Python Virtual Environment
       # pyindi-client is installed by setup_venv.sh itself (not as a
       # separate step here) so CI exercises the exact same script a

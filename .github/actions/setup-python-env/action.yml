@@ -49,6 +49,22 @@ runs:
         # them without trouble.
         sudo dpkg --add-architecture amd64
 
+        # Pin this PPA's sources entry to amd64. On 26.04 apt prefers a
+        # repository's binary-amd64v3 index over binary-amd64, and the PPA
+        # publishes an amd64v3 index containing only its Architecture:all
+        # packages -- so the variant index shadows the base one and the
+        # real libindi binaries stay invisible no matter which
+        # architectures dpkg has enabled. Naming the architecture
+        # explicitly makes apt read binary-amd64, where they actually are.
+        ppa_sources="$(grep -rl mutlaqja /etc/apt/sources.list.d/ | head -1)"
+        if [ -z "$ppa_sources" ]; then
+          echo "::error::Could not find the mutlaqja PPA sources file after add-apt-repository."
+          exit 1
+        fi
+        sudo sed -i '/^Suites:/a Architectures: amd64' "$ppa_sources"
+        echo "PPA sources entry now reads:"
+        grep -vE "^ |BEGIN PGP|END PGP" "$ppa_sources" || true
+
         sudo apt-get update
         # indi-bin, not indi-full: the PPA dropped indi-full ("has no
         # installation candidate", replaced by indi-3rdparty-drivers), and
@@ -68,6 +84,10 @@ runs:
         # from a cached wheel, and the only symptom is 'import PyIndi'
         # failing much later against an soname that isn't there. Catch the
         # wrong version here, where the message can name the cause.
+        # Print what apt considered, so a future failure here shows which
+        # sources were in play rather than only the version that won.
+        apt-cache policy libindi-dev libindi-dev:amd64 || true
+
         indi_version="$(dpkg-query -W -f='${Version}' libindi-dev:amd64)"
         case "$indi_version" in
           2.*) echo "libindi-dev $indi_version (INDI 2.x, as required)." ;;

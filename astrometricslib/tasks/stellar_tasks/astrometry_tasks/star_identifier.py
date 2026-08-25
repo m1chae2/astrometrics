@@ -387,6 +387,7 @@ class StarIdentifier:
         attempt_plate_solving: bool = True,
         center_ra: float | None = None,
         center_dec: float | None = None,
+        maximum_identified_stars: int | None = None,
     ) -> tuple[list[StellarObject], WCS | None]:
         """Run the main pipeline: detect, solve, then identify.
 
@@ -403,6 +404,16 @@ class StarIdentifier:
         center_dec : `float`, optional
             Dec hint, in degrees, for the field center (default
             `None`).
+        maximum_identified_stars : `int`, optional
+            Ceiling on how many detected stars are identified and
+            returned, brightest first. Identification cost grows
+            roughly linearly with the count, so this trades
+            completeness for runtime. `None` (the default) defers to
+            the ``Processing.Astrometry.maximum_identified_stars``
+            configuration setting, which is itself unlimited by
+            default; pass 0 to force no limit regardless of
+            configuration. Has no effect on plate solving, which uses
+            its own `MAXIMUM_PLATE_SOLVE_SOURCES` brightest subset.
 
         Returns
         -------
@@ -458,6 +469,25 @@ class StarIdentifier:
         # preserves that order, so this is the brightest N rather than
         # an arbitrary slice.
         solver_sources = unique_sources[:MAXIMUM_PLATE_SOLVE_SOURCES]
+
+        # An explicit argument wins over configuration, and an explicit
+        # 0 means "no limit" so a caller can override a configured cap
+        # without having to read the configuration first.
+        identification_limit = maximum_identified_stars
+        if identification_limit is None:
+            try:
+                identification_limit = self.config.get_maximum_identified_stars()
+            except Exception:
+                # A configuration stub without this getter must not stop
+                # a solve; no limit is the documented default anyway.
+                identification_limit = None
+        if isinstance(identification_limit, int) and identification_limit > 0:
+            if len(unique_sources) > identification_limit:
+                logger.info(
+                    f"Identifying the brightest {identification_limit} of "
+                    f"{len(unique_sources)} detected sources, per the configured limit."
+                )
+            unique_sources = unique_sources[:identification_limit]
 
         self.stellar_objects = self._build_stellar_objects_from_sources(unique_sources)
         self.solve_attempted = False

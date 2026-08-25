@@ -114,6 +114,8 @@ class AppConfiguration:
                 "generate_rejmap": "true",
                 "background_homogeneity_check_enabled": "true",
             },
+            # 0 means no limit; see get_maximum_identified_stars.
+            "Processing.Astrometry": {"maximum_identified_stars": "0"},
         }
         for section, values in defaults.items():
             if section not in self.app_config:
@@ -276,6 +278,41 @@ class AppConfiguration:
         """
         val = self.get_value("Processing.Siril", "background_homogeneity_check_enabled", fallback="true")
         return str(val).lower() == "true"
+
+    def get_maximum_identified_stars(self) -> int | None:
+        """Return the ceiling on how many detected stars are identified.
+
+        Unlimited by default: the detected sources are real stars, not
+        noise, and discarding them silently loses data. Measured on the
+        2026-08-25 catalog run, NGC 2244's stacked frame detected 7,280
+        sources of which 5,154 (71%) matched SIMBAD entries within 10
+        arcsec, and its 5-sigma detection count sits far below the star
+        density expected at its galactic latitude of -2.2 degrees.
+
+        Identification is not free, though: every star above this
+        ceiling is cross-matched against the catalogs and persisted, so
+        cost grows roughly linearly with the count. This exists so a
+        caller who cares more about runtime than completeness can trade
+        one for the other explicitly, rather than the pipeline making
+        that choice for them.
+
+        Unrelated to `star_identifier.MAXIMUM_PLATE_SOLVE_SOURCES`,
+        which bounds what astrometry.net receives and has no bearing on
+        what the pipeline reports.
+
+        Returns
+        -------
+        maximum : `int` or `None`
+            The maximum number of stars to identify, brightest first, or
+            `None` for no limit. A configured value of 0 (or a negative
+            or unparseable one) also means no limit.
+        """
+        val = self.get_value("Processing.Astrometry", "maximum_identified_stars", fallback="0")
+        try:
+            maximum = int(str(val).strip())
+        except TypeError, ValueError:
+            return None
+        return maximum if maximum > 0 else None
 
     def get_auto_open_siril_gui(self) -> bool:
         """Return whether Siril GUI should be opened when stacking finishes.

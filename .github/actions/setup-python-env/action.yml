@@ -39,7 +39,13 @@ runs:
         done
 
         sudo apt-get update
-        sudo apt-get install -y indi-full libindi-dev
+        # indi-bin, not indi-full: the PPA dropped indi-full ("has no
+        # installation candidate", replaced by indi-3rdparty-drivers), and
+        # what CI actually needs is indiserver plus the core simulator
+        # drivers that start_indiserver_simulators.sh launches -- all of
+        # which ship in indi-bin. The 3rd-party driver set indi-full also
+        # pulled in is for real hardware CI never touches.
+        sudo apt-get install -y indi-bin libindi-dev
 
     - name: Bootstrap Python Virtual Environment
       # pyindi-client is installed by setup_venv.sh itself (not as a

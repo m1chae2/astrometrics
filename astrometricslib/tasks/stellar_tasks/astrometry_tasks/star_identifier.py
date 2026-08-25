@@ -73,6 +73,14 @@ GAIA_LOCK = threading.Lock()
 # the observed all-or-nothing failure mode.
 GAIA_CONSECUTIVE_FAILURE_LIMIT = 3
 
+# How many of the brightest detected sources are handed to the plate
+# solver. astrometry.net builds its match quads from the brightest
+# stars, so this bounds solve time without affecting whether a field
+# solves; the value is the long-standing one, kept because every field
+# in the catalog has solved with it. It deliberately does NOT bound
+# what the rest of the pipeline sees -- see the note at its use site.
+MAXIMUM_PLATE_SOLVE_SOURCES = 100
+
 _gaia_failure_state_lock = threading.Lock()
 _gaia_consecutive_failures = 0
 _gaia_circuit_open = False
@@ -436,9 +444,20 @@ class StarIdentifier:
         self.sources_detected = len(unique_sources)
         self.catalog_match_separations_arcsec = []
 
-        # Limit to top 100
-        if len(unique_sources) > 100:
-            unique_sources = unique_sources[:100]
+        # Only the plate solver gets a capped list. astrometry.net
+        # matches quads built from the brightest sources, so a couple
+        # hundred is ample and thousands of faint detections mostly add
+        # solve time. Everything downstream wants the opposite: the
+        # comparison ensemble, catalog cross-matching and variable-star
+        # detection all get better with more stars, and capping the
+        # shared list at 100 starved them on every deep target. On the
+        # 2026-08-25 catalog run the median frame detected 4,235
+        # sources and kept 100.
+        #
+        # detect() returns sources by descending flux and deduplicate()
+        # preserves that order, so this is the brightest N rather than
+        # an arbitrary slice.
+        solver_sources = unique_sources[:MAXIMUM_PLATE_SOLVE_SOURCES]
 
         self.stellar_objects = self._build_stellar_objects_from_sources(unique_sources)
         self.solve_attempted = False
@@ -453,7 +472,7 @@ class StarIdentifier:
             if not self.solve_attempted:
                 logger.info(f"Skipping plate solve: only {len(self.stellar_objects)} sources detected.")
             else:
-                logger.info(f"Solving field with {len(self.stellar_objects)} sources...")
+                logger.info(f"Solving field with {len(solver_sources)} of {len(unique_sources)} sources...")
                 h, w = data.shape
 
                 # REQ: SR-3.1 - Determine scale hints dynamically. We
@@ -463,7 +482,7 @@ class StarIdentifier:
 
                 header = self.solver.solve(
                     image_path=path,
-                    sources=unique_sources,
+                    sources=solver_sources,
                     image_width=w,
                     image_height=h,
                     center_ra=center_ra,

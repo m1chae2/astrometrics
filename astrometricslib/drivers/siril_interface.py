@@ -1675,7 +1675,57 @@ class ImageProcessing:
                 # dispersion axis and smear the spectral trace
                 # between frames, breaking wavelength calibration
                 # consistency across the stack.
-                register_command = f"register {seq} -transf=shift" if is_spectral else f"register {seq}"
+                # Pin star detection instead of inheriting whatever the
+                # Siril GUI last persisted to its own config: detection
+                # settings are global user state, so without this the
+                # pipeline's registration behaviour differs between
+                # machines and silently changes if someone adjusts the
+                # GUI. -relax=on is what M 42 needs -- its nebulosity
+                # dominates the frame's background statistics, and with
+                # the default relax=off Siril's findstar returned 9
+                # candidates on a calibrated frame carrying 464
+                # detectable stars (photutils DAOStarFinder, 5 sigma),
+                # which aborted registration for the whole sequence.
+                # With relax=on the same frame yields 472.
+                register_commands = ["setfindstar -relax=on"]
+
+                if is_spectral:
+                    # REQ: IMG-4.4 - Multi-frame Stacking
+                    # Spectroscopy frames need a shift-only transform: a
+                    # diffraction grating disperses every star's light,
+                    # not just the target's, so field stars are usually
+                    # still plentiful (confirmed empirically -- 99-125
+                    # stars/frame in a real SA200 session is typical,
+                    # not "too few" for a homography fit). The actual
+                    # constraint is that any rotation or scale
+                    # introduced by registration would rotate the
+                    # dispersion axis and smear the spectral trace
+                    # between frames, breaking wavelength calibration
+                    # consistency across the stack.
+                    #
+                    # Left on single-pass registration deliberately: the
+                    # two-pass reference selection below is validated
+                    # only against standard frames, and the spectral
+                    # path's shift-only constraint is the more delicate
+                    # of the two to disturb.
+                    register_commands.append(f"register {seq} -transf=shift")
+                    registered_seq = f"r_{seq}"
+                else:
+                    # Two-pass registration scores every frame before
+                    # picking a reference, where single-pass just takes
+                    # the first. M 42's first frame is also its worst
+                    # for this purpose -- pointing sits ~9.6 arcmin off
+                    # the other 21 -- and single-pass registration
+                    # matched only 6-8 star pairs against it and
+                    # registered nothing, even with detection fixed.
+                    # Two-pass chose a different reference and stacked
+                    # 21 of 22 frames.
+                    register_commands.append(f"register {seq} -2pass")
+                    # -2pass computes the transforms without applying
+                    # them, so the registered sequence only exists once
+                    # seqapplyreg has run.
+                    register_commands.append(f"seqapplyreg {seq}")
+                    registered_seq = f"r_{seq}"
 
                 # Field-star population is typically rich enough in
                 # spectral frames too (see above), so
@@ -1694,7 +1744,10 @@ class ImageProcessing:
                     stack_options.append("-rejmap")
                 stack_options += ["-norm=addscale", "-out=result_stacked"]
 
-                script += [register_command, f"stack r_{seq} " + " ".join(stack_options)]
+                script += [
+                    *register_commands,
+                    f"stack {registered_seq} " + " ".join(stack_options),
+                ]
 
             def write_commands():  # ruff: ignore[missing-return-type-private-function]
                 self.send_commands(command_pipe, script, job_logger=job_logger)

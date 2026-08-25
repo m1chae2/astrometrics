@@ -885,26 +885,48 @@ class VariabilityAnalyzer:
                 if flux and flux > 0 and not saturated
             }
             saturated_fraction = sum(1 for _, _, saturated in measurements if saturated) / len(measurements)
-            coverage = len(usable_timestamps) / frame_count if frame_count else 0.0
-            candidates.append((star, coverage, saturated_fraction, star.flux or 0.0))
+            # Coverage is measured against the frames this star was
+            # actually observed in, not against every frame in the call.
+            # A target's sessions each have their own frame set, and a
+            # star only exists in its own session's frames -- scoring it
+            # against the union marked a star measured perfectly in all
+            # 52 frames of its session as 52/77 = 0.68 and rejected it,
+            # which drove selection down through every relaxation step
+            # to no coverage requirement at all.
+            own_frames = {timestamp for timestamp, _, _ in measurements}
+            coverage = len(usable_timestamps) / len(own_frames) if own_frames else 0.0
+            candidates.append((star, coverage, saturated_fraction, star.flux or 0.0, frozenset(own_frames)))
+
+        # Group by the frame set a star belongs to. Normalization is
+        # per-frame, so a frame can only be normalized by stars measured
+        # in it: one pooled top-N drawn across sessions leaves whichever
+        # sessions lost the brightness contest with no ensemble at all,
+        # which is how 100 selected stars spanned only 29 of 61 frames.
+        # Each frame set therefore gets its own ensemble.
+        candidates_by_frame_set: dict = {}
+        for candidate in candidates:
+            candidates_by_frame_set.setdefault(candidate[4], []).append(candidate)
 
         def _select(minimum_coverage: float) -> list:
-            """Filter candidates on merit and rank them brightest first.
+            """Choose a per-session ensemble, brightest first within each.
 
             Returns
             -------
             selected : `list`
-                Up to `TARGET_ENSEMBLE_SIZE` candidate tuples meeting
-                `minimum_coverage` and the saturation limit, brightest
-                first.
+                Up to `TARGET_ENSEMBLE_SIZE` candidates per frame set,
+                meeting `minimum_coverage` and the saturation limit.
             """
-            eligible = [
-                candidate
-                for candidate in candidates
-                if candidate[1] >= minimum_coverage and candidate[2] <= MAXIMUM_ENSEMBLE_SATURATED_FRACTION
-            ]
-            eligible.sort(key=lambda candidate: -candidate[3])
-            return eligible[:TARGET_ENSEMBLE_SIZE]
+            chosen = []
+            for group in candidates_by_frame_set.values():
+                eligible = [
+                    candidate
+                    for candidate in group
+                    if candidate[1] >= minimum_coverage
+                    and candidate[2] <= MAXIMUM_ENSEMBLE_SATURATED_FRACTION
+                ]
+                eligible.sort(key=lambda candidate: -candidate[3])
+                chosen.extend(eligible[:TARGET_ENSEMBLE_SIZE])
+            return chosen
 
         selected = _select(MINIMUM_ENSEMBLE_FRAME_COVERAGE)
         relaxed_coverage = None
@@ -924,7 +946,15 @@ class VariabilityAnalyzer:
             logger.info(
                 f"  Normalization ensemble: {len(reference_ids)} of {total_star_count} stars "
                 f"selected on coverage/saturation, flux {faintest:.4g}-{brightest:.4g}"
-                + (f" (coverage requirement relaxed to {relaxed_coverage:.0%})" if relaxed_coverage else "")
+                # "is not None", not truthiness: relaxing all the way to
+                # 0.0 is the most severe step and the one most worth
+                # reporting, but it is falsy, so a plain truth test
+                # reported the worst case as no relaxation at all.
+                + (
+                    f" (coverage requirement relaxed to {relaxed_coverage:.0%})"
+                    if relaxed_coverage is not None
+                    else ""
+                )
             )
         else:
             logger.warning(

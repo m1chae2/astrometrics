@@ -1386,7 +1386,6 @@ def _run_analysis_pipeline_match(
             all_candidates = []
             all_rejected_files = []
             all_frame_ensemble_composition = []
-            frames_rejected_for_small_ensemble = 0
             session_empty_reasons = []
             # Only session-prefix ids when there's more than one session,
             # so the common single-session target keeps today's plain
@@ -1440,9 +1439,6 @@ def _run_analysis_pipeline_match(
                 all_candidates.extend(session_candidates)
                 all_rejected_files.extend(analyzer.rejected_files)
                 all_frame_ensemble_composition.extend(analyzer.frame_ensemble_composition)
-                frames_rejected_for_small_ensemble += getattr(
-                    analyzer, "frames_rejected_for_small_ensemble", 0
-                )
 
             # Captured before cross-session merging/re-flagging below so
             # each candidate reflects its own session's local adaptive
@@ -1550,7 +1546,6 @@ def _run_analysis_pipeline_match(
                     frames_processed=frames_processed,
                     rejected_frames=rejected_frames,
                     frame_ensemble_composition=all_frame_ensemble_composition,
-                    frames_rejected_for_small_ensemble=frames_rejected_for_small_ensemble,
                     variable_candidate_count=len(all_candidates),
                     cross_session_match_count=cross_session_match_count,
                     sessions_missing_wcs=sessions_missing_wcs,
@@ -1568,12 +1563,6 @@ def _run_analysis_pipeline_match(
                 target.photometry_quality_summary.flagged = True
                 target.photometry_quality_summary.flag_reasons.append(
                     f"{len(all_rejected_files)} frame(s) rejected as global ensemble outliers"
-                )
-            if frames_rejected_for_small_ensemble:
-                target.photometry_quality_summary.flagged = True
-                target.photometry_quality_summary.flag_reasons.append(
-                    f"{frames_rejected_for_small_ensemble} frame(s) had fewer than "
-                    "the minimum comparison stars and were not normalized"
                 )
             if photometry_frames_without_timestamp:
                 target.photometry_quality_summary.flagged = True

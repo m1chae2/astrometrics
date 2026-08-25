@@ -348,6 +348,75 @@ class SpectroscopyQualitySummary(PipelineQualitySummaryBase):
 
 
 # ---------------------------------------------------------------------------
+# Tracking
+# ---------------------------------------------------------------------------
+
+# Bumped whenever TrackingPipelineQualityMetrics's shape changes
+# meaningfully.
+TRACKING_PIPELINE_VERSION = "1.0.0"
+
+
+class TrackingPipelineQualityMetrics(BaseModel):
+    """Tracking-pipeline-specific quality metrics.
+
+    Not shared with other pipelines. Describes the *acquisition* --
+    mount drift, periodic error, trailing, focus drift, sky conditions
+    -- from per-frame facts other pipelines already recorded, rather
+    than anything about processing. See
+    `tracking_analysis_tasks.analyze_guiding` and
+    `.analyze_input_conditions` for how each field is derived and what
+    a bad value implies about the rig.
+
+    Every field is the worst session's value (see
+    `_combine_session_analyses`'s docstring for why worst rather than
+    average), except the input-condition fields, which are computed
+    across every session at once since seeing and background are not
+    session-scoped concepts the way tracking is.
+    """
+
+    sessions_found: int
+    sessions_analyzed: int
+    usable_frames: int
+    span_hours: float | None = None
+
+    drift_rate_x_px_per_hour: float | None = None
+    drift_rate_y_px_per_hour: float | None = None
+    max_excursion_px: float | None = None
+    meridian_flips: int = 0
+
+    # A single session's strongest candidate period; see
+    # analyze_guiding's finding text for why this is not by itself a
+    # confirmed mechanical periodic error, and
+    # `periodic_error_corroborated` for the check that promotes it to
+    # one.
+    periodic_error_period_seconds: int | None = None
+    periodic_error_strength: float = 0.0
+    periodic_error_corroborated: bool = False
+
+    trailed_frame_count: int = 0
+    median_fwhm_px: float | None = None
+    fwhm_spread_px: float | None = None
+    median_roundness: float | None = None
+    median_background: float | None = None
+    background_spread: float | None = None
+
+
+class TrackingQualitySummary(PipelineQualitySummaryBase):
+    """Persisted per-run quality record for the tracking pipeline.
+
+    upstream_quality_summary_reference defaults to "stacking": every
+    metric here reads registration data that Siril only writes during
+    stacking, so a target with no stack has nothing for this pipeline
+    to analyze.
+    """
+
+    pipeline_name: str = "tracking"
+    pipeline_version: str = TRACKING_PIPELINE_VERSION
+    upstream_quality_summary_reference: str | None = "stacking"
+    tracking_metrics: TrackingPipelineQualityMetrics
+
+
+# ---------------------------------------------------------------------------
 # Asteroid recovery
 # ---------------------------------------------------------------------------
 

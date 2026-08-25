@@ -37,6 +37,8 @@ from astrometricslib.models.quality_summary import (
     StackingPipelineQualityMetrics,
     StackQualitySummary,
     TargetSessionContribution,
+    TrackingPipelineQualityMetrics,
+    TrackingQualitySummary,
 )
 from astrometricslib.models.stellar_source import (
     AnalysisResult,
@@ -296,6 +298,8 @@ def main() -> None:
         generate_interface(PhotometryQualitySummary, "PhotometryQualitySummary"),
         generate_interface(SpectroscopyPipelineQualityMetrics, "SpectroscopyPipelineQualityMetrics"),
         generate_interface(SpectroscopyQualitySummary, "SpectroscopyQualitySummary"),
+        generate_interface(TrackingPipelineQualityMetrics, "TrackingPipelineQualityMetrics"),
+        generate_interface(TrackingQualitySummary, "TrackingQualitySummary"),
         generate_interface(FrameDetection, "FrameDetection"),
         generate_interface(MovingObjectTrack, "MovingObjectTrack"),
         generate_enum(CascadeStage, "CascadeStage"),

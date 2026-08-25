@@ -172,3 +172,52 @@ def test_a_target_with_no_shifts_reports_nothing_analysed():  # ruff: ignore[mis
 def test_session_gap_constant_is_between_a_pause_and_a_night():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """The threshold must separate nights without splitting one."""
     assert 2.0 < tracking.SESSION_GAP_HOURS < 12.0
+
+
+def test_a_recurring_period_across_sessions_is_corroborated():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Two independent sessions agreeing on period is what confirms it.
+
+    A worm's period is a mechanical constant, so it should recur across
+    independent nights. That agreement is the corroboration a single
+    session's finding explicitly says it lacks.
+    """
+    import math
+
+    def _session_with_period(start, period_seconds, count=80, spacing=30.0):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+        return [
+            _Frame(
+                start + index * spacing,
+                dx=3.0 * math.sin(2 * math.pi * (index * spacing) / period_seconds),
+            )
+            for index in range(count)
+        ]
+
+    night_one = _session_with_period(0.0, 480.0)
+    night_two = _session_with_period(24 * ONE_HOUR, 480.0)
+    target = _Target(night_one + night_two)
+
+    analysis = analyze_guiding(target)
+
+    assert any("recurs across independent sessions" in finding for finding in analysis["findings"])
+
+
+def test_unrelated_session_periods_are_not_corroborated():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Two sessions with different periods must not claim agreement."""
+    import math
+
+    def _session_with_period(start, period_seconds, count=80, spacing=30.0):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+        return [
+            _Frame(
+                start + index * spacing,
+                dx=3.0 * math.sin(2 * math.pi * (index * spacing) / period_seconds),
+            )
+            for index in range(count)
+        ]
+
+    night_one = _session_with_period(0.0, 200.0)
+    night_two = _session_with_period(24 * ONE_HOUR, 850.0)
+    target = _Target(night_one + night_two)
+
+    analysis = analyze_guiding(target)
+
+    assert not any("recurs across independent sessions" in finding for finding in analysis["findings"])

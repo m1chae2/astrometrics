@@ -14,9 +14,12 @@ import itertools
 import logging
 import math
 import statistics
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from astrometricslib.models.quality_summary import TrackingQualitySummary
 
 # A mount's worm period is the dominant periodic-error term and typically
 # falls in the low minutes; anything far outside this band is more likely
@@ -27,9 +30,24 @@ MINIMUM_PERIODIC_ERROR_PERIOD_SECONDS = 60.0
 MAXIMUM_PERIODIC_ERROR_PERIOD_SECONDS = 1200.0
 
 # A detected period must carry this share of the series' total variance
-# before it is called periodic error rather than noise. Chosen so a flat
-# or purely-drifting series never reports a period.
-MINIMUM_PERIODIC_ERROR_POWER_FRACTION = 0.25
+# before it is called periodic error rather than noise.
+#
+# 0.25 was too permissive to mean anything: run across this catalog's
+# 28 deep-sky sessions with a detected period, the periods themselves
+# scattered from 1.0 to 14.2 minutes with no clustering, including
+# among high-power detections (M 1 at 1.3min/0.91, IC 1805 at
+# 4.6min/0.92, NGC 7023 at 5.0min/0.88) -- a real worm period is a
+# mechanical constant and should recur across sessions and targets, not
+# vary target to target. That scatter means the periodogram was mostly
+# fitting whichever low-frequency guiding correction or drift residual
+# a short session happened to contain, not real periodic error.
+#
+# Raising the bar to 0.5 cuts the weakest half of those detections
+# (0.257-0.487) without touching the stronger ones, but does not by
+# itself prove what remains is mechanical -- see the finding text below,
+# which is now hedged accordingly rather than asserting periodic error
+# from a single session.
+MINIMUM_PERIODIC_ERROR_POWER_FRACTION = 0.5
 
 # Silence longer than this ends an observing session. Six hours is
 # longer than any plausible within-night pause (a meridian flip, a cloud
@@ -357,9 +375,16 @@ def _analyze_one_session(target: Any, frames: list) -> dict[str, Any]:
     if period is not None and power >= MINIMUM_PERIODIC_ERROR_POWER_FRACTION:
         analysis["periodic_error_period_seconds"] = round(period)
         analysis["periodic_error_strength"] = round(power, 3)
+        # One session cannot confirm mechanical periodic error: a
+        # worm's period is a fixed constant, so a genuine detection
+        # must recur at the same period across sessions and targets.
+        # This is one session's strongest candidate period, not a
+        # verdict -- see _combine_session_analyses' cross-session check
+        # for the confirmed case.
         analysis["findings"].append(
             f"Periodic drift on the {axis} axis with a ~{period / 60:.1f} minute period "
-            f"explains {power:.0%} of the residual motion, consistent with mount periodic error."
+            f"explains {power:.0%} of this session's residual motion. A single session cannot "
+            "confirm mechanical periodic error; check whether this period recurs elsewhere."
         )
 
     for rate, axis_name in ((rate_x, "x"), (rate_y, "y")):
@@ -438,6 +463,25 @@ def _combine_session_analyses(
             if finding.startswith("No drift"):
                 continue
             findings.append(f"Session {index}: {finding}")
+
+    # A worm's period is a mechanical constant, so it should recur
+    # across independent sessions. Two sessions agreeing within 15% is
+    # the corroboration a single session's finding above explicitly
+    # says it lacks; this is the only place in this module that
+    # promotes a candidate period to an actual mechanical claim.
+    periods = [
+        session["periodic_error_period_seconds"]
+        for session in session_analyses
+        if session.get("periodic_error_period_seconds")
+    ]
+    for first, second in itertools.combinations(periods, 2):
+        if abs(first - second) <= 0.15 * max(first, second):
+            findings.append(
+                f"Periodic error near {statistics.fmean([first, second]) / 60:.1f} minutes recurs "
+                "across independent sessions, corroborating a mechanical (worm gear) cause."
+            )
+            break
+
     if not findings:
         findings.append("No drift, periodic error, or excursion stands out in any session.")
 
@@ -681,3 +725,81 @@ def evaluate_rejection_effectiveness(target: Any) -> dict[str, Any]:
             f"({background_ratio:.2f}x), so rejection is not selecting on background."
         )
     return analysis
+
+
+def build_tracking_quality_summary(target: Any) -> TrackingQualitySummary | None:
+    """Assemble a persisted `TrackingQualitySummary` for a target.
+
+    Combines `analyze_guiding` and `analyze_input_conditions`. Both are
+    read-only analyses over data other pipelines already wrote
+    (registration shifts from stacking, per-frame background/FWHM from
+    input-quality measurement); this only packages their results into
+    the same queryable form every other pipeline's findings take.
+
+    Parameters
+    ----------
+    target : `Any`
+        The target to analyze.
+
+    Returns
+    -------
+    summary : `TrackingQualitySummary` or `None`
+        `None` when the target has no usable frames for either
+        analysis -- there is nothing to persist, and a record with
+        every field empty would be indistinguishable from a real
+        finding of "nothing wrong".
+    """
+    from astrometricslib.models.quality_summary import TrackingPipelineQualityMetrics, TrackingQualitySummary
+
+    guiding = analyze_guiding(target)
+    conditions = analyze_input_conditions(target)
+    if not guiding.get("usable_frames") and conditions.get("median_fwhm_px") is None:
+        return None
+
+    periods = [
+        session["periodic_error_period_seconds"]
+        for session in guiding.get("sessions", [])
+        if session.get("periodic_error_period_seconds")
+    ]
+    corroborated = any(
+        abs(first - second) <= 0.15 * max(first, second)
+        for first, second in itertools.combinations(periods, 2)
+    )
+
+    findings = list(guiding.get("findings", [])) + list(conditions.get("findings", []))
+    summary = TrackingQualitySummary(
+        target_id=target.id,
+        tracking_metrics=TrackingPipelineQualityMetrics(
+            sessions_found=guiding.get("sessions_found", 0),
+            sessions_analyzed=guiding.get("sessions_analyzed", 0),
+            usable_frames=guiding.get("usable_frames", 0),
+            span_hours=guiding.get("span_hours"),
+            drift_rate_x_px_per_hour=guiding.get("drift_rate_x_px_per_hour"),
+            drift_rate_y_px_per_hour=guiding.get("drift_rate_y_px_per_hour"),
+            max_excursion_px=guiding.get("max_excursion_px"),
+            meridian_flips=guiding.get("meridian_flips", 0),
+            periodic_error_period_seconds=guiding.get("periodic_error_period_seconds"),
+            periodic_error_strength=guiding.get("periodic_error_strength", 0.0),
+            periodic_error_corroborated=corroborated,
+            trailed_frame_count=conditions.get("trailed_frame_count", 0),
+            median_fwhm_px=conditions.get("median_fwhm_px"),
+            fwhm_spread_px=conditions.get("fwhm_spread_px"),
+            median_roundness=conditions.get("median_roundness"),
+            median_background=conditions.get("median_background"),
+            background_spread=conditions.get("background_spread"),
+        ),
+    )
+
+    real_findings = [
+        finding
+        for finding in findings
+        if not finding.startswith("No drift")
+        and not finding.startswith("Seeing, star shape")
+        and not finding.startswith("Not enough frames")
+        and "cannot be assessed" not in finding
+    ]
+    if real_findings:
+        summary.flagged = True
+        summary.flag_reasons = real_findings
+
+    return summary

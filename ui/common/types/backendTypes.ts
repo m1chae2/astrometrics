@@ -150,6 +150,7 @@ export interface TargetObject {
   spectroscopyQualitySummary?: SpectroscopyQualitySummary | null;
   asteroidCandidates?: AsteroidRecoveryCandidate[];
   asteroidRecoveryQualitySummary?: AsteroidRecoveryQualitySummary | null;
+  trackingQualitySummary?: TrackingQualitySummary | null;
   exposureTime?: number;
   numberOfStars?: number;
   frames?: FrameRecord[];
@@ -847,6 +848,66 @@ export interface SpectroscopyQualitySummary {
   flag_reasons?: string[];
   created_at?: string;
   spectroscopy_metrics: SpectroscopyPipelineQualityMetrics;
+}
+
+/**
+ * Tracking-pipeline-specific quality metrics.
+ *
+ * Not shared with other pipelines. Describes the *acquisition* --
+ * mount drift, periodic error, trailing, focus drift, sky conditions
+ * -- from per-frame facts other pipelines already recorded, rather
+ * than anything about processing. See
+ * `tracking_analysis_tasks.analyze_guiding` and
+ * `.analyze_input_conditions` for how each field is derived and what
+ * a bad value implies about the rig.
+ *
+ * Every field is the worst session's value (see
+ * `_combine_session_analyses`'s docstring for why worst rather than
+ * average), except the input-condition fields, which are computed
+ * across every session at once since seeing and background are not
+ * session-scoped concepts the way tracking is.
+ */
+export interface TrackingPipelineQualityMetrics {
+  sessions_found: number;
+  sessions_analyzed: number;
+  usable_frames: number;
+  span_hours?: number | null;
+  drift_rate_x_px_per_hour?: number | null;
+  drift_rate_y_px_per_hour?: number | null;
+  max_excursion_px?: number | null;
+  meridian_flips?: number;
+  periodic_error_period_seconds?: number | null;
+  periodic_error_strength?: number;
+  periodic_error_corroborated?: boolean;
+  trailed_frame_count?: number;
+  median_fwhm_px?: number | null;
+  fwhm_spread_px?: number | null;
+  median_roundness?: number | null;
+  median_background?: number | null;
+  background_spread?: number | null;
+}
+
+/**
+ * Persisted per-run quality record for the tracking pipeline.
+ *
+ * upstream_quality_summary_reference defaults to "stacking": every
+ * metric here reads registration data that Siril only writes during
+ * stacking, so a target with no stack has nothing for this pipeline
+ * to analyze.
+ */
+export interface TrackingQualitySummary {
+  pipeline_name?: string;
+  pipeline_version?: string;
+  target_id: string;
+  target_session_ids?: string[];
+  target_session_breakdown?: TargetSessionContribution[];
+  upstream_quality_summary_reference?: string | null;
+  resolved_parameters?: Record<string, any>;
+  quality_processing_applied?: boolean;
+  flagged?: boolean;
+  flag_reasons?: string[];
+  created_at?: string;
+  tracking_metrics: TrackingPipelineQualityMetrics;
 }
 
 /**

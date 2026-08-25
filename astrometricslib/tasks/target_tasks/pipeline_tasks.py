@@ -2186,6 +2186,18 @@ def run_full_pipeline(
             "Skipping stacking step."
         )
 
+    # 1b. Tracking Analysis. Read-only over the registration data
+    # stacking just wrote, so it belongs right after stacking and
+    # before any pipeline that could fail and end this run early --
+    # rig-quality findings are worth having even if astrometry or
+    # photometry later fails on this target.
+    from astrometricslib.tasks.target_tasks.tracking_analysis_tasks import build_tracking_quality_summary
+
+    try:
+        target.tracking_quality_summary = build_tracking_quality_summary(target)
+    except Exception as tracking_error:
+        logger.warning(f"[{target.id}] Tracking analysis failed: {tracking_error}")
+
     # 2. Astrometry Analysis
     print(f"[{target.id}] Running Astrometry Analysis...")
     astrometry_results = analyze_target(target, pipeline_type="astrometry", butler=astrometrics.butler)

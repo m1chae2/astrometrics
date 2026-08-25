@@ -26,6 +26,7 @@ from astrometricslib.models.quality_summary import (
     PhotometryQualitySummary,
     SpectroscopyQualitySummary,
     StackQualitySummary,
+    TrackingQualitySummary,
 )
 from astrometricslib.utilities.enums import FilterType
 
@@ -221,6 +222,9 @@ class Target(BaseModel):
     )
     asteroid_recovery_quality_summary: AsteroidRecoveryQualitySummary | None = Field(
         default=None, alias="asteroidRecoveryQualitySummary"
+    )
+    tracking_quality_summary: TrackingQualitySummary | None = Field(
+        default=None, alias="trackingQualitySummary"
     )
     exposure_sec: float = Field(default=0, alias="exposureTime")
     number_of_stars: int = Field(default=0, alias="numberOfStars")

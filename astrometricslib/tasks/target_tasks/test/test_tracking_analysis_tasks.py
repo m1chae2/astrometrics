@@ -240,3 +240,39 @@ def test_meridian_flip_shift_is_not_called_a_bump():  # ruff: ignore[missing-ret
 
     assert analysis["meridian_flips"] == 1
     assert not any("bump" in finding for finding in analysis["findings"])
+
+
+def test_a_single_session_period_is_hedged_not_asserted():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """One session cannot confirm mechanical periodic error on its own.
+
+    0.25 let periods from 1 to 14 minutes through with no clustering
+    across this catalog's sessions -- a real worm period is a mechanical
+    constant, so that scatter meant the periodogram was fitting whatever
+    a short session happened to contain. The finding text must not claim
+    more than one session supports.
+    """
+    times = [index * 30.0 for index in range(80)]
+    values = [3.0 * math.sin(2 * math.pi * t / 480.0) for t in times]
+    target = _target_with_shifts(times, values)
+
+    analysis = analyze_guiding(target)
+
+    periodic_findings = [f for f in analysis["findings"] if "Periodic drift" in f]
+    assert periodic_findings
+    assert "single session cannot confirm" in periodic_findings[0]
+    assert "consistent with mount periodic error" not in periodic_findings[0]
+
+
+def test_a_weak_period_no_longer_clears_the_reporting_bar():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """A detection that explained 25-49% of the variance is now dropped.
+
+    That band is exactly what let unrelated periods through on real
+    data: high-power detections varied from 1.3 to 5.0 minutes with no
+    agreement either, so a weak detection is even less trustworthy.
+    """
+    times = [index * 30.0 for index in range(80)]
+    random.seed(11)
+    values = [1.0 * math.sin(2 * math.pi * t / 480.0) + random.gauss(0, 1.4) for t in times]
+    _period, power = _dominant_period_seconds(times, values)
+
+    assert power < 0.5

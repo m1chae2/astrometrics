@@ -38,6 +38,17 @@ runs:
           sleep $((attempt * 5))
         done
 
+        # Ubuntu 26.04's native dpkg architecture is amd64v3, but the PPA
+        # builds INDI only for plain amd64: its binary-amd64v3 index holds
+        # nothing but the Architecture:all packages, so apt never sees
+        # libindi-dev/libindi1/indi-bin there and silently settles for
+        # Ubuntu universe's libindi 1.9.9. Enable amd64 as a foreign
+        # architecture so the PPA's binary-amd64 index is fetched too.
+        # x86-64-v3 is a superset of the baseline, so amd64 INDI binaries
+        # run fine here, and an extension compiled for v3 links against
+        # them without trouble.
+        sudo dpkg --add-architecture amd64
+
         sudo apt-get update
         # indi-bin, not indi-full: the PPA dropped indi-full ("has no
         # installation candidate", replaced by indi-3rdparty-drivers), and
@@ -45,7 +56,11 @@ runs:
         # drivers that start_indiserver_simulators.sh launches -- all of
         # which ship in indi-bin. The 3rd-party driver set indi-full also
         # pulled in is for real hardware CI never touches.
-        sudo apt-get install -y indi-bin libindi-dev
+        #
+        # The :amd64 qualifiers are required, not cosmetic -- unqualified
+        # names resolve to the native amd64v3 architecture, which is
+        # exactly the fallback to 1.9.9 this is working around.
+        sudo apt-get install -y indi-bin:amd64 libindi-dev:amd64
 
         # Assert we got INDI 2.x from the PPA rather than Ubuntu universe's
         # 1.9.9. Nothing above fails when apt silently picks the older
@@ -53,11 +68,11 @@ runs:
         # from a cached wheel, and the only symptom is 'import PyIndi'
         # failing much later against an soname that isn't there. Catch the
         # wrong version here, where the message can name the cause.
-        indi_version="$(dpkg-query -W -f='${Version}' libindi-dev)"
+        indi_version="$(dpkg-query -W -f='${Version}' libindi-dev:amd64)"
         case "$indi_version" in
           2.*) echo "libindi-dev $indi_version (INDI 2.x, as required)." ;;
           *)
-            echo "::error::libindi-dev resolved to $indi_version, but pyindi-client 2.x needs INDI 2.x. The INDI Stable Builds PPA publishes core libindi only for the resolute (26.04) series, so this job must run on ubuntu-26.04, not ubuntu-latest."
+            echo "::error::libindi-dev resolved to $indi_version, but pyindi-client 2.x needs INDI 2.x. The INDI Stable Builds PPA publishes core libindi only for the resolute (26.04) series and only for the amd64 architecture, so this job must run on ubuntu-26.04 with amd64 enabled as a foreign architecture."
             exit 1
             ;;
         esac

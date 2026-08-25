@@ -32,6 +32,45 @@ logger = logging.getLogger(__name__)
 # this module's worker-process path).
 _SATURATION_ADU_THRESHOLD = 65000.0
 
+# --- Normalization ensemble selection ---------------------------------------
+#
+# The ensemble used to be a positional slice of the flux-sorted star list,
+# which silently changed meaning with the population size: at 100 stars it
+# took indices 10-70 (bright, well-measured), but at 992 it took 99-300 --
+# far deeper and fainter. Measured on IC 1805 and M 106 (2026-08-25), the
+# larger, fainter ensemble was worse on both, significantly so on M 106
+# (median per-star coefficient of variation 0.5014 vs 0.4469 with the
+# smaller bright ensemble; 32 of 103 paired stars improved, sign-test
+# p=0.00015). Selecting on photometric merit instead keeps the ensemble
+# anchored to the stars that actually normalize well, whatever the
+# population size.
+
+# A comparison star is only useful in frames where it was measured, so
+# require it to carry usable flux in most of them. 0.8 keeps stars that
+# miss the occasional frame to cloud or a cosmic ray while rejecting ones
+# that dropped out of half the run -- the failure mode behind the
+# "ensemble only covered 17/61 frames" fallback seen on M 106.
+MINIMUM_ENSEMBLE_FRAME_COVERAGE = 0.8
+
+# Saturated stars have a flat-topped profile whose measured flux no longer
+# tracks real brightness, so they poison a normalization reference. Binning
+# IC 1805 by brightness showed the brightest 61 stars had *worse* median
+# scatter (0.768) than the brightest 500 (0.565) -- the signature of
+# saturation at the bright end. A small allowance absorbs a star that
+# clips in a frame or two of unusually good seeing.
+MAXIMUM_ENSEMBLE_SATURATED_FRACTION = 0.05
+
+# Ensemble size is subject to diminishing returns: the per-frame median is
+# already well determined by this many good stars, and every additional one
+# is necessarily fainter and noisier than the last. The measurements above
+# found 60 bright stars beat 201 fainter ones, so bias toward quality.
+TARGET_ENSEMBLE_SIZE = 100
+
+# Floor below which a merit-selected ensemble is too small to give a stable
+# per-frame median, at which point the coverage requirement is relaxed
+# rather than proceeding with too few comparison stars.
+MINIMUM_ENSEMBLE_SIZE = 10
+
 
 def _read_exposure_seconds(header: Any) -> float:
     """Read a FITS header's exposure duration, in seconds.
@@ -609,11 +648,15 @@ class VariabilityAnalyzer:
 
         # Alignment anchors (indices 50-100 to avoid saturation) always
         # come from this blind detection pass, regardless of whether
-        # seed_stars is given -- a seeded, astrometry-identified
-        # population is typically far smaller than 100 stars, and
-        # frame-to-frame alignment doesn't care which stars are being
-        # tracked/reported, only that enough of them exist to measure a
-        # reliable shift.
+        # seed_stars is given -- frame-to-frame alignment doesn't care
+        # which stars are being tracked/reported, only that enough of
+        # them exist to measure a reliable shift.
+        #
+        # This used to also say the seeded population is "typically far
+        # smaller than 100 stars". That was only true because
+        # identify_session_stars capped it at 100; it now defers to
+        # Processing.Astrometry.maximum_identified_stars and a seeded
+        # population can be thousands.
         reference_top_refs_minimal = []
         for star_row in reference_stars_detected[50:100]:
             x_ref = star_row.get("xcentroid", star_row.get("x_centroid"))
@@ -783,24 +826,98 @@ class VariabilityAnalyzer:
         if not self.stellar_objects:
             return
 
-        # 1. Identify "Stable Reference Stars": a percentile window scaled
-        # to the actual detected population, favoring moderately bright
-        # (but not the very brightest, more saturation-prone) sources
-        # over hardcoded absolute indices. A fixed [100:300] slice
-        # silently produced an EMPTY ensemble on fields with far fewer
-        # than ~300 detections (e.g. a nebula field with ~200 total
-        # detections) -- which, per the fallback below and in step 4,
-        # used to wipe every star's light curve down to nothing rather
-        # than fail loudly or adapt.
-        sorted_objects = sorted(self.stellar_objects, key=lambda x: x.flux if x.flux else 0, reverse=True)
-        total_star_count = len(sorted_objects)
-        start_index = min(100, total_star_count // 10)
-        end_index = min(300, start_index + max(1, int(total_star_count * 0.6)))
-        reference_ids = {s.id for s in sorted_objects[start_index:end_index]}
-        logger.info(
-            f"  Normalization ensemble: using {len(reference_ids)} / {total_star_count} stars "
-            f"(indices {start_index}-{end_index})."
-        )
+        # 1. Identify "Stable Reference Stars" on photometric merit --
+        # well-covered, unsaturated, and then brightest-first -- rather
+        # than by position in the flux-sorted list. See the ensemble
+        # selection constants above for why the positional slice this
+        # replaces degraded as the detected population grew.
+        total_star_count = len(self.stellar_objects)
+        # Count distinct timestamps across the whole run, not the longest
+        # single light curve. Stars from different sessions carry
+        # different timestamp sets, so measuring coverage against one
+        # star's own frame count scores a star that only ever appears in
+        # half the run as fully covered -- which is what let a selected
+        # ensemble still trip the frame-coverage fallback below.
+        frame_count = len({
+            timestamp
+            for star in self.stellar_objects
+            if star.light_curve
+            for timestamp in star.light_curve.timestamps
+        })
+
+        candidates = []
+        for star in self.stellar_objects:
+            light_curve = star.light_curve
+            if not light_curve or not light_curve.fluxes:
+                continue
+            # Zip all three the way _collect_frame_flux_data does, so
+            # coverage measures the frames that will actually receive a
+            # measurement. Counting fluxes alone overstates it whenever a
+            # star's timestamp list is shorter than its flux list, which
+            # is how an ensemble could pass an 80% coverage filter and
+            # still populate only 29 of 61 frames.
+            measurements = list(
+                zip(
+                    light_curve.timestamps,
+                    light_curve.fluxes,
+                    light_curve.is_saturated,
+                    strict=False,
+                )
+            )
+            if not measurements:
+                continue
+            usable_timestamps = {
+                timestamp
+                for timestamp, flux, saturated in measurements
+                if flux and flux > 0 and not saturated
+            }
+            saturated_fraction = sum(1 for _, _, saturated in measurements if saturated) / len(measurements)
+            coverage = len(usable_timestamps) / frame_count if frame_count else 0.0
+            candidates.append((star, coverage, saturated_fraction, star.flux or 0.0))
+
+        def _select(minimum_coverage: float) -> list:
+            """Filter candidates on merit and rank them brightest first.
+
+            Returns
+            -------
+            selected : `list`
+                Up to `TARGET_ENSEMBLE_SIZE` candidate tuples meeting
+                `minimum_coverage` and the saturation limit, brightest
+                first.
+            """
+            eligible = [
+                candidate
+                for candidate in candidates
+                if candidate[1] >= minimum_coverage and candidate[2] <= MAXIMUM_ENSEMBLE_SATURATED_FRACTION
+            ]
+            eligible.sort(key=lambda candidate: -candidate[3])
+            return eligible[:TARGET_ENSEMBLE_SIZE]
+
+        selected = _select(MINIMUM_ENSEMBLE_FRAME_COVERAGE)
+        relaxed_coverage = None
+        # A sparse or short run can leave too few stars measured in most
+        # frames. Relaxing coverage beats proceeding with an ensemble too
+        # small for a stable median, so step down rather than give up.
+        for fallback_coverage in (0.5, 0.25, 0.0):
+            if len(selected) >= MINIMUM_ENSEMBLE_SIZE:
+                break
+            relaxed_coverage = fallback_coverage
+            selected = _select(fallback_coverage)
+
+        reference_ids = {candidate[0].id for candidate in selected}
+        if selected:
+            faintest = min(candidate[3] for candidate in selected)
+            brightest = max(candidate[3] for candidate in selected)
+            logger.info(
+                f"  Normalization ensemble: {len(reference_ids)} of {total_star_count} stars "
+                f"selected on coverage/saturation, flux {faintest:.4g}-{brightest:.4g}"
+                + (f" (coverage requirement relaxed to {relaxed_coverage:.0%})" if relaxed_coverage else "")
+            )
+        else:
+            logger.warning(
+                f"  Normalization ensemble: no star of {total_star_count} met the coverage and "
+                "saturation requirements."
+            )
 
         # 2. Collect fluxes per timestamp for a candidate ensemble. A
         # comparison star saturated in a given frame is excluded from
@@ -839,12 +956,31 @@ class VariabilityAnalyzer:
         total_frame_count = len({t for star in self.stellar_objects for t in star.light_curve.timestamps})
         min_required_frames = max(1, int(total_frame_count * 0.5)) if total_frame_count else 0
         if total_frame_count and len(frame_flux_data) < min_required_frames:
+            # Widen in two steps rather than straight to everything. The
+            # first keeps the saturation filter, which is the criterion
+            # worth defending -- a saturated star's flux does not track
+            # its brightness, so admitting one to fix frame coverage
+            # trades a gap for a wrong answer. Only if that still leaves
+            # too few frames does the ensemble fall back to every star.
+            widened_ids = {
+                candidate[0].id
+                for candidate in candidates
+                if candidate[2] <= MAXIMUM_ENSEMBLE_SATURATED_FRACTION
+            }
             logger.warning(
                 f"  Normalization ensemble only covered {len(frame_flux_data)}/{total_frame_count} "
-                "frames; widening to all detected stars with positive flux."
+                f"frames; widening to {len(widened_ids)} unsaturated stars."
             )
-            reference_ids = {s.id for s in self.stellar_objects}
+            reference_ids = widened_ids
             frame_flux_data, frame_excluded_star_ids = _collect_frame_flux_data(reference_ids)
+
+            if len(frame_flux_data) < min_required_frames:
+                logger.warning(
+                    f"  Still only {len(frame_flux_data)}/{total_frame_count} frames covered; "
+                    "falling back to all detected stars with positive flux."
+                )
+                reference_ids = {s.id for s in self.stellar_objects}
+                frame_flux_data, frame_excluded_star_ids = _collect_frame_flux_data(reference_ids)
 
         self.frame_ensemble_composition = [
             FrameEnsembleComposition(
@@ -915,18 +1051,37 @@ class VariabilityAnalyzer:
             star.light_curve.fluxes_normalized = []
             new_timestamps = []
             new_fluxes = []
+            # is_saturated and airmasses are per-frame too, so they have
+            # to be filtered with the same mask. Rewriting only
+            # timestamps/fluxes left them at their original length and
+            # positionally misaligned, which is how a persisted light
+            # curve ended up with 52 fluxes against 61 saturation flags
+            # -- every later zip of the two then paired a flux with some
+            # other frame's saturation verdict.
+            new_is_saturated = []
+            new_airmasses = []
+            saturation_flags = star.light_curve.is_saturated or []
+            airmasses = star.light_curve.airmasses or []
 
-            for timestamp, flux in zip(star.light_curve.timestamps, star.light_curve.fluxes, strict=False):
+            for index, (timestamp, flux) in enumerate(
+                zip(star.light_curve.timestamps, star.light_curve.fluxes, strict=False)
+            ):
                 if timestamp in self.frame_reference_flux:
                     norm_factor = self.frame_reference_flux[timestamp]
                     if norm_factor > 0:
                         star.light_curve.fluxes_normalized.append(flux / norm_factor)
                         new_timestamps.append(timestamp)
                         new_fluxes.append(flux)
+                        if index < len(saturation_flags):
+                            new_is_saturated.append(saturation_flags[index])
+                        if index < len(airmasses):
+                            new_airmasses.append(airmasses[index])
 
             # Update the original light curve data to exclude rejected frames
             star.light_curve.timestamps = new_timestamps
             star.light_curve.fluxes = new_fluxes
+            star.light_curve.is_saturated = new_is_saturated
+            star.light_curve.airmasses = new_airmasses
 
             # --- Pass 3: Star-Level Sigma Clipping ---
             if len(star.light_curve.fluxes_normalized) > 10:
@@ -952,6 +1107,18 @@ class VariabilityAnalyzer:
                         ]
                         star.light_curve.fluxes_normalized = [
                             fn for i, fn in enumerate(star.light_curve.fluxes_normalized) if valid_mask[i]
+                        ]
+                        # Same reason as the rejected-frame filter above:
+                        # every per-frame array shares one index space.
+                        star.light_curve.is_saturated = [
+                            s
+                            for i, s in enumerate(star.light_curve.is_saturated)
+                            if i < len(valid_mask) and valid_mask[i]
+                        ]
+                        star.light_curve.airmasses = [
+                            a
+                            for i, a in enumerate(star.light_curve.airmasses)
+                            if i < len(valid_mask) and valid_mask[i]
                         ]
 
     def identify_variable_stars(

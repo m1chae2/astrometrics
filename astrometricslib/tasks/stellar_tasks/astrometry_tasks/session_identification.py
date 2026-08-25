@@ -231,7 +231,7 @@ def identify_session_stars(
     star_identifier: StarIdentifier,
     center_ra: float | None = None,
     center_dec: float | None = None,
-    max_detections: int = 100,
+    max_detections: int | None = None,
     write_back: bool = True,
 ) -> SessionIdentificationResult:
     """Detect and identify the stars on one session's reference frame.
@@ -253,9 +253,18 @@ def identify_session_stars(
         RA/Dec hints, in degrees, for the field center (default
         `None`).
     max_detections : `int`, optional
-        Maximum number of detected sources to identify, ranked by
-        flux (default 100, matching `StarIdentifier.process_image`'s
-        existing cap).
+        Maximum number of detected sources to identify, ranked by flux.
+        `None` (the default) defers to
+        ``Processing.Astrometry.maximum_identified_stars``, which is
+        unlimited by default; pass 0 to force no limit regardless of
+        configuration.
+
+        These stars become the photometry comparison ensemble's seed
+        population, so this is the ceiling that decides how much the
+        ensemble has to choose from. It used to be a hardcoded 100,
+        which is why a reference frame carrying 4,794 detected stars
+        still built its ensemble from 60 of 100 -- and why filtering
+        *within* that pool could never help.
     write_back : `bool`, optional
         Whether to write a freshly-solved WCS back to the reference
         frame's FITS header (default `True`).
@@ -275,8 +284,18 @@ def identify_session_stars(
     sources = star_identifier.detector.detect(data)
     unique_sources = star_identifier.detector.deduplicate(sources)
     sources_detected = len(unique_sources)
-    if len(unique_sources) > max_detections:
-        unique_sources = unique_sources[:max_detections]
+
+    # An explicit argument wins over configuration; an explicit 0 means
+    # no limit, so a caller can override a configured ceiling without
+    # reading configuration first. Matches process_image's precedence.
+    identification_limit = max_detections
+    if identification_limit is None:
+        try:
+            identification_limit = star_identifier.config.get_maximum_identified_stars()
+        except Exception:
+            identification_limit = None
+    if isinstance(identification_limit, int) and identification_limit > 0:
+        unique_sources = unique_sources[:identification_limit]
 
     stellar_objects = star_identifier._build_stellar_objects_from_sources(unique_sources)
 

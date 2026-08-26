@@ -101,3 +101,55 @@ def test_process_seeded_stars_skip_entries_missing_a_centroid(tmp_path):  # ruff
 
     assert len(analyzer.stellar_objects) == 1
     assert analyzer.stellar_objects[0].id == "* alf Lyr"
+
+
+def test_process_excludes_seed_stars_with_no_signal_on_the_reference_frame(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """A seed star with no detectable flux on the reference frame is dropped.
+
+    identify_session_stars now defers to the uncapped
+    Processing.Astrometry.maximum_identified_stars, so seed_stars can
+    number in the thousands -- and every accepted one re-enters the
+    per-frame parallel worker's per-star loop for every frame in the
+    session. A star with no signal above background never contributes a
+    usable measurement, so tracking it is pure cost with no benefit; on
+    2026-08-25 this scaled badly enough to exhaust system memory. This
+    only decides whether *this* photometry call gives the star a light
+    curve -- its catalog identity from astrometry is untouched.
+    """
+    path = tmp_path / "frame.fits"
+    _write_single_star_fits(path)
+
+    on_the_real_star = StellarObject(id="* alf Lyr", name="Vega")
+    on_the_real_star.star_data = {"xcentroid": 32.0, "ycentroid": 32.0}
+
+    # Far from the one real source this frame contains -- blank sky, so
+    # net_flux (background-subtracted) has no real signal to clamp to 0.
+    on_blank_sky = StellarObject(id="Nothing_Here", name="Nothing_Here")
+    on_blank_sky.star_data = {"xcentroid": 8.0, "ycentroid": 56.0}
+
+    analyzer = VariabilityAnalyzer()
+    analyzer.process([str(path)], seed_stars=[on_the_real_star, on_blank_sky])
+
+    assert len(analyzer.stellar_objects) == 1
+    assert analyzer.stellar_objects[0].id == "* alf Lyr"
+
+
+def test_process_keeps_a_seed_star_with_only_marginal_signal(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify the exclusion is a strict >0 gate, not a brightness floor.
+
+    A faint but genuinely positive net flux must still be tracked --
+    the filter targets stars with nothing to measure, not a magnitude
+    cut.
+    """
+    path = tmp_path / "frame.fits"
+    _write_single_star_fits(path)
+
+    faint_but_real = StellarObject(id="Faint_Star", name="Faint_Star")
+    # A few pixels off the Gaussian's peak, still inside its wings.
+    faint_but_real.star_data = {"xcentroid": 36.0, "ycentroid": 32.0}
+
+    analyzer = VariabilityAnalyzer()
+    analyzer.process([str(path)], seed_stars=[faint_but_real])
+
+    assert len(analyzer.stellar_objects) == 1
+    assert analyzer.stellar_objects[0].flux > 0

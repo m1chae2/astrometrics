@@ -673,6 +673,24 @@ class VariabilityAnalyzer:
 
         reference_stars_minimal = []
         if seed_stars is not None:
+            # identify_session_stars defers to the now-uncapped
+            # Processing.Astrometry.maximum_identified_stars, so
+            # seed_stars can run into the thousands -- and every one
+            # accepted here re-enters the per-frame parallel worker's
+            # per-star cutout loop for every frame in the session. A
+            # seed star with no detectable signal above local background
+            # on the reference frame (net_flux clamped to 0.0 by
+            # _measure_flux_numpy) will never contribute a usable
+            # measurement in any frame either, so tracking it is pure
+            # cost with no photometric benefit. Excluding it here only
+            # decides whether this call gives it a light curve -- it
+            # stays fully present in the catalog, since astrometry
+            # identification and persistence are separate and untouched.
+            #
+            # On 2026-08-25, NGC 6888 seeded 2,439 stars this way across
+            # a 166-frame session; two photometry workers reached ~6GB
+            # RSS each, exhausted an 8GB swap, and got Siril OOM-killed.
+            seed_stars_without_signal = 0
             for seed_star in seed_stars:
                 star_data = seed_star.star_data
                 x_ref = star_data.get("xcentroid", star_data.get("x_centroid"))
@@ -688,6 +706,9 @@ class VariabilityAnalyzer:
                 # below -- see _read_exposure_seconds.
                 flux, is_saturated = self._measure_flux_numpy(reference_data, x_ref, y_ref)
                 flux = flux / reference_exposure_seconds
+                if flux <= 0:
+                    seed_stars_without_signal += 1
+                    continue
                 seed_star.flux = flux
                 seed_star.light_curve = LightCurve(
                     timestamps=[reference_timestamp],
@@ -697,6 +718,11 @@ class VariabilityAnalyzer:
                 )
                 self.stellar_objects.append(seed_star)
                 reference_stars_minimal.append((seed_star.id, x_ref, y_ref))
+            if seed_stars_without_signal:
+                logger.info(
+                    f"  {seed_stars_without_signal} of {len(seed_stars)} seed stars had no detectable "
+                    "signal above background on the reference frame; excluded from per-frame tracking."
+                )
         else:
             for i, star_data in enumerate(reference_stars_detected[:max_stars]):
                 new_star = StellarObject(id=f"{id_prefix}Star_{i + 1}")

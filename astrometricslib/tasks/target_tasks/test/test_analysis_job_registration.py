@@ -170,25 +170,22 @@ def test_log_handlers_are_detached_even_when_the_run_fails(isolated_job_logging,
     assert _package_logger_handler_count() == handlers_before
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Known leak: the per-job logger keeps its FileHandler attached and open after the run. "
-        "Extracting one job/logging context manager fixes this; flip this to a plain assertion "
-        "at that point."
-    ),
-)
 def test_the_per_job_logger_is_left_clean(isolated_job_logging, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify the throwaway per-job logger does not keep its handlers.
+    """Verify the throwaway per-job logger does not keep our handlers.
 
-    Each run makes a logger named ``job_<uuid>`` and hangs a file handler on
-    it. Python keeps every logger it has ever been asked for, so if the
+    Each run makes a logger named ``job_<uuid>`` and hangs a file handler
+    on it. Python keeps every logger it has ever been asked for, so if the
     handler is never removed and closed, each run leaves behind one more
-    logger holding one more open file. Over a long batch that is a real
-    file-descriptor leak.
+    logger holding one more open file. Over a long batch run that is a
+    real file-handle leak.
 
-    This currently fails on purpose. It is the marker for the fix.
+    Only the handlers this library attaches are checked. pytest adds its
+    own capture handler to these loggers as part of running the test, and
+    that one is not ours to remove.
     """
+    from astrometricslib.drivers.logger_interface import DbLogHandler
+
+    our_handler_types = (logging.FileHandler, DbLogHandler)
     captured_job_ids: list[str] = []
 
     def _capture(*args: object, **kwargs: object) -> object:
@@ -204,8 +201,15 @@ def test_the_per_job_logger_is_left_clean(isolated_job_logging, monkeypatch):  #
     )
 
     assert captured_job_ids, "no per-job logger was created, so this test proves nothing"
-    leftover = [job_id for job_id in captured_job_ids if logging.getLogger(f"job_{job_id}").handlers]
-    assert leftover == []
+    leftover = {
+        job_id: [
+            handler
+            for handler in logging.getLogger(f"job_{job_id}").handlers
+            if isinstance(handler, our_handler_types)
+        ]
+        for job_id in captured_job_ids
+    }
+    assert not any(leftover.values()), f"job loggers kept our handlers: {leftover}"
 
 
 def test_a_broken_logs_database_does_not_stop_the_analysis(isolated_job_logging, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]

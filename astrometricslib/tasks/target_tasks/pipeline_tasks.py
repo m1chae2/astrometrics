@@ -14,6 +14,7 @@ import time
 from typing import Any, NamedTuple
 
 from astrometricslib.drivers import disk_interface
+from astrometricslib.drivers.job_logging import registered_job
 from astrometricslib.models.moving_object import CascadeStage
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
@@ -963,106 +964,21 @@ def analyze_target(
 
         butler = DiskButler()
 
-    # Automatically register processing job in astrometrics_log.db so
-    # execution from scripts, notebooks, or CLI automatically appears in
-    # the UI job manager. Skipped when register_job=False -- see that
-    # parameter's docstring.
-    # Mirrors AnalysisOrchestrator._start_analysis_task's job_logger setup (a
-    # FileHandler for the job's own log file, plus a DbLogHandler so
-    # JobHistoryList's "select job -> view log" pulls the same milestone
-    # messages a UI-started analysis run would produce) so a script-started
-    # run gets the same terminal output as one started from the UI.
-    job_id = None
-    logger_if = None
-    job_logger = None
-    job_log_handlers: list = []
-    pipeline_logger = None
-    if register_job:
-        try:
-            import os
-            import uuid
-            from datetime import datetime
+    # Record this run in the job list so work started from a script,
+    # notebook, or the command line shows up in the user interface the
+    # same way a run started from the interface does. Skipped when
+    # register_job=False -- see that parameter's docstring.
+    with registered_job(
+        enabled=register_job,
+        job_type="analysis",
+        target_id=target.id,
+        completed_message=f"[{target.id}] Analysis completed successfully.",
+        failed_message=f"[{target.id}] Analysis failed.",
+    ) as job:
+        job.info(
+            f"[{target.id}] Analysis job started for {target.id} (type: {pipeline_type}, Job: {job.job_id})"
+        )
 
-            from astrometricslib.drivers.logger_interface import DbLogHandler, LoggerInterface
-            from astrometricslib.utilities.config_loader import get_configuration
-            from astrometricslib.utilities.pipeline_models import ProcessingJob
-
-            cfg = get_configuration()
-            log_db_path = cfg.get_logs_db_path()
-            logger_if = LoggerInterface(log_db_path)
-            job_id = str(uuid.uuid4())
-
-            safe_target = target.id.replace(" ", "_").replace("/", "_")
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            log_dir = cfg.get_logs_path()
-            os.makedirs(log_dir, exist_ok=True)
-            log_file_path = str(log_dir / f"analysis_{safe_target}_{timestamp}.log")
-
-            job_logger = logging.getLogger(f"job_{job_id}")
-            job_logger.propagate = False
-            job_logger.setLevel(logging.INFO)
-            file_handler = logging.FileHandler(log_file_path)
-            file_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
-            db_handler = DbLogHandler(logger_if, job_id=job_id)
-            job_logger.addHandler(file_handler)
-            job_logger.addHandler(db_handler)
-
-            # Also attach to the "astrometricslib" package logger -- the
-            # common ancestor of every module logger used deeper in the
-            # pipeline (star_identifier, plate_solver,
-            # variability_analyzer, etc, all via
-            # logging.getLogger(__name__) with propagate=True by
-            # default). Without this, only this function's own
-            # hand-written milestone messages ever reached the job's log
-            # file/DB rows -- everything the pipeline itself decides
-            # along the way (plate-solve fallback stages, SIMBAD/Gaia
-            # query results, per-star identification) was invisible
-            # there. Removed in the finally block below once this run is
-            # done, since every job attaches its own handler instances
-            # here and leaving them would mean this job's file/DB rows
-            # keep receiving every *future* job's log lines too.
-            job_log_handlers = [file_handler, db_handler]
-            pipeline_logger = logging.getLogger("astrometricslib")
-            for handler in job_log_handlers:
-                pipeline_logger.addHandler(handler)
-            pipeline_logger.setLevel(logging.INFO)
-
-            initial_job = ProcessingJob(
-                id=job_id,
-                target_id=target.id,
-                job_type="analysis",
-                status="started",
-                progress_current=0,
-                progress_total=100,
-                log_file_path=log_file_path,
-                created_at=datetime.now().isoformat(),
-                updated_at=datetime.now().isoformat(),
-            )
-            logger_if.upsert_job(initial_job)
-            job_logger.info(
-                f"[{target.id}] Analysis job started for {target.id} (type: {pipeline_type}, Job: {job_id})"
-            )
-        except Exception as job_err:
-            logger.warning(f"Could not register job in astrometrics_log.db: {job_err}")
-
-    def _update_job_status(status_val: str, progress_val: int = 100):  # ruff: ignore[missing-return-type-private-function]
-        if logger_if and job_id:
-            try:
-                j = logger_if.get_job(job_id)
-                if j:
-                    j.status = status_val
-                    j.progress_current = progress_val
-                    j.updated_at = datetime.now().isoformat()
-                    logger_if.upsert_job(j)
-            except Exception as exc:
-                logger.debug("Failed to persist job status update for job '%s': %s", job_id, exc)
-        if job_logger:
-            if status_val == "completed":
-                job_logger.info(f"[{target.id}] Analysis completed successfully.")
-            elif status_val == "failed":
-                job_logger.error(f"[{target.id}] Analysis failed.")
-
-    try:
         # Resolve image path for astrometry/spectroscopy modes
         # if not explicitly provided
         if not path and pipeline_type in ("astrometry", "spectroscopy"):
@@ -1075,30 +991,14 @@ def analyze_target(
             elif target.frames:
                 path = target.frames[0].path
             else:
-                _update_job_status("failed", 0)
                 raise ValueError(
                     f"No frames or stacked image available for {pipeline_type} analysis"
                     f" on target {target.id}."
                 )
 
-        res_dict = _run_analysis_pipeline_match(
+        return _run_analysis_pipeline_match(
             target, frames, pipeline_type, filter_type, butler, path, **kwargs
         )
-        _update_job_status("completed", 100)
-        return res_dict
-    except Exception as exc:
-        _update_job_status("failed", 0)
-        raise exc
-    finally:
-        # See the comment where job_log_handlers/pipeline_logger are
-        # built above: every job attaches its own handler instances to
-        # the shared "astrometricslib" logger, so they must come off
-        # again once this run is done (any exit path), or this job's
-        # file/DB rows would keep receiving every *future* job's log
-        # lines too.
-        if pipeline_logger:
-            for handler in job_log_handlers:
-                pipeline_logger.removeHandler(handler)
 
 
 def _run_analysis_pipeline_match(
@@ -1831,87 +1731,16 @@ def stack_and_solve(
     stacked_path : str or None
         The path to the final combined image file, or None if it failed.
     """
-    job_id = None
-    logger_if = None
-    job_logger = None
-    job_log_handlers: list = []
-    pipeline_logger = None
+    with registered_job(
+        enabled=register_job,
+        job_type="stacking",
+        target_id=target.id,
+        log_file=log_file,
+        completed_message=f"[{target.id}] Stacking completed successfully.",
+        failed_message=f"[{target.id}] Stacking failed.",
+    ) as job:
+        job.info(f"[{target.id}] Stacking job started (Job: {job.job_id}).")
 
-    if register_job:
-        try:
-            import os
-            import uuid
-            from datetime import datetime
-
-            from astrometricslib.drivers.logger_interface import DbLogHandler, LoggerInterface
-            from astrometricslib.utilities.config_loader import get_configuration
-            from astrometricslib.utilities.pipeline_models import ProcessingJob
-
-            cfg = get_configuration()
-            logger_if = LoggerInterface(cfg.get_logs_db_path())
-            job_id = str(uuid.uuid4())
-
-            safe_target = target.id.replace(" ", "_").replace("/", "_")
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            log_dir = cfg.get_logs_path()
-            os.makedirs(log_dir, exist_ok=True)
-            job_log_file_path = log_file or str(log_dir / f"stacking_{safe_target}_{timestamp}.log")
-
-            job_logger = logging.getLogger(f"job_{job_id}")
-            job_logger.propagate = False
-            job_logger.setLevel(logging.INFO)
-            file_handler = logging.FileHandler(job_log_file_path)
-            file_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
-            db_handler = DbLogHandler(logger_if, job_id=job_id)
-            job_logger.addHandler(file_handler)
-            job_logger.addHandler(db_handler)
-
-            # Also attach to the "astrometricslib" package logger, the
-            # common ancestor of every module logger used deeper in the
-            # stacking pipeline (stacking_tasks, siril_interface, etc,
-            # all via logging.getLogger(__name__) with propagate=True by
-            # default) -- mirrors analyze_target's identical setup.
-            job_log_handlers = [file_handler, db_handler]
-            pipeline_logger = logging.getLogger("astrometricslib")
-            for handler in job_log_handlers:
-                pipeline_logger.addHandler(handler)
-            pipeline_logger.setLevel(logging.INFO)
-
-            logger_if.upsert_job(
-                ProcessingJob(
-                    id=job_id,
-                    target_id=target.id,
-                    job_type="stacking",
-                    status="started",
-                    progress_current=0,
-                    progress_total=100,
-                    log_file_path=job_log_file_path,
-                    created_at=datetime.now().isoformat(),
-                    updated_at=datetime.now().isoformat(),
-                )
-            )
-            job_logger.info(f"[{target.id}] Stacking job started (Job: {job_id}).")
-        except Exception as job_err:
-            logger.warning(f"Could not register stacking job in astrometrics_log.db: {job_err}")
-
-    def _update_job_status(status_val: str, progress_val: int = 100):  # ruff: ignore[missing-return-type-private-function]
-        if logger_if and job_id:
-            try:
-                j = logger_if.get_job(job_id)
-                if j:
-                    j.status = status_val
-                    j.progress_current = progress_val
-                    j.updated_at = datetime.now().isoformat()
-                    logger_if.upsert_job(j)
-            except Exception as exc:
-                logger.debug("Failed to persist stacking job status update for job '%s': %s", job_id, exc)
-        if job_logger:
-            if status_val == "completed":
-                job_logger.info(f"[{target.id}] Stacking completed successfully.")
-            elif status_val == "failed":
-                job_logger.error(f"[{target.id}] Stacking failed.")
-
-    try:
         from astrometricslib.tasks.target_tasks import stacking_tasks
 
         stacked_path = stacking_tasks.stack_frames(
@@ -1966,15 +1795,11 @@ def stack_and_solve(
                         simbad_matched_count=0,
                     ),
                 )
-        _update_job_status("completed" if stacked_path else "failed", 100)
+        # Stacking can finish without raising and still produce no
+        # image, so the outcome is decided here rather than left to the
+        # context manager's "no exception means success" default.
+        job.mark("completed" if stacked_path else "failed", 100)
         return stacked_path
-    except Exception as exc:
-        _update_job_status("failed", 0)
-        raise exc
-    finally:
-        if pipeline_logger:
-            for handler in job_log_handlers:
-                pipeline_logger.removeHandler(handler)
 
 
 def _stack_frames_with_timeout(

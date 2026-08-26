@@ -1,11 +1,9 @@
-"""Purpose: Target Session derivation.
+"""Grouping images into observing sessions.
 
-Description: Defines TargetSession, a computed (not persisted) grouping of a
-target's frames by observing night and gain/offset configuration, plus the
-pure functions that derive it from frame metadata alone. TargetSession is
-orthogonal to Target -- Target is "what" (identity/coordinates), TargetSession
-is "when/under what conditions" -- and it is always reconstructable from
-Target.frames, so it carries no persistence of its own.
+This file defines a 'TargetSession', which groups a target's images by the
+night they were taken and the camera settings used (gain/offset). We do this
+because taking pictures on different nights usually means the telescope is
+pointing slightly differently, so they need to be handled in separate batches.
 """
 
 from datetime import date, datetime, timedelta
@@ -21,7 +19,7 @@ SESSION_NIGHT_BOUNDARY_HOUR = 12
 
 
 class TargetSession(BaseModel):
-    """A target's frames from one night under one gain/offset config."""
+    """A group of images taken on the same night with the same settings."""
 
     id: str
     target_id: str
@@ -32,20 +30,22 @@ class TargetSession(BaseModel):
 
 
 def compute_session_night(frame_timestamp: float) -> date:
-    """Return the local calendar date of the noon-to-noon session-night window.
+    """Figure out which observing night an image belongs to.
+
+    Astronomers work through the night, so a "night" runs from noon to noon,
+    not midnight to midnight. This keeps pictures taken at 11 PM and 1 AM
+    together in the same session.
 
     Parameters
     ----------
     frame_timestamp : `float`
-        Unix timestamp of a frame's capture time (``FrameRecord.timestamp``),
-        interpreted in the system's local time zone (no observatory-site
-        time zone configuration exists yet in this repo).
+        The exact time the picture was taken (Unix timestamp).
 
     Returns
     -------
     night_date : `date`
-        The calendar date of the night the frame belongs to. Timestamps
-        before local noon belong to the previous calendar date's night.
+        The calendar date of the night the image belongs to. Images taken
+        before noon count as the previous night's session.
     """
     local_capture_time = datetime.fromtimestamp(frame_timestamp)
     if local_capture_time.hour < SESSION_NIGHT_BOUNDARY_HOUR:
@@ -54,28 +54,23 @@ def compute_session_night(frame_timestamp: float) -> date:
 
 
 def derive_target_sessions(target_id: str, frames: list[FrameRecord]) -> list[TargetSession]:
-    """Group a target's frames into per-night, per-gain/offset sessions.
+    """Group a list of images into separate sessions.
 
-    Frames need not be temporally contiguous: repeated identical gain/offset
-    configuration within the same session night rejoins the same session
-    rather than starting a new one. Filter and exposure changes do not split
-    a session (see the architecture discussion this implements).
+    Images go into the same session if they were taken on the same night
+    and have the exact same camera gain and offset settings. Changing the
+    filter or exposure time doesn't start a new session.
 
     Parameters
     ----------
     target_id : `str`
-        Identifier of the owning `Target`.
-    frames : `list` [`FrameRecord`]
-        Frames to bucket, drawn from ``Target.frames``. Frames with no
-        `timestamp` are skipped, since a session night can't be computed
-        without a capture time.
+        The ID of the target these images belong to.
+    frames : `list` of `FrameRecord`
+        The list of images to group. Images missing a timestamp are ignored.
 
     Returns
     -------
-    sessions : `list` [`TargetSession`]
-        One `TargetSession` per distinct (night, gain, offset) bucket found
-        in `frames`, sorted by `night_date`. Pure function: no I/O, no
-        persistence.
+    sessions : `list` of `TargetSession`
+        A list of grouped sessions, ordered by date.
     """
     frame_paths_by_bucket: dict = {}
     bucket_order: list[tuple[date, str, str]] = []

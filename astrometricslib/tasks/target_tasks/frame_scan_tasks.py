@@ -1,28 +1,27 @@
-"""Pure FITS-header classification logic for frame scanning.
+"""Functions to read image settings and figure out what kind of picture it is.
 
-The disk-scanning/file-I/O half of the former
-targetlib/frame_scanning_operations.py lives in
-data_access/frame_scanning.py instead.
+This file only contains the logic for reading the header data.
+The actual file reading happens elsewhere.
 """
 
 from astrometricslib.utilities.enums import FilterType
 
 
 def get_filter_type(header: dict) -> FilterType:
-    """Extract FilterType from a FITS header via keyword matching.
+    """Read the image data to figure out which filter was used.
 
-    Falls back to `FilterType.NONE` when no keyword matches.
+    Looks at the text in the 'FILTER' section of the image data and tries
+    to match it to a known filter type (like Red, Green, Blue, or H-Alpha).
 
     Parameters
     ----------
     header : `dict`
-        Dictionary-like FITS header object.
+        The image metadata.
 
     Returns
     -------
     filter_type : `FilterType`
-        The matched filter type, or `FilterType.NONE` if the header's
-        ``FILTER`` value does not match any known keyword.
+        The matching filter, or `FilterType.NONE` if it doesn't match anything.
     """
     filter_str = str(header.get("FILTER", "")).upper()
 

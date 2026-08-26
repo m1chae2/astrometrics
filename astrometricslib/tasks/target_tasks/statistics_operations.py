@@ -1,27 +1,27 @@
-"""Frame statistics and scanning.
+"""Functions for checking and counting image frames.
 
-Extracted astronomical target stats calculations, grouping of light
-frame logs, FITS header queries, and recursive folder scanners.
+This file contains tools for calculating statistics about the images,
+such as counting how many images there are for different camera settings,
+and measuring basic quality metrics like the sky background brightness.
 """
 
 from typing import Any
 
 
 def get_frame_stats(target: Any) -> dict[str, Any]:
-    """Return aggregated frame counts grouped by acquisition specs.
+    """Count how many images share the same camera settings.
 
     Parameters
     ----------
     target : `Any`
-        The target whose frames are summarized.
+        The target to check.
 
     Returns
     -------
-    frame_stats : `Dict[str, Any]`
-        A dict with key "lights", a list of per-acquisition-spec
-        entries each containing "telescope", "camera", "iso",
-        "exposure", "filter", and "count". Empty when the target has
-        no light frames.
+    frame_stats : `dict`
+        A dictionary with a "lights" list. Each item in the list shows
+        the camera, telescope, ISO, exposure time, filter, and how many
+        images match those exact settings.
     """
     if not target:
         return {"lights": []}
@@ -50,25 +50,22 @@ def get_frame_stats(target: Any) -> dict[str, Any]:
 
 
 def list_camera_names(targets: list) -> dict[str, int]:
-    """Count frames per distinct camera name across a list of targets.
+    """Find all the different cameras used across a bunch of targets.
 
-    Intended for discoverability: callers of pipeline entry points
-    that filter by camera (e.g. `run_full_pipeline`'s `camera_name`)
-    have no other way to know which camera names are actually present
-    in the catalog's frame data before choosing one.
+    This helps the user interface show a list of available cameras to
+    filter by.
 
     Parameters
     ----------
     targets : `list`
-        The targets whose frames are counted.
+        A list of target objects to look through.
 
     Returns
     -------
-    counts_by_camera : `Dict[str, int]`
-        Each distinct camera name found (the frame's raw `camera`
-        value, unset frames reported as ``"Unknown"``) mapped to how
-        many frames across all given targets used it, sorted by count
-        descending.
+    counts_by_camera : `dict`
+        A dictionary where the key is the camera name and the value is
+        how many images were taken with it. Sorted with the most used
+        camera first.
     """
     counts: dict[str, int] = {}
     for target in targets:
@@ -85,45 +82,28 @@ def measure_frame_input_quality(
     remeasure: bool = False,
     camera_name: str | None = None,
 ) -> dict[str, int]:
-    """Record per-frame quality for a target's frames, in place.
+    """Measure basic quality stats for every image in a target.
 
-    Fills in `background_level` and `saturated_pixel_fraction` (and
-    optionally FWHM) on each frame, so a frame can be judged before it
-    is ever stacked. Until now those numbers were written only during
-    registration, leaving never-stacked frames -- the ones most worth
-    triaging -- with no evidence at all.
-
-    Incremental by default: a frame already carrying a background level
-    is skipped, so an interrupted sweep resumes instead of restarting.
-    Measured cost on the 2026-08-23 catalog is roughly 0.3s of compute
-    per frame plus however long that frame takes to read, which is the
-    dominant term; `include_fwhm` adds ~16s per frame on top, so a
-    whole-catalog sweep with FWHM enabled is an overnight job, not an
-    interactive one.
-
-    The caller is responsible for persisting `target` afterwards; this
-    mutates the frame records but performs no write of its own.
+    This checks things like sky background brightness and how many pixels
+    are maxed out (saturated). This helps us throw out bad images before
+    we waste time trying to stack them. It updates the target object directly.
 
     Parameters
     ----------
     target : `Any`
-        The target whose frames are measured, mutated in place.
+        The target whose images need measuring.
     include_fwhm : `bool`, optional
-        Whether to also measure FWHM (default `False`); see the cost
-        note above.
+        If True, also measures sharpness (FWHM). This takes a long time!
     remeasure : `bool`, optional
-        Whether to re-measure frames that already carry a background
-        level (default `False`).
+        If True, forces it to re-check images it already measured before.
     camera_name : `str`, optional
-        Restrict measurement to frames from this camera, matched
-        case-insensitively as a substring. `None` (default) measures
-        every frame.
+        Only measure images from this specific camera.
 
     Returns
     -------
-    counts : `dict` [`str`, `int`]
-        ``measured``, ``skipped`` (already had values), and ``failed``
-        (unreadable or unmeasurable) frame counts.
+    counts : `dict`
+        A dictionary showing how many images were "measured", "skipped",
+        or "failed" (because they couldn't be read).
     """
     from astrometricslib.data_access.image_quality_metrics import (
         measure_frame_input_quality as measure_one_frame,
@@ -167,27 +147,26 @@ def measure_frame_input_quality(
 
 
 def get_frame_stats_grouped(target: Any, calibration: Any, camera: str | None = None) -> list[dict[str, Any]]:
-    """Return frame statistics grouped by filter and exposure.
+    """Group image statistics and check if we have matching dark frames.
+
+    This groups the images by filter, ISO, and exposure time. For each group,
+    it also checks the calibration library to see if we have dark frames
+    that match those exact settings.
 
     Parameters
     ----------
     target : `Any`
-        The target whose frames are summarized.
+        The target to summarize.
     calibration : `Any`
-        A `CalibrationCatalog`-like object (``.get(kind, **kwargs)``)
-        used to look up matching dark frames.
+        The library of calibration frames (dark frames, flat frames, etc).
     camera : `str`, optional
-        If given, restrict the summary to light frames captured with
-        this camera; default `None` (no restriction).
+        Only check images from this camera.
 
     Returns
     -------
-    grouped_stats : `List[Dict[str, Any]]`
-        One entry per (filter, iso, exposure) group, sorted by filter
-        then iso, each containing "filter", "iso", "exposure" (as a
-        formatted string), "count", "darks" (matched dark frame count
-        or "Missing"), and "camera". Empty when the target is not
-        found.
+    grouped_stats : `list` of `dict`
+        A list where each dictionary represents a group of images with the
+        same settings, and includes a count of matching dark frames.
     """
     if not target:
         return []

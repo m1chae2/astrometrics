@@ -1,10 +1,7 @@
-"""Purpose: Unit tests for the Target/FrameRecord pure data schema.
+"""Tests for the Target and Frame information structures.
 
-Description: Verifies per-frame quality fields default to None and
-round-trip through serialize/deserialize. Orchestration-method tests
-(analyze_target, process_target, add_frame, analyze_frame_spectroscopy)
-moved to tasks/target_tasks/test/test_pipeline_tasks.py, since those
-operations moved off Target and into free functions there.
+These tests make sure that when we save and load target information
+(like from a file), all the details about its images are kept correctly.
 """
 
 import pytest
@@ -13,7 +10,7 @@ from astrometricslib.models.target import FrameRecord, Target
 
 
 def test_frame_record_per_frame_quality_facts_default_to_none_and_round_trip() -> None:
-    """Verify per-frame quality fields default to None and round-trip."""
+    """Check that image quality details start empty and can round-trip."""
     frame = FrameRecord(path="frame.fits")
     assert frame.registration_fwhm_x_px is None
     assert frame.registration_dx_px is None
@@ -35,8 +32,8 @@ def test_frame_record_per_frame_quality_facts_default_to_none_and_round_trip() -
     reloaded.deserialize(target.serialize())
 
     reloaded_frame = reloaded.frames[0]
-    # Exact literals set above and round-tripped through
-    # serialize/deserialize, not computed values.
+    # Check that the loaded values exactly match what we put in
+    # before saving.
     assert reloaded_frame.registration_fwhm_x_px == pytest.approx(2.6)
     assert reloaded_frame.registration_dx_px == pytest.approx(1.2)
     assert reloaded_frame.registration_dy_px == pytest.approx(-0.8)

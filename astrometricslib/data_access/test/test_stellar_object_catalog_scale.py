@@ -25,6 +25,8 @@ to 270,450 stellar objects on 2026-08-25, after an earlier fix removed the
 import json
 import sqlite3
 
+import pytest
+
 from astrometricslib.drivers import disk_interface
 from astrometricslib.utilities.config_loader import AppConfiguration
 
@@ -126,7 +128,7 @@ def test_list_object_summaries_reports_the_expected_fields(tmp_path):  # ruff: i
     config = _make_isolated_config(tmp_path)
     catalog = StellarCatalog(config=config)
 
-    vega = StellarObject(id="Vega", name="Vega", target_ids=["Lyra Field"])
+    vega = StellarObject(id="Vega", name="Vega", target_ids=["Lyra Field"], ra=279.2347, dec=38.7837)
     vega.spectrum_data_processed = {"wavelengths_angstrom": [5000], "intensities": [1.0]}
     betelgeuse = StellarObject(id="Betelgeuse", name="Betelgeuse", target_ids=["Orion Field"])
     betelgeuse.light_curve = {"timestamps": ["2026-01-01T00:00:00Z"], "magnitudes": [0.5]}
@@ -138,6 +140,11 @@ def test_list_object_summaries_reports_the_expected_fields(tmp_path):  # ruff: i
     assert summaries["Vega"]["hasSpectra"] is True
     assert summaries["Vega"]["hasPhotometry"] is False
     assert summaries["Vega"]["targetIds"] == ["Lyra Field"]
+    # Consumers like the Planetarium's object picker resolve a selected
+    # star's sky position from this same summary list -- omitting these
+    # meant every star selected through it recentered on RA=0, Dec=0.
+    assert summaries["Vega"]["ra"] == pytest.approx(279.2347)
+    assert summaries["Vega"]["dec"] == pytest.approx(38.7837)
 
     assert summaries["Betelgeuse"]["hasSpectra"] is False
     assert summaries["Betelgeuse"]["hasPhotometry"] is True
@@ -161,6 +168,94 @@ def test_list_object_summaries_filters_by_target_id(tmp_path):  # ruff: ignore[m
     summaries = catalog.list_object_summaries(target_id="M 13")
 
     assert [s["id"] for s in summaries] == ["InField"]
+
+
+def test_list_object_summaries_target_id_substring_collision_is_still_exact(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """A target id that is a substring of another must not false-match.
+
+    target_id is passed to Butler.list_projected as a `like` prefilter
+    for performance, but "M 1" is a substring of "M 13" -- the LIKE
+    narrowing alone would incorrectly include a star that only belongs
+    to "M 13" when asked for "M 1". Correctness must come entirely from
+    the exact `target_ids` membership check that runs after the SQL
+    query, not from the SQL LIKE itself.
+    """
+    from astrometricslib.api.stars import StellarCatalog
+    from astrometricslib.models.stellar_source import StellarObject
+
+    config = _make_isolated_config(tmp_path)
+    catalog = StellarCatalog(config=config)
+
+    in_m1 = StellarObject(id="InM1", name="InM1", target_ids=["M 1"])
+    in_m13_only = StellarObject(id="InM13Only", name="InM13Only", target_ids=["M 13"])
+    in_both = StellarObject(id="InBoth", name="InBoth", target_ids=["M 1", "M 13"])
+    catalog.butler.put([in_m1, in_m13_only, in_both], "stellar_catalog", {})
+
+    summaries = catalog.list_object_summaries(target_id="M 1")
+
+    assert {s["id"] for s in summaries} == {"InM1", "InBoth"}
+
+
+def test_list_object_summaries_caps_the_unfiltered_case_by_default(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """A browse-everything request must not return the whole catalog.
+
+    DEFAULT_UNFILTERED_SUMMARY_LIMIT bounds what an unfiltered listing
+    transmits and re-serializes -- without it, a catalog-browsing view
+    with no target filter hydrates and sends every row in the catalog
+    on every poll.
+    """
+    import astrometricslib.api.stars as stars_module
+    from astrometricslib.api.stars import StellarCatalog
+    from astrometricslib.models.stellar_source import StellarObject
+
+    monkeypatch.setattr(stars_module, "DEFAULT_UNFILTERED_SUMMARY_LIMIT", 3)
+    config = _make_isolated_config(tmp_path)
+    catalog = StellarCatalog(config=config)
+    catalog.butler.put(
+        [StellarObject(id=f"Star{i}", name=f"Star{i}") for i in range(10)], "stellar_catalog", {}
+    )
+
+    summaries = catalog.list_object_summaries()
+
+    assert len(summaries) == 3
+
+
+def test_list_object_summaries_explicit_limit_overrides_the_default(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """A caller-supplied limit wins over the built-in default either way."""
+    import astrometricslib.api.stars as stars_module
+    from astrometricslib.api.stars import StellarCatalog
+    from astrometricslib.models.stellar_source import StellarObject
+
+    monkeypatch.setattr(stars_module, "DEFAULT_UNFILTERED_SUMMARY_LIMIT", 3)
+    config = _make_isolated_config(tmp_path)
+    catalog = StellarCatalog(config=config)
+    catalog.butler.put(
+        [StellarObject(id=f"Star{i}", name=f"Star{i}") for i in range(10)], "stellar_catalog", {}
+    )
+
+    summaries = catalog.list_object_summaries(limit=7)
+
+    assert len(summaries) == 7
+
+
+def test_list_object_summaries_a_target_scoped_request_is_not_capped_by_default(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """A single target's own stars are not subject to the browse-all cap."""
+    import astrometricslib.api.stars as stars_module
+    from astrometricslib.api.stars import StellarCatalog
+    from astrometricslib.models.stellar_source import StellarObject
+
+    monkeypatch.setattr(stars_module, "DEFAULT_UNFILTERED_SUMMARY_LIMIT", 3)
+    config = _make_isolated_config(tmp_path)
+    catalog = StellarCatalog(config=config)
+    catalog.butler.put(
+        [StellarObject(id=f"Star{i}", name=f"Star{i}", target_ids=["M 13"]) for i in range(10)],
+        "stellar_catalog",
+        {},
+    )
+
+    summaries = catalog.list_object_summaries(target_id="M 13")
+
+    assert len(summaries) == 10
 
 
 def test_list_object_summaries_matches_the_model_computed_properties(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]

@@ -1,17 +1,9 @@
 """Session background-homogeneity check.
 
-Detects when a stacking session silently mixes two different sky
-conditions -- e.g. thin clouds rolling in partway through a session
-and never clearing -- as distinct from calibration/gain mismatch or
-ordinary gradual sky-brightness drift. Found via NGC 2403 (2026-02-22):
-a real session where background jumped ~5x and stayed there for the
-rest of the night, undetected by rejection-fraction or
-gain/calibration checks alone.
-
-The per-frame FITS-reading measurement functions
-(measure_frame_background_level, measure_frame_saturated_pixel_fraction)
-live in data_access/background_homogeneity.py instead -- this module
-only operates on already-measured, in-memory values.
+Detects when a stacking session mixes two different sky conditions,
+like when clouds roll in partway through the night. It looks for
+sudden jumps in sky brightness, ignoring normal slow changes (like
+the moon rising).
 """
 
 import statistics
@@ -45,32 +37,22 @@ def detect_background_split(
 ) -> dict[str, Any] | None:
     """Detect a sharp two-group split in per-frame sky-background levels.
 
-    Finds the largest gap between consecutive sorted background values
-    and compares it to the largest within-group spread on either side
-    of that gap. A session with gradual, continuous background drift
-    (changing sky altitude, moonrise, twilight) will have a gap
-    comparable to its typical spread; a session where conditions
-    changed abruptly partway through (thin clouds rolling in) will
-    have a gap many times larger than the spread on either side.
+    Sorts the background levels and finds the biggest gap between any two.
+    If that gap is much larger than the normal spread of values on either
+    side, it flags it as a sudden change in conditions.
 
     Parameters
     ----------
-    background_levels : `List[float]`
-        Per-frame sigma-clipped median sky-background levels, in the
-        same units as the raw ADU (see `measure_frame_background_level`).
+    background_levels : `list` [`float`]
+        The measured sky brightness for each image.
     gap_ratio_threshold : `float`, optional
-        The minimum ratio of the largest gap to the typical
-        within-group spread required to report a split, default
-        `DEFAULT_GAP_RATIO_THRESHOLD` (4.0).
+        How many times larger the gap must be compared to normal spread
+        to count as a split (default is 4.0).
 
     Returns
     -------
-    split_summary : `Optional[Dict[str, Any]]`
-        `None` when no split is detected (including when there are
-        fewer than 2 frames, or no meaningful spread to compare
-        against). Otherwise a dict with keys "low_group_count",
-        "high_group_count", "low_group_median", "high_group_median",
-        "gap", and "gap_ratio".
+    split_summary : `dict` [`str`, `Any`] or `None`
+        Details about the split, or None if the images are all similar.
     """
     if len(background_levels) < 2:
         return None
@@ -109,50 +91,26 @@ def find_dominant_background_subset(
 ) -> tuple[list[Any], list[Any], dict[str, Any] | None]:
     """Split frames into the larger same-conditions group and the rest.
 
-    Detecting a background split is only half the job. Stacking every
-    frame anyway lets a single wildly discrepant frame become Siril's
-    registration reference, and a cloud-washed or light-leaked frame
-    often has no detectable stars at all -- at which point registration
-    aborts and the whole sequence is lost, however many good frames
-    were sitting behind it. That is exactly what happened to M 42 on
-    2026-08-25: 22 frames at ~236 ADU, one at ~2324, reference found
-    0 stars, all 23 frames discarded.
-
-    Mirrors `frame_homogeneity.find_dominant_gain_subset`: keep the
-    majority group, hand back the minority to be recorded as excluded
-    rather than silently dropped.
+    If the weather changed suddenly during a session (like clouds
+    rolling in), this function keeps the largest group of similar
+    images and rejects the rest. Stacking completely different images
+    together causes errors.
 
     Parameters
     ----------
-    frames : `List[Any]`
-        Frame records to split. Each is read via its
-        ``background_level`` attribute, which the caller is expected to
-        have measured already.
+    frames : `list` [`Any`]
+        The images to check.
     gap_ratio_threshold : `float`, optional
-        Passed through to `detect_background_split`, default
-        `DEFAULT_GAP_RATIO_THRESHOLD` (4.0).
+        The threshold to decide if conditions changed (default is 4.0).
 
     Returns
     -------
-    dominant_subset : `List[Any]`
-        The frames to stack. Equal to `frames` when no split is found.
-    excluded : `List[Any]`
-        The minority-group frames, empty when no split is found.
-    split_summary : `Optional[Dict[str, Any]]`
-        The `detect_background_split` result, for logging and quality
-        reporting, or `None` when no split was detected.
-
-    Notes
-    -----
-    Frames whose ``background_level`` is `None` were never successfully
-    measured, so they cannot be assigned to either group and are always
-    retained -- a failed measurement is not evidence a frame is bad,
-    and the existing measurement loop already tolerates such failures.
-
-    The larger group wins, matching the gain check, so a session that
-    turned cloudy and stayed that way still stacks its cloudy majority:
-    the goal is a homogeneous stack, not the lowest background. Ties go
-    to the low-background group, which is the cleaner sky.
+    dominant_subset : `list` [`Any`]
+        The main group of images to keep.
+    excluded : `list` [`Any`]
+        The images that were rejected because they look different.
+    split_summary : `dict` [`str`, `Any`] or `None`
+        Details about the split, or None if no split happened.
     """
     if not frames:
         return [], [], None

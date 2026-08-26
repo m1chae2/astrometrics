@@ -677,6 +677,7 @@ class ImageProcessing:
             cached_master_path = os.path.join(cache_directory, f"{kind}_{fingerprint}.fits")
             if os.path.exists(cached_master_path):
                 continue
+            partial_path = None
             try:
                 with tempfile.NamedTemporaryFile(
                     dir=cache_directory, suffix=".partial", delete=False
@@ -686,8 +687,9 @@ class ImageProcessing:
                 os.replace(partial_path, cached_master_path)
             except OSError as store_error:
                 logger.debug("Could not cache %s master: %s", kind, store_error)
-                with contextlib.suppress(OSError):
-                    os.unlink(partial_path)
+                if partial_path is not None:
+                    with contextlib.suppress(OSError):
+                        os.unlink(partial_path)
                 continue
             if job_logger:
                 job_logger.info(f"Cached master {kind} frame (fingerprint {fingerprint[:12]}).")
@@ -855,8 +857,7 @@ class ImageProcessing:
 
                     calibration_library.py's get_dark_frames/
                     get_bias_frames/get_flat_frames are documented
-                    as "REQ: BKD-1.1 - Relaxed matching (ignore
-                    ISO...)" -- they deliberately accept a
+                    to deliberately accept a
                     mismatched-gain master over having none at all.
                     This check doesn't override that: it only
                     surfaces the mismatch as a soft flag, checked
@@ -1573,7 +1574,7 @@ class ImageProcessing:
                 target_folder, job_logger=job_logger
             )
 
-            # REQ: IMG-4.2 - Automated Master Calibration Generation
+            # Automated Master Calibration Generation
             if num_biases > 0 and "bias" not in restored_master_kinds:
                 script += [f"cd {os.path.join(target_folder, 'biases')}"]
                 if num_biases == 1:
@@ -1663,7 +1664,7 @@ class ImageProcessing:
                 else:
                     seq = "light_source"
 
-                # REQ: IMG-4.4 - Multi-frame Stacking
+                # Multi-frame Stacking
                 # Spectroscopy frames need a shift-only transform: a
                 # diffraction grating disperses every star's light,
                 # not just the target's, so field stars are usually
@@ -1690,7 +1691,7 @@ class ImageProcessing:
                 register_commands = ["setfindstar -relax=on"]
 
                 if is_spectral:
-                    # REQ: IMG-4.4 - Multi-frame Stacking
+                    # Multi-frame Stacking
                     # Spectroscopy frames need a shift-only transform: a
                     # diffraction grating disperses every star's light,
                     # not just the target's, so field stars are usually
@@ -1795,7 +1796,7 @@ class ImageProcessing:
                 )
                 self.last_run_diagnostics["zero_order_stars"] = [parse_zero_order_star(p) for p in lst_paths]
 
-            # REQ: HDR-4.1 - Update stacked FITS header with total
+            # Update stacked FITS header with total
             # exposure time
             if res and os.path.exists(res):
                 try:

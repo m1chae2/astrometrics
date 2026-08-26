@@ -1,6 +1,7 @@
-"""AnalysisContext: A data container for a single analysis session.
+"""A container for the data used during an image analysis session.
 
-Holds the image, detected objects, and world coordinate system.
+It holds the image itself, any objects (like stars) found in it, and the
+mapping that connects image pixels to real sky coordinates (WCS).
 """
 
 from dataclasses import dataclass
@@ -13,7 +14,7 @@ from astrometricslib.utilities.image import AstrometricsImage
 
 @dataclass
 class AnalysisContext:
-    """A context object that bundles image data and metadata for analysis."""
+    """Everything one image's analysis pass builds up as it runs."""
 
     image: AstrometricsImage
     stellar_objects: list[StellarObject]

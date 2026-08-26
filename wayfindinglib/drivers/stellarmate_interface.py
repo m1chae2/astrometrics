@@ -369,6 +369,7 @@ class StellarMateInterface:
                 "--no-p",
                 "--no-g",
                 "--no-o",
+                "-s",
                 f"{self.host_alias}:{remote_path}",
                 local_target_path,
             ]

@@ -1,11 +1,12 @@
-"""Purpose: Moving-object discrimination cascade for asteroid recovery.
+"""Tools to find moving objects like asteroids.
 
-Description: Chains per-frame point-source detections (already
-morphology-filtered by SourceDetector -- cascade step 1) across frames,
-then applies the persistence, reference-frame, and rate/linearity tests
-(cascade steps 2-4) to separate real slow movers from cosmic rays,
-missed stars, and hot pixels. Ephemeris cross-matching (cascade step 5)
-is a separate, later stage (EphemerisCrossMatcher).
+This takes a list of possible star-like dots from our images and runs them
+through a series of tests to find the real asteroids:
+1. Does it show up in multiple pictures over time? (Persistence)
+2. Is it actually moving across the sky, or just a bad pixel on the camera?
+3. Is it moving in a straight line at a reasonable speed? (Linearity/Rate)
+
+This helps us ignore random noise (like cosmic rays) and broken camera pixels.
 """
 
 import logging
@@ -28,10 +29,9 @@ logger = logging.getLogger(__name__)
 
 _SECONDS_PER_HOUR = 3600.0
 
-# Below this total sum-of-squares (in arcsec^2), a chain's sky positions
-# are treated as having no meaningful spread at all for R^2 purposes,
-# avoiding a division by (near-)zero. Not a tunable quality threshold --
-# a numerical-stability guard only.
+# A very tiny number used to prevent math errors. If an object hasn't moved
+# at all, calculating its straight-line speed would involve dividing by zero.
+# We use this to safely handle those cases.
 _LINEAR_FIT_TOTAL_SUM_OF_SQUARES_EPSILON = 1e-12
 
 
@@ -41,29 +41,29 @@ def _tangent_plane_offset_arcsec(
     reference_right_ascension_deg: float,
     reference_declination_deg: float,
 ) -> tuple[float, float]:
-    """Project a sky position onto a small tangent-plane offset, in arcsec.
+    """Calculate the flat X/Y distance between two points on the sky.
 
-    A small-angle approximation (`right_ascension` scaled by
-    `cos(declination)`, no great-circle correction) -- adequate at the
-    sub-degree field-of-view scales this pipeline operates at.
+    Because the sky is curved, measuring distance directly is hard. For
+    small distances, we can pretend the sky is flat (a 'tangent plane')
+    to make the math simpler.
 
     Parameters
     ----------
     right_ascension_deg : `float`
-        The position's right ascension, in degrees.
+        The X-coordinate (RA) of the point we are checking.
     declination_deg : `float`
-        The position's declination, in degrees.
+        The Y-coordinate (Dec) of the point we are checking.
     reference_right_ascension_deg : `float`
-        The reference position's right ascension, in degrees.
+        The X-coordinate (RA) of our center or starting point.
     reference_declination_deg : `float`
-        The reference position's declination, in degrees.
+        The Y-coordinate (Dec) of our center or starting point.
 
     Returns
     -------
     right_ascension_offset_arcsec : `float`
-        East-west offset from the reference position, in arcsec.
+        How far left or right the point is from center, in arcseconds.
     declination_offset_arcsec : `float`
-        North-south offset from the reference position, in arcsec.
+        How far up or down the point is from center, in arcseconds.
     """
     right_ascension_offset_arcsec = (
         (right_ascension_deg - reference_right_ascension_deg)
@@ -77,21 +77,22 @@ def _tangent_plane_offset_arcsec(
 def _fit_linear_rate_arcsec_per_hour(
     timestamps: np.ndarray, tangent_plane_offsets_arcsec: np.ndarray
 ) -> tuple[float, float]:
-    """Fits a single tangent-plane axis's offsets linearly against time.
+    """Calculate how fast an object moves in a straight line, on one axis.
 
     Parameters
     ----------
     timestamps : `numpy.ndarray`
-        Unix-epoch-seconds timestamps, one per frame detection in the chain.
+        The times when the object was seen.
     tangent_plane_offsets_arcsec : `numpy.ndarray`
-        This axis's tangent-plane offset (arcsec) at each timestamp.
+        Where the object was located at each of those times.
 
     Returns
     -------
     rate_arcsec_per_hour : `float`
-        The fitted linear rate of change, in arcsec/hour.
+        How fast the object is moving along this axis.
     r_squared : `float`
-        The fit's coefficient of determination, in [0, 1].
+        How perfectly straight the movement is (1.0 is a perfect straight
+        line).
     """
     rate_arcsec_per_second, intercept = np.polyfit(timestamps, tangent_plane_offsets_arcsec, 1)
     fitted_values = rate_arcsec_per_second * timestamps + intercept
@@ -109,16 +110,16 @@ def _fit_linear_rate_arcsec_per_hour(
 
 
 class MovingObjectDetector:
-    """Chain per-frame detections into candidate moving-object tracks.
+    """Connects the dots between photos to find real moving objects.
 
-    Applies the persistence, reference-frame, and rate/linearity
-    discrimination cascade stages.
+    This runs the three main tests: checking if it shows up in multiple
+    pictures, checking if it's actually moving on the sky, and checking
+    if it moves in a straight line.
 
     Parameters
     ----------
     config : `MovingObjectConfig`
-        Configuration supplying the cascade's match radii, thresholds,
-        and rate bounds.
+        The settings for how strict these tests should be.
     """
 
     def __init__(self, config: MovingObjectConfig):  # ruff: ignore[missing-return-type-special-method]
@@ -127,25 +128,21 @@ class MovingObjectDetector:
     def detect_candidates(
         self, target_id: str, frame_detections: list[FrameDetection]
     ) -> list[AsteroidRecoveryCandidate]:
-        """Chains detections across frames and runs the discrimination cascade.
+        """Connect the dots between frames and run all the tests.
 
         Parameters
         ----------
         target_id : `str`
-            The `Target` these detections were made on.
+            The ID of the target we are analyzing.
         frame_detections : `list` [`FrameDetection`]
-            All morphology-filtered point-source detections across the
-            target's individual frames (cascade step 1 already applied
-            upstream, by whichever caller ran `SourceDetector` on each
-            frame).
+            A list of all the possible dots found in all the pictures.
 
         Returns
         -------
         candidates : `list` [`AsteroidRecoveryCandidate`]
-            One candidate per chained track, including rejected ones
-            (labeled with the cascade stage they were rejected at) --
-            rejections are labeled, not dropped, so the quality summary
-            can report on them.
+            The list of possible moving objects we found. Even if a dot
+            failed a test (like it didn't move fast enough), we still include
+            it in this list with a note explaining why it failed.
         """
         # Step 2: Chain detections that appear consistently across
         # multiple frames (Persistence test)
@@ -158,19 +155,20 @@ class MovingObjectDetector:
         return candidates
 
     def _evaluate_chain(self, target_id: str, chain: list[FrameDetection]) -> AsteroidRecoveryCandidate:
-        """Run the persistence/reference-frame/rate-linearity cascade.
+        """Run one connected path of dots through our three main tests.
 
         Parameters
         ----------
         target_id : `str`
-            The target identifier.
+            The name of the target we are analyzing.
         chain : `list` [`FrameDetection`]
-            Chained detections across frames.
+            A series of dots from different pictures that we think might
+            be the same object.
 
         Returns
         -------
         candidate : `AsteroidRecoveryCandidate`
-            The evaluated candidate object.
+            The final result of the tests.
         """
         candidate_id = str(uuid.uuid4())
 
@@ -203,20 +201,20 @@ class MovingObjectDetector:
     def _chain_detections_by_persistence(
         self, frame_detections: list[FrameDetection]
     ) -> list[list[FrameDetection]]:
-        """Greedily chain detections via nearest-neighbor sky matching.
+        """Try to connect dots picture to picture by finding the closest match.
 
-        The match radius is scaled by elapsed time (cascade step 2).
+        It looks for a dot in the next picture that is close to where we'd
+        expect it to be based on how much time has passed.
 
         Parameters
         ----------
         frame_detections : `list` [`FrameDetection`]
-            All detections across every frame, unordered.
+            All the dots found in all the pictures.
 
         Returns
         -------
         chains : `list` [`list` [`FrameDetection`]]
-            Every resulting chain, including single-detection chains
-            (persistence hasn't been evaluated yet at this point).
+            The paths of dots we connected together.
         """
         detections_by_frame: dict[str, list[FrameDetection]] = defaultdict(list)
         for detection in frame_detections:
@@ -251,12 +249,11 @@ class MovingObjectDetector:
 
                 cos_dec = math.cos(math.radians(last_detection.declination_deg))
                 max_deg = (match_radius_arcsec / 3600.0) * 1.2
-                # The RA bbox half-width must use the true cos(dec), floored
-                # only against literal division-by-zero at the pole -- not
-                # against some larger value, which would narrow the box
-                # below what a real near-pole match needs (RA degrees
-                # genuinely blow up near the pole for a fixed arcsec
-                # separation) and silently drop valid candidates.
+                # When looking near the North or South Pole, the lines of
+                # longitude (Right Ascension) get very close together. We use
+                # a small math trick (max with 1e-6) to make sure we don't
+                # accidentally divide by zero when calculating how far away
+                # to look for the next dot.
                 ra_bbox_half_width_deg = max_deg / max(abs(cos_dec), 1e-6)
                 ra_min = last_detection.right_ascension_deg - ra_bbox_half_width_deg
                 ra_max = last_detection.right_ascension_deg + ra_bbox_half_width_deg
@@ -290,22 +287,24 @@ class MovingObjectDetector:
         return open_chains
 
     def _evaluate_reference_frame_test(self, chain: list[FrameDetection]) -> CascadeStage:
-        """Distinguish a missed star from a hot pixel (cascade step 3).
+        """Check if the dot is a real object or a camera artifact.
 
-        A missed star has a fixed sky position but a moving native
-        pixel position under dithering; a hot pixel has a fixed native
-        pixel position but an apparently moving sky position.
+        Because the telescope shakes a tiny bit ('dithering'), a real star
+        will move slightly on the camera sensor from picture to picture, but
+        stay in the same place on the sky. A broken camera pixel will stay
+        in the exact same place on the sensor, but look like it's moving
+        across the sky.
 
         Parameters
         ----------
         chain : `list` [`FrameDetection`]
-            A chain that has already passed the persistence check.
+            The path of connected dots we want to check.
 
         Returns
         -------
         cascade_stage : `CascadeStage`
-            `REJECTED_STATIONARY_PIXEL`, `REJECTED_STATIONARY_SKY`, or
-            `REFERENCE_FRAME_CONFIRMED`.
+            The result: is it a bad pixel, a normal star, or a real moving
+            object?
         """
         mean_right_ascension_deg = statistics.mean(detection.right_ascension_deg for detection in chain)
         mean_declination_deg = statistics.mean(detection.declination_deg for detection in chain)
@@ -328,10 +327,12 @@ class MovingObjectDetector:
             for detection in chain
         )
 
-        # Checked first: a fixed native-pixel signature is the hot-pixel
-        # discriminator regardless of how much its derived sky position
-        # appears to drift under per-frame WCS re-centering (see
-        # frame_wcs_composer's mount-pointing caveat).
+        # Stage 3 tests: First, we check if the dot stays on the exact same
+        # camera pixel in every photo. If it does, it's just a broken "hot"
+        # pixel,
+        # not a real object in the sky. If it passes that, we then check if
+        # it's
+        # moving across the actual sky.
         if pixel_spread_px < self.config.pixel_match_tolerance_px:
             return CascadeStage.REJECTED_STATIONARY_PIXEL
         if sky_spread_arcsec < self.config.sky_match_tolerance_arcsec:
@@ -341,23 +342,21 @@ class MovingObjectDetector:
     def _fit_rate_linearity(
         self, chain: list[FrameDetection]
     ) -> tuple[MovingObjectTrack | None, CascadeStage]:
-        """Fit the chain's sky motion linearly against time.
+        """Check if the object moves in a straight line at a reasonable speed.
 
-        Checks the fitted rate against the configured rate bounds
-        (cascade step 4).
+        Asteroids don't usually zig-zag or move incredibly fast.
 
         Parameters
         ----------
         chain : `list` [`FrameDetection`]
-            A chain that has already passed the reference-frame test.
+            The path of connected dots we want to check.
 
         Returns
         -------
         track : `MovingObjectTrack` or `None`
-            The fitted track, or `None` if the chain was rejected.
+            The calculated path details, or None if it failed the test.
         cascade_stage : `CascadeStage`
-            `RATE_LINEARITY_CONFIRMED` or
-            `REJECTED_NONLINEAR_OR_OUT_OF_RANGE_RATE`.
+            Did it pass or fail?
         """
         # Calculate the mean position to serve as a local tangent-plane origin
         mean_right_ascension_deg = statistics.mean(detection.right_ascension_deg for detection in chain)
@@ -404,9 +403,9 @@ class MovingObjectDetector:
             <= self.config.rate_max_arcsec_per_hour
         )
 
-        # Reject the candidate if it is moving too fast/slow (e.g.
-        # noise/satellite)
-        # or if the motion is not a straight line (low R-squared).
+        # Reject the object if it's moving way too fast or too slow (like a
+        # satellite instead of an asteroid), or if it's zig-zagging randomly
+        # instead of moving in a straight line.
         if linear_fit_r_squared < self.config.rate_linearity_r_squared_min or not rate_in_range:
             return None, CascadeStage.REJECTED_NONLINEAR_OR_OUT_OF_RANGE_RATE
 

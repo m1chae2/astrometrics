@@ -1,13 +1,10 @@
-"""Adaptive stack-rejection sigma via Chauvenet's criterion.
+"""Adjusting the pixel rejection threshold based on how many images we have.
 
-Chauvenet's criterion gives a rejection sigma that scales with sample
-size. With more frames in a stack, an extreme pixel value is more
-likely to occur by chance alone across all those samples, so a single
-fixed sigma either over-rejects at high frame counts or is practically
-inert at low frame counts. This computes the frame-count-adjusted
-sigma so rejection stays statistically meaningful across very
-different session sizes, rather than relying on one fixed constant for
-every stack.
+When combining (stacking) many images, the chance of seeing random noise
+goes up. If we use a fixed limit for throwing out bad pixels, we might
+throw out too few pixels for small stacks, and too many for large stacks.
+This file calculates a sliding limit based on the number of images, keeping
+the pixel rejection balanced.
 """
 
 import math
@@ -16,53 +13,31 @@ from scipy.special import erfcinv
 
 
 def chauvenet_sigma(n_frames: int) -> float:
-    r"""Return the Chauvenet-criterion sigma threshold for a stack.
+    """Calculate the pixel rejection limit for a certain number of images.
 
-    A pixel value is rejected under Chauvenet's criterion when the
-    probability of seeing a deviation at least that extreme, among
-    n_frames samples drawn from a Gaussian, is less than
-    :math:`\frac{1}{2N}`. Solving that tail-probability equation for a
-    two-tailed Gaussian gives:
-
-    .. math::
-       \sigma = \sqrt{2} \cdot \text{erfcinv}\left(\frac{1}{2N}\right)
+    This uses a statistical rule called Chauvenet's criterion. It figures
+    out the maximum difference from the average that we should allow before
+    deciding a pixel is bad (like a cosmic ray or hot pixel).
 
     Parameters
     ----------
     n_frames : `int`
-        The number of frames in the stack being rejected against.
+        The number of images being stacked.
 
     Returns
     -------
     sigma : `float`
-        The Chauvenet-criterion sigma threshold for this stack size.
+        The cutoff point (in standard deviations) for throwing out a pixel.
 
     Raises
     ------
     ValueError
-        Raised if n_frames is less than 1.
-
-    Notes
-    -----
-    Cross-checked against rejection_threshold_analysis.py sweeps on
-    M 81 (45 frames), M 13 L-filter (40 frames, 2026-05-23), and
-    NGC 2403 (70 frames, 2026-02-22 -- includes a cloud-affected
-    session with a 5x sky-background step-change partway through).
-    This formula recommends sigma of about 2.50 (n=40) to 2.69 (n=70)
-    for that range, versus the fixed sigma=3.0 those scripts defaulted
-    to. In all three sweeps, stacked-image FWHM was indistinguishable
-    between sigma=2.5 and sigma=3.0 (well under 1% difference), while
-    rejected-fraction rose from ~1% to ~2.5-2.8% at the lower sigma --
-    so the lower, frame-count-derived threshold costs no measurable
-    sharpness, it just rejects a more statistically-justified fraction
-    of pixels. See logs/rejection_threshold_analysis_*.json for the
-    raw sweep data.
+        If the number of frames is less than 1.
     """
     if n_frames < 1:
         raise ValueError(f"n_frames must be at least 1, got {n_frames}")
 
     # Calculate the tail probability threshold for rejection (1 / 2N)
-    # Then use the inverse complementary error function (erfcinv) to
-    # map that probability to the corresponding sigma threshold for a
-    # Gaussian distribution
+    # Then map that probability to the corresponding standard deviation
+    # threshold for a normal distribution.
     return math.sqrt(2) * float(erfcinv(1.0 / (2 * n_frames)))

@@ -1,12 +1,9 @@
-"""Automatic tuning of physical spectroscopy calibration parameters.
+"""Automatically figure out the physics settings for our camera.
 
-Processes a stacked stellar FITS spectrum (e.g. Vega), detects
-absorption valleys, optimizes physical parameters (grating distance L
-and zero-order offset dispersion_start_px) using a non-linear
-least-squares fit, and automatically updates the high-level interface.config
-file.
-
-REQ: AST-1, AST-2
+We use a known bright star (like Vega) as a reference. By finding the known
+dark bands in its spectrum (hydrogen lines) and doing some math, we can
+calculate exactly how far the grating is from the sensor and where the
+rainbow starts. Then, it saves those numbers for next time.
 """
 
 import itertools
@@ -28,17 +25,15 @@ logger = logging.getLogger(__name__)
 
 
 class SpectroscopyCalibrationTuner:
-    """Autotune physical spectroscopy calibration parameters.
+    """Figures out exactly how our spectrograph camera is set up.
 
-    Extracts the 1D spectrum, identifies hydrogen and telluric dips,
-    and fits grating distance and zero-order offsets using a
-    non-linear physical model solver.
+    It looks at a known star's spectrum, finds the dark lines, and calculates
+    the physical distance between the grating and the camera sensor.
 
     Attributes
     ----------
     config : `AppConfiguration`
-        The application configuration object used to load spectroscopy
-        settings and persist tuned calibration parameters.
+        Where we load our settings from and save our new calibration to.
     """
 
     def __init__(self, config=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
@@ -47,8 +42,7 @@ class SpectroscopyCalibrationTuner:
         Parameters
         ----------
         config : `AppConfiguration`, optional
-            The application configuration object. If `None`, loads it
-            via `get_configuration()`.
+            The settings object. If None, it will grab the default one.
         """
         if config is None:
             from astrometricslib.utilities.config_loader import get_configuration
@@ -62,40 +56,33 @@ class SpectroscopyCalibrationTuner:
         camera_name: str | None = None,
         star_pos: tuple[float, float] | None = None,
     ) -> dict[str, Any]:
-        """Fit physical spectrometer parameters from a calibration frame.
+        """Calculate the camera settings by looking at a known star.
 
-        Extracts the 1D spectrum of the calibration star, identifies
-        absorption dips, fits the physical spectrometer parameters (L
-        and zero-order start), and persists the tuned values directly
-        to the application configuration file.
+        This looks for specific dark lines (absorption dips) in the star's
+        light.
+        Because we know exactly what color those lines should be, we can work
+        backwards to figure out the physical camera settings, then save them.
 
         Parameters
         ----------
         image_path : `str`
-            Absolute path to the stacked FITS image of the calibration
-            star (e.g. Vega).
+            Where the picture of the star is saved.
         camera_name : `str`, optional
-            Name of the camera section in config. If `None`, falls
-            back to default_primary_camera.
+            Which camera we are tuning. If None, uses the default camera.
         star_pos : `Tuple[float, float]`, optional
-            The pixel coordinates (x, y) of the zero-order star. If
-            `None`, autodetects.
+            The `(x, y)` location of the star. If None, it will try to find it.
 
         Returns
         -------
         calibration_summary : `Dict[str, Any]`
-            Summary of the calibration results: fitted grating
-            distance, fitted zero-order offset, RMS fit error,
-            detected dispersion angle, and per-feature calibration
-            detail.
+            A report of what settings we calculated and how accurate they are.
 
         Raises
         ------
         ValueError
-            Raised if no stars are detected in the calibration frame,
-            if fewer than 3 absorption features can be identified, or
-            if the physical parameter fit does not converge to an
-            acceptable accuracy.
+            If we can't find the star, can't find enough dark lines to do the
+            math,
+            or if the math gives an impossible answer.
         """
         logger.info(f"Starting spectroscopy calibration tuning for {image_path}...")
         image = AstrometricsImage(image_path)
@@ -149,23 +136,12 @@ class SpectroscopyCalibrationTuner:
         # highlight broad absorption bands
         smoothed = spec_pipeline.calibrator.apply_smoothing(intensities, window=5)
 
-        # Dynamic valley depth thresholding:
-        # We need at least 3 distinct absorption valleys to fit the
-        # physical model (H-delta, H-gamma, H-beta). We start with a
-        # strict minimum depth of 1% (0.01) relative intensity and
-        # gradually relax it by 0.2% increments if not enough
-        # features are found, down to a safe noise floor limit of
-        # 0.1% (0.001).
-        #
-        # Detection delegates to scipy.signal.find_peaks on the
-        # negated spectrum: prominence with wlen=31 reproduces the
-        # historical depth measure min(left_max, right_max) - value
-        # computed over a +/-15 px window, and distance=6 reproduces
-        # the historical 11-px local-minimum uniqueness window
-        # (equivalence covered by test_calibration_tuner_dip_detection.py
-        # against a synthetic Balmer-line spectrum; the best-RMS grid
-        # search below is unchanged and tolerant of small
-        # candidate-set differences).
+        # Look for the dark "valleys" (absorption lines) in the spectrum.
+        # We need to find at least 3 distinct valleys to figure out the math.
+        # We start by looking for very deep valleys (1% drop in brightness).
+        # If we can't find 3, we slowly lower our standards until we hit
+        # the noise floor (0.1%), making sure not to count the same valley
+        # twice.
         min_depth = 0.01
         dips = []
         while len(dips) < 3 and min_depth >= 0.001:
@@ -173,8 +149,10 @@ class SpectroscopyCalibrationTuner:
             dips = [int(i) for i in peak_indices if 5 <= i < len(smoothed) - 5]
             min_depth -= 0.002
 
-        # Continuum-normalized fallback search if raw profile dips are
-        # obscured by background slope
+        # Fallback: If the background brightness is too uneven (maybe from
+        # heat),
+        # the simple valley search will fail. Here we try to flatten out the
+        # background first, then search again.
         if len(dips) < 3:
             x_idx = np.arange(len(smoothed))
             try:
@@ -196,9 +174,9 @@ class SpectroscopyCalibrationTuner:
 
         logger.info(f"Detected {len(dips)} candidate absorption dips at indices: {dips}")
 
-        # 4. Perform grid search and non-linear fit to physical model
-        # Target reference features for Vega standard calibration star:
-        # H-delta = 410.17 nm | H-gamma = 434.05 nm | H-beta = 486.13 nm
+        # 4. Math time! We test different combinations of the valleys we found.
+        # We know Vega (the target) should have dark lines at exactly
+        # 410.17 nm, 434.05 nm, and 486.13 nm (the Hydrogen Balmer series).
         target_wls = np.array([410.17, 434.05, 486.13])
         current_start_px = float(spec_pipeline.instrument.zero_order_offset_px)
 
@@ -206,11 +184,10 @@ class SpectroscopyCalibrationTuner:
         best_grating_distance_mm = None
         best_combo = None
 
-        # Grid search over monotonically ordered combinations of 3 dips:
-        # Since we do not know which detected dips correspond to
-        # H-delta, H-gamma, and H-beta, we evaluate every combination
-        # of 3 dips (n_dips choose 3). For each combination, we
-        # optimize the physical grating-to-sensor distance (L).
+        # Try every combination of 3 valleys against our known target
+        # wavelengths.
+        # For each combination, we run a math solver to figure out what grating
+        # distance (L) makes the lines fit best.
         for combo in itertools.combinations(sorted(dips), 3):
             combo_indices = np.array(combo)
             absolute_offsets = current_start_px + combo_indices
@@ -232,11 +209,10 @@ class SpectroscopyCalibrationTuner:
                 # model wavelengths and target reference bands
                 return np.sum((calculated_wavelengths - target_wls) ** 2)
 
-            # Fit physical grating distance L (in mm) using L-BFGS-B
-            # bound optimizer. Initial guess is 16.5 mm (standard
-            # optical profile spacer thickness). Physical bounds are
-            # set to [10 mm, 30 mm] to prevent unphysical optical
-            # solutions.
+            # Run the math solver. We guess the grating is around 16.5 mm away
+            # based on how the camera is physically built. We limit the solver
+            # to between 10 and 30 mm so it doesn't give us an impossible
+            # answer.
             res = minimize(loss, x0=[16.5], method="L-BFGS-B", bounds=[(10.0, 30.0)])
 
             if res.success:
@@ -252,11 +228,9 @@ class SpectroscopyCalibrationTuner:
                 f"accuracy (best RMS = {best_rms} nm)"
             )
 
-        # Calculate the zero-order starting offset mathematically from
-        # the fitted grating distance. Wavelength of 380 nm maps to
-        # the starting edge of the visible spectrum. We solve the
-        # inverse equation directly using our pure optics_physics
-        # library.
+        # Now that we know the distance (L), calculate exactly where the
+        # visible
+        # spectrum starts (380 nm) in pixels.
         best_x0 = calculate_pixel_offset(
             wavelength_nm=380.0,
             grating_distance_mm=best_grating_distance_mm,

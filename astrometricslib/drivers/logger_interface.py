@@ -5,10 +5,7 @@ Provides `LoggerInterface`, a SQLite-backed repository for
 log entries, plus `DbLogHandler`, a `logging.Handler` that persists
 emitted log records into that same database.
 
-Notes
------
-Implements requirement REQ: IMG-5.6 (persistent job history
-tracking).
+
 """
 
 import logging
@@ -85,7 +82,7 @@ class LoggerInterface:
                 )
             """)
 
-            # REQ: AGENT-1.7 - Interaction logging for audit and reflection
+            # Interaction logging for audit and reflection
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS agent_interactions (
                     id TEXT PRIMARY KEY,
@@ -96,7 +93,7 @@ class LoggerInterface:
                 )
             """)
 
-            # REQ: AGENT-1.9 - Distilled knowledge for LTM
+            # Distilled knowledge for LTM
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS agent_knowledge (
                     id TEXT PRIMARY KEY,
@@ -109,7 +106,7 @@ class LoggerInterface:
                 )
             """)
 
-            # REQ: SYS-1.4 - Per-component / per-job log persistence
+            # Per-component / per-job log persistence
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS log_entries (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -305,7 +302,7 @@ class LoggerInterface:
 
         Notes
         -----
-        Implements requirement REQ: IMG-5.7.
+        Implements persistent job history tracking.
         """
         try:
             conn = self._connect()

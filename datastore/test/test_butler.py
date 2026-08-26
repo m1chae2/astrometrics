@@ -254,3 +254,62 @@ def test_list_projected_on_a_missing_database_returns_empty(tmp_path):  # ruff: 
     butler = _make_indexed_butler(tmp_path)
 
     assert butler.list_projected("widget", ["id"]) == []
+
+
+def test_list_projected_like_matches_a_substring(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify like= narrows to rows whose column contains the substring."""
+    butler = _make_indexed_butler(tmp_path)
+    butler.put(_Widget(id="w1", label="M 13 Field"), "widget")
+    butler.put(_Widget(id="w2", label="M 81 Field"), "widget")
+    butler.put(_Widget(id="w3", label="NGC 7023"), "widget")
+
+    rows = butler.list_projected("widget", ["id"], like={"label": "M 13"})
+
+    assert rows == [{"id": "w1"}]
+
+
+def test_list_projected_like_and_where_are_anded_together(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify like= and where= combine rather than either alone deciding."""
+    butler = _make_indexed_butler(tmp_path)
+    butler.put(_Widget(id="w1", label="M 13 Field", score=1.0), "widget")
+    butler.put(_Widget(id="w2", label="M 13 Other", score=2.0), "widget")
+
+    rows = butler.list_projected("widget", ["id"], where={"score": 2.0}, like={"label": "M 13"})
+
+    assert rows == [{"id": "w2"}]
+
+
+def test_list_projected_like_escapes_sql_wildcard_characters(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify a literal '%' or '_' typed by a caller matches literally.
+
+    Without escaping, a caller-supplied '%' or '_' would act as a SQL
+    wildcard instead of the literal character it actually is -- this
+    matters because `like` values can originate from end-user input
+    (e.g. a search box), not just trusted code.
+    """
+    butler = _make_indexed_butler(tmp_path)
+    butler.put(_Widget(id="w1", label="100% Done"), "widget")
+    butler.put(_Widget(id="w2", label="100X Done"), "widget")
+
+    rows = butler.list_projected("widget", ["id"], like={"label": "100%"})
+
+    assert rows == [{"id": "w1"}]
+
+
+def test_list_projected_limit_caps_the_row_count(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify limit= bounds how many rows are returned."""
+    butler = _make_indexed_butler(tmp_path)
+    for index in range(5):
+        butler.put(_Widget(id=f"w{index}", label="star"), "widget")
+
+    rows = butler.list_projected("widget", ["id"], limit=2)
+
+    assert len(rows) == 2
+
+
+def test_list_projected_rejects_an_unregistered_like_column(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify like= keys are validated the same way columns/where are."""
+    butler = _make_indexed_butler(tmp_path)
+
+    with pytest.raises(ValueError, match="unknown column"):
+        butler.list_projected("widget", ["id"], like={"nonexistent_column": "x"})

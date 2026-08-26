@@ -1,10 +1,7 @@
-"""Purpose: Image Conversions.
+"""Image Conversions.
 
-Description: Extracted astronomical target image processing, conversion of
-FITS arrays to raw base64 encoded PNG data URLs, and file exclusions.
-The pure numpy-scaling logic (ImageScaler) lives in
-tasks/target_tasks/image_scaling_tasks.py instead -- everything in this
-module reads or writes files on disk.
+This module helps turn raw astronomical telescope images (FITS files)
+into standard pictures (PNGs) that can be shown on a webpage or app.
 """
 
 import base64
@@ -27,7 +24,7 @@ _png_cache: dict[tuple[str, int, float | None, float | None, str, bool], tuple[b
 
 
 class ImageConverter:
-    """Stateless utility for FITS conversion, scaling, and PNG output."""
+    """A helper class for changing FITS images into PNG format."""
 
     @staticmethod
     def convert_fits_to_png_with_stats(
@@ -38,14 +35,16 @@ class ImageConverter:
         cmap: str = "gray",
         stretch: bool = True,
     ) -> tuple[bytes, float, float]:
-        """Perform standard FITS scaling and return raw PNG bytes and stats.
+        """Convert a FITS file to PNG bytes, tracking the brightness range.
 
-        Includes an in-memory cache to speed up repeated queries.
+        It uses a cache to remember recent images so they load faster
+        the next time you ask for them.
 
         Returns
         -------
         result : `tuple`
-            `(png_bytes, vmin, vmax)`.
+            A tuple containing `(png_bytes, minimum_brightness,
+            maximum_brightness)`.
         """
         cache_key = (path, int(max_dimensions), center, width, cmap, stretch)
         if cache_key in _png_cache:
@@ -86,17 +85,18 @@ class ImageConverter:
     def convert_fits_to_base64_png(
         cls, path: str, max_dimensions: int = 2000, stretch: bool = True
     ) -> dict[str, Any] | None:
-        """Convert a FITS file to a base64 PNG data URL with scale values.
+        """Convert a FITS image to text so it can be sent over the internet.
 
         Returns
         -------
         result : `dict`
-            Contains `image_data`, `min`, `max`.
+            A dictionary with the image text (`image_data`), minimum
+            brightness (`min`), maximum brightness (`max`), and file headers.
 
         Raises
         ------
         AstroLibError
-            If FITS-to-PNG conversion fails for any reason.
+            If there is any problem changing the image.
         """
         try:
             png_bytes, vmin, vmax = cls.convert_fits_to_png_with_stats(
@@ -123,38 +123,38 @@ class ImageConverter:
 
 
 def get_frame(target: Any, iso: str, exposure: str, index: int = 0) -> str:
-    """Retrieve a frame path for a target by ISO, exposure, and index.
+    """Find a specific frame for a target based on its camera settings.
 
     Parameters
     ----------
-    target : `astrometricslib.models.target.Target`
-        The target whose frames are searched.
+    target : `Target`
+        The astronomical target we are looking at.
     iso : `str`
-        The ISO/gain setting to match.
+        The camera ISO or gain setting.
     exposure : `str`
-        The exposure length to match.
+        The exposure time in seconds.
     index : `int`, optional
-        Which matching frame to return, by order. Defaults to 0.
+        If there are multiple matching frames, this picks which one to
+        return (0 is the first). Defaults to 0.
 
     Returns
     -------
     frame_path : `str`
-        The path of the matching frame.
+        The file path to the matching image.
 
     Raises
     ------
     ValueError
-        If no frame matches the requested ISO/exposure/index.
+        If it can't find an image with those settings.
     """
 
     def to_float(val: Any) -> float | None:
-        """Convert a value to float safely, returning `None` on failure.
+        """Safely convert a value to a decimal number.
 
         Returns
         -------
         result : `float` or `None`
-            The converted float value, or `None` if `val` cannot be
-            converted.
+            The decimal number, or None if it's not a valid number.
         """
         try:
             return float(val)
@@ -192,22 +192,22 @@ def get_frame(target: Any, iso: str, exposure: str, index: int = 0) -> str:
 
 
 def convert_fits_to_png(path: str, max_dimensions: int = 2000, stretch: bool = True) -> dict[str, Any] | None:
-    """Convert a FITS file at the given path to a base64 PNG data URL.
+    """Convert an image file to a text-based format for webpages.
 
     Parameters
     ----------
     path : `str`
-        Path to the FITS file to convert.
+        The file path to the image.
     max_dimensions : `int`, optional
-        Maximum output dimension in pixels. Defaults to 2000.
+        The maximum size (width or height) in pixels. Defaults to 2000.
     stretch : `bool`, optional
-        Whether to apply the stretch/normalization before rendering.
-        Defaults to `True`.
+        Whether to adjust the image brightness so it's easier to see. Defaults
+        to True.
 
     Returns
     -------
-    png_data : `dict[str, Any]`
-        The base64-encoded PNG and scale metadata.
+    png_data : `dict`
+        A dictionary with the converted image and its brightness settings.
     """
     return ImageConverter.convert_fits_to_base64_png(path, max_dimensions=max_dimensions, stretch=stretch)
 
@@ -220,29 +220,28 @@ def convert_fits_to_png_with_stats(
     cmap: str = "gray",
     stretch: bool = True,
 ) -> tuple[bytes, float, float]:
-    """Perform standard FITS scaling and return raw PNG bytes and stats.
+    """Convert a FITS image to raw PNG data and return the brightness range.
 
     Parameters
     ----------
     path : `str`
-        Path to the FITS file to convert.
+        The file path to the image.
     max_dimensions : `int`, optional
-        Maximum output dimension in pixels. Defaults to 2000.
+        The maximum size (width or height) in pixels. Defaults to 2000.
     center : `float`, optional
-        Stretch center override.
+        The middle value for adjusting brightness.
     width : `float`, optional
-        Stretch width override.
+        The range of values around the center to show.
     cmap : `str`, optional
-        Matplotlib colormap name. Defaults to ``"gray"``.
+        The color scheme to use (like "gray"). Defaults to "gray".
     stretch : `bool`, optional
-        Whether to apply the stretch/normalization before rendering.
-        Defaults to `True`.
+        Whether to adjust the brightness. Defaults to True.
 
     Returns
     -------
-    result : `tuple[bytes, float, float]`
-        A tuple ``(png_bytes, min_value, max_value)`` of the raw
-        PNG bytes and the scale bounds used to render them.
+    result : `tuple`
+        The image data as bytes, followed by the lowest and highest
+        brightness values used.
     """
     return ImageConverter.convert_fits_to_png_with_stats(
         path, max_dimensions=max_dimensions, center=center, width=width, cmap=cmap, stretch=stretch
@@ -250,22 +249,23 @@ def convert_fits_to_png_with_stats(
 
 
 def get_fits_header(path: str) -> list[dict[str, str]]:
-    """Extract the main FITS header card entries from the file.
+    """Get the text information (header) saved inside a FITS file.
 
     Parameters
     ----------
     path : `str`
-        Path to the FITS file to read.
+        The file path to the image.
 
     Returns
     -------
-    header_cards : `list[dict[str, str]]`
-        The FITS primary header's card entries.
+    header_cards : `list` of `dict`
+        A list of information pieces, where each has a 'key', 'value',
+        and 'comment'.
 
     Raises
     ------
     FileNotFoundError
-        If `path` does not exist on disk.
+        If the file doesn't exist.
     """
     if not os.path.exists(path):
         raise FileNotFoundError(f"File not found: {path}")
@@ -287,32 +287,31 @@ def get_fits_header(path: str) -> list[dict[str, str]]:
 def get_light_frame_data(
     target: Any, iso: str, exposure: str, index: int = 0, stretch: bool = True
 ) -> dict[str, Any]:
-    """Find a light frame record and scale it to base64 PNG data.
+    """Find a specific telescope image and convert it for web display.
 
     Parameters
     ----------
-    target : `astrometricslib.models.target.Target`
-        The target whose frames are searched.
+    target : `Target`
+        The target to look for.
     iso : `str`
-        The ISO/gain setting to match.
+        The camera ISO or gain.
     exposure : `str`
-        The exposure length to match.
+        The exposure time.
     index : `int`, optional
-        Which matching frame to use, by order. Defaults to 0.
+        Which matching frame to use if there are multiple. Defaults to 0.
     stretch : `bool`, optional
-        Whether to apply the stretch/normalization before rendering.
-        Defaults to `True`.
+        Whether to adjust the brightness so things are easier to see.
+        Defaults to True.
 
     Returns
     -------
-    light_frame_data : `dict[str, Any]`
-        The scaled base64 PNG data and associated metadata.
+    light_frame_data : `dict`
+        A dictionary with the target ID, brightness stats, and the image data.
 
     Raises
     ------
     FileNotFoundError
-        If no frame matches the request, or the matched frame's path
-        does not exist on disk.
+        If the image can't be found or doesn't exist.
     """
     path = get_frame(target, iso, exposure, index)
     if not path or not os.path.exists(path):
@@ -329,22 +328,20 @@ def get_light_frame_data(
 
 
 def get_last_captured_image(config: Any, stretch: bool = True) -> dict[str, Any] | None:
-    """Locate and return the most recently modified FITS image file.
+    """Find the newest telescope image and convert it for web display.
 
     Parameters
     ----------
-    config : `astrometricslib.utilities.config_loader.AppConfiguration`
-        Application configuration, used to resolve the frames directory.
+    config : `AppConfiguration`
+        Application settings to know where to look for images.
     stretch : `bool`, optional
-        Whether to apply the stretch/normalization before rendering.
-        Defaults to `True`.
+        Whether to adjust the image brightness. Defaults to True.
 
     Returns
     -------
-    image_data : `dict[str, Any]` or `None`
-        The scaled base64 PNG data for the most recently modified
-        FITS file, or `None` if no FITS file is found or conversion
-        fails.
+    image_data : `dict` or `None`
+        A dictionary with the image data and details, or None if no
+        images could be found.
     """
     frames_path = config.get_frames_path()
     pattern = os.path.join(frames_path, "**", "*.fit*")
@@ -378,22 +375,21 @@ def get_last_captured_image(config: Any, stretch: bool = True) -> dict[str, Any]
 def delete_images(
     paths: list[str], target_catalog: Any = None, target_id: str | None = None
 ) -> dict[str, Any]:
-    """Remove files from disk and the target's frame list if present.
+    """Delete specific image files and update the records.
 
     Parameters
     ----------
-    paths : `list` [`str`]
-        File paths to delete.
-    target_catalog : `astrometricslib.api.targets.TargetCatalog`, optional
-        Catalog to update when `target_id` is also given.
+    paths : `list` of `str`
+        The file paths of the images to delete.
+    target_catalog : `TargetCatalog`, optional
+        The database containing our targets, to remove the image records.
     target_id : `str`, optional
-        If given (with `target_catalog`), remove matching frame
-        records from this target's frame list.
+        The specific target to remove the images from.
 
     Returns
     -------
-    result : `dict[str, Any]`
-        A summary of the deletion outcome.
+    result : `dict`
+        A summary of which files were successfully deleted and which failed.
     """
     deleted_files = []
     failed_files = []

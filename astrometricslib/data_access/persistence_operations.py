@@ -1,15 +1,8 @@
-"""Target persistence operations.
+"""Target database operations.
 
-Extracted SQLite and filesystem persistence operations for target
-library indexes, including CRUD (create, read, update, delete)
-operations, and linking target assets.
-
-`api` throughout this module is a `TargetCatalog` instance -- it owns
-the in-memory `_targets`/`_touched_target_ids` state and the `butler`
-handle these functions read/write directly. Functions here call each
-other directly (e.g. `create_target` calls `get_target`) rather than
-routing back through `TargetCatalog`'s public methods, so this module
-never calls back up into Layer 1.
+This module contains the functions that actually save, load, update, and
+delete targets (like galaxies or stars) in our database. It talks directly
+to the database system so the rest of the program doesn't have to.
 """
 
 import os
@@ -17,19 +10,17 @@ from typing import Any
 
 
 def _mark_touched(api, target_id: str) -> None:  # ruff: ignore[missing-type-function-argument]
-    """Record that a target may have been fetched, created, or mutated.
+    """Remember that we changed a target so we know to save it later.
 
-    save_targets() only re-persists targets marked touched here, rather
-    than every target this process happens to hold a stale in-memory copy
-    of. This keeps a process that only ever looked at target A from
-    clobbering a concurrent process's edits to target B when it saves.
+    This prevents us from accidentally saving over someone else's changes
+    if we only modified one target but had a bunch loaded in memory.
 
     Parameters
     ----------
     api : `Any`
-        the high-level interface holding the touched-id set.
+        The system that keeps track of our loaded targets.
     target_id : `str`
-        The id of the target being fetched, created, or updated.
+        The name of the target we just changed or looked at.
     """
     touched_ids = getattr(api, "_touched_target_ids", None)
     if touched_ids is None:
@@ -39,22 +30,22 @@ def _mark_touched(api, target_id: str) -> None:  # ruff: ignore[missing-type-fun
 
 
 def _find_target(targets: list[Any], target_id: str) -> Any | None:
-    """Search a target list, supporting exact and fuzzy matching.
+    """Look for a target in our list, even if the name isn't perfectly typed.
+
+    It tries an exact match first. If that fails, it tries replacing
+    underscores with spaces, and then it tries ignoring spaces and capitals.
 
     Parameters
     ----------
-    targets : `List[Any]`
-        The targets to search.
+    targets : `list`
+        The list of targets to look through.
     target_id : `str`
-        The target identifier to look up. Tried first as an exact
-        match, then with underscores normalized to spaces, then via
-        case-insensitive, space/underscore-ignoring fuzzy matching.
+        The name of the target we want to find.
 
     Returns
     -------
-    target : `Optional[Any]`
-        The matching target, or `None` if no target matches by any
-        of the three strategies.
+    target : `Any` or `None`
+        The found target, or None if it wasn't in the list.
     """
     # 1. Exact match
     for target in targets:
@@ -88,23 +79,20 @@ def _find_target(targets: list[Any], target_id: str) -> Any | None:
 
 
 def list_targets(api) -> list[Any]:  # ruff: ignore[missing-type-function-argument]
-    """Return all targets currently loaded in the library.
+    """Load and return all the targets from the database.
 
-    Reloads the full catalog from disk on every call, so callers that
-    iterate every target and mutate items in place (e.g. batch reindex
-    scripts) always see the latest on-disk state. Every returned target is
-    marked touched, since the caller may hold and mutate a direct
-    reference to any of them before the next save_targets() call.
+    This always reads fresh from the hard drive, so if another program
+    added a target, we will see it.
 
     Parameters
     ----------
     api : `Any`
-        the high-level interface providing butler access.
+        The system that manages our database connection.
 
     Returns
     -------
-    targets : `List[Any]`
-        All targets currently loaded in the library.
+    targets : `list`
+        A list of all targets in the database.
     """
     api._targets = api.butler.get("target_catalog", {}) or []
     for target in api._targets:
@@ -113,33 +101,23 @@ def list_targets(api) -> list[Any]:  # ruff: ignore[missing-type-function-argume
 
 
 def get_target(api, target_id: str) -> Any | None:  # ruff: ignore[missing-type-function-argument]
-    """Retrieve a target by ID, supporting exact and fuzzy matching.
+    """Find a specific target by its name.
 
-    Looks up target_id against the in-memory target cache first, rather
-    than reloading the full catalog from disk on every call. This avoids
-    orphaning mutations made to targets fetched earlier in the same
-    process: e.g. fetching target A, mutating it, then fetching target B
-    no longer silently discards A's in-memory edit by replacing
-    api._targets wholesale. If target_id isn't found in the cache, any
-    targets on disk that this process doesn't know about yet are pulled in
-    (additively, without replacing already-cached targets) before retrying
-    the match, so newly created records -- from this process or another --
-    are still discoverable.
+    It looks in our already-loaded memory first so we don't wipe out
+    unsaved changes. If it's not there, it checks the hard drive for
+    newly added targets.
 
     Parameters
     ----------
     api : `Any`
-        the high-level interface providing target lookup.
+        The system managing our loaded targets.
     target_id : `str`
-        The target identifier to look up. Tried first as an exact
-        match, then with underscores normalized to spaces, then via
-        case-insensitive, space/underscore-ignoring fuzzy matching.
+        The name of the target to find.
 
     Returns
     -------
-    target : `Optional[Any]`
-        The matching target, or `None` if no target matches by any
-        of the three strategies.
+    target : `Any` or `None`
+        The target object if found, otherwise None.
     """
     target = _find_target(api._targets, target_id)
 
@@ -156,26 +134,23 @@ def get_target(api, target_id: str) -> Any | None:  # ruff: ignore[missing-type-
 
 
 def create_target(api, target_id: str, ra: str | None = None, dec: str | None = None) -> Any:  # ruff: ignore[missing-type-function-argument]
-    """Create a new target and scan the filesystem for matching frames.
+    """Create a new target and look for its image files on the hard drive.
 
     Parameters
     ----------
     api : `Any`
-        the high-level interface providing target lookup and
-        persistence.
+        The system that manages our targets.
     target_id : `str`
-        The identifier for the new target; underscores are
-        normalized to spaces.
+        The name for the new target.
     ra : `str`, optional
-        The target's right ascension, default `None`.
+        The right ascension (horizontal coordinate) in the sky.
     dec : `str`, optional
-        The target's declination, default `None`.
+        The declination (vertical coordinate) in the sky.
 
     Returns
     -------
     target : `Any`
-        The newly created target, or the existing target if one
-        already matches target_id.
+        The newly created target (or the existing one if it already was there).
     """
     from astrometricslib.models.target import Target
 
@@ -201,26 +176,22 @@ def create_target(api, target_id: str, ra: str | None = None, dec: str | None = 
 
 
 def update_target(api, target_id: str, updates: dict) -> Any | None:  # ruff: ignore[missing-type-function-argument]
-    """Update attributes on a target by ID.
+    """Change specific information about a target.
 
     Parameters
     ----------
     api : `Any`
-        the high-level interface providing target lookup and
-        persistence.
+        The system that manages our targets.
     target_id : `str`
-        The identifier of the target to update.
+        The name of the target to update.
     updates : `dict`
-        Attribute name/value pairs to set on the target. Only keys
-        that already exist as attributes on the target are applied;
-        an "id" value is normalized to replace underscores with
-        spaces.
+        A dictionary where the keys are what to change (like "ra")
+        and the values are the new information.
 
     Returns
     -------
-    target : `Optional[Any]`
-        The updated target, or `None` if target_id does not match
-        any target.
+    target : `Any` or `None`
+        The updated target, or None if the target wasn't found.
     """
     target = get_target(api, target_id)
     if not target:
@@ -237,21 +208,19 @@ def update_target(api, target_id: str, updates: dict) -> Any | None:  # ruff: ig
 
 
 def delete_target(api, target_id: str) -> bool:  # ruff: ignore[missing-type-function-argument]
-    """Remove a target from the target library index.
+    """Remove a target completely from the database.
 
     Parameters
     ----------
     api : `Any`
-        the high-level interface providing target lookup and butler
-        access.
+        The system that manages our targets.
     target_id : `str`
-        The identifier of the target to remove.
+        The name of the target to remove.
 
     Returns
     -------
     was_deleted : `bool`
-        `True` if a matching target was found and removed, `False`
-        otherwise.
+        True if it was successfully deleted, False if it wasn't found.
     """
     target = get_target(api, target_id)
     if target:
@@ -265,21 +234,17 @@ def delete_target(api, target_id: str) -> bool:  # ruff: ignore[missing-type-fun
 
 
 def refresh_target(api, target_id: str, prune_missing: bool = False) -> None:  # ruff: ignore[missing-type-function-argument]
-    """Rescan the filesystem directory for the target's frame records.
+    """Check the hard drive again for new images for this target.
 
     Parameters
     ----------
     api : `Any`
-        the high-level interface providing target lookup, creation,
-        and persistence.
+        The system that manages our targets.
     target_id : `str`
-        The identifier of the target to refresh. If no target
-        matches, a new one is created instead.
+        The name of the target to check.
     prune_missing : `bool`, optional
-        If `True`, clear the target's existing frame records before
-        rescanning, discarding any that are no longer found on disk;
-        default `False`, which keeps existing records and only adds
-        newly discovered ones.
+        If True, it will also remove records for files that have been deleted
+        from the hard drive. Defaults to False.
     """
     target = get_target(api, target_id)
     if not target:
@@ -296,27 +261,16 @@ def refresh_target(api, target_id: str, prune_missing: bool = False) -> None:  #
 
 
 def save_targets(api) -> None:  # ruff: ignore[missing-type-function-argument]
-    """Persist targets this process has touched back to disk.
+    """Save our changes back to the database.
 
-    Only merges in targets marked touched by get_target/list_targets/
-    create_target (i.e. actually fetched, created, or updated by this
-    process), rather than overwriting the whole target_catalog with
-    api._targets. api._targets can hold targets this process loaded once
-    but never revisited, whose on-disk copies a concurrent process may
-    have since changed; pushing the whole list back would silently
-    clobber those concurrent edits with this process's stale copies. Only
-    ever pushing what this process actually touched keeps that blast
-    radius limited to records it meant to change.
-
-    Falls back to a full-collection replace for butlers that don't
-    implement merge_and_persist_records (e.g. test doubles), preserving
-    the previous replace-on-save behavior for those.
+    This is smart and only saves the specific targets we actually changed
+    or looked at. This stops us from accidentally deleting changes that
+    other parts of the program might be making at the same time.
 
     Parameters
     ----------
     api : `Any`
-        the high-level interface providing butler access and the
-        in-memory target list to persist.
+        The system that manages our targets.
     """
     touched_ids = getattr(api, "_touched_target_ids", None)
     if not touched_ids:
@@ -336,35 +290,28 @@ def save_targets(api) -> None:  # ruff: ignore[missing-type-function-argument]
 
 
 def add_data(api, target_id: str, image_file: Any, camera: str | None = None) -> dict[str, Any]:  # ruff: ignore[missing-type-function-argument]
-    """Link processed image files or raw frames to a target.
+    """Connect a new image file to a target.
 
     Parameters
     ----------
     api : `Any`
-        the high-level interface providing target lookup, the image
-        service, and persistence.
+        The system that manages our targets.
     target_id : `str`
-        The identifier of the target to link the file(s) to; created
-        if it does not already exist.
+        The name of the target the image belongs to.
     image_file : `Any`
-        A single file path/dict, or a list of them. FITS files
-        (.fits/.fit) are indexed as frames via the image service;
-        image files (.jpg/.jpeg/.png/.tiff/.tif) are set as the
-        target's processed image.
+        The file path (or a list of paths) to the new images.
     camera : `str`, optional
-        Unused by this function directly; accepted for interface
-        consistency. Default `None`.
+        The name of the camera (not currently used here).
 
     Returns
     -------
-    serialized_target : `Dict[str, Any]`
-        The updated target, serialized.
+    serialized_target : `dict`
+        A dictionary representation of the updated target.
 
     Raises
     ------
     RuntimeError
-        Raised if the API's image service is not available (e.g. in
-        standalone mode).
+        If the image processing system is turned off.
     """
     target = get_target(api, target_id)
     if not target:

@@ -1,22 +1,11 @@
-"""Per-frame WCS estimation for the asteroid-recovery pipeline.
+"""Figure out where each individual picture was pointing.
 
-Estimates a WCS in each individual frame's own pixel space using the
-stack's plate-solve WCS for scale/rotation/projection plus that
-frame's own mount-reported pointing for the sky position -- NOT
-Siril's per-frame registration transform. Empirically confirmed (real
-M 81/M 13 sessions, Siril 1.4.4) that although Siril's "Global Star
-Alignment" computes a real per-frame homography during registration
-(visible in its own log output as real, varying dx/dy/rotation/scale
-values), it never serializes that data into the .seq file it writes
-to disk -- every frame's H matrix in that file reads back as the
-identity, regardless of what was actually computed. Since that data
-isn't recoverable after the fact, this instead uses each frame's own
-OBJCTRA/OBJCTDEC-derived RA/DEC header values (already present per
-frame, confirmed to vary meaningfully frame-to-frame across a real
-session), which carry the mount's own reported pointing at capture
-time -- coarser than a star-based registration solution, but accuracy
-loss here is irrelevant at the sky-motion scales this pipeline cares
-about (arcsec-to-arcmin/hour).
+We combine the very accurate rotation and scale information from the final
+stacked image with the slightly-less-accurate pointing information saved by
+the telescope in each individual picture's header. We have to do this
+because our stacking software (Siril) doesn't save the exact per-picture
+alignments it calculates. This method is close enough for finding moving
+objects.
 """
 
 import logging
@@ -31,36 +20,24 @@ def estimate_frame_wcs_from_mount_pointing(
     stack_wcs: WCS,
     frame_fits_header: fits.Header,
 ) -> WCS | None:
-    """Estimate a frame-space WCS from the stack's WCS and mount pointing.
+    """Calculate how pixels map to the sky for one specific picture.
 
-    Keeps the stack WCS's projection type, units, and pixel-scale
-    matrix (scale and rotation are assumed effectively constant across
-    one target's frame set for a tracked, equatorially-mounted imaging
-    session -- real per-frame field rotation was confirmed, via
-    Siril's own registration log output, to be on the order of
-    hundredths of a degree, negligible at this pipeline's motion
-    scales), but re-centers the sky position (``CRVAL``) on this
-    frame's own reported RA/DEC rather than the stack's, and
-    re-centers the reference pixel (``CRPIX``) on this frame's own
-    image center rather than the stack's.
+    This takes the rotation and scale from the main stack, but centers the
+    view on where the telescope said it was pointing when it took this
+    specific picture.
 
     Parameters
     ----------
     stack_wcs : `astropy.wcs.WCS`
-        The stack's plate-solve WCS, used only for its projection
-        type, units, and pixel-scale matrix.
+        The accurate sky-mapping (WCS) from the final stacked image.
     frame_fits_header : `astropy.io.fits.Header`
-        The individual frame's own FITS header, read directly from
-        disk (not a persisted field on `FrameRecord` -- this is
-        computed on demand from the frame's existing `path`).
+        The data header loaded from this specific picture's file.
 
     Returns
     -------
     frame_wcs : `astropy.wcs.WCS` or `None`
-        A WCS estimate valid in this frame's own native pixel space,
-        or `None` (with a logged warning) if the frame's header is
-        missing RA/DEC or image-dimension keywords.
-
+        The sky-mapping for this specific picture, or None if the picture
+        is missing necessary location data.
     """
     right_ascension_deg = frame_fits_header.get("RA")
     declination_deg = frame_fits_header.get("DEC")

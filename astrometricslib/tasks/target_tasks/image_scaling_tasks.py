@@ -1,9 +1,8 @@
-"""Pure numpy array scaling/normalization for display.
+"""Tools for adjusting image brightness and contrast for display.
 
-The disk-I/O-heavy FITS-to-PNG conversion, frame lookup, and file
-deletion functions that use this live in
-data_access/image_conversions.py instead -- everything in this module
-operates only on already-loaded in-memory arrays.
+This file only handles the math to convert raw telescope data into
+a format that can be drawn on a screen. Saving the actual image
+files happens somewhere else.
 """
 
 import logging
@@ -14,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class ImageScaler:
-    """Handle normalization/scaling of astronomical image data for display."""
+    """Adjust an astronomy image's brightness and contrast so we can see it."""
 
     @staticmethod
     def scale_to_uint8(
@@ -24,15 +23,16 @@ class ImageScaler:
         stretch: bool = True,
         percentiles: tuple[float, float] = (1.0, 99.0),
     ) -> tuple[np.ndarray, float, float]:
-        """Scale a numpy array to 0-255 uint8 range.
+        """Convert raw image data into standard computer colors (0-255).
 
-        If vmin/vmax are not provided, they are calculated based on
-        percentiles.
+        If you don't provide minimum and maximum brightness values, it
+        will guess them based on the darkest and lightest pixels.
 
         Returns
         -------
         result : `tuple`
-            `(scaled_data, vmin, vmax)`.
+            The new image data, the minimum brightness used, and the
+            maximum brightness used.
         """
         arr = np.array(data, dtype=float)
 

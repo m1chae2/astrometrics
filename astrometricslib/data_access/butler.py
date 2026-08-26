@@ -1,12 +1,8 @@
-"""Data access layer following the Rubin Observatory Butler pattern.
+"""Data saving and loading tools.
 
-Defines the abstract base class for dataset retrieval, the
-`DataCoordinate` (Data ID) model, and the concrete `DiskButler`
-implementation wrapping local FITS files and a SQLite index.
-
-Notes
------
-Implements requirement REQ: BKD-5.
+This file defines how the program interacts with the database and files,
+following a standard pattern so different parts of the code don't have to
+worry about where the data actually lives.
 """
 
 import logging
@@ -70,116 +66,114 @@ class DataCoordinate(BaseModel):
 
 
 class AbstractButler(ABC):
-    """Abstract data access layer (DAL) following the Rubin Butler pattern."""
+    """The blueprint for how we load and save data."""
 
     @abstractmethod
     def get(self, dataset_type: str, coordinate: dict[str, Any]) -> Any:
-        """Retrieve a dataset for a coordinate.
+        """Load a specific piece of data.
 
         Parameters
         ----------
         dataset_type : `str`
-            Identifier of the dataset kind to retrieve (e.g.
-            "target_catalog", "raw_frame").
+            What kind of data to load (like "target_catalog" or "raw_frame").
         coordinate : `dict`
-            Data ID fields identifying which dataset instance to load.
+            Information to help find the exact piece of data.
 
         Returns
         -------
         dataset : `Any`
-            The hydrated domain model object, array, or catalog.
+            The loaded data.
         """
         pass
 
     @abstractmethod
     def put(self, obj: Any, dataset_type: str, coordinate: dict[str, Any]) -> None:
-        """Persist a dataset under a given type and coordinate.
+        """Save a piece of data.
 
         Parameters
         ----------
         obj : `Any`
-            The dataset object to persist.
+            The data to save.
         dataset_type : `str`
-            Identifier of the dataset kind being written.
+            What kind of data this is.
         coordinate : `dict`
-            Data ID fields identifying where to store the dataset.
+            Information to help store the data in the right place.
         """
         pass
 
     @abstractmethod
     def exists(self, dataset_type: str, coordinate: dict[str, Any]) -> bool:
-        """Check if the dataset exists for the coordinate.
+        """Check if a specific piece of data exists without loading it.
 
         Parameters
         ----------
         dataset_type : `str`
-            Identifier of the dataset kind to check.
+            What kind of data to check for.
         coordinate : `dict`
-            Data ID fields identifying which dataset instance to check.
+            Information identifying the data.
 
         Returns
         -------
         exists : `bool`
-            `True` if the dataset is present, `False` otherwise.
+            True if the data exists, False if not.
         """
         pass
 
     @abstractmethod
     def query_coordinates(self, dataset_type: str, query: dict[str, Any]) -> list[dict[str, Any]]:
-        """Find coordinates matching a query template.
+        """Find data that matches a search pattern.
 
         Parameters
         ----------
         dataset_type : `str`
-            Identifier of the dataset kind to query.
+            What kind of data to search.
         query : `dict`
-            Partial Data ID fields to match against.
+            The search pattern to match against.
 
         Returns
         -------
         coordinates : `list` of `dict`
-            Data ID dictionaries matching the query template.
+            A list of coordinates for the data that matched the search.
         """
         pass
 
     @abstractmethod
     def get_local_path(self, dataset_type: str, coordinate: dict[str, Any]) -> str:
-        """Get a local filesystem path/URI for physical file access.
+        """Get the actual file path on the hard drive for this data.
 
         Parameters
         ----------
         dataset_type : `str`
-            Identifier of the dataset kind to resolve.
+            What kind of data to find the path for.
         coordinate : `dict`
-            Data ID fields identifying which dataset instance to
-            locate.
+            Information identifying the data.
 
         Returns
         -------
         path : `str`
-            Local filesystem path or URI for the dataset.
+            The full file path.
         """
         pass
 
 
 def _target_extra_columns(target: Any) -> dict[str, Any]:
-    """Return the indexed columns kept alongside a target's data_json.
+    """Pull specific columns from a target so it can be searched quickly.
 
     Returns
     -------
     columns : `dict`
-        The `name`/`ra`/`dec` column values for `target`.
+        A dictionary containing the target's name and coordinates.
     """
     return {"name": target.common_name, "ra": target.ra, "dec": target.dec}
 
 
 def _coerce_float(value: Any) -> float | None:
-    """Best-effort float coercion of a value.
+    """Try to convert a value into a floating-point number.
 
     Returns
     -------
     coerced : `float` or `None`
-        `value` as a `float`, or `None` if it is empty or invalid.
+        The number, or None if it couldn't be converted.
     """
     if value in ("", None):
         return None
@@ -190,21 +184,15 @@ def _coerce_float(value: Any) -> float | None:
 
 
 def _stellar_extra_columns(stellar_object: Any) -> dict[str, Any]:
-    """Return the indexed columns kept alongside a stellar object's data_json.
+    """Pull out specific information from a star so it can be searched quickly.
 
-    has_spectra/has_photometry mirror StellarObject's own computed
-    properties of the same name exactly (by calling them, not
-    reimplementing their logic) -- they exist as real columns so a
-    catalog-browsing listing can read them via `Butler.list_projected`
-    without parsing every row's full nested light curve/spectra data
-    just to answer two booleans. SQLite has no native boolean type;
-    stored as INTEGER 0/1, read back as bool by callers that want one.
+    This helps us quickly find if a star has specific data without
+    having to load the entire star object.
 
     Returns
     -------
     columns : `dict`
-        The `target_id`/`name`/`ra`/`dec`/`magnitude`/`has_spectra`/
-        `has_photometry` column values for `stellar_object`.
+        A dictionary containing basic information about the star.
     """
     target_ids = getattr(stellar_object, "target_ids", None)
     return {
@@ -219,24 +207,20 @@ def _stellar_extra_columns(stellar_object: Any) -> dict[str, Any]:
 
 
 class DiskButler(AbstractButler):
-    """Concrete Butler backed by the local SQLite WAL database and disk.
+    """A Butler that saves data to your local hard drive and a SQLite database.
 
-    `target_catalog`/`stellar_catalog` are keyed-model tables with no
-    FITS-file analog, so they're delegated to a shared, generic
-    `datastore.Butler` instance -- the same class wayfindinglib's
-    Butler composes for its own record types. `raw_frame`/
-    `stacked_image`/`raw_frames`/`DataCoordinate` path resolution have
-    no equivalent in datastore and stay implemented directly here.
+    This handles both database records (like star catalogs) and actual
+    image files (like FITS files).
     """
 
     def __init__(self, config=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
-        """Initialize DiskButler with standard configuration.
+        """Set up the DiskButler.
 
         Parameters
         ----------
         config : `AppConfiguration`, optional
-            Application configuration object. If `None` (default), the
-            process-wide singleton from `get_configuration` is used.
+            The application settings. If not provided, it will use the
+            default settings.
         """
         if config is None:
             from astrometricslib.utilities.config_loader import get_configuration
@@ -274,40 +258,45 @@ class DiskButler(AbstractButler):
                         "has_photometry": "INTEGER",
                     },
                     extra_columns=_stellar_extra_columns,
-                    # Per-target browsing (the Astronomy Manager's target
-                    # filter) is the one place this dataset is queried by
-                    # something other than id -- without an index that's
-                    # a full-table scan of every stellar object in the
-                    # catalog to find one target's stars.
+                    # Speeds up an exact single-target match (the common
+                    # case: most stars belong to only one target), which
+                    # a caller could query directly with
+                    # where={"target_id": "M 13"}. The one place this
+                    # column is actually filtered today --
+                    # StellarCatalog.list_object_summaries's target_id
+                    # narrowing -- uses `like` (a star can belong to more
+                    # than one target, comma-joined, so a substring match
+                    # is the only safe SQL prefilter) rather than exact
+                    # equality; a leading-wildcard LIKE cannot seek this
+                    # B-tree index and falls back to a full scan
+                    # regardless. Kept anyway since it costs little at
+                    # this table's size and does serve an exact match, if
+                    # a future caller adds one.
                     indexed_columns=("target_id",),
                 ),
             },
         )
 
     def get(self, dataset_type: str, coordinate: dict[str, Any]) -> Any:
-        """Hydrate targets, stellar catalogs, or frame images.
+        """Load data from the database or hard drive.
 
         Parameters
         ----------
         dataset_type : `str`
-            One of "target_catalog", "stellar_catalog", "raw_frame",
-            "stacked_image", or "raw_frames".
+            What to load. Options include "target_catalog", "stellar_catalog",
+            "raw_frame", "stacked_image", or "raw_frames".
         coordinate : `dict`
-            Data ID fields identifying which dataset instance to load.
-            For "raw_frame"/"stacked_image" this resolves a local
-            path; for "raw_frames" this must include "target".
+            Information identifying exactly what to load.
 
         Returns
         -------
         dataset : `Any`
-            The hydrated target list, stellar catalog, image, or list
-            of frames, depending on `dataset_type`.
+            The requested data.
 
         Raises
         ------
         ValueError
-            Raised if `dataset_type` is not one of the supported
-            values.
+            If you ask for a data type it doesn't recognize.
         """
         if dataset_type == "target_catalog":
             # Goes through disk_interface.load_targets rather than
@@ -346,26 +335,21 @@ class DiskButler(AbstractButler):
             raise ValueError(f"Unknown dataset type: {dataset_type}")
 
     def put(self, obj: Any, dataset_type: str, coordinate: dict[str, Any]) -> None:
-        """Persist data to SQLite or files.
+        """Save data to the database or hard drive.
 
         Parameters
         ----------
         obj : `Any`
-            The object(s) to persist: a `Target` list for
-            "target_catalog", a single `Target` for "target_record",
-            or a `StellarObject` list for "stellar_catalog".
+            The data to save.
         dataset_type : `str`
-            One of "target_catalog", "target_record", or
-            "stellar_catalog".
+            What kind of data this is (e.g., "target_catalog").
         coordinate : `dict`
-            Data ID fields (unused by the current write paths, but
-            required by the `AbstractButler` interface).
+            Information on where to store the data (currently unused here).
 
         Raises
         ------
         ValueError
-            Raised if `dataset_type` is not one of the supported
-            values.
+            If you try to save a data type it doesn't support.
         """
         if dataset_type == "target_catalog":
             self._generic.put_all("target_catalog", obj)
@@ -383,32 +367,26 @@ class DiskButler(AbstractButler):
         objects: list[Any],
         merge_function: Callable[[Any | None, Any], Any],
     ) -> None:
-        """Combine new records with what is currently stored, then save.
+        """Update existing records safely without overwriting other changes.
 
-        Reads only the current rows matching the given objects' ids,
-        applies ``merge_function(existing_record_or_none,
-        updated_record) -> merged_record`` to each, and saves the
-        merged results under a single lock, so concurrent processes
-        updating overlapping records never race on the same rows the
-        way a plain get()-then-put() read-modify-write would.
+        This loads the current data, applies your changes using a
+        `merge_function`, and saves it back. It locks the database so
+        two programs don't accidentally overwrite each other.
 
         Parameters
         ----------
         dataset_type : `str`
-            Which dataset to merge into. One of "stellar_catalog" or
-            "target_catalog".
+            The kind of data to update (e.g., "stellar_catalog").
         objects : `list`
-            The new or updated records to merge in.
+            The new data to add or update.
         merge_function : `Callable`
-            Callable combining an existing record (or `None` if the
-            record is new) with the updated record, returning the
-            merged record to save.
+            A function that knows how to combine the old data with the new
+            data.
 
         Raises
         ------
         ValueError
-            Raised if `dataset_type` is not "stellar_catalog" or
-            "target_catalog".
+            If the dataset type isn't supported for merging.
         """
         if dataset_type not in ("stellar_catalog", "target_catalog"):
             raise ValueError(f"merge_and_persist_records is not supported for dataset type: {dataset_type}")
@@ -421,20 +399,19 @@ class DiskButler(AbstractButler):
             self._stellar_catalog_cache = None
 
     def delete_by_ids(self, dataset_type: str, ids: list[str]) -> None:
-        """Lock-guarded, targeted delete of only the given ids.
+        """Delete specific records from the database using their IDs.
 
         Parameters
         ----------
         dataset_type : `str`
-            One of "stellar_catalog" or "target_catalog".
-        ids : `list` [`str`]
-            Ids to remove.
+            The kind of data to delete from.
+        ids : `list` of `str`
+            The specific IDs to remove.
 
         Raises
         ------
         ValueError
-            Raised if `dataset_type` is not "stellar_catalog" or
-            "target_catalog".
+            If the dataset type isn't supported for deleting.
         """
         if dataset_type not in ("stellar_catalog", "target_catalog"):
             raise ValueError(f"delete_by_ids is not supported for dataset type: {dataset_type}")
@@ -445,27 +422,19 @@ class DiskButler(AbstractButler):
             self._stellar_catalog_cache = None
 
     def get_by_ids(self, dataset_type: str, ids: list[str]) -> list[Any]:
-        """Load only the rows matching the given ids.
-
-        Plain pass-through to the generic Butler's own `get_by_ids`,
-        an indexed primary-key lookup -- unlike `get`, which for
-        "stellar_catalog" always returns (and caches) the entire
-        catalog regardless of `coordinate`. Prefer this when a caller
-        genuinely wants one or a few specific stars, not the whole
-        table.
+        """Load only specific records from the database instead of everything.
 
         Parameters
         ----------
         dataset_type : `str`
-            One of "stellar_catalog" or "target_catalog".
-        ids : `list` [`str`]
-            Ids to look up.
+            The kind of data to load.
+        ids : `list` of `str`
+            The specific IDs to look for.
 
         Returns
         -------
         rows : `list`
-            The persisted instances matching `ids`, in no particular
-            order; ids with no match are simply absent.
+            The records that were found.
         """
         return self._generic.get_by_ids(dataset_type, ids)
 
@@ -474,50 +443,49 @@ class DiskButler(AbstractButler):
         dataset_type: str,
         columns: list[str],
         where: dict[str, Any] | None = None,
+        like: dict[str, str] | None = None,
+        limit: int | None = None,
     ) -> list[dict[str, Any]]:
-        """List rows as plain dicts of only the given columns.
+        """Grab specific columns from the database, no full objects.
 
-        Straight pass-through to the generic Butler -- unlike `get`,
-        this has no legacy-shard-migration path and unlike `get_all`
-        (see the cache this class keeps for it), no in-memory cache:
-        it exists specifically so a caller can read a handful of
-        indexed columns without paying to hydrate or cache full model
-        instances. See `datastore.butler.Butler.list_projected` for
-        the full contract and validation rules.
+        This is much faster if you only need one or two pieces of information
+        (like just checking if a star has spectra) instead of loading
+        the whole complex record.
 
         Parameters
         ----------
         dataset_type : `str`
-            One of "stellar_catalog" or "target_catalog".
-        columns : `list` [`str`]
-            Column names to select, in result order.
+            The kind of data to search.
+        columns : `list` of `str`
+            Which specific columns of data you want to retrieve.
         where : `dict`, optional
-            Column-name/value pairs to filter on, ANDed together.
+            Filters to exactly match specific column values.
+        like : `dict`, optional
+            Filters to partially match text in a column.
+        limit : `int`, optional
+            The maximum number of results to return.
 
         Returns
         -------
-        rows : `list` [`dict`]
-            One dict per matching row, keyed by the requested column
-            names.
+        rows : `list` of `dict`
+            The requested data as simple dictionaries.
         """
-        return self._generic.list_projected(dataset_type, columns, where)
+        return self._generic.list_projected(dataset_type, columns, where, like, limit)
 
     def exists(self, dataset_type: str, coordinate: dict[str, Any]) -> bool:
-        """Check if a database record or file path exists.
+        """Check if a file exists on the hard drive.
 
         Parameters
         ----------
         dataset_type : `str`
-            Identifier of the dataset kind to check.
+            What kind of file it is.
         coordinate : `dict`
-            Data ID fields identifying which dataset instance to
-            check.
+            Information to build the file path.
 
         Returns
         -------
         exists : `bool`
-            `True` if the resolved local path exists, `False`
-            otherwise (including if path resolution itself fails).
+            True if the file is found, False otherwise.
         """
         try:
             path = self.get_local_path(dataset_type, coordinate)
@@ -526,48 +494,42 @@ class DiskButler(AbstractButler):
             return False
 
     def query_coordinates(self, dataset_type: str, query: dict[str, Any]) -> list[dict[str, Any]]:
-        """Find matching coordinates.
+        """Return the search pattern unchanged (used for basic file routing).
 
         Parameters
         ----------
         dataset_type : `str`
-            Identifier of the dataset kind to query (unused by this
-            minimal implementation).
+            What kind of data.
         query : `dict`
-            Partial Data ID fields to match against.
+            The search pattern.
 
         Returns
         -------
         coordinates : `list` of `dict`
-            A single-element list containing `query` unchanged. This
-            is a minimal query implementation for file routing rather
-            than a real catalog search.
+            The exact same search pattern back in a list.
         """
         # Minimal query implementation for file routing
         return [query]
 
     def get_local_path(self, dataset_type: str, coordinate: dict[str, Any]) -> str:
-        """Resolve a local file path for the given dataset and coordinate.
+        """Figure out where a file should be saved on the hard drive.
 
         Parameters
         ----------
         dataset_type : `str`
-            One of "stacked_image" or "raw_frame".
+            What kind of file (e.g., "stacked_image" or "raw_frame").
         coordinate : `dict`
-            Data ID fields. If "path" is present and truthy, it is
-            returned as-is; otherwise the path is derived from
-            "target" and "role".
+            Information about the target and what kind of frame it is.
 
         Returns
         -------
         path : `str`
-            Local filesystem path for the dataset.
+            The full file path.
 
         Raises
         ------
         ValueError
-            Raised if `dataset_type` is not one of the supported
-            values.
+            If it doesn't know how to build a path for that data type.
         """
         if coordinate.get("path"):
             return coordinate["path"]

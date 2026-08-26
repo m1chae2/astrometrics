@@ -1,13 +1,11 @@
-"""Purpose: Guiding and Input-Data Quality Analysis.
+"""Tools to analyze mount tracking and image quality.
 
-Description: Turns the per-frame facts already recorded on `FrameRecord`
-into statements about the *acquisition* rather than the processing --
-mount tracking drift, periodic error, trailing, focus drift, and sky
-conditions -- plus a check on whether a pipeline's frame rejection
-actually tracked frame quality.
+This file looks at the data saved about each image to figure out how well
+the telescope was tracking the sky. It checks for things like the mount
+drifting over time, periodic mechanical errors (like the worm gear wobbling),
+sudden jumps, and changes in focus or sky brightness.
 
-These are read-only analyses over data other stages recorded. Nothing
-here re-measures a frame or touches disk.
+It only analyzes existing data; it doesn't process images or save new files.
 """
 
 import itertools
@@ -88,17 +86,17 @@ TRAILED_FRAME_ROUNDNESS_THRESHOLD = 0.75
 
 
 def _ordered_frames_with_shifts(frames: list) -> list:
-    """Select frames carrying both a timestamp and a registration shift.
+    """Filter out images missing timestamps or location data.
 
     Parameters
     ----------
     frames : `list`
-        Frame records to filter.
+        The image records to check.
 
     Returns
     -------
     ordered : `list`
-        The usable frames, sorted by acquisition time.
+        The valid images, sorted by when they were taken.
     """
     usable = [
         frame
@@ -113,17 +111,17 @@ def _ordered_frames_with_shifts(frames: list) -> list:
 
 
 def count_implausible_shifts(frames: list) -> int:
-    """Count frames whose recorded shift cannot be a tracking excursion.
+    """Count how many images have a position shift too big to be real.
 
     Parameters
     ----------
     frames : `list`
-        Frame records to inspect.
+        The image records to check.
 
     Returns
     -------
     count : `int`
-        Frames carrying a shift beyond
+        How many images have a shift bigger than
         `IMPLAUSIBLE_REGISTRATION_SHIFT_PX`.
     """
     return sum(
@@ -139,30 +137,24 @@ def count_implausible_shifts(frames: list) -> int:
 
 
 def split_frames_into_sessions(frames: list, gap_hours: float = SESSION_GAP_HOURS) -> list[list]:
-    """Split time-ordered frames wherever an observing gap occurs.
+    """Split a list of images into separate observing sessions.
 
-    Tracking statistics only mean anything inside one continuous run of
-    the mount. Across a gap the mount has slewed, been re-centred, and
-    very likely been powered down, so a shift measured from one night to
-    the next describes re-pointing, not tracking.
-
-    Concatenating nights produced physically impossible numbers on the
-    2026-08-24 catalog: NGC 7023's 535 frames span 9 separate nights and
-    reported a "span" of 8,094 hours with a 9,779 px excursion -- 1.6x
-    the sensor width -- and M 51's three nights spread over 15 months
-    reported 10,962 hours.
+    If two images in a row were taken more than `gap_hours` apart, we
+    assume the telescope was turned off in between and start a new
+    session. This keeps us from comparing images taken on different
+    nights as if they were part of one continuous run.
 
     Parameters
     ----------
     frames : `list`
-        Frames carrying timestamps, already sorted by acquisition time.
+        Images sorted by the time they were taken.
     gap_hours : `float`, optional
-        Silence longer than this starts a new session.
+        How many hours of silence means a new session has started.
 
     Returns
     -------
-    sessions : `list` [`list`]
-        One list of frames per session, in time order.
+    sessions : `list` of `list`
+        The images, grouped into separate sessions, in time order.
     """
     if not frames:
         return []
@@ -177,20 +169,19 @@ def split_frames_into_sessions(frames: list, gap_hours: float = SESSION_GAP_HOUR
 
 
 def _linear_trend_per_hour(times: list[float], values: list[float]) -> float | None:
-    """Fit a least-squares slope, expressed per hour.
+    """Calculate the average rate of change per hour using a straight line fit.
 
     Parameters
     ----------
-    times : `list` [`float`]
-        Epoch seconds, one per sample.
-    values : `list` [`float`]
-        Sample values, aligned with `times`.
+    times : `list` of `float`
+        Timestamps for each data point (in seconds).
+    values : `list` of `float`
+        The value recorded at each time.
 
     Returns
     -------
     slope_per_hour : `float` or `None`
-        The fitted slope in value-units per hour, or `None` if the
-        samples span no time.
+        The average change per hour. Returns None if there's not enough data.
     """
     if len(times) < 3:
         return None
@@ -206,29 +197,25 @@ def _linear_trend_per_hour(times: list[float], values: list[float]) -> float | N
 
 
 def _dominant_period_seconds(times: list[float], values: list[float]) -> tuple[float | None, float]:
-    """Find the strongest sinusoidal period in an unevenly sampled series.
+    """Find a repeating pattern (like a sine wave) in the data.
 
-    A direct Lomb-Scargle-style periodogram: the series is detrended,
-    then correlated against sine and cosine at a sweep of trial periods.
-    Written out rather than pulled from scipy because frames are unevenly
-    spaced (an FFT would need resampling, which invents data at the exact
-    timescale being measured).
+    This helps us find the "periodic error" of the telescope mount, which
+    is a regular wobble caused by the gears turning.
 
     Parameters
     ----------
-    times : `list` [`float`]
-        Epoch seconds, one per sample.
-    values : `list` [`float`]
-        Sample values, aligned with `times`.
+    times : `list` of `float`
+        Timestamps for each data point (in seconds).
+    values : `list` of `float`
+        The value recorded at each time.
 
     Returns
     -------
     period_seconds : `float` or `None`
-        The strongest period found within the mount-plausible band, or
-        `None` if the series is too short or carries no clear period.
+        The time in seconds it takes for the wobble to repeat.
     power_fraction : `float`
-        The share of the detrended series' variance that period explains,
-        between 0 and 1.
+        A number from 0 to 1 showing how much of the movement is caused
+        by this specific wobble, rather than random noise.
     """
     if len(times) < 8:
         return None, 0.0
@@ -292,32 +279,24 @@ def _dominant_period_seconds(times: list[float], values: list[float]) -> tuple[f
     return best_period, min(1.0, (2.0 * best_power) / total_power)
 
 
-def _analyze_one_session(target: Any, frames: list) -> dict[str, Any]:
-    """Describe one observing session's mount behaviour.
+def _analyze_one_session(frames: list) -> dict[str, Any]:
+    """Calculate tracking statistics for a single observing session.
 
-    Every statistic here assumes a continuous run of the mount, so the
-    caller must pass a single session's frames -- see
-    `split_frames_into_sessions` for why concatenating nights makes
-    these numbers meaningless.
+    This calculates things like the total drift, the average speed of the
+    drift, and the biggest sudden jump.
 
     Parameters
     ----------
-    target : `Any`
-        The target the session belongs to, used for meridian-flip
-        detection.
     frames : `list`
-        One session's frames, time-ordered, each carrying a timestamp
-        and a registration shift.
+        Images from one session, sorted by time, that include timestamps
+        and movement data.
 
     Returns
     -------
-    analysis : `dict` [`str`, `Any`]
-        ``usable_frames``, ``span_hours``, ``drift_x_px``/``drift_y_px``
-        (net displacement), ``drift_rate_x_px_per_hour``/
-        ``drift_rate_y_px_per_hour``, ``max_excursion_px``,
-        ``periodic_error_period_seconds``, ``periodic_error_strength``,
-        and ``findings`` (human-readable statements). ``usable_frames``
-        is 0 when no frame carries both a timestamp and a shift.
+    analysis : `dict`
+        A dictionary containing the tracking numbers (like `drift_x_px` and
+        `max_excursion_px`) and a list of `findings` (text warnings if
+        something looks wrong).
     """
     analysis: dict[str, Any] = {
         "usable_frames": len(frames),
@@ -394,7 +373,7 @@ def _analyze_one_session(target: Any, frames: list) -> dict[str, Any]:
                 "consistent with polar misalignment or an uncorrected tracking rate."
             )
 
-    flip_indices = detect_meridian_flips(target)
+    flip_indices = detect_meridian_flips(frames)
     analysis["meridian_flips"] = len(flip_indices)
     if flip_indices:
         analysis["findings"].append(
@@ -426,27 +405,27 @@ def _analyze_one_session(target: Any, frames: list) -> dict[str, Any]:
 def _combine_session_analyses(
     usable_frame_count: int, session_count: int, session_analyses: list[dict[str, Any]]
 ) -> dict[str, Any]:
-    """Summarise per-session tracking analyses into one report.
+    """Combine the reports from multiple observing sessions into one.
 
-    Reports the worst session for each statistic rather than an average.
-    A single bad night is what an observer needs to find, and averaging
-    it against good ones hides exactly the case worth acting on.
+    This reports the *worst* session for each problem, rather than the average.
+    If you had 4 good nights and 1 terrible night, the average might look okay,
+    but we want to highlight the terrible night so you can figure out what
+    went wrong.
 
     Parameters
     ----------
     usable_frame_count : `int`
-        Frames carrying both a timestamp and a registration shift.
+        Total number of images that had useful data.
     session_count : `int`
-        Sessions found, including those too short to analyse.
-    session_analyses : `list` [`dict`]
-        One `_analyze_one_session` result per analysed session.
+        Total number of sessions found.
+    session_analyses : `list` of `dict`
+        The list of individual session reports.
 
     Returns
     -------
-    analysis : `dict` [`str`, `Any`]
-        The same keys `_analyze_one_session` produces, taken from the
-        worst session, plus ``sessions_analyzed``, ``sessions_found``
-        and ``sessions`` holding each session's own analysis.
+    analysis : `dict`
+        A single dictionary containing the worst-case numbers across all
+        sessions, plus the individual session reports inside it.
     """
 
     def _worst(key: str) -> Any:
@@ -504,39 +483,39 @@ def _combine_session_analyses(
 
 
 def analyze_guiding(target: Any) -> dict[str, Any]:
-    """Describe a target's mount behaviour, session by session.
+    """Calculate tracking statistics for all images in a target.
 
-    Frames are split into observing sessions first, because drift,
-    excursion and periodic error only mean anything within one
-    continuous run of the mount. Analysing a target's frames as a single
-    series reports the re-pointing between nights as tracking error: on
-    the 2026-08-24 catalog that gave NGC 7023 a span of 8,094 hours and
-    a 9,779 px excursion, larger than the sensor is wide.
+    This function first splits the images into separate observing sessions
+    (like different nights), then calculates the tracking performance for
+    each session.
 
     Parameters
     ----------
     target : `Any`
-        The target whose frames are analyzed.
+        The target to analyze.
 
     Returns
     -------
-    analysis : `dict` [`str`, `Any`]
-        ``usable_frames``, ``sessions_found``, ``sessions_analyzed``,
-        and ``sessions`` (each session's own analysis), plus the worst
-        session's ``span_hours``, ``drift_x_px``/``drift_y_px``,
-        ``drift_rate_x_px_per_hour``/``drift_rate_y_px_per_hour``,
-        ``max_excursion_px``, ``periodic_error_period_seconds``,
-        ``periodic_error_strength`` and ``findings``.
+    analysis : `dict`
+        A dictionary summarizing the mount's tracking performance.
     """
     all_frames = _ordered_frames_with_shifts(target.frames or [])
     sessions = split_frames_into_sessions(all_frames)
     long_enough = [session for session in sessions if len(session) >= MINIMUM_SESSION_FRAMES]
-    session_analyses = [_analyze_one_session(target, session) for session in long_enough]
+    session_analyses = [_analyze_one_session(session) for session in long_enough]
 
     if session_analyses:
         return _combine_session_analyses(len(all_frames), len(sessions), session_analyses)
 
-    analysis = _analyze_one_session(target, all_frames)
+    # No session reached MINIMUM_SESSION_FRAMES. Analysing only the
+    # longest single session -- never `all_frames` -- matters here:
+    # concatenating every session back together is exactly the
+    # cross-night join this function's docstring describes fixing
+    # (NGC 7023's 8,094-hour span, 9,779px excursion). A target whose
+    # every session is individually short still deserves that session's
+    # own, correctly-scoped analysis rather than none at all.
+    longest_session = max(sessions, key=len) if sessions else []
+    analysis = _analyze_one_session(longest_session)
     analysis["sessions_found"] = len(sessions)
     analysis["sessions_analyzed"] = 0
     analysis["sessions"] = []
@@ -544,24 +523,21 @@ def analyze_guiding(target: Any) -> dict[str, Any]:
 
 
 def fwhm_in_arcsec(frame: Any) -> float | None:
-    """Express a frame's FWHM in arcseconds rather than pixels.
+    """Convert an image's sharpness (FWHM) from pixels to arcseconds.
 
-    A FWHM in pixels is only meaningful alongside the pixel scale that
-    produced it: the same seeing reads as a different pixel count on a
-    different camera or focal length. Arcseconds are comparable across
-    every frame in the library and are the unit seeing is actually
-    discussed in.
+    Measuring in arcseconds lets us compare image sharpness across different
+    cameras and telescopes, because a pixel on one camera might cover more
+    or less sky than a pixel on another.
 
     Parameters
     ----------
     frame : `Any`
-        The frame record to convert.
+        The image record to calculate.
 
     Returns
     -------
     fwhm_arcsec : `float` or `None`
-        FWHM in arcseconds, or `None` if either the FWHM or the pixel
-        scale is missing.
+        The sharpness in arcseconds, or None if we don't have enough data.
     """
     fwhm_px = frame.registration_fwhm_x_px
     if fwhm_px is None or frame.pixel_scale_arcsec is None:
@@ -569,46 +545,52 @@ def fwhm_in_arcsec(frame: Any) -> float | None:
     return round(fwhm_px * frame.pixel_scale_arcsec, 2)
 
 
-def detect_meridian_flips(target: Any) -> list[int]:
-    """Find where a session changed pier side.
+def detect_meridian_flips(frames: list) -> list[int]:
+    """Find out when the telescope flipped over to the other side of the pier.
 
-    A meridian flip moves the field abruptly, so the shift between the
-    frames either side of one is not a tracking fault. Without this, that
-    jump reads as a bump or cable snag in `analyze_guiding`.
+    Telescopes often have to "flip" when a target crosses the highest point
+    in the sky (the meridian) so they don't crash into the mount. This causes
+    a big jump in the image position, which we need to ignore so we don't
+    count it as a tracking error.
 
     Parameters
     ----------
-    target : `Any`
-        The target whose frames are examined.
+    frames : `list`
+        Images sorted by time.
 
     Returns
     -------
-    flip_indices : `list` [`int`]
-        Indices, into the time-ordered frame list, of each frame that
-        begins a new pier side.
+    flip_indices : `list` of `int`
+        The list indexes of the images where a flip happened.
     """
-    ordered = sorted(
-        (f for f in (target.frames or []) if f.timestamp is not None and f.pier_side),
-        key=lambda f: f.timestamp,
-    )
-    return [
-        index for index in range(1, len(ordered)) if ordered[index].pier_side != ordered[index - 1].pier_side
-    ]
+    flip_indices = []
+    last_known_side = None
+    for index, frame in enumerate(frames):
+        side = frame.pier_side
+        if side is None:
+            continue
+        if last_known_side is not None and side != last_known_side:
+            flip_indices.append(index)
+        last_known_side = side
+    return flip_indices
 
 
 def analyze_input_conditions(target: Any) -> dict[str, Any]:
-    """Describe seeing, trailing, and sky conditions across a target's frames.
+    """Calculate statistics about the sky and image quality.
+
+    This checks things like the average sharpness of the stars, how many
+    images had trailing (stretched stars), and the brightness of the sky
+    background.
 
     Parameters
     ----------
     target : `Any`
-        The target whose frames are analyzed.
+        The target whose images we are analyzing.
 
     Returns
     -------
-    analysis : `dict` [`str`, `Any`]
-        Median and spread for FWHM, roundness, and background, the count
-        of trailed frames, and ``findings``.
+    analysis : `dict`
+        A dictionary of the calculated statistics and text findings.
     """
     frames = target.frames or []
     fwhm_values = [f.registration_fwhm_x_px for f in frames if f.registration_fwhm_x_px is not None]
@@ -656,24 +638,21 @@ def analyze_input_conditions(target: Any) -> dict[str, Any]:
 
 
 def evaluate_rejection_effectiveness(target: Any) -> dict[str, Any]:
-    """Check whether frame rejection actually tracked frame quality.
+    """Check if the software successfully threw out the bad images.
 
-    A pipeline that rejects frames should be rejecting the *worse* ones.
-    Comparing the input quality of rejected frames against kept ones
-    turns that assumption into something checkable: if the two groups
-    look identical, the rejection is not selecting on quality.
+    If our stacking software throws out images, we want to make sure it
+    threw out the blurry or bright ones, and kept the sharp, dark ones.
+    This function compares the quality of the kept images vs rejected ones.
 
     Parameters
     ----------
     target : `Any`
-        The target whose stacking summary and frames are compared.
+        The target to check.
 
     Returns
     -------
-    analysis : `dict` [`str`, `Any`]
-        Median background and FWHM for rejected and kept frames, the
-        counts of each, and ``findings``. ``comparable`` is `False` when
-        there are too few measured frames on either side to compare.
+    analysis : `dict`
+        A summary comparing the two groups of images.
     """
     summary = getattr(target, "stack_quality_summary", None)
     metrics = getattr(summary, "stacking_metrics", None) if summary else None
@@ -728,13 +707,10 @@ def evaluate_rejection_effectiveness(target: Any) -> dict[str, Any]:
 
 
 def build_tracking_quality_summary(target: Any) -> TrackingQualitySummary | None:
-    """Assemble a persisted `TrackingQualitySummary` for a target.
+    """Create a complete tracking report for a target.
 
-    Combines `analyze_guiding` and `analyze_input_conditions`. Both are
-    read-only analyses over data other pipelines already wrote
-    (registration shifts from stacking, per-frame background/FWHM from
-    input-quality measurement); this only packages their results into
-    the same queryable form every other pipeline's findings take.
+    This runs all the individual tracking and quality checks and bundles
+    the results into a single summary object that gets saved to the database.
 
     Parameters
     ----------
@@ -744,10 +720,7 @@ def build_tracking_quality_summary(target: Any) -> TrackingQualitySummary | None
     Returns
     -------
     summary : `TrackingQualitySummary` or `None`
-        `None` when the target has no usable frames for either
-        analysis -- there is nothing to persist, and a record with
-        every field empty would be indistinguishable from a real
-        finding of "nothing wrong".
+        The final summary object, or None if there wasn't enough data.
     """
     from astrometricslib.models.quality_summary import TrackingPipelineQualityMetrics, TrackingQualitySummary
 

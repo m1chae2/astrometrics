@@ -1,10 +1,8 @@
-"""Batch target processing operations.
+"""Tools for processing many targets at the same time.
 
-Thin adapter wiring the generic parallel-batch engine to target-level
-processing. Owns only target-specific concerns (worker lookup,
-worker-count resolution); the actual process-pool mechanics live in
-astrometricslib.utilities.parallel_batch, which knows nothing about
-targets. # REQ: BKD-5
+This file connects the target-processing steps to a background worker system,
+allowing the computer to process multiple targets simultaneously without
+freezing.
 """
 
 from typing import Any
@@ -16,32 +14,25 @@ from astrometricslib.utilities.concurrency import resolve_worker_counts
 def _process_single_target_worker(
     target_id: str, photometry_workers: int, camera_name: str, focal_length_mm: float | None = None
 ) -> dict:
-    """Run one target's full pipeline in its own process.
+    """Run the full analysis process for a single target in the background.
 
-    Module-level, picklable worker. Constructs a fresh Astrometrics
-    astrometrics (its own DiskButler/config) so each worker process is
-    self-contained, mirroring the pattern already used by
-    variability_analyzer.py's _process_single_frame_worker.
+    This runs inside its own isolated process so that errors don't crash
+    the rest of the program.
 
     Parameters
     ----------
     target_id : `str`
-        The identifier of the target to process.
+        The name of the target to process.
     photometry_workers : `int`
-        The number of inner worker processes to use for the
-        photometry stage of the target's pipeline.
+        How many CPU cores to use for measuring star brightness.
     camera_name : `str`
-        Case-insensitive substring matched against each frame's
-        camera name; only matching frames are processed. Passed
-        through to `run_full_pipeline`.
+        Only process images taken with this specific camera.
 
     Returns
     -------
     result : `dict`
-        A dict with keys "status" (`str`, "success", "skipped", or
-        "failed"), "error" (`str` or `None`), and "stack_outputs"
-        (`dict` of per-stack pipeline outputs). "skipped" means the
-        target holds no frames for `camera_name`, so nothing was run.
+        The outcome of the process. Includes "status" (success, skipped,
+        or failed), "error" (if any), and "stack_outputs" (the final data).
     """
     from astrometricslib import Astrometrics
     from astrometricslib.tasks.target_tasks.pipeline_tasks import (
@@ -88,28 +79,23 @@ def process_all_targets(
     camera_name: str,
     focal_length_mm: float | None = None,
 ) -> parallel_batch.BatchRunSummary:
-    """Process many targets' full pipelines concurrently.
+    """Process many targets at the same time.
 
-    Uses the generic parallel-batch engine to run each target's
-    pipeline in its own worker process.
+    This splits the workload across multiple CPU cores to finish faster.
 
     Parameters
     ----------
     api : `Any`
-        the high-level interface providing config and target lookup.
-    target_ids : `List[str]`, optional
-        Target ids to process; defaults to `None`, in which case
-        every target currently in the catalog is processed.
+        The main program interface.
+    target_ids : `list` [`str`], optional
+        The specific targets to process. If None, processes all targets.
     camera_name : `str`
-        Case-insensitive substring matched against each frame's
-        camera name; only matching frames are processed for each
-        target -- see `run_full_pipeline`'s `camera_name` parameter.
-        Required, keyword-only, and has no default.
+        Only process images taken with this specific camera.
 
     Returns
     -------
     summary : `parallel_batch.BatchRunSummary`
-        Aggregated success/failure/result state across all targets.
+        A report showing how many targets succeeded, failed, or were skipped.
     """
     if target_ids is None:
         target_ids = [target.id for target in api.targets.list()]

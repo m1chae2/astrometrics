@@ -103,6 +103,29 @@ def test_repointing_between_nights_is_not_an_excursion():  # ruff: ignore[missin
     assert analysis["max_excursion_px"] < 10.0
 
 
+def test_meridian_flip_count_is_not_summed_across_sessions():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """One real flip must be reported once, not once per session.
+
+    detect_meridian_flips used to be handed the whole target's frames
+    regardless of which session was being analysed, so every session
+    reported the same target-wide flip count and the combined total
+    summed that count once per session -- a single real flip on a
+    3-session target came back as 3.
+    """
+    first = _session(0.0, 5)
+    for frame in first:
+        frame.pier_side = "EAST"
+
+    second = _session(24 * ONE_HOUR, 5)
+    for index, frame in enumerate(second):
+        frame.pier_side = "EAST" if index < 2 else "WEST"
+
+    analysis = analyze_guiding(_Target(first + second))
+
+    assert analysis["sessions_analyzed"] == 2
+    assert analysis["meridian_flips"] == 1
+
+
 def test_frame_sized_shifts_are_excluded():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """A shift the size of the frame is a failed transform, not tracking."""
     frames = _session(0.0, 10)
@@ -136,6 +159,26 @@ def test_a_short_session_is_counted_but_not_analysed():  # ruff: ignore[missing-
 
     assert analysis["sessions_found"] == 1
     assert analysis["sessions_analyzed"] == 0
+
+
+def test_multiple_short_sessions_report_the_longest_one_not_all_joined():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """When no session reaches the minimum, nights must still not be joined.
+
+    Falling back to every session's frames concatenated together is
+    exactly the cross-night join `analyze_guiding`'s docstring exists to
+    prevent -- it must fall back to the longest single session instead.
+    """
+    first_night = _session(0.0, 3)
+    second_night = _session(48 * ONE_HOUR, 4)
+
+    analysis = analyze_guiding(_Target(first_night + second_night))
+
+    assert analysis["sessions_found"] == 2
+    assert analysis["sessions_analyzed"] == 0
+    # A real span across the two nights would be ~48 hours; the longest
+    # single session (4 frames, 2 minutes apart) spans a few minutes.
+    assert analysis["usable_frames"] == 4
+    assert analysis["span_hours"] < 1.0
 
 
 def test_the_worst_session_is_the_one_reported(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]

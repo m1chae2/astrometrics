@@ -26,67 +26,60 @@ from astrometricslib.tasks.shared.source_detection_shared import SourceDetector
 
 logger = logging.getLogger(__name__)
 
-# Just under the raw 16-bit unsigned max (65535) -- same default and
-# caveats as image_quality_metrics.DEFAULT_SATURATION_ADU_THRESHOLD (not
-# reused directly to avoid pulling astropy/photutils-heavy imports into
-# this module's worker-process path).
+# The maximum brightness value a pixel can record before it maxes out
+# ("saturates")
+# and stops measuring light accurately. Because our cameras save 16-bit images,
+# the absolute maximum is 65,535. We set our threshold just below that at
+# 65,000.
 _SATURATION_ADU_THRESHOLD = 65000.0
 
-# --- Normalization ensemble selection ---------------------------------------
+# --- Choosing Reference Stars for Comparison --------------------------------
 #
-# The ensemble used to be a positional slice of the flux-sorted star list,
-# which silently changed meaning with the population size: at 100 stars it
-# took indices 10-70 (bright, well-measured), but at 992 it took 99-300 --
-# far deeper and fainter. Measured on IC 1805 and M 106 (2026-08-25), the
-# larger, fainter ensemble was worse on both, significantly so on M 106
-# (median per-star coefficient of variation 0.5014 vs 0.4469 with the
-# smaller bright ensemble; 32 of 103 paired stars improved, sign-test
-# p=0.00015). Selecting on photometric merit instead keeps the ensemble
-# anchored to the stars that actually normalize well, whatever the
-# population size.
+# To tell if a target star is actually changing brightness, we compare it
+# against
+# a group (or "ensemble") of other stars in the same image that we assume are
+# stable.
+# We choose these reference stars based on how clean and consistent their data
+# is,
+# rather than just picking the brightest ones. Tests on real fields (like IC
+# 1805)
+# show this gives us much more accurate measurements.
 
-# A comparison star is only useful in frames where it was measured, so
-# require it to carry usable flux in most of them. 0.8 keeps stars that
-# miss the occasional frame to cloud or a cosmic ray while rejecting ones
-# that dropped out of half the run -- the failure mode behind the
-# "ensemble only covered 17/61 frames" fallback seen on M 106.
+# The percentage of images (80% or 0.8) where a star must be clearly visible
+# to be used as a reference. This allows a star to still be used even if it
+# gets
+# briefly covered by a cloud or hit by a cosmic ray in a few pictures.
 MINIMUM_ENSEMBLE_FRAME_COVERAGE = 0.8
 
-# Saturated stars have a flat-topped profile whose measured flux no longer
-# tracks real brightness, so they poison a normalization reference. Binning
-# IC 1805 by brightness showed the brightest 61 stars had *worse* median
-# scatter (0.768) than the brightest 500 (0.565) -- the signature of
-# saturation at the bright end. A small allowance absorbs a star that
-# clips in a frame or two of unusually good seeing.
+# The maximum percentage of times (5% or 0.05) a star is allowed to hit
+# the maximum brightness limit (saturation). If a star is too bright, its data
+# gets cut off at the top, making it a bad reference point. We allow a tiny 5%
+# margin in case the air suddenly gets very still and clear ("good seeing")
+# and makes the star appear brighter for a moment.
 MAXIMUM_ENSEMBLE_SATURATED_FRACTION = 0.05
 
-# Ensemble size is subject to diminishing returns: the per-frame median is
-# already well determined by this many good stars, and every additional one
-# is necessarily fainter and noisier than the last. The measurements above
-# found 60 bright stars beat 201 fainter ones, so bias toward quality.
+# The ideal number of reference stars to use. Adding too many faint stars
+# actually makes the math worse because faint stars have a lot of background
+# noise.
+# A smaller group of 100 bright, clean stars works much better.
 TARGET_ENSEMBLE_SIZE = 100
 
-# Floor below which a merit-selected ensemble is too small to give a stable
-# per-frame median, at which point the coverage requirement is relaxed
-# rather than proceeding with too few comparison stars.
+# The absolute minimum number of reference stars we need for the math to work.
+# If we can't find 10 good stars, we will lower our strict quality standards
+# until we find enough.
 MINIMUM_ENSEMBLE_SIZE = 10
 
 
 def _read_exposure_seconds(header: Any) -> float:
-    """Read a FITS header's exposure duration, in seconds.
+    """Read how long the camera shutter was open (exposure time).
 
-    Checks ``EXPTIME`` then ``EXPOSURE`` (both in common use across
-    capture software), matching the fallback name/default already used
-    for exposure metadata elsewhere (see
-    `data_access.frame_scanning`). Guards against a missing, zero, or
-    negative value, any of which would make a later flux-per-second
-    division meaningless or blow up.
+    We need this to calculate light-per-second. If a picture has no
+    exposure time recorded, we assume 1 second to avoid math errors.
 
     Returns
     -------
     exposure_seconds : `float`
-        The frame's exposure duration in seconds, or `1.0` if the
-        header has no usable value (i.e. flux is left un-rescaled).
+        The exposure time in seconds.
     """
     for key in ("EXPTIME", "EXPOSURE"):
         value = header.get(key)
@@ -103,21 +96,15 @@ def _read_exposure_seconds(header: Any) -> float:
 def locate_star_centroid(
     data: np.ndarray, expected_x: float, expected_y: float, search_half_width: int = 40
 ) -> tuple[float, float] | None:
-    """Re-locate a star's centroid near an expected position.
+    """Find the exact center of a star if we already know roughly where it is.
 
-    Uses a small background-subtracted, flux-weighted center-of-mass
-    within a local window, instead of a full-frame star detection --
-    frame-to-frame drift between exposures of the same session is
-    normally a few pixels at most, so a local search around each
-    known reference star's expected position finds the same result
-    as full-frame detection at a fraction of the cost.
+    Instead of searching the whole picture, we just look in a small box
+    around where we expect the star to be. This is much faster.
 
     Returns
     -------
     centroid : `tuple` [`float`, `float`] or `None`
-        The `(x, y)` centroid in frame pixel coordinates, or `None` if
-        the search window falls outside the frame or contains no
-        signal above background.
+        The exact `(x, y)` center, or None if we couldn't find the star.
     """
     height, width = data.shape
     x0 = round(expected_x) - search_half_width
@@ -143,18 +130,16 @@ def locate_star_centroid(
 def _calculate_frame_offset(
     data: np.ndarray, reference_top_refs_minimal: list[tuple[float, float, float]]
 ) -> tuple[float, float]:
-    """Estimate a frame's pixel shift relative to the reference frame.
+    """Figure out how much the telescope drifted between pictures.
 
-    Re-locates each of the top reference stars near its expected
-    position (see `locate_star_centroid`) and takes the median
-    per-axis offset, which is robust to the occasional star lost to
-    noise, a cosmic ray, or a near-neighbor in one window.
+    We look at a few bright stars and see how far they moved since the
+    first picture. We take the median (middle) movement to ignore any
+    weird mistakes.
 
     Returns
     -------
     offset : `tuple` [`float`, `float`]
-        The `(delta_x, delta_y)` shift, `(0.0, 0.0)` if fewer than 5
-        reference stars were successfully re-located.
+        How many pixels the image shifted `(x_shift, y_shift)`.
     """
     shifts_x, shifts_y = [], []
     for reference_x, reference_y, _ in reference_top_refs_minimal:
@@ -171,12 +156,15 @@ def _calculate_frame_offset(
 
 
 def compute_frame_airmass(header: fits.Header) -> float:
-    """Extract or calculate airmass X = sec(z) from FITS header metadata.
+    """Figure out how much atmosphere we are looking through.
+
+    "Airmass" is 1.0 when looking straight up, and gets higher as you
+    look toward the horizon (because you look through more air).
 
     Returns
     -------
     airmass : `float`
-        Calculated or extracted airmass value, defaulted to 1.0.
+        The airmass value, or 1.0 if we can't figure it out.
     """
     for key in ["AIRMASS", "CENTAIRM", "AIRM"]:
         if key in header:
@@ -201,24 +189,16 @@ def compute_frame_airmass(header: fits.Header) -> float:
 
 
 def _process_single_frame_worker(args):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
-    """Worker function to process a single frame in parallel.
+    """Analyze a single picture.
 
-    Performs alignment and forced photometry. Measured flux is
-    expressed in ADU/second (divided by the frame's own `EXPTIME`/
-    `EXPOSURE`), not raw ADU counts -- otherwise a target observed
-    across sessions with different exposure lengths (e.g. 180s and
-    300s subs of the same object) would show a spurious step-change
-    in raw flux purely from exposure, indistinguishable from real
-    variability without going through ensemble normalization first.
-    Normalizing at the measurement source makes flux directly
-    comparable across exposure lengths even before that step.
+    This aligns the picture and measures the brightness of every star.
+    We measure brightness in "light per second" so we can compare a
+    3-minute exposure fairly against a 5-minute exposure.
 
     Returns
     -------
     result : `tuple`
-        A tuple ``(path, data)`` where ``data`` is
-        ``(timestamp, fluxes_dict, delta_x, delta_y, background, airmass)``,
-        and each flux in ``fluxes_dict`` is in ADU/second.
+        The results, including star brightnesses and picture details.
     """
     path, reference_stars_list, reference_top_refs_minimal = args
 
@@ -311,21 +291,15 @@ def _process_single_frame_worker(args):  # ruff: ignore[missing-type-function-ar
 
 
 def _compute_star_coefficients_of_variation(stellar_objects: list[StellarObject]) -> list[float]:
-    """Compute and store each star's coefficient of variation in place.
+    """Calculate how much each star's brightness jumps around.
 
-    Prefers `fluxes_detrended` over `fluxes_normalized` where available.
-    Shared by both single-session (`identify_variable_stars`) and
-    cross-session-merged (`identify_long_term_variable_candidates`)
-    variability flagging, since the per-star CV computation itself
-    doesn't depend on which population it's drawn from.
+    We use the "Coefficient of Variation" (CV), which is the standard
+    deviation divided by the mean. A higher CV means the star is more variable.
 
     Returns
     -------
     cv_list : `list` [`float`]
-        Coefficient of variation for every star with enough valid flux
-        points to compute one (mutates `mean_flux`,
-        `coefficient_of_variation`, `variability_score`, and
-        `magnitude` on those stars as a side effect).
+        The calculated scatter for each star.
     """
     cv_list = []
     for star in stellar_objects:
@@ -352,35 +326,28 @@ def _compute_star_coefficients_of_variation(stellar_objects: list[StellarObject]
     return cv_list
 
 
-# Multiplier applied to the population's MAD when deciding which stars
-# are variable. MAD is about 0.6745 sigma for a normal distribution, so
-# the previous value of 2.0 was only ~1.35 sigma -- roughly the 91st
-# percentile, flagging about one star in ten before any skew. Measured on
-# the 2026-08-24 catalog it flagged 630 of 3,177 stars (19.8%), and
-# per-target rates ran to 32% (M 81, 45 of 142). Real variable fractions
-# in an arbitrary field are 1-3%, so essentially every candidate was
-# noise.
+# A math multiplier used to find stars that are behaving very differently
+# from the rest of the group. Setting this to 7.4 flags roughly the top 3%
+# of stars that vary the most.
 #
-# 7.4 MAD is about 5 sigma and yields 3.0% on the same population, which
-# is at the generous end of plausible rather than absurd. Chosen over a
-# tighter cut because this stage produces *candidates* for follow-up: a
-# few false positives cost a look, whereas a missed variable is never
-# revisited.
+# We set this slightly low (meaning it will catch a few false alarms) on
+# purpose.
+# It's better to flag a normal star by mistake than to accidentally ignore
+# a brand-new supernova!
 DEFAULT_VARIABILITY_SIGMA_THRESHOLD = 7.4
 
 
 def median_light_curve_scatter_mag(stellar_objects: list[StellarObject]) -> float | None:
-    """Summarise a field's photometric precision as a magnitude scatter.
+    """Calculate the overall "noise level" of the entire image.
 
-    The population median of each star's fractional flux scatter,
-    converted to magnitudes. Reported as a median rather than a mean so
-    a handful of genuine variables cannot stand in for the field's
-    precision.
+    This takes the scatter (how much the light jumps around) for every single
+    star,
+    and finds the median (middle) value. We use the median so that a few
+    highly variable stars don't skew the average for the whole group.
 
-    This is the number that says whether a variability search is worth
-    believing: candidates are picked out against this floor, so a field
-    scattering at 0.3 mag cannot support detecting a 0.05 mag signal no
-    matter where the threshold sits.
+    This number tells us what's possible to detect. For example, if the
+    overall image noise causes a star's brightness to bounce around by 0.3,
+    we will never be able to confidently detect a real variability of 0.05.
 
     Parameters
     ----------
@@ -415,24 +382,23 @@ def median_light_curve_scatter_mag(stellar_objects: list[StellarObject]) -> floa
 
 
 def _adaptive_cv_cutoff(cv_list: list[float], sigma_threshold: float) -> float:
-    """Compute a population's adaptive ensemble noise floor cutoff.
+    """Calculate the noise limit for this specific group of stars.
 
-    Field scatter median + `sigma_threshold` * MAD, floored at a
-    Field scatter median + `sigma_threshold` * MAD, floored at a
-    minimum cutoff of 2%.
+    We find the average noise for the whole group, and add our safety
+    margin (sigma). Any star bouncing around more than this limit is
+    flagged as variable.
 
     Parameters
     ----------
     cv_list : `list` of `float`
-        The list of coefficients of variation for the population.
+        The noise levels for all the stars.
     sigma_threshold : `float`
-        The threshold multiplier for the Median Absolute Deviation (MAD).
+        How strict we want to be (higher = fewer false alarms).
 
     Returns
     -------
     cutoff : `float`
-        The coefficient-of-variation threshold above which a star is
-        flagged as variable.
+        The final noise limit.
     """
     # Compute robust statistics (Median and Median Absolute Deviation) to avoid
     # outliers artificially inflating the noise floor
@@ -447,20 +413,19 @@ def _adaptive_cv_cutoff(cv_list: list[float], sigma_threshold: float) -> float:
 def _flag_variable_stars_by_adaptive_cutoff(
     stellar_objects: list[StellarObject], sigma_threshold: float
 ) -> list[StellarObject]:
-    """Flag stars whose CV exceeds their population's own adaptive cutoff.
+    """Find the stars that change brightness more than the noise limit.
 
     Parameters
     ----------
     stellar_objects : `list` of `StellarObject`
-        The population of stars to evaluate.
+        The stars to check.
     sigma_threshold : `float`
-        The threshold multiplier for the Median Absolute Deviation (MAD).
+        How strict we want to be.
 
     Returns
     -------
     variable_candidates : `list` [`StellarObject`]
-        Stars whose coefficient of variation exceeds the adaptive
-        ensemble noise floor cutoff, in `stellar_objects` order.
+        The stars that passed the test and look like real variable stars.
     """
     variable_candidates = []
     cv_list = _compute_star_coefficients_of_variation(stellar_objects)
@@ -490,39 +455,28 @@ def identify_long_term_variable_candidates(
     stellar_objects: list[StellarObject],
     sigma_threshold: float = DEFAULT_VARIABILITY_SIGMA_THRESHOLD,
 ) -> list[StellarObject]:
-    """Identify cross-session-merged stars with variability past the floor.
+    """Find stars that slowly change brightness over days, weeks, or months.
 
-    Mirrors `VariabilityAnalyzer.identify_variable_stars`'s adaptive
-    median+MAD cutoff, but operates on an arbitrary population of
-    already cross-session-merged `StellarObject`s (see
-    `pipeline_tasks._match_and_merge_across_sessions`) rather than a
-    single analyzer's own tracked stars -- computed separately from
-    each session's own single-session-scoped variability flagging, so a
-    star's long-term (multi-session) variability status is independent
-    of whether any one session alone flagged it.
+    This looks at data gathered from multiple different nights to find
+    slow-changing stars that we might miss if we only looked at one night.
 
     Parameters
     ----------
     stellar_objects : `list` of `StellarObject`
-        The population of stars to evaluate across multiple sessions.
+        The stars to check.
     sigma_threshold : `float`, optional
-        The threshold multiplier for the Median Absolute Deviation
-        (MAD). Defaults to 2.0.
+        How strict we want to be.
 
     Returns
     -------
     variable_candidates : `list` [`StellarObject`]
-        Stars whose merged-light-curve coefficient of variation exceeds
-        the merged population's adaptive ensemble noise floor cutoff.
+        The stars that look like long-term variables.
     """
     return _flag_variable_stars_by_adaptive_cutoff(stellar_objects, sigma_threshold)
 
 
 class VariabilityAnalyzer:
-    """Analyzes a sequence of images to detect variable stars.
-
-    Performs alignment, forced photometry, and ensemble normalization.
-    """
+    """Analyzes a sequence of images to detect variable stars."""
 
     def __init__(self, config=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
         self.config = config
@@ -534,13 +488,12 @@ class VariabilityAnalyzer:
         self.frame_ensemble_composition: list[FrameEnsembleComposition] = []
 
     def load_target_images(self, target_id: str) -> list[str]:
-        """Return nothing; deprecated and replaced by ImageService.
+        """Not used anymore, kept only so older code doesn't break.
 
         Returns
         -------
-        image_paths : `list[str]`
-            Always an empty list; retained only for backward
-            compatibility.
+        image_paths : `list` [`str`]
+            Always empty.
         """
         return []
 
@@ -551,53 +504,19 @@ class VariabilityAnalyzer:
         id_prefix: str = "",
         seed_stars: list[StellarObject] | None = None,
     ):
-        """Process a sequence of images to extract light curves.
-
-        1. Detect stars in all images.
-        2. Match stars to the reference frame (first image) by pixel
-           distance.
-        3. Build light curves.
+        """Measure the brightness of all stars across a sequence of images.
 
         Parameters
         ----------
         image_paths : `list` [`str`]
-            Paths to the frames to process; the first is treated as the
-            reference frame. All frames should share consistent
-            framing/rotation (e.g. one observing session) -- pixel-position
-            re-centroiding against a single reference frame does not hold
-            up across sessions with different dither/rotation.
+            The pictures to process. The first picture is used as the map.
         max_workers : `int`, optional
-            Number of processes to use for the per-frame parallel
-            photometry step. Defaults to 75% of the available CPU cores
-            when not given, preserving today's behavior for callers
-            that don't need to coordinate this with other concurrent
-            work.
+            How many CPU cores to use.
         id_prefix : `str`, optional
-            Prefix applied to every generated ``Star_{i+1}`` id (default
-            ``""``, preserving today's plain naming). Callers running
-            multiple independent `process()` calls against the same
-            target (e.g. once per observing session) must pass a distinct,
-            deterministic prefix per call, since ids are otherwise only
-            unique within a single `process()` call and would collide
-            across calls when persisted. Ignored when `seed_stars` is
-            given, since seed stars already carry their own real ids.
+            A label to add to star names, like "Night1_Star_5".
         seed_stars : `list` [`StellarObject`], optional
-            Pre-identified stars (e.g. from
-            `session_identification.identify_session_stars`) to track
-            instead of blindly detecting the reference frame's own
-            stars. Each seed star's `star_data["xcentroid"/"ycentroid"]`
-            must already be expressed in this method's own reference
-            frame's pixel space (`image_paths[0]`) -- when seeded from
-            a session identification pass run against that exact same
-            file, this holds with no reprojection needed. When
-            `None` (default), behavior is unchanged from before this
-            parameter existed: stars are detected blindly on the
-            reference frame and assigned synthetic `Star_N` ids. Blind
-            detection still always runs regardless, since its output is
-            also used to build frame-to-frame alignment anchors
-            (`reference_top_refs_minimal`) -- seeding only replaces
-            which stars are *tracked and reported*, not how frames are
-            aligned to each other.
+            A list of specific stars to track instead of finding them
+            ourselves.
         """
         if not image_paths:
             return
@@ -802,21 +721,16 @@ class VariabilityAnalyzer:
             logger.info("Parallel processing complete.")
 
     def _measure_flux_numpy(self, data, x, y, radius=4.0):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
-        """Perform simple circular aperture photometry using numpy.
+        """Measure the brightness of a star inside a small circle.
 
-        Calculates net flux within radius, subtracting background from
-        annulus.
+        We add up all the light inside the circle, then subtract the background
+        glow to get the star's true brightness.
 
         Returns
         -------
         result : `tuple[float, bool]`
-            A tuple ``(flux, is_saturated)`` -- ``is_saturated`` flags
-            whether the star's own aperture (not the whole cutout,
-            which includes background/annulus pixels where saturation
-            there wouldn't taint the flux measurement the same way)
-            has a significant fraction of pixels at or above the
-            saturation threshold, so callers know not to trust this
-            particular flux/magnitude measurement.
+            The total brightness, and a True/False flag if the star was
+            too bright (saturated).
         """
         height, width = data.shape
         x_int, y_int = round(x), round(y)
@@ -865,11 +779,9 @@ class VariabilityAnalyzer:
         if not self.stellar_objects:
             return
 
-        # 1. Identify "Stable Reference Stars" on photometric merit --
-        # well-covered, unsaturated, and then brightest-first -- rather
-        # than by position in the flux-sorted list. See the ensemble
-        # selection constants above for why the positional slice this
-        # replaces degraded as the detected population grew.
+        # 1. Find our group of stable reference stars. We want stars that are
+        # visible in almost every frame, don't get too bright (saturate), and
+        # are generally as bright as possible.
         total_star_count = len(self.stellar_objects)
         # Count distinct timestamps across the whole run, not the longest
         # single light curve. Stars from different sessions carry
@@ -889,12 +801,11 @@ class VariabilityAnalyzer:
             light_curve = star.light_curve
             if not light_curve or not light_curve.fluxes:
                 continue
-            # Zip all three the way _collect_frame_flux_data does, so
-            # coverage measures the frames that will actually receive a
-            # measurement. Counting fluxes alone overstates it whenever a
-            # star's timestamp list is shorter than its flux list, which
-            # is how an ensemble could pass an 80% coverage filter and
-            # still populate only 29 of 61 frames.
+            # We bundle the timestamp, brightness, and saturation flag
+            # together.
+            # This makes sure we only count a star as "visible" in a frame if
+            # we
+            # actually have all three pieces of data for it.
             measurements = list(
                 zip(
                     light_curve.timestamps,
@@ -911,14 +822,14 @@ class VariabilityAnalyzer:
                 if flux and flux > 0 and not saturated
             }
             saturated_fraction = sum(1 for _, _, saturated in measurements if saturated) / len(measurements)
-            # Coverage is measured against the frames this star was
-            # actually observed in, not against every frame in the call.
-            # A target's sessions each have their own frame set, and a
-            # star only exists in its own session's frames -- scoring it
-            # against the union marked a star measured perfectly in all
-            # 52 frames of its session as 52/77 = 0.68 and rejected it,
-            # which drove selection down through every relaxation step
-            # to no coverage requirement at all.
+            # We calculate the star's "coverage score" by comparing the number
+            # of
+            # good measurements against the total number of frames in this
+            # specific
+            # observation session. We don't compare it against the total
+            # number of
+            # frames forever, because a star might only have been observed
+            # tonight.
             own_frames = {timestamp for timestamp, _, _ in measurements}
             coverage = len(usable_timestamps) / len(own_frames) if own_frames else 0.0
             candidates.append((star, coverage, saturated_fraction, star.flux or 0.0, frozenset(own_frames)))
@@ -934,13 +845,12 @@ class VariabilityAnalyzer:
             candidates_by_frame_set.setdefault(candidate[4], []).append(candidate)
 
         def _select(minimum_coverage: float) -> list:
-            """Choose a per-session ensemble, brightest first within each.
+            """Pick the best reference stars, prioritizing the brightest ones.
 
             Returns
             -------
             selected : `list`
-                Up to `TARGET_ENSEMBLE_SIZE` candidates per frame set,
-                meeting `minimum_coverage` and the saturation limit.
+                Our chosen list of reference stars.
             """
             chosen = []
             for group in candidates_by_frame_set.values():
@@ -1027,14 +937,12 @@ class VariabilityAnalyzer:
                 f"median={coverages[len(coverages) // 2]:.2f}."
             )
 
-        # Fallback: if the chosen ensemble covers too few frames to be
-        # useful (e.g. it landed on faint sources embedded in bright,
-        # structured nebular background where local aperture photometry
-        # frequently nets zero flux -- see _measure_flux_numpy's max(0.0,
-        # ...) clamp), widen to every detected star with at least one
-        # positive-flux measurement rather than silently producing a
-        # near-empty normalization that then wipes every star's data in
-        # step 4 below.
+        # Fallback: If our strict selection rules resulted in a group of
+        # reference
+        # stars that are missing from too many frames, the math will fail
+        # later.
+        # Before we give up, we will lower our standards and try using almost
+        # any visible star as a reference point.
         total_frame_count = len({t for star in self.stellar_objects for t in star.light_curve.timestamps})
         min_required_frames = max(1, int(total_frame_count * 0.5)) if total_frame_count else 0
         if total_frame_count and len(frame_flux_data) < min_required_frames:
@@ -1140,10 +1048,24 @@ class VariabilityAnalyzer:
             # curve ended up with 52 fluxes against 61 saturation flags
             # -- every later zip of the two then paired a flux with some
             # other frame's saturation verdict.
+            #
+            # That reindexing is only valid when the source array
+            # already lines up 1:1 with timestamps/fluxes -- a star
+            # whose is_saturated/airmasses predates a fix that made
+            # these three arrays grow together (or was otherwise
+            # truncated) does not have that correspondence, and
+            # reindexing it by position would just produce a different,
+            # still-wrong pairing rather than fix anything. Left empty
+            # in that case instead: every downstream reader already
+            # tolerates a missing array (strict=False zips,
+            # length-checked reindexing in merge_light_curve_segments)
+            # but nothing tolerates a silently mispaired one.
             new_is_saturated = []
             new_airmasses = []
             saturation_flags = star.light_curve.is_saturated or []
             airmasses = star.light_curve.airmasses or []
+            saturation_flags_aligned = len(saturation_flags) == len(star.light_curve.timestamps)
+            airmasses_aligned = len(airmasses) == len(star.light_curve.timestamps)
 
             for index, (timestamp, flux) in enumerate(
                 zip(star.light_curve.timestamps, star.light_curve.fluxes, strict=False)
@@ -1154,16 +1076,16 @@ class VariabilityAnalyzer:
                         star.light_curve.fluxes_normalized.append(flux / norm_factor)
                         new_timestamps.append(timestamp)
                         new_fluxes.append(flux)
-                        if index < len(saturation_flags):
+                        if saturation_flags_aligned:
                             new_is_saturated.append(saturation_flags[index])
-                        if index < len(airmasses):
+                        if airmasses_aligned:
                             new_airmasses.append(airmasses[index])
 
             # Update the original light curve data to exclude rejected frames
             star.light_curve.timestamps = new_timestamps
             star.light_curve.fluxes = new_fluxes
-            star.light_curve.is_saturated = new_is_saturated
-            star.light_curve.airmasses = new_airmasses
+            star.light_curve.is_saturated = new_is_saturated if saturation_flags_aligned else []
+            star.light_curve.airmasses = new_airmasses if airmasses_aligned else []
 
             # --- Pass 3: Star-Level Sigma Clipping ---
             if len(star.light_curve.fluxes_normalized) > 10:
@@ -1206,21 +1128,20 @@ class VariabilityAnalyzer:
     def identify_variable_stars(
         self, sigma_threshold: float = DEFAULT_VARIABILITY_SIGMA_THRESHOLD
     ) -> list[StellarObject]:
-        """Identify stars with variability exceeding the adaptive floor.
+        """Find the stars that change brightness more than the noise limit.
 
         Returns
         -------
         variable_candidates : `list[StellarObject]`
-            Stars whose coefficient of variation exceeds the adaptive
-            ensemble noise floor cutoff, in stellar-object iteration order.
+            The stars that look like real variable stars.
         """
         return _flag_variable_stars_by_adaptive_cutoff(self.stellar_objects, sigma_threshold)
 
     def detrend_light_curves_airmass(self) -> None:
-        """Perform airmass systematic extinction detrending.
+        """Remove false dimming caused by looking through Earth's atmosphere.
 
-        Fits a 2nd-order polynomial of normalized flux vs airmass X(t)
-        to remove systematic extinction slopes.
+        As stars get lower in the sky, we look through more air (airmass),
+        which makes them look dimmer. This finds that pattern and removes it.
         """
         for star in self.stellar_objects:
             if not star.light_curve or not star.light_curve.fluxes_normalized:
@@ -1249,12 +1170,12 @@ class VariabilityAnalyzer:
                 star.light_curve.fluxes_detrended = [float(f) for f in fluxes_norm]
 
     def run_bls_transit_search(self, star: StellarObject) -> Any | None:
-        """Run Box-fitting Least Squares (BLS) exoplanet transit search.
+        """Look for repeating dips in brightness caused by a planet passing by.
 
         Returns
         -------
         candidate : `ExoplanetTransitCandidate` or `None`
-            BLS transit candidate object if detected; `None` otherwise.
+            The details of the possible planet, or None if nothing was found.
         """
         if not star.light_curve or len(star.light_curve.timestamps) < 8:
             return None
@@ -1303,13 +1224,12 @@ class VariabilityAnalyzer:
         return candidate
 
     def run_lomb_scargle_periodogram(self, star: StellarObject) -> Any | None:
-        """Run Lomb-Scargle periodogram analysis to recover periodic signals.
+        """Look for regular repeating patterns in the star's brightness.
 
         Returns
         -------
         periodogram : `PeriodogramResult` or `None`
-            Lomb-Scargle periodogram result object if analyzed;
-            `None` otherwise.
+            The analysis results, or None if the math failed.
         """
         if not star.light_curve or len(star.light_curve.timestamps) < 5:
             return None

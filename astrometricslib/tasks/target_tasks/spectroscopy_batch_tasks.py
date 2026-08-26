@@ -1,19 +1,10 @@
-"""Batch spectroscopy frame processing operations.
+"""Tools for running spectroscopy processing on many images at once.
 
-Thin adapter wiring the generic parallel-batch engine to per-frame
-spectroscopy analysis, mirroring batch_processing_operations.py's
-shape. Owns only spectroscopy-specific concerns (worker lookup,
-worker-count resolution); the actual process-pool mechanics live in
-astrometricslib.utilities.parallel_batch, which knows nothing about
-spectroscopy frames.
-
-`process_spectroscopy_frames_by_session` is the session-grouped entry
-point: unlike the older flat `process_spectroscopy_frames` (kept for
-now, see its docstring), it identifies each observing session's stars
-once via `session_identification.identify_session_stars` and extracts
-spectra for those same identified stars from every frame in that
-session, instead of each frame independently re-detecting its own,
-disconnected set of anonymous point sources.
+This file connects the specific spectroscopy tasks to the general
+parallel processing system (which handles running multiple tasks
+at the same time). It groups images by the observing session they
+belong to, identifies the stars in one reference image, and then
+uses those same stars for all the other images in the session.
 """
 
 import logging
@@ -31,29 +22,22 @@ logger = logging.getLogger(__name__)
 def _process_single_spectroscopy_frame_worker(path: str, target_id: str) -> dict:
     """Run spectroscopy analysis on one frame in its own process.
 
-    Module-level, picklable worker. Constructs a fresh Astrometrics
-    astrometrics (its own DiskButler/config) so each worker process is
-    self-contained, mirroring the pattern already used by
-    batch_processing_operations.py's _process_single_target_worker.
-    Returns only summary counts, not the full analyze_target()
-    payload (which carries a pipeline context object not worth
-    pickling back across the process boundary); persistence already
-    happens inside analyze_target() via
-    Butler.merge_and_persist_records(), which is safe under
-    concurrent multi-process writers.
+    This function is designed to run independently in the background
+    (parallel processing). It sets up its own environment so it doesn't
+    interfere with other tasks.
 
     Parameters
     ----------
     path : `str`
-        The filesystem path of the frame to analyze.
+        The location of the image file to analyze.
     target_id : `str`
-        The identifier of the target this frame belongs to.
+        The ID of the target this image belongs to.
 
     Returns
     -------
     result : `dict`
-        A dict with keys "status" (`str`, "success" or "failed"),
-        "error" (`str` or `None`), and "stars_processed" (`int`).
+        A dictionary with "status" (success/failed), "error" (if any),
+        and "stars_processed" (how many stars were analyzed).
     """
     from astrometricslib import Astrometrics
     from astrometricslib.models.target import FrameRecord
@@ -85,41 +69,29 @@ def process_spectroscopy_frames(
     max_workers: int | None = None,
     on_item_complete: Callable[[str, dict, int, int], None] | None = None,
 ) -> parallel_batch.BatchRunSummary:
-    """Process many spectroscopy frames for one target concurrently.
+    """Process many spectroscopy frames at the same time.
 
-    Uses the generic parallel-batch engine to run each frame's
-    spectroscopy analysis in its own worker process.
-
-    Superseded by `process_spectroscopy_frames_by_session`, which
-    identifies each observing session's stars once and gives every
-    frame in that session real, cross-frame-consistent star
-    identities, rather than each frame here independently detecting
-    its own disconnected top-N brightest point sources with no shared
-    identity. Kept, unused by the orchestrator, until the new path is
-    verified against real data -- not deleted outright in case a quick
-    revert is needed.
+    (Note: This is an older function. The newer version,
+    `process_spectroscopy_frames_by_session`, is better because it
+    groups images by session so stars can be tracked across frames.)
 
     Parameters
     ----------
     api : `Any`
-        the high-level interface providing config and target lookup.
+        The main program interface.
     target_id : `str`
-        The target these frames belong to.
-    paths : `List[str]`
-        Frame file paths to analyze, one worker call each.
-    max_workers : `Optional[int]`, optional
-        Number of concurrent worker processes, default `None`, in
-        which case it is resolved from configuration via
-        resolve_worker_counts().
+        The ID of the target the images belong to.
+    paths : `list` of `str`
+        The file locations of the images to process.
+    max_workers : `int` or `None`, optional
+        How many processes to run at once.
     on_item_complete : `Callable`, optional
-        Per-frame completion callback of the form
-        ``(path, result, done_count, total_count) -> None``, default
-        `None`. Passed through to run_parallel_batch() unchanged.
+        A function to call every time one image finishes.
 
     Returns
     -------
-    summary : `parallel_batch.BatchRunSummary`
-        Aggregated success/failure/result state across all frames.
+    summary : `BatchRunSummary`
+        A report showing how many images succeeded or failed.
     """
     if max_workers is None:
         worker_counts = resolve_worker_counts("1", api.config.get_photometry_workers())
@@ -136,26 +108,18 @@ def process_spectroscopy_frames(
 
 
 def _fallback_independent_frame_analysis(astrometrics: Any, target_id: str, path: str, result: dict) -> dict:
-    """Fall back to today's fully independent per-frame spectroscopy flow.
+    """Analyze a single frame when session grouping fails.
 
-    Used when no session-identified stars are available to seed with
-    at all (e.g. the session's own reference-frame identification
-    found nothing), or a usable WCS can't be obtained for this
-    specific frame either from its own header or the session's
-    reference frame. Should be rare in practice -- it only triggers
-    when the session-level identify step itself already failed to
-    resolve anything for this session.
-
-    Mutates and returns `result` in place, matching
-    `_process_single_spectroscopy_frame_worker`'s existing shape, so
-    both fallback and seeded results are the same dict shape from the
-    caller's perspective.
+    This is a backup plan. If we can't figure out the star coordinates
+    for the whole session (e.g., if plate solving failed), we fall back
+    to treating this image independently and just trying to find whatever
+    bright stars we can.
 
     Returns
     -------
     result : `dict`
-        The same `result` dict passed in, mutated with `"status"`,
-        `"error"`, and `"stars_processed"`.
+        The same `result` dictionary that was passed in, updated with
+        success/failure details.
     """
     from astrometricslib.tasks.target_tasks.pipeline_tasks import analyze_target
 
@@ -175,23 +139,17 @@ def _fallback_independent_frame_analysis(astrometrics: Any, target_id: str, path
 def _project_session_stars_to_frame_pixels(
     session_stars: list[StellarObject], wcs: Any
 ) -> list[StellarObject]:
-    """Project each session-identified star's sky position to `wcs` pixels.
+    """Calculate where the session's stars appear in this specific image.
 
-    Returns deep copies (never the original `session_stars` entries):
-    `SpectroscopyPipeline.process_image` mutates a processed star's
-    `star_data["xcentroid"/"ycentroid"]` in place with the refined
-    position it locates, which must not leak back onto the shared
-    session identity when other frames in the same session are
-    projected from the same `session_stars` list.
+    This takes the real-world sky coordinates (RA/Dec) of the stars and
+    uses the image's coordinate mapping (WCS) to find their exact X/Y
+    pixel locations in this particular picture.
 
     Returns
     -------
-    projected_stars : `list` [`StellarObject`]
-        One deep-copied, frame-pixel-positioned entry per input star
-        that had a usable sky position and projected successfully.
-        Stars lacking `right_ascension`/`declination` (never
-        SIMBAD-matched) or whose projection raised are silently
-        skipped.
+    projected_stars : `list` of `StellarObject`
+        A new list of star objects with their X/Y positions updated for
+        this specific image. Stars that couldn't be mapped are skipped.
     """
     from astropy import units as astropy_units
     from astropy.coordinates import SkyCoord
@@ -226,42 +184,19 @@ def _process_single_spectroscopy_frame_worker_v2(
     session_stars: list[StellarObject],
     session_wcs_header: dict | None,
 ) -> dict:
-    """Extract spectra for one frame's session-identified stars.
+    """Extract spectra for one image, using the session's known stars.
 
-    Module-level, picklable worker (see
-    `_process_single_spectroscopy_frame_worker`'s docstring for why
-    each worker process constructs its own `Astrometrics` astrometrics).
-
-    WCS resolution priority, most to least accurate:
-    1. This frame's own FITS-header WCS, if valid -- most accurate,
-       since it accounts for this specific frame's own pointing (e.g.
-       a dithered exposure with genuinely different framing/rotation
-       within the session).
-    2. `session_wcs_header` -- the session's own reference-frame WCS,
-       reconstructed from the plain header dict passed across the
-       process boundary (a `WCS` object itself isn't reliably
-       picklable in all astropy versions), used as an approximation
-       when this frame has no usable WCS of its own.
-    3. Neither available, or no `session_stars` to seed with at all --
-       fall back to `_fallback_independent_frame_analysis`, matching
-       today's blind per-frame detection with no cross-frame star
-       identity. Should be rare, since it only triggers when the
-       session's own reference-frame resolution already failed.
+    This tries to map the known stars from the observing session onto
+    this specific image. If this image has its own coordinate mapping (WCS),
+    it uses that. Otherwise, it uses the session's mapping. If all else
+    fails, it uses the fallback independent analysis.
 
     Returns
     -------
     result : `dict`
-        Keys: "status" (`"success"` or `"failed"`), "error", and
-        "stars_processed" (matching
-        `_process_single_spectroscopy_frame_worker`'s shape). On a
-        successful seeded (non-fallback) extraction, also includes
-        "dispersion_angles" (`list` [`float`]), "trail_widths"
-        (`list` [`float`]), and "zero_order_saturation_fractions"
-        (`list` [`float`]) -- raw per-star quality inputs for the
-        parent process to aggregate into a
-        `SpectroscopyPipelineQualityMetrics` (the fallback path leaves
-        these as empty lists, since it doesn't track that level of
-        detail).
+        A dictionary containing the success/failure status, error messages,
+        number of stars processed, and data about the quality of the
+        extracted spectra (like dispersion angle and trail width).
     """
     result = {
         "status": "failed",
@@ -342,13 +277,12 @@ def _process_single_spectroscopy_frame_worker_v2(
 
 
 def _merge_batch_summaries(summaries: list[parallel_batch.BatchRunSummary]) -> parallel_batch.BatchRunSummary:
-    """Concatenate multiple sessions' BatchRunSummary objects into one.
+    """Combine the results from multiple batch processing runs into one.
 
     Returns
     -------
-    merged : `parallel_batch.BatchRunSummary`
-        A single summary combining every input summary's succeeded,
-        failed, skipped, and results entries.
+    merged : `BatchRunSummary`
+        A single summary containing all the successes and failures.
     """
     merged = parallel_batch.BatchRunSummary()
     for summary in summaries:
@@ -366,73 +300,34 @@ def process_spectroscopy_frames_by_session(
     max_workers: int | None = None,
     on_item_complete: Callable[[str, dict, int, int], None] | None = None,
 ) -> tuple[parallel_batch.BatchRunSummary, list]:
-    """Process a target's spectroscopy frames one observing session at a time.
+    """Process a target's spectroscopy images, grouped by observing session.
 
-    For each session (grouped via `derive_target_sessions`, mirroring
-    the photometry pipeline's own session-safety boundary -- framing
-    and rotation can differ between a target's separate observing
-    sessions, so a single astrometric solve is only trusted within one
-    session, never reused across sessions): identifies that session's
-    stars once, from its reference frame, via
-    `session_identification.identify_session_stars` -- reusing an
-    existing FITS-header WCS when present, otherwise plate-solving --
-    then every frame in that session extracts spectra for those same
-    identified stars, each projected to its own pixel coordinates.
-    This gives every extracted spectrum a real, stable star identity
-    shared consistently across the whole session, instead of each
-    frame's own independent, disconnected top-N brightest detections
-    (`process_spectroscopy_frames`'s existing behavior).
-
-    Session identification runs sequentially in this (parent) process,
-    once per session, before that session's frames are dispatched to
-    worker processes -- cheap, since SIMBAD identification is one bulk
-    region query per solve, not one call per star or per frame.
+    Images taken at different times (different sessions) might have the
+    telescope pointing slightly differently. By grouping images into sessions,
+    we can find the stars once in a 'reference image' for that session, and
+    then reliably track those exact same stars across all other images taken
+    that night.
 
     Parameters
     ----------
     api : `Any`
-        the high-level interface providing config.
+        The main program interface.
     target : `Target`
-        Supplies the RA/Dec hint for astrometry identification and the
-        target id frames are associated with.
-    frame_records : `list` [`FrameRecord`]
-        The frames to process. Frames with no `timestamp` can't be
-        assigned a session and are silently excluded, matching the
-        photometry pipeline's existing behavior.
-    max_workers : `int`, optional
-        Number of concurrent worker processes, default `None`, in
-        which case it is resolved from configuration via
-        `resolve_worker_counts()`.
+        The target the images belong to.
+    frame_records : `list` of `FrameRecord`
+        The image records to process.
+    max_workers : `int` or `None`, optional
+        How many processes to run at once.
     on_item_complete : `Callable`, optional
-        Per-frame completion callback of the form
-        ``(path, result, done_count, total_count) -> None``, default
-        `None`. Passed through to `run_parallel_batch()` unchanged;
-        `done_count`/`total_count` are scoped to each session's own
-        batch, not the run overall, since sessions are dispatched as
-        separate `run_parallel_batch()` calls.
+        A function called every time an image finishes processing.
 
     Returns
     -------
-    summary : `parallel_batch.BatchRunSummary`
-        Aggregated success/failure/result state across every session's
-        frames.
-    session_results : `list` [`tuple`]
-        One `(session, identify_result)` pair per session -- a
-        `TargetSession` paired with its `SessionIdentificationResult`
-        -- in session order, so the caller has each session's
-        id/frame_paths alongside its identification result, enough
-        to aggregate into a `SpectroscopyQualitySummary`'s
-        `target_session_breakdown` without re-deriving sessions.
-
-    Notes
-    -----
-    Also builds and attaches `target.spectroscopy_quality_summary`
-    from the aggregated per-frame results before returning, mirroring
-    the metrics `pipeline_tasks.py`'s single-stacked-frame
-    `"spectroscopy"` case computes (zero-order saturation, dispersion
-    angle, trail-width profile), plus a `target_session_breakdown` the
-    single-frame case has no concept of. Does not persist `target` --
-    the caller is responsible for that.
+    summary : `BatchRunSummary`
+        A report of all successes and failures across all sessions.
+    session_results : `list` of `tuple`
+        The results for each session, pairing the session data with its
+        star identification data.
     """
     from astrometricslib.tasks.stellar_tasks.astrometry_tasks.session_identification import (
         identify_session_stars,
@@ -489,10 +384,10 @@ def process_spectroscopy_frames_by_session(
 def _attach_spectroscopy_quality_summary(
     target: Target, summary: parallel_batch.BatchRunSummary, session_results: list
 ) -> None:
-    """Aggregate per-frame worker results into a quality summary.
+    """Gather up all the worker results into a single quality report.
 
-    Mutates `target.spectroscopy_quality_summary` in place; does not
-    persist -- the caller is responsible for that.
+    This updates the target with a summary of how well the spectroscopy
+    processing went across all the images.
     """
     import statistics
 

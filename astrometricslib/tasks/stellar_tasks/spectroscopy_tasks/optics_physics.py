@@ -1,10 +1,7 @@
-r"""Physical optics for first-order transmission grating spectrometers.
+r"""The math behind how a spectrograph splits light into a rainbow.
 
-Provides pure, stateless physics equations for first-order
-transmission grating spectrometers. Isolates the core optical model,
-dispersion geometry, and coordinate conversions to make the
-mathematical processing transparent, easy to audit, and highly
-testable.
+Provides the physics equations to figure out exactly what color of light
+is hitting each pixel on the camera sensor.
 
 Notes
 -----
@@ -55,7 +52,6 @@ Physical equations:
       x_{\text{mm}} &= L \cdot \tan(\theta) \\
       x_{\text{offset\_px}} &= \frac{x_{\text{mm}}}{\text{pitch}_{\text{mm}}}
 
-REQ: AST-1, AST-2
 """
 
 import numpy as np
@@ -67,29 +63,23 @@ Numeric = float | np.ndarray
 def calculate_wavelength(
     pixel_offset_px: Numeric, grating_distance_mm: float, lines_per_mm: float, pixel_size_um: float
 ) -> Numeric:
-    """Calculate the physical wavelength for a given pixel offset.
-
-    Uses a standard first-order transmission grating geometric model
-    to convert a pixel offset along the dispersion vector, measured
-    from the zero-order anchor position, into a wavelength.
+    """Figure out what color (wavelength) is hitting a specific pixel.
 
     Parameters
     ----------
     pixel_offset_px : `Numeric`
-        Pixel offset along the dispersion line relative to the
-        zero-order star.
+        How many pixels away we are from the main star image.
     grating_distance_mm : `float`
-        Physical distance (L) between the grating filter and the
-        camera sensor (in mm).
+        How far the grating is from the camera sensor (in mm).
     lines_per_mm : `float`
-        Frequency of lines per mm of the diffraction grating.
+        How many lines are etched into the grating per mm (like 100 or 200).
     pixel_size_um : `float`
-        Dimension of a single pixel on the sensor (in micrometers).
+        How big each pixel is on the camera sensor (in micrometers).
 
     Returns
     -------
     wavelength_nm : `Numeric`
-        Calibrated physical wavelength(s) (in nanometers).
+        The color of the light at that pixel, in nanometers.
     """
     # 1. Convert pixel size in micrometers to millimeter pitch
     # pitch = um * 1e-3 (e.g. 3.76 um -> 0.00376 mm)
@@ -118,27 +108,26 @@ def calculate_wavelength(
 def calculate_pixel_offset(
     wavelength_nm: Numeric, grating_distance_mm: float, lines_per_mm: float, pixel_size_um: float
 ) -> Numeric:
-    """Calculate the pixel offset for a given target wavelength.
+    """Figure out which pixel will see a specific color of light.
 
-    The mathematical inverse of `calculate_wavelength`. Given a target
-    wavelength (in nm), determines the expected pixel offset along the
-    dispersion vector from the zero-order anchor.
+    This is the reverse of `calculate_wavelength`. If we want to find where
+    the red light is, this tells us how many pixels away to look.
 
     Parameters
     ----------
     wavelength_nm : `Numeric`
-        Target calibrated wavelength (in nanometers).
+        The color we are looking for, in nanometers.
     grating_distance_mm : `float`
-        Physical optical distance (L) from grating to sensor (in mm).
+        How far the grating is from the camera sensor (in mm).
     lines_per_mm : `float`
-        Frequency of lines per mm of the diffraction grating.
+        How many lines are etched into the grating per mm.
     pixel_size_um : `float`
-        Dimension of a single pixel on the sensor (in micrometers).
+        How big each pixel is on the camera sensor (in micrometers).
 
     Returns
     -------
     pixel_offset_px : `Numeric`
-        Solved pixel offset index along the dispersion vector.
+        How many pixels away from the star that color will land.
     """
     # 1. Calculate grating line spacing d in millimeters
     # d_mm = 1.0 / lines_per_mm

@@ -5,9 +5,7 @@ primitives this module used to define now live in the shared
 `datastore` package; they're re-exported here under their historical
 names for backward compatibility with existing callers.
 
-Notes
------
-Implements requirements REQ: BKD-5, AGENT-4.1.
+
 """
 
 import json

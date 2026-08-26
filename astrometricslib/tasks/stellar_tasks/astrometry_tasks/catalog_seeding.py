@@ -1,26 +1,10 @@
-"""Populate the local Gaia DR3 cache ahead of time, from a target catalog.
+"""Tool to download the star database before we start processing.
 
-`star_identifier` already prefers a local SQLite cache over ESA's Gaia
-TAP service and keeps using that cache after its remote circuit breaker
-trips. What it lacks is a way to *fill* the cache deliberately: regions
-are only written as a side effect of a remote query that happened to
-succeed, so the first run over a new field still depends on the network
-at the worst possible moment -- inside a parallel batch, where several
-worker processes query at once.
-
-That concurrency is the actual failure mode. On the 2026-08-24 batch run
-six worker processes issued 0.8-degree cone searches simultaneously and
-drew timeouts and HTTP 500s until the breaker latched off, leaving Moon
-with "0 catalog-matched, 100 position-only"; the same service answered a
-single serial query in 3.4 seconds minutes later. Seeding therefore runs
-*serially*, with a pause between requests, outside any batch run.
-
-Field centers come from the frames themselves rather than from
-`Target.ra`/`Target.dec`, which are free-text sexagesimal strings that
-are frequently unset (all 45 targets in the 2026-08-24 catalog held the
-placeholder ``0h 0m 0s``). Reading them from headers costs no network
-and works for any observer's data, so only the Gaia download itself
-needs connectivity.
+If we try to download star data while we're processing 6 images at
+once, we overwhelm the online database and it kicks us out. This tool
+looks at all our photos, figures out where they are pointing, and
+downloads the stars for those areas one by one before we start the
+heavy lifting.
 """
 
 import logging
@@ -78,25 +62,22 @@ _RETRY_BACKOFF_BASE_SECONDS = 2.0
 
 
 def _coordinate_from_header(header: Any) -> tuple[float, float] | None:
-    """Read a field center in degrees from one FITS header.
+    """Find out where the photo was pointing by reading its metadata.
 
-    Prefers the solved WCS reference point, since a plate-solved
-    ``CRVAL1``/``CRVAL2`` pair describes where the camera actually
-    looked rather than where the mount believed it was pointing. The
-    decimal ``RA``/``DEC`` pair and the sexagesimal
-    ``OBJCTRA``/``OBJCTDEC`` pair are progressively weaker fallbacks
-    for frames that were never solved.
+    We try the most accurate coordinates first (if the image has already
+    been mapped), then fall back to whatever the telescope thought it
+    was looking at.
 
     Parameters
     ----------
     header : `Any`
-        FITS header to read.
+        The metadata from the image file.
 
     Returns
     -------
     center : `tuple` [`float`, `float`] or `None`
-        ``(right_ascension_degrees, declination_degrees)``, or `None`
-        when the header carries no usable pointing.
+        The center coordinates (Right Ascension, Declination), or None
+        if we couldn't find them.
     """
     right_ascension = header.get("CRVAL1")
     declination = header.get("CRVAL2")
@@ -134,24 +115,23 @@ def _angular_separation_degrees(
     second_right_ascension: float,
     second_declination: float,
 ) -> float:
-    """Return the great-circle separation between two sky positions.
+    """Calculate the distance between two points in the sky.
 
-    Uses the haversine form rather than a plain coordinate difference
-    so that right-ascension wrap-around at 0h and convergence of the
-    meridians near the pole are both handled -- Polaris sits in this
-    library's own catalog, where a naive difference is meaningless.
+    We have to use complex spherical math (haversine) instead of simple
+    subtraction because the sky is a globe. For example, if you are near
+    the North Star, the lines of longitude are very close together.
 
     Parameters
     ----------
     first_right_ascension, first_declination : `float`
-        First position in degrees.
+        First point in degrees.
     second_right_ascension, second_declination : `float`
-        Second position in degrees.
+        Second point in degrees.
 
     Returns
     -------
     separation_degrees : `float`
-        Angular separation in degrees.
+        The distance between them in degrees.
     """
     first_right_ascension_radians = math.radians(first_right_ascension)
     second_right_ascension_radians = math.radians(second_right_ascension)
@@ -174,34 +154,26 @@ def derive_field_centers(
     max_frames_per_target: int = 12,
     separation_threshold_degrees: float = DEFAULT_DEDUPLICATION_SEPARATION_DEGREES,
 ) -> list[dict[str, Any]]:
-    """Work out which sky positions a catalog's frames actually cover.
+    """Make a list of all the unique places we took pictures of.
 
-    Reads pointing from FITS headers only, so this is entirely local
-    and needs no network and no name resolution. Positions closer
-    together than `separation_threshold_degrees` are merged, because a
-    seeded region already covers its neighbours and re-downloading them
-    would return rows that are mostly stored already.
+    If we took 100 pictures of the exact same spot, we combine them into
+    one spot so we don't download the same star map 100 times. We also
+    stop checking after the first few photos of a target to save time,
+    since a telescope rarely moves far while shooting one object.
 
     Parameters
     ----------
     targets : `list`
-        Target objects whose ``frames`` carry readable ``path``
-        attributes.
+        The list of targets (folders of photos) we plan to process.
     max_frames_per_target : `int`, optional
-        How many of each target's frames to read before moving on
-        (default 12). A target's frames sit within a few arcmin of one
-        another, so reading all of them would cost time without
-        producing new field centers; the cap keeps a 4,000-frame
-        catalog to a few seconds.
+        How many photos to check per target before we get the idea.
     separation_threshold_degrees : `float`, optional
-        Positions closer than this are treated as one field.
+        If two spots are closer than this, we treat them as the same spot.
 
     Returns
     -------
     field_centers : `list` [`dict`]
-        One entry per distinct field, each with ``right_ascension_deg``,
-        ``declination_deg``, ``target_ids`` (`list` [`str`]), and
-        ``frames_examined`` (`int`).
+        A clean list of the unique sky coordinates we need to download.
     """
     from astropy.io import fits
 
@@ -258,20 +230,18 @@ def derive_field_centers(
 
 
 def summarize_local_catalog_coverage(config: Any = None) -> dict[str, Any]:
-    """Report what the local Gaia cache currently holds.
+    """Check how many stars we already have saved on our hard drive.
 
     Parameters
     ----------
     config : `AppConfiguration`, optional
-        Configuration locating the catalog directory; loaded from the
-        application configuration when omitted.
+        The system settings (so we know where the database file is).
 
     Returns
     -------
     coverage : `dict`
-        ``cache_path`` (`str`), ``exists`` (`bool`), ``source_count``
-        (`int`), ``region_count`` (`int`), and ``size_megabytes``
-        (`float`).
+        Stats about our database: where it is, how many stars it holds,
+        and how much disk space it takes up.
     """
     import os
     import sqlite3
@@ -316,40 +286,32 @@ def seed_local_gaia_catalog(
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
-    """Download Gaia sources for every field a target catalog covers.
+    """Go through the list of spots and download the stars for each one.
 
-    Safe to re-run: `_seed_gaia_cache_for_field` records each region it
-    writes and returns early for one already stored, so a sweep
-    interrupted halfway resumes rather than re-downloading.
-
-    Requests are issued one at a time with a pause between them. That is
-    deliberate and is the reason this exists as a separate step instead
-    of running inside the batch -- see the module docstring.
+    If we get interrupted, we can just run this again and it will skip
+    the ones we already downloaded. It pauses between downloads so we
+    don't get banned from the server.
 
     Parameters
     ----------
     targets : `list`
-        Target objects to derive field centers from.
+        The list of targets (folders of photos) we plan to process.
     radius_degrees : `float`, optional
-        Cone-search radius per field.
+        How wide of an area to download around each spot.
     magnitude_limit : `float`, optional
-        Faintest Gaia G magnitude to store.
+        How dim of a star we care about (ignore the super faint ones).
     request_delay_seconds : `float`, optional
-        Pause between consecutive remote requests.
+        How long to wait between downloads so we don't overwhelm the server.
     max_attempts : `int`, optional
-        Attempts per field before giving up on it and moving to the
-        next; one unreachable field must not abandon the sweep.
+        How many times to retry if the server gives us an error.
     progress_callback : `Callable`, optional
-        Called with each field's result dict as it completes, for
-        callers that want to report progress as it happens.
+        A function we can call to update a loading bar on the screen.
 
     Returns
     -------
     report : `dict`
-        ``fields_total``, ``fields_seeded``, ``fields_already_cached``,
-        ``fields_failed`` (`int`), ``sources_cached`` (`int`),
-        ``results`` (`list` [`dict`], one per field), and ``coverage``
-        (`dict`, the post-run `summarize_local_catalog_coverage`).
+        A summary of what we did: how many spots we checked, how many
+        failed, and how many new stars we added to the database.
     """
     from astrometricslib.tasks.stellar_tasks.astrometry_tasks.star_identifier import StarIdentifier
 

@@ -1,12 +1,11 @@
-"""SpectrumExtractor: extraction of 1D spectra from 2D images.
+"""Tools to read the brightness of a spectral streak in an image.
 
-Includes straight-line box extraction and flare-masked extraction with
-rotation/tilt tracking (rung 1, fixed-width/fixed-offset), plus traced
-extraction (rung 3): a per-position Gaussian cross-section fit smoothed into
-a trail-centerline polynomial, with an aperture adaptive to the locally
-measured width. The trail-width profile this produces is a free
-byproduct that also feeds SpectroscopyPipelineQualityMetrics
-(targetlib/spectroscopy_quality.py).
+This file provides two ways to measure a spectrum:
+1. Basic: Draws a straight rectangular box over the spectrum and adds up
+   all the light inside it.
+2. Advanced (Traced): Carefully follows the exact center of the spectrum as
+   it bends or widens. It adjusts the size of the box on the fly to get
+   the best possible reading while ignoring background noise.
 """
 
 import logging
@@ -33,12 +32,14 @@ except ImportError:
     _fit_cross_section_c = None
     HAS_C_EXTENSION = False
 
-# Minimum valid samples in a cross-section for a Gaussian fit to be
-# attempted at all -- below this the fit is underdetermined.
+# The minimum number of pixels we need to confidently find the center of
+# the spectrum line. If the line is too thin, the math will fail, so we
+# fall back to a simpler method.
 _MINIMUM_CROSS_SECTION_SAMPLES = 5
 
-# Aperture half-width as a multiple of the locally fitted Gaussian sigma --
-# ~2.5-3 sigma captures ~99% of a Gaussian's flux per side.
+# How wide to make the reading box, compared to the measured width of the
+# spectrum. A value of 2.5 is wide enough to capture almost all (99%) of
+# the star's light without accidentally including too much empty black sky.
 APERTURE_SIGMA_MULTIPLIER = 2.5
 
 
@@ -48,28 +49,24 @@ def fit_cross_section_gaussian(
     perpendicular_vector: tuple[float, float],
     search_radius: float,
 ) -> tuple[float, float] | None:
-    """Fit a 1D Gaussian to a cross-section perpendicular to dispersion.
-
-    Samples pixel values at integer offsets from -search_radius to
-    +search_radius along perpendicular_vector, centered at `center`, and
-    fits a 1D Gaussian. Uses fast C extension when available, falling back
-    to pure-Python/NumPy.
+    """Look sideways across the spectrum to find its exact center and width.
 
     Parameters
     ----------
     data : `numpy.ndarray`
-        The 2D image array to sample from.
+        The picture data.
     center : `tuple[float, float]`
-        (x, y) pixel coordinates of the nominal center.
+        Where we think the center is `(x, y)`.
     perpendicular_vector : `tuple[float, float]`
-        Unit vector perpendicular to the dispersion direction.
+        An arrow pointing exactly sideways across the spectrum.
     search_radius : `float`
-        Half-width, in pixels, of the cross-section to sample.
+        How many pixels sideways to look.
 
     Returns
     -------
     fit_result : `tuple[float, float]` or `None`
-        (center_offset_px, sigma_px) or `None` if fit fails.
+        How far off our guess was (offset) and how wide the line is (sigma).
+        Returns None if we couldn't find a clear line.
     """
     if HAS_C_EXTENSION and _fit_cross_section_c is not None:
         try:
@@ -128,13 +125,12 @@ def fit_cross_section_gaussian(
 
 
 def fit_trail_centerline_polynomial(raw_centers: list[float | None], degree: int) -> list[float]:
-    """Smooth per-step raw Gaussian-fit centers into a trail centerline.
+    """Draw a smooth curve through all the center points we found.
 
-    Fits a polynomial of the given degree through the steps that produced a
-    valid fit, then evaluates it at every step -- including steps where the
-    per-position fit failed. The same np.polyfit/np.polyval technique
-    spectroscopy_pipeline.py's detect_dispersion_angle already uses for a
-    single global angle, generalized here to a full per-position trace.
+    Sometimes we can't find the center perfectly because a pixel is too dark
+    or completely blown out (white). This fits a smooth curve through the
+    points we *did* find, so we can guess where the center should have been
+    in the bad spots.
 
     Parameters
     ----------
@@ -163,54 +159,47 @@ def fit_trail_centerline_polynomial(raw_centers: list[float | None], degree: int
 
 
 class SpectrumExtractor:
-    """Extract spectral data from a high-level interfaceImage.
+    """Reads the brightness of a spectrum from an image.
 
     Attributes
     ----------
     radius : `int`
-        Half-width of the summation window used across the dispersion
-        direction when extracting a 1D profile (rung 1) or the initial
-        cross-section search radius (rung 3).
-
+        How wide of a box to draw around the spectrum (in pixels).
     """
 
     def __init__(self, radius: int = 10):  # ruff: ignore[missing-return-type-special-method]
-        """Initialize the extractor with its default extraction radius.
+        """Set up the extractor.
 
         Parameters
         ----------
         radius : `int`, optional
-            Half-width of the summation window across the dispersion
-            direction (default 10 pixels).
-
+            How wide of a box to use (default is 10 pixels).
         """
         self.radius = radius
 
     def extract_line(
         self, image: AstrometricsImage, start_pos: tuple[float, float], vector: np.ndarray, length: float
     ) -> np.ndarray:
-        """Extract a line of pixels starting at start_pos following the vector.
+        """Read a straight line across the image.
 
-        Sums over the extraction radius perpendicular to the
-        dispersion direction at each step along the line.
+        This draws a straight box and adds up all the light inside it.
+        It assumes the spectrum is perfectly straight.
 
         Parameters
         ----------
         image : `AstrometricsImage`
-            The 2D image to extract the spectral line from.
+            The picture to read from.
         start_pos : `Tuple[float, float]`
-            Starting pixel coordinates (x, y) of the extraction line.
+            Where the line starts `(x, y)`.
         vector : `np.ndarray`
-            2-element unit vector giving the direction of dispersion.
+            Which direction the line goes.
         length : `float`
-            Number of steps to take along `vector`.
+            How long the line is (in pixels).
 
         Returns
         -------
         profile : `np.ndarray`
-            1D array of summed intensities, one value per step along
-            the line.
-
+            The total brightness at each step along the line.
         """
         data = image.data
         h, w = data.shape
@@ -250,42 +239,36 @@ class SpectrumExtractor:
         length: float,
         centerline_polynomial_degree: int = 2,
     ) -> tuple[np.ndarray, list[float], list[float]]:
-        """Traced (rung 3) variant of extract_line.
+        """Advanced version of extract_line that follows curves.
 
-        At each step, fits a Gaussian cross-section perpendicular to
-        `vector` instead of assuming the trail sits exactly on the nominal
-        line; the raw per-step centers are then smoothed into a single
-        trail-centerline polynomial, and flux is re-summed using an
-        aperture adaptive to the locally measured width, centered on the
-        smoothed centerline. A step whose Gaussian fit fails falls back to
-        that step's plain fixed-radius sum around the nominal (uncorrected)
-        position -- not fatal to the rest of the trace.
+        Instead of assuming the spectrum is perfectly straight, this checks the
+        true center at every step along the line. It draws a smooth curve
+        through
+        those centers, and widens or narrows its reading box depending on how
+        fat the spectrum is at that spot. If it loses the trail for a moment,
+        it just guesses using a straight line until it finds it again.
 
         Parameters
         ----------
         image : `AstrometricsImage`
-            The 2D image to extract the spectral line from.
+            The picture to read from.
         start_pos : `Tuple[float, float]`
-            Starting pixel coordinates (x, y) of the extraction line.
+            Where to start looking.
         vector : `np.ndarray`
-            2-element unit vector giving the direction of dispersion.
+            Which direction to go.
         length : `float`
-            Number of steps to take along `vector`.
+            How long the spectrum is.
         centerline_polynomial_degree : `int`, optional
-            Degree of the polynomial fit to the per-step raw centers
-            (default 2).
+            How flexible the curve should be (default 2 means a simple curve).
 
         Returns
         -------
         profile : `np.ndarray`
-            1D array of summed intensities, one value per step.
+            The brightness at each step.
         trail_centerline_px : `List[float]`
-            Smoothed per-step centerline offset (pixels, perpendicular to
-            `vector`) relative to the nominal line.
+            How far the actual center was from the straight line we guessed.
         trail_width_px : `List[float]`
-            Per-step fitted Gaussian sigma (pixels); `0.0` for steps that
-            fell back to the fixed-box method.
-
+            How wide the spectrum was at each step.
         """
         data = image.data
         height, width = data.shape
@@ -319,9 +302,9 @@ class SpectrumExtractor:
             int_x, int_y = int(curr_x), int(curr_y)
 
             if raw_centers[i] is None:
-                # Per-position fallback: the original fixed-radius sum
-                # around the nominal (uncorrected) position for this one
-                # step.
+                # If we couldn't find the exact center here, just draw a
+                # standard fixed-size box exactly where we expected the
+                # line to be.
                 if 0 <= int_x < width and 0 <= int_y < height:
                     if abs(vx) > abs(vy):
                         y_start = max(0, int_y - self.radius)
@@ -366,14 +349,12 @@ class SpectrumExtractor:
         orientation: str = "vertical",
         angle_degrees: float = 0.0,
     ) -> tuple[np.ndarray, float, float]:
-        """Extract a 1D spectrum starting after a flare-masking offset.
+        """Measure a spectrum while ignoring the bright star flare.
 
-        The extraction is relative to an accurately computed
-        zero-order sub-pixel centroid anchor. Uses a 21x21 subgrid
-        center-of-mass calculation to find the anchor point, defines a
-        tight spectral bounding box (dynamically adjusted for rotation
-        tilt), and sums intensities (column-wise for horizontal,
-        row-wise for vertical).
+        First, this finds the exact center of the star using a 21x21 pixel box.
+        Then, it starts measuring the spectrum a few pixels away to avoid the
+        bright flare from the star itself. It tracks any tilt in the image and
+        adds up the light inside a tight box.
 
         Parameters
         ----------
@@ -481,54 +462,43 @@ class SpectrumExtractor:
         angle_degrees: float = 0.0,
         centerline_polynomial_degree: int = 2,
     ) -> tuple[np.ndarray, float, float, list[float], list[float]]:
-        """Traced (rung 3) variant of extract_with_flare_mask.
+        """Smart version of extract_with_flare_mask that follows curves.
 
-        Keeps the same sub-pixel zero-order anchor and global tilt slope as
-        extract_with_flare_mask, but replaces the fixed-radius box at each
-        step with a per-position Gaussian cross-section fit, smoothed into a
-        trail-centerline polynomial and an adaptive aperture from the
-        locally measured width -- same technique as extract_line_traced.
+        Like extract_with_flare_mask, this avoids the bright star flare.
+        Like extract_line_traced, it also tracks the exact center of the
+        spectrum as it bends and changes width.
 
         Parameters
         ----------
         image : `AstrometricsImage`
-            The 2D image data.
+            The picture to read from.
         start_pos : `Tuple[float, float]`
-            Rough coordinates of the zero-order star (x, y).
+            Where we think the star is `(x, y)`.
         flare_offset_pixels : `float`
-            Starting pixel offset relative to the anchor to avoid the
-            astigmatism flare.
+            How far away to start reading, so we don't blind ourselves.
         max_offset_pixels : `float`
-            Ending pixel offset relative to the anchor to define the
-            bounding box.
+            Where to stop reading.
         radius : `int`
-            Initial cross-section search radius used for the per-step
-            Gaussian fit.
+            How wide to look for the center.
         orientation : `str`, optional
-            Orientation of the dispersion, "horizontal" or "vertical"
-            (default "vertical").
+            "horizontal" or "vertical".
         angle_degrees : `float`, optional
-            Rotation/tilt angle of the dispersion streak in degrees
-            (default 0.0).
+            Any overall tilt to the picture.
         centerline_polynomial_degree : `int`, optional
-            Degree of the polynomial fit to the per-step raw centers
-            (default 2).
+            How flexible the curve tracking should be.
 
         Returns
         -------
         profile : `np.ndarray`
-            1D array of summed intensities.
+            The brightness at each step.
         anchor_x : `float`
-            Sub-pixel zero-order anchor X coordinate.
+            The exact `x` center of the star.
         anchor_y : `float`
-            Sub-pixel zero-order anchor Y coordinate.
+            The exact `y` center of the star.
         trail_centerline_px : `List[float]`
-            Smoothed per-step centerline offset relative to the
-            tilt-corrected nominal line.
+            How far the spectrum drifted from straight.
         trail_width_px : `List[float]`
-            Per-step fitted Gaussian sigma; `0.0` for steps that fell back
-            to the fixed-box method.
-
+            How fat the spectrum was at each step.
         """
         data = image.data
         h, w = data.shape

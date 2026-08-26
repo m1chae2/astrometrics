@@ -6,7 +6,7 @@ free functions that replaced Target's former orchestration methods.
 """
 
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Never
 
 import numpy as np
 import pytest
@@ -79,6 +79,172 @@ def test_drop_unresolved_stars_empty_input_returns_zero_counts():  # ruff: ignor
     assert breakdown == pipeline_tasks.StarIdentificationBreakdown(
         catalog_matched=0, position_only=0, unresolved=0
     )
+
+
+def _position_only_star(id_: str, ra: float, dec: float) -> StellarObject:
+    """Build a minimal position-only StellarObject for reconciliation tests.
+
+    Returns
+    -------
+    star : `StellarObject`
+        A star with a FIELD_J-style id and a real position, but no
+        catalog match.
+    """
+    star = StellarObject(id=id_, name=id_)
+    star.right_ascension = ra
+    star.declination = dec
+    star.is_catalog_identified = False
+    return star
+
+
+class _StubButler:
+    """Fake butler that only knows how to answer list_projected."""
+
+    def __init__(self, rows: list[dict]):  # ruff: ignore[missing-return-type-special-method]
+        self._rows = rows
+
+    def list_projected(self, dataset_type: str, columns: list[str], where: dict | None = None) -> list[dict]:
+        assert dataset_type == "stellar_catalog"
+        return [{column: row.get(column) for column in columns} for row in self._rows]
+
+
+def test_reconcile_position_only_star_ids_reuses_a_nearby_existing_row(caplog):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify a star within the match radius reuses that row's id.
+
+    FIELD_J{ra:.4f}{dec:+.4f} bins position to 0.36 arcsec, well inside
+    the solve-to-solve scatter a real re-solve produces, so two solves
+    of the same physical star mint two different ids without this
+    reconciliation.
+    """
+    import logging
+
+    existing_id = "FIELD_J083344.3000-263740.0000"
+    new_star = _position_only_star("FIELD_J083344.3050-263739.9980", ra=128.834305, dec=-26.62777)
+    stub_butler = _StubButler([{"id": existing_id, "ra": 128.834300, "dec": -26.627778, "target_id": "M42"}])
+
+    with caplog.at_level(logging.INFO, logger="astrometricslib.tasks.target_tasks.pipeline_tasks"):
+        result = pipeline_tasks._reconcile_position_only_star_ids(
+            [new_star], butler=stub_butler, target_id="M42"
+        )
+
+    assert result[0].id == existing_id
+    assert result[0].name == existing_id
+    assert "Reconciled 1 position-only" in caplog.text
+
+
+def test_reconcile_position_only_star_ids_leaves_a_distant_star_alone():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify a distant star keeps its own freshly minted id."""
+    fresh_id = "FIELD_J083344.3050-263739.9980"
+    new_star = _position_only_star(fresh_id, ra=128.834305, dec=-26.62777)
+    stub_butler = _StubButler([
+        # 0.5 degrees away -- nowhere near CATALOG_MATCH_RADIUS_ARCSEC.
+        {"id": "FIELD_J083744.3000-263740.0000", "ra": 129.334300, "dec": -26.627778, "target_id": "M42"}
+    ])
+
+    result = pipeline_tasks._reconcile_position_only_star_ids([new_star], butler=stub_butler, target_id="M42")
+
+    assert result[0].id == fresh_id
+
+
+def test_reconcile_position_only_star_ids_only_matches_the_same_targets_rows():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify a row belonging only to a different target is not reused.
+
+    target_id is a comma-joined string, so membership must be checked
+    by splitting it, not by substring or exact equality against the
+    whole field -- the same reasoning
+    StellarCatalog.list_object_summaries's identical filter documents.
+    """
+    new_star = _position_only_star("FIELD_J083344.3050-263739.9980", ra=128.834305, dec=-26.62777)
+    stub_butler = _StubButler([
+        {
+            "id": "FIELD_J083344.3000-263740.0000",
+            "ra": 128.834300,
+            "dec": -26.627778,
+            "target_id": "OtherTarget",
+        }
+    ])
+
+    result = pipeline_tasks._reconcile_position_only_star_ids([new_star], butler=stub_butler, target_id="M42")
+
+    assert result[0].id == "FIELD_J083344.3050-263739.9980"
+
+
+def test_reconcile_position_only_star_ids_matches_a_multi_target_row():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify a comma-joined target_id matches this target among several."""
+    existing_id = "FIELD_J083344.3000-263740.0000"
+    new_star = _position_only_star("FIELD_J083344.3050-263739.9980", ra=128.834305, dec=-26.62777)
+    stub_butler = _StubButler([
+        {"id": existing_id, "ra": 128.834300, "dec": -26.627778, "target_id": "M42,M43"}
+    ])
+
+    result = pipeline_tasks._reconcile_position_only_star_ids([new_star], butler=stub_butler, target_id="M42")
+
+    assert result[0].id == existing_id
+
+
+def test_reconcile_position_only_star_ids_never_lets_two_new_stars_collide():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify two new stars matching one existing row don't collapse onto it.
+
+    Colliding two genuinely different stars onto one row would silently
+    lose one of them the next time that id is upserted -- the second
+    match keeps its own id rather than claiming an already-reused one.
+    """
+    existing_id = "FIELD_J083344.3000-263740.0000"
+    first = _position_only_star("FIELD_J083344.3010-263739.9990", ra=128.834304, dec=-26.627777)
+    second = _position_only_star("FIELD_J083344.3020-263739.9970", ra=128.834308, dec=-26.627769)
+    stub_butler = _StubButler([{"id": existing_id, "ra": 128.834300, "dec": -26.627778, "target_id": "M42"}])
+
+    result = pipeline_tasks._reconcile_position_only_star_ids(
+        [first, second], butler=stub_butler, target_id="M42"
+    )
+
+    reconciled_ids = {star.id for star in result}
+    assert existing_id in reconciled_ids
+    # Exactly one of the two claimed the existing row; the other kept
+    # its own id rather than colliding onto the same one.
+    assert len(reconciled_ids) == 2
+
+
+def test_reconcile_position_only_star_ids_skips_catalog_matched_stars():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify a SIMBAD/Gaia-matched star is never touched by reconciliation.
+
+    Only FIELD_J-prefixed ids are ever position-derived; a real catalog
+    id must never be overwritten by a positional match.
+    """
+    catalog_star = StellarObject(id="* alf Lyr", name="Vega")
+    catalog_star.right_ascension = 279.234735
+    catalog_star.declination = 38.783689
+    catalog_star.is_catalog_identified = True
+    stub_butler = _StubButler([
+        {"id": "FIELD_J184257.9364+384701.2804", "ra": 279.234735, "dec": 38.783689, "target_id": "Vega"}
+    ])
+
+    result = pipeline_tasks._reconcile_position_only_star_ids(
+        [catalog_star], butler=stub_butler, target_id="Vega"
+    )
+
+    assert result[0].id == "* alf Lyr"
+
+
+def test_reconcile_position_only_star_ids_handles_a_lookup_failure_gracefully():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify a butler error doesn't block persistence of this run's own stars.
+
+    Reconciliation is an optimisation over an already-correct (if
+    duplicative) persistence path, so its own failure must be
+    swallowed rather than propagated.
+    """
+
+    class _BrokenButler:
+        def list_projected(self, *args: Any, **kwargs: Any) -> Never:
+            raise RuntimeError("catalog unreachable")
+
+    new_star = _position_only_star("FIELD_J083344.3050-263739.9980", ra=128.834305, dec=-26.62777)
+
+    result = pipeline_tasks._reconcile_position_only_star_ids(
+        [new_star], butler=_BrokenButler(), target_id="M42"
+    )
+
+    assert result[0].id == "FIELD_J083344.3050-263739.9980"
 
 
 @pytest.mark.filterwarnings("ignore:No sources were found")

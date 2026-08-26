@@ -1,20 +1,8 @@
-"""Reference quantum-efficiency curves for supported camera sensors.
+"""A database of how sensitive different cameras are to different colors.
 
-Provides digitized quantum-efficiency (QE) vs wavelength reference
-data for the camera models this library's spectroscopy pipeline
-knows about, and a lookup accessor for the pipeline to fetch a
-camera's curve by name.
-
-Notes
------
-The curve points below are **visually digitized from manufacturer
-datasheet plots**, not exact published tables — precision is limited
-by both the source plot's resolution and manual point-picking, and
-should not be treated as calibration-grade metrology. Cameras with no
-digitized curve here (e.g. the Nikon D5300 and ZWO ASI120MC-S entries
-in `astrometrics.config`) simply have no entry in the lookup table,
-which is the intended signal for callers to skip QE correction for
-that camera rather than guess.
+We read these numbers off the graphs the camera manufacturers provide.
+They aren't perfectly exact, but they are close enough to fix our spectra.
+If a camera isn't listed here, we just don't try to fix it.
 """
 
 from typing import NamedTuple
@@ -23,31 +11,25 @@ import numpy as np
 
 
 class QuantumEfficiencyCurve(NamedTuple):
-    """A camera's digitized quantum-efficiency curve.
+    """The sensitivity data for a specific camera.
 
     Attributes
     ----------
     wavelength_nm : `np.ndarray`
-        Wavelengths (nanometers) of the digitized curve points, sorted
-        ascending.
+        The list of colors (in nanometers).
     quantum_efficiency_fraction : `np.ndarray`
-        Quantum efficiency at each corresponding wavelength, expressed
-        as a fraction (0-1), not a percentage.
+        How sensitive the camera is to that color (0.0 means completely blind,
+        1.0 means perfect).
     """
 
     wavelength_nm: np.ndarray
     quantum_efficiency_fraction: np.ndarray
 
 
-# ZWO ASI533MM Pro (Sony IMX533 mono sensor) quantum-efficiency curve.
-#
-# Visually digitized from the manufacturer's published QE-vs-wavelength
-# datasheet plot (peak ~91-92% at 460-480nm, ~88-90% plateau through
-# 500-550nm, then declining smoothly to ~35% at 750nm, ~19% at 850nm,
-# ~8% at 950nm, and ~6% by 1000nm). Approximate, not exact manufacturer
-# figures. The datasheet plot only covers 400-1000nm; wavelengths below
-# 400nm are not measured here and edge-hold to the 400nm value when
-# queried (see `quantum_efficiency_correction.interpolate_quantum_efficiency`).
+# ZWO ASI533MM Pro sensitivity data.
+# We read this off the graph provided by ZWO. It peaks around blue/green
+# (92% sensitive) and drops off heavily into the deep red/infrared
+# (only 6% sensitive at 1000nm).
 _ZWO_ASI533MM_PRO_QUANTUM_EFFICIENCY_CURVE = QuantumEfficiencyCurve(
     wavelength_nm=np.array([
         400.0,
@@ -95,20 +77,16 @@ _QUANTUM_EFFICIENCY_CURVES_BY_CAMERA_NAME: dict[str, QuantumEfficiencyCurve] = {
 
 
 def get_quantum_efficiency_curve(camera_name: str) -> QuantumEfficiencyCurve | None:
-    """Return the digitized quantum-efficiency curve for a camera, if known.
+    """Look up the sensitivity data for a specific camera.
 
     Parameters
     ----------
     camera_name : `str`
-        Camera name, expected to match `CameraConfig.name` (e.g. the
-        `Observatory.Camera.<name>` section names in
-        `astrometrics.config`).
+        The name of the camera.
 
     Returns
     -------
     curve : `Optional[QuantumEfficiencyCurve]`
-        The camera's digitized QE curve, or `None` if this camera has
-        no digitized curve on file. Callers should treat `None` as
-        "skip QE correction for this camera" rather than an error.
+        The sensitivity data, or None if we don't have data for this camera.
     """
     return _QUANTUM_EFFICIENCY_CURVES_BY_CAMERA_NAME.get(camera_name)

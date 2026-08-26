@@ -1,10 +1,9 @@
-"""Purpose: Orchestrates the asteroid-recovery pipeline end to end.
+"""Main controller for finding asteroids in our photos.
 
-Description: Wires per-frame WCS estimation, point-source detection, the
-moving-object discrimination cascade, and ephemeris cross-matching into
-one pipeline that takes a `Target` directly (not an `AnalysisContext`,
-since this pipeline works from a set of individual per-frame images
-plus the stack header, not one image).
+This ties all the steps together: figuring out where the photos are pointing,
+finding all the dots (stars/asteroids) in them, running the tests to filter
+out the noise, and finally checking if any survivors match known asteroids
+in our databases.
 """
 
 import logging
@@ -48,23 +47,19 @@ def _detect_sources_in_one_frame(
     fwhm: float,
     threshold_sigma: float,
 ) -> tuple[Literal["ok", "no_wcs", "read_failed"], list[FrameDetection]]:
-    """Read one frame, estimate its WCS, and detect its point sources.
+    """Read one photo, figure out where it's pointing, and find all the dots.
 
-    Module-level so it can run in a worker process (see
-    `AsteroidRecoveryPipeline._detect_frame_sources`) -- each frame's
-    read/WCS-estimate/detect is fully independent of every other
-    frame, so the per-frame loop parallelizes across processes with
-    no change to what gets detected.
+    We put this function out here on its own so that we can run it on
+    multiple photos at the same time using different CPU cores.
 
     Returns
     -------
     status : `"ok"`, `"no_wcs"`, or `"read_failed"`
-        `"read_failed"` if the frame couldn't be opened or had no
-        pixel data; `"no_wcs"` if its WCS couldn't be estimated from
-        the mount-pointing headers; `"ok"` otherwise.
+        Did it work? "ok" means yes, "read_failed" means we couldn't open
+        the file, and "no_wcs" means we couldn't figure out where it was
+        pointing.
     detections : `list` [`FrameDetection`]
-        This frame's point-source detections, or `[]` if `status` is
-        not `"ok"`.
+        A list of all the possible stars/asteroids we found in this photo.
     """
     try:
         with fits.open(frame_path, memmap=False) as hdul:
@@ -107,45 +102,39 @@ def _detect_sources_in_one_frame(
 
 
 class AsteroidRecoveryPipeline:
-    """Recover known bright asteroids from a target's plate-solved frames.
+    """The main factory line for finding asteroids in our photos.
 
     Parameters
     ----------
     config : `MovingObjectConfig`, optional
-        Pipeline configuration. If `None` (default), loaded via
-        `MovingObjectConfigLoader.load_moving_object_config`.
+        The settings to use. If None, it loads the default settings.
     """
 
     def __init__(self, config: MovingObjectConfig | None = None):  # ruff: ignore[missing-return-type-special-method]
         self.config = config or MovingObjectConfigLoader.load_moving_object_config()
-        # Populated by process(); read by Target.analyze_target to build
-        # the quality summary, matching the
-        # last_run_diagnostics/last_run_zero_order_saturation_fractions
-        # convention already used by the Siril driver and
-        # SpectroscopyPipeline.
+        # A simple dictionary to store the results of the last run. We save
+        # things like "how many asteroids did we find?" so the main program
+        # can show a summary to the user later.
         self.last_run_metrics: dict[str, int] = {}
 
     def process(self, target: Any) -> list[AsteroidRecoveryCandidate]:
-        """Run the full asteroid-recovery pipeline against one target.
+        """Run the whole asteroid-finding process on one set of photos.
 
         Parameters
         ----------
         target : `astrometricslib.models.target.Target`
-            The target to process. Must already have a `stacked_image`
-            (i.e. `analyze_target(type="astrometry")` must have already
-            run).
+            The target we are analyzing. It must already have a finished
+            stacked image so we know exactly where it is in the sky.
 
         Returns
         -------
         candidates : `list` [`AsteroidRecoveryCandidate`]
-            Every candidate the discrimination cascade produced,
-            including rejected ones (labeled with the cascade stage
-            they were rejected at).
+            The list of moving objects we found.
 
         Raises
         ------
         ValueError
-            If the target has no `stacked_image`.
+            If the target hasn't been stacked yet.
         """
         if not target.stacked_image:
             raise ValueError(
@@ -192,20 +181,20 @@ class AsteroidRecoveryPipeline:
         return candidates
 
     def _detect_frame_sources(self, target: Any, stack_wcs: WCS) -> tuple[list[FrameDetection], int, int]:
-        """Estimate each light frame's WCS and run point-source detection.
+        """Find all the dots in all the photos.
 
-        Frames are fully independent of each other, so this fans the
-        per-frame work (read, WCS estimate, DAOStarFinder detection)
-        out across worker processes -- real parallelism, not threads,
-        since this is CPU-bound and threads would stay serialized
-        behind the GIL. Detection results are identical to running
-        the same work serially; only wall-clock changes.
+        We have a lot of photos to check, so we divide the work. This splits
+        the photos across all the available CPU cores so they can be processed
+        at the same time, making it much faster.
 
         Returns
         -------
         frame_detections : `list` [`FrameDetection`]
+            All the dots found in all the photos.
         frames_with_wcs_estimate : `int`
+            How many photos we successfully checked.
         frames_excluded_missing_pointing_metadata : `int`
+            How many photos we had to skip because they were missing data.
         """
         frame_detections: list[FrameDetection] = []
         frames_with_wcs_estimate = 0
@@ -254,16 +243,16 @@ class AsteroidRecoveryPipeline:
         stack_wcs: WCS,
         stack_header: fits.Header,
     ) -> list[AsteroidRecoveryCandidate]:
-        """Run the ephemeris cross-match (cascade step 5).
+        """Check our final list of moving objects against the database.
 
-        Only runs if any candidate reached rate-linearity confirmation.
+        We only do this if we actually found something that looks like a real
+        asteroid.
 
         Returns
         -------
         candidates : `list[AsteroidRecoveryCandidate]`
-            The input candidates, augmented with ephemeris cross-match
-            results, or returned unchanged if no candidate reached
-            rate-linearity confirmation or no frame detections exist.
+            The same list of objects, but with database match info added if we
+            found any.
         """
         has_rate_confirmed_candidate = any(
             candidate.cascade_stage == CascadeStage.RATE_LINEARITY_CONFIRMED for candidate in candidates

@@ -1,7 +1,8 @@
-"""Purpose: Stellar object spectroscopy analysis and calibration tuning.
+"""Tools for looking at stars and calibrating the spectroscope.
 
-Description: Handles parsing and extraction of spectral data, object
-queries, analysis runs, and calibration tuning.
+This contains the functions we need to search for a specific star in
+the database, pull its light spectrum data so we can graph it, and
+run the automatic calibration tool.
 """
 
 import logging
@@ -12,26 +13,26 @@ logger = logging.getLogger(__name__)
 
 
 def get_plot_data(stellar_object) -> dict[str, list[float]]:  # ruff: ignore[missing-type-function-argument]
-    """Normalize internal spectrum formats into a canonical plot format.
+    """Take a star's raw light data and make it ready to graph.
 
     Returns
     -------
     plot_data : `dict[str, list[float]]`
-        A dict with ``"wavelengths"`` and ``"intensities"`` keys,
-        each a list of floats; both lists are empty if no usable
-        spectral data is found on `stellar_object`.
+        A dictionary containing the x-axis (wavelengths) and y-axis
+        (intensities) for the graph. If the star has no data, these
+        lists will be empty.
     """
     return stellar_object.get_plot_data()
 
 
 def list_objects(analysis) -> list[Any]:  # ruff: ignore[missing-type-function-argument]
-    """List all stellar objects extracted across the library.
+    """Get a list of every single star we've ever analyzed.
 
     Returns
     -------
     stellar_objects : `list[Any]`
-        All stellar objects loaded from disk, or an empty list if
-        loading fails.
+        The full list of stars from the hard drive, or an empty list
+        if something goes wrong.
     """
     from astrometricslib.drivers import disk_interface
 
@@ -42,24 +43,17 @@ def list_objects(analysis) -> list[Any]:  # ruff: ignore[missing-type-function-a
 
 
 def get_object(analysis, object_id: str) -> Any | None:  # ruff: ignore[missing-type-function-argument]
-    """Get a single stellar object by ID using exact/fuzzy matching.
+    """Find a specific star in the database by its name.
 
-    Tries an indexed exact-id lookup first when the injected butler
-    supports one (`get_by_ids`, an indexed primary-key query -- see
-    `data_access.butler.DiskButler.get_by_ids`), which is what every
-    real `StellarCatalog` is constructed with. This is the path a
-    star's detail/spectrum/photometry view actually takes: exact id,
-    not a fuzzy guess. Falls back to scanning the full, hydrated
-    catalog only when the injected butler doesn't support indexed
-    lookup at all (e.g. a minimal test double), or when the exact
-    lookup misses and a normalized/case-insensitive match is still
-    worth trying.
+    First we try to look it up exactly (which is very fast). If that
+    doesn't work, we load the whole list of stars and search through
+    it, ignoring spaces and capital letters, just in case the user
+    typed it slightly wrong.
 
     Returns
     -------
     stellar_object : `Any` or `None`
-        The matching stellar object, or `None` if no exact or
-        normalized-fuzzy match is found.
+        The star if we found it, or None if it doesn't exist.
     """
     get_by_ids = getattr(analysis.butler, "get_by_ids", None)
     if callable(get_by_ids):
@@ -82,13 +76,12 @@ def get_object(analysis, object_id: str) -> Any | None:  # ruff: ignore[missing-
 
 
 def get_plot_data_analysis(analysis, object_id: str):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Retrieve normalized plot data for a stellar object.
+    """Look up a star by name and get its graph data.
 
     Returns
     -------
     plot_data : `PlotData` or `None`
-        The normalized wavelength/intensity plot data, or `None` if
-        `object_id` does not resolve to a known stellar object.
+        The graphing data, or None if the star wasn't found.
     """
     from astrometricslib.models.stellar_source import PlotData
 
@@ -100,13 +93,12 @@ def get_plot_data_analysis(analysis, object_id: str):  # ruff: ignore[missing-ty
 
 
 def get_analysis_history(analysis, target_id: str) -> list[Any]:  # ruff: ignore[missing-type-function-argument]
-    """Retrieve analysis run history for a target from the database.
+    """Get the history of everything we've done to a specific target.
 
     Returns
     -------
     results : `list[Any]`
-        `AnalysisResult` entries for relevant job types, or an empty
-        list if the logs database is missing or loading fails.
+        A list of past analysis jobs, or an empty list if there's no history.
     """
     from astrometricslib.drivers.logger_interface import LoggerInterface
     from astrometricslib.models.stellar_source import AnalysisResult
@@ -151,13 +143,13 @@ def tune_spectroscopy_calibration(
     star_x: float | None = None,
     star_y: float | None = None,
 ) -> dict[str, Any]:
-    """Run the autonomous physical-model spectroscopy calibration tuner.
+    """Run the tool that figures out the spectroscope's settings automatically.
 
     Returns
     -------
     tuning_result : `dict[str, Any]`
-        The calibration tuning result produced by
-        `SpectroscopyCalibrationTuner.tune_calibration`.
+        The calculated settings that make the spectroscope data line up
+        with reality.
     """
     from astrometricslib.tasks.stellar_tasks.spectroscopy_tasks.calibration_tuner import (
         SpectroscopyCalibrationTuner,

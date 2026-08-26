@@ -1,24 +1,9 @@
-"""Sensor quantum-efficiency correction for extracted spectra.
+"""Fixes the spectrum to account for the camera sensor's sensitivity.
 
-Divides an extracted spectrum's raw summed-intensity values by the
-camera sensor's wavelength-dependent quantum efficiency (QE), so the
-sensor's own declining response toward the red end no longer distorts
-the plotted spectral shape.
-
-Notes
------
-This is a **QE-only** correction: it removes the sensor's own
-wavelength-dependent response, but does not account for grating
-diffraction efficiency, telescope/optics throughput, or atmospheric
-extinction, all of which also shape the observed spectrum. A fuller
-empirical instrument-response function -- capturing all of these at
-once -- could be derived later from a calibration star with a known
-spectral energy distribution (Vega is already used this way for
-wavelength calibration in `calibration_tuner.py`, fitting grating
-distance against its known Balmer line rest wavelengths; the same
-frame could, in principle, be used to derive a flux response curve
-instead of just a wavelength solution). That is future work, not
-implemented here.
+Camera sensors aren't equally sensitive to all colors (they usually see
+green better than deep red). This math boosts the signal for the colors
+the camera is bad at seeing, so the final graph shows the true shape of
+the star's light.
 """
 
 import numpy as np
@@ -29,29 +14,22 @@ from astrometricslib.tasks.stellar_tasks.spectroscopy_tasks.quantum_efficiency_c
 
 
 def interpolate_quantum_efficiency(wavelength_nm: np.ndarray, curve: QuantumEfficiencyCurve) -> np.ndarray:
-    """Interpolate a digitized quantum-efficiency curve at wavelengths.
+    """Figure out the camera's exact sensitivity for any specific color.
+
+    We only have a few data points from the manufacturer, so this draws
+    a line between those dots to estimate the sensitivity everywhere else.
 
     Parameters
     ----------
     wavelength_nm : `np.ndarray`
-        Wavelengths (nanometers) to evaluate the curve at.
+        The colors we want to know the sensitivity for.
     curve : `QuantumEfficiencyCurve`
-        The camera's digitized quantum-efficiency curve.
+        The data points provided by the camera manufacturer.
 
     Returns
     -------
     quantum_efficiency_fraction : `np.ndarray`
-        Interpolated quantum efficiency (0-1 fraction) at each
-        requested wavelength.
-
-    Notes
-    -----
-    Uses `np.interp`, which edge-holds: wavelengths below the curve's
-    lowest digitized point return that point's QE value, and
-    wavelengths above the highest digitized point return that point's
-    QE value, rather than extrapolating linearly. This is the intended
-    behavior, not an oversight -- it avoids inventing QE values outside
-    the range the datasheet plot actually covers.
+        The estimated sensitivity (from 0.0 to 1.0) for each color.
     """
     return np.interp(wavelength_nm, curve.wavelength_nm, curve.quantum_efficiency_fraction)
 
@@ -62,30 +40,24 @@ def apply_quantum_efficiency_correction(
     curve: QuantumEfficiencyCurve,
     minimum_quantum_efficiency_fraction: float = 0.01,
 ) -> np.ndarray:
-    """Correct summed intensities for the sensor's quantum efficiency.
+    """Boost the weak parts of the spectrum so the graph is accurate.
 
     Parameters
     ----------
     wavelength_nm : `np.ndarray`
-        Wavelength (nanometers) for each intensity sample.
+        The colors we captured.
     intensity : `np.ndarray`
-        Raw summed-intensity values (ADU) to correct.
+        How much light we captured for each color.
     curve : `QuantumEfficiencyCurve`
-        The camera's digitized quantum-efficiency curve.
+        The camera's sensitivity data.
     minimum_quantum_efficiency_fraction : `float`, optional
-        Floor applied to the interpolated quantum efficiency before
-        dividing, by default 0.01 (1%). Protects against
-        divide-by-zero/blow-up at wavelengths where the digitized
-        curve's QE approaches zero -- this is a display/analysis aid,
-        not a metrology correction, so silently flooring the
-        correction magnitude is preferable to raising or returning
-        `inf`/`nan`.
+        If the camera is completely blind to a color (0%), we pretend it's
+        at least 1% so our math doesn't explode (divide by zero).
 
     Returns
     -------
     quantum_efficiency_corrected_intensity : `np.ndarray`
-        `intensity` divided by the (floored) interpolated quantum
-        efficiency at each wavelength.
+        The corrected brightness values.
     """
     quantum_efficiency_fraction = interpolate_quantum_efficiency(wavelength_nm, curve)
     quantum_efficiency_fraction = np.clip(

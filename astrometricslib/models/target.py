@@ -1,17 +1,9 @@
-"""Purpose: Target Domain Model.
+"""Data structures for tracking astronomical targets.
 
-Description: Target & Library Management pure data schemas. Only
-derived-field methods (serialize, deserialize, recalculate_total_exposure)
-live on Target itself -- all pipeline orchestration (analyze_target,
-process_target, run_full_pipeline, reindex_frames, etc.) moved to free
-functions in tasks/target_tasks/pipeline_tasks.py, taking a Target
-instance as their first argument. This breaks the former circular
-import between target.py and targetlib/ (targetlib modules imported
-Target back at module level, while target.py imported targetlib
-modules at module level too), which previously required ~30 scattered
-in-method lazy imports to avoid an ImportError at load time.
-
-# REQ: BKD-5: Data Persistence
+This module defines the pure data classes (like Target and FrameRecord)
+used to store information about the objects you are photographing.
+These classes only hold data; the actual work (stacking, analysis)
+happens elsewhere to keep the code organized and avoid import errors.
 """
 
 from enum import StrEnum
@@ -44,14 +36,14 @@ __all__ = [
 
 
 class ImageType(StrEnum):
-    """Enum representing different types of target images."""
+    """Lists the different categories of images we can process."""
 
     STAR_FIELD = "star_field"
     TARGET_IMAGE = "target_image"
 
 
 class FrameRecord(BaseModel):
-    """Represents a single image frame on disk with its associated metadata."""
+    """A single raw photograph and its settings (like ISO, exposure)."""
 
     path: str = Field(alias="path")
     filter: FilterType = Field(default=FilterType.NONE, alias="filter")
@@ -64,31 +56,28 @@ class FrameRecord(BaseModel):
     telescope: str = Field(default="Unknown", alias="telescope")
     date: str = Field(default="Unknown", alias="date")
 
-    # Acquisition conditions, read straight from the FITS header at index
-    # time. These cost nothing beyond the header parse already happening
-    # and describe the sky and equipment state the frame was taken under,
-    # which is what separates "the mount misbehaved" from "the target was
-    # low" when a later analysis flags a frame.
+    # Information about the equipment and sky conditions when the photo was
+    # taken.
+    # We read these from the image file to help figure out why a picture
+    # might be blurry or noisy later on.
     pier_side: str | None = Field(default=None, alias="pierSide")
     airmass: float | None = Field(default=None, alias="airmass")
     altitude_degrees: float | None = Field(default=None, alias="altitudeDegrees")
     azimuth_degrees: float | None = Field(default=None, alias="azimuthDegrees")
     pixel_scale_arcsec: float | None = Field(default=None, alias="pixelScaleArcsec")
-    # Which optic took this frame, in millimetres. Recorded per frame
-    # rather than taken from configuration because a library can span
-    # several optics: this one holds 1,596 frames at 300mm and 1,055 at
-    # 405mm, and seven targets had both mixed into a single stack, whose
-    # scales differ by 1.35x. Frames must be grouped by this before
-    # stacking -- see `select_frames_for_configuration`.
+    # The focal length (zoom level) of the telescope, in millimeters.
+    # We must record this per-picture because a user might photograph the
+    # same target with two different telescopes over time, and those pictures
+    # cannot be stacked together directly.
     focal_length_mm: float | None = Field(default=None, alias="focalLengthMm")
     binning: int | None = Field(default=None, alias="binning")
     sensor_temperature_c: float | None = Field(default=None, alias="sensorTemperatureC")
     focuser_position: int | None = Field(default=None, alias="focuserPosition")
     focuser_temperature_c: float | None = Field(default=None, alias="focuserTemperatureC")
 
-    # Registration facts (Siril's findstar/registration pass, one .seq line
-    # per frame). None until the first pipeline that needs them computes and
-    # persists them.
+    # Alignment data. When the pipeline aligns the images (registration),
+    # it calculates these values (like how far the stars shifted).
+    # They stay None until that pipeline runs.
     registration_fwhm_x_px: float | None = Field(default=None, alias="registrationFwhmXPx")
     registration_fwhm_y_px: float | None = Field(default=None, alias="registrationFwhmYPx")
     registration_roundness: float | None = Field(default=None, alias="registrationRoundness")
@@ -97,26 +86,24 @@ class FrameRecord(BaseModel):
     registration_dx_px: float | None = Field(default=None, alias="registrationDxPx")
     registration_dy_px: float | None = Field(default=None, alias="registrationDyPx")
 
-    # Per-frame facts computed directly on the raw frame, independent of
-    # whether it was ever registered or stacked.
+    # Statistics calculated straight from the raw picture, even if it
+    # hasn't been aligned or stacked yet.
     background_level: float | None = Field(default=None, alias="backgroundLevel")
     saturated_pixel_fraction: float | None = Field(default=None, alias="saturatedPixelFraction")
-    # Kept separate from registration_fwhm_x/y_px because the two are not
-    # on the same absolute scale: photutils measures ~1.53x Siril's PSF
-    # fit on identical frames. Comparing values across the two fields is
-    # meaningless; comparing within either one is valid.
+    # Star sharpness measured directly by our code, rather than by Siril.
+    # You cannot directly compare this number to `registration_fwhm_x_px`.
     measured_fwhm_px: float | None = Field(default=None, alias="measuredFwhmPx")
 
     @field_validator("filter", mode="before")
     @classmethod
     def normalize_filter(cls, v: Any) -> Any:
-        """Normalize filter string representations into FilterType.
+        """Convert a filter name string into the official FilterType.
 
         Returns
         -------
         normalized_value : `Any`
-            The matching `FilterType` member if `v` is a recognized
-            filter string; otherwise `v` unchanged.
+            The official `FilterType` enum, or the original string if
+            it wasn't recognized.
         """
         if isinstance(v, str):
             mapping = {
@@ -137,7 +124,7 @@ class FrameRecord(BaseModel):
 
 
 class MosaicInfo(BaseModel):
-    """Stores information about a mosaic configuration created for a target."""
+    """Details about a multi-panel picture (mosaic) created for this target."""
 
     model_config = ConfigDict(populate_by_name=True, validate_assignment=True)
 
@@ -148,11 +135,10 @@ class MosaicInfo(BaseModel):
 
 
 class StackConfigurationResult(BaseModel):
-    """One camera-and-optic configuration's stacking result.
+    """The final stacked image for a specific telescope/camera setup.
 
-    A target imaged through two optics has two valid stacks that must
-    not be combined, since their pixel scales differ. This holds the
-    result for one of them so the other is not lost.
+    If a target was shot with two different telescopes, it will produce
+    two different stacked images. This structure tracks one of them.
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -166,13 +152,10 @@ class StackConfigurationResult(BaseModel):
 
 
 class Target(BaseModel):
-    """Pure data schema for astronomical targets.
+    """The main record for an astronomical target (like a galaxy or nebula).
 
-    Algorithmic operations (stacking, analysis, pipelines) are free
-    functions in `astrometricslib.tasks.target_tasks.pipeline_tasks`
-    taking a `Target` as their first argument, and are exposed to
-    external callers via `astrometricslib.api.targets.TargetCatalog`.
-
+    This class only stores data. If you want to stack images or analyze
+    the target, use the tools in the `TargetCatalog`.
     """
 
     model_config = ConfigDict(populate_by_name=True, validate_assignment=True)
@@ -189,17 +172,11 @@ class Target(BaseModel):
     guide_scope: str = Field(default="", alias="guideScope")
     mount: str = Field(default="SW Star Adventurer GTi", alias="mount")
     processed_image: str = Field(default="", alias="processedImage")
-    # The preferred configuration's stack, kept single-valued so every
-    # existing reader and the UI continue to work unchanged. Which
-    # configuration is preferred comes from the observer's primary optic
-    # in configuration -- see `AppConfiguration.get_primary_focal_length_mm`.
+    # The main, finished picture for this target. If multiple telescopes
+    # were used, this points to the picture from the 'primary' telescope.
     stacked_image: str = Field(default="", alias="stackedImage")
-    # Every configuration's stack, including the preferred one that
-    # `stacked_image` also points at. Additive on purpose: 45 call sites
-    # and the UI read `stacked_image`, and none of them need to change
-    # for a target to gain a second optic. Keyed by
-    # `pipeline_tasks.frame_configuration_key`, e.g.
-    # "Nikon DSLR DSC D5300@300mm".
+    # A dictionary tracking the finished pictures from every telescope
+    # setup used on this target. The key is a label like "CameraName@300mm".
     stacks_by_configuration: dict[str, StackConfigurationResult] = Field(
         default_factory=dict, alias="stacksByConfiguration"
     )
@@ -236,12 +213,12 @@ class Target(BaseModel):
     panel_name: str = Field(default="", alias="panelName")
 
     def serialize(self) -> dict[str, Any]:
-        """Convert the target object into a dictionary representation.
+        """Package the target's data into a basic dictionary format.
 
         Returns
         -------
         data : `dict[str, Any]`
-            The target's fields, keyed by alias.
+            The target's fields, using their JSON-friendly names.
         """
         data = self.model_dump(mode="python", by_alias=True)
         if "stackedSpectralTarget" not in data and hasattr(self, "stacked_spectral_target"):
@@ -251,7 +228,7 @@ class Target(BaseModel):
         return data
 
     def deserialize(self, object_info: dict[str, Any]) -> None:
-        """Deserialize property values from a dictionary into this target."""
+        """Load values from a dictionary back into this target object."""
         if not isinstance(object_info, dict):
             return
         # Build mapping from alias to field name
@@ -272,12 +249,12 @@ class Target(BaseModel):
                     setattr(self, field_name, value)
 
     def recalculate_total_exposure(self) -> float:
-        """Recalculate the total exposure time from the frame records list.
+        """Add up the exposure times of all the individual frames.
 
         Returns
         -------
         total : `float`
-            The recomputed total exposure time, in seconds.
+            The total exposure time in seconds.
         """
         total = 0.0
         if self.frames:
@@ -291,7 +268,7 @@ class Target(BaseModel):
 
 
 class FitsHeaderEntry(BaseModel):
-    """Represents a single card entry in a FITS file header."""
+    """A single piece of metadata (key/value pair) from a FITS image file."""
 
     key: str = Field(alias="key")
     value: str = Field(alias="value")
@@ -299,7 +276,7 @@ class FitsHeaderEntry(BaseModel):
 
 
 class RenderedImage(BaseModel):
-    """Lightweight schema holding scaled visualization PNG data and stats."""
+    """A finished PNG image ready to display, plus brightness stats."""
 
     id: str = Field(alias="id")
     min: float = Field(alias="min")

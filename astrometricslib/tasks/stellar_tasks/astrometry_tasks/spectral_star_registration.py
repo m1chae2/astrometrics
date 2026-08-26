@@ -1,34 +1,13 @@
-"""Identify spectroscopy-extracted stars against a catalog-identified field.
+"""Match stars in a spectroscopy image to stars in a normal image.
 
-The spectral (grism/slitless) stack is never plate-solved (see
-`AstrometryPipeline.process` called with `attempt_plate_solving=False` for
-spectroscopy in `pipeline_tasks.analyze_target`) -- a dispersed star field
-doesn't match a point-source catalog the way an undispersed one does, so it
-carries no WCS of its own. That leaves every spectroscopy-extracted star
-without a real identity: it never goes through SIMBAD/Gaia and keeps a
-synthetic ``Star_N`` id/name.
+Spectroscopy images (the ones that spread star light into rainbows)
+can't be mapped directly because the stars aren't just dots anymore.
+So, we can't look up their names in the database.
 
-If this target also has an already plate-solved, catalog-identified
-luminance (or other undispersed) stack, its stars' pixel positions and the
-spectral stack's zero-order star positions describe the *same physical
-star field* through two different pixel grids. Two strategies recover the
-mapping between them, purely from point-set geometry -- no WCS needed on
-either side:
-
-1. **Translation-only offset voting** (tried first): a fixed tracking
-   mount with active guiding keeps the same pointing across sessions, so
-   the two pixel grids should differ by little more than a constant (X, Y)
-   offset -- at most a few pixels of guiding jitter, plus whatever small,
-   consistent mechanical shift comes from inserting/removing the grism
-   accessory between the luminance and spectral sessions. That's only 2
-   degrees of freedom, and finding it by histogram-voting over every
-   source-to-target pairwise offset is far more robust with a modest
-   number of stars than a full similarity-transform fit.
-2. **`astroalign` similarity-transform fit** (fallback): handles rotation
-   and scale differences too, for the case where the two stacks' framing
-   genuinely isn't just a small translation apart (different session,
-   meridian flip, mount reset). Needs more well-distributed control
-   points to converge reliably than the translation-only approach.
+To fix this, we take a normal image of the same target where we DO
+know the names of all the stars, and we try to line up the two images.
+If we can figure out how the two images overlap, we can copy the star
+names from the normal image to the spectroscopy image.
 """
 
 import logging
@@ -71,12 +50,12 @@ _TRANSLATION_BIN_PX = 6.0
 
 
 def _pixel_position(obj: StellarObject) -> tuple[float, float] | None:
-    """Extract a pixel centroid from `obj.star_data`.
+    """Get the X and Y coordinates of a star in the image.
 
     Returns
     -------
     position : `tuple[float, float]` or `None`
-        `(x, y)`, or `None` if `obj.star_data` has no centroid.
+        The (X, Y) pixel location, or None if it's missing.
     """
     star_data = obj.star_data if isinstance(obj.star_data, dict) else {}
     x = star_data.get("xcentroid", star_data.get("x_centroid"))
@@ -92,21 +71,16 @@ def _estimate_translation_offset(
     max_offset_px: float,
     bin_px: float,
 ) -> tuple[float, float] | None:
-    """Find the dominant (dx, dy) translating `source_points` onto targets.
+    """Figure out how far we need to slide one image to match the other.
 
-    Computes every source-to-target pairwise offset within
-    `max_offset_px`, bins them into a 2D histogram, and takes the
-    median of the offsets falling in (and immediately around) the
-    most-voted bin. A true shared translation shows up as a sharp
-    peak -- most source stars have *some* target star at very nearly
-    the same offset -- while unrelated point sets spread their offsets
-    roughly uniformly across the search window.
+    This assumes the telescope didn't rotate, it just bumped slightly
+    left, right, up, or down.
 
     Returns
     -------
     offset : `tuple[float, float]` or `None`
-        The estimated `(dx, dy)`, or `None` if no offset collected
-        enough votes to be trusted (see `_MIN_CONTROL_POINTS`).
+        How many pixels to slide the image (X, Y), or None if we couldn't
+        find a clear match.
     """
     diffs = (target_points[np.newaxis, :, :] - source_points[:, np.newaxis, :]).reshape(-1, 2)
     within_window = (np.abs(diffs[:, 0]) <= max_offset_px) & (np.abs(diffs[:, 1]) <= max_offset_px)
@@ -137,16 +111,15 @@ def _apply_matches(
     target_points: np.ndarray,
     max_match_distance_px: float,
 ) -> int:
-    """Nearest-neighbour match onto targets, then copy over identity.
+    """Once the images are lined up, copy the star names over.
 
-    Mutates each matched star in `spectral_objs` in place -- see
-    `identify_spectral_stars_via_registration` for exactly which
-    fields are copied.
+    We pair up stars that are physically very close to each other
+    after sliding the images, assuming they must be the same star.
 
     Returns
     -------
     matched_count : `int`
-        Number of `spectral_objs` successfully identified.
+        How many stars we successfully copied names to.
     """
     from scipy.spatial import cKDTree
 
@@ -178,40 +151,28 @@ def identify_spectral_stars_via_registration(
     max_match_distance_px: float = _DEFAULT_MAX_MATCH_DISTANCE_PX,
     max_translation_offset_px: float = _DEFAULT_MAX_TRANSLATION_OFFSET_PX,
 ) -> int:
-    """Carry catalog identity from `reference_stellar_objects` onto matches.
+    """Give names to the stars in the spectroscopy image.
 
-    Tries a translation-only offset vote first (see
-    `_estimate_translation_offset`) -- the right model for a fixed
-    tracking mount with guiding, and far more robust with a modest
-    star count since it only has 2 degrees of freedom. Falls back to a
-    full `astroalign` similarity-transform fit (rotation + scale +
-    translation) if that doesn't find a confident offset, for framing
-    that isn't just a small translation apart.
-
-    Stars with no pixel centroid, or left unmatched within
-    `max_match_distance_px` of their registered position, are returned
-    unmodified and keep whatever placeholder identity
-    `SourceDetector`/`SpectroscopyPipeline` gave them.
+    We do this by lining up the spectroscopy image with a normal image
+    where we already know all the star names. We try just sliding the
+    images first, and if that doesn't work, we try rotating and scaling
+    them too.
 
     Parameters
     ----------
     spectral_stellar_objects : `list` [`StellarObject`]
-        Freshly detected/extracted stars from the spectral stack, to
-        identify in place.
+        The unnamed stars from the spectroscopy image.
     reference_stellar_objects : `list` [`StellarObject`]
-        Already catalog-identified stars from a plate-solved stack of
-        the same field (e.g. the target's luminance `stacked_image`).
+        The named stars from the normal image.
     max_match_distance_px : `float`, optional
-        Maximum post-registration nearest-neighbour distance, in
-        pixels, to accept a match (default 15.0).
+        How close the stars have to line up to be considered a match.
     max_translation_offset_px : `float`, optional
-        Maximum `(dx, dy)` magnitude, in pixels, considered for the
-        translation-only offset vote (default 300.0).
+        The furthest we will try to slide the images to make them fit.
 
     Returns
     -------
     matched_count : `int`
-        Number of `spectral_stellar_objects` successfully identified.
+        How many unnamed stars we successfully gave names to.
     """
     spectral_positions = {id(obj): pos for obj in spectral_stellar_objects if (pos := _pixel_position(obj))}
     reference_positions = {id(obj): pos for obj in reference_stellar_objects if (pos := _pixel_position(obj))}

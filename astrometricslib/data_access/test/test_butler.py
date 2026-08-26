@@ -2,7 +2,7 @@
 
 Description: Verifies that DiskButler resolves paths and catalogs
 correctly, and that a mock butler can be injected to isolate scientific
-core logic. # REQ: BKD-5
+core logic.
 """
 
 from typing import Any

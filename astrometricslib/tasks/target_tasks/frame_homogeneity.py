@@ -1,37 +1,33 @@
-"""Frame and calibration-master metadata homogeneity checks.
+"""Checks to make sure image settings match before stacking.
 
-Pure comparison logic for two related but distinct homogeneity
-concerns in the stacking pipeline: whether a matched calibration
-master's own metadata (exposure, gain) is actually compatible with
-the light frames it would be applied to, and whether the light frames
-being stacked together share a consistent gain setting among
-themselves. Both fail closed rather than silently producing a
-miscalibrated or noise-inconsistent stack.
+When combining (stacking) images, they all need to have been taken with
+similar camera settings (like gain and exposure). This file checks
+that the images match each other, and that the calibration files
+(like darks and flats) match the images. If they don't match, the
+process stops to avoid creating a bad final image.
 """
 
 from typing import Any
 
 
 def is_calibration_gain_compatible(light_gain: str, master_gain: str) -> bool:
-    """Return whether a calibration master's gain matches the lights'.
+    """Check if the calibration and light frames share the same gain.
 
-    Applies to all three calibration types (dark/bias/flat): dark
-    current and read-noise characteristics are gain-setting-specific,
-    so any difference is worth flagging regardless of what kind of
-    master it is.
+    Gain (or ISO) is how sensitive the camera is set to be. All calibration
+    files (darks, bias, and flats) must have the exact same gain as the
+    light images for the math to work correctly.
 
     Parameters
     ----------
     light_gain : `str`
-        The gain (ISO/GAIN) setting of the light frames.
+        The gain setting of the light images.
     master_gain : `str`
-        The gain (ISO/GAIN) setting of the calibration master.
+        The gain setting of the calibration file.
 
     Returns
     -------
     is_compatible : `bool`
-        `True` if light_gain and master_gain match exactly, `False`
-        otherwise.
+        True if the gain settings match exactly, False if they don't.
     """
     return str(light_gain) == str(master_gain)
 
@@ -43,50 +39,32 @@ def is_dark_calibration_metadata_compatible(
     master_gain: str,
     exposure_tolerance_seconds: float = 1.0,
 ) -> bool:
-    """Return whether a matched dark master's metadata is close enough.
+    """Check if a dark calibration file matches the light images.
 
-    Dark-specific: a dark's exposure time must be close to the light
-    frames' exposure time, since dark current accumulates over
-    exposure duration. This does NOT apply to bias or flat masters --
-    both are expected to have exposure times unrelated to the light
-    frames' (bias is near-zero by design, flats are calibrated to the
-    flat panel's brightness), so comparing their exposure against the
-    light's would flag normal, correct calibration setups as
-    mismatched. Use `is_calibration_gain_compatible` for bias/flat
-    instead.
+    Dark frames remove thermal noise, which builds up over time. Because
+    of this, a dark frame must have both the exact same gain AND very
+    close to the same exposure time as the light image.
+
+    (Note: Do not use this for bias or flat files, because their exposure
+    times are supposed to be different from the light images.)
 
     Parameters
     ----------
     light_exposure : `float`
-        The exposure time, in seconds, of the light frames.
+        The exposure time of the light images, in seconds.
     light_gain : `str`
-        The gain (ISO/GAIN) setting of the light frames.
+        The gain setting of the light images.
     master_exposure : `float`
-        The exposure time, in seconds, of the dark master.
+        The exposure time of the dark file, in seconds.
     master_gain : `str`
-        The gain (ISO/GAIN) setting of the dark master.
+        The gain setting of the dark file.
     exposure_tolerance_seconds : `float`, optional
-        The maximum allowed difference between light_exposure and
-        master_exposure, in seconds, default 1.0.
+        How much difference in exposure time is allowed (default 1.0 seconds).
 
     Returns
     -------
     is_compatible : `bool`
-        `True` if the gains match exactly and the exposures are
-        within exposure_tolerance_seconds of each other, `False`
-        otherwise.
-
-    Notes
-    -----
-    Gain must match exactly for the same reason as
-    `is_calibration_gain_compatible`. Exposure allows a tolerance
-    because darks are commonly reused across light frames with
-    slightly different exposure times. (calibration_library.
-    CalibrationLibrary.get_dark_frames already does its own coarser
-    0.1s fuzzy match at lookup time; this is a second, independent
-    sanity check on the master actually selected, using a looser
-    tolerance appropriate for deciding whether to trust it at all
-    rather than just whether to consider it a lookup candidate.)
+        True if the gain matches perfectly and the exposure is close enough.
     """
     if not is_calibration_gain_compatible(light_gain, master_gain):
         return False
@@ -94,33 +72,23 @@ def is_dark_calibration_metadata_compatible(
 
 
 def find_dominant_gain_subset(frames: list[Any]) -> tuple[list[Any], list[Any]]:
-    """Split frames into the largest same-gain group and everything else.
+    """Group images by their gain setting and return the largest group.
 
-    Mixed-gain stacking corrupts noise statistics -- each gain setting
-    has its own read-noise and dark-current profile -- so only the
-    dominant-gain subset should be stacked; the rest should be
-    recorded as excluded rather than silently included.
+    Mixing images with different gain settings ruins the noise calculations
+    when stacking. This function finds the most common gain setting and
+    keeps only those images, throwing out the rest.
 
     Parameters
     ----------
-    frames : `List[Any]`
-        The frame records to split by gain setting.
+    frames : `list` [`Any`]
+        The list of image records to check.
 
     Returns
     -------
-    dominant_subset : `List[Any]`
-        The largest group of frames sharing the same gain setting.
-    excluded : `List[Any]`
-        All frames not in the dominant-gain group.
-
-    Notes
-    -----
-    Only frame.iso (which this codebase uses for both ISO and camera
-    GAIN settings, see calibration_library.CalibrationLibrary.
-    _get_iso_gain) is compared. A separate sensor OFFSET/black-level
-    setting is not currently tracked on FrameRecord, so it can't be
-    checked here yet -- this only covers the gain half of
-    "gain/offset".
+    dominant_subset : `list` [`Any`]
+        The largest group of images that all share the exact same gain.
+    excluded : `list` [`Any`]
+        The images that were thrown out because their gain was different.
     """
     if not frames:
         return [], []

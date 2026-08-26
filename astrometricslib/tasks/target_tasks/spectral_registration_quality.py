@@ -1,21 +1,10 @@
-"""Spectral (SA200) registration quality evaluation.
+"""Checking the alignment quality of spectroscopy images.
 
-Wires spectral_registration_quality_analysis.py's per-frame
-registration diagnostics (matched star count, fit RMSE, zero-order
-star position/brightness stability) into a reusable function for
-StackQualitySummary, rather than only existing as a standalone
-analysis script. Validated against a real M 13 SA200 session (40
-frames): found 2 frames where the zero-order star was briefly
-misidentified, correlated with a drop in matched star count --
-exactly the class of problem this is meant to catch during a real
-production stack, not just an offline sweep.
-
-Standard imaging and spectral stacks need different quality-check
-shapes: a whole-field FWHM check
-(image_quality_metrics.measure_image_fwhm) doesn't capture what
-matters for a spectral trace, which only has one star (the zero
-order) that matters. See stack_quality.py for the standard-imaging
-equivalent.
+When we stack regular images, we can check how sharp they are (the FWHM).
+But spectroscopy images are mostly stretched-out streaks of light, so that
+doesn't work. Instead, we check the single round dot (the 'zero-order star')
+that creates each streak. This module checks if that star jumps around or
+fades out, which means the software might be confused and ruining the stack.
 """
 
 import itertools
@@ -31,27 +20,26 @@ ZERO_ORDER_AMPLITUDE_OUTLIER_SIGMA = 2.5
 
 
 def flag_outliers(values: list[float | None], sigma_threshold: float, low_is_bad: bool = False) -> list[bool]:
-    """Flag entries more than sigma_threshold standard deviations away.
+    """Find values that are weirdly different from the rest.
+
+    This function calculates the average and then flags any numbers that
+    are too far away from that average (measured in standard deviations).
 
     Parameters
     ----------
-    values : `List[Optional[float]]`
-        The per-frame values to check for outliers. `None` entries
-        are excluded from the mean/std computation and are never
-        flagged.
+    values : `list` of `float` or `None`
+        The list of numbers to check. Empty (None) values are ignored.
     sigma_threshold : `float`
-        The number of standard deviations from the mean beyond which
-        a value is flagged.
+        How many standard deviations away a number has to be to get flagged.
     low_is_bad : `bool`, optional
-        If `True`, flags only values below the mean (e.g. dim
-        zero-order star); if `False` (default), flags deviation in
-        either direction (e.g. elevated RMSE).
+        If True, only flag numbers that are unusually small (like a fading
+        star).
+        If False, flag numbers that are unusually small or large.
 
     Returns
     -------
-    flags : `List[bool]`
-        A list the same length as values, `True` where the
-        corresponding entry is an outlier.
+    flags : `list` of `bool`
+        A list of True/False flags. True means the number was weird.
     """
     present = [v for v in values if v is not None]
     if len(present) < 2:
@@ -75,32 +63,28 @@ def evaluate_spectral_registration_quality(
     seq_frames: list[dict[str, float]],
     zero_order_stars: list[dict[str, float] | None],
 ) -> list[dict[str, Any]]:
-    """Return frames with a registration concern.
+    """Check each image frame for problems aligning the spectrum.
 
     Parameters
     ----------
-    frame_paths : `List[str]`
-        The filesystem paths of the frames being evaluated.
-    seq_frames : `List[Dict[str, float]]`
-        Per-frame registration stats parsed from Siril's .seq output,
-        expected to contain "nb_stars" and "rmse" keys.
-    zero_order_stars : `List[Optional[Dict[str, float]]]`
-        Per-frame zero-order star measurements (keys "x", "y", and
-        "peak_to_background_ratio"), or `None` where the zero-order
-        star could not be identified in that frame.
+    frame_paths : `list` of `str`
+        The file locations for the images being checked.
+    seq_frames : `list` of `dict`
+        Alignment stats from Siril (like 'nb_stars' and 'rmse').
+    zero_order_stars : `list` of `dict` or `None`
+        Details about the zero-order star in each frame (x/y position,
+        brightness).
+        Can be None if the software couldn't find the star.
 
     Returns
     -------
-    flagged_frames : `List[Dict[str, Any]]`
-        A list of {"path", "reason"} entries for frames with a
-        registration concern.
+    flagged_frames : `list` of `dict`
+        A list of frames with warnings. Each item has a 'path' and a 'reason'.
 
     Notes
     -----
-    frame_paths, seq_frames, and zero_order_stars must be
-    index-aligned (one entry per input frame, in original submission
-    order) -- callers are responsible for that alignment since it
-    depends on how the caller parsed Siril's .seq/.lst output.
+    The three input lists must match up perfectly (e.g., the first item in
+    each list describes the first image frame).
     """
     n = len(frame_paths)
     if len(seq_frames) != n or len(zero_order_stars) != n:

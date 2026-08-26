@@ -1,7 +1,7 @@
 """Domain-level exception classes for astrolib logic.
 
 This module has no dependencies on the outer backend layers (services,
-routers). REQ: AGENT-4.1
+routers).
 """
 
 from datastore.exceptions import DeviceInUseError

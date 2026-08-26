@@ -1,11 +1,8 @@
-"""Purpose: Unit tests for MovingObjectDetector.
+"""Tests for the MovingObjectDetector (the tool that finds the asteroids).
 
-Description: Verifies each discrimination-cascade rejection path
-(single-frame cosmic ray, stationary sky/missed star, stationary
-pixel/hot pixel, nonlinear or out-of-range rate) plus one clean
-linear-track pass-through, against synthetic multi-frame detection
-sets. Also unit-tests the tangent-plane projection and linear rate-fit
-helpers directly.
+These tests create fake dots that move in different ways (like a cosmic
+ray, a hot camera pixel, a wiggly line, or a real asteroid) to make sure
+the detector correctly filters out the junk and finds the real ones.
 """
 
 import math
@@ -29,15 +26,12 @@ def _make_detection(
     right_ascension_deg,  # ruff: ignore[missing-type-function-argument]
     declination_deg,  # ruff: ignore[missing-type-function-argument]
 ) -> FrameDetection:
-    """Build a FrameDetection with arbitrary-but-fixed audit fields.
-
-    For tests that only care about position/timestamp.
+    """Create a fake dot with some default stats just for testing.
 
     Returns
     -------
     FrameDetection
-        A detection with the given position/timestamp and fixed audit
-        fields (flux, sharpness, roundness).
+        A fake dot located where we want it.
     """
     return FrameDetection(
         frame_path=frame_path,
@@ -53,7 +47,7 @@ def _make_detection(
 
 
 def test_tangent_plane_offset_arcsec_matches_known_declination_scaling():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify the right-ascension offset is scaled by cos(declination)."""
+    """Test that our flat-sky math works correctly at different latitudes."""
     right_ascension_offset, declination_offset = _tangent_plane_offset_arcsec(150.01, 60.0, 150.0, 60.0)
     expected_right_ascension_offset = 0.01 * math.cos(math.radians(60.0)) * 3600.0
     assert right_ascension_offset == pytest.approx(expected_right_ascension_offset)
@@ -61,7 +55,7 @@ def test_tangent_plane_offset_arcsec_matches_known_declination_scaling():  # ruf
 
 
 def test_fit_linear_rate_arcsec_per_hour_recovers_known_rate():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify a perfectly linear synthetic track recovers its exact rate."""
+    """Test that we measure the speed of an object in a straight line."""
     import numpy as np
 
     timestamps = np.array([0.0, 600.0, 1200.0, 1800.0])
@@ -75,7 +69,7 @@ def test_fit_linear_rate_arcsec_per_hour_recovers_known_rate():  # ruff: ignore[
 
 
 def test_detect_candidates_rejects_single_frame_apparition_as_cosmic_ray():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify an isolated detection is rejected below the persistence floor."""
+    """Test that a dot that only appears in one photo gets ignored."""
     detector = MovingObjectDetector(MovingObjectConfig())
     detections = [_make_detection("frame0.fits", 0.0, 100.0, 100.0, 150.0, 30.0)]
 
@@ -86,7 +80,7 @@ def test_detect_candidates_rejects_single_frame_apparition_as_cosmic_ray():  # r
 
 
 def test_detect_candidates_rejects_stationary_sky_as_missed_star():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify a fixed-sky, drifting-pixel chain rejected as missed star."""
+    """Test a still dot on the sky gets ignored (just a normal star)."""
     detector = MovingObjectDetector(MovingObjectConfig())
     detections = [
         _make_detection("frame0.fits", 0.0, 100.0, 100.0, 150.0, 30.0),
@@ -101,7 +95,7 @@ def test_detect_candidates_rejects_stationary_sky_as_missed_star():  # ruff: ign
 
 
 def test_detect_candidates_rejects_stationary_pixel_as_hot_pixel():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify a fixed-pixel, drifting-sky chain is rejected as a hot pixel."""
+    """Test a dot that never moves on the sensor is ignored (broken pixel)."""
     detector = MovingObjectDetector(MovingObjectConfig())
     detections = [
         _make_detection("frame0.fits", 0.0, 400.0, 400.0, 150.00, 30.0),
@@ -116,7 +110,7 @@ def test_detect_candidates_rejects_stationary_pixel_as_hot_pixel():  # ruff: ign
 
 
 def test_detect_candidates_rejects_nonlinear_track():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify a genuinely non-linear (zigzag) chain fails the rate fit."""
+    """Test that an object moving in a zig-zag line gets ignored."""
     config = MovingObjectConfig(rate_max_arcsec_per_hour=10000.0)
     detector = MovingObjectDetector(config)
     detections = [
@@ -134,13 +128,11 @@ def test_detect_candidates_rejects_nonlinear_track():  # ruff: ignore[missing-re
 
 
 def test_detect_candidates_links_a_track_near_the_celestial_pole():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify chaining survives a wide raw-RA-degree spread near the pole.
+    """Test we still connect dots if the telescope points near the North Pole.
 
-    At high declination, a fixed on-sky separation corresponds to a much
-    larger separation in raw RA degrees (RA is compressed by cos(dec)).
-    The persistence-chaining bounding-box pre-filter must widen enough
-    to still capture these matches rather than only ever using the
-    on-sky arcsec radius directly.
+    Near the North Pole, the lines of longitude get very close together,
+    so things can look like they are moving very fast horizontally when
+    they actually aren't.
     """
     detector = MovingObjectDetector(MovingObjectConfig())
     reference_right_ascension_deg = 150.0
@@ -176,10 +168,7 @@ def test_detect_candidates_links_a_track_near_the_celestial_pole():  # ruff: ign
 
 
 def test_detect_candidates_confirms_a_clean_linear_track():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify a linear, in-range-rate track is confirmed with a fit.
-
-    The fitted MovingObjectTrack should match the synthetic rate.
-    """
+    """Test that a perfectly normal moving asteroid passes all the tests."""
     detector = MovingObjectDetector(MovingObjectConfig())
     reference_right_ascension_deg = 150.0
     reference_declination_deg = 0.0

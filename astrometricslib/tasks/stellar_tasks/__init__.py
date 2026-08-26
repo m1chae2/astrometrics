@@ -1,5 +1,6 @@
-"""Algorithmic orchestration for the stellar domain.
+"""The step-by-step logic for analyzing stars.
 
-Covers astrometry, photometry, spectroscopy, and analysis/job-queue
-operations.
+This handles the math for figuring out where stars are (astrometry),
+how bright they are (photometry), what they're made of (spectroscopy),
+and the background job system that runs it all.
 """

@@ -28,10 +28,7 @@ BAADER_BESSEL_ASI533_TRANSFORM_COEFFICIENTS = {
 
 
 class CalibrationLibrary(BaseModel):
-    """Store dark, flat, and bias calibration frames.
-
-    REQ: BKD-3.2
-    """
+    """Store dark, flat, and bias calibration frames."""
 
     model_config = ConfigDict(populate_by_name=True, arbitrary_types_allowed=True)
 
@@ -118,7 +115,7 @@ class CalibrationLibrary(BaseModel):
 
         Covers dark, bias, and flat frames.
 
-        REQ: BKD-3.2
+
 
         Returns
         -------
@@ -365,8 +362,6 @@ class CalibrationLibrary(BaseModel):
     def get_dark_frames(self, camera="ZWO ASI 533MM Pro", exposure=None, validate_paths=True, **kwargs):  # ruff: ignore[missing-type-function-argument, missing-type-kwargs, missing-return-type-undocumented-public-function]
         """Retrieve dark frames for a camera and exposure.
 
-        REQ: BKD-1.1 - Relaxed matching (ignore ISO, fuzzy exposure)
-
         Returns
         -------
         frames : `list` [`str`]
@@ -402,8 +397,6 @@ class CalibrationLibrary(BaseModel):
     def get_bias_frames(self, camera="ZWO ASI 533MM Pro", validate_paths=True, **kwargs):  # ruff: ignore[missing-type-function-argument, missing-type-kwargs, missing-return-type-undocumented-public-function]
         """Retrieve bias frames for a camera.
 
-        REQ: BKD-1.1 - Relaxed matching (ignore ISO)
-
         Returns
         -------
         frames : `list` [`str`]
@@ -433,8 +426,6 @@ class CalibrationLibrary(BaseModel):
     ):
         """Retrieve flat frames for a telescope, camera, and filter.
 
-        REQ: BKD-1.1 - Relaxed matching (ignore ISO, fuzzy filter)
-
         Returns
         -------
         frames : `list` [`str`]
@@ -444,7 +435,6 @@ class CalibrationLibrary(BaseModel):
         f_val = filter_type.value if hasattr(filter_type, "value") else str(filter_type)
 
         # Filter aliases to handle terminology updates
-        # REQ: CAL-1.5: Flats without filter work for Luminance or None
         filter_aliases = {
             "L": ["Luminance", "L", "None", "NONE", ""],
             "Luminance": ["Luminance", "L", "None", "NONE", ""],

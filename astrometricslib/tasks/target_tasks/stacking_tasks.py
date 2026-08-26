@@ -1,8 +1,7 @@
-"""Purpose: Image Stacking & Spectroscopy Extraction.
+"""Tools for combining (stacking) images and extracting light spectrums.
 
-Description: Extracted image processing operations for running the Siril
-headless stacking driver and executing the target-centric spectroscopy
-analysis pipeline.
+This file handles running the external stacking software (Siril)
+and checking the quality of the final stacked images.
 """
 
 import logging
@@ -25,50 +24,49 @@ def stack_frames(
     generate_rejmap: bool | None = None,
     output_file: str | None = None,
 ) -> str | None:
-    """Run the stacking pipeline via the Siril ImageProcessing driver.
+    """Run the main stacking process using the ImageProcessing driver.
 
-    This function combines multiple individual exposures into a
-    single, high-signal "master" image. By averaging frames together,
-    the random camera noise cancels out while the true astronomical
-    signal builds up. It also applies pixel-rejection algorithms to
-    throw out anomalies like satellite trails or cosmic rays that only
-    appear in a few frames.
+    This function combines many individual pictures (sub-exposures) into one
+    master image. Adding the images together makes the real stars and galaxies
+    brighter, while randomly occurring noise (like camera read noise or heat
+    noise) tends to cancel itself out. Before combining the images, we also
+    use rejection algorithms to find and throw out temporary artifacts like
+    satellite trails, cosmic rays, and hot pixels.
 
     Parameters
     ----------
     target : Target
-        The astronomical target whose frames should be stacked.
+        The astronomical target to stack.
     log_file : `str` or `None`, optional
-        Path to a log file for Siril output.
+        Where to save the output text from Siril.
     frames_to_stack : `list` of `Any` or `None`, optional
-        Explicit list of frames to stack. If None, resolves from the target.
+        A specific list of images to use. If None, it uses all images from the
+        target.
     filter_type : `Any` or `None`, optional
-        The specific optical filter to stack (e.g., 'L', 'HA').
+        Only stack images taken with this specific filter (like 'L' or 'HA').
     rejection_sigma : `tuple` of (`float`, `float`) or `None`, optional
-        The lower and upper sigma limits for pixel rejection.
+        How strict the rejection algorithm should be (lower, upper limits).
     filter_wfwhm : `str` or `None`, optional
-        Condition string to filter out frames with poor FWHM (blurriness).
+        A rule to throw out blurry images.
     filter_round : `str` or `None`, optional
-        Condition string to filter out frames with poor star roundness.
+        A rule to throw out images where stars aren't round.
     stack_weight : `str` or `None`, optional
-        Weighting formula for how frames are averaged.
+        How to weight the images when combining them.
     generate_rejmap : `bool` or `None`, optional
-        Whether to generate a rejection map showing which pixels were
-        discarded.
+        Whether to save a picture showing exactly which pixels were thrown out.
     output_file : `str` or `None`, optional
-        Explicit path for the output stacked image.
+        Where to save the final stacked image.
 
     Returns
     -------
     stacked_path : `str` or `None`
-        The path to the stacked output file, or `None` if stacking
-        did not produce an output.
+        The location of the new stacked image, or None if it failed.
 
     Raises
     ------
     ValueError
-        If the target has no frames available to stack, or its
-        frames mix spectral and standard filter types.
+        If the target has no usable frames to stack, either at the
+        start or after filtering out mismatched frames.
     """
     if frames_to_stack is not None:
         target_frames = frames_to_stack
@@ -151,10 +149,11 @@ def stack_frames(
 
     excluded_frames: list[ExcludedFrame] = []
 
-    # Mixed-gain stacking corrupts noise statistics (each gain setting has
-    # its own read-noise/dark-current profile), so only the dominant-gain
-    # subset is stacked -- fail closed by excluding the minority rather
-    # than silently mixing gains.
+    # Ensure all frames have the same camera gain setting. Stacking frames
+    # with different gains messes up the noise calculation, because each
+    # gain setting has a different amount of read noise and dark current.
+    # To protect the final image, we find the most common gain setting
+    # and throw out any frames that don't match it.
     from astrometricslib.tasks.target_tasks.frame_homogeneity import find_dominant_gain_subset
 
     target_frames, excluded_by_gain = find_dominant_gain_subset(target_frames)
@@ -170,13 +169,11 @@ def stack_frames(
     if not target_frames:
         raise ValueError("Target has no frames available to stack after gain-homogeneity filtering.")
 
-    # Detects a session silently mixing two different sky conditions (e.g.
-    # thin clouds rolling in partway through and never clearing) -- a real
-    # problem found on NGC 2403 that rejected-fraction and
-    # gain/calibration checks alone didn't catch. Adds real per-frame I/O
-    # cost (~1.4s/frame), so it's config-gated; see
-    # config_loader.get_background_homogeneity_check_enabled's docstring
-    # for the tradeoff.
+    # Check for sudden changes in the sky background (like clouds moving in).
+    # Standard calibration and pixel rejection aren't enough to catch these
+    # massive, image-wide changes. Because checking every frame takes extra
+    # time, this feature can be turned on or off in the settings using
+    # `get_background_homogeneity_check_enabled`.
     from astrometricslib.utilities.config_loader import get_configuration
 
     background_split = None
@@ -202,11 +199,12 @@ def stack_frames(
                 logger.debug("Skipping background/saturation measurement for '%s': %s", frame.path, exc)
                 continue
 
-        # Exclude the minority group rather than only reporting it. A
-        # frame from the other sky condition can become Siril's
-        # registration reference, and a washed-out reference with no
-        # detectable stars aborts registration for the entire sequence
-        # -- one bad frame otherwise costs every good one behind it.
+        # Throw out frames with a different background level. If we
+        # accidentally
+        # use a washed-out frame as the main reference for aligning the images,
+        # the software won't be able to find any sharp stars to lock onto. This
+        # would cause the alignment to fail and crash the entire stacking
+        # process.
         target_frames, excluded_by_background, background_split = find_dominant_background_subset(
             target_frames
         )
@@ -277,33 +275,28 @@ def stack_frames(
 
 
 def _disambiguating_configuration_tag(target, target_frames) -> str:  # ruff: ignore[missing-type-function-argument]
-    """Return a filename tag when a target's stacks would otherwise collide.
+    """Create a unique filename tag so we don't overwrite existing stacks.
 
-    Splitting a target by optic runs the stacker once per
-    configuration, and every run wrote to the same
-    ``<target>_<filter>_Stacked.fits``. The second pass therefore
-    overwrote the first: M 27 finished with two recorded
-    configurations, 21 frames at 405mm and 105 at 300mm, both naming
-    one file that held only the 300mm result. The 405mm stack was
-    measured -- 2.06 arcsec residual against the blend's 5.36 -- and
-    then destroyed.
+    If we image the same target using different equipment setups (like changing
+    the telescope focal length), the default name
+    ``<target>_<filter>_Stacked.fits``
+    would cause the new stack to overwrite the old one. This function adds a
+    specific tag to the filename to keep them separate.
 
-    Only multi-configuration targets are tagged. Seven targets in this
-    library have two optics; the rest keep the paths their existing
-    stacks and catalog entries already use, so this cannot orphan them.
+    We only add this tag if the target actually has multiple setups, so older
+    targets keep their normal filenames and don't get lost in the catalog.
 
     Parameters
     ----------
-    target : `astrometricslib.models.target.Target`
-        Target whose full frame set decides whether a tag is needed.
-    target_frames : `list` [`astrometricslib.models.target.FrameRecord`]
-        The frames this particular stack is being built from.
+    target : `Target`
+        The target being checked.
+    target_frames : `list` [`FrameRecord`]
+        The specific images being stacked right now.
 
     Returns
     -------
     configuration_tag : `str`
-        A filename-safe configuration tag, or ``""`` when the target has
-        only one configuration and no disambiguation is required.
+        The extra tag to add to the filename, or "" if it's not needed.
     """
     from astrometricslib.tasks.target_tasks.pipeline_tasks import (
         frame_configuration_key,
@@ -333,30 +326,27 @@ def _disambiguating_configuration_tag(target, target_frames) -> str:  # ruff: ig
 
 
 def _record_configuration_stack(target, target_frames, stacked_path) -> bool:  # ruff: ignore[missing-type-function-argument]
-    """Record this stack under its configuration and say if it is preferred.
+    """Record a stack for one setup and say if it's the preferred one.
 
-    Additive to `stacked_image`, which still names a single stack so
-    every existing reader and the UI are unaffected. Without this, a
-    target imaged through two optics keeps only one stack and the other
-    run's work is lost -- NGC 7023 has 424 frames at one focal length
-    and 111 at another, and both are worth keeping.
+    This works alongside the older `stacked_image` property so that other
+    parts of the program (like the UI) still work normally. This allows a
+    target photographed through different telescopes to safely keep all of
+    its separate, stacked images at the same time.
 
     Parameters
     ----------
     target : `Target`
-        The target to record against.
+        The target to update.
     target_frames : `list`
-        The frames this stack was built from, used to identify the
-        configuration and count what contributed.
+        The images used to create this stack.
     stacked_path : `str`
-        Path of the stack just produced.
+        Where the new stacked image is saved.
 
     Returns
     -------
     should_become_stacked_image : `bool`
-        `True` when `stacked_image` should point at this stack: either
-        this is the observatory's own camera and optic, or nothing
-        preferred has been recorded and some stack is better than none.
+        True if this new image should become the main, default image for the
+        target.
     """
     from astrometricslib.models.target import StackConfigurationResult
     from astrometricslib.tasks.target_tasks.pipeline_tasks import frame_configuration_key
@@ -423,12 +413,12 @@ def _record_configuration_stack(target, target_frames, stacked_path) -> bool:  #
 
 
 def _camera_names_match(first: str, second: str) -> bool:
-    """Compare two camera names tolerantly.
+    """Check if two camera names match, ignoring spaces and capitalization.
 
-    Configuration and FITS headers spell the same camera differently --
-    "ZWO ASI533MM Pro" against the header-derived "ZWO ASI 533MM Pro" --
-    so spaces and case are ignored rather than requiring the observer to
-    match the header exactly.
+    Camera names in settings and image files often have slight differences
+    (like "ZWO ASI533MM Pro" vs. "ZWO ASI 533MM Pro"). This function cleans
+    them up so we can reliably match them even if they aren't typed exactly
+    the same way.
 
     Parameters
     ----------
@@ -438,7 +428,7 @@ def _camera_names_match(first: str, second: str) -> bool:
     Returns
     -------
     matches : `bool`
-        `True` when the names denote the same camera.
+        True if the names mean the same camera.
     """
     return "".join(first.split()).casefold() == "".join(second.split()).casefold()
 
@@ -453,20 +443,19 @@ def _build_stack_quality_summary(  # ruff: ignore[missing-return-type-private-fu
     background_split: dict | None,
     stacked_path: str | None,
 ):
-    """Assemble a StackQualitySummary from data gathered in stack_frames.
+    """Gather diagnostic data into a final `StackQualitySummary`.
 
-    Standard stacks get a whole-field FWHM sanity check (comparing the
-    stacked image against the median FWHM of a sample of the raw inputs,
-    both measured the same way); spectral stacks get a
-    zero-order-star-tracking check instead (see
-    spectral_registration_quality.py) -- a whole-field FWHM doesn't
-    capture what matters for a spectral trace.
+    This checks the quality of the stack differently depending on the type
+    of image. For regular images, it compares the overall sharpness (FWHM)
+    of the final stack against the average sharpness of the original frames.
+    For spectroscopy images, it uses a special tracking analysis because
+    measuring the sharpness of stretched-out light spectrums doesn't work.
 
     Returns
     -------
     summary : `StackQualitySummary`
-        The assembled stack quality summary, with flags set for any
-        detected degradation.
+        A report card on how well the stacking went, with warnings if
+        something looks wrong.
     """
     from astrometricslib.data_access.image_quality_metrics import (
         measure_image_fwhm,
@@ -568,14 +557,33 @@ def _build_stack_quality_summary(  # ruff: ignore[missing-return-type-private-fu
             # 0 stars in reference" and nothing recorded which frame that
             # was. The reference is the frame whose transform is the
             # identity, i.e. the one with no shift of its own.
-            for index, facts in enumerate(registration_frames):
-                if not facts["dx"] and not facts["dy"]:
-                    if index < len(registration_frame_paths):
-                        summary.stacking_metrics.registration_reference_frame = registration_frame_paths[
-                            index
-                        ]
-                    summary.stacking_metrics.registration_reference_star_count = facts["nb_stars"]
-                    break
+            #
+            # Guarded the same way the pairing loop below is, and for
+            # the same reason: a registration_frame_paths/
+            # registration_frames length mismatch means the positional
+            # correspondence between the two lists cannot be trusted, so
+            # indexing into registration_frame_paths here would risk
+            # naming the wrong frame as the reference. Also require
+            # exactly one zero-shift frame -- a legacy `r_` sequence
+            # (already-aligned frames, every one recording an identity
+            # transform; see the preserved-sequence fix elsewhere in
+            # this file) has no single frame identifiable as "the"
+            # reference, and recording the first such frame would be
+            # fabricated rather than measured.
+            zero_shift_indices = [
+                index
+                for index, facts in enumerate(registration_frames)
+                if not facts["dx"] and not facts["dy"]
+            ]
+            reference_lists_align = len(registration_frame_paths) == len(registration_frames)
+            if len(zero_shift_indices) == 1 and reference_lists_align:
+                reference_index = zero_shift_indices[0]
+                summary.stacking_metrics.registration_reference_frame = registration_frame_paths[
+                    reference_index
+                ]
+                summary.stacking_metrics.registration_reference_star_count = registration_frames[
+                    reference_index
+                ]["nb_stars"]
 
             if len(registration_frame_paths) == len(registration_frames):
                 frame_by_path = {frame.path: frame for frame in target_frames}
@@ -712,23 +720,20 @@ def add_frame(  # ruff: ignore[missing-return-type-undocumented-public-function]
     filter_type: str | None = None,
     camera: str | None = None,
 ):
-    """Add a frame to the target, or update it in place if already present.
+    """Add an image to a target, or update it if it's already there.
 
-    Lazily loads FITS metadata, parses the FITS fields, checks for
-    spectral/standard homogeneity, appends a FrameRecord to
-    target.frames (or updates the matching existing record by path),
-    and recalculates the target's total exposure time.
+    This function reads the metadata from the image file and updates the
+    target's total exposure time.
 
     Returns
     -------
     frame_record : `FrameRecord`
-        The newly appended frame record, or the existing record that
-        was updated in place.
+        The new or updated image record.
 
     Raises
     ------
     ValueError
-        If adding `path` would mix spectral ("SPEC") and standard
+        If adding this frame would mix spectral ('SPEC') and standard
         imaging frames on the same target.
     """
     from astrometricslib.data_access.frame_scanning import create_frame_record_from_fits

@@ -1,8 +1,6 @@
-"""Physical domain model for a spectroscopy instrument setup.
+"""A digital model of our spectrograph camera setup.
 
-Calculates dispersion, theta, and expected spectrum characteristics.
-
-REQ: SR-3.2
+This calculates where the rainbow should fall on the camera sensor.
 """
 
 import logging
@@ -15,39 +13,31 @@ logger = logging.getLogger(__name__)
 
 
 class SpectroscopyInstrument:
-    """Encapsulate the physics of the spectroscopy setup.
-
-    Calculates expected dispersion and offsets based on grating
-    equations.
+    """The math model of our specific camera and grating.
 
     Attributes
     ----------
     config : `SpectroscopyConfig`
-        The spectroscopy configuration this instrument was built from.
+        The settings for this specific camera.
     theta : `float`
-        Dispersion angle (radians) at the center wavelength.
+        The angle the light bends at the center of the rainbow (in radians).
     dx_dlambda : `float`
-        Linear dispersion (mm/mm) at the center wavelength.
+        How spread out the rainbow is (dispersion).
     expected_length_mm : `float`
-        Expected physical length of the dispersed spectrum on the
-        sensor (in mm).
+        How long the rainbow should be on the sensor (in mm).
     expected_length_px : `float`
-        Expected length of the dispersed spectrum on the sensor (in
-        pixels).
+        How long the rainbow should be on the sensor (in pixels).
     zero_order_offset_px : `float`
-        Pixel offset of the start of the spectrum relative to the
-        zero-order star, either taken directly from configuration or
-        derived from the theoretical minimum wavelength.
+        How many pixels away from the star the rainbow starts.
     """
 
     def __init__(self, config: SpectroscopyConfig):  # ruff: ignore[missing-return-type-special-method]
-        """Initialize the instrument model and derive its properties.
+        """Initialize the instrument model and calculate its properties.
 
         Parameters
         ----------
         config : `SpectroscopyConfig`
-            The spectroscopy configuration to build this instrument
-            model from.
+            The camera settings to use.
         """
         self.config = config
         self._calculate_properties()
@@ -101,15 +91,13 @@ class SpectroscopyInstrument:
             self.expected_length_px = 750.0 - self.zero_order_offset_px
 
     def get_dispersion_vector(self) -> np.ndarray:
-        """Return a unit vector pointing in the direction of dispersion.
+        """Get an arrow pointing exactly along the rainbow.
 
         Returns
         -------
         dispersion_vector : `np.ndarray`
-            2-element unit vector `(cos(angle), sin(angle))` giving the
-            dispersion direction, combining the configured orientation
-            (horizontal/vertical), direction (positive/negative), and
-            fine-tuning `dispersion_angle_degrees`.
+            An arrow `(x, y)` pointing in the direction the rainbow is spread
+            out.
         """
         orient = self.config.dispersion_orientation
         direc = self.config.dispersion_direction
@@ -122,17 +110,17 @@ class SpectroscopyInstrument:
         return np.array([np.cos(total_angle_rad), np.sin(total_angle_rad)])
 
     def wavelength_at_pixel_offset(self, px_offset: float) -> float:
-        """Calculate wavelength (nm) at a pixel offset from zero order.
+        """Figure out what color is hitting a specific pixel.
 
         Parameters
         ----------
         px_offset : `float`
-            Pixel offset relative to the zero-order star position.
+            How many pixels away from the main star we are looking.
 
         Returns
         -------
         wavelength_nm : `float`
-            Calibrated wavelength (in nanometers) at the given offset.
+            The color at that pixel, in nanometers.
         """
         # px_offset is relative to zero order star
         # mm_offset = px_offset * pixel_pitch

@@ -1,15 +1,8 @@
-"""Purpose: Target pipeline orchestration.
+"""Main control center for processing target images.
 
-Description: Free functions implementing the analysis/stacking pipeline
-orchestration that used to live as methods directly on
-`astrometricslib.models.target.Target`. Each function takes a `Target`
-instance as its first argument rather than being a method, so that
-`models/target.py` can stay a pure data schema with zero imports of
-`tasks/`, `api/`, or `data_access/` -- these functions depend on
-`Target`, not the other way around. Exposed to external callers via
-`astrometricslib.api.targets.TargetCatalog`.
-
-# REQ: BKD-5: Data Persistence
+This file acts as the conductor, calling the different analysis
+programs (like astrometry and photometry) in the right order.
+It keeps the actual image data models separate from the processing logic.
 """
 
 import logging
@@ -28,27 +21,16 @@ from astrometricslib.utilities.enums import FilterType
 
 logger = logging.getLogger(__name__)
 
-# Maximum time to wait for a single Siril stacking run before giving up
-# on it. Scaled by frame count rather than flat, because stacking cost
-# is dominated by per-frame registration and integration and the
-# catalog's targets differ by more than an order of magnitude in size
-# (2 frames for Alnath, 535 for NGC 7023).
+# Maximum allowed time for an external stacking task to run.
+# The timeout grows with the number of frames (N) because adding more
+# frames increases the amount of work the stacking process has to do.
 #
-# A flat 600s was the previous value and it silently discarded finished
-# work. On the 2026-08-24 DSLR pass four targets were declared timed out
-# and three of them went on to stack *successfully* seconds later --
-# NGC 7000 finished at 06:35:11 after being abandoned at 06:27:21, and
-# its 288MB output was left on disk with nothing in the catalog pointing
-# at it.
-#
-# The per-frame figure comes from that same run: NGC 7000's 84 color
-# frames took roughly 800s of Siril time, about 9.5s per frame, for
-# 288MB three-channel output. Monochrome frames are far cheaper (NGC
-# 2403 stacked 35 frames in 22.5s, 0.64s/frame), so a per-frame budget
-# sized for color leaves mono with a wide margin rather than needing a
-# second constant. 30s/frame is roughly 3x the measured color cost,
-# chosen so that a legitimate stack is never killed -- this is a
-# hang-detection ceiling, not an expected duration.
+# The base time (300s) and per-frame time (30s) act as a safety net
+# to detect if the process is stuck, not as an expected run time. These
+# limits come from tests on different targets (e.g., the 2026-08-24 DSLR
+# survey of NGC 7000). They make sure that slow color processing
+# (~9.5s/frame) can finish without being cut off early, while giving
+# plenty of extra time for fast black-and-white processing (<1s/frame).
 STACKING_TIMEOUT_BASE_SECONDS = 300
 STACKING_TIMEOUT_PER_FRAME_SECONDS = 30
 
@@ -62,39 +44,35 @@ STACKING_TIMEOUT_SECONDS = 600
 # accrue after the wait began.
 _STACKING_TIMEOUT_POLL_SECONDS = 2.0
 
-# Ensemble outlier rejection is normal sigma-clipping behaviour, so
-# flagging on any rejection at all reports routine operation as a
-# quality problem. Measured across the 33 targets with photometry on
-# the 2026-08-25 full-catalog run: 11 targets clipped nothing, and the
-# other 22 ranged from 1.4% to 51.7% of contributed frames, median
-# 7.2%. Flagging every non-zero value marked 22 of 33 targets, which
-# carries no signal; the tail worth a human's attention starts where
-# the clip rate reaches a quarter of the frames (M 13 51.7%, M 16
-# 46.7%, Moon 41.9%, NGC 6888 34.1%, NGC 7000 29.8%).
+# The percentage of rejected frames needed to trigger a quality warning flag.
+# Normal processing naturally rejects a small number of frames (around 7.2%
+# based on past runs). If we trigger a warning for anything less, we get
+# too many false alarms. Setting the limit to 0.25 (25%) helps us catch
+# real issues (like passing clouds) that need a human to check.
 MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG = 0.25
 
-# Small samples reach a high fraction on a couple of frames alone --
-# NGC 4438 clipped 3 of 11 (27.3%) and Mars 4 of 13 (30.8%) on that
-# same run, neither of which indicates an ensemble problem. Require an
-# absolute count as well so the fraction is measured against enough
-# frames to mean something.
+# The minimum number of rejected frames needed to trigger a quality warning.
+# This prevents false alarms when dealing with a small number of frames
+# (under 20), where a single rejected frame could cause a high percentage.
 MINIMUM_ENSEMBLE_REJECTION_COUNT_TO_FLAG = 5
 
 
 def compute_stacking_timeout_seconds(frame_count: int) -> int:
-    """Return the stacking timeout appropriate to a frame count.
+    """Calculate how long the stacking process is allowed to run.
+
+    Stacking takes longer when there are more images (frames). This
+    function adds a base time allowance to a per-image allowance to
+    set a deadline. If it takes longer than this, something is probably stuck.
 
     Parameters
     ----------
     frame_count : `int`
-        Number of frames being submitted to this stack.
+        The number of images being stacked.
 
     Returns
     -------
     timeout_seconds : `int`
-        Base overhead plus a per-frame allowance, never less than
-        `STACKING_TIMEOUT_SECONDS` so a tiny stack still gets the
-        historical budget.
+        The maximum allowed time in seconds.
     """
     scaled_timeout = STACKING_TIMEOUT_BASE_SECONDS + STACKING_TIMEOUT_PER_FRAME_SECONDS * max(0, frame_count)
     return int(max(STACKING_TIMEOUT_SECONDS, scaled_timeout))
@@ -119,53 +97,44 @@ class StarIdentificationBreakdown(NamedTuple):
 
 
 def select_frames_for_camera(target: Any, camera_name: str) -> list:
-    """Select the frames on `target` captured with the named camera.
+    """Find all images taken with a specific camera.
 
-    The single definition of "does this target have work for this
-    camera", shared by `run_full_pipeline` (which processes the frames)
-    and the batch worker (which decides whether the target is a no-op
-    skip rather than a genuine success). Keeping one implementation
-    means the two can never disagree about which targets have frames.
-
-    Matching is a case-insensitive substring test, so a caller may pass
-    either a full camera name or a distinguishing fragment of one.
+    You can provide either the full camera name or just a part of it
+    (like 'ZWO' or 'Canon'). It ignores capitalization.
 
     Parameters
     ----------
     target : `Any`
-        The target whose `frames` are filtered.
+        The target object containing the images.
     camera_name : `str`
-        Camera name, matched case-insensitively as a substring.
+        The name (or part of the name) of the camera to look for.
 
     Returns
     -------
     camera_frames : `list`
-        The matching frames, in their original order.
+        A list of images taken by that camera.
     """
     return [frame for frame in target.frames if camera_name.lower() in (frame.camera or "").lower()]
 
 
 def frame_configuration_key(frame: Any) -> str | None:
-    """Name the camera-and-optic configuration a frame belongs to.
+    """Create a label identifying the camera and telescope combination.
 
-    Frames may only be stacked with others of the same configuration.
-    Two optics of different focal length image at different scales --
-    this library's 300mm lens and 405mm telescope differ by 1.35x -- so
-    a stack blending them has no single pixel scale, cannot be plate
-    solved accurately, and yields fluxes that are not comparable between
-    frames. Seven targets were being stacked that way, including
-    NGC 7023 (424 frames at 300mm with 111 at 405mm).
+    We can only combine (stack) images taken with the exact same
+    camera and telescope (focal length). Mixing different ones creates
+    a bad image that can't be measured properly. This function creates
+    a label like 'Canon@300mm' to help group matching images together.
 
     Parameters
     ----------
     frame : `Any`
-        The frame record to key.
+        The image record to look at.
 
     Returns
     -------
     configuration_key : `str` or `None`
-        ``"<camera>@<focal>mm"``, or `None` when the frame records no
-        focal length and therefore cannot be safely grouped.
+        The label (like "<camera>@<focal_length>mm"), or None if the
+        focal length is missing.
     """
     focal_length = getattr(frame, "focal_length_mm", None)
     if not focal_length or focal_length <= 0:
@@ -177,23 +146,21 @@ def frame_configuration_key(frame: Any) -> str | None:
 
 
 def group_frames_by_configuration(target: Any, camera_name: str | None = None) -> dict[str, list]:
-    """Group a target's light frames into stackable configurations.
+    """Sort a target's images into groups that can be stacked together.
 
     Parameters
     ----------
     target : `Any`
-        The target whose `frames` are grouped.
+        The target containing the images.
     camera_name : `str`, optional
-        Restrict to this camera, matched case-insensitively as a
-        substring. Defaults to every camera.
+        Only include images from this camera (ignores capitalization).
 
     Returns
     -------
     frames_by_configuration : `dict` [`str`, `list`]
-        Frames keyed by `frame_configuration_key`, largest group first.
-        Frames without a focal length are omitted entirely -- see
-        `frames_missing_focal_length`, which reports them so they are
-        never dropped silently.
+        A dictionary where the keys are the camera/telescope combo labels
+        and the values are lists of images. The largest group is first.
+        Images missing focal length data are skipped.
     """
     grouped: dict[str, list] = {}
     for frame in target.frames or []:
@@ -207,24 +174,23 @@ def group_frames_by_configuration(target: Any, camera_name: str | None = None) -
 
 
 def frames_missing_focal_length(target: Any, camera_name: str | None = None) -> list:
-    """Report frames that cannot be assigned to any configuration.
+    """Find images that are missing focal length information.
 
-    Omitting a frame is a real loss, so callers are expected to surface
-    this rather than let it pass. On this library 602 frames carry no
-    FOCALLEN, and three targets consist entirely of them -- including a
-    comet that cannot be re-imaged.
+    Images without a focal length can't be safely stacked because we don't
+    know how zoomed in they are. This function finds them so we can warn
+    the user, instead of just silently ignoring them.
 
     Parameters
     ----------
     target : `Any`
-        The target whose `frames` are inspected.
+        The target to check.
     camera_name : `str`, optional
-        Restrict to this camera, matched as a case-insensitive substring.
+        Only check images from this specific camera.
 
     Returns
     -------
     unassignable_frames : `list`
-        Frames with no usable focal length.
+        A list of images that are missing focal length data.
     """
     return [
         frame
@@ -312,18 +278,158 @@ def _drop_unresolved_stars(
     return resolved, StarIdentificationBreakdown(catalog_matched, position_only, unresolved)
 
 
-def merge_astrometry_stellar_object(existing_stellar_object, updated_stellar_object):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Merge rule for astrometry-derived stellar object updates.
+# Prefix minted by star_identifier.identify_stars_with_wcs's Step 3 for a
+# star with a solved sky position but no SIMBAD/Gaia match. Duplicated
+# here rather than imported, matching _UNRESOLVED_STAR_ID_PATTERN's own
+# precedent of matching the format by convention instead of taking a
+# dependency in the other direction.
+_POSITION_ONLY_STAR_ID_PREFIX = "FIELD_J"
 
-    Appends any new target ids and carries over freshly solved/identified
-    properties, without discarding data other targets may have already
-    contributed to this same stellar object.
+
+def _reconcile_position_only_star_ids(
+    stellar_objects: list,
+    *,
+    butler,  # ruff: ignore[missing-type-function-argument]
+    target_id: str,
+) -> list:
+    """Reconcile and merge catalog IDs based on star positions.
+
+    Standard naming based on position assumes we can measure star locations
+    perfectly every time. In reality, tests show star positions can shift
+    by 1-6 arcseconds between different runs of the same field. If we don't
+    merge them, this shift causes the same physical star to be saved multiple
+    times under slightly different names.
+
+    This function checks new stars before saving them, comparing them to
+    existing stars in the catalog. If they are close enough (within
+    `CATALOG_MATCH_RADIUS_ARCSEC`), it merges them. This ensures we update
+    the existing star instead of creating a duplicate.
+
+    Note: This handles active pipeline outputs; legacy catalog
+    deduplication is addressed separately via
+    `scripts/reconcile_position_only_star_catalog.py`.
+
+    Parameters
+    ----------
+    stellar_objects : `list`
+        Candidate stars about to be persisted, mutated in place (each
+        reassigned star's `id`/`name` are overwritten with the id of
+        the existing catalog row it matched).
+    butler : `Any`
+        Provides `list_projected` for reading the target's existing
+        position-only rows.
+    target_id : `str`
+        The target these stars belong to. Scoped to one target both to
+        keep the candidate set small and because that is where this
+        catalog's own measured duplication was concentrated; a
+        position-only star shared between two overlapping targets'
+        fields is not reconciled by this pass.
 
     Returns
     -------
-    stellar_object : `Any`
-        `updated_stellar_object` if `existing_stellar_object` is `None`;
-        otherwise `existing_stellar_object` merged with the update.
+    stellar_objects : `list`
+        The same list, for chaining alongside `_drop_unresolved_stars`.
+    """
+    from astropy import units as u
+    from astropy.coordinates import SkyCoord
+
+    from astrometricslib.tasks.stellar_tasks.astrometry_tasks.star_identifier import (
+        CATALOG_MATCH_RADIUS_ARCSEC,
+    )
+
+    # `StellarObject.right_ascension`/`.declination` are typed `Any` and
+    # default to `""`, not `None` -- an `is not None` check alone would
+    # let that default through and crash the `SkyCoord` arithmetic
+    # below. Every real `FIELD_J...` star has both set to real floats at
+    # the same place its id is minted (star_identifier.py's Step 3), so
+    # this only excludes a malformed star that should never reach
+    # persistence in the first place.
+    position_only_stars = [
+        stellar_object
+        for stellar_object in stellar_objects
+        if stellar_object.id.startswith(_POSITION_ONLY_STAR_ID_PREFIX)
+        and isinstance(stellar_object.right_ascension, int | float)
+        and isinstance(stellar_object.declination, int | float)
+    ]
+    if not position_only_stars:
+        return stellar_objects
+
+    try:
+        existing_rows = butler.list_projected("stellar_catalog", ["id", "ra", "dec", "target_id"])
+    except Exception as lookup_error:
+        # Reconciliation is an optimization over an already-correct (if
+        # duplicative) persistence path; a lookup failure must not block
+        # a run's own stars from being saved.
+        logger.debug(
+            "[%s] Could not read existing catalog for id reconciliation: %s", target_id, lookup_error
+        )
+        return stellar_objects
+
+    # target_id is a comma-joined string (a star can belong to more than
+    # one target), so membership is checked in Python -- same reasoning
+    # as StellarCatalog.list_object_summaries's identical filter.
+    existing_position_only = [
+        row
+        for row in existing_rows
+        if row["id"].startswith(_POSITION_ONLY_STAR_ID_PREFIX)
+        and row["ra"] is not None
+        and row["dec"] is not None
+        and target_id in (row["target_id"] or "").split(",")
+    ]
+    if not existing_position_only:
+        return stellar_objects
+
+    existing_coords = SkyCoord(
+        ra=[row["ra"] for row in existing_position_only] * u.deg,
+        dec=[row["dec"] for row in existing_position_only] * u.deg,
+    )
+
+    reused_ids: set[str] = set()
+    reused_count = 0
+    for stellar_object in position_only_stars:
+        star_coord = SkyCoord(
+            ra=stellar_object.right_ascension * u.deg, dec=stellar_object.declination * u.deg
+        )
+        idx, d2d, _ = star_coord.match_to_catalog_sky(existing_coords)
+        if d2d >= CATALOG_MATCH_RADIUS_ARCSEC * u.arcsec:
+            continue
+
+        existing_id = existing_position_only[idx]["id"]
+        if existing_id in reused_ids:
+            # Already claimed by another star from this same run -- two
+            # distinct stars should never collapse onto one row. Leave
+            # this one with its own freshly minted id rather than
+            # colliding; if it's a genuine duplicate of the star that
+            # already claimed the match, that will still be caught the
+            # next time this reconciliation runs.
+            continue
+        if existing_id == stellar_object.id:
+            continue
+
+        stellar_object.id = existing_id
+        stellar_object.name = existing_id
+        reused_ids.add(existing_id)
+        reused_count += 1
+
+    if reused_count:
+        logger.info(
+            f"[{target_id}] Reconciled {reused_count} position-only star id(s) onto existing "
+            f"catalog rows within {CATALOG_MATCH_RADIUS_ARCSEC:g} arcsec, instead of minting new ones."
+        )
+    return stellar_objects
+
+
+def merge_astrometry_stellar_object(existing_stellar_object, updated_stellar_object):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Merge rule for astrometry updates to a star.
+
+    Keeps any old target names but adds new ones. It also updates
+    things we just solved (like identity or position) without throwing
+    away data from other targets that might be attached to this star.
+
+    Returns
+    -------
+    merged_object : StellarObject
+        The combined star record.
     """
     if existing_stellar_object is None:
         return updated_stellar_object
@@ -339,24 +445,15 @@ def merge_astrometry_stellar_object(existing_stellar_object, updated_stellar_obj
 
 
 def merge_spectroscopy_stellar_object(existing_stellar_object, updated_stellar_object):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Merge rule for spectroscopy-derived stellar object updates.
+    """Merge rule for spectroscopy updates to a star.
 
-    Appends any new target ids and carries over every field this run's
-    spectroscopy pipeline owns (spectrum data, dispersion geometry,
-    trail fit, and -- when registration identified the star against a
-    catalog-identified reference field, see
-    `identify_spectral_stars_via_registration` -- its catalog identity),
-    without discarding data other targets may have already contributed
-    to this same stellar object. A prior version of this rule only
-    refreshed `spectrum_data_processed`, leaving `dispersion_angle` and
-    the trail/rectangle geometry stuck at whatever the *first* run for
-    this star computed even after a later run recomputed them.
+    Adds new target names to the list and updates the light spectrum
+    data and dispersion angle, but leaves everything else alone.
 
     Returns
     -------
-    stellar_object : `Any`
-        `updated_stellar_object` if `existing_stellar_object` is `None`;
-        otherwise `existing_stellar_object` merged with the update.
+    merged_object : StellarObject
+        The combined star record.
     """
     if existing_stellar_object is None:
         return updated_stellar_object
@@ -381,17 +478,15 @@ def merge_spectroscopy_stellar_object(existing_stellar_object, updated_stellar_o
 
 
 def merge_photometry_stellar_object(existing_stellar_object, updated_stellar_object):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Merge rule for photometry-derived stellar object updates.
+    """Merge rule for photometry updates to a star.
 
-    Carries over the freshly measured light curve and variability
-    statistics, and appends any new target ids, without discarding data
-    other targets may have already contributed to this same stellar object.
+    Adds new target names, updates cross-session identity data,
+    and brings in new brightness variation (variability) metrics.
 
     Returns
     -------
-    stellar_object : `Any`
-        `updated_stellar_object` if `existing_stellar_object` is `None`;
-        otherwise `existing_stellar_object` merged with the update.
+    merged_object : StellarObject
+        The combined star record.
     """
     if existing_stellar_object is None:
         return updated_stellar_object
@@ -421,55 +516,22 @@ def _run_variability_analysis_for_session(
     star_identifier: Any = None,
     use_astrometry_seed: bool = True,
 ) -> tuple[Any, list[Any], Any | None]:
-    """Run one independent VariabilityAnalyzer against one observing session.
+    """Track star brightness over a single observing session.
 
-    Pixel-position re-centroiding against a single reference frame only
-    holds within frames that share consistent framing/rotation -- i.e.
-    one observing session. Mixing frames across sessions into a single
-    `VariabilityAnalyzer.process()` call corrupts tracking for most stars
-    (see the "photometry" case in `analyze_target`), so each session gets
-    its own analyzer run and its own reference frame.
-
-    When `use_astrometry_seed` is `True`, this session's reference frame
-    is first run through `session_identification.identify_session_stars`
-    -- reusing an existing FITS-header WCS when present, otherwise
-    plate-solving -- and the resulting SIMBAD-identified stars are
-    tracked instead of `VariabilityAnalyzer`'s own blind detection (see
-    `VariabilityAnalyzer.process`'s `seed_stars` parameter), so results
-    are tied to real, stable star identities instead of throwaway
-    per-run `Star_N` labels.
-
-    Parameters
-    ----------
-    session : `TargetSession`
-        The observing session to analyze.
-    max_workers : `int`, optional
-        Forwarded to `VariabilityAnalyzer.process`.
-    id_prefix : `str`
-        Forwarded to `VariabilityAnalyzer.process`; ignored when
-        `use_astrometry_seed` is `True` since identified stars already
-        carry their own real ids.
-    target : `Target`, optional
-        Supplies the RA/Dec hint for astrometry identification when
-        `use_astrometry_seed` is `True`.
-    star_identifier : `StarIdentifier`, optional
-        Shared identifier instance (reused across sessions) to run
-        identification with when `use_astrometry_seed` is `True`.
-    use_astrometry_seed : `bool`, optional
-        Whether to seed this session's tracked stars from astrometry
-        identification rather than blind detection (default `False`).
+    If `use_astrometry_seed` is turned on, this function tries to
+    figure out the sky coordinates (plate solve) of the reference image.
+    It then looks up the stars in SIMBAD/Gaia databases before tracking
+    their brightness. This known identity stays with the star.
 
     Returns
     -------
-    analyzer : `VariabilityAnalyzer`
-        The analyzer instance holding this session's `stellar_objects`,
-        `rejected_files`, and `frame_ensemble_composition`.
-    candidates : `list`
-        This session's flagged variable-star candidates.
-    identify_result : `SessionIdentificationResult` or `None`
-        This session's astrometry identification result (including its
-        resolved WCS, if any), if `use_astrometry_seed` was requested;
-        `None` if seeding wasn't requested at all.
+    analyzer : VariabilityAnalyzer
+        The tool that ran the analysis.
+    candidates : list
+        Stars that might be changing brightness (variable stars).
+    identify_result : IdentifyStarsResult or None
+        The result of looking up the stars, if we tried to do it.
+        Useful for getting the sky coordinate map (WCS) later.
     """
     from astrometricslib.tasks.stellar_tasks.photometry_tasks.variability_analyzer import (
         VariabilityAnalyzer,
@@ -514,38 +576,17 @@ def _run_variability_analysis_for_session(
 
 
 def _solve_session_wcs(session: Any, target: Target) -> Any | None:
-    """Plate-solve one session's own reference frame for sky coordinates.
+    """Plate-solve a session's reference frame to get its sky coordinates.
 
-    Identifying the same physical star across sessions needs a common
-    coordinate system -- pixel positions have no shared meaning across
-    sessions with different framing/rotation.
-
-    Fallback path only: when `_run_variability_analysis_for_session`
-    already resolved this session's WCS via `use_astrometry_seed` (see
-    `session_identification.identify_session_stars`), that result is
-    passed to `_match_and_merge_across_sessions` via `session_wcs_map`
-    and this function is never called for that session -- calling
-    `PlateSolver` directly here, a second time against the same
-    reference frame, would be a wasted, redundant solve. This function
-    only still runs for sessions that weren't pre-resolved, i.e. the
-    still-default `use_astrometry_seed=False` path, or a session whose
-    astrometry-seed resolution itself failed (present in the map with
-    a `None` value is NOT such a case -- see `session_wcs_map`'s
-    docstring -- but a session simply absent from a `None` map is).
-    `PlateSolver` is constructed with no API key here, so its online
-    fallback tiers are already no-ops (`solve()` returns `None`
-    immediately for those without a key); only the local `solve-field`
-    attempt ever runs, so this adds no new network dependency. Unlike
-    `identify_session_stars`, this never runs SIMBAD identification --
-    only the WCS itself is needed for cross-session sky-position
-    matching (§ `_stars_to_sky`), independent of whether any star ever
-    gets a real catalog identity.
+    We need this when we want to match stars across different sessions,
+    but we haven't already looked up their identities in a database.
+    (For example, if we skipped the SIMBAD lookup step earlier).
 
     Returns
     -------
     wcs : `astropy.wcs.WCS` or `None`
-        The solved WCS for this session's reference frame, or `None` if
-        the solve failed or raised.
+        The map from pixel to sky position, or None if the solve
+        failed.
     """
     import warnings
 
@@ -599,23 +640,14 @@ def _solve_session_wcs(session: Any, target: Target) -> Any | None:
 
 
 def _stars_to_sky(stellar_objects: list[Any], wcs: Any) -> list[Any]:
-    """Convert each star's detected pixel position into sky coordinates.
+    """Convert star pixel locations into real sky coordinates (RA/Dec).
 
-    Mutates `right_ascension`/`declination` on each successfully
-    converted star in place, using the same low-level WCSLIB pixel ->
-    world conversion already used for SIMBAD identification
-    (`star_identifier.py`'s `wcs.wcs_pix2world(x, y, 0)`), applied here
-    directly to `VariabilityAnalyzer`'s own detected pixel positions
-    rather than running a separate independent detection pass.
+    Updates the input stars with their new right ascension and declination.
 
     Returns
     -------
-    converted : `list`
-        The subset of `stellar_objects` that had a usable pixel
-        position and were successfully converted. Tracked separately
-        rather than re-inspected from the mutated fields afterward,
-        since a genuine ra/dec of exactly 0.0 would otherwise read as
-        falsy and be miscategorized as unconverted.
+    stars_with_position : `list`
+        Only the stars that successfully got sky coordinates.
     """
     import numpy as np
 
@@ -678,12 +710,8 @@ def _rescale_flux_segment(
 
 
 def _rescale_and_merge_light_curve(canonical: Any, new: Any) -> Any:
-    """Merge a session's light curve into a canonical cross-session curve.
+    """Merge a star's brightness data from two different nights.
 
-    Different sessions normalize flux against their own local
-    comparison-star ensemble median (Eq. 5), so naively concatenating
-    two sessions' fluxes would inject a spurious step-change at the
-    session boundary that looks like variability but is really just an
     inter-session zero-point offset. The incoming (`new`) segment's
     `fluxes_normalized`/`fluxes_detrended` are each independently
     rescaled so their own median matches the canonical curve's existing
@@ -742,56 +770,39 @@ def _match_and_merge_across_sessions(
     tolerance_arcsec: float = 5.0,
     session_wcs_map: dict[str, Any] | None = None,
 ) -> tuple[list[Any], list[str], int]:
-    """Identify the same physical star across sessions and merge light curves.
+    """Find the same real star in different sessions and combine its data.
 
-    Uses each session's own reference-frame WCS to get real sky
-    coordinates for its detected stars, then greedily matches stars
-    across sessions within `tolerance_arcsec` and merges matched stars'
-    light curves into one canonical, persisted entity per physical star
-    (see `_rescale_and_merge_light_curve`). A star observed in only one
-    session, or whose session's WCS is unavailable, persists standalone
-    exactly as it did before this matching step existed -- this is
-    purely additive, never a regression.
+    This takes the sky coordinates for stars in each session and pairs
+    them up if they are very close to each other (under `tolerance_arcsec`).
+    If they match, their light curves are merged into a single star record.
+    If a star only appears once, or if we don't have sky coordinates for
+    that session, it stays as its own separate record.
 
     Parameters
     ----------
-    photometry_sessions : `list`
-        Sessions in the same chronological order `derive_target_sessions`
-        returns them in (sorted by night date, then gain, then offset).
-    per_session_results : `list` [`tuple`]
-        `(analyzer, session_candidates)` pairs, index-aligned with
-        `photometry_sessions`, from `_run_variability_analysis_for_session`.
-    target : `Target`
-        Supplies the RA/Dec hint passed to the plate solver when a
-        session's WCS isn't already available via `session_wcs_map`.
-    tolerance_arcsec : `float`, optional
-        Angular separation below which two sessions' detections are
-        considered the same physical star (default 5.0", matching
-        `stellar_service.find_or_create_by_position`'s existing
-        spatial-match tolerance).
-    session_wcs_map : `dict` [`str`, `Any`], optional
-        Pre-resolved `{session.id: wcs}` entries, e.g. already obtained
-        by `_run_variability_analysis_for_session`'s astrometry-seed
-        step. When a session's id is present here (even with a `None`
-        value, meaning that session's own resolution already failed),
-        its WCS is used as-is and `_solve_session_wcs` is not called
-        again for it -- avoiding a second, redundant plate-solve of the
-        same reference frame. A session absent from the map (including
-        when `session_wcs_map` itself is `None`) falls back to today's
-        behavior of solving it here.
+    photometry_sessions : list
+        The list of observing sessions, in chronological order.
+    per_session_results : list of tuples
+        The analysis tool and variable star candidates for each session.
+    target : Target
+        The target name and RA/Dec hint used to help the plate solver
+        figure out coordinates if they are missing.
+    tolerance_arcsec : float, optional
+        How close two stars must be in arcseconds to be considered the
+        same physical star (default is 5.0").
+    session_wcs_map : dict, optional
+        A map of session IDs to their known coordinate systems (WCS).
+        This stops us from having to run the plate solver twice for the
+        same image.
 
     Returns
     -------
-    merged_stellar_objects : `list`
-        Every session's stellar objects, with matched stars folded into
-        one merged canonical entry per physical star (unmatched stars
-        unchanged, still one entry each).
-    sessions_missing_wcs : `list` [`str`]
-        Session ids whose plate solve failed or found no usable stars.
-    match_count : `int`
-        Number of (star, contributing-session) pairs folded into an
-        existing canonical entry -- total merges performed, not the
-        count of distinct merged stars.
+    merged_stellar_objects : list
+        The final list of stars, with matching ones combined.
+    sessions_missing_wcs : list of str
+        Names of sessions where we couldn't figure out the coordinates.
+    match_count : int
+        The total number of times we merged a star into another one.
     """
     from astropy import units as astropy_units
     from astropy.coordinates import SkyCoord, search_around_sky
@@ -900,13 +911,12 @@ def _match_and_merge_across_sessions(
 
 
 def analyze_frame_spectroscopy(target: Target, path: str, limit: int = 10) -> tuple[Any, list[Any]]:
-    """Run spectroscopy analysis on a single FITS frame for this target.
+    """Run the light spectrum (spectroscopy) tool on one image frame.
 
     Returns
     -------
-    result : `tuple[Any, list[Any]]`
-        The result of
-        `tasks.target_tasks.stacking_tasks.analyze_frame_spectroscopy`.
+    result : tuple
+        The analysis tool and the list of stars it found.
     """
     from astrometricslib.tasks.target_tasks.stacking_tasks import analyze_frame_spectroscopy as _analyze
 
@@ -923,37 +933,30 @@ def analyze_target(
     path: str | None = None,
     **kwargs,  # ruff: ignore[missing-type-kwargs]
 ) -> dict[str, Any]:
-    """Run the requested analysis pipeline on this Target domain object.
+    """Run a specific analysis pipeline on the given target.
 
-    Supports "astrometry", "spectroscopy", "photometry", and
-    "asteroid_recovery" analysis types.
+    You can ask it to run "astrometry" (finding star positions),
+    "spectroscopy" (light spectrum), "photometry" (brightness changes),
+    or "asteroid_recovery" (finding moving rocks).
 
     Parameters
     ----------
-    register_job : `bool`, optional
-        Whether to auto-register a `ProcessingJob` for this run
-        (default `True`), so a script/notebook/CLI call shows up in
-        the UI's job manager without the caller doing anything extra.
-        Callers that already track their own job for this exact call
-        -- namely `AnalysisOrchestrator._start_analysis_task`, which
-        creates and finalizes its own job around this same call --
-        must pass `False` here, otherwise this call would register a
-        second, redundant job for the same analysis run: two "started"
-        rows appearing for one UI-triggered analysis, both ownerless
-        from the orchestrator's perspective (it only tracks the job
-        id it itself created).
+    register_job : bool, optional
+        Set to True (default) if you want this run to automatically
+        show up in the user interface's job tracker. Set to False if
+        you are calling this from a tool that already tracks its own jobs
+        (to prevent double-counting).
 
     Returns
     -------
-    result : `dict[str, Any]`
-        Analysis-type-specific results and status fields.
+    result : dict
+        A dictionary with the final results and status info.
 
     Raises
     ------
     ValueError
-        If `pipeline_type` is not one of the supported analysis types, or
-        if no frames or stacked image are available for an
-        "astrometry"/"spectroscopy" analysis.
+        If you ask for an unknown pipeline type, or if we don't have
+        the right images needed to run it.
     """
     if butler is None:
         from astrometricslib.data_access.butler import DiskButler
@@ -1112,6 +1115,20 @@ def _run_analysis_pipeline_match(
             from astrometricslib.tasks.stellar_tasks.astrometry_tasks.astrometry_pipeline import (
                 AstrometryPipeline,
             )
+            from astrometricslib.tasks.stellar_tasks.astrometry_tasks.plate_solver import (
+                reset_plate_solve_statistics,
+            )
+            from astrometricslib.tasks.stellar_tasks.astrometry_tasks.star_identifier import (
+                reset_gaia_query_statistics,
+            )
+
+            # Reset before this target's own solve/query work starts, so
+            # the counts read back below describe this target alone --
+            # both tallies are process-global and a worker handles many
+            # targets in sequence. reset_gaia_query_statistics leaves the
+            # circuit breaker itself untouched; see its docstring.
+            reset_plate_solve_statistics()
+            reset_gaia_query_statistics()
 
             pipeline = AstrometryPipeline()
             context = pipeline.process(
@@ -1223,6 +1240,9 @@ def _run_analysis_pipeline_match(
                 if target.id not in obj.target_ids:
                     obj.target_ids.append(target.id)
 
+            context.stellar_objects = _reconcile_position_only_star_ids(
+                context.stellar_objects, butler=butler, target_id=target.id
+            )
             butler.merge_and_persist_records(
                 "stellar_catalog", context.stellar_objects, merge_astrometry_stellar_object
             )
@@ -1289,6 +1309,9 @@ def _run_analysis_pipeline_match(
                 if target.id not in obj.target_ids:
                     obj.target_ids.append(target.id)
 
+            stellar_objects = _reconcile_position_only_star_ids(
+                stellar_objects, butler=butler, target_id=target.id
+            )
             butler.merge_and_persist_records(
                 "stellar_catalog", stellar_objects, merge_spectroscopy_stellar_object
             )
@@ -1413,7 +1436,7 @@ def _run_analysis_pipeline_match(
             # cross-match a lone session against.
             id_prefix_enabled = len(photometry_sessions) > 1
 
-            # REQ: Analyze Target should identify the actual stars in an
+            # Analyze Target should identify the actual stars in an
             # image against a real catalog, not just track anonymous
             # per-run pixel detections. Opt-in for now (see rollout
             # notes) while this is verified against real data before
@@ -1515,6 +1538,9 @@ def _run_analysis_pipeline_match(
                 if target.id not in obj.target_ids:
                     obj.target_ids.append(target.id)
 
+            all_stellar_objects = _reconcile_position_only_star_ids(
+                all_stellar_objects, butler=butler, target_id=target.id
+            )
             butler.merge_and_persist_records(
                 "stellar_catalog", all_stellar_objects, merge_photometry_stellar_object
             )
@@ -1717,13 +1743,11 @@ def reindex_frames(
     butler=None,  # ruff: ignore[missing-type-function-argument]
     refresh_headers: bool = False,
 ) -> None:
-    """Sync frame records from disk and recompute total exposure time.
+    """Update our saved list of images from the actual files on disk.
 
-    `refresh_headers` also re-reads header-derived acquisition
-    conditions on frames already tracked. Scanning alone only builds
-    records for files it has not seen, so a field added to
-    `FrameRecord` after a frame was first indexed stays `None` on that
-    frame until this runs. Costs ~10ms per frame.
+    This function adds any new image files it finds and updates the
+    total exposure time. If `refresh_headers` is True, it will also
+    re-read the FITS header data for files we already know about.
     """
     if butler is None:
         from astrometricslib.data_access.butler import DiskButler
@@ -1742,24 +1766,27 @@ def reindex_frames(
 
 
 def get_header_information(target: Target, frame_path: str) -> list[dict[str, str]]:
-    """Verify ownership and return raw FITS header card listings.
+    """Get the raw metadata (FITS header info) for an image.
+
+    Checks to make sure the target name actually owns this image
+    before reading it.
 
     Parameters
     ----------
-    target : `Target`
-        The target `frame_path` must belong to.
-    frame_path : `str`
-        Path to the FITS file to read.
+    target : Target
+        The target the image should belong to.
+    frame_path : str
+        The file path to the FITS image.
 
     Returns
     -------
-    header_cards : `list[dict[str, str]]`
-        The FITS primary header's card entries for `frame_path`.
+    header_cards : list of dict
+        A list of key-value pairs from the image header.
 
     Raises
     ------
     ValueError
-        If `frame_path` does not belong to this target.
+        If the image file doesn't belong to this target.
     """
     is_valid = any(f.path == frame_path for f in target.frames)
     if not is_valid:
@@ -1786,34 +1813,23 @@ def stack_and_solve(
     generate_rejmap: bool | None = None,
     register_job: bool = True,
 ) -> str | None:
-    """Run the Siril stacking pipeline on the target's frames.
+    """Run the Siril stacking tool to combine the target's images.
 
-    Accepts optional frames_to_stack list or filter_type to filter
-    frames for stacking, plus overrides for the stack-time rejection
-    sigma, FWHM/roundness selection filters, frame weighting, and
-    rejection-map generation (each falls back to the configured
-    default in astrometrics.config when omitted).
+    You can optionally provide a specific list of frames or a filter
+    type. You can also override settings like the star roundness limit
+    or rejection sigma. If you leave these blank, it uses the defaults.
 
     Parameters
     ----------
-    register_job : `bool`, optional
-        Whether to auto-register a `ProcessingJob` for this stacking
-        run (default `True`), so a script/notebook/CLI call shows up
-        in the UI's job manager without the caller doing anything
-        extra -- mirrors `analyze_target`'s `register_job` parameter
-        and its job-registration shape. The backend's own UI-triggered
-        "Stack Frames" button does not route through this function (it
-        calls the Siril driver directly and manages its own job via
-        `backend.services.processing.job_service`), so there is no
-        double-registration risk here. Registration failures are
-        logged and swallowed rather than raised, so a database issue
-        never blocks the actual stack.
+    register_job : bool, optional
+        Set to True (default) if you want this run to automatically
+        show up in the user interface's job tracker. Set to False if
+        you are calling this from a tool that already tracks its own jobs.
 
     Returns
     -------
-    stacked_path : `str` or `None`
-        The path to the stacked output file, or `None` if
-        stacking did not produce an output.
+    stacked_path : str or None
+        The path to the final combined image file, or None if it failed.
     """
     job_id = None
     logger_if = None
@@ -1964,38 +1980,32 @@ def stack_and_solve(
 def _stack_frames_with_timeout(
     target: Target, frames_to_stack: list[FrameRecord], timeout_seconds: int | None = None
 ) -> str | None:
-    """Run stack_and_solve on a background thread, enforcing a hard timeout.
+    """Run the image stacker with a time limit so it doesn't freeze forever.
 
-    Siril can occasionally hang mid-stack (e.g. waiting on a pipe that
-    never receives its completion marker), which would otherwise freeze
-    the caller indefinitely.
-
-    The budget covers time this stack spends *working*. Time spent
-    blocked on the machine-wide Siril lock is added back as it accrues,
-    because that queue exists to stop Siril runs competing for the CPU
-    and must not convert into a cascade of timeouts for the targets
-    waiting their turn.
+    The Siril stacking program can sometimes get stuck. This function
+    runs it in the background and will kill it if it takes too long.
+    The time limit only counts time spent actually working, not time
+    spent waiting in line for the CPU.
 
     Parameters
     ----------
-    target : `Target`
-        The target being stacked.
-    frames_to_stack : `list` [`FrameRecord`]
-        Frames submitted to this stack; their count sets the budget.
-    timeout_seconds : `int`, optional
-        Explicit budget override. Defaults to
-        `compute_stacking_timeout_seconds` for this frame count.
+    target : Target
+        The target name being stacked.
+    frames_to_stack : list
+        The image frames we want to combine.
+    timeout_seconds : int, optional
+        The maximum time allowed in seconds. If blank, it calculates
+        a budget based on the number of frames.
 
     Returns
     -------
-    stacked_path : `str` or `None`
-        The stacked output path, or `None` if stacking timed out.
+    stacked_path : str or None
+        The path to the combined image file, or None if it timed out.
 
     Raises
     ------
     Exception
-        Whatever exception `stack_and_solve` raised on the
-        background thread, re-raised here on the caller's thread.
+        Any error that happened during stacking is passed up to here.
     """  # ruff: ignore[docstring-extraneous-exception] -- `raise
     # outcome["error"]` re-raises a captured exception object,
     # which pydoclint cannot resolve to a declared type statically.
@@ -2064,49 +2074,34 @@ def run_full_pipeline(
     camera_name: str,
     focal_length_mm: float | None = None,
 ) -> dict[str, str]:
-    """Run the full stacking and analysis pipeline sequence.
+    """Run the complete start-to-finish processing pipeline for a target.
 
-    Executes stacking, astrometry, photometry, and spectroscopy in
-    sequence, then persists this target's own record. Reusable by
-    both a single-target caller and a batch orchestrator processing
-    many targets concurrently, since persistence only ever touches
-    this target's own row (see DiskButler's "target_record" dataset
-    type) rather than a full-catalog resync.
+    This runs stacking, position solving (astrometry), brightness
+    tracking (photometry), and light spectrum (spectroscopy) in order,
+    then saves the target's data to the database.
 
     Parameters
     ----------
-    target : `Target`
-        The target to process.
-    astrometrics : `Any`
-        the high-level interface providing config and butler access.
-    max_workers : `int`, optional
-        Number of processes to use for the photometry step's
-        per-frame parallel work. Passed through to analyze_target;
-        `None` preserves that step's own default.
-    camera_name : `str`
-        Case-insensitive substring matched against each frame's
-        camera name; only matching frames are processed, and every
-        other frame on the target -- including from a second camera
-        the target was also captured with -- is silently excluded.
-        Required, keyword-only, and has no default: a multi-camera
-        target silently dropping most of its frames under an
-        unnoticed fallback is worse than a caller being forced to say
-        which camera they mean. Use
-        `TargetCatalog.list_camera_names` to see what's actually
-        present in the catalog before choosing one.
+    target : Target
+        The target we want to process.
+    astrometrics : Any
+        The system interface that gives us config settings and database access.
+    max_workers : int, optional
+        How many parallel processes to use during the brightness tracking step.
+    camera_name : str
+        The name of the camera to process images for. Any images taken
+        by a different camera will be ignored.
 
     Returns
     -------
-    stack_outputs : `dict`
-        Mapping of stack type ("standard" and/or "spectral") to its
-        output path for whichever stacks were actually produced;
-        empty if none.
+    stack_outputs : dict
+        A dictionary mapping the stack type ("standard" or "spectral")
+        to the final saved image file path.
 
     Raises
     ------
     ValueError
-        If stacking of the standard and/or spectral frame group
-        fails to produce a valid output file.
+        If the stacking process fails to make a final image file.
     """
     stack_outputs: dict[str, str] = {}
     print("\n==========================================")
@@ -2282,11 +2277,11 @@ def run_full_pipeline(
 def add_frame(
     target: Target, path: str, role: str = "LIGHT", filter_type: str | None = None, camera: str | None = None
 ) -> FrameRecord:
-    """Add a single FrameRecord by parsing its FITS metadata.
+    """Add a single image frame to the target by reading its metadata.
 
     Returns
     -------
-    frame_record : `FrameRecord`
+    frame_record : FrameRecord
         The newly added frame record.
     """
     from astrometricslib.tasks.target_tasks import stacking_tasks

@@ -1,10 +1,7 @@
-"""Purpose: End-to-end tests for AsteroidRecoveryPipeline.
+"""Tests for the whole asteroid-finding pipeline.
 
-Description: Verifies the full pipeline (per-frame WCS estimation,
-point-source detection, discrimination cascade, ephemeris cross-match)
-against synthetic FITS frames containing a single point source moving
-linearly across the field. astroquery.imcce.Skybot.cone_search is
-mocked so these tests never make a real network call.
+We create some fake photos with a dot moving across them in a straight
+line, and make sure the pipeline correctly finds it from start to finish.
 """
 
 import astropy.units as u
@@ -32,7 +29,7 @@ def _write_frame_fits(  # ruff: ignore[missing-return-type-private-function]
     declination_deg=0.0,  # ruff: ignore[missing-type-function-argument]
     include_radec=True,  # ruff: ignore[missing-type-function-argument]
 ):
-    """Write a synthetic 64x64 frame FITS file with one Gaussian source."""
+    """Create a fake, tiny photo with one dot in it."""
     rng = np.random.default_rng(0)
     data = rng.normal(100.0, 5.0, (64, 64)).astype(np.float32)
     yy, xx = np.mgrid[0:64, 0:64]
@@ -45,7 +42,7 @@ def _write_frame_fits(  # ruff: ignore[missing-return-type-private-function]
 
 
 def _write_stack_fits(path):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
-    """Write a synthetic 64x64 stack FITS file with a real TAN WCS header."""
+    """Create a fake stacked image with map coordinates."""
     header = fits.Header()
     header["NAXIS1"] = 64
     header["NAXIS2"] = 64
@@ -65,12 +62,12 @@ def _write_stack_fits(path):  # ruff: ignore[missing-type-function-argument, mis
 
 
 def _build_moving_target(tmp_path, include_radec=True):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
-    """Build a Target with 4 light frames of a linearly moving source.
+    """Create a fake target with 4 photos showing a dot in a straight line.
 
     Returns
     -------
     Target
-        A target with 4 light frames and a stacked image set.
+        Our fake target ready for testing.
     """
     frames = []
     zipped_frames = zip(_STAR_PIXEL_POSITIONS, _FRAME_TIMESTAMPS, strict=False)
@@ -88,7 +85,7 @@ def _build_moving_target(tmp_path, include_radec=True):  # ruff: ignore[missing-
 
 
 def test_process_raises_when_target_has_no_stacked_image():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify process() raises rather than silently doing nothing."""
+    """Test that we stop and complain if the target hasn't been stacked yet."""
     target = Target(id="NoStackTarget", frames=[])
     pipeline = AsteroidRecoveryPipeline(MovingObjectConfig())
     with pytest.raises(ValueError, match="stacked_image"):
@@ -96,10 +93,7 @@ def test_process_raises_when_target_has_no_stacked_image():  # ruff: ignore[miss
 
 
 def test_process_confirms_a_moving_source_with_no_ephemeris_match(tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify the pipeline confirms a genuinely moving point source.
-
-    Ends at RATE_LINEARITY_CONFIRMED when no known body matches.
-    """
+    """Test that we find a moving object even if it's not in the database."""
     mocker.patch("astroquery.imcce.Skybot.cone_search", return_value=None)
 
     target = _build_moving_target(tmp_path)
@@ -118,10 +112,7 @@ def test_process_confirms_a_moving_source_with_no_ephemeris_match(tmp_path, mock
 
 
 def test_process_matches_a_moving_source_against_a_known_body(tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify the pipeline reaches EPHEMERIS_MATCHED for a known body.
-
-    SkyBoT returns a known body close to the candidate's mean position.
-    """
+    """Test that we match a moving object to an asteroid in the database."""
     field_table = QTable({
         "Number": [-1],
         "Name": ["2003 XY99"],
@@ -146,7 +137,7 @@ def test_process_matches_a_moving_source_against_a_known_body(tmp_path, mocker):
 
 
 def test_process_excludes_frames_missing_pointing_metadata(tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify frames missing RA/DEC headers are excluded and counted."""
+    """Test that we safely ignore any photos that are missing location data."""
     mocker.patch("astroquery.imcce.Skybot.cone_search", return_value=None)
 
     target = _build_moving_target(tmp_path, include_radec=False)

@@ -1,34 +1,29 @@
-"""Saturation soft-flagging for photometry consumers.
+"""Tools to check if a photo is too bright (overexposed).
 
-Computes the fraction of saturated pixels in a frame or stack, as
-metadata for downstream photometry consumers -- flagged, not used to
-fail or exclude anything, since a partially-saturated frame can still
-be scientifically useful for everything except the saturated stars
-themselves.
+This counts how many pixels are completely maxed out (pure white). We
+don't throw the photo away just because a few stars are too bright, but
+we leave a warning flag so later steps know those specific stars can't
+be measured accurately.
 """
 
 import numpy as np
 
 
 def compute_saturated_pixel_fraction(data: np.ndarray, saturation_threshold: float) -> float:
-    """Return the fraction of pixels at or above saturation_threshold.
+    """Calculate what percentage of the image is completely blown out.
 
     Parameters
     ----------
     data : `numpy.ndarray`
-        The pixel data of the frame or stack to inspect.
+        The actual pixels of the image.
     saturation_threshold : `float`
-        The ADU value at or above which a pixel is considered
-        saturated. This is the caller's responsibility (e.g. derived
-        from the sensor's bit depth), since it varies by camera --
-        there's no single correct ADU constant across the 16-bit ZWO
-        and DSLR-RAW sources this pipeline handles.
+        The brightness level that counts as 'maxed out'. This changes
+        depending on which camera took the picture.
 
     Returns
     -------
     saturated_fraction : `float`
-        The fraction of pixels in data at or above
-        saturation_threshold. Returns 0.0 if data is empty.
+        The percentage of pixels that are too bright (from 0.0 to 1.0).
     """
     if data.size == 0:
         return 0.0
@@ -36,25 +31,19 @@ def compute_saturated_pixel_fraction(data: np.ndarray, saturation_threshold: flo
 
 
 def is_saturation_significant(saturated_fraction: float, flag_threshold: float = 0.001) -> bool:
-    """Return whether the saturated fraction is worth flagging.
+    """Decide if there are enough overexposed pixels to warn the user about it.
 
     Parameters
     ----------
     saturated_fraction : `float`
-        The fraction of saturated pixels, as returned by
-        `compute_saturated_pixel_fraction`.
+        The percentage of maxed-out pixels we found.
     flag_threshold : `float`, optional
-        The fraction at or above which saturation is considered
-        significant, default 0.001 (0.1%). This is an unvalidated
-        placeholder -- unlike the sigma/filter defaults in
-        rejection_thresholds.py, this has not yet been cross-checked
-        against a real session with known saturated stars. Treat it
-        as a starting point, not a derived constant.
+        How much overexposure is 'too much'. Default is 0.1%. (Note: this
+        is just a guess right now and might need to be adjusted later).
 
     Returns
     -------
     is_significant : `bool`
-        `True` if saturated_fraction is at or above flag_threshold,
-        `False` otherwise.
+        True if the image is too bright, False if it's fine.
     """
     return saturated_fraction >= flag_threshold

@@ -1,10 +1,7 @@
-"""SpectroscopyPipeline: orchestrates extraction and calibration.
+"""The master controller for processing spectra.
 
-Wires together the instrument model, spectrum extractor, and
-calibrator to turn detected stellar positions in an image into
-calibrated 1D spectra.
-
-REQ: SR-3.2
+This ties all the other tools together. It takes a raw picture and a list
+of stars, and returns the final, cleaned-up color data (spectra) for each star.
 """
 
 import logging
@@ -33,29 +30,28 @@ logger = logging.getLogger(__name__)
 
 
 class SpectroscopyPipeline:
-    """The main orchestrator for processing spectral images.
+    """The master controller for processing spectra.
 
     Attributes
     ----------
     config : `SpectroscopyConfig`
-        The spectroscopy configuration driving this pipeline.
+        The camera settings.
     instrument : `SpectroscopyInstrument`
-        The physical instrument model derived from `config`.
+        The math model of the camera.
     extractor : `SpectrumExtractor`
-        Extracts 1D pixel profiles from 2D images.
+        The tool that reads brightness from the image.
     calibrator : `SpectrumCalibrator`
-        Maps extracted pixel profiles to calibrated wavelengths.
+        The tool that turns pixel numbers into colors.
     """
 
     def __init__(self, config: SpectroscopyConfig | None = None):  # ruff: ignore[missing-return-type-special-method]
-        """Initialize the pipeline with a configuration object.
+        """Set up the master controller.
 
         Parameters
         ----------
         config : `SpectroscopyConfig`, optional
-            The spectroscopy configuration to use. If `None`,
-            automatically loads the spectroscopy configuration from
-            application settings.
+            The camera settings to use. If you leave this blank, it will
+            load the default settings automatically.
         """
         if config is None:
             from astrometricslib.utilities import ConfigLoader
@@ -65,39 +61,30 @@ class SpectroscopyPipeline:
         self.instrument = SpectroscopyInstrument(config)
         self.extractor = SpectrumExtractor(radius=config.extraction_radius)
         self.calibrator = SpectrumCalibrator(self.instrument)
-        # Zero-order saturation fractions from the most recent
-        # process() call, one per successfully processed star -- read
-        # by callers building a quality summary.
+        # Keeps track of how many stars were too bright (saturated) in the
+        # center. We save this list so other parts of the program can check
+        # the overall image quality later.
         self.last_run_zero_order_saturation_fractions: list[float] = []
 
     def process(
         self, context: AnalysisContext, limit: int = 10, auto_detect_angle: bool = True
     ) -> list[StellarObject]:
-        """Run the main spectroscopy analysis entry point.
-
-        Processes spectral data for stars in the context. Returns
-        enriched StellarObject instances directly.
+        """Process all the stars we found in an image.
 
         Parameters
         ----------
         context : `AnalysisContext`
-            The analysis context holding the image, detected stellar
-            objects, and optional extended target.
+            The picture and the list of stars we found in it.
         limit : `int`, optional
-            Maximum number of stellar objects from `context` to
-            process (default 10).
+            The maximum number of stars to process (default is 10).
         auto_detect_angle : `bool`, optional
-            Whether to auto-detect the dispersion angle from the
-            brightest usable star before extracting each spectrum
-            (default `True`).
+            Whether to try and figure out the exact tilt of the camera
+            automatically (default is True).
 
         Returns
         -------
         processed_stellar_objects : `List[StellarObject]`
-            The successfully processed `StellarObject` instances, each
-            enriched with its extracted and calibrated spectrum. If
-            `context.extended_target` is present and successfully
-            processed, it is inserted at the front of the list.
+            The list of stars, now updated with their color data (spectra).
         """
         results = self.process_image(
             context.image, target_stars=context.stellar_objects[:limit], auto_detect_angle=auto_detect_angle
@@ -109,8 +96,9 @@ class SpectroscopyPipeline:
         ]
         valid_objects = [res["star_source"] for res in results if "error" not in res]
 
-        # Automatically process and integrate extended target
-        # spectrum if found in context
+        # If the user is targeting a large object like a nebula instead of a
+        # star,
+        # we process it automatically using a wider measuring area.
         if context.extended_target:
             try:
                 ext_radius = getattr(context.extended_target, "extraction_radius", 60)
@@ -152,30 +140,25 @@ class SpectroscopyPipeline:
         limit: int = 10,
         auto_detect_angle: bool = True,
     ) -> list[dict[str, Any]]:
-        """Process the image to extract spectra for multiple stars.
+        """Process stars in an image at a lower level than `process`.
 
         Parameters
         ----------
         image : `AstrometricsImage`
-            The image to process.
+            The picture to process.
         target_stars : `list`, optional
-            List of `(x, y)` pixel-position tuples, `StellarObject`
-            instances, or dict-like rows (e.g. from `photutils`). If
-            `None`, no stars are processed and an empty list is
-            returned.
+            A list of stars to process. These can be full data objects or
+            just simple `(x, y)` coordinates.
         limit : `int`, optional
-            Maximum number of stars to process (default 10).
+            The maximum number of stars to process.
         auto_detect_angle : `bool`, optional
-            Whether to auto-detect the dispersion angle once from the
-            best available star before extracting each spectrum
-            (default `True`).
+            Whether to automatically find the camera tilt.
 
         Returns
         -------
         results : `list` [`dict`]
-            One result dict per successfully processed star (see
-            `_process_single_star` for the dict shape). Stars that
-            fail to process are silently skipped.
+            A list of dictionaries containing the raw spectrum data for each
+            star.
         """
         # 1. Detect stars if no targets provided
         if target_stars is None:
@@ -288,10 +271,12 @@ class SpectroscopyPipeline:
                         "intensities": result["intensities"],
                     }
 
-                    # QE correction is only available for cameras with
-                    # a digitized quantum-efficiency curve on file
-                    # (see quantum_efficiency_curves.py) -- cameras
-                    # without one simply don't get this extra key.
+                    # "Quantum Efficiency" (QE) corrects for the fact that
+                    # camera
+                    # sensors see some colors of light better than others.
+                    # If we know the camera's exact QE curve, we fix the data
+                    # here.
+                    # If we don't know the camera, we just skip this step.
                     quantum_efficiency_curve = get_quantum_efficiency_curve(self.config.camera.name)
                     if quantum_efficiency_curve is not None:
                         star.spectrum_data_processed["quantum_efficiency_corrected_intensities"] = (
@@ -336,26 +321,23 @@ class SpectroscopyPipeline:
     def _process_single_star(
         self, image: AstrometricsImage, pos: tuple[float, float], auto_detect_angle: bool = True
     ) -> dict[str, Any]:
-        """Process a single star at the given position.
+        """Process just one star.
 
         Parameters
         ----------
         image : `AstrometricsImage`
-            The image containing the star's spectral trail.
+            The picture to read from.
         pos : `tuple` [`float`, `float`]
-            The `(x, y)` pixel position of the star's zero order.
+            Where the star is `(x, y)`.
         auto_detect_angle : `bool`, optional
-            Whether to auto-detect the dispersion angle from the
-            image before extraction (default `True`).
+            Whether to automatically find the camera tilt.
 
         Returns
         -------
         result : `dict`
-            The extracted/calibrated spectrum and metadata: keys
-            ``"wavelengths"``, ``"intensities"``, ``"target_pos"``,
-            ``"detected_angle"``, ``"config_summary"``,
-            ``"zero_order_saturated_pixel_fraction"``,
-            ``"trail_centerline_px"``, and ``"trail_width_px"``.
+            A dictionary containing the color data (wavelengths and
+            intensities)
+            and other math details about the extraction.
         """
         # 1. Auto-detect angle if requested
         detected_angle = self.config.dispersion_angle_degrees
@@ -440,11 +422,12 @@ class SpectroscopyPipeline:
             wavelengths, intensities = self.calibrator.calibrate(spectrum_1d, offset_px)
             target_pos = pos
 
-        # Zero-order saturation protects wavelength calibration, which
-        # anchors off this position -- reuses the same generic
-        # saturation check already used by stacking and photometry,
-        # cropped to the extraction aperture around the zero-order
-        # position rather than the whole frame.
+        # We need to make sure the center of the star isn't completely maxed
+        # out
+        # (saturated). If the center is just a flat white blob, we won't know
+        # exactly where the star is, which ruins the calibration for the
+        # spectrum.
+        # We check just the small box around the star for this problem.
         aperture_radius = int(self.config.extraction_radius)
         data = image.data
         height, width = data.shape
@@ -468,14 +451,15 @@ class SpectroscopyPipeline:
         }
 
     def detect_dispersion_angle(self, image: AstrometricsImage, star_pos: tuple[float, float]) -> float:
-        """Detect the spectral streak angle relative to base orientation.
+        """Figure out exactly how much the camera is tilted.
 
-        Uses polyfit on the brightest pixels in the dispersion region.
+        It looks at the bright streak of the spectrum and calculates its exact
+        angle.
 
         Returns
         -------
         angle_degrees : `float`
-            The detected dispersion angle, in degrees.
+            The tilt of the camera, in degrees.
         """
         data = image.data
         x_star, y_star = star_pos
@@ -534,11 +518,11 @@ class SpectroscopyPipeline:
     def create_extended_target_object(
         self, extraction_center: tuple[float, float], object_name: str, otype: str, extraction_radius: int
     ) -> StellarObject:
-        """Build a custom StellarObject for an extended target.
+        """Create a data object for a large target like a nebula.
 
-        Calculates the physical dispersion-box coordinates for an
-        extended source (nebula or cluster) with wide-aperture
-        configurations.
+        Because a nebula is large, we have to calculate a much wider
+        rectangular box to capture its light, rather than the thin line
+        we use for a single star.
 
         Parameters
         ----------

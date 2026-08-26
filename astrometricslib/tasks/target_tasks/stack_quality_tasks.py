@@ -1,15 +1,9 @@
-"""Purpose: Post-stack validation decision logic.
+"""Rules for deciding if a stacked image is good enough.
 
-Description: Pure decision logic for the minimum-surviving-frames floor
-and post-stack FWHM/rejection-fraction flagging. Standard and spectral
-stacks get different quality-check shapes (FWHM-based vs
-zero-order-tracking-based) rather than one shared schema, per the finding
-from spectral_registration_quality_analysis.py that a whole-field FWHM
-check doesn't characterize what matters for a spectral trace.
-
-The schema half of the former targetlib/stack_quality.py
-(StackQualitySummary, StackingPipelineQualityMetrics) moved to
-models/quality_summary.py instead.
+This file contains the logic for checking the quality of the final image
+after the stacking process is finished. It checks things like whether the
+final image is blurrier than the original single frames, and whether too
+many pixels had to be thrown out.
 """
 
 # "80%" then "90%" then unfiltered: the two percentiles
@@ -53,34 +47,29 @@ def resolve_filter_wfwhm_with_floor(
     requested_filter_wfwhm: str | None,
     minimum_surviving_frames: int = DEFAULT_MINIMUM_SURVIVING_FRAMES,
 ) -> tuple[str | None, bool]:
-    """Resolve a percentage-based frame filter against a survivor floor.
+    """Make sure we don't throw away too many images when filtering.
 
-    Returns (effective_filter_wfwhm, was_loosened). filter_wfwhm=X% keeps
-    round(num_lights * X / 100) frames deterministically -- Siril doesn't need
-    to run for this to be computed, since a percentage filter always keeps that
-    fraction of the input regardless of which specific frames pass. If the
-    requested percentage would drop the survivor count below the floor, loosens
-    one step at a time through FILTER_WFWHM_LOOSENING_LADDER (matching
-    rejection_threshold_analysis.py's tested grid) until at or above the floor,
-    falling back to unfiltered if even that isn't enough. was_loosened is True
-    whenever the effective setting differs from what was requested, so callers
-    can flag it.
+    If we tell the software to only keep the top 80% sharpest images, but
+    we only have 4 images total, keeping 80% might leave us with too few
+    images to make a good stack. This function checks if our filter rule
+    will leave us with at least a minimum number of frames. If not, it
+    loosens the rule (e.g., from 80% to 90%, or turns it off completely)
+    until we have enough frames.
 
     Parameters
     ----------
     num_lights : `int`
-        Number of light frames the filter is being applied to.
+        The total number of images we're starting with.
     requested_filter_wfwhm : `str` or `None`
-        Requested filter_wfwhm setting, e.g. "80%", or `None` for unfiltered.
+        The rule we want to use (like "80%").
     minimum_surviving_frames : `int`, optional
-        Minimum number of surviving frames the effective setting must keep.
-        Defaults to `DEFAULT_MINIMUM_SURVIVING_FRAMES`.
+        The absolute minimum number of images we need to keep.
 
     Returns
     -------
     result : `tuple`
-        The `(effective_filter_wfwhm, was_loosened)` pair: the filter setting
-        to actually use, and whether it differs from what was requested.
+        A pair containing the rule we should actually use, and a True/False
+        flag saying whether we had to loosen the original rule.
     """
     if requested_filter_wfwhm is None:
         return None, False
@@ -108,18 +97,17 @@ def is_stacked_fwhm_degraded(
     median_input_fwhm: float,
     degradation_ratio: float = DEFAULT_FWHM_DEGRADATION_RATIO,
 ) -> bool:
-    """Check whether the stacked FWHM is worse than expected from the inputs.
+    """Check if the final stacked image is blurrier than it should be.
 
-    A stacked FWHM meaningfully worse than the inputs' own median FWHM suggests
-    a registration problem (misalignment smears the PSF), not just ordinary
-    seeing.
+    Normally, combining images makes them look sharper. If the final image
+    is significantly blurrier than the average original image, it usually
+    means the software failed to align the images correctly before adding
+    them together.
 
     Returns
     -------
     is_degraded : `bool`
-        `True` if `stacked_fwhm` exceeds `median_input_fwhm` scaled by
-        `degradation_ratio`; `False` if `median_input_fwhm` is
-        non-positive.
+        True if the final image is much blurrier than the originals.
     """
     if median_input_fwhm <= 0:
         return False
@@ -130,11 +118,11 @@ def is_rejected_fraction_significant(
     rejected_fraction: float,
     flag_threshold: float = DEFAULT_REJECTED_FRACTION_FLAG_THRESHOLD,
 ) -> bool:
-    """Check whether the rejected-pixel fraction is high enough to flag.
+    """Check if too many pixels were thrown out during stacking.
 
     Returns
     -------
     is_significant : `bool`
-        `True` if `rejected_fraction` is at or above `flag_threshold`.
+        True if the percentage of rejected pixels is above the warning limit.
     """
     return rejected_fraction >= flag_threshold

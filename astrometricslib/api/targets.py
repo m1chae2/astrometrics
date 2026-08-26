@@ -1,19 +1,10 @@
-"""Layer-1 domain high-level interface for the target catalog domain.
+"""Main interface for managing targets in the catalog.
 
-`TargetCatalog` (exposed as `Astrometrics.targets`) is the CRUD entry
-point for the target catalog, plus target-scoped object-management
-operations (`add_frame`, `reindex_frames`,
-`get_calibration_frame_statistics`, `get_header`, `get_frame`,
-`delete_images`). It owns the in-memory target list and touched-id set
-directly -- see its `__init__` -- rather than the high-level
-interface holding them.
-
-Delegates to `astrometricslib.tasks.target_tasks` and
-`astrometricslib.data_access` directly -- Layer 1 may reach into any
-lower layer, since that is what a astrometrics is for. What those lower
-layers must never do is call back up into a registry; see
-`astrometricslib.data_access.persistence_operations`'s module
-docstring for how that direction is enforced.
+`TargetCatalog` allows you to create, read, update, and delete targets.
+It also handles target-specific actions like adding new image frames,
+re-indexing frames, and checking statistics. This class stores the active
+targets in memory and coordinates with lower-level task modules to perform
+work.
 """
 
 import builtins
@@ -37,14 +28,11 @@ class TargetCatalog:
     """
 
     def __init__(self, config: AppConfiguration, butler: object):  # ruff: ignore[missing-return-type-special-method]
-        """Initialize with application config and a butler for persistence.
+        """Initialize with configuration settings and a database manager.
 
-        Owns the in-memory target list and touched-id set directly
-        (rather than the high-level interface holding them), so
-        `data_access.persistence_operations` operates on this catalog
-        without calling back up through it -- avoiding the circular
-        `TargetCatalog` -> `persistence_operations` -> `TargetCatalog`
-        dependency the previous back-reference-only design had.
+        This setup keeps the list of targets and tracked changes right here
+        in memory, which prevents confusing circular dependencies when
+        saving data to disk later.
 
         Parameters
         ----------
@@ -217,12 +205,11 @@ class TargetCatalog:
         reindex_frames(target, prune_missing=prune_missing, butler=butler, refresh_headers=refresh_headers)
 
     def get_header(self, path: str, target: Target | None = None) -> builtins.list[dict[str, str]]:
-        """Extract FITS header card entries, optionally ownership-checked.
+        """Read header information from a FITS image file.
 
-        When `target` is given, verifies `path` belongs to it (as a
-        frame, or the target's processed/stacked/spectral output)
-        before reading; raises if it does not. Without `target`, reads
-        `path` unconditionally.
+        If a `target` is provided, this function will first double-check
+        that the image file actually belongs to that target before reading
+        it to ensure data safety.
 
         Parameters
         ----------
@@ -297,18 +284,11 @@ class TargetCatalog:
         camera_name: str | None = None,
         save: bool = True,
     ) -> dict[str, int]:
-        """Measure and persist per-frame quality for a target's frames.
+        """Measure the image quality of a target's frames before stacking.
 
-        Lets a frame be judged before it is ever stacked. The
-        equivalent per-frame numbers are otherwise written only during
-        registration, so a frame that was never stacked carried no
-        quality evidence -- which is backwards, since those are exactly
-        the frames worth triaging.
-
-        Incremental by default, so an interrupted sweep resumes. See
-        `statistics_operations.measure_frame_input_quality` for the
-        per-frame cost, which is substantial for a whole catalog and
-        much more so with `include_fwhm`.
+        This allows us to evaluate and filter out bad frames early in the
+        process. The checks are incremental, meaning if the process is
+        interrupted, it can pick up where it left off without starting over.
 
         Parameters
         ----------
@@ -344,12 +324,11 @@ class TargetCatalog:
         return counts
 
     def list_camera_names(self) -> dict[str, int]:
-        """Count frames per distinct camera name across the whole catalog.
+        """Find out which cameras were used to take the images in the catalog.
 
-        Intended for discoverability: there is otherwise no way to
-        know what camera names are actually present in the catalog's
-        frame data before choosing one for `run_full_pipeline`'s (or
-        `Astrometrics.process_all_targets`'s) `camera_name` filter.
+        This is helpful when you need to run processing pipelines on images
+        taken by a specific camera, but aren't sure which camera names exist
+        in the data yet.
 
         Returns
         -------
@@ -369,7 +348,7 @@ class TargetCatalog:
         grouped: bool = True,
         camera: str | None = None,
     ) -> object:
-        """Return grouped or flat frame/calibration-match statistics.
+        """Return statistics about how frames match with calibration data.
 
         Parameters
         ----------

@@ -117,6 +117,38 @@ def test_arrays_stay_aligned_when_sigma_clipping_drops_frames():  # ruff: ignore
         assert len(light_curve.timestamps) == len(light_curve.fluxes)
 
 
+def test_a_pre_existing_length_mismatch_is_not_silently_reindexed():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """A star whose arrays never lined up must not be given a fake pairing.
+
+    Some legacy or cross-session-merged stars carry an is_saturated/
+    airmasses array shorter than their timestamps/fluxes -- from before
+    a fix made all four grow together, or from a merge that lost track.
+    Reindexing that short array by position (as if it corresponded 1:1)
+    would pair a flux with some other frame's saturation verdict; the
+    correct behaviour is to leave it empty rather than guess.
+
+    A cohort of well-formed stars supplies the normalization ensemble
+    (so `frame_reference_flux` covers every frame regardless of the
+    one broken star), isolating the mismatch to the one star's own
+    per-frame arrays -- exactly what Pass 2's per-star filtering must
+    handle correctly.
+    """
+    timestamps = [datetime(2026, 7, 20, 22, 0) + timedelta(minutes=5 * i) for i in range(_FRAME_COUNT)]
+    well_formed_stars = [_build_star(f"Star_{i}", [1000.0 + i] * _FRAME_COUNT, timestamps) for i in range(10)]
+    mismatched_star = _build_star("MismatchedStar", [1000.0] * _FRAME_COUNT, timestamps)
+    # Simulate a pre-existing mismatch: is_saturated/airmasses are
+    # shorter than timestamps/fluxes before normalization ever runs.
+    mismatched_star.light_curve.is_saturated = mismatched_star.light_curve.is_saturated[:10]
+    mismatched_star.light_curve.airmasses = mismatched_star.light_curve.airmasses[:10]
+
+    analyzer = _run([*well_formed_stars, mismatched_star], timestamps)
+
+    light_curve = next(star.light_curve for star in analyzer.stellar_objects if star.id == "MismatchedStar")
+    assert len(light_curve.fluxes) == _FRAME_COUNT
+    assert light_curve.is_saturated == []
+    assert light_curve.airmasses == []
+
+
 def test_the_surviving_saturation_flag_belongs_to_its_own_frame():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verify filtering preserves which frame each flag describes.
 

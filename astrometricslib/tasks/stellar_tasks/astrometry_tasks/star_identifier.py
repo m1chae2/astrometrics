@@ -1,13 +1,15 @@
-"""Orchestrate star detection, plate solving, and SIMBAD/Gaia identification.
+"""Detect stars, map them to the sky, and identify their names.
 
-Identification chain for each detected star:
-  1. SIMBAD bulk region query + nearest-neighbour match (≤10 arcsec)
-  2. Gaia DR3 bulk cone search + nearest-neighbour match (≤10 arcsec)
-  3. Position-based fallback ID  FIELD_J{ra:.4f}{dec:+.4f}  (sky coords known)
+This follows a step-by-step process to give every detected star a permanent
+name:
+  1. Search the SIMBAD database (matching stars within 10 arcseconds).
+  2. If SIMBAD fails, search the Gaia DR3 database (matching within 10
+  arcseconds).
+  3. If both fail, name the star based on its coordinates (e.g.,
+  ``FIELD_J{ra:.4f}{dec:+.4f}``).
 
-No star is ever left with id="" or a synthetic Star_N label after
-identification -- every tracked star has a stable, unique catalog or
-position-based identity that survives INSERT OR REPLACE persistence.
+This makes sure every star gets a stable, consistent name before it is saved to
+the database, replacing temporary labels so we don't save duplicates.
 """
 
 import logging
@@ -24,6 +26,7 @@ from astropy.coordinates import SkyCoord
 from astropy.wcs import WCS, FITSFixedWarning
 from astroquery.simbad import Simbad
 
+from astrometricslib.data_access.image_quality_metrics import measure_fwhm_from_data
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.tasks.shared.source_detection_shared import SourceDetector
 from astrometricslib.tasks.stellar_tasks.astrometry_tasks.plate_solver import PlateSolver
@@ -32,6 +35,22 @@ from astrometricslib.utilities.config_loader import AppConfiguration
 from astrometricslib.utilities.exceptions import AstroLibError
 
 logger = logging.getLogger(__name__)
+
+# --- Preparing the Image for Star Detection ---------------------------------
+#
+# The star-finding algorithm assumes background noise is random for
+# every pixel. Color images break this rule because the debayering
+# process interpolates colors, linking neighboring pixels together.
+# This tricks the algorithm into thinking the noise clumps are
+# actually stars. Tests showed this causes thousands of false
+# detections and makes it nearly impossible to match real stars to
+# the catalog.
+#
+# To fix this, we shrink the image to half its size (2x2 averaging)
+# before looking for stars. Tests prove this successfully breaks up
+# the noise clumps without missing any real stars, dropping false
+# detections significantly.
+_COLOR_DETECTION_BIN_FACTOR = 2
 
 # astroquery's default is 1080s (18 min) -- a stalled/slow connection blocks
 # an entire analysis run for that long with no visible progress before
@@ -47,39 +66,29 @@ SIMBAD_LOCK = threading.Lock()
 # Gaia singleton; serialise them with a dedicated lock.
 GAIA_LOCK = threading.Lock()
 
-# --- Gaia remote-query circuit breaker -------------------------------------
+# --- Gaia Connection Safety Switch ------------------------------------------
 #
-# Damage control, not a fix: when ESA's Gaia TAP service is unresponsive
-# every query still burns its full timeout before failing, and the pipeline
-# keeps trying once per field. A full-catalog run on 2026-08-23 made 67
-# remote Gaia calls with a 0% success rate -- 46 cone-search timeouts at
-# 30s, 21 bulk-seed timeouts at 45s -- spending roughly 2,325 seconds of
-# cumulative worker time to retrieve nothing. Measurement that day ruled out
-# every local cause (TCP to gea.esac.esa.int connected in 0.2s, SIMBAD
-# queries over the same network succeeded all run, and a bare
-# ``SELECT TOP 5`` timed out at 60s on both the sync and async endpoints),
-# so the failures are service-side and retrying within a run cannot help.
+# This acts like a circuit breaker to protect the program if the Gaia database
+# servers go offline. Normally, waiting for a dead server to time out over and
+# over causes massive delays.
 #
-# Once tripped, `_query_gaia_region` and `_seed_gaia_cache_for_field` skip
-# the *remote* call only -- local SQLite cache lookups still run, since
-# those work and served 4 hits during that same run. State is deliberately
-# per-process and in-memory: a new run always re-probes the service rather
-# than staying permanently disabled, and worker processes each make their
-# own small number of attempts rather than coordinating through shared
-# storage.
-#
-# Threshold: 3 consecutive failures. High enough not to trip on a single
-# blip, low enough to cap the waste at a few timeouts per process against
-# the observed all-or-nothing failure mode.
+# If the server fails 3 times in a row, the breaker trips and we stop trying
+# to connect for the rest of the run. We still check our local offline cache,
+# but we skip the internet request to save time. Setting the limit to 3 allows
+# for a few normal internet hiccups before giving up.
 GAIA_CONSECUTIVE_FAILURE_LIMIT = 3
 
-# How many of the brightest detected sources are handed to the plate
-# solver. astrometry.net builds its match quads from the brightest
-# stars, so this bounds solve time without affecting whether a field
-# solves; the value is the long-standing one, kept because every field
-# in the catalog has solved with it. It deliberately does NOT bound
-# what the rest of the pipeline sees -- see the note at its use site.
+# The maximum number of stars to send to the plate solver (which figures out
+# where the telescope is pointing). The solver only needs the brightest stars
+# to work. Sending every faint star makes the math take much longer without
+# helping the solve succeed. This limit only applies to solving the image;
+# we still measure the brightness of every star later.
 MAXIMUM_PLATE_SOLVE_SOURCES = 100
+
+# The maximum allowed distance between two star positions to consider them
+# the same physical star. This 10-arcsecond limit is used when matching our
+# detected stars to the SIMBAD/Gaia catalogs, and when merging duplicates.
+CATALOG_MATCH_RADIUS_ARCSEC = 10.0
 
 _gaia_failure_state_lock = threading.Lock()
 _gaia_consecutive_failures = 0
@@ -96,12 +105,12 @@ _gaia_queries_failed = 0
 
 
 def _record_gaia_failure(context: str) -> None:
-    """Count a failed remote Gaia call, tripping the breaker at the limit.
+    """Log a failure to connect to Gaia, possibly triggering the safety switch.
 
     Parameters
     ----------
     context : `str`
-        Short description of the failing call, for the trip log line.
+        What we were trying to do when it failed.
     """
     global _gaia_consecutive_failures, _gaia_circuit_open, _gaia_queries_attempted, _gaia_queries_failed
     with _gaia_failure_state_lock:
@@ -118,7 +127,7 @@ def _record_gaia_failure(context: str) -> None:
 
 
 def _record_gaia_success() -> None:
-    """Reset the consecutive-failure count after a working remote call."""
+    """Reset the failure counter back to zero after a successful connection."""
     global _gaia_consecutive_failures, _gaia_queries_attempted
     with _gaia_failure_state_lock:
         _gaia_queries_attempted += 1
@@ -126,14 +135,13 @@ def _record_gaia_success() -> None:
 
 
 def get_gaia_query_statistics() -> dict[str, int | bool]:
-    """Report this process's cumulative remote Gaia outcomes.
+    """Check how reliable the Gaia connection has been so far.
 
     Returns
     -------
     statistics : `dict` [`str`, `int` or `bool`]
-        ``attempted`` and ``failed`` query counts, plus
-        ``circuit_breaker_tripped``. Counts are per-process and reset by
-        `reset_gaia_circuit_breaker`.
+        How many times we tried to connect, how many times it failed,
+        and whether the safety switch has flipped.
     """
     with _gaia_failure_state_lock:
         return {
@@ -144,25 +152,19 @@ def get_gaia_query_statistics() -> dict[str, int | bool]:
 
 
 def _gaia_remote_queries_disabled() -> bool:
-    """Report whether the breaker has tripped in this process.
+    """Check if the Gaia safety switch has tripped.
 
     Returns
     -------
     disabled : `bool`
-        `True` once `GAIA_CONSECUTIVE_FAILURE_LIMIT` consecutive remote
-        Gaia calls have failed.
+        True if we've failed to connect too many times in a row.
     """
     with _gaia_failure_state_lock:
         return _gaia_circuit_open
 
 
 def reset_gaia_circuit_breaker() -> None:
-    """Clear the breaker so remote Gaia calls are attempted again.
-
-    Intended for tests and for callers that know the service has
-    recovered; ordinary runs get a clean breaker automatically because
-    the state is per-process.
-    """
+    """Reset the safety switch so we can try connecting to Gaia again."""
     global _gaia_consecutive_failures, _gaia_circuit_open, _gaia_queries_attempted, _gaia_queries_failed
     with _gaia_failure_state_lock:
         _gaia_consecutive_failures = 0
@@ -171,42 +173,41 @@ def reset_gaia_circuit_breaker() -> None:
         _gaia_queries_failed = 0
 
 
+def reset_gaia_query_statistics() -> None:
+    """Reset the tracking stats back to zero for a new image.
+
+    This does NOT reset the safety switch. If Gaia was offline for the
+    last image, we assume it's still offline and don't bother trying again.
+    """
+    global _gaia_queries_attempted, _gaia_queries_failed
+    with _gaia_failure_state_lock:
+        _gaia_queries_attempted = 0
+        _gaia_queries_failed = 0
+
+
 def _run_with_daemon_thread_timeout(query_function: Callable[[], Any], timeout_seconds: float) -> Any:
-    """Run a zero-argument callable on a daemon thread, enforcing a timeout.
+    """Run a background task and strictly enforce a time limit.
 
-    Behaves like ``ThreadPoolExecutor(max_workers=1).submit(query_function)
-    .result(timeout=timeout_seconds)``, with one deliberate difference: the
-    worker thread is created with ``daemon=True``.
-
-    astroquery's Gaia calls set no socket-level timeout of their own, so a
-    call that hangs past `timeout_seconds` leaves its thread permanently
-    blocked on the network read -- `query_gaia_region` and
-    `seed_gaia_cache_for_field` already give up on schedule by abandoning
-    that thread, but a `ThreadPoolExecutor` thread is non-daemon, and
-    Python joins every non-daemon thread in a process before that process
-    is allowed to exit. During the 2026-08-23 Gaia outage that join is what
-    stranded worker processes for hours after they had already finished
-    all their work: each one had an abandoned, still-blocked Gaia thread
-    holding its interpreter open. A daemon thread is exempt from that join,
-    so the process exits normally with the still-running query simply
-    abandoned to the OS.
+    Normally, if a network connection stalls forever, the program won't
+    be allowed to close until that connection finishes. By running it this
+    way, we can abandon a stuck connection and still shut down cleanly.
 
     Parameters
     ----------
     query_function : `Callable`
-        Zero-argument callable to run on the worker thread.
+        The function to run.
     timeout_seconds : `float`
-        Seconds to wait before giving up.
+        How many seconds to wait before giving up.
 
     Returns
     -------
     result : `Any`
-        Whatever `query_function` returned.
+        Whatever the function returned.
 
     Raises
     ------
     TimeoutError
-        If `query_function` has not completed within `timeout_seconds`.
+        If the function has not finished within `timeout_seconds`.
     """
     result_queue: queue.Queue = queue.Queue(maxsize=1)
 
@@ -230,22 +231,59 @@ def _run_with_daemon_thread_timeout(query_function: Callable[[], Any], timeout_s
     raise payload
 
 
-class StarIdentifier:
-    """Orchestrate star detection, plate solving, and SIMBAD identification.
+def _block_average(data: np.ndarray, factor: int) -> np.ndarray:
+    """Shrink an image by averaging groups of pixels together.
 
-    Detection is handled by `SourceDetector`, plate solving by
-    `PlateSolver` (Astrometry.net), and star identification by
-    querying SIMBAD.
+    Parameters
+    ----------
+    data : `numpy.ndarray`
+        The image data.
+    factor : `int`
+        How many pixels to group together (e.g., 2 means 2x2 blocks).
+
+    Returns
+    -------
+    binned : `numpy.ndarray`
+        The shrunk image.
     """
+    height, width = data.shape
+    cropped_height = height - height % factor
+    cropped_width = width - width % factor
+    cropped = data[:cropped_height, :cropped_width]
+    return cropped.reshape(cropped_height // factor, factor, cropped_width // factor, factor).mean(
+        axis=(1, 3)
+    )
+
+
+def _rescale_source_centroids(sources: list[dict], factor: int) -> None:
+    """Convert star locations found in a shrunk image back to normal size.
+
+    Parameters
+    ----------
+    sources : `list` [`dict`]
+        The list of stars found.
+    factor : `int`
+        The same shrink factor used in `_block_average`.
+    """
+    offset = (factor - 1) / 2.0
+    for source in sources:
+        for x_key, y_key in (("x_centroid", "y_centroid"), ("xcentroid", "ycentroid")):
+            if x_key in source and source[x_key] is not None:
+                source[x_key] = source[x_key] * factor + offset
+            if y_key in source and source[y_key] is not None:
+                source[y_key] = source[y_key] * factor + offset
+
+
+class StarIdentifier:
+    """The main tool for finding stars, mapping the image, and naming them."""
 
     def __init__(self, config: AppConfiguration | None = None):  # ruff: ignore[missing-return-type-special-method]
-        """Initialize the StarIdentifier with a configuration object.
+        """Set up the tools.
 
         Parameters
         ----------
         config : `AppConfiguration`, optional
-            Application configuration to use. If `None` (default), a
-            new configuration instance is loaded.
+            The system settings.
         """
         if config is None:
             from astrometricslib.utilities.config_loader import get_configuration
@@ -275,21 +313,15 @@ class StarIdentifier:
 
     @staticmethod
     def _build_stellar_objects_from_sources(sources: list[dict]) -> list[StellarObject]:
-        """Build one `StellarObject` per detected source.
+        """Create a `StellarObject` for each dot of light we found.
 
-        Converts numpy scalar values in each source dict to native
-        Python types for serialization safety, and assigns each object
-        a temporary ``Star_{n}`` id and name.  This id is a safe
-        non-empty placeholder that makes every object addressable in
-        the ``stellar_object_map`` inside `VariabilityAnalyzer.process`
-        and in the SQLite ``INSERT OR REPLACE`` step; it is overwritten
-        by a real catalog id as soon as SIMBAD or Gaia identifies the
-        star (see `identify_stars_with_wcs`).
+        We give every star a temporary name like "Star_1", "Star_2".
+        Later, we'll try to replace these with real database names.
 
         Returns
         -------
         stellar_objects : `list` [`StellarObject`]
-            One `StellarObject` per input source, in the same order.
+            The list of star objects ready for identification.
         """
         stellar_objects = []
         for i, src in enumerate(sources):
@@ -320,40 +352,75 @@ class StarIdentifier:
         return stellar_objects
 
     def get_astrometric_residual_rms_arcsec(self) -> float | None:
-        """Return the RMS of catalog-match separations for the last solve.
+        """Check how accurate our map is.
 
-        This is the standard measure of a plate solution's quality: how
-        far, on average, the solved WCS puts a star from where the
-        catalog says it is. A few tenths of an arcsecond is a good
-        solution; several arcseconds means the WCS is fitting badly even
-        though the solve "succeeded".
+        This measures the average distance between where our map says a
+        star should be, and where the official database says it actually is.
+        A small number (less than 1) is good.
 
         Returns
         -------
         residual_rms_arcsec : `float` or `None`
-            RMS separation in arcsec, or `None` when no star was matched
-            against a catalog.
+            The average error distance, or None if we didn't match any stars.
         """
         separations = self.catalog_match_separations_arcsec
         if not separations:
             return None
         return round(math.sqrt(sum(value**2 for value in separations) / len(separations)), 4)
 
-    def _calculate_scale_hints(self, image_data_or_path: Any) -> tuple[float | None, float | None]:
-        """Estimate a pixel-scale search window from equipment metadata.
+    def detect_stars(self, data: np.ndarray, is_color_frame: bool = False) -> tuple[list[dict], list[dict]]:
+        """Find all the dots of light in the image and remove duplicates.
 
-        Tries the image's own FITS header first (`FOCALLEN`/
-        `XPIXSZ`/`PIXSCAL`), falling back to the app configuration's
-        focal length if the header doesn't have it. Returns a narrow
-        +/-5% window around the calculated scale (`PlateSolver`
-        relaxes it further on its own if that fails to solve).
+        This uses different tricks depending on whether it's a color image
+        or a black-and-white (monochrome) image.
+
+        Parameters
+        ----------
+        data : `numpy.ndarray`
+            The image to search.
+        is_color_frame : `bool`, optional
+            True if this started as a color image. We handle color images
+            differently to avoid false detections from debayering noise.
+
+        Returns
+        -------
+        sources : `list` [`dict`]
+            Everything we found that looks like a star.
+        unique_sources : `list` [`dict`]
+            The same list, but with duplicates removed.
+        """
+        if is_color_frame and data is not None:
+            binned = _block_average(data, _COLOR_DETECTION_BIN_FACTOR)
+            sources = self.detector.detect(binned)
+            unique_sources = self.detector.deduplicate(sources)
+            _rescale_source_centroids(sources, _COLOR_DETECTION_BIN_FACTOR)
+            _rescale_source_centroids(unique_sources, _COLOR_DETECTION_BIN_FACTOR)
+            return sources, unique_sources
+
+        try:
+            measured_fwhm = measure_fwhm_from_data(data) if data is not None else None
+        except Exception as fwhm_error:
+            logger.debug("Could not measure detection FWHM, keeping the configured default: %s", fwhm_error)
+            measured_fwhm = None
+        if measured_fwhm is not None:
+            logger.debug(f"Matching detection kernel to measured FWHM: {measured_fwhm:.2f}px")
+            self.detector.fwhm = measured_fwhm
+
+        sources = self.detector.detect(data)
+        unique_sources = self.detector.deduplicate(sources)
+        return sources, unique_sources
+
+    def _calculate_scale_hints(self, image_data_or_path: Any) -> tuple[float | None, float | None]:
+        """Guess how zoomed in the image is based on the telescope settings.
+
+        This helps the math solver run much faster because it doesn't have
+        to guess the zoom level.
 
         Returns
         -------
         scale_lower, scale_upper : `float` or `None`
-            The lower/upper bounds of the pixel-scale search window
-            in arcsec/pixel, or `(None, None)` if no usable equipment
-            metadata was found.
+            A rough guess of the zoom scale, or None if the settings are
+            missing.
         """
         focal_len = None
         pixel_size = None
@@ -389,45 +456,30 @@ class StarIdentifier:
         center_dec: float | None = None,
         maximum_identified_stars: int | None = None,
     ) -> tuple[list[StellarObject], WCS | None]:
-        """Run the main pipeline: detect, solve, then identify.
+        """Run the full process: find the stars, map the image, and name them.
 
         Parameters
         ----------
         image_data_or_path : `AstrometricsImage`, `numpy.ndarray`, or `str`
-            The image data, an `AstrometricsImage`, or a path to a
-            FITS file to process.
+            The image we are analyzing.
         attempt_plate_solving : `bool`, optional
-            Whether to attempt plate solving (default `True`).
-        center_ra : `float`, optional
-            RA hint, in degrees, for the field center (default
-            `None`).
-        center_dec : `float`, optional
-            Dec hint, in degrees, for the field center (default
-            `None`).
+            If True, figure out exactly where the telescope was pointing.
+        center_ra, center_dec : `float`, optional
+            Hints about where the telescope was pointing.
         maximum_identified_stars : `int`, optional
-            Ceiling on how many detected stars are identified and
-            returned, brightest first. Identification cost grows
-            roughly linearly with the count, so this trades
-            completeness for runtime. `None` (the default) defers to
-            the ``Processing.Astrometry.maximum_identified_stars``
-            configuration setting, which is itself unlimited by
-            default; pass 0 to force no limit regardless of
-            configuration. Has no effect on plate solving, which uses
-            its own `MAXIMUM_PLATE_SOLVE_SOURCES` brightest subset.
+            A cap on how many stars we look up in the database.
 
         Returns
         -------
         stellar_objects : `list` [`StellarObject`]
-            The detected and (where possible) identified stars.
+            The final list of named stars.
         wcs : `astropy.wcs.WCS` or `None`
-            The solved world coordinate system, or `None` if plate
-            solving was skipped or failed.
+            The map data, or None if the mapping process failed.
 
         Raises
         ------
         AstroLibError
-            Raised if plate solving is attempted and fails to solve
-            the field.
+            If plate solving is attempted and the field cannot be solved.
         """
         # 1. Load Image
         if isinstance(image_data_or_path, str):
@@ -441,7 +493,8 @@ class StarIdentifier:
             data = image_data_or_path
             path = None
 
-        if data is not None and data.ndim == 3:
+        is_color_frame = data is not None and data.ndim == 3
+        if is_color_frame:
             if data.shape[0] in [3, 4]:
                 data = np.mean(data, axis=0)
             else:
@@ -449,8 +502,7 @@ class StarIdentifier:
 
         # 2. Detect Stars
         logger.info("Detecting stars...")
-        sources = self.detector.detect(data)
-        unique_sources = self.detector.deduplicate(sources)
+        sources, unique_sources = self.detect_stars(data, is_color_frame=is_color_frame)
         logger.debug(f"Detected {len(sources)} sources, {len(unique_sources)} unique.")
         self.sources_detected = len(unique_sources)
         self.catalog_match_separations_arcsec = []
@@ -505,7 +557,7 @@ class StarIdentifier:
                 logger.info(f"Solving field with {len(solver_sources)} of {len(unique_sources)} sources...")
                 h, w = data.shape
 
-                # REQ: SR-3.1 - Determine scale hints dynamically. We
+                # Determine scale hints dynamically. We
                 # use a very narrow 5% window here because the
                 # PlateSolver will relax it by another 20%.
                 scale_lower, scale_upper = self._calculate_scale_hints(image_data_or_path)
@@ -552,23 +604,16 @@ class StarIdentifier:
         height: int,
         radius_deg_override: float | None = None,
     ) -> tuple[Any, SkyCoord] | tuple[None, None]:
-        """Run bulk SIMBAD region query centered on coordinates.
+        """Download a chunk of the SIMBAD database for our specific image area.
 
-        The search radius is `radius_deg_override` when given (e.g. a
-        tight radius bounding the actual detected star positions,
-        rather than the whole field of view). Otherwise it's derived
-        from the field of view when a `wcs` is available (capped at 1
-        degree), or a default 12-arcmin radius is used. Non-stellar
-        rows (galaxies, nebulae, star clusters) are filtered out via
-        `_filter_stellar_rows` before returning, since a detected
-        point source can never legitimately be one of those.
+        We filter out galaxies and nebulae because our algorithm only
+        cares about stars.
 
         Returns
         -------
         result_table, simbad_coords : `astropy.table.Table`, `SkyCoord`
-            The stellar-filtered result table and its coordinates as
-            a `SkyCoord` array, or `(None, None)` if the query
-            failed, returned nothing, or had no stellar-type rows.
+            The list of known stars and their coordinates, or None if the
+            download failed.
         """
         with SIMBAD_LOCK:
             # Calculate a reasonable radius based on image size (if
@@ -595,7 +640,7 @@ class StarIdentifier:
             try:
                 Simbad.reset_votable_fields()
                 Simbad.ROW_LIMIT = 5000  # Prevent massive result sets
-                # REQ: AST-1.1 - common names
+                # common names
                 Simbad.add_votable_fields("flux(V)", "sp_type", "ids", "ra(d)", "dec(d)", "otype")
 
                 coord = SkyCoord(ra_center * u.deg, dec_center * u.deg)
@@ -628,7 +673,7 @@ class StarIdentifier:
         logger.info(f"SIMBAD table columns: {result_table.colnames}")
         logger.info("Creating SkyCoord for SIMBAD matches...")
         try:
-            # REQ: AST-1.2 - Use actual column names from SIMBAD response
+            # Use actual column names from SIMBAD response
             ra_col = next((c for c in ["ra", "RA_d", "RA"] if c in result_table.colnames), "ra")
             dec_col = next((c for c in ["dec", "DEC_d", "DEC"] if c in result_table.colnames), "dec")
 
@@ -655,25 +700,26 @@ class StarIdentifier:
         radius_deg: float = 0.5,
         max_magnitude: float = 18.0,
     ) -> int:
-        """Seed the local Gaia DR3 SQLite cache for a field position.
+        """Download and save Gaia DR3 stars for a specific area of the sky.
 
-        Checks if the target region is already recorded in ``cached_regions``;
-        if not, downloads sources brighter than ``max_magnitude`` and writes
-        them to ``gaia_sources``, adding an entry to ``cached_regions``.
+        This checks if we've already downloaded stars for this area and saved
+        them in our local database (`cached_regions`). If we haven't, it
+        downloads stars brighter than the `max_magnitude` limit and saves them
+        so we don't have to download them again later.
 
         Parameters
         ----------
         ra_center, dec_center : `float`
-            Field center coordinates in degrees.
+            The center of the image area in degrees.
         radius_deg : `float`, optional
-            Search radius in degrees (capped at 1.0°, default 0.5°).
+            How wide of an area to search.
         max_magnitude : `float`, optional
-            Magnitude threshold (default 18.0).
+            How faint of a star to care about.
 
         Returns
         -------
         count : `int`
-            Number of Gaia sources cached or loaded.
+            How many stars we downloaded or found in the cache.
         """
         import os
         import sqlite3
@@ -726,8 +772,9 @@ class StarIdentifier:
         except Exception as e:
             logger.warning(f"Error checking cached_regions: {e}")
 
-        # Same breaker as the cone-search path: the region-already-cached
-        # check above is local and still runs, only the download is skipped.
+        # Use the same safety switch as the main search. We still check the
+        # local database above, we just skip the internet download part if the
+        # connection has failed too many times.
         if _gaia_remote_queries_disabled():
             logger.debug(
                 "Skipping Gaia cache seed for field (%.4f, %.4f): circuit breaker open.",
@@ -810,29 +857,23 @@ class StarIdentifier:
         dec_center: float,
         radius_deg: float,
     ) -> tuple[Any, SkyCoord] | tuple[None, None]:
-        """Run a bulk Gaia DR3 cone search with local SQLite caching.
+        """Search the Gaia DR3 database for stars in a circular area.
 
-        Used as a fallback for stars that SIMBAD could not identify.
-        Gaia DR3 contains ~1.8 billion sources, far exceeding SIMBAD's
-        ~15 million, so most faint field stars missed by SIMBAD will be
-        present in Gaia.
-
-        Results are automatically cached locally in SQLite under the app's
-        library path (`catalogs/catalog_cache.db`) so subsequent runs in
-        the same sky region require no remote network requests.
+        We check our local cache first. If it's not there, we download from
+        the internet and save it for next time.
 
         Parameters
         ----------
         ra_center, dec_center : `float`
-            Field center in degrees.
+            The center of the image area in degrees.
         radius_deg : `float`
-            Cone-search radius in degrees.
+            How wide of an area to search.
 
         Returns
         -------
         result_table, gaia_coords : `astropy.table.Table`, `SkyCoord`
-            The result table and its coordinates, or `(None, None)` if
-            the query failed or returned no rows.
+            The list of stars and their coordinates, or None if the search
+            failed.
         """
         import os
         import sqlite3
@@ -904,8 +945,9 @@ class StarIdentifier:
         except Exception as e:
             logger.warning(f"Failed checking local Gaia SQLite cache: {e}")
 
-        # Cache miss. Everything above this point is local and still runs
-        # with the breaker open; only the remote fetch below is skipped.
+        # We didn't find the stars in our local database. Like before, we
+        # only skip this next part (the internet download) if the connection
+        # safety switch has been tripped.
         if _gaia_remote_queries_disabled():
             logger.debug(
                 "Skipping remote Gaia query at %.4f, %.4f: circuit breaker open for this process.",
@@ -1040,40 +1082,32 @@ class StarIdentifier:
         width: int,
         height: int,
     ) -> list[StellarObject]:
-        """Identify each of `stellar_objects` against SIMBAD then Gaia.
+        """Name every detected star using SIMBAD, then Gaia, then position.
 
-        Identification chain for every detected star:
+        Here is the order we follow to name a star:
 
-        1. **SIMBAD** — bulk region query + nearest-neighbour at ≤10 arcsec.
-        2. **Gaia DR3** — bulk cone search fallback for stars SIMBAD did
-           not match. Gaia DR3 (~1.8 billion sources) covers most field
-           stars absent from SIMBAD's ~15 million.
-        3. **Position-based ID** — ``FIELD_J{ra:.4f}{dec:+.4f}`` for stars
-           with a solved sky position but still no catalog match.  Gives
-           every star a stable, unique, non-synthetic identity without
-           inventing a catalog name.
-
-        No star is left with ``id=""`` or a ``Star_N`` synthetic label
-        after this method returns -- every star that can be plate-solved
-        gets either a real catalog id or a position-anchored one.
+        1. **SIMBAD**: We check SIMBAD first because it has the most famous
+        stars.
+        2. **Gaia DR3**: If SIMBAD doesn't know the star, we check Gaia, which
+           has over a billion faint stars.
+        3. **Position**: If neither database knows the star, we name it based
+           on its coordinates (like `FIELD_J123.4+45.6`). This gives the star
+           a permanent name without making up a fake one.
 
         Parameters
         ----------
         stellar_objects : `list` [`StellarObject`]
-            The detected stars to identify, each with a pixel
-            centroid already recorded in `star_data`.
+            The stars we want to name.
         wcs : `astropy.wcs.WCS`
-            The solved (or reused) world coordinate system for the
-            image `stellar_objects` was detected on.
+            The map data that tells us where in the sky we are looking.
         width, height : `int`
-            The image dimensions, used to derive the SIMBAD query
-            radius from the field of view.
+            The size of the image, which helps us know how big an area to
+            search.
 
         Returns
         -------
         stellar_objects : `list` [`StellarObject`]
-            The same `stellar_objects` list, mutated in place with
-            identification results, returned for convenience chaining.
+            The updated list of named stars.
         """
         if not stellar_objects:
             return stellar_objects
@@ -1088,16 +1122,14 @@ class StarIdentifier:
             return stellar_objects
 
         # ------------------------------------------------------------------
-        # Step 0: project every star's pixel centroid to sky coordinates up
-        # front, so the catalog query region can be bounded to where the
-        # detected stars actually are instead of the whole field of view.
-        # On a sparse or off-center field this can shrink the query radius
-        # (and therefore the result set SIMBAD/Gaia have to return) by a
-        # large factor, which matters: an unnecessarily large bulk region
-        # query is slow and, worse, a bigger surface for the kind of
-        # network stall/timeout seen on real (Veil Nebula) analysis runs.
-        # sky_positions maps stellar_object -> (ra, dec) for all stars
-        # whose pixel centroid was successfully plate-solved.
+        # Step 0: Convert every star's position from pixels (X/Y) to sky
+        # coordinates (RA/Dec) right at the beginning. This allows us to
+        # ask SIMBAD/Gaia only for the specific area where our stars are,
+        # rather than the entire picture. If the stars are only in one
+        # corner of the image, this makes the download much smaller and
+        # faster, and prevents the internet connection from timing out.
+        # `sky_positions` stores the RA/Dec for every star we successfully
+        # located.
         # ------------------------------------------------------------------
         sky_positions: dict[int, tuple[float, float]] = {}  # id(obj) -> (ra, dec)
         for stellar_object in stellar_objects:
@@ -1158,7 +1190,7 @@ class StarIdentifier:
 
             if simbad_coords is not None and result_table is not None:
                 idx, d2d, _ = star_coord.match_to_catalog_sky(simbad_coords)
-                if d2d < 10 * u.arcsec:
+                if d2d < CATALOG_MATCH_RADIUS_ARCSEC * u.arcsec:
                     self._apply_simbad_match(stellar_object, result_table[idx], ra, dec)
                     # The separation between where the solved WCS put this
                     # star and where the catalog says it is, which is the
@@ -1220,9 +1252,13 @@ class StarIdentifier:
                 star_coord = SkyCoord(ra * u.deg, dec * u.deg)
                 idx, d2d, _ = star_coord.match_to_catalog_sky(gaia_coords)
 
-                if d2d < 10 * u.arcsec:
+                if d2d < CATALOG_MATCH_RADIUS_ARCSEC * u.arcsec:
                     row = gaia_table[idx]
                     self._apply_gaia_match(stellar_object, row, ra, dec)
+                    # Same reason as the SIMBAD match above: the residual
+                    # RMS must cover every catalog match, not just
+                    # whichever catalog happened to resolve a star first.
+                    self.catalog_match_separations_arcsec.append(float(np.ravel(d2d.arcsec)[0]))
                     logger.info(f"  Gaia match: {stellar_object.name} at ({ra:.4f}, {dec:.4f})")
                 else:
                     still_unmatched.append(stellar_object)
@@ -1236,11 +1272,11 @@ class StarIdentifier:
         )
 
         # ------------------------------------------------------------------
-        # Step 3: Position-based ID for any star still without a catalog
-        # identity.  FIELD_J{ra:.4f}{dec:+.4f} is stable across runs
-        # (same star at the same sky position always gets the same ID),
-        # unique within the field, and unambiguously non-catalog so the
-        # UI can choose to show/hide them separately.
+        # Step 3: Give a coordinate-based name to any star we couldn't find
+        # in the catalogs. Using the format FIELD_J{ra:.4f}{dec:+.4f} ensures
+        # that the same star will get the exact same name every time we run
+        # the program. It also makes it obvious that this isn't a famous star,
+        # so the user interface can easily hide them if desired.
         # ------------------------------------------------------------------
         for stellar_object in still_unmatched:
             ra, dec = sky_positions.get(id(stellar_object), (None, None))
@@ -1265,15 +1301,11 @@ class StarIdentifier:
         width: int = 1000,
         height: int = 1000,
     ):
-        """Query SIMBAD for the field and match detected sources.
+        """Ask SIMBAD for stars in the image area and match them up.
 
-        With a `wcs`, delegates to `identify_stars_with_wcs` for full
-        per-star identification. Without one, falls back to matching
-        only the single star nearest the image center against the
-        nearest stellar-type SIMBAD entry to the RA/Dec hint (SIMBAD's
-        row order is not distance- or relevance-sorted, so using
-        `result_table[0]` here would assign an arbitrary, unrelated
-        catalog entry as the star's identity).
+        If we successfully mapped the image, we name every star. If the map
+        failed, we just try to name the star closest to the center of the image
+        using our best guess of where the telescope was pointing.
         """
         if not self.stellar_objects:
             return
@@ -1318,18 +1350,15 @@ class StarIdentifier:
 
     @staticmethod
     def _filter_stellar_rows(result_table):  # ruff: ignore[missing-type-function-argument, missing-return-type-static-method]
-        """Restrict `result_table` to rows classified as individual stars.
+        """Filter the SIMBAD results to only include individual stars.
 
-        Excludes galaxies, nebulae, and star clusters using SIMBAD's
-        OTYPE field (falling back to presence of a spectral type), so
-        extended/non-stellar catalog objects are never eligible to be
-        matched against a point source.
+        This removes galaxies, nebulae, and star clusters. Our algorithm only
+        looks for small dots of light, so it won't find a whole galaxy anyway.
 
         Returns
         -------
         result_table : `astropy.table.Table`
-            The input table restricted to rows classified as
-            individual stars, or unchanged if no OTYPE column exists.
+            The list with only single stars included.
         """
         otype_col = next((c for c in ["OTYPE", "otype"] if c in result_table.colnames), None)
         sp_type_col = next((c for c in ["SP_TYPE", "sp_type"] if c in result_table.colnames), None)
@@ -1349,9 +1378,11 @@ class StarIdentifier:
             spectral_type_val = row[sp_type_col] if sp_type_col else None
             has_spectral_type = not _is_masked(spectral_type_val) and str(spectral_type_val).strip() != ""
 
-            # SIMBAD short OTYPE for an individual star is '*', 'V*',
-            # 'WD*', etc. Star clusters use 'Cl*' and must not be
-            # treated as individual stars.
+            # In SIMBAD, codes for individual stars end in '*' (like 'V*' or
+            # 'WD*').
+            # The code 'Cl*' stands for a star cluster, which is a group of
+            # stars,
+            # so we want to filter those out.
             is_individual_star = otype.endswith("*") and "CL" not in otype
             stellar_mask.append(is_individual_star or "STAR" in otype or has_spectral_type)
 
@@ -1359,7 +1390,7 @@ class StarIdentifier:
         return result_table[stellar_mask]
 
     def _apply_simbad_match(self, stellar_object, match, ra, dec):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
-        """Extract SIMBAD fields from `match` into `stellar_object`."""
+        """Copy the star details from SIMBAD into our star object."""
         main_id = "Unknown"
         for col in ["main_id", "MAIN_ID", "ID", "id"]:
             if col in match.colnames:
@@ -1392,7 +1423,7 @@ class StarIdentifier:
             spectral_type = "Unknown"
 
         magnitude = 0.0
-        # REQ: AST-1.3 - Map SIMBAD flux (magnitude)
+        # Map SIMBAD flux (magnitude)
         for col in ["V", "FLUX_V", "flux_v", "flux(V)"]:
             if col in match.colnames:
                 val = match[col]
@@ -1417,7 +1448,7 @@ class StarIdentifier:
         )
 
     def _apply_gaia_match(self, stellar_object: StellarObject, match: Any, ra: float, dec: float):  # ruff: ignore[missing-return-type-private-function]
-        """Extract Gaia DR3 fields from `match` into `stellar_object`."""
+        """Copy the star details from Gaia into our star object."""
         source_id = None
         for col in ["DESIGNATION", "designation", "source_id", "SOURCE_ID"]:
             if col in match.colnames:

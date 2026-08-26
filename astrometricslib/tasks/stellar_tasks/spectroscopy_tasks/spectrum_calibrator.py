@@ -1,7 +1,8 @@
-"""SpectrumCalibrator: wavelength mapping and spectral processing.
+"""Tools for mapping pixels to colors (wavelengths).
 
-Maps extracted pixel indices to calibrated wavelengths and applies
-smoothing to raw spectral intensity profiles.
+Converts a row of pixels from the image into actual light wavelengths
+(like red, green, blue) based on the physics of the camera's grating.
+It also provides tools to smooth out the jagged data into clean curves.
 """
 
 import logging
@@ -19,13 +20,12 @@ logger = logging.getLogger(__name__)
 
 
 class SpectrumCalibrator:
-    """Map pixel indices to wavelengths and perform calibration.
+    """Turns pixel numbers into actual colors (wavelengths).
 
     Attributes
     ----------
     instrument : `SpectroscopyInstrument`
-        The instrument model providing the pixel-to-wavelength
-        conversion used by `calibrate`.
+        The math model that tells us how to convert pixels to colors.
     """
 
     def __init__(self, instrument: SpectroscopyInstrument):  # ruff: ignore[missing-return-type-special-method]
@@ -34,26 +34,26 @@ class SpectrumCalibrator:
         Parameters
         ----------
         instrument : `SpectroscopyInstrument`
-            The instrument model to use for wavelength conversion.
+            The math model for the camera.
         """
         self.instrument = instrument
 
     def calibrate(self, pixels: np.ndarray, offset_px: float) -> tuple[np.ndarray, np.ndarray]:
-        """Return (wavelengths, intensities) for the extracted pixels.
+        """Figure out what color each pixel represents.
 
         Parameters
         ----------
         pixels : `np.ndarray`
-            Extracted 1D intensity profile.
+            The brightness values for a line of pixels.
         offset_px : `float`
-            Starting pixel offset relative to the zero-order star.
+            Where this line of pixels starts, relative to the main star.
 
         Returns
         -------
         wavelengths : `np.ndarray`
-            Calibrated wavelength (nm) for each pixel in `pixels`.
+            The calculated color (in nm) for each pixel.
         intensities : `np.ndarray`
-            The input `pixels` array, returned unchanged.
+            The original brightness values, untouched.
         """
         wavelengths = []
         for i in range(len(pixels)):
@@ -64,30 +64,27 @@ class SpectrumCalibrator:
         return np.array(wavelengths), pixels
 
     def apply_smoothing(self, intensities: np.ndarray, window: int = 5) -> np.ndarray:
-        """Apply a boxcar (moving-average) smoothing.
+        """Smooth out a jagged graph by averaging nearby points.
 
         Parameters
         ----------
         intensities : `np.ndarray`
-            Raw spectral intensity profile to smooth.
+            The jagged data to smooth.
         window : `int`, optional
-            Width of the boxcar smoothing kernel, in samples (default
-            5).
+            How many nearby points to average together (default is 5).
 
         Returns
         -------
         smoothed_intensities : `np.ndarray`
-            The smoothed intensity profile, or `intensities` unchanged
-            if it is shorter than `window`.
+            The clean, smoothed-out data.
 
         Notes
         -----
-        Box1DKernel(window) is the same moving-average kernel
-        previously applied via np.convolve(mode="same"); astropy's
-        convolve additionally interpolates NaN samples and, with
-        boundary="extend", renormalizes at the array edges instead of
-        zero-padding, so edge samples are no longer artificially
-        damped.
+        We use a smart smoothing tool here instead of a basic one. A basic
+        tool pretends the data outside the edges is zero, which artificially
+        drags the ends of the graph down. This tool extends the edge values
+        outward, keeping the ends of the graph accurate. It also handles bad
+        (dead) pixels safely.
         """
         if len(intensities) < window:
             return intensities

@@ -224,7 +224,7 @@ def test_meridian_flip_is_detected():  # ruff: ignore[missing-return-type-undocu
     for frame, side in zip(target.frames, ["EAST", "EAST", "WEST", "WEST"], strict=True):
         frame.pier_side = side
 
-    assert detect_meridian_flips(target) == [2]
+    assert detect_meridian_flips(target.frames) == [2]
 
 
 def test_meridian_flip_shift_is_not_called_a_bump():  # ruff: ignore[missing-return-type-undocumented-public-function]

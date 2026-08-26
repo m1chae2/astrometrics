@@ -1,11 +1,8 @@
-"""Modular interface for plate solving using Astrometry.net.
+"""Tools to figure out exactly what part of the sky an image shows.
 
-Supports both local and online (nova.astrometry.net) solving.
-
-Notes
------
-Implements requirement REQ: SR-3.1 (isolated local-solve execution
-environment).
+This uses a tool called Astrometry.net to map the stars in an image to
+known coordinate systems. It tries to do this on the computer first,
+and if that fails, it tries asking the internet.
 """
 
 import http.client
@@ -24,26 +21,15 @@ from astroquery.astrometry_net import AstrometryNet
 
 logger = logging.getLogger(__name__)
 
-# Transport-level failures reaching nova.astrometry.net, as distinct from
-# the server answering "I could not solve this field". Only the former is
-# worth repeating: a dropped connection says nothing about the image,
-# whereas an genuine unsolvable field (e.g. a lunar disk with no star
-# pattern) fails identically no matter how many times it is uploaded.
+# A list of network errors that are safe to retry. We only want to retry
+# if the internet connection dropped or glitched. If the solver fails because
+# the image is genuinely unsolvable (like a picture of the moon), retrying
+# won't help, so we don't include those errors here.
 #
-# Observed on the 2026-08-23 full-catalog run: one M 13 session's
-# reference frame died on
-# ``('Connection aborted.', RemoteDisconnected('Remote end closed
-# connection without response'))``. The very next solve in the same block
-# succeeded, but that session had already lost its WCS -- and with it all
-# 100 of its stars, which were dropped for having no sky position.
-#
-# Note that the builtin `TimeoutError` is deliberately absent: astroquery
-# raises it when the *solve job* exceeds ``solve_timeout``, which is a
-# statement about the field's difficulty, not the network. That exclusion
-# is also why `socket.timeout` cannot be listed here -- since Python 3.10
-# it *is* `TimeoutError`, so including it would silently make every
-# solve-job timeout retryable. Genuine network read timeouts still match
-# via the requests-style name check in `_is_transient_network_error`.
+# Note that we do NOT include `TimeoutError`. The solver library uses that
+# error to say "I tried for a long time but couldn't solve it," not "the
+# internet disconnected." If we retried timeouts, we'd waste time on
+# impossible images.
 _TRANSIENT_NETWORK_ERROR_TYPES: tuple[type[BaseException], ...] = (
     ConnectionError,
     http.client.BadStatusLine,
@@ -52,15 +38,13 @@ _TRANSIENT_NETWORK_ERROR_TYPES: tuple[type[BaseException], ...] = (
     socket.gaierror,
 )
 
-# 3 attempts total. The observed failure recovered on the immediately
-# following request, so the goal is only to ride out a single dropped
-# connection -- not to keep hammering a service that is genuinely down,
-# which would multiply an already slow step across every frame.
+# The maximum number of times to retry if the internet connection fails.
+# We stop at 3 so we don't get stuck forever if the website is actually down.
 ONLINE_SOLVE_ATTEMPT_LIMIT = 3
 
-# Seconds before retrying, doubled each attempt (2s, then 4s). Short
-# enough not to stall a batch run, long enough to let a momentary
-# server-side hiccup clear.
+# The base number of seconds to wait before retrying a failed connection.
+# It doubles each time (2 seconds, 4 seconds, etc.) to give the server
+# time to recover if it's overloaded.
 ONLINE_SOLVE_RETRY_BACKOFF_SECONDS = 2.0
 
 # Cumulative per-process count of solve uploads, retries included, so a
@@ -71,39 +55,39 @@ _plate_solve_attempts = 0
 
 
 def get_plate_solve_attempt_count() -> int:
-    """Report how many solve uploads this process has made.
+    """Check how many times we've tried to solve an image.
 
     Returns
     -------
     attempts : `int`
-        Total attempts, including retries after transient failures.
+        The number of tries, including times we had to retry because
+        the internet dropped.
     """
     return _plate_solve_attempts
 
 
 def reset_plate_solve_statistics() -> None:
-    """Clear the solve-attempt tally, so a run counts only its own work."""
+    """Reset the retry counter back to zero for a new run."""
     global _plate_solve_attempts
     _plate_solve_attempts = 0
 
 
 def _is_transient_network_error(error: BaseException) -> bool:
-    """Report whether an exception looks like a retryable transport fault.
+    """Check if an error is just a temporary internet glitch.
 
-    `requests` wraps the underlying transport error in its own
-    `ConnectionError`, and astroquery in turn may re-wrap that, so the
-    exception's ``__cause__``/``__context__`` chain is walked rather than
-    only checking the outermost type.
+    We don't want to retry if the image is truly broken, but we DO want
+    to retry if the Wi-Fi just blinked off for a second. We dig through
+    the error message to see what the root cause was.
 
     Parameters
     ----------
     error : `BaseException`
-        The exception raised by an online solve attempt.
+        The error the program threw.
 
     Returns
     -------
     is_transient : `bool`
-        `True` if the failure is transport-level and worth retrying.
+        True if it's a temporary internet glitch we should retry.
     """
     seen: set[int] = set()
     current: BaseException | None = error
@@ -130,19 +114,19 @@ def _is_transient_network_error(error: BaseException) -> bool:
 def _call_with_transient_retry(
     solve_call: Callable[[], fits.Header | None], *, description: str
 ) -> fits.Header | None:
-    """Run an online solve, repeating it only on transient network faults.
+    """Try to solve via the internet, retrying if the connection drops.
 
     Parameters
     ----------
     solve_call : `Callable`
-        Zero-argument callable performing one solve attempt.
+        The block of code that actually tries the internet solve.
     description : `str`
-        Short label for this solve strategy, used in log messages.
+        A name for this attempt so we can log it cleanly.
 
     Returns
     -------
     header : `astropy.io.fits.Header` or `None`
-        The solved header, or `None` if every attempt failed.
+        The solved map data, or None if it completely failed.
     """
     global _plate_solve_attempts
     for attempt_number in range(1, ONLINE_SOLVE_ATTEMPT_LIMIT + 1):
@@ -170,19 +154,19 @@ def _call_with_transient_retry(
 
 
 class PlateSolver:
-    """Handle plate solving by interfacing with Astrometry.net.
+    """The tool that manages all attempts to map out an image.
 
-    Supports both local and online solvers.
+    It tries the local computer first, then the internet as a backup.
     """
 
     def __init__(self, api_key: str | None = None):  # ruff: ignore[missing-return-type-special-method]
-        """Initialize the plate solver.
+        """Set up the solver.
 
         Parameters
         ----------
         api_key : `str`, optional
-            Astrometry.net API key used for online solving. If `None`
-            (default), online solving is disabled.
+            The password needed to use the online service. If we don't
+            have one, we just won't try the internet backup.
         """
         self.api_key = api_key
         self.astrometry_net = AstrometryNet()
@@ -197,35 +181,30 @@ class PlateSolver:
         image_height: int = 1000,
         **kwargs,  # ruff: ignore[missing-type-kwargs]
     ) -> fits.Header | None:
-        """Solve a field, trying local and online strategies in order.
+        """Try everything possible to figure out where the image is pointing.
 
-        Tries a local solve first, then a source-based online solve,
-        then falls back to a full image upload.
+        We try three things in order:
+        1. Run the solver locally on this computer (fastest).
+        2. Send just the dots (stars) to the internet (saves bandwidth).
+        3. Upload the whole giant image to the internet (last resort).
 
         Parameters
         ----------
         image_path : `str`, optional
-            Path to the FITS image to solve (default `None`).
+            The path to the image file on the hard drive.
         sources : `list` [`dict`], optional
-            Detected source list used for source-based online solving
-            (default `None`).
+            The list of stars we already found in the image.
         image_width : `int`, optional
-            Image width in pixels, used for source-based solving
-            (default 1000).
+            How wide the image is (needed for the "just dots" internet solve).
         image_height : `int`, optional
-            Image height in pixels, used for source-based solving
-            (default 1000).
+            How tall the image is (needed for the "just dots" internet solve).
         **kwargs
-            Additional solver options forwarded to the underlying
-            local or online solve methods (e.g. ``scale_units``,
-            ``scale_lower``, ``scale_upper``, ``center_ra``,
-            ``center_dec``, ``radius``, ``solve_timeout``).
+            Extra settings like hints about where the telescope was pointing.
 
         Returns
         -------
         header : `astropy.io.fits.Header` or `None`
-            The solved WCS FITS header, or `None` if no solve
-            strategy succeeded.
+            The final map metadata, or None if we gave up.
         """
         # astroquery.astrometry_net defaults verbose=True, which prints
         # progress dots and dumps the full source table to stdout. Silence
@@ -251,13 +230,12 @@ class PlateSolver:
         return None
 
     def _solve_locally(self, image_path: str, **kwargs) -> fits.Header | None:  # ruff: ignore[missing-type-kwargs]
-        """Attempt to solve using the local 'solve-field' command.
+        """Try to solve the image using the program installed on this computer.
 
         Returns
         -------
         header : `astropy.io.fits.Header` or `None`
-            The solved WCS FITS header, or `None` if the local
-            solve did not produce a result.
+            The map metadata if it worked, or None if it failed.
         """
         from astrometricslib.utilities.config_loader import get_configuration
 
@@ -282,7 +260,7 @@ class PlateSolver:
             config_lines.append("autoindex")
         config_lines.append(f"cpulimit {cpulimit}")
 
-        # REQ: SR-3.1 - Isolated execution environment
+        # Isolated execution environment
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_cfg_path = os.path.join(tmp_dir, "astrometry.cfg")
             with open(tmp_cfg_path, "w") as tmp_cfg:
@@ -341,19 +319,12 @@ class PlateSolver:
                 if header is not None:
                     return header
 
-                # A hint that excludes the truth makes the field
-                # unsolvable no matter how good the data is, so a failed
-                # hinted solve is retried blind rather than given up on.
-                #
-                # The hints come from FOCALLEN/XPIXSZ, and this library's
-                # own catalog shows how wrong they can be: the DSLR's
-                # "Nikkor 300mm" images actually resolve at ~404mm, so
-                # the computed 2.68 arcsec/px window of 2.03-3.37
-                # excluded M 31's true 1.996 arcsec/px entirely. Same
-                # image, same solver, on 2026-08-24: constrained did not
-                # solve, blind solved in seconds against
-                # index-tycho2-10. Four DSLR targets were lost this way
-                # in one run, each with a perfectly good stack.
+                # Try again without any hints if the first attempt fails.
+                # If the user's telescope settings are slightly wrong (like
+                # forgetting to account for a focal reducer), the strict hints
+                # will actually prevent the solver from finding the right
+                # answer.
+                # A blind retry fixes this by searching everywhere.
                 if applied_hints:
                     logger.info("Hinted local solve failed; retrying blind (no scale or position hints).")
                     blind_command = [*cmd, working_path]
@@ -369,22 +340,21 @@ class PlateSolver:
     def _run_solve_field(
         self, command: list[str], working_directory: str, timeout: int
     ) -> fits.Header | None:
-        """Run one `solve-field` invocation and return its solved header.
+        """Run the actual shell command to launch the local solver program.
 
         Parameters
         ----------
         command : `list` [`str`]
-            The full `solve-field` argv to execute.
+            The exact terminal command we want to run.
         working_directory : `str`
-            Directory `solve-field` writes its outputs into.
+            The temporary folder where it can dump its math files.
         timeout : `int`
-            Seconds before the invocation is abandoned.
+            How long to let it think before we kill it.
 
         Returns
         -------
         header : `astropy.io.fits.Header` or `None`
-            The solved WCS header, or `None` when this invocation did
-            not produce one.
+            The map metadata if it worked, or None.
         """
         logger.info(f"Executing: {' '.join(command)}")
         result = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
@@ -406,13 +376,13 @@ class PlateSolver:
         height: int,
         **kwargs,  # ruff: ignore[missing-type-kwargs]
     ) -> fits.Header | None:
-        """Attempt an online solve from a list of detected sources.
+        """Try to solve by sending just the star locations to the internet.
 
         Returns
         -------
         header : `astropy.io.fits.Header` or `None`
-            The solved WCS FITS header, or `None` if no API key is
-            configured or the online solve did not succeed.
+            The map metadata if it worked, or None if we don't have an
+            API key or it failed.
         """
         if not self.api_key:
             return None
@@ -424,29 +394,22 @@ class PlateSolver:
         )
 
     def _solve_online_image(self, image_path: str, **kwargs) -> fits.Header | None:  # ruff: ignore[missing-type-kwargs]
-        """Attempt an online solve by uploading the full image.
+        """Try to solve by uploading the whole image to the internet.
 
         Returns
         -------
         header : `astropy.io.fits.Header` or `None`
-            The solved WCS FITS header, or `None` if no API key is
-            configured or the online solve did not succeed.
+            The map metadata if it worked, or None.
         """
         if not self.api_key:
             return None
 
-        # astrometry.net's uploader runs source extraction over the
-        # array as loaded, and its weighting step is written for a 2D
-        # frame: handed a colour stack it raises "weights.ndim (2) must
-        # match len(axes) (3)" and the solve is lost to a crash rather
-        # than to the data. Every DSLR stack in this library is
-        # (3, H, W), so the fallback path was unusable for exactly the
-        # targets most likely to need it.
+        # The online solver at astrometry.net only accepts black-and-white (2D)
+        # images. If we send it a color (3D) image, it will crash.
         #
-        # Collapsing to a mean across channels rather than picking one
-        # keeps every photon that contributes to a star's centroid,
-        # which is all a solve needs -- colour carries no astrometric
-        # information.
+        # To fix this, we squash the color channels together by taking the
+        # average. This turns it into a black-and-white image but keeps all
+        # the starlight in the right place so the solver can still work.
         upload_path = image_path
         temporary_directory = None
         try:

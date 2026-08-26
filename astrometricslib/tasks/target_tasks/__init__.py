@@ -1,1 +1,1 @@
-"""Algorithmic orchestration for the target/stacking domain."""
+"""Tasks for combining (stacking) images and managing targets."""

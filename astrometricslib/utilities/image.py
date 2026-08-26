@@ -1,7 +1,6 @@
 """AstrometricsImage: The primary data container for astronomical images.
 
 Wraps astropy.io.fits, providing standardized access to data and metadata.
-REQ: SR-2.2
 """
 
 import logging

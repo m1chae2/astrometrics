@@ -1,1 +1,1 @@
-"""Algorithmic orchestration for the moving-object/asteroid-recovery domain."""
+"""Tools and steps for finding moving objects like asteroids."""

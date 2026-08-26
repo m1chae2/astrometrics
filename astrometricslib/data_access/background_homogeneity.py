@@ -1,9 +1,8 @@
-"""Per-frame FITS reads for the session background-homogeneity check.
+"""Tools to check how bright the sky background is in an image.
 
-The pure decision logic that operates on the resulting in-memory
-values (detect_background_split) lives in
-tasks/target_tasks/background_homogeneity_tasks.py instead --
-everything in this module opens a FITS file from disk.
+This file only handles reading the image data from the hard drive.
+The actual math to decide if the background is changing too much is
+kept separately in the target tasks folder.
 """
 
 import numpy as np
@@ -21,31 +20,21 @@ _SATURATION_ADU_THRESHOLD = 65000.0
 
 
 def measure_frame_background_level(path: str) -> float | None:
-    """Return a frame's sigma-clipped median background level.
+    """Calculate the average brightness of the sky background in an image.
 
-    Uses the full frame, matching exactly the method the
-    DEFAULT_GAP_RATIO_THRESHOLD above was validated against.
+    This ignores the stars and only measures the dark background part
+    of the image.
 
     Parameters
     ----------
     path : `str`
-        The filesystem path to the FITS frame to measure.
+        The file path to the image we want to check.
 
     Returns
     -------
-    median_background : `Optional[float]`
-        The sigma-clipped median background level, in the same units
-        as the raw ADU. Returns `None` if the frame has no data.
-
-    Notes
-    -----
-    A central-crop/memmap shortcut was tried to cut the ~1.4s/frame
-    cost, but these cameras' FITS files use BZERO/BSCALE header
-    scaling, which astropy can't memory-map (raises ValueError) --
-    would need a raw partial read plus manual scale application to be
-    a real optimization, not attempted here. At ~1.4s/frame this adds
-    real but bounded overhead (e.g. ~100s for a 70-frame session),
-    comparable to the stacking job itself.
+    median_background : `float` or `None`
+        The average background brightness number. Returns None if the
+        file is empty.
     """
     with fits.open(path, memmap=False) as hdul:
         data = hdul[0].data
@@ -59,23 +48,22 @@ def measure_frame_background_level(path: str) -> float | None:
 
 
 def measure_frame_saturated_pixel_fraction(path: str) -> float | None:
-    """Return the fraction of a raw frame's pixels at or above saturation.
+    """Calculate what percentage of the image is completely blown out (white).
 
-    A sibling fact to measure_frame_background_level, gathered with the same
-    file-open/mono-flatten pattern so a caller already paying that per-frame
-    I/O cost (e.g. the background-homogeneity check) can compute both facts
-    from one already-open frame's data.
+    Cameras can only record so much light before a pixel maxes out and
+    just records pure white (saturation). This checks how much of the
+    image has hit that maximum limit.
 
     Parameters
     ----------
     path : `str`
-        The filesystem path to the FITS frame to measure.
+        The file path to the image to check.
 
     Returns
     -------
-    saturated_fraction : `Optional[float]`
-        The fraction of pixels at or above the saturation threshold.
-        Returns `None` if the frame has no data.
+    saturated_fraction : `float` or `None`
+        A number between 0.0 and 1.0 representing the percentage of blown out
+        pixels. Returns None if the file is empty.
     """
     with fits.open(path, memmap=False) as hdul:
         data = hdul[0].data

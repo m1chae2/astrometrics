@@ -1,9 +1,6 @@
-"""Algorithmic leaves shared across the target/stellar/moving-object domains.
+"""Tools that are used by multiple different parts of the program.
 
-Neither `saturation_analysis` (target-quality checks used by stellar
-pipelines) nor `source_detection_shared` (point-source detection used
-by target-, stellar-, and moving-object-domain code) is really
-domain-specific -- their prior location under `target_tasks`/
-`stellar_tasks` respectively was what produced the bidirectional
-`target_tasks` <-> `stellar_tasks` import cycle.
+For example, finding stars in an image is a step needed by both the
+regular target pipeline and the asteroid-finding pipeline. We put those
+shared tools here so both sides can use them without getting tangled up.
 """

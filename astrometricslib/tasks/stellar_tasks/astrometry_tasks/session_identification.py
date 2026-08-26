@@ -1,10 +1,8 @@
-"""Resolve a WCS and identify stars once per observing session.
+"""Figure out what stars are in an image sequence.
 
-`identify_session_stars` is the single entry point both the
-photometry and spectroscopy pipelines call to turn a session's
-reference frame into a WCS plus a list of SIMBAD-identified stars,
-reusing any WCS already present in the frame's FITS header instead of
-always plate-solving from scratch.
+This tool looks at the first image in a sequence (the "reference frame"),
+maps it to the sky, and identifies all the stars. It's smart enough to
+re-use existing map data if the image already has it, saving a lot of time.
 """
 
 import logging
@@ -49,11 +47,10 @@ MIN_STARS_TO_VERIFY_REUSED_WCS = 20
 
 
 def _write_wcs_to_header(path: str, wcs: WCS) -> None:
-    """Merge `wcs`'s header cards into the FITS file at `path` in place.
+    """Save the calculated map data back into the image file.
 
-    Mirrors the writeback already performed by the astrometry branch
-    of `pipeline_tasks.analyze_target` so a future run against the
-    same file can reuse this solve instead of re-solving.
+    This means the next time we load this image, we won't have to
+    waste time re-calculating everything.
     """
     if not path or not os.path.exists(path):
         return
@@ -80,54 +77,37 @@ def resolve_frame_wcs(
     write_back: bool = True,
     ignore_existing_wcs: bool = False,
 ) -> tuple[WCS | None, bool, bool]:
-    """Resolve a WCS for `image`, reusing an existing header WCS when possible.
+    """Figure out the sky map (WCS) for an image.
 
-    Checks `image.wcs` (auto-populated from the FITS header on load)
-    first; if it's already a valid celestial solution, it's reused
-    with no plate-solve at all. Otherwise, if `allow_solve`, a fresh
-    solve is attempted via `star_identifier.solver`, using the same
-    scale-hint estimation `StarIdentifier.process_image` uses. On a
-    successful fresh solve, the result is written back to `image`'s
-    FITS header (when `write_back`) so a later call against the same
-    file can reuse it too.
+    It tries to be lazy and use the map already saved in the image file.
+    If there isn't one, it calculates a new one from scratch and saves it.
 
     Parameters
     ----------
     image : `AstrometricsImage`
-        The frame to resolve a WCS for.
+        The image we want to map.
     star_identifier : `StarIdentifier`
-        Provides the configured `PlateSolver` and scale-hint
-        estimation used for a fresh solve.
+        The tool that does the heavy lifting to identify stars.
     allow_solve : `bool`, optional
-        If `False`, only an existing header WCS can be returned; no
-        plate-solve is ever attempted (default `True`). Used to
-        forbid solving non-reference frames independently.
+        If False, we just check the file and give up if the map isn't
+        already there. We don't try to calculate it from scratch.
     center_ra, center_dec : `float`, optional
-        RA/Dec hints, in degrees, for the field center (default
-        `None`).
+        Hints about where the telescope was pointing.
     sources : `list` [`dict`], optional
-        Detected source list, used for a source-based online solve
-        fallback if a local solve fails (default `None`).
+        A list of stars we already found in the image.
     write_back : `bool`, optional
-        Whether to write a freshly-solved WCS back to `image`'s FITS
-        header (default `True`).
+        Whether we should save our newly calculated map into the image file.
     ignore_existing_wcs : `bool`, optional
-        If `True`, skip the header-WCS reuse path entirely and always
-        plate-solve (default `False`). Used by
-        `identify_session_stars` to re-derive a WCS after a reused
-        header solution failed catalog verification -- `image.wcs` is
-        still populated in that case, so without this the same
-        untrustworthy solution would just be handed back again.
+        If True, we ignore any saved map and force it to calculate a new one.
 
     Returns
     -------
     wcs : `astropy.wcs.WCS` or `None`
-        The resolved WCS, or `None` if no header WCS existed and
-        either solving wasn't allowed or it failed.
+        The finished map data, or None if it failed.
     reused_existing_header_wcs : `bool`
-        `True` if an existing header WCS was reused without solving.
+        True if we were lazy and just used the saved map.
     solve_attempted : `bool`
-        `True` if a fresh plate-solve was actually attempted.
+        True if we actually ran the complex math to calculate a new map.
     """
     if not ignore_existing_wcs and image.wcs is not None and image.wcs.is_celestial:
         # NOTE: is_celestial is a *structural* check (does this WCS have
@@ -172,36 +152,28 @@ def resolve_frame_wcs(
 
 
 def _catalog_matched_count(stellar_objects: list[StellarObject]) -> int:
-    """Count stars resolved to a real catalog identity.
-
-    Uses `is_catalog_identified`, which both `_apply_simbad_match` and
-    `_apply_gaia_match` set, rather than the presence of a spectral
-    type -- a Gaia match records its spectral type as ``"Unknown"``,
-    so a spectral-type test would silently miscount Gaia-identified
-    stars as unidentified.
+    """Count how many stars we successfully looked up in the database.
 
     Returns
     -------
     matched : `int`
-        How many of `stellar_objects` carry a catalog identity.
+        The number of stars we positively identified.
     """
     return sum(1 for star in stellar_objects if star.is_catalog_identified)
 
 
 def _reused_wcs_looks_untrustworthy(stellar_objects: list[StellarObject]) -> bool:
-    """Report whether a reused header WCS matched too few catalog stars.
+    """Check if the saved map in the image file is actually garbage.
 
-    A structurally-valid but astrometrically inaccurate header WCS
-    projects stars far enough from their true sky positions that they
-    fall outside the 10 arcsec SIMBAD/Gaia match radius, so almost
-    nothing identifies. That collapse is the signal this looks for.
+    Sometimes an image has a saved map, but it's completely wrong.
+    We can tell because when we try to look up the stars using that map,
+    none of them match the real database.
 
     Returns
     -------
     untrustworthy : `bool`
-        `True` if there were enough stars to judge by and the catalog
-        match fraction fell below
-        `MIN_CATALOG_MATCH_FRACTION_FOR_REUSED_WCS`.
+        True if the saved map is so bad we need to throw it out and
+        recalculate it.
     """
     if len(stellar_objects) < MIN_STARS_TO_VERIFY_REUSED_WCS:
         return False
@@ -234,55 +206,46 @@ def identify_session_stars(
     max_detections: int | None = None,
     write_back: bool = True,
 ) -> SessionIdentificationResult:
-    """Detect and identify the stars on one session's reference frame.
+    """Find and name all the stars in the first image of a sequence.
 
-    Detects sources on `reference_image`, resolves its WCS (reusing
-    an existing header solution when present, per `resolve_frame_wcs`),
-    and — when a WCS is available — runs full SIMBAD identification
-    against every detected star via `StarIdentifier.identify_stars_with_wcs`,
-    not just the single star nearest the image center.
+    This looks at the image, maps it out, and then checks the database
+    to figure out the name of every single star it can see.
 
     Parameters
     ----------
     reference_image : `AstrometricsImage`
-        The session's reference frame to detect and identify stars on.
+        The image we are analyzing.
     star_identifier : `StarIdentifier`
-        Provides source detection, the plate solver, and SIMBAD
-        identification.
+        The tool that does the math and database lookups.
     center_ra, center_dec : `float`, optional
-        RA/Dec hints, in degrees, for the field center (default
-        `None`).
+        Hints about where the telescope was pointing.
     max_detections : `int`, optional
-        Maximum number of detected sources to identify, ranked by flux.
-        `None` (the default) defers to
-        ``Processing.Astrometry.maximum_identified_stars``, which is
-        unlimited by default; pass 0 to force no limit regardless of
-        configuration.
-
-        These stars become the photometry comparison ensemble's seed
-        population, so this is the ceiling that decides how much the
-        ensemble has to choose from. It used to be a hardcoded 100,
-        which is why a reference frame carrying 4,794 detected stars
-        still built its ensemble from 60 of 100 -- and why filtering
-        *within* that pool could never help.
+        If we find 5,000 stars, looking them all up might take forever.
+        This puts a cap on how many of the brightest stars we identify.
     write_back : `bool`, optional
-        Whether to write a freshly-solved WCS back to the reference
-        frame's FITS header (default `True`).
+        Whether to save our calculated map data back into the image file.
 
     Returns
     -------
     result : `SessionIdentificationResult`
-        The resolved WCS, identified stars, and identification
-        quality counters for this session.
+        A bundle containing the map data, the list of identified stars,
+        and some stats about how well the process worked.
     """
     data = reference_image.data
-    if data is not None and data.ndim == 3:
+    is_color_frame = data is not None and data.ndim == 3
+    if is_color_frame:
         import numpy as np
 
         data = np.mean(data, axis=0) if data.shape[0] in (3, 4) else np.mean(data, axis=-1)
 
-    sources = star_identifier.detector.detect(data)
-    unique_sources = star_identifier.detector.deduplicate(sources)
+    # See StarIdentifier.detect_stars: a colour session reference frame
+    # needs the same block-averaging treatment `process_image` gives the
+    # astrometry pass's stacked image, for the same reason -- a raw,
+    # never-debayered single light (the common case here) has no
+    # correlated-interpolation-noise problem and this branch is a no-op
+    # for it, but a reference frame that does arrive as a colour cube
+    # would otherwise hit the same false-detection failure mode.
+    _sources, unique_sources = star_identifier.detect_stars(data, is_color_frame=is_color_frame)
     sources_detected = len(unique_sources)
 
     # An explicit argument wins over configuration; an explicit 0 means

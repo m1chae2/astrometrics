@@ -114,8 +114,10 @@ class AppConfiguration:
                 "generate_rejmap": "true",
                 "background_homogeneity_check_enabled": "true",
             },
-            # 0 means no limit; see get_maximum_identified_stars.
-            "Processing.Astrometry": {"maximum_identified_stars": "0"},
+            # 500; see get_maximum_identified_stars for why this isn't 0
+            # (unlimited) despite that having been this setting's first
+            # default.
+            "Processing.Astrometry": {"maximum_identified_stars": "500"},
         }
         for section, values in defaults.items():
             if section not in self.app_config:
@@ -282,17 +284,33 @@ class AppConfiguration:
     def get_maximum_identified_stars(self) -> int | None:
         """Return the ceiling on how many detected stars are identified.
 
-        Unlimited by default: the detected sources are real stars, not
-        noise, and discarding them silently loses data. Measured on the
-        2026-08-25 catalog run, NGC 2244's stacked frame detected 7,280
-        sources of which 5,154 (71%) matched SIMBAD entries within 10
-        arcsec, and its 5-sigma detection count sits far below the star
-        density expected at its galactic latitude of -2.2 degrees.
+        Defaults to 500, brightest first. The detected sources are real
+        stars, not noise, and discarding them silently loses data --
+        measured on the 2026-08-25 catalog run, NGC 2244's stacked frame
+        detected 7,280 sources of which 5,154 (71%) matched SIMBAD
+        entries within 10 arcsec, and its 5-sigma detection count sits
+        far below the star density expected at its galactic latitude of
+        -2.2 degrees. That observation argued for no limit at all, which
+        was this setting's first default.
 
-        Identification is not free, though: every star above this
-        ceiling is cross-matched against the catalogs and persisted, so
-        cost grows roughly linearly with the count. This exists so a
-        caller who cares more about runtime than completeness can trade
+        Unlimited turned out to be the wrong default, though: this same
+        ceiling also bounds `identify_session_stars`'s seed population
+        for photometry (see that function's docstring), and on
+        2026-08-25 NGC 6888 seeded 2,439 stars this way across a
+        166-frame session -- two photometry workers reached ~6GB RSS
+        each, exhausted an 8GB swap, and were OOM-killed by the kernel.
+        500 keeps a comfortable margin over
+        `variability_analyzer.TARGET_ENSEMBLE_SIZE` (100, the
+        normalization ensemble's own target size, itself chosen because
+        60 bright stars measurably beat 201 fainter ones) while capping
+        the worst case a deep field can hand the seeding/identification
+        path. A caller who wants NGC 2244's full completeness back, and
+        has the memory budget for it, can still set this to 0.
+
+        Identification is not free: every star above this ceiling is
+        cross-matched against the catalogs and persisted, so cost grows
+        roughly linearly with the count. This exists so a caller who
+        cares more about runtime (or memory) than completeness can trade
         one for the other explicitly, rather than the pipeline making
         that choice for them.
 
@@ -305,9 +323,9 @@ class AppConfiguration:
         maximum : `int` or `None`
             The maximum number of stars to identify, brightest first, or
             `None` for no limit. A configured value of 0 (or a negative
-            or unparseable one) also means no limit.
+            or unparseable one) means no limit.
         """
-        val = self.get_value("Processing.Astrometry", "maximum_identified_stars", fallback="0")
+        val = self.get_value("Processing.Astrometry", "maximum_identified_stars", fallback="500")
         try:
             maximum = int(str(val).strip())
         except TypeError, ValueError:
@@ -650,8 +668,6 @@ class AppConfiguration:
     def get_min_altitude(self) -> float:
         """Return the minimum allowed altitude for telescope slews.
 
-        REQ: OBS-1.1
-
         Returns
         -------
         min_altitude : `float`
@@ -664,8 +680,6 @@ class AppConfiguration:
 
     def get_max_altitude(self) -> float:
         """Return the maximum allowed altitude for telescope slews.
-
-        REQ: OBS-1.1
 
         Returns
         -------

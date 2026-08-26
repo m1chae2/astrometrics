@@ -1,6 +1,8 @@
-"""Coordinate loading, plate-solving, and catalog identification.
+"""The main tool that figures out what we're looking at.
 
-Handles star detection in visual/photometric fields.
+This coordinates all the different steps needed to map out an image:
+finding the stars, running the math to figure out the exact coordinates,
+and checking the database to identify what objects are in the picture.
 """
 
 import logging
@@ -17,19 +19,20 @@ logger = logging.getLogger(__name__)
 
 
 class AstrometryPipeline:
-    """Shared orchestrator for all image analysis workflows.
+    """The manager that runs the whole process from start to finish.
 
-    Handles the common steps: load -> detect -> solve -> identify.
+    It loads the image, finds the stars, figures out the coordinates,
+    and identifies the objects.
     """
 
     def __init__(self, app_config: AppConfiguration | None = None):  # ruff: ignore[missing-return-type-special-method]
-        """Initialize the pipeline with a configuration object.
+        """Set up the pipeline using the program's settings.
 
         Parameters
         ----------
         app_config : `AppConfiguration`, optional
-            Application configuration to use. If `None` (default), the
-            global configuration is loaded via `get_configuration`.
+            The settings to use. If you leave this blank, it will just
+            use the default system settings.
         """
         if app_config is None:
             from astrometricslib.utilities.config_loader import get_configuration
@@ -46,27 +49,23 @@ class AstrometryPipeline:
         target_ra: float | None = None,
         target_dec: float | None = None,
     ) -> AnalysisContext:
-        """Backwards compatibility alias for `process`.
+        """Old name for the 'process' function (kept so old code still works).
 
         Parameters
         ----------
         image_or_path : `AstrometricsImage` or `str`
-            The image object or path to the FITS file.
+            The image we want to look at, or the file path to it.
         attempt_plate_solving : `bool`, optional
-            Whether to attempt plate solving (default `True`).
+            Whether we should try to figure out the map coordinates.
         target_ra : `float`, optional
-            Target RA hint from library (default `None`).
+            A hint for the horizontal coordinate (Right Ascension).
         target_dec : `float`, optional
-            Target Dec hint from library (default `None`).
+            A hint for the vertical coordinate (Declination).
 
         Returns
         -------
         analysis_context : `AnalysisContext`
-            The context produced by `process` for the given image.
-
-        See Also
-        --------
-        process
+            The results of running the pipeline on this image.
         """
         return self.process(image_or_path, attempt_plate_solving, target_ra, target_dec)
 
@@ -77,23 +76,25 @@ class AstrometryPipeline:
         target_ra: float | None = None,
         target_dec: float | None = None,
     ) -> AnalysisContext:
-        """Load image, detect stars, solve field, and identify via SIMBAD.
+        """Run the whole pipeline on an image.
 
         Parameters
         ----------
         image_or_path : `AstrometricsImage` or `str`
-            The image object or path to the FITS file.
+            The image we want to look at, or the file path to it.
         attempt_plate_solving : `bool`, optional
-            Whether to attempt plate solving (default `True`).
+            Whether we should try to figure out the exact map coordinates.
+            Default is True.
         target_ra : `float`, optional
-            Target RA hint from library (default `None`).
+            A hint for where the telescope was pointing horizontally.
         target_dec : `float`, optional
-            Target Dec hint from library (default `None`).
+            A hint for where the telescope was pointing vertically.
 
         Returns
         -------
         analysis_context : `AnalysisContext`
-            Context containing the image and enriched StellarObjects.
+            An object that holds the original image and all the stars
+            and data we found in it.
         """
         if isinstance(image_or_path, str):
             logger.info(f"Loading image from path: {image_or_path}")
@@ -103,8 +104,9 @@ class AstrometryPipeline:
 
         logger.info("Processing image for stars...")
 
-        # Prioritize library coordinates over FITS header hints, parsing
-        # them if they are sexagesimal strings
+        # If the user provides specific coordinates, we use those instead of
+        # looking in the image's FITS header. We convert any hour/minute/second
+        # strings into plain decimal degrees so we can do math on them.
         ra_hint = None
         dec_hint = None
         if target_ra is not None and target_dec is not None:
@@ -112,8 +114,12 @@ class AstrometryPipeline:
                 if isinstance(target_ra, str) and ("h" in target_ra or "°" in target_ra or " " in target_ra):
                     resolved_ra_deg = parse_coordinate_string(str(target_ra), is_ra=True)
                     resolved_dec_deg = parse_coordinate_string(str(target_dec), is_ra=False)
-                    # Avoid using 0h 0m 0s placeholder values from
-                    # unconfigured database indices
+                    # Sometimes an empty database field will default to 0h 0m
+                    # 0s.
+                    # We ignore exact zeros because it's almost certainly a
+                    # blank
+                    # default, not the user actually pointing at the 0,0
+                    # coordinate.
                     if resolved_ra_deg != 0.0 or resolved_dec_deg != 0.0:  # ruff: ignore[float-equality-comparison] -- 0h0m0s placeholder sentinel, not measured
                         ra_hint = float(resolved_ra_deg)
                         dec_hint = float(resolved_dec_deg)
@@ -159,10 +165,12 @@ class AstrometryPipeline:
             logger.info("Using pre-existing WCS from FITS image header as fallback.")
             wcs = image.wcs
 
-        # 1. Resolve and parse primary target name from FITS header or filename
+        # 1. Figure out the main target's name by looking in the FITS header,
+        # or by guessing from the file name if the header is missing.
         object_name = image.header.get("OBJECT")
         if not object_name:
-            # Fallback parsing for common test file structures
+            # Look for specific names in the file path to help our test
+            # scripts work.
             base_file = os.path.basename(image.path)
             if "M 13" in base_file or "M_13" in base_file:
                 object_name = "M 13"
@@ -172,7 +180,8 @@ class AstrometryPipeline:
         extended_target_obj = None
 
         if object_name:
-            # 2. Check SIMBAD live catalog classification
+            # 2. Ask the SIMBAD database to figure out what type of object
+            # this is.
             is_extended, target_coord, otype, majaxis = self.check_extended_source(object_name)
 
             if is_extended:
@@ -181,7 +190,9 @@ class AstrometryPipeline:
                     "Resolving pixel coordinates..."
                 )
 
-                # 3. Resolve pixel coordinate center
+                # 3. Convert the object's real sky coordinates (from the
+                # database)
+                # into exact X/Y pixel coordinates on our image.
                 extraction_center = None
                 if wcs and target_coord:
                     try:
@@ -206,8 +217,12 @@ class AstrometryPipeline:
                         f"skipping extended-target enrichment."
                     )
                 else:
-                    # 4. Construct wide-aperture StellarObject
-                    # representing the extended target
+                    # 4. Create a special `StellarObject` for this target.
+                    # Unlike a
+                    # normal star (a tiny dot), this object will use a large
+                    # circle
+                    # to measure all the light coming from the whole
+                    # nebula/galaxy.
                     from astrometricslib.tasks.stellar_tasks.spectroscopy_tasks.spectroscopy_pipeline import (
                         SpectroscopyPipeline,
                     )
@@ -215,8 +230,10 @@ class AstrometryPipeline:
 
                     spec_config = ConfigLoader.load_spectroscopy_config(app_config=self.config)
 
-                    # Derive extraction radius dynamically from major
-                    # axis queried from SIMBAD
+                    # Calculate how big the measuring circle needs to be by
+                    # looking at
+                    # the object's actual size in the catalog and our
+                    # telescope's zoom level.
                     extraction_radius = 60  # Default fallback
                     if majaxis is not None and wcs:
                         try:
@@ -229,11 +246,14 @@ class AstrometryPipeline:
                                 arcmin_per_px = deg_per_px * 60.0
                                 # Major axis in pixels
                                 majaxis_px = majaxis / arcmin_per_px
-                                # Radius is half of major axis, with
-                                # safety bounds
+                                # Set the measuring radius to half the
+                                # object's total width.
                                 derived_radius = round(majaxis_px / 2.0)
-                                # Bound between 15 and 200 pixels to
-                                # prevent anomalous sizes
+                                # Keep the radius between 15 and 200 pixels.
+                                # This stops the
+                                # program from crashing or slowing down if the
+                                # catalog
+                                # gives us weird or incorrect size data.
                                 extraction_radius = int(max(15, min(200, derived_radius)))
                                 logger.info(
                                     f"Derived extended extraction radius from SIMBAD ({majaxis} arcmin): "
@@ -255,7 +275,9 @@ class AstrometryPipeline:
                         f"Successfully initialized extended target StellarObject for '{object_name}'."
                     )
 
-        # Seed Gaia DR3 catalog cache for the field in the background
+        # Start downloading Gaia DR3 stars for this image's area in the
+        # background.
+        # This speeds things up by saving the stars to our local database.
         if wcs is not None and wcs.is_celestial:
             try:
                 from astropy.wcs.utils import proj_plane_pixel_scales
@@ -283,29 +305,28 @@ class AstrometryPipeline:
         )
 
     def check_extended_source(self, object_name: str) -> tuple[bool, Any | None, str | None, float | None]:
-        """Query the SIMBAD astronomical database for the target name.
+        """Ask the SIMBAD database if this target is an extended object.
 
-        Determines whether the object represents an extended object (such
-        as a nebula, galaxy, or star cluster).
+        An "extended object" is something that looks like a fuzzy shape
+        (like a galaxy, nebula, or star cluster) instead of a single dot.
 
         Parameters
         ----------
         object_name : `str`
-            The catalog name of the object to query.
+            The name of the object to look up (like "M 13" or "Andromeda").
 
         Returns
         -------
         is_extended : `bool`
-            `True` if the object's SIMBAD type is one of the extended
-            object types, `False` otherwise.
+            True if the database says this is a large fuzzy object.
         coordinates : `astropy.coordinates.SkyCoord` or `None`
-            The SIMBAD-resolved sky coordinates of the object, or `None`
-            if the query failed or returned no result.
+            The exact center coordinates of the object, if found.
         simbad_object_type : `str` or `None`
-            The raw SIMBAD object type code, or `None` if unavailable.
+            The short code for the object type (like "GlC" for Globular
+            Cluster).
         major_axis_arcmin : `float` or `None`
-            The major axis of the object in arcminutes, or `None` if not
-            reported by SIMBAD.
+            How wide the object is, measured in arcminutes (a tiny fraction
+            of a degree), if the database has that information.
         """
         if not object_name:
             return False, None, None, None

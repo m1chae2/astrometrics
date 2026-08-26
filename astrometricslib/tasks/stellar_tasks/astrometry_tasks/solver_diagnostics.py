@@ -1,6 +1,8 @@
-"""Purpose: Logic for verifying plate solver configuration and index files.
+"""Tools to check if the local mapping software is installed correctly.
 
-Provides diagnostic tools for both the backend and research notebooks.
+We need specific map files (called index files) downloaded to the
+computer for the local solver to work. These functions check if they
+exist.
 """
 
 import os
@@ -8,20 +10,18 @@ from typing import Any
 
 
 def check_local_solver_config(app_config) -> dict[str, Any]:  # ruff: ignore[missing-type-function-argument]
-    """Verify the local astrometry solver configuration and index files.
+    """Check if the local solver has the map files it needs to run.
 
     Parameters
     ----------
     app_config : `AppConfiguration`
-        Application configuration providing access to the raw
-        configuration values and the project root.
+        The system settings (so we know where to look).
 
     Returns
     -------
     diagnostics : `dict`
-        Dictionary containing the diagnostic results, with keys
-        ``"config_index_path"``, ``"resolved_path"``, ``"exists"``,
-        ``"is_directory"``, and ``"index_files"``.
+        A report showing exactly where we looked, whether the folder
+        existed, and how many map files we found inside it.
     """
     # Assuming app_config provides access to the raw configuration if needed,
     # or specialized methods for processing settings.

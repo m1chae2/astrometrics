@@ -1,19 +1,13 @@
-"""Astrometrics domain library.
+"""The main Astrometrics software library.
 
-A standalone, high-performance library for astronomical image
-calibration, plate-solving, photometry, and spectroscopy pipelines.
+This library is a collection of tools for processing astronomical images.
+It handles everything from aligning and stacking images (calibration),
+to figuring out exactly what stars are in the picture (plate-solving),
+to measuring star brightness and colors (photometry and spectroscopy).
 
-`astrometricslib.api` and every other subpackage are internal --
-import everything from this top-level namespace instead. `Astrometrics`
-is the entry point; its five domain namespaces (`targets`, `stars`,
-`moving_objects`, `processing`, `visualization`) are where nearly all
-work happens.
-
-`AstrometryPipeline` and `StarIdentifier` are resolved lazily (module
-`__getattr__`, PEP 562): both transitively import `astroquery`/`pyvo`,
-which dominate this package's import cost, and most callers never
-touch them directly -- they reach the same functionality through
-`Astrometrics.processing.run_astrometry`.
+To use the library, just import `Astrometrics` from here. It acts as the
+main control panel, giving you access to all the sub-tools like targets,
+stars, and image processing.
 """
 
 from importlib.metadata import PackageNotFoundError
@@ -87,22 +81,25 @@ _LAZY_EXPORTS = {
 
 
 def __getattr__(name: str) -> Any:
-    """Lazily resolve an export whose module pulls in a heavy dependency.
+    """Load certain tools only when they are actually needed.
+
+    Some tools take a long time to load. This function makes sure we
+    only load them if someone actually tries to use them.
 
     Parameters
     ----------
     name : `str`
-        The attribute name being resolved.
+        The name of the tool being requested.
 
     Returns
     -------
     resolved : `Any`
-        The resolved export.
+        The loaded tool.
 
     Raises
     ------
     AttributeError
-        Raised if `name` is not a lazily-resolved export.
+        If the tool name is not recognized.
     """
     module_name = _LAZY_EXPORTS.get(name)
     if module_name is None:
@@ -113,10 +110,10 @@ def __getattr__(name: str) -> Any:
 
 
 class Astrometrics:
-    """Canonical entry point for the high-level interface domain library.
+    """The main control panel for the library.
 
-    Composes the target, stellar, moving-object, processing, and
-    visualization domain namespaces directly.
+    This class groups all the different tools (like image processing,
+    star tracking, and data visualization) together in one place.
     """
 
     def __init__(  # ruff: ignore[missing-return-type-special-method]
@@ -125,19 +122,18 @@ class Astrometrics:
         app_config: AppConfiguration | None = None,
         butler: AbstractButler | None = None,
     ):
-        """Initialize the high-level interface.
+        """Set up the main Astrometrics tools.
 
         Parameters
         ----------
         config : `AppConfiguration`, optional
-            Application configuration. Loaded from the application
-            configuration when both `config` and `app_config` are
-            omitted.
+            The application settings. If not provided, it will load the
+            default settings.
         app_config : `AppConfiguration`, optional
-            Alias for `config`, kept for callers that pass it by name.
+            Another way to provide the settings.
         butler : `AbstractButler`, optional
-            Storage backend for the target and stellar catalogs. A
-            `DiskButler` over `config` is constructed when omitted.
+            The database tool used to save and load data. If not provided,
+            it will create a default one.
         """
         from astrometricslib.api.moving_objects import MovingObjectRecovery
         from astrometricslib.api.processing import ProcessingPipelines
@@ -171,35 +167,24 @@ class Astrometrics:
         camera_name: str,
         focal_length_mm: float | None = None,
     ) -> Any:
-        """Process many targets' full stacking/analysis pipelines.
+        """Run the full image processing pipeline for multiple targets.
 
-        Delegates to `batch_processing_operations`, which wires target
-        ids and resolved worker counts into the generic
-        `astrometricslib.utilities.parallel_batch` engine and runs the
-        targets concurrently.
+        This runs the image stacking and analysis for many targets at the
+        same time, which is much faster than doing them one by one.
 
         Parameters
         ----------
-        target_ids : `list` [`str`], optional
-            Target ids to process; defaults to every target currently
-            in the catalog.
+        target_ids : `list` of `str`, optional
+            A list of specific target IDs to process. If not provided,
+            it processes every target in the database.
         camera_name : `str`
-            Case-insensitive substring matched against each frame's
-            camera name; only matching frames are processed for each
-            target, and every other frame -- including from a second
-            camera the target was also captured with -- is silently
-            excluded. Required, keyword-only, and has no default: a
-            multi-camera target silently dropping most of its frames
-            under an unnoticed fallback is worse than a caller being
-            forced to say which camera they mean. Use
-            `TargetCatalog.list_camera_names` to see what's actually
-            present in the catalog before choosing one.
+            The name of the camera used to take the pictures. It will only
+            process images taken with this specific camera.
 
         Returns
         -------
         summary : `BatchRunSummary`
-            Aggregated success/failure/result state across all
-            targets.
+            A report showing which targets succeeded and which failed.
         """
         from astrometricslib.tasks.target_tasks import batch_processing_tasks as batch_processing_operations
 

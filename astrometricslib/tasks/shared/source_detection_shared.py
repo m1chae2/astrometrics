@@ -1,6 +1,7 @@
-"""SourceDetector: Standardized point-source detection wrapping photutils.
+"""SourceDetector: The shared tool we use to find stars in our photos.
 
-Used for star identification and spectroscopy zero-order detection.
+We use this for basic target alignment, looking for asteroids, and
+finding the central star in spectroscopy.
 """
 
 import logging
@@ -45,41 +46,41 @@ _BACKGROUND_2D_MIN_BOXES_PER_AXIS = 3
 
 
 class SourceDetector:
-    """Finds point sources in an image using DAOStarFinder."""
+    """Finds bright dots (stars) in an image using the DAOStarFinder math."""
 
     def __init__(self, fwhm: float = 4.0, threshold_sigma: float = 5.0):  # ruff: ignore[missing-return-type-special-method]
-        """Initialize the source detector.
+        """Set up the star finder.
 
         Parameters
         ----------
         fwhm : `float`, optional
-            Full width at half maximum of the Gaussian kernel used by
-            the star finder, in pixels (default 4.0).
+            How wide we expect a typical star to be across the middle,
+            measured in pixels (default is 4.0).
         threshold_sigma : `float`, optional
-            Detection threshold expressed as a multiple of the
-            background noise standard deviation (default 5.0).
+            How bright a dot needs to be before we believe it's a star.
+            This is measured as a multiple of the background noise
+            (default is 5.0x the noise).
         """
         self.fwhm = fwhm
         self.threshold_sigma = threshold_sigma
 
     def detect(self, data: np.ndarray, mask: np.ndarray | None = None) -> list[dict[str, Any]]:
-        """Detect stars in the provided image data.
+        """Find the stars in the given picture.
 
         Parameters
         ----------
         data : `numpy.ndarray`
-            2D (or 3D, e.g. multi-plane) image data to search for point
-            sources. 3D data is collapsed to 2D by averaging.
+            The actual pixels of the picture. If it's a color image (3D),
+            we squash it into black and white (2D) first.
         mask : `numpy.ndarray`, optional
-            Boolean mask of pixels to exclude from background
-            statistics and detection (default `None`).
+            An optional list of bad pixels we should ignore.
 
         Returns
         -------
         sources : `list` [`dict`]
-            List of dictionaries containing star properties
-            (``xcentroid``, ``ycentroid``, ``flux``, etc.), sorted by
-            descending flux.
+            A list of the stars we found, sorted from brightest to dimmest.
+            Each star has coordinates (xcentroid, ycentroid) and a
+            brightness value (flux).
         """
         # Ensure data is 2D for DAOStarFinder
         if data.ndim == 3:
@@ -161,25 +162,24 @@ class SourceDetector:
         return [dict(zip(sources.colnames, row, strict=False)) for row in sources]
 
     def deduplicate(self, sources: list[dict[str, Any]], separation_px: float = 15.0) -> list[dict[str, Any]]:
-        """Merge nearby detections by averaging coordinates.
+        """Combine overlapping dots into a single star.
 
-        Detections closer than `separation_px` are merged into a
-        single entry: their centroid coordinates are averaged and
-        their flux values are summed.
+        If the math accidentally splits a large star into two dots, this
+        combines them back together. We take the average position and add
+        their brightnesses together.
 
         Parameters
         ----------
         sources : `list` [`dict`]
-            List of source dictionaries, as returned by `detect`.
+            The list of stars we found in the previous step.
         separation_px : `float`, optional
-            Maximum center-to-center distance, in pixels, for two
-            detections to be considered the same source
-            (default 15.0).
+            How close two dots need to be (in pixels) before we assume
+            they are actually just one star. Default is 15.0 pixels.
 
         Returns
         -------
         unique_stars : `list` [`dict`]
-            List of source dictionaries with nearby duplicates merged.
+            The cleaned up list of stars.
         """
         if not sources:
             return []

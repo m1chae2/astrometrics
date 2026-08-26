@@ -1,17 +1,13 @@
-"""Purpose: Unit tests for StellarObject and AnalysisResult schemas.
+"""Tests for the star and analysis result structures.
 
-Description: Verifies that analysis result summaries are correctly
-formatted for display.
+Checks that the text summary of a processing job is generated correctly.
 """
 
 from astrometricslib.models.stellar_source import AnalysisResult, VariableCandidate
 
 
 def test_analysis_result_summary() -> None:
-    """Verify AnalysisResult.summary returns a fully formatted string.
-
-    Contains all relevant target metrics on separate lines.
-    """
+    """Make sure the job summary creates a readable report with the numbers."""
     candidate = VariableCandidate(
         id="star_123", meanFlux=5000.0, coefficientOfVariation=0.02, score=0.95, ra=120.5, dec=45.2
     )

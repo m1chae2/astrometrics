@@ -1,10 +1,8 @@
-"""Frame scanning, FITS header parsing, and target directory indexing.
+"""Tools for finding and reading image files.
 
-Recursively scans directories to discover fits/fit frame files,
-extracts metadata from headers, and maps them to hydrated FrameRecord
-objects. The pure FITS-header classification logic
-(`get_filter_type`) lives in tasks/target_tasks/frame_scan_tasks.py
-instead -- everything in this module touches the filesystem.
+This module scans folders to find telescope images (FITS files) and reads
+the basic information saved inside them (like camera temperature or exposure
+time).
 """
 
 import logging
@@ -22,24 +20,23 @@ logger = logging.getLogger(__name__)
 
 
 def _coerce_header_number(value: Any, cast: type) -> Any:
-    """Convert a FITS header value to a number, or `None` if it cannot be.
+    """Try to convert a value from an image file into a number.
 
-    Header values arrive as strings, numbers, or astropy `Undefined`
-    sentinels depending on the writer, so every read is guarded rather
-    than trusted.
+    Different cameras save data differently (sometimes as text, sometimes
+    as numbers). This function tries to safely turn whatever it finds
+    into the number type we need (like an integer or decimal).
 
     Parameters
     ----------
     value : `Any`
-        Raw header value.
+        The raw value read from the file.
     cast : `type`
-        `int` or `float`.
+        The type of number we want (e.g., `int` or `float`).
 
     Returns
     -------
     number : `Any`
-        The converted number, or `None` if `value` is absent or
-        non-numeric.
+        The converted number, or `None` if it couldn't be converted.
     """
     if value is None:
         return None
@@ -50,21 +47,18 @@ def _coerce_header_number(value: Any, cast: type) -> Any:
 
 
 def _populate_acquisition_conditions(record: FrameRecord, header: Any) -> None:
-    """Copy sky and equipment state from a FITS header onto a frame record.
+    """Copy sky and equipment settings from the image file to our records.
 
-    Read at index time because the header parse is already happening;
-    none of this touches pixel data, so it adds no measurable cost to
-    scanning. Every field is optional: the two cameras in this library
-    write different subsets (only the cooled ZWO reports sensor and
-    focuser telemetry; only the DSLR writes a pixel scale), and a
-    missing key simply leaves its field `None`.
+    This reads information like the telescope's position, camera temperature,
+    and focus position. If some information is missing (since different cameras
+    save different things), it just leaves that part blank.
 
     Parameters
     ----------
     record : `FrameRecord`
-        Frame record to populate, mutated in place.
+        The record we are filling with information.
     header : `Any`
-        The FITS header to read from.
+        The data header from the image file.
     """
     pier_side = header.get("PIERSIDE")
     # Recorded because a meridian flip mid-session moves the field
@@ -96,21 +90,23 @@ def _populate_acquisition_conditions(record: FrameRecord, header: Any) -> None:
 
 
 def create_frame_record_from_fits(path: str, camera: str | None = None) -> FrameRecord:
-    """Parse a FITS file and build a hydrated FrameRecord from it.
+    """Read an image file and create a record for it.
+
+    This function opens a telescope image, reads its settings (like exposure
+    time, date, and camera used), and creates a `FrameRecord` so the rest
+    of the program knows about it without having to open the file again.
 
     Parameters
     ----------
     path : `str`
-        Absolute path to the FITS file.
+        The full file path to the image.
     camera : `str`, optional
-        Fallback camera name used if not found in the header.
+        The name of the camera, if we want to force it to a specific value.
 
     Returns
     -------
     record : `FrameRecord`
-        Frame record populated from the FITS header metadata. On
-        parse failure, a partially-populated record with default
-        values is returned and the failure is logged.
+        The record containing the image's information.
     """
     filename = os.path.basename(path)
     record = FrameRecord(
@@ -170,34 +166,32 @@ def create_frame_record_from_fits(path: str, camera: str | None = None) -> Frame
 
 
 def refresh_acquisition_conditions(frame: FrameRecord) -> bool:
-    """Re-read one already-tracked frame's header conditions.
+    """Re-read the basic equipment settings from an image file.
 
-    Only the header-derived acquisition fields are replaced. Everything
-    a pipeline measured -- registration facts, background level,
-    saturation, measured FWHM -- is left untouched, because none of it
-    comes from the header and re-deriving it would cost orders of
-    magnitude more (a header read is ~10ms against ~4s for the pixels).
-
-    Exists because `scan_target_directory` only builds records for files
-    it has not seen before, so fields added to `FrameRecord` after a
-    frame was first indexed would otherwise stay `None` forever on every
-    existing record.
+    If we add new things we want to track (like a new temperature sensor),
+    this lets us go back and read those new values from images we've
+    already found, without having to do all the heavy processing again.
 
     Parameters
     ----------
     frame : `FrameRecord`
-        The frame record to refresh, mutated in place.
+        The frame record to update.
 
     Returns
     -------
     refreshed : `bool`
-        `True` if the header was read and applied; `False` if the file
-        is missing or unreadable.
+        True if the file was read successfully, False if there was an error.
     """
-    from astropy.io import fits
-
     try:
-        header = fits.getheader(frame.path)
+        # AstrometricsImage.header, not fits.getheader(path): the latter
+        # only ever reads HDU0, while a real frame's header can live in
+        # HDU1 when HDU0 carries no data (AstrometricsImage._load_header
+        # falls back to HDU1 in that case, matching the read
+        # create_frame_record_from_fits used when this frame was first
+        # indexed). Reading HDU0's empty header here would overwrite
+        # every field _populate_acquisition_conditions sets with None,
+        # even though the initial scan recorded them correctly.
+        header = AstrometricsImage(frame.path).header
     except Exception as header_error:
         logger.debug("Could not refresh header conditions for %s: %s", frame.path, header_error)
         return False
@@ -207,25 +201,21 @@ def refresh_acquisition_conditions(frame: FrameRecord) -> bool:
 
 
 def scan_target_directory(target: Target, frames_root_path: str, refresh_headers: bool = False) -> None:
-    """Scan the lights directory for target match variants.
+    """Look through folders to find new images for a specific target.
 
-    Recursively scans the lights directory inside the frames root
-    folder for directories matching one of the target's id variants,
-    and populates ``target.frames`` with unique FrameRecord entries.
+    This function searches the hard drive for any image folders that match
+    the target's name. If it finds new images, it adds them to the target's
+    list.
 
     Parameters
     ----------
     target : `Target`
-        The Target object to populate.
+        The target (like a galaxy or nebula) we are looking for.
     frames_root_path : `str`
-        Base directory containing imaging files.
+        The main folder where all images are kept.
     refresh_headers : `bool`, optional
-        Whether to also re-read header-derived acquisition conditions on
-        frames already tracked (default `False`). Without this, a field
-        added to `FrameRecord` after a frame was first indexed stays
-        `None` on that frame forever, since only unseen files get a new
-        record built. Costs ~10ms per frame -- header reads only, no
-        pixel data.
+        If True, it will also re-read the settings of images it already knows
+        about.
     """
     variants = [
         target.id,
@@ -275,28 +265,27 @@ def scan_target_directory(target: Target, frames_root_path: str, refresh_headers
 
 
 def classify_and_sort_fits_files(scan_list: list[str], target_id: str, config, telescope_name: str) -> int:  # ruff: ignore[missing-type-function-argument]
-    """Classify and sort FITS files into the library directory tree.
+    """Sort new image files into the correct folders.
 
-    Walks source directories, reads FITS headers, classifies frames by
-    type (light/dark/bias/flat), normalizes camera names, and moves
-    files into the correct library directory structure.
+    This reads new images, figures out what kind they are (like a dark frame,
+    flat frame, or regular light frame), and moves them into the organized
+    folder structure based on the camera and telescope used.
 
     Parameters
     ----------
-    scan_list : `list` [`str`]
-        Source directory paths to scan for FITS files.
+    scan_list : `list` of `str`
+        A list of folders to check for new images.
     target_id : `str`
-        Target identifier used for routing light frames.
-    config
-        Application configuration providing ``frames_path``.
+        The name of the target for regular light frames.
+    config : `AppConfiguration`
+        Application settings to know where the main folder is.
     telescope_name : `str`
-        Telescope name used in the directory structure for lights and
-        flats.
+        The name of the telescope used.
 
     Returns
     -------
     processed_count : `int`
-        Number of files successfully classified and moved.
+        The number of files that were successfully moved.
     """
     import shutil
 

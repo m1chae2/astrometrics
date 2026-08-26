@@ -1,8 +1,8 @@
-"""Layer-1 domain high-level interface for the moving-object/asteroid domain.
+"""Main interface for finding asteroids and other moving objects in images.
 
-`MovingObjectRecovery` is the single entry point external callers
-should use to run asteroid recovery -- it delegates to
-`astrometricslib.tasks.moving_object_tasks`.
+This module provides `MovingObjectRecovery`, which is the primary tool for
+searching through a series of images to find things that move (like asteroids)
+against the fixed background stars.
 """
 
 from astrometricslib.models.moving_object import AsteroidRecoveryCandidate
@@ -16,20 +16,18 @@ __all__ = ["MovingObjectRecovery"]
 
 
 class MovingObjectRecovery:
-    """Recover known solar-system bodies from a target's plate-solved frames.
+    """Finds asteroids and comets in a sequence of images.
 
-    This pipeline orchestrates the search for moving objects (like
-    asteroids and comets) by analyzing the differences between
-    successive images of the same target area. It leverages astrometry
-    to convert pixel coordinates into sky coordinates, allowing us to
-    differentiate between stationary background stars and true moving
-    transients.
+    This tool searches for moving objects by looking for things that change
+    position across multiple images of the same area. It uses the known
+    positions of background stars to figure out if an object is truly moving
+    through space or if the telescope just bumped.
 
     Parameters
     ----------
     config : `MovingObjectConfig`, optional
-        Pipeline configuration. If `None` (default), loaded from the
-        application configuration the first time a recovery run needs it.
+        Settings for the search. If not provided, it will load the default
+        settings automatically.
     """
 
     def __init__(self, config: MovingObjectConfig | None = None):  # ruff: ignore[missing-return-type-special-method]
@@ -46,14 +44,12 @@ class MovingObjectRecovery:
         self._pipeline = AsteroidRecoveryPipeline(config=config)
 
     def recover_asteroids(self, target: Target) -> list[AsteroidRecoveryCandidate]:
-        """Run the full asteroid-recovery pipeline against one target.
+        """Run the full search for asteroids on a specific target.
 
-        This process executes a sequence of algorithms (the
-        discrimination cascade) to identify sources that move
-        consistently in a straight line across multiple frames. It
-        relies on the target having a stacked image and plate-solved
-        frames to accurately map pixel motion to true celestial
-        motion.
+        This runs several algorithms to find dots of light that move in a
+        consistent, straight line across multiple images. The images must
+        already be plate-solved (stars matched to a database) so we can
+        accurately measure true movement in the sky.
 
         Parameters
         ----------

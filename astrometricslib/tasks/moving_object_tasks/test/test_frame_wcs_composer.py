@@ -1,8 +1,8 @@
-"""Purpose: Unit tests for estimate_frame_wcs_from_mount_pointing.
+"""Tests for the tool that figures out where each photo is pointing.
 
-Description: Verifies the stack-WCS + frame-header-RA/DEC based WCS
-estimate against known synthetic headers, and its rejection paths
-(missing RA/DEC, missing NAXIS1/NAXIS2, non-numeric RA/DEC).
+We test if it correctly combines the general location of the target with
+the specific coordinates saved by the telescope when it took each photo.
+We also test if it correctly handles broken or missing data.
 """
 
 import pytest
@@ -15,12 +15,12 @@ from astrometricslib.tasks.moving_object_tasks.frame_wcs_composer import (
 
 
 def _build_stack_wcs() -> WCS:
-    """Build a synthetic TAN-projection stack WCS with a known CD matrix.
+    """Create a fake set of map coordinates for the center of the target.
 
     Returns
     -------
     WCS
-        A TAN-projection WCS centered at RA=150.0, Dec=30.0 degrees.
+        A fake coordinate system centered on a specific spot in the sky.
     """
     header = fits.Header()
     header["WCSAXES"] = 2
@@ -40,12 +40,13 @@ def _build_stack_wcs() -> WCS:
 
 
 def _build_frame_header(right_ascension_deg, declination_deg, width_px=1024, height_px=1024) -> fits.Header:  # ruff: ignore[missing-type-function-argument]
-    """Build a synthetic frame FITS header carrying mount-reported pointing.
+    """Create a fake set of telescope settings (like what's saved in a photo).
 
     Returns
     -------
     fits.Header
-        A header with NAXIS1/NAXIS2 and, when provided, RA/DEC keywords.
+        A fake list of settings containing the image size and where the
+        telescope was pointing.
     """
     header = fits.Header()
     header["NAXIS1"] = width_px
@@ -58,10 +59,7 @@ def _build_frame_header(right_ascension_deg, declination_deg, width_px=1024, hei
 
 
 def test_estimate_frame_wcs_centers_on_frames_own_reported_pointing():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify the frame WCS's sky center matches the frame's own RA/DEC.
-
-    At its own image center pixel, not the stack's.
-    """
+    """Test that it uses the photo's own coordinates, not the target's."""
     stack_wcs = _build_stack_wcs()
     frame_header = _build_frame_header(150.05, 30.02, width_px=2000, height_px=2000)
 
@@ -73,10 +71,7 @@ def test_estimate_frame_wcs_centers_on_frames_own_reported_pointing():  # ruff: 
 
 
 def test_estimate_frame_wcs_reuses_stack_pixel_scale_matrix():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify the frame WCS's pixel scale/rotation matches the stack's.
-
-    Scale and rotation are assumed constant across one target's frames.
-    """
+    """Test that it copies rotation and scale from the main target image."""
     stack_wcs = _build_stack_wcs()
     frame_header = _build_frame_header(150.05, 30.02)
 
@@ -87,14 +82,14 @@ def test_estimate_frame_wcs_reuses_stack_pixel_scale_matrix():  # ruff: ignore[m
 
 
 def test_estimate_frame_wcs_returns_none_when_ra_dec_missing():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify a header with no RA/DEC keywords is rejected, not raised."""
+    """Test that it safely fails if the photo is missing its coordinates."""
     stack_wcs = _build_stack_wcs()
     frame_header = _build_frame_header(None, None)
     assert estimate_frame_wcs_from_mount_pointing(stack_wcs, frame_header) is None
 
 
 def test_estimate_frame_wcs_returns_none_when_naxis_missing():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verifies a frame header with no NAXIS1/NAXIS2 keywords is rejected."""
+    """Test that it safely fails if the photo is missing its size."""
     stack_wcs = _build_stack_wcs()
     frame_header = fits.Header()
     frame_header["RA"] = 150.05
@@ -103,7 +98,7 @@ def test_estimate_frame_wcs_returns_none_when_naxis_missing():  # ruff: ignore[m
 
 
 def test_estimate_frame_wcs_returns_none_for_non_numeric_ra_dec():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify a header with non-numeric RA/DEC is rejected, not raised."""
+    """Test it safely fails if the coordinates are letters, not numbers."""
     stack_wcs = _build_stack_wcs()
     frame_header = _build_frame_header(0, 0, width_px=1024, height_px=1024)
     frame_header["RA"] = "not-a-number"

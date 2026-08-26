@@ -29,6 +29,21 @@ class TargetSessionContribution(BaseModel):
     frames_clipped: int
 
 
+class StarIdentificationMetrics(BaseModel):
+    """How many of the stars found in an image could be named.
+
+    Some pipelines look up each star's position against a known catalog.
+    A star can end up in one of three buckets: matched to a name we
+    already know, seen but with no matching catalog entry, or not
+    resolved at all. Astrometry, photometry, and spectroscopy all record
+    this the same way, so it lives here once instead of three times.
+    """
+
+    catalog_matched_star_count: int = 0
+    position_only_star_count: int = 0
+    unresolved_star_count: int = 0
+
+
 class PipelineQualitySummaryBase(BaseModel):
     """Basic information recorded by every processing pipeline.
 
@@ -120,7 +135,7 @@ class StackQualitySummary(PipelineQualitySummaryBase):
 ASTROMETRY_PIPELINE_VERSION = "1.2.0"
 
 
-class AstrometryPipelineQualityMetrics(BaseModel):
+class AstrometryPipelineQualityMetrics(StarIdentificationMetrics):
     """Measurements recorded when figuring out where an image is pointing.
 
     This tracks how many stars were found and whether the image's coordinates
@@ -132,9 +147,6 @@ class AstrometryPipelineQualityMetrics(BaseModel):
     plate_solve_succeeded: bool
     simbad_matched_count: int
     astrometric_residual_rms_arcsec: float | None = None
-    catalog_matched_star_count: int = 0
-    position_only_star_count: int = 0
-    unresolved_star_count: int = 0
 
     # Tracks whether we had connection issues when trying to look up
     # star names in online databases (like SIMBAD or Gaia).
@@ -171,7 +183,7 @@ class FrameEnsembleComposition(BaseModel):
     excluded_comparison_star_ids: list[str] = Field(default_factory=list)
 
 
-class PhotometryPipelineQualityMetrics(BaseModel):
+class PhotometryPipelineQualityMetrics(StarIdentificationMetrics):
     """Measurements recorded when measuring the brightness of stars.
 
     This tracks how many stars were processed and if any variable stars
@@ -193,10 +205,6 @@ class PhotometryPipelineQualityMetrics(BaseModel):
     # Lists observing sessions where the image coordinates saved in the file
     # were bad and had to be recalculated from scratch.
     sessions_with_replaced_header_wcs: list[str] = Field(default_factory=list)
-    # Breakdown of whether the stars we found matched known catalogs.
-    catalog_matched_star_count: int = 0
-    position_only_star_count: int = 0
-    unresolved_star_count: int = 0
 
 
 class PhotometryQualitySummary(PipelineQualitySummaryBase):
@@ -216,7 +224,7 @@ class PhotometryQualitySummary(PipelineQualitySummaryBase):
 SPECTROSCOPY_PIPELINE_VERSION = "1.1.0"
 
 
-class SpectroscopyPipelineQualityMetrics(BaseModel):
+class SpectroscopyPipelineQualityMetrics(StarIdentificationMetrics):
     """Measurements recorded when analyzing a star's light spectrum.
 
     This tracks details about the spectral lines, like how wide they are
@@ -229,10 +237,6 @@ class SpectroscopyPipelineQualityMetrics(BaseModel):
     trail_width_profile_available: bool = False
     median_trail_width_px: float | None = None
     wavelength_calibration_rms_nm: float | None = None
-    # Breakdown of whether the stars we found matched known catalogs.
-    catalog_matched_star_count: int = 0
-    position_only_star_count: int = 0
-    unresolved_star_count: int = 0
 
 
 class SpectroscopyQualitySummary(PipelineQualitySummaryBase):

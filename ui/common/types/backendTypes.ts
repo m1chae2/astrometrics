@@ -661,14 +661,14 @@ export interface StackQualitySummary {
  * could be successfully calculated (plate solving).
  */
 export interface AstrometryPipelineQualityMetrics {
+  catalog_matched_star_count?: number;
+  position_only_star_count?: number;
+  unresolved_star_count?: number;
   sources_detected: number;
   solve_attempted: boolean;
   plate_solve_succeeded: boolean;
   simbad_matched_count: number;
   astrometric_residual_rms_arcsec?: number | null;
-  catalog_matched_star_count?: number;
-  position_only_star_count?: number;
-  unresolved_star_count?: number;
   remote_catalog_queries_attempted?: number;
   remote_catalog_queries_failed?: number;
   remote_catalog_circuit_breaker_tripped?: boolean;
@@ -709,6 +709,9 @@ export interface FrameEnsembleComposition {
  * were found.
  */
 export interface PhotometryPipelineQualityMetrics {
+  catalog_matched_star_count?: number;
+  position_only_star_count?: number;
+  unresolved_star_count?: number;
   stars_processed: number;
   stars_found: number;
   frames_processed: number;
@@ -722,9 +725,6 @@ export interface PhotometryPipelineQualityMetrics {
   astrometry_identified_star_count?: number;
   sessions_with_reused_header_wcs?: string[];
   sessions_with_replaced_header_wcs?: string[];
-  catalog_matched_star_count?: number;
-  position_only_star_count?: number;
-  unresolved_star_count?: number;
 }
 
 /**
@@ -752,15 +752,15 @@ export interface PhotometryQualitySummary {
  * and whether any parts of the spectrum were too bright (saturated).
  */
 export interface SpectroscopyPipelineQualityMetrics {
+  catalog_matched_star_count?: number;
+  position_only_star_count?: number;
+  unresolved_star_count?: number;
   zero_order_saturated_pixel_fraction?: number | null;
   zero_order_saturation_flagged?: boolean;
   dispersion_angle_deg?: number | null;
   trail_width_profile_available?: boolean;
   median_trail_width_px?: number | null;
   wavelength_calibration_rms_nm?: number | null;
-  catalog_matched_star_count?: number;
-  position_only_star_count?: number;
-  unresolved_star_count?: number;
 }
 
 /**

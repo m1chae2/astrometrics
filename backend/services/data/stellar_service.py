@@ -174,6 +174,32 @@ class StellarService:
             if not _is_per_frame_photometry_detection(obj.id)
         ]
 
+    def get_displayable_stellar_object_summaries(self, target_id: str | None = None) -> list[dict]:
+        """Lightweight per-star summaries for a catalog-browsing listing.
+
+        Same displayability filtering as `get_displayable_stellar_objects`,
+        but built on `disk_interface.load_stellar_object_summaries`
+        instead of fully hydrating every `StellarObject` -- the right
+        choice for a listing that is fetched wholesale and polled on an
+        interval (the astronomy list view), where hydrating and
+        transmitting every star's complete nested light curve/spectra
+        data is pure cost for a view that only ever reads five scalar
+        fields. Prefer `get_displayable_stellar_objects` for anything
+        that needs a real, complete `StellarObject`.
+
+        Returns
+        -------
+        summaries : `list` [`dict`]
+            One dict per displayable star with keys ``id``, ``name``,
+            ``targetIds``, ``hasSpectra``, and ``hasPhotometry``,
+            optionally filtered by ``target_id``.
+        """
+        return [
+            summary
+            for summary in self.astrometrics.stars.list_object_summaries(target_id)
+            if not _is_per_frame_photometry_detection(summary["id"])
+        ]
+
     def load_stellar_objects(self) -> None:
         """No-op retained for backward compatibility.
 

@@ -161,3 +161,64 @@ def test_disk_butler_put_refreshes_stellar_catalog_cache(mocker):  # ruff: ignor
     assert mock_save.call_count == 1
     assert result == updated
     assert mock_load.call_count == 0
+
+
+def test_disk_butler_list_projected_reads_stellar_catalog_columns(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify list_projected reaches the real stellar_catalog registration.
+
+    Regression coverage for the target_id-indexed browsing path added
+    alongside disk_interface's lightweight summary loader: confirms the
+    DatasetSpec registered in this module actually has target_id
+    available to list_projected, and that it filters correctly.
+    """
+    from astrometricslib.utilities.config_loader import AppConfiguration
+
+    library_path = tmp_path / "library"
+    (library_path / "targets").mkdir(parents=True)
+    (library_path / "frames").mkdir(parents=True)
+    config = AppConfiguration()
+    config.update_config({
+        "Image Library": {"path": str(library_path), "frames_path": str(library_path / "frames")}
+    })
+
+    butler = DiskButler(config=config)
+    in_field = StellarObject(id="InField", name="InField")
+    in_field.target_ids = ["M 13"]
+    out_of_field = StellarObject(id="OutOfField", name="OutOfField")
+    out_of_field.target_ids = ["M 81"]
+    butler.put([in_field, out_of_field], "stellar_catalog", {})
+
+    rows = butler.list_projected("stellar_catalog", ["id", "name"], where={"target_id": "M 13"})
+
+    assert rows == [{"id": "InField", "name": "InField"}]
+
+
+def test_disk_butler_stellar_catalog_has_a_target_id_index(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify the real stellar_objects table gets its target_id index.
+
+    A raw sqlite_master check rather than trusting list_projected alone
+    to work -- correct query results don't prove the index exists, only
+    that filtering is correct; a full scan would return the same rows.
+    """
+    import sqlite3
+
+    from astrometricslib.utilities.config_loader import AppConfiguration
+
+    library_path = tmp_path / "library"
+    (library_path / "targets").mkdir(parents=True)
+    (library_path / "frames").mkdir(parents=True)
+    config = AppConfiguration()
+    config.update_config({
+        "Image Library": {"path": str(library_path), "frames_path": str(library_path / "frames")}
+    })
+
+    butler = DiskButler(config=config)
+    butler.put([StellarObject(id="Polaris", name="Polaris")], "stellar_catalog", {})
+
+    conn = sqlite3.connect(str(library_path / "astrometrics.db"))
+    indexes = {
+        row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'").fetchall()
+    }
+    conn.close()
+
+    assert "idx_stellar_objects_target_id" in indexes

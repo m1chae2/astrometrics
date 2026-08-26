@@ -262,6 +262,12 @@ class DiskButler(AbstractButler):
                         "magnitude": "REAL",
                     },
                     extra_columns=_stellar_extra_columns,
+                    # Per-target browsing (the Astronomy Manager's target
+                    # filter) is the one place this dataset is queried by
+                    # something other than id -- without an index that's
+                    # a full-table scan of every stellar object in the
+                    # catalog to find one target's stars.
+                    indexed_columns=("target_id",),
                 ),
             },
         )
@@ -425,6 +431,39 @@ class DiskButler(AbstractButler):
 
         if dataset_type == "stellar_catalog":
             self._stellar_catalog_cache = None
+
+    def list_projected(
+        self,
+        dataset_type: str,
+        columns: list[str],
+        where: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        """List rows as plain dicts of only the given columns.
+
+        Straight pass-through to the generic Butler -- unlike `get`,
+        this has no legacy-shard-migration path and unlike `get_all`
+        (see the cache this class keeps for it), no in-memory cache:
+        it exists specifically so a caller can read a handful of
+        indexed columns without paying to hydrate or cache full model
+        instances. See `datastore.butler.Butler.list_projected` for
+        the full contract and validation rules.
+
+        Parameters
+        ----------
+        dataset_type : `str`
+            One of "stellar_catalog" or "target_catalog".
+        columns : `list` [`str`]
+            Column names to select, in result order.
+        where : `dict`, optional
+            Column-name/value pairs to filter on, ANDed together.
+
+        Returns
+        -------
+        rows : `list` [`dict`]
+            One dict per matching row, keyed by the requested column
+            names.
+        """
+        return self._generic.list_projected(dataset_type, columns, where)
 
     def exists(self, dataset_type: str, coordinate: dict[str, Any]) -> bool:
         """Check if a database record or file path exists.

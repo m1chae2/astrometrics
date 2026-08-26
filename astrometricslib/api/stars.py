@@ -76,6 +76,28 @@ class StellarCatalog:
 
         return analysis_operations.list_objects(self)
 
+    def list_object_summaries(self, target_id: str | None = None) -> list[dict[str, Any]]:
+        """Lightweight per-star summaries for catalog-browsing callers.
+
+        Prefer `list_objects` for anything that needs a real, complete
+        `StellarObject` -- this exists for callers like a UI catalog
+        listing that only read id/name/targetIds/hasSpectra/
+        hasPhotometry, want the fetch itself to be cheap, and are
+        likely to be polled repeatedly. See
+        `disk_interface.load_stellar_object_summaries` for why that
+        matters at scale.
+
+        Returns
+        -------
+        summaries : `list` [`dict`]
+            One dict per star with keys ``id``, ``name``, ``targetIds``,
+            ``hasSpectra``, and ``hasPhotometry``, optionally filtered
+            by ``target_id``.
+        """
+        from astrometricslib.drivers import disk_interface
+
+        return disk_interface.load_stellar_object_summaries(self._config, target_id)
+
     def get_object(self, object_id: str) -> StellarObject | None:
         """Get a single stellar object by ID using exact/fuzzy matching.
 

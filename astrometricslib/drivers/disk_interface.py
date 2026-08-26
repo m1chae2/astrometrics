@@ -188,6 +188,117 @@ def load_stellar_objects(app_config=None) -> list[Any]:  # ruff: ignore[missing-
     return []
 
 
+def load_stellar_object_summaries(
+    app_config=None,  # ruff: ignore[missing-type-function-argument]
+    target_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """Load lightweight per-star summaries for catalog browsing.
+
+    Built for the astronomy-list use case (a filterable, refreshed-on-
+    an-interval catalog browser), which only ever needs id/name/
+    hasSpectra/hasPhotometry/targetIds to render and filter its list --
+    never the full per-frame light curve or spectral data a `dedicated
+    single-object fetch (``astronomy:get``) already provides once a
+    star is actually selected.
+
+    `load_stellar_objects` fully hydrates a `StellarObject` (nested
+    light curve, spectra history, etc.) for every row, which is the
+    right thing for callers that need real objects, but a poor fit for
+    a list that's fetched wholesale and polled repeatedly: measured
+    against a real 270,450-row catalog on 2026-08-25, that path fully
+    parses, validates, and re-serializes every row's complete nested
+    data, which is both slow to build and a large payload to transmit
+    for a view that only reads five scalar fields per star. This reads
+    the same rows but only ever touches the small set of top-level
+    keys those five fields need, skipping model construction and
+    nested-array processing entirely.
+
+    Parameters
+    ----------
+    app_config : `AppConfiguration`, optional
+        Application configuration object. If `None` (default), the
+        process-wide singleton from `get_configuration` is used.
+    target_id : `str`, optional
+        Restrict to stars associated with this target id, matched the
+        same way `get_stellar_objects` does (membership in the star's
+        ``targetIds``/``target_ids`` list). `None` (default) returns
+        every star.
+
+    Returns
+    -------
+    summaries : `list` [`dict`]
+        One dict per star with keys ``id``, ``name``, ``targetIds``,
+        ``hasSpectra``, and ``hasPhotometry`` -- the same field names
+        `StellarObject.serialize()` uses, so this is a drop-in lighter
+        substitute wherever only those fields are read.
+    """
+    if app_config is None:
+        from astrometricslib.utilities.config_loader import get_configuration
+
+        app_config = get_configuration()
+    db_path = os.path.join(str(app_config.get_library_path()), "astrometrics.db")
+    summaries: list[dict[str, Any]] = []
+
+    try:
+        if not os.path.exists(db_path):
+            return summaries
+
+        conn = _connect_db(db_path)
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS stellar_objects (
+                id TEXT PRIMARY KEY,
+                target_id TEXT,
+                name TEXT,
+                ra REAL,
+                dec REAL,
+                magnitude REAL,
+                data_json TEXT
+            )
+        """)
+        cursor.execute("SELECT data_json FROM stellar_objects")
+        for row in cursor.fetchall():
+            data = json.loads(row["data_json"])
+            target_ids = data.get("targetIds") or data.get("target_ids") or []
+            if target_id and target_id not in target_ids:
+                continue
+
+            spectrum_data_processed = data.get("spectrumDataProcessed")
+            spectra_history = data.get("spectraHistory") or []
+            spectrum_data = data.get("spectrumData") or []
+            plain_data = data.get("data") or []
+            has_spectra = bool(
+                spectrum_data_processed
+                or len(spectra_history) > 0
+                or len(spectrum_data) > 0
+                or len(plain_data) > 0
+            )
+
+            light_curve = data.get("lightCurve") or {}
+            has_photometry = bool(
+                light_curve
+                and (
+                    len(light_curve.get("timestamps") or []) > 0
+                    or len(light_curve.get("magnitudes") or []) > 0
+                    or len(light_curve.get("fluxes") or []) > 0
+                )
+            )
+
+            summaries.append({
+                "id": data.get("id", ""),
+                "name": data.get("name", ""),
+                "targetIds": target_ids,
+                "hasSpectra": has_spectra,
+                "hasPhotometry": has_photometry,
+            })
+        conn.close()
+    except Exception as e:
+        logger.error(f"Error loading stellar object summaries: {e}")
+        return []
+
+    return summaries
+
+
 def save_target(app_config=None, target=None) -> str:  # ruff: ignore[missing-type-function-argument]
     """Save a single target to the SQLite database.
 
@@ -486,6 +597,13 @@ def save_stellar_objects(app_config=None, stellar_list=None) -> str:  # ruff: ig
 
 _database_verified = False
 
+# Persisted in the database itself via PRAGMA user_version, so the
+# stellar_objects migration pass in verify_and_upgrade_database can tell
+# whether it has already brought every row up to this format -- see
+# that function's comments for why this exists and what it does not
+# protect against.
+STELLAR_OBJECT_DATA_VERSION = 1
+
 
 def verify_and_upgrade_database(app_config=None) -> None:  # ruff: ignore[missing-type-function-argument]
     """Validate and upgrade all persisted rows in the SQLite tables.
@@ -562,6 +680,27 @@ def verify_and_upgrade_database(app_config=None) -> None:  # ruff: ignore[missin
             logger.error(f"Failed target database verification: {e}")
 
         # 2. StellarObjects verification
+        #
+        # This is a schema migration, not a general integrity scan --
+        # its job is bringing existing rows up to the current
+        # StellarObject serialization format, not catching arbitrary
+        # corruption. It used to run unconditionally on every startup,
+        # fully hydrating and re-serializing every row regardless of
+        # whether anything had actually changed. That was fine at a few
+        # hundred rows; measured against a real 270,450-row catalog on
+        # 2026-08-25 it took ~26 seconds and rewrote 0 rows (every one
+        # already matched the current format), which was long enough to
+        # push backend startup close to the launcher's 60s health-check
+        # timeout and made every restart pay a tax proportional to
+        # total catalog size for no benefit.
+        #
+        # STELLAR_OBJECT_DATA_VERSION gates the whole pass behind
+        # PRAGMA user_version, so a steady-state restart costs one
+        # PRAGMA read instead of an O(row count) rewrite. Increment the
+        # constant whenever StellarObject's persisted JSON shape
+        # changes in a way that requires rewriting existing rows -- that
+        # is what triggers the next full pass, which then advances
+        # user_version so subsequent restarts skip it again.
         try:
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS stellar_objects (
@@ -574,27 +713,36 @@ def verify_and_upgrade_database(app_config=None) -> None:  # ruff: ignore[missin
                     data_json TEXT
                 )
             """)
-            cursor.execute("SELECT id, data_json FROM stellar_objects")
-            rows = cursor.fetchall()
-            for row in rows:
-                obj_id = row["id"]
-                data = json.loads(row["data_json"])
-
-                try:
-                    stellar_obj = StellarObject.model_validate(data)
-                except Exception as val_err:
-                    logger.warning(f"StellarObject {obj_id} hydration failed, attempting recovery: {val_err}")
-                    # Attempt safe recovery patching
-                    if "id" not in data:
-                        data["id"] = obj_id
-                    stellar_obj = StellarObject.model_validate(data)
-
-                # Re-serialize to verify structure parity
-                cursor.execute(
-                    "UPDATE stellar_objects SET data_json = ? WHERE id = ?",
-                    (_safe_json_dumps(stellar_obj.serialize()), obj_id),
+            stored_version = cursor.execute("PRAGMA user_version").fetchone()[0]
+            if stored_version >= STELLAR_OBJECT_DATA_VERSION:
+                logger.info(
+                    "Stellar object catalog already verified at the current schema version; skipping."
                 )
-            logger.info(f"Verified and upgraded {len(rows)} stellar objects.")
+            else:
+                cursor.execute("SELECT id, data_json FROM stellar_objects")
+                rows = cursor.fetchall()
+                for row in rows:
+                    obj_id = row["id"]
+                    data = json.loads(row["data_json"])
+
+                    try:
+                        stellar_obj = StellarObject.model_validate(data)
+                    except Exception as val_err:
+                        logger.warning(
+                            f"StellarObject {obj_id} hydration failed, attempting recovery: {val_err}"
+                        )
+                        # Attempt safe recovery patching
+                        if "id" not in data:
+                            data["id"] = obj_id
+                        stellar_obj = StellarObject.model_validate(data)
+
+                    # Re-serialize to verify structure parity
+                    cursor.execute(
+                        "UPDATE stellar_objects SET data_json = ? WHERE id = ?",
+                        (_safe_json_dumps(stellar_obj.serialize()), obj_id),
+                    )
+                cursor.execute(f"PRAGMA user_version = {STELLAR_OBJECT_DATA_VERSION}")
+                logger.info(f"Verified and upgraded {len(rows)} stellar objects.")
         except Exception as e:
             logger.error(f"Failed stellar objects database verification: {e}")
 

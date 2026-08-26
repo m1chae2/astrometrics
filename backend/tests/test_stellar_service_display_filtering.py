@@ -113,3 +113,58 @@ def test_stellar_object_has_spectra_and_has_photometry_computed_fields():  # ruf
     rpc_data = serialize_rpc_result(star_with_spectra)
     assert rpc_data["hasSpectra"] is True
     assert rpc_data["plotData"] == {"wavelengths": [5000.0], "intensities": [1.0]}
+
+
+def test_get_displayable_stellar_object_summaries_excludes_per_frame_detections(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify the lightweight summary listing also drops detection stubs.
+
+    Mirrors test_get_displayable_stellar_objects_excludes_per_frame_detections
+    for get_displayable_stellar_object_summaries, the path astronomy:list
+    actually uses -- built on StellarCatalog.list_object_summaries's
+    disk-backed lightweight read rather than a fully-hydrated
+    StellarObject list, so the per-frame-stub filter needs its own
+    coverage against that path. Uses a real Astrometrics (not a
+    MagicMock) since the point is exercising the actual disk-backed
+    summary read, not a mocked stand-in for it.
+    """
+    import json
+    import sqlite3
+
+    from astrometricslib import AppConfiguration, Astrometrics
+
+    library_path = tmp_path / "library"
+    (library_path / "targets").mkdir(parents=True)
+    (library_path / "frames").mkdir(parents=True)
+    config = AppConfiguration()
+    config.update_config({
+        "Image Library": {"path": str(library_path), "frames_path": str(library_path / "frames")}
+    })
+
+    db_path = str(library_path / "astrometrics.db")
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE stellar_objects (
+            id TEXT PRIMARY KEY, target_id TEXT, name TEXT,
+            ra REAL, dec REAL, magnitude REAL, data_json TEXT
+        )
+        """
+    )
+    conn.execute(
+        "INSERT INTO stellar_objects (id, data_json) VALUES (?, ?)",
+        ("Polaris", json.dumps({"id": "Polaris", "name": "Polaris", "targetIds": []})),
+    )
+    conn.execute(
+        "INSERT INTO stellar_objects (id, data_json) VALUES (?, ?)",
+        (
+            "M 81:2026-01-14:0:0:Star_60",
+            json.dumps({"id": "M 81:2026-01-14:0:0:Star_60", "name": "detection", "targetIds": ["M 81"]}),
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    service = StellarService(config=config, astrometrics=Astrometrics(config=config), wayfinder=MagicMock())
+    summaries = service.get_displayable_stellar_object_summaries()
+
+    assert [s["id"] for s in summaries] == ["Polaris"]

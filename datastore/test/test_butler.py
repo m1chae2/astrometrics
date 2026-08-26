@@ -143,3 +143,114 @@ def test_exists(tmp_path):  # ruff: ignore[missing-type-function-argument, missi
 
     butler.put(_Widget(id="a"), "widget")
     assert butler.exists("widget", {"id": "a"}) is True
+
+
+def _make_indexed_butler(tmp_path) -> Butler:  # ruff: ignore[missing-type-function-argument]
+    """Build a Butler whose spec declares label as an indexed column.
+
+    Returns
+    -------
+    butler : `Butler`
+        A Butler registered with a "widget" dataset type whose
+        ``label`` column has a real SQL index.
+    """
+    config = _FakeConfig(str(tmp_path))
+    spec = DatasetSpec(
+        table_name="widgets",
+        model_class=_Widget,
+        extra_column_types={"label": "TEXT", "score": "REAL"},
+        extra_columns=lambda widget: {"label": widget.label, "score": widget.score},
+        indexed_columns=("label",),
+    )
+    return Butler(config, db_name="test.db", specs={"widget": spec})
+
+
+def test_ensure_table_creates_the_declared_index(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify indexed_columns produces a real SQL index, not just a column."""
+    import sqlite3
+
+    butler = _make_indexed_butler(tmp_path)
+    butler.put(_Widget(id="w1", label="alpha"), "widget")
+
+    conn = sqlite3.connect(str(tmp_path / "test.db"))
+    indexes = {
+        row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'").fetchall()
+    }
+    conn.close()
+
+    assert "idx_widgets_label" in indexes
+
+
+def test_list_projected_returns_only_the_requested_columns(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify the result dicts carry exactly the requested columns."""
+    butler = _make_indexed_butler(tmp_path)
+    butler.put(_Widget(id="w1", label="alpha", score=1.5), "widget")
+    butler.put(_Widget(id="w2", label="beta", score=2.5), "widget")
+
+    rows = butler.list_projected("widget", ["id", "label"])
+
+    assert sorted(rows, key=lambda r: r["id"]) == [
+        {"id": "w1", "label": "alpha"},
+        {"id": "w2", "label": "beta"},
+    ]
+
+
+def test_list_projected_filters_with_where(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify where= restricts results to matching rows."""
+    butler = _make_indexed_butler(tmp_path)
+    butler.put(_Widget(id="w1", label="alpha"), "widget")
+    butler.put(_Widget(id="w2", label="beta"), "widget")
+
+    rows = butler.list_projected("widget", ["id"], where={"label": "beta"})
+
+    assert rows == [{"id": "w2"}]
+
+
+def test_list_projected_never_touches_data_json_unless_asked(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify data_json is absent from results that don't request it.
+
+    The whole point of this method is avoiding the cost of parsing
+    data_json for callers that only need indexed columns -- this
+    checks the contract, not just the happy path.
+    """
+    butler = _make_indexed_butler(tmp_path)
+    butler.put(_Widget(id="w1", label="alpha"), "widget")
+
+    (row,) = butler.list_projected("widget", ["id", "label"])
+
+    assert "data_json" not in row
+
+
+def test_list_projected_rejects_an_unregistered_column(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify an unknown column name raises rather than building raw SQL.
+
+    columns/where can originate from caller-assembled lists, so this
+    is a real injection guard, not just input validation.
+    """
+    butler = _make_indexed_butler(tmp_path)
+
+    with pytest.raises(ValueError, match="unknown column"):
+        butler.list_projected("widget", ["id", "; DROP TABLE widgets"])
+
+
+def test_list_projected_rejects_an_unregistered_where_column(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify where= keys are validated the same way columns are."""
+    butler = _make_indexed_butler(tmp_path)
+
+    with pytest.raises(ValueError, match="unknown column"):
+        butler.list_projected("widget", ["id"], where={"nonexistent_column": "x"})
+
+
+def test_list_projected_requires_at_least_one_column(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify an empty column list raises rather than selecting nothing."""
+    butler = _make_indexed_butler(tmp_path)
+
+    with pytest.raises(ValueError, match="at least one column"):
+        butler.list_projected("widget", [])
+
+
+def test_list_projected_on_a_missing_database_returns_empty(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify no database file yet is handled the same as an empty table."""
+    butler = _make_indexed_butler(tmp_path)
+
+    assert butler.list_projected("widget", ["id"]) == []

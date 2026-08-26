@@ -19,6 +19,9 @@ from astrometricslib.models.moving_object import CascadeStage
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.tasks.target_tasks import pipeline_tasks
+from astrometricslib.tasks.target_tasks.test.test_pipeline_return_contracts import (
+    assert_result_keys,
+)
 from astrometricslib.utilities.config_loader import AppConfiguration
 
 
@@ -485,6 +488,7 @@ def test_target_analyze_target_asteroid_recovery(tmp_path, mocker):  # ruff: ign
 
     result = pipeline_tasks.analyze_target(target, pipeline_type="asteroid_recovery")
 
+    assert_result_keys(result, "asteroid_recovery")
     assert result["status"] == "completed"
     assert len(target.asteroid_candidates) == 1
     assert target.asteroid_candidates[0].cascade_stage == CascadeStage.RATE_LINEARITY_CONFIRMED
@@ -530,6 +534,7 @@ def test_target_analyze_target_asteroid_recovery_drops_rejected_candidates(tmp_p
 
     result = pipeline_tasks.analyze_target(target, pipeline_type="asteroid_recovery")
 
+    assert_result_keys(result, "asteroid_recovery")
     assert result["status"] == "completed"
     # Only the confirmed track is persisted -- the single-frame cosmic
     # ray is dropped, not carried onto the target.
@@ -665,6 +670,7 @@ def test_target_analyze_target_photometry_runs_each_session_independently(tmp_pa
 
     expected_independent_total = len(session_a_positions) + len(session_b_positions)
 
+    assert_result_keys(result, "photometry")
     assert result["status"] == "completed"
     assert result["starsProcessed"] == expected_independent_total
     assert result["starsFound"] == expected_independent_total
@@ -754,6 +760,7 @@ def test_target_analyze_target_photometry_with_astrometry_seed_uses_identified_s
         target, pipeline_type="photometry", butler=butler, use_astrometry_seed=True
     )
 
+    assert_result_keys(result, "photometry")
     assert result["status"] == "completed"
     assert result["starsProcessed"] == 1
 
@@ -802,6 +809,7 @@ def test_target_analyze_target_photometry_without_astrometry_seed_persists_nothi
         target, pipeline_type="photometry", butler=butler, use_astrometry_seed=False
     )
 
+    assert_result_keys(result, "photometry")
     assert result["status"] == "completed"
     assert result["starsProcessed"] == 0
     assert result["starsFound"] == 0

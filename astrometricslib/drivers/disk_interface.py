@@ -188,117 +188,6 @@ def load_stellar_objects(app_config=None) -> list[Any]:  # ruff: ignore[missing-
     return []
 
 
-def load_stellar_object_summaries(
-    app_config=None,  # ruff: ignore[missing-type-function-argument]
-    target_id: str | None = None,
-) -> list[dict[str, Any]]:
-    """Load lightweight per-star summaries for catalog browsing.
-
-    Built for the astronomy-list use case (a filterable, refreshed-on-
-    an-interval catalog browser), which only ever needs id/name/
-    hasSpectra/hasPhotometry/targetIds to render and filter its list --
-    never the full per-frame light curve or spectral data a `dedicated
-    single-object fetch (``astronomy:get``) already provides once a
-    star is actually selected.
-
-    `load_stellar_objects` fully hydrates a `StellarObject` (nested
-    light curve, spectra history, etc.) for every row, which is the
-    right thing for callers that need real objects, but a poor fit for
-    a list that's fetched wholesale and polled repeatedly: measured
-    against a real 270,450-row catalog on 2026-08-25, that path fully
-    parses, validates, and re-serializes every row's complete nested
-    data, which is both slow to build and a large payload to transmit
-    for a view that only reads five scalar fields per star. This reads
-    the same rows but only ever touches the small set of top-level
-    keys those five fields need, skipping model construction and
-    nested-array processing entirely.
-
-    Parameters
-    ----------
-    app_config : `AppConfiguration`, optional
-        Application configuration object. If `None` (default), the
-        process-wide singleton from `get_configuration` is used.
-    target_id : `str`, optional
-        Restrict to stars associated with this target id, matched the
-        same way `get_stellar_objects` does (membership in the star's
-        ``targetIds``/``target_ids`` list). `None` (default) returns
-        every star.
-
-    Returns
-    -------
-    summaries : `list` [`dict`]
-        One dict per star with keys ``id``, ``name``, ``targetIds``,
-        ``hasSpectra``, and ``hasPhotometry`` -- the same field names
-        `StellarObject.serialize()` uses, so this is a drop-in lighter
-        substitute wherever only those fields are read.
-    """
-    if app_config is None:
-        from astrometricslib.utilities.config_loader import get_configuration
-
-        app_config = get_configuration()
-    db_path = os.path.join(str(app_config.get_library_path()), "astrometrics.db")
-    summaries: list[dict[str, Any]] = []
-
-    try:
-        if not os.path.exists(db_path):
-            return summaries
-
-        conn = _connect_db(db_path)
-        cursor = conn.cursor()
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS stellar_objects (
-                id TEXT PRIMARY KEY,
-                target_id TEXT,
-                name TEXT,
-                ra REAL,
-                dec REAL,
-                magnitude REAL,
-                data_json TEXT
-            )
-        """)
-        cursor.execute("SELECT data_json FROM stellar_objects")
-        for row in cursor.fetchall():
-            data = json.loads(row["data_json"])
-            target_ids = data.get("targetIds") or data.get("target_ids") or []
-            if target_id and target_id not in target_ids:
-                continue
-
-            spectrum_data_processed = data.get("spectrumDataProcessed")
-            spectra_history = data.get("spectraHistory") or []
-            spectrum_data = data.get("spectrumData") or []
-            plain_data = data.get("data") or []
-            has_spectra = bool(
-                spectrum_data_processed
-                or len(spectra_history) > 0
-                or len(spectrum_data) > 0
-                or len(plain_data) > 0
-            )
-
-            light_curve = data.get("lightCurve") or {}
-            has_photometry = bool(
-                light_curve
-                and (
-                    len(light_curve.get("timestamps") or []) > 0
-                    or len(light_curve.get("magnitudes") or []) > 0
-                    or len(light_curve.get("fluxes") or []) > 0
-                )
-            )
-
-            summaries.append({
-                "id": data.get("id", ""),
-                "name": data.get("name", ""),
-                "targetIds": target_ids,
-                "hasSpectra": has_spectra,
-                "hasPhotometry": has_photometry,
-            })
-        conn.close()
-    except Exception as e:
-        logger.error(f"Error loading stellar object summaries: {e}")
-        return []
-
-    return summaries
-
-
 def save_target(app_config=None, target=None) -> str:  # ruff: ignore[missing-type-function-argument]
     """Save a single target to the SQLite database.
 
@@ -602,7 +491,11 @@ _database_verified = False
 # whether it has already brought every row up to this format -- see
 # that function's comments for why this exists and what it does not
 # protect against.
-STELLAR_OBJECT_DATA_VERSION = 1
+STELLAR_OBJECT_DATA_VERSION = 2
+# v1 -> v2: backfill the has_spectra/has_photometry columns
+# (astrometricslib.data_access.butler._stellar_extra_columns) for rows
+# written before those columns existed, from the same hydrated object
+# this pass already builds -- see the UPDATE below.
 
 
 def verify_and_upgrade_database(app_config=None) -> None:  # ruff: ignore[missing-type-function-argument]
@@ -719,6 +612,18 @@ def verify_and_upgrade_database(app_config=None) -> None:  # ruff: ignore[missin
                     "Stellar object catalog already verified at the current schema version; skipping."
                 )
             else:
+                # This table is also reachable through Butler, whose
+                # _ensure_table adds any column a DatasetSpec declares
+                # that isn't on disk yet -- but this pass writes via a
+                # raw cursor, not through Butler, so it can't assume
+                # that has already run. Bring the two new v2 columns
+                # in the same way _ensure_table does, so the UPDATE
+                # below has somewhere to write.
+                existing_columns = {row[1] for row in cursor.execute("PRAGMA table_info(stellar_objects)")}
+                for column in ("has_spectra", "has_photometry"):
+                    if column not in existing_columns:
+                        cursor.execute(f"ALTER TABLE stellar_objects ADD COLUMN {column} INTEGER")
+
                 cursor.execute("SELECT id, data_json FROM stellar_objects")
                 rows = cursor.fetchall()
                 for row in rows:
@@ -736,10 +641,22 @@ def verify_and_upgrade_database(app_config=None) -> None:  # ruff: ignore[missin
                             data["id"] = obj_id
                         stellar_obj = StellarObject.model_validate(data)
 
-                    # Re-serialize to verify structure parity
+                    # Re-serialize to verify structure parity, and
+                    # backfill has_spectra/has_photometry from the same
+                    # hydrated object -- these mirror StellarObject's
+                    # own computed properties of the same name, kept in
+                    # sync going forward by
+                    # data_access.butler._stellar_extra_columns on every
+                    # write through Butler.
                     cursor.execute(
-                        "UPDATE stellar_objects SET data_json = ? WHERE id = ?",
-                        (_safe_json_dumps(stellar_obj.serialize()), obj_id),
+                        "UPDATE stellar_objects SET data_json = ?, has_spectra = ?, has_photometry = ? "
+                        "WHERE id = ?",
+                        (
+                            _safe_json_dumps(stellar_obj.serialize()),
+                            int(stellar_obj.has_spectra),
+                            int(stellar_obj.has_photometry),
+                            obj_id,
+                        ),
                     )
                 cursor.execute(f"PRAGMA user_version = {STELLAR_OBJECT_DATA_VERSION}")
                 logger.info(f"Verified and upgraded {len(rows)} stellar objects.")

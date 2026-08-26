@@ -178,7 +178,8 @@ class StellarService:
         """Lightweight per-star summaries for a catalog-browsing listing.
 
         Same displayability filtering as `get_displayable_stellar_objects`,
-        but built on `disk_interface.load_stellar_object_summaries`
+        but built on `StellarCatalog.list_object_summaries` (indexed
+        columns via `Butler.list_projected`, never touching `data_json`)
         instead of fully hydrating every `StellarObject` -- the right
         choice for a listing that is fetched wholesale and polled on an
         interval (the astronomy list view), where hydrating and

@@ -192,11 +192,19 @@ def _coerce_float(value: Any) -> float | None:
 def _stellar_extra_columns(stellar_object: Any) -> dict[str, Any]:
     """Return the indexed columns kept alongside a stellar object's data_json.
 
+    has_spectra/has_photometry mirror StellarObject's own computed
+    properties of the same name exactly (by calling them, not
+    reimplementing their logic) -- they exist as real columns so a
+    catalog-browsing listing can read them via `Butler.list_projected`
+    without parsing every row's full nested light curve/spectra data
+    just to answer two booleans. SQLite has no native boolean type;
+    stored as INTEGER 0/1, read back as bool by callers that want one.
+
     Returns
     -------
     columns : `dict`
-        The `target_id`/`name`/`ra`/`dec`/`magnitude` column values
-        for `stellar_object`.
+        The `target_id`/`name`/`ra`/`dec`/`magnitude`/`has_spectra`/
+        `has_photometry` column values for `stellar_object`.
     """
     target_ids = getattr(stellar_object, "target_ids", None)
     return {
@@ -205,6 +213,8 @@ def _stellar_extra_columns(stellar_object: Any) -> dict[str, Any]:
         "ra": _coerce_float(stellar_object.right_ascension),
         "dec": _coerce_float(stellar_object.declination),
         "magnitude": _coerce_float(getattr(stellar_object, "magnitude", None)),
+        "has_spectra": int(stellar_object.has_spectra),
+        "has_photometry": int(stellar_object.has_photometry),
     }
 
 
@@ -260,6 +270,8 @@ class DiskButler(AbstractButler):
                         "ra": "REAL",
                         "dec": "REAL",
                         "magnitude": "REAL",
+                        "has_spectra": "INTEGER",
+                        "has_photometry": "INTEGER",
                     },
                     extra_columns=_stellar_extra_columns,
                     # Per-target browsing (the Astronomy Manager's target
@@ -431,6 +443,31 @@ class DiskButler(AbstractButler):
 
         if dataset_type == "stellar_catalog":
             self._stellar_catalog_cache = None
+
+    def get_by_ids(self, dataset_type: str, ids: list[str]) -> list[Any]:
+        """Load only the rows matching the given ids.
+
+        Plain pass-through to the generic Butler's own `get_by_ids`,
+        an indexed primary-key lookup -- unlike `get`, which for
+        "stellar_catalog" always returns (and caches) the entire
+        catalog regardless of `coordinate`. Prefer this when a caller
+        genuinely wants one or a few specific stars, not the whole
+        table.
+
+        Parameters
+        ----------
+        dataset_type : `str`
+            One of "stellar_catalog" or "target_catalog".
+        ids : `list` [`str`]
+            Ids to look up.
+
+        Returns
+        -------
+        rows : `list`
+            The persisted instances matching `ids`, in no particular
+            order; ids with no match are simply absent.
+        """
+        return self._generic.get_by_ids(dataset_type, ids)
 
     def list_projected(
         self,

@@ -1,8 +1,8 @@
 """Purpose: Regression tests for stellar-object catalog performance at scale.
 
-Description: Covers two problems that only showed up once a real catalog
-grew to 270,450 stellar objects on 2026-08-25, after an earlier fix removed
-the 100-star identification cap:
+Description: Covers problems that only showed up once a real catalog grew
+to 270,450 stellar objects on 2026-08-25, after an earlier fix removed the
+100-star identification cap:
 
 1. verify_and_upgrade_database's stellar_objects pass used to fully
    hydrate, re-serialize, and rewrite every row on every single call --
@@ -12,12 +12,14 @@ the 100-star identification cap:
    It now gates the whole pass behind PRAGMA user_version so a
    steady-state call costs one PRAGMA read.
 
-2. load_stellar_objects() fully hydrates a StellarObject (nested
-   light curve, spectra history, etc.) for every row, which the
-   astronomy-list view (polled on an interval, needing only five
-   scalar fields per star) does not need and pays for regardless.
-   load_stellar_object_summaries() reads the same rows but only
-   touches the handful of top-level JSON keys those fields need.
+2. The astronomy-list view (polled on an interval, needing only id/
+   name/targetIds/hasSpectra/hasPhotometry per star) used to be served
+   by fully hydrating a StellarObject -- nested light curve, spectra
+   history, everything -- for every row, then discarding most of it.
+   StellarCatalog.list_object_summaries now reads has_spectra/
+   has_photometry as real, indexed-alongside-data_json columns via
+   Butler.list_projected, which never touches data_json at all for
+   this use case: ~0.6s against the real catalog, versus 7-25s before.
 """
 
 import json
@@ -109,36 +111,29 @@ def test_verify_and_upgrade_skips_the_full_pass_once_already_current(tmp_path, m
     assert row[0] == "not valid json"
 
 
-def test_load_stellar_object_summaries_reports_the_expected_fields(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify summaries carry id/name/targetIds/hasSpectra/hasPhotometry."""
+def test_list_object_summaries_reports_the_expected_fields(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify summaries carry id/name/targetIds/hasSpectra/hasPhotometry.
+
+    Exercises StellarCatalog.list_object_summaries end-to-end through a
+    real DiskButler -- has_spectra/has_photometry are real columns
+    populated by data_access.butler._stellar_extra_columns at write
+    time (via StellarObject's own computed properties), not derived
+    from the JSON at read time the way the code this superseded did.
+    """
+    from astrometricslib.api.stars import StellarCatalog
+    from astrometricslib.models.stellar_source import StellarObject
+
     config = _make_isolated_config(tmp_path)
-    db_path = str(tmp_path / "library" / "astrometrics.db")
+    catalog = StellarCatalog(config=config)
 
-    _insert_raw_stellar_object(
-        db_path,
-        "Vega",
-        {
-            "id": "Vega",
-            "name": "Vega",
-            "targetIds": ["Lyra Field"],
-            "spectrumDataProcessed": {"wavelengths_angstrom": [5000], "intensities": [1.0]},
-        },
-    )
-    _insert_raw_stellar_object(
-        db_path,
-        "Betelgeuse",
-        {
-            "id": "Betelgeuse",
-            "name": "Betelgeuse",
-            "targetIds": ["Orion Field"],
-            "lightCurve": {"timestamps": ["2026-01-01T00:00:00Z"], "magnitudes": [0.5]},
-        },
-    )
-    _insert_raw_stellar_object(
-        db_path, "EmptyStar", {"id": "EmptyStar", "name": "EmptyStar", "targetIds": []}
-    )
+    vega = StellarObject(id="Vega", name="Vega", target_ids=["Lyra Field"])
+    vega.spectrum_data_processed = {"wavelengths_angstrom": [5000], "intensities": [1.0]}
+    betelgeuse = StellarObject(id="Betelgeuse", name="Betelgeuse", target_ids=["Orion Field"])
+    betelgeuse.light_curve = {"timestamps": ["2026-01-01T00:00:00Z"], "magnitudes": [0.5]}
+    empty_star = StellarObject(id="EmptyStar", name="EmptyStar", target_ids=[])
+    catalog.butler.put([vega, betelgeuse, empty_star], "stellar_catalog", {})
 
-    summaries = {s["id"]: s for s in disk_interface.load_stellar_object_summaries(config)}
+    summaries = {s["id"]: s for s in catalog.list_object_summaries()}
 
     assert summaries["Vega"]["hasSpectra"] is True
     assert summaries["Vega"]["hasPhotometry"] is False
@@ -151,45 +146,44 @@ def test_load_stellar_object_summaries_reports_the_expected_fields(tmp_path):  #
     assert summaries["EmptyStar"]["hasPhotometry"] is False
 
 
-def test_load_stellar_object_summaries_filters_by_target_id(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_list_object_summaries_filters_by_target_id(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify target_id restricts to stars whose targetIds include it."""
+    from astrometricslib.api.stars import StellarCatalog
+    from astrometricslib.models.stellar_source import StellarObject
+
     config = _make_isolated_config(tmp_path)
-    db_path = str(tmp_path / "library" / "astrometrics.db")
+    catalog = StellarCatalog(config=config)
 
-    _insert_raw_stellar_object(
-        db_path, "InField", {"id": "InField", "name": "InField", "targetIds": ["M 13"]}
-    )
-    _insert_raw_stellar_object(
-        db_path, "OutOfField", {"id": "OutOfField", "name": "OutOfField", "targetIds": ["M 81"]}
-    )
+    in_field = StellarObject(id="InField", name="InField", target_ids=["M 13"])
+    out_of_field = StellarObject(id="OutOfField", name="OutOfField", target_ids=["M 81"])
+    catalog.butler.put([in_field, out_of_field], "stellar_catalog", {})
 
-    summaries = disk_interface.load_stellar_object_summaries(config, target_id="M 13")
+    summaries = catalog.list_object_summaries(target_id="M 13")
 
     assert [s["id"] for s in summaries] == ["InField"]
 
 
-def test_load_stellar_object_summaries_matches_the_full_hydration_path(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify the lightweight path agrees with StellarObject's computed fields.
+def test_list_object_summaries_matches_the_model_computed_properties(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify the persisted columns agree with StellarObject's own properties.
 
-    The summary logic re-implements has_spectra/has_photometry rather
-    than reusing StellarObject's computed properties (to avoid building
-    a full model per row) -- this checks the two never drift apart.
+    has_spectra/has_photometry are computed once at write time (see
+    data_access.butler._stellar_extra_columns) by calling
+    StellarObject's own computed properties directly, so there is no
+    separate logic to drift out of sync with the model -- this checks
+    that wiring, not a reimplementation of the model's rules.
     """
-    config = _make_isolated_config(tmp_path)
-    db_path = str(tmp_path / "library" / "astrometrics.db")
-    data = {
-        "id": "Vega",
-        "name": "Vega",
-        "targetIds": ["Lyra Field"],
-        "spectrumDataProcessed": {"wavelengths_angstrom": [5000], "intensities": [1.0]},
-        "lightCurve": {"timestamps": ["2026-01-01T00:00:00Z"], "fluxes": [1.0]},
-    }
-    _insert_raw_stellar_object(db_path, "Vega", data)
-
+    from astrometricslib.api.stars import StellarCatalog
     from astrometricslib.models.stellar_source import StellarObject
 
-    full = StellarObject.model_validate(data)
-    (summary,) = disk_interface.load_stellar_object_summaries(config)
+    config = _make_isolated_config(tmp_path)
+    catalog = StellarCatalog(config=config)
 
-    assert summary["hasSpectra"] == full.has_spectra
-    assert summary["hasPhotometry"] == full.has_photometry
+    vega = StellarObject(id="Vega", name="Vega", target_ids=["Lyra Field"])
+    vega.spectrum_data_processed = {"wavelengths_angstrom": [5000], "intensities": [1.0]}
+    vega.light_curve = {"timestamps": ["2026-01-01T00:00:00Z"], "fluxes": [1.0]}
+    catalog.butler.put([vega], "stellar_catalog", {})
+
+    (summary,) = catalog.list_object_summaries()
+
+    assert summary["hasSpectra"] == vega.has_spectra
+    assert summary["hasPhotometry"] == vega.has_photometry

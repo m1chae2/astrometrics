@@ -44,16 +44,34 @@ def list_objects(analysis) -> list[Any]:  # ruff: ignore[missing-type-function-a
 def get_object(analysis, object_id: str) -> Any | None:  # ruff: ignore[missing-type-function-argument]
     """Get a single stellar object by ID using exact/fuzzy matching.
 
+    Tries an indexed exact-id lookup first when the injected butler
+    supports one (`get_by_ids`, an indexed primary-key query -- see
+    `data_access.butler.DiskButler.get_by_ids`), which is what every
+    real `StellarCatalog` is constructed with. This is the path a
+    star's detail/spectrum/photometry view actually takes: exact id,
+    not a fuzzy guess. Falls back to scanning the full, hydrated
+    catalog only when the injected butler doesn't support indexed
+    lookup at all (e.g. a minimal test double), or when the exact
+    lookup misses and a normalized/case-insensitive match is still
+    worth trying.
+
     Returns
     -------
     stellar_object : `Any` or `None`
         The matching stellar object, or `None` if no exact or
         normalized-fuzzy match is found.
     """
-    objects = analysis.list_objects()
-    for obj in objects:
-        if obj.id == object_id:
-            return obj
+    get_by_ids = getattr(analysis.butler, "get_by_ids", None)
+    if callable(get_by_ids):
+        exact_matches = get_by_ids("stellar_catalog", [object_id])
+        if exact_matches:
+            return exact_matches[0]
+        objects = analysis.list_objects()
+    else:
+        objects = analysis.list_objects()
+        for obj in objects:
+            if obj.id == object_id:
+                return obj
 
     normalized = object_id.lower().replace(" ", "").replace("_", "")
     for obj in objects:

@@ -148,6 +148,18 @@ class Butler(AbstractButler):
             f"CREATE TABLE IF NOT EXISTS {spec.table_name} "
             f"(id TEXT PRIMARY KEY, data_json TEXT{extra_columns_sql})"
         )
+        # CREATE TABLE IF NOT EXISTS is a no-op on a table that already
+        # exists, so a DatasetSpec that adds a new extra_column_types
+        # entry after rows are already on disk would otherwise leave
+        # that column silently absent -- any write naming it would then
+        # fail with "no such column", and any read would just never see
+        # it. Bring an existing table's columns up to what the spec
+        # declares, once per _ensure_table call; new columns start NULL
+        # until whatever migration populates them backfills a real value.
+        existing_columns = {row[1] for row in cursor.execute(f"PRAGMA table_info({spec.table_name})")}
+        for name, sql_type in spec.extra_column_types.items():
+            if name not in existing_columns:
+                cursor.execute(f"ALTER TABLE {spec.table_name} ADD COLUMN {name} {sql_type}")
         for column in spec.indexed_columns:
             index_name = f"idx_{spec.table_name}_{column}"
             cursor.execute(f"CREATE INDEX IF NOT EXISTS {index_name} ON {spec.table_name}({column})")

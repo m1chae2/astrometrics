@@ -28,7 +28,7 @@ import logging
 import os
 import uuid
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -67,7 +67,7 @@ class JobHandle:
         self.job_logger = job_logger
         self.log_file_path = log_file_path
         self._logger_interface = logger_interface
-        self._reached_terminal_status = False
+        self.reached_terminal_status = False
 
     def info(self, message: str) -> None:
         """Write an informational line to this job's log.
@@ -106,7 +106,7 @@ class JobHandle:
             How far along the job is, out of 100. Defaults to 100.
         """
         if status in _TERMINAL_STATUSES:
-            self._reached_terminal_status = True
+            self.reached_terminal_status = True
 
         if not (self._logger_interface and self.job_id):
             return
@@ -121,26 +121,96 @@ class JobHandle:
             logger.debug("Could not update job '%s' to '%s': %s", self.job_id, status, update_error)
 
 
-def _build_job_handle(
+@contextmanager
+def capture_job_logs(
     *,
-    job_type: str,
-    target_id: str,
-    log_file: str | None,
-    package_logger_name: str,
-) -> tuple[JobHandle, logging.Logger | None, list[logging.Handler]]:
-    """Create the job row and attach its log handlers.
+    job_id: str,
+    log_file_path: str | None,
+    logger_interface: object | None = None,
+    package_logger_name: str = "astrometricslib",
+) -> Iterator[logging.Logger]:
+    """Send this job's log messages to its own log file and database rows.
+
+    This is the half every caller needs, whether the job row was just
+    created here or already existed. Handlers go on two loggers: the job's
+    own, for messages the caller writes by hand, and the shared package
+    logger, which every module deeper in the work logs through. Without
+    the second one, the job's log would only contain the handful of
+    milestone lines the caller wrote, and none of the decisions the work
+    actually made along the way.
+
+    On the way out the handlers are removed *and closed*. Removing one
+    stops it receiving messages but leaves its file open, and Python keeps
+    every logger it has ever created, so an unclosed handler is a file
+    handle held for the life of the process.
+
+    Parameters
+    ----------
+    job_id : `str`
+        Identifies the job, and names its private logger.
+    log_file_path : `str` or `None`
+        Where to write this job's log file. `None` skips the file and
+        keeps only the database rows.
+    logger_interface : `Any`, optional
+        Somewhere to write log rows to, such as a `LoggerInterface` or the
+        backend job service's repository. `None` skips the database rows.
+    package_logger_name : `str`, optional
+        The shared logger to capture messages from. Defaults to
+        "astrometricslib"; the wayfinding library passes its own.
+
+    Yields
+    ------
+    job_logger : `logging.Logger`
+        The job's own logger, for writing milestone messages.
+    """
+    from astrometricslib.drivers.logger_interface import DbLogHandler
+
+    job_logger = logging.getLogger(f"job_{job_id}")
+    job_logger.propagate = False
+    job_logger.setLevel(logging.INFO)
+
+    attached_handlers: list[logging.Handler] = []
+    if log_file_path:
+        log_directory = os.path.dirname(log_file_path)
+        if log_directory:
+            os.makedirs(log_directory, exist_ok=True)
+        file_handler = logging.FileHandler(log_file_path)
+        file_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+        attached_handlers.append(file_handler)
+    if logger_interface is not None:
+        attached_handlers.append(DbLogHandler(logger_interface, job_id=job_id))
+
+    package_logger = logging.getLogger(package_logger_name)
+    for handler in attached_handlers:
+        job_logger.addHandler(handler)
+        package_logger.addHandler(handler)
+    package_logger.setLevel(logging.INFO)
+
+    try:
+        yield job_logger
+    finally:
+        for handler in attached_handlers:
+            job_logger.removeHandler(handler)
+            package_logger.removeHandler(handler)
+            try:
+                handler.close()
+            except Exception as close_error:
+                logger.debug("Could not close a job log handler: %s", close_error)
+
+
+def _create_job_row(*, job_type: str, target_id: str, log_file: str | None) -> tuple[str, str, object]:
+    """Write a "started" row for a new job into the logs database.
 
     Returns
     -------
-    handle : `JobHandle`
-        The handle the caller will use.
-    package_logger : `logging.Logger` or `None`
-        The shared logger the handlers were attached to, or `None` if
-        nothing was attached.
-    attached_handlers : `list` [`logging.Handler`]
-        The handlers that need taking off again afterwards.
+    job_id : `str`
+        The new job's unique id.
+    log_file_path : `str`
+        Where this job's log file should be written.
+    logger_interface : `Any`
+        The open connection to the logs database.
     """
-    from astrometricslib.drivers.logger_interface import DbLogHandler, LoggerInterface
+    from astrometricslib.drivers.logger_interface import LoggerInterface
     from astrometricslib.utilities.config_loader import get_configuration
     from astrometricslib.utilities.pipeline_models import ProcessingJob
 
@@ -153,26 +223,6 @@ def _build_job_handle(
     log_directory = configuration.get_logs_path()
     os.makedirs(log_directory, exist_ok=True)
     log_file_path = log_file or str(log_directory / f"{job_type}_{safe_target}_{timestamp}.log")
-
-    job_logger = logging.getLogger(f"job_{job_id}")
-    job_logger.propagate = False
-    job_logger.setLevel(logging.INFO)
-
-    file_handler = logging.FileHandler(log_file_path)
-    file_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
-    database_handler = DbLogHandler(logger_interface, job_id=job_id)
-    attached_handlers = [file_handler, database_handler]
-    for handler in attached_handlers:
-        job_logger.addHandler(handler)
-
-    # Also listen on the shared package logger. Every module deeper in the
-    # work logs through it, so without this the only messages reaching the
-    # job's log file would be the handful this function's caller writes by
-    # hand -- none of the decisions the work actually made along the way.
-    package_logger = logging.getLogger(package_logger_name)
-    for handler in attached_handlers:
-        package_logger.addHandler(handler)
-    package_logger.setLevel(logging.INFO)
 
     logger_interface.upsert_job(
         ProcessingJob(
@@ -187,45 +237,7 @@ def _build_job_handle(
             updated_at=datetime.now().isoformat(),
         )
     )
-
-    handle = JobHandle(
-        job_id=job_id,
-        job_logger=job_logger,
-        log_file_path=log_file_path,
-        logger_interface=logger_interface,
-    )
-    return handle, package_logger, attached_handlers
-
-
-def _detach_handlers(
-    job_logger: logging.Logger | None,
-    package_logger: logging.Logger | None,
-    handlers: list[logging.Handler],
-) -> None:
-    """Take the job's log handlers back off and close their files.
-
-    Both steps matter. Removing a handler stops it receiving new
-    messages, but the file it opened stays open until it is closed, and
-    Python never throws the logger away, so an unclosed handler is a
-    file handle leaked for the life of the process.
-
-    Parameters
-    ----------
-    job_logger : `logging.Logger` or `None`
-        This job's own logger.
-    package_logger : `logging.Logger` or `None`
-        The shared logger the handlers were also attached to.
-    handlers : `list` [`logging.Handler`]
-        The handlers to remove and close.
-    """
-    for handler in handlers:
-        for attached_logger in (job_logger, package_logger):
-            if attached_logger is not None:
-                attached_logger.removeHandler(handler)
-        try:
-            handler.close()
-        except Exception as close_error:
-            logger.debug("Could not close a job log handler: %s", close_error)
+    return job_id, log_file_path, logger_interface
 
 
 @contextmanager
@@ -252,6 +264,9 @@ def registered_job(
     can finish cleanly but still produce no image) should call
     `handle.mark(...)` itself; that choice is respected.
 
+    Callers that already have a job row, such as the backend's analysis
+    orchestrator, want `capture_job_logs` instead.
+
     Parameters
     ----------
     enabled : `bool`
@@ -269,8 +284,7 @@ def registered_job(
     failed_message : `str`, optional
         Line to write to the job log when the work fails.
     package_logger_name : `str`, optional
-        The shared logger to capture messages from. Defaults to
-        "astrometricslib"; the wayfinding library passes its own.
+        The shared logger to capture messages from.
 
     Yields
     ------
@@ -278,33 +292,41 @@ def registered_job(
         Used to log messages and report progress.
     """
     handle = JobHandle()
-    package_logger: logging.Logger | None = None
-    attached_handlers: list[logging.Handler] = []
 
-    if enabled:
+    with ExitStack() as log_capture:
+        if enabled:
+            try:
+                job_id, log_file_path, logger_interface = _create_job_row(
+                    job_type=job_type, target_id=target_id, log_file=log_file
+                )
+                job_logger = log_capture.enter_context(
+                    capture_job_logs(
+                        job_id=job_id,
+                        log_file_path=log_file_path,
+                        logger_interface=logger_interface,
+                        package_logger_name=package_logger_name,
+                    )
+                )
+                handle = JobHandle(
+                    job_id=job_id,
+                    job_logger=job_logger,
+                    log_file_path=log_file_path,
+                    logger_interface=logger_interface,
+                )
+            except Exception as registration_error:
+                # A job we cannot record is still a job worth doing.
+                logger.warning("Could not register %s job: %s", job_type, registration_error)
+                handle = JobHandle()
+
         try:
-            handle, package_logger, attached_handlers = _build_job_handle(
-                job_type=job_type,
-                target_id=target_id,
-                log_file=log_file,
-                package_logger_name=package_logger_name,
-            )
-        except Exception as registration_error:
-            # A job we cannot record is still a job worth doing.
-            logger.warning("Could not register %s job: %s", job_type, registration_error)
-            handle = JobHandle()
-
-    try:
-        yield handle
-    except Exception:
-        handle.mark("failed", 0)
-        if failed_message:
-            handle.error(failed_message)
-        raise
-    else:
-        if not handle._reached_terminal_status:
-            handle.mark("completed", 100)
-        if completed_message:
-            handle.info(completed_message)
-    finally:
-        _detach_handlers(handle.job_logger, package_logger, attached_handlers)
+            yield handle
+        except Exception:
+            handle.mark("failed", 0)
+            if failed_message:
+                handle.error(failed_message)
+            raise
+        else:
+            if not handle.reached_terminal_status:
+                handle.mark("completed", 100)
+            if completed_message:
+                handle.info(completed_message)

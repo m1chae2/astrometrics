@@ -643,6 +643,7 @@ def sync_all_remote_folders(
     import logging as _logging
     import os
     import uuid
+    from contextlib import ExitStack
     from datetime import datetime
 
     from astrometricslib import Astrometrics, get_configuration
@@ -656,12 +657,18 @@ def sync_all_remote_folders(
     logger_if = None
     job_id = None
     job_logger = None
-    job_log_handlers: list = []
-    package_logger = None
+
+    # Attaching and detaching this job's log handlers is shared with
+    # astrometricslib rather than written out again here, because every
+    # hand-written copy of it got the cleanup wrong in the same two ways:
+    # the handlers were left on the job's own logger, and the log file
+    # they opened was never closed. Held open in an ExitStack so the
+    # existing `finally` below is still the single place cleanup happens.
+    log_capture = ExitStack()
 
     if register_job:
         try:
-            from astrometricslib import DbLogHandler, LoggerInterface, ProcessingJob
+            from astrometricslib import LoggerInterface, ProcessingJob, capture_job_logs
 
             config = get_configuration()
             logger_if = LoggerInterface(config.get_logs_db_path())
@@ -671,25 +678,6 @@ def sync_all_remote_folders(
             log_dir = config.get_logs_path()
             os.makedirs(log_dir, exist_ok=True)
             log_file_path = str(log_dir / f"remote_sync_{timestamp}.log")
-
-            job_logger = _logging.getLogger(f"job_{job_id}")
-            job_logger.propagate = False
-            job_logger.setLevel(_logging.INFO)
-            file_handler = _logging.FileHandler(log_file_path)
-            file_handler.setFormatter(_logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
-            db_handler = DbLogHandler(logger_if, job_id=job_id)
-            job_logger.addHandler(file_handler)
-            job_logger.addHandler(db_handler)
-            job_log_handlers = [file_handler, db_handler]
-
-            # Also attach to the wayfindinglib package logger so
-            # anything logged deeper in the download drivers (e.g.
-            # StellarMateInterface's rsync/scp progress) lands in this
-            # job's log file/DB rows too.
-            package_logger = _logging.getLogger("wayfindinglib")
-            for handler in job_log_handlers:
-                package_logger.addHandler(handler)
-            package_logger.setLevel(_logging.INFO)
 
             logger_if.upsert_job(
                 ProcessingJob(
@@ -704,11 +692,23 @@ def sync_all_remote_folders(
                     updated_at=datetime.now().isoformat(),
                 )
             )
+
+            # The wayfindinglib package logger, not astrometricslib's, so
+            # progress logged deeper in the download drivers (such as
+            # StellarMateInterface's rsync output) reaches this job's log.
+            job_logger = log_capture.enter_context(
+                capture_job_logs(
+                    job_id=job_id,
+                    log_file_path=log_file_path,
+                    logger_interface=logger_if,
+                    package_logger_name="wayfindinglib",
+                )
+            )
         except Exception as job_err:
             logger_if = None
             job_id = None
             job_logger = None
-            job_log_handlers = []
+            log_capture.close()
             _logging.getLogger(__name__).warning(f"Could not register job in astrometrics_log.db: {job_err}")
 
     def update_job(status: str | None = None, progress_current: int | None = None, **fields: Any) -> None:
@@ -780,8 +780,6 @@ def sync_all_remote_folders(
         final_status = "completed_with_errors" if failed else "completed"
         update_job(status=final_status, message=f"{len(succeeded)} succeeded, {len(failed)} failed.")
     finally:
-        if package_logger:
-            for handler in job_log_handlers:
-                package_logger.removeHandler(handler)
+        log_capture.close()
 
     return {"succeeded": succeeded, "failed": failed, "job_id": job_id}

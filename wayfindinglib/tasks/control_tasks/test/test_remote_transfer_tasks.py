@@ -367,3 +367,110 @@ def test_download_remote_targets_transfers_same_name_file_of_different_size(tmp_
     assert mock_driver.return_value.download_target_folder.call_args.kwargs["selected_files"] == [
         "Light/Luminance/M_27_Light_001.fits"
     ]
+
+
+class _EmptyTargetCatalog:
+    """Stands in for the target catalog, with nothing in it."""
+
+    def list(self):  # ruff: ignore[missing-return-type-private-function]
+        return []
+
+
+class _EmptyAstrometrics:
+    """Stands in for the Astrometrics facade the sync builds for itself."""
+
+    def __init__(self, *args, **kwargs):  # ruff: ignore[missing-return-type-special-method, missing-type-kwargs, missing-type-args]
+        self.targets = _EmptyTargetCatalog()
+
+
+def _our_log_handlers(logger_name: str) -> list:
+    """List only the log handlers this library attaches.
+
+    pytest adds its own capture handler while a test runs, and that one
+    is not ours to remove.
+
+    Returns
+    -------
+    handlers : `list`
+        The file and database handlers attached to `logger_name`.
+    """
+    import logging
+
+    from astrometricslib import DbLogHandler
+
+    return [
+        handler
+        for handler in logging.getLogger(logger_name).handlers
+        if isinstance(handler, logging.FileHandler | DbLogHandler)
+    ]
+
+
+def test_sync_all_remote_folders_records_a_job_and_cleans_up_its_log_handlers(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify the sync records a job and leaves no log handlers behind.
+
+    The handlers are attached to the shared "wayfindinglib" logger so
+    progress from the download drivers reaches the job's log. Leaving
+    them attached would mean this job's log kept collecting messages from
+    every later job, and leaving the file open leaks a file handle for
+    the life of the process.
+
+    Nothing is actually downloaded here: the remote listings are stubbed
+    empty, so this exercises the job bookkeeping around the sync rather
+    than the sync itself.
+    """
+    import astrometricslib
+    from astrometricslib import AppConfiguration, LoggerInterface
+
+    library_path = tmp_path / "library"
+    library_path.mkdir()
+    logs_path = tmp_path / "logs"
+    logs_path.mkdir()
+
+    configuration = AppConfiguration()
+    configuration.update_config({"Image Library": {"path": str(library_path)}})
+    monkeypatch.setattr(configuration, "get_logs_path", lambda: logs_path)
+    monkeypatch.setattr(astrometricslib, "get_configuration", lambda: configuration)
+    monkeypatch.setattr(astrometricslib, "Astrometrics", _EmptyAstrometrics)
+    monkeypatch.setattr(remote_operations, "list_remote_calibration_folders", lambda api: [])
+    monkeypatch.setattr(remote_operations, "discover_unassociated_remote_targets", lambda api, targets: [])
+
+    handlers_before = len(_our_log_handlers("wayfindinglib"))
+
+    result = remote_operations.sync_all_remote_folders(api=None, register_job=True)
+
+    assert result["succeeded"] == []
+    assert result["failed"] == []
+    assert result["job_id"] is not None
+
+    stored_job = LoggerInterface(configuration.get_logs_db_path()).get_job(result["job_id"])
+    assert stored_job is not None
+    assert stored_job.job_type == "remote_sync"
+    assert stored_job.status == "completed"
+    # This sync sets a finish time, which the shared helper's simpler
+    # status update does not -- proof that behaviour survived the move.
+    assert stored_job.completed_at
+
+    assert len(_our_log_handlers("wayfindinglib")) == handlers_before
+    assert _our_log_handlers(f"job_{result['job_id']}") == []
+
+
+def test_sync_all_remote_folders_without_job_registration_records_nothing(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify the opt-out skips the job row and attaches no handlers."""
+    import astrometricslib
+    from astrometricslib import AppConfiguration
+
+    library_path = tmp_path / "library"
+    library_path.mkdir()
+    configuration = AppConfiguration()
+    configuration.update_config({"Image Library": {"path": str(library_path)}})
+    monkeypatch.setattr(astrometricslib, "get_configuration", lambda: configuration)
+    monkeypatch.setattr(astrometricslib, "Astrometrics", _EmptyAstrometrics)
+    monkeypatch.setattr(remote_operations, "list_remote_calibration_folders", lambda api: [])
+    monkeypatch.setattr(remote_operations, "discover_unassociated_remote_targets", lambda api, targets: [])
+
+    handlers_before = len(_our_log_handlers("wayfindinglib"))
+
+    result = remote_operations.sync_all_remote_folders(api=None, register_job=False)
+
+    assert result["job_id"] is None
+    assert len(_our_log_handlers("wayfindinglib")) == handlers_before

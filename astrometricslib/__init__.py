@@ -23,6 +23,7 @@ except PackageNotFoundError:  # running from a source tree without an install
 
 from astrometricslib.data_access.butler import AbstractButler, DiskButler
 from astrometricslib.data_access.frame_scanning import classify_and_sort_fits_files
+from astrometricslib.drivers.job_logging import JobHandle, capture_job_logs, registered_job
 from astrometricslib.drivers.logger_interface import DbLogHandler, LoggerInterface
 from astrometricslib.drivers.siril_interface import ImageProcessing
 from astrometricslib.models.moving_object import AsteroidRecoveryCandidate
@@ -212,6 +213,7 @@ __all__ = [
     "FrameRecord",
     "GroupedFrameStat",
     "ImageProcessing",
+    "JobHandle",
     "LightCurve",
     "LoggerInterface",
     "MosaicInfo",
@@ -232,10 +234,12 @@ __all__ = [
     "TargetSessionContribution",
     "VariableCandidate",
     "Visualization",
+    "capture_job_logs",
     "classify_and_sort_fits_files",
     "derive_target_sessions",
     "get_configuration",
     "parse_coordinate_string",
+    "registered_job",
     "resolve_worker_counts",
     "run_parallel_batch",
 ]

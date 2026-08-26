@@ -166,53 +166,22 @@ class AnalysisOrchestrator(BaseBackgroundService):
             ...}` dict if a single batch contained both frame types;
             or an error dict if no usable paths/filter were found.
         """
-        # Configure local logger for this job's isolated file. Handlers are
-        # attached to BOTH job_logger (this method's own explicit
-        # milestone messages, e.g. below) AND the "astrometricslib"
-        # package logger -- the common ancestor of every module logger
-        # used deeper in the pipeline (star_identifier, plate_solver,
-        # variability_analyzer, etc, all via logging.getLogger(__name__)
-        # with propagate=True by default). Without the latter, only this
-        # method's own hand-written log lines ever reached the job's log
-        # file/DB rows; everything the pipeline itself decides along the
-        # way (plate-solve fallback stages, SIMBAD/Gaia query results,
-        # per-star identification) was invisible there.
+        # The job row already exists here -- it was created before this
+        # worker started -- so this only needs the log-capture half.
+        # capture_job_logs attaches handlers to both this job's own logger
+        # and the shared "astrometricslib" logger that every module deeper
+        # in the pipeline logs through, then removes and closes them again
+        # when the work finishes. See astrometricslib.drivers.job_logging.
+        from astrometricslib import capture_job_logs
+
         job = self._job_service.get_job(job_id) if self._job_service else None
-        job_logger = logging.getLogger(f"job_{job_id}")
-        job_logger.propagate = False
-        pipeline_logger = logging.getLogger("astrometricslib")
 
-        job_log_handlers: list[logging.Handler] = []
-        if job and job.log_file_path:
-            log_dir = os.path.dirname(job.log_file_path)
-            if log_dir and not os.path.exists(log_dir):
-                os.makedirs(log_dir, exist_ok=True)
-            handler = logging.FileHandler(job.log_file_path)
-            handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
-            job_log_handlers.append(handler)
-
-        if self._job_service is not None:
-            from astrometricslib import DbLogHandler
-
-            job_log_handlers.append(DbLogHandler(self._job_service.repository, job_id=job_id))
-
-        for handler in job_log_handlers:
-            job_logger.addHandler(handler)
-            pipeline_logger.addHandler(handler)
-        job_logger.setLevel(logging.INFO)
-        pipeline_logger.setLevel(logging.INFO)
-
-        try:
+        with capture_job_logs(
+            job_id=job_id,
+            log_file_path=job.log_file_path if job else None,
+            logger_interface=self._job_service.repository if self._job_service else None,
+        ) as job_logger:
             return self._run_analysis_task_body(job_logger, job_id, target_id, image_files, filter_type, type)
-        finally:
-            # Every job creates its own handler instances above, so
-            # leaving them attached would mean this job's file/DB rows
-            # keep receiving every *future* job's log lines too (they all
-            # share the same "astrometricslib" ancestor) -- remove them
-            # once this run is done, regardless of success or failure.
-            for handler in job_log_handlers:
-                job_logger.removeHandler(handler)
-                pipeline_logger.removeHandler(handler)
 
     def _run_analysis_task_body(  # ruff: ignore[missing-return-type-private-function]
         self,

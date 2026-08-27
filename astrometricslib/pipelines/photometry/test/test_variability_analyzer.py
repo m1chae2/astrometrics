@@ -12,6 +12,7 @@ import pytest
 from astrometricslib.pipelines.photometry.variability_analyzer import (
     VariabilityAnalyzer,
     _calculate_frame_offset,
+    _measure_aperture_flux,
     locate_star_centroid,
 )
 
@@ -43,6 +44,61 @@ def test_measure_flux_numpy_out_of_bounds_returns_unsaturated_zero():  # ruff: i
     analyzer = VariabilityAnalyzer()
     flux, is_saturated = analyzer._measure_flux_numpy(data, 1, 1)
     assert flux == pytest.approx(0.0)
+    assert is_saturated is False
+
+
+def test_measure_aperture_flux_pins_sum_method_exact():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verifies the exact flux value produced by sum_method="exact".
+
+    photutils.aperture supports several ways to decide how much of a
+    boundary pixel counts as "inside" a circular aperture ("center",
+    "exact", "subpixel"), and they give slightly different answers right
+    at the edge of the circle. This test uses a hard-edged square star
+    (not a soft, star-like glow) so that edge-pixel handling actually
+    matters, and pins the exact number photutils gives us today for
+    "exact" (its own default method). If this test ever fails after an
+    unrelated change, the most likely cause is someone changed which
+    method is used -- that is a real, if small, change to every star's
+    measured brightness and should be a deliberate decision, not an
+    accident.
+    """
+    data = np.full((100, 100), 500.0)
+    data[46:54, 46:54] = 1000.0  # hard-edged square, not a soft star glow
+
+    flux, is_saturated = _measure_aperture_flux(data, 50, 50)
+    assert flux == pytest.approx(23824.693920034817)
+    assert is_saturated is False
+
+
+def test_measure_aperture_flux_empty_annulus_uses_local_median():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verifies the local-cutout-median fallback when the annulus is empty.
+
+    A star near the edge of a small picture might not have any
+    background ring (annulus) pixels to measure at all. When that
+    happens, this function should fall back to the median brightness of
+    the whole local cutout around the star.
+    """
+    data = np.full((9, 9), 500.0)
+    data[2:7, 2:7] = 1000.0  # star block big enough that the local median is still background (500)
+
+    flux, is_saturated = _measure_aperture_flux(data, 4, 4, cutout_radius=4)
+    assert flux == pytest.approx(12500.0)
+    assert is_saturated is False
+
+
+def test_measure_aperture_flux_empty_annulus_honors_explicit_fallback():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verifies an explicit fallback_background overrides the local median.
+
+    This is the background the per-frame worker passes in (a frame-wide
+    sampled median), which differs from the local-cutout-median fallback
+    that the reference-frame flux measurements use when no
+    fallback_background is given.
+    """
+    data = np.full((9, 9), 500.0)
+    data[2:7, 2:7] = 1000.0
+
+    flux, is_saturated = _measure_aperture_flux(data, 4, 4, cutout_radius=4, fallback_background=100.0)
+    assert flux == pytest.approx(32606.192982974677)
     assert is_saturated is False
 
 

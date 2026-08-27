@@ -15,6 +15,8 @@ from typing import Any
 import numpy as np
 from astropy.io import fits
 from astropy.stats import mad_std, sigma_clip
+from photutils.aperture import CircularAnnulus, CircularAperture
+from photutils.centroids import centroid_com
 
 from astrometricslib.image_processing.fits_access import collapse_to_2d
 from astrometricslib.image_processing.saturation import (
@@ -118,14 +120,11 @@ def locate_star_centroid(
     cutout = data[y0:y1, x0:x1]
     background_level = np.median(cutout)
     weights = np.clip(cutout - background_level, 0.0, None)
-    total_weight = weights.sum()
-    if total_weight <= 0:
+    if weights.sum() <= 0:
         return None
 
-    cutout_y_indices, cutout_x_indices = np.indices(cutout.shape)
-    centroid_x = float((cutout_x_indices * weights).sum() / total_weight)
-    centroid_y = float((cutout_y_indices * weights).sum() / total_weight)
-    return x0 + centroid_x, y0 + centroid_y
+    centroid_x, centroid_y = centroid_com(weights)
+    return x0 + float(centroid_x), y0 + float(centroid_y)
 
 
 def _calculate_frame_offset(
@@ -189,6 +188,81 @@ def compute_frame_airmass(header: fits.Header) -> float:
     return 1.0
 
 
+def _measure_aperture_flux(
+    data: np.ndarray,
+    x: float,
+    y: float,
+    radius: float = 4.0,
+    annulus_inner: float = 7.0,
+    annulus_outer: float = 12.0,
+    cutout_radius: int = 15,
+    fallback_background: float | None = None,
+) -> tuple[float, bool]:
+    """Measure the brightness of a star inside a small circle.
+
+    We add up all the light inside the circle, then subtract the background
+    glow to get the star's true brightness. This is the one place that
+    actually does the aperture math -- every other function in this file
+    that needs a star's flux calls this one, so the math only lives here.
+
+    Returns
+    -------
+    result : `tuple[float, bool]`
+        The total brightness, and a True/False flag if the star was
+        too bright (saturated).
+    """
+    height, width = data.shape
+    x_int, y_int = round(x), round(y)
+
+    # Bounds check
+    if (
+        x_int - cutout_radius < 0
+        or x_int + cutout_radius >= width
+        or y_int - cutout_radius < 0
+        or y_int + cutout_radius >= height
+    ):
+        return 0.0, False
+
+    aperture = CircularAperture((x_int, y_int), r=radius)
+    annulus = CircularAnnulus((x_int, y_int), r_in=annulus_inner, r_out=annulus_outer)
+
+    # "exact" is photutils' own default for aperture_photometry(): it
+    # weighs each boundary pixel by how much of it actually falls inside
+    # the circle, instead of an all-or-nothing pixel-center test. A
+    # circle of radius 4.0 doesn't divide evenly into whole pixels, so
+    # any binary mask has to make an arbitrary call on those boundary
+    # pixels; "exact" is the one photutils itself recommends, and its
+    # weighted sum has to be paired with the aperture's true analytic
+    # area (below), not a raw pixel count, when subtracting background.
+    star_flux_sum = aperture.to_mask(method="exact").get_values(data).sum()
+
+    # Saturation is judged from actual pixel ADU values, not the
+    # area-weighted fractions above, so it uses its own unweighted mask.
+    star_raw_values = aperture.to_mask(method="center").get_values(data)
+
+    # The background level is a median, which (per photutils' own
+    # ApertureStats) comes out the same regardless of which masking
+    # method is used, so the plain unweighted mask is enough here.
+    annulus_values = annulus.to_mask(method="center").get_values(data)
+
+    if annulus_values is not None and annulus_values.size > 0:
+        background_level = np.median(annulus_values)
+    elif fallback_background is not None:
+        background_level = fallback_background
+    else:
+        local_cutout = data[
+            y_int - cutout_radius : y_int + cutout_radius + 1,
+            x_int - cutout_radius : x_int + cutout_radius + 1,
+        ]
+        background_level = np.median(local_cutout)
+
+    net_flux = star_flux_sum - aperture.area * background_level
+    saturated_fraction = compute_saturated_pixel_fraction(star_raw_values, _SATURATION_ADU_THRESHOLD)
+    is_saturated = is_saturation_significant(saturated_fraction)
+
+    return max(0.0, float(net_flux)), is_saturated
+
+
 def _process_single_frame_worker(args):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
     """Analyze a single picture.
 
@@ -226,58 +300,17 @@ def _process_single_frame_worker(args):  # ruff: ignore[missing-type-function-ar
 
         # 3. Forced Photometry
         fluxes_dict = {}
-        height, width = data.shape
-        aperture_radius = 4.0
-        # Increase cutout for a proper background annulus
-        cutout_radius_integer = 15
 
         for reference_id, reference_x, reference_y in reference_stars_list:
             target_x, target_y = reference_x + delta_x_shift, reference_y + delta_y_shift
-            target_x_int, target_y_int = round(target_x), round(target_y)
-
-            # Bounds check with larger cutout
-            if (
-                target_x_int - cutout_radius_integer < 0
-                or target_x_int + cutout_radius_integer >= width
-                or target_y_int - cutout_radius_integer < 0
-                or target_y_int + cutout_radius_integer >= height
-            ):
-                fluxes_dict[reference_id] = (0.0, False)
-                continue
-
-            cutout = data[
-                target_y_int - cutout_radius_integer : target_y_int + cutout_radius_integer + 1,
-                target_x_int - cutout_radius_integer : target_x_int + cutout_radius_integer + 1,
-            ]
-            cutout_y, cutout_x = np.indices(cutout.shape)
-            # Distance from center of cutout
-            distance_squared = (cutout_x - cutout_radius_integer) ** 2 + (
-                cutout_y - cutout_radius_integer
-            ) ** 2
-
-            # Star mask
-            star_mask = distance_squared <= aperture_radius**2
-
-            # Background annulus: radius 7 to 12
-            annulus_inner = 7.0
-            annulus_outer = 12.0
-            annulus_mask = (distance_squared > annulus_inner**2) & (distance_squared <= annulus_outer**2)
-
-            # Median background from annulus
-            if np.any(annulus_mask):
-                background_level = np.median(cutout[annulus_mask])
-            else:
-                background_level = global_background
-
-            net_flux = np.sum(cutout[star_mask]) - (np.count_nonzero(star_mask) * background_level)
             # Saturation is judged from raw ADU pixel values (against
-            # _SATURATION_ADU_THRESHOLD, itself a raw-ADU constant), so
-            # it must run before the ADU/second conversion below.
-            saturated_fraction = compute_saturated_pixel_fraction(
-                cutout[star_mask], _SATURATION_ADU_THRESHOLD
+            # _SATURATION_ADU_THRESHOLD, itself a raw-ADU constant) inside
+            # _measure_aperture_flux, so it happens before the ADU/second
+            # conversion below.
+            net_flux, is_saturated = _measure_aperture_flux(
+                data, target_x, target_y, fallback_background=global_background
             )
-            is_saturated = is_saturation_significant(saturated_fraction)
-            fluxes_dict[reference_id] = (max(0.0, net_flux) / exposure_seconds, is_saturated)
+            fluxes_dict[reference_id] = (net_flux / exposure_seconds, is_saturated)
 
         return path, (timestamp, fluxes_dict, delta_x_shift, delta_y_shift, global_background, airmass)
 
@@ -715,7 +748,9 @@ class VariabilityAnalyzer:
         """Measure the brightness of a star inside a small circle.
 
         We add up all the light inside the circle, then subtract the background
-        glow to get the star's true brightness.
+        glow to get the star's true brightness. This is a thin wrapper around
+        `_measure_aperture_flux`, which is the module-level function every flux
+        measurement in this file actually goes through.
 
         Returns
         -------
@@ -723,43 +758,7 @@ class VariabilityAnalyzer:
             The total brightness, and a True/False flag if the star was
             too bright (saturated).
         """
-        height, width = data.shape
-        x_int, y_int = round(x), round(y)
-        cutout_radius = 15
-
-        # Bounds check
-        if (
-            x_int - cutout_radius < 0
-            or x_int + cutout_radius >= width
-            or y_int - cutout_radius < 0
-            or y_int + cutout_radius >= height
-        ):
-            return 0.0, False
-
-        cutout = data[
-            y_int - cutout_radius : y_int + cutout_radius + 1,
-            x_int - cutout_radius : x_int + cutout_radius + 1,
-        ]
-        cutout_y, cutout_x = np.indices(cutout.shape)
-        distance_squared = (cutout_x - cutout_radius) ** 2 + (cutout_y - cutout_radius) ** 2
-        star_mask = distance_squared <= radius**2
-
-        # Background annulus: radius 7 to 12
-        annulus_inner = 7.0
-        annulus_outer = 12.0
-        annulus_mask = (distance_squared > annulus_inner**2) & (distance_squared <= annulus_outer**2)
-
-        if np.any(annulus_mask):
-            background_level = np.median(cutout[annulus_mask])
-        else:
-            background_level = np.median(cutout)  # Fallback
-
-        # Sum Flux
-        net_flux = np.sum(cutout[star_mask]) - (np.count_nonzero(star_mask) * background_level)
-        saturated_fraction = compute_saturated_pixel_fraction(cutout[star_mask], _SATURATION_ADU_THRESHOLD)
-        is_saturated = is_saturation_significant(saturated_fraction)
-
-        return max(0.0, net_flux), is_saturated
+        return _measure_aperture_flux(data, x, y, radius=radius)
 
     def normalize_light_curves(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Perform differential photometry using ensemble normalization.

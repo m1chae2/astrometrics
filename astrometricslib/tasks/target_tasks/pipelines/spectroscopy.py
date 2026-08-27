@@ -137,7 +137,7 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
             Flagged when any processed star's zero-order image was
             significantly saturated.
         """
-        from astrometricslib.tasks.shared.saturation_analysis import is_saturation_significant
+        from astrometricslib.image_processing.saturation import is_saturation_significant
 
         stellar_objects = outcome.stellar_objects
         star_id_breakdown = outcome.payload["star_id_breakdown"]

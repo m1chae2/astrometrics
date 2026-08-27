@@ -16,14 +16,14 @@ import numpy as np
 from astropy.io import fits
 from astropy.stats import mad_std, sigma_clip
 
-from astrometricslib.data_access.image_type import collapse_to_2d
-from astrometricslib.models.quality_summary import FrameEnsembleComposition
-from astrometricslib.models.stellar_source import LightCurve, StellarObject
-from astrometricslib.tasks.shared.saturation_analysis import (
+from astrometricslib.image_processing.fits_access import collapse_to_2d
+from astrometricslib.image_processing.saturation import (
     compute_saturated_pixel_fraction,
     is_saturation_significant,
 )
-from astrometricslib.tasks.shared.source_detection_shared import SourceDetector
+from astrometricslib.image_processing.source_detection import SourceDetector
+from astrometricslib.models.quality_summary import FrameEnsembleComposition
+from astrometricslib.models.stellar_source import LightCurve, StellarObject
 
 logger = logging.getLogger(__name__)
 

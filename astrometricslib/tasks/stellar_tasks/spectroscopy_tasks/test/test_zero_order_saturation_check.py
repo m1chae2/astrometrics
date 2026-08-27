@@ -11,8 +11,9 @@ and photometry.
 import numpy as np
 import pytest
 
+from astrometricslib.image_processing.image import AstrometricsImage
 from astrometricslib.tasks.stellar_tasks.spectroscopy_tasks.spectroscopy_pipeline import SpectroscopyPipeline
-from astrometricslib.utilities import AstrometricsImage, CameraConfig, SpectroscopyConfig
+from astrometricslib.utilities import CameraConfig, SpectroscopyConfig
 
 
 class MockAstrometricsImage(AstrometricsImage):

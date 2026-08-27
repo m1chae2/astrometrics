@@ -463,13 +463,13 @@ def _build_stack_quality_summary(  # ruff: ignore[missing-return-type-private-fu
         measure_saturated_pixel_fraction,
         parse_seq_file,
     )
+    from astrometricslib.image_processing.saturation import is_saturation_significant
     from astrometricslib.models.quality_summary import (
         ExcludedFrame,
         StackingPipelineQualityMetrics,
         StackQualitySummary,
         TargetSessionContribution,
     )
-    from astrometricslib.tasks.shared.saturation_analysis import is_saturation_significant
     from astrometricslib.tasks.target_tasks.stack_quality_tasks import (
         is_rejected_fraction_significant,
         is_stacked_fwhm_degraded,

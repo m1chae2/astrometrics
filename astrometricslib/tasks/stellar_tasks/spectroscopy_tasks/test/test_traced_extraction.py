@@ -11,12 +11,13 @@ just by reading the code.
 import numpy as np
 import pytest
 
+from astrometricslib.image_processing.image import AstrometricsImage
 from astrometricslib.tasks.stellar_tasks.spectroscopy_tasks.spectroscopy_instrument import (
     SpectroscopyInstrument,
 )
 from astrometricslib.tasks.stellar_tasks.spectroscopy_tasks.spectrum_calibrator import SpectrumCalibrator
 from astrometricslib.tasks.stellar_tasks.spectroscopy_tasks.spectrum_extractor import SpectrumExtractor
-from astrometricslib.utilities import AstrometricsImage, CameraConfig, SpectroscopyConfig
+from astrometricslib.utilities import CameraConfig, SpectroscopyConfig
 
 
 class MockAstrometricsImage(AstrometricsImage):

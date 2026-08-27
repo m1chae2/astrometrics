@@ -317,7 +317,7 @@ class DiskButler(AbstractButler):
 
         elif dataset_type == "raw_frame" or dataset_type == "stacked_image":
             path = self.get_local_path(dataset_type, coordinate)
-            from astrometricslib.utilities.image import AstrometricsImage
+            from astrometricslib.image_processing.image import AstrometricsImage
 
             return AstrometricsImage(path)
         elif dataset_type == "raw_frames":

@@ -14,8 +14,8 @@ import numpy as np
 from astropy.io import fits
 from astropy.stats import sigma_clipped_stats
 
-from astrometricslib.data_access.image_type import collapse_to_2d
-from astrometricslib.tasks.shared.saturation_analysis import compute_saturated_pixel_fraction
+from astrometricslib.image_processing.fits_access import collapse_to_2d
+from astrometricslib.image_processing.saturation import compute_saturated_pixel_fraction
 
 logger = logging.getLogger(__name__)
 
@@ -224,7 +224,7 @@ def measure_fwhm_from_data(data: np.ndarray, n_stars: int = FWHM_MEASUREMENT_STA
     """
     from photutils.morphology import data_properties
 
-    from astrometricslib.tasks.shared.source_detection_shared import SourceDetector
+    from astrometricslib.image_processing.source_detection import SourceDetector
 
     sources = SourceDetector().detect(data)
     if not sources:

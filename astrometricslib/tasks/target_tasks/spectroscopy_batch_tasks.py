@@ -208,8 +208,8 @@ def _process_single_spectroscopy_frame_worker_v2(
     }
     try:
         from astrometricslib import Astrometrics
+        from astrometricslib.image_processing.image import AstrometricsImage
         from astrometricslib.tasks.target_tasks.pipeline_tasks import merge_spectroscopy_stellar_object
-        from astrometricslib.utilities.image import AstrometricsImage
 
         astrometrics = Astrometrics()
 
@@ -329,13 +329,13 @@ def process_spectroscopy_frames_by_session(
         The results for each session, pairing the session data with its
         star identification data.
     """
+    from astrometricslib.image_processing.image import AstrometricsImage
     from astrometricslib.tasks.stellar_tasks.astrometry_tasks.session_identification import (
         identify_session_stars,
     )
     from astrometricslib.tasks.stellar_tasks.astrometry_tasks.star_identifier import StarIdentifier
     from astrometricslib.tasks.target_tasks.target_session_tasks import derive_target_sessions
     from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
-    from astrometricslib.utilities.image import AstrometricsImage
 
     if max_workers is None:
         worker_counts = resolve_worker_counts("1", api.config.get_photometry_workers())
@@ -391,12 +391,12 @@ def _attach_spectroscopy_quality_summary(
     """
     import statistics
 
+    from astrometricslib.image_processing.saturation import is_saturation_significant
     from astrometricslib.models.quality_summary import (
         SpectroscopyPipelineQualityMetrics,
         SpectroscopyQualitySummary,
         TargetSessionContribution,
     )
-    from astrometricslib.tasks.shared.saturation_analysis import is_saturation_significant
 
     all_dispersion_angles = []
     all_trail_widths = []

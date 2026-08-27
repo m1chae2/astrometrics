@@ -14,12 +14,12 @@ import numpy as np
 from scipy.optimize import minimize
 from scipy.signal import find_peaks
 
+from astrometricslib.image_processing.image import AstrometricsImage
 from astrometricslib.tasks.stellar_tasks.spectroscopy_tasks.optics_physics import (
     calculate_pixel_offset,
     calculate_wavelength,
 )
 from astrometricslib.tasks.stellar_tasks.spectroscopy_tasks.spectroscopy_pipeline import SpectroscopyPipeline
-from astrometricslib.utilities.image import AstrometricsImage
 
 logger = logging.getLogger(__name__)
 

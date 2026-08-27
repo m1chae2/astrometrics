@@ -9,7 +9,7 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 
-from astrometricslib.utilities.image import AstrometricsImage
+from astrometricslib.image_processing.image import AstrometricsImage
 
 from .layers import ImageOverlay, PhotometryOverlay, SpectrumOverlay, StarOverlay
 from .star_field_visualization import _AnalysisView

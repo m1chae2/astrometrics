@@ -391,7 +391,7 @@ def test_target_analyze_frame_spectroscopy(tmp_path, mocker):  # ruff: ignore[mi
 
         # Mock Pipelines
         from astrometricslib.analysis_context import AnalysisContext
-        from astrometricslib.utilities.image import AstrometricsImage
+        from astrometricslib.image_processing.image import AstrometricsImage
 
         img = AstrometricsImage(str(fit_path))
         mock_context = AnalysisContext(image=img, stellar_objects=[StellarObject(id="Vega_Star")], wcs=None)

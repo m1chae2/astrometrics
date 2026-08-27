@@ -10,9 +10,8 @@ import numpy as np
 from astropy.io import fits
 from astropy.wcs import WCS
 
-from astrometricslib.data_access.image_type import collapse_to_2d
-
-from .enums import FilterType
+from astrometricslib.image_processing.fits_access import collapse_to_2d
+from astrometricslib.utilities.enums import FilterType
 
 logger = logging.getLogger(__name__)
 

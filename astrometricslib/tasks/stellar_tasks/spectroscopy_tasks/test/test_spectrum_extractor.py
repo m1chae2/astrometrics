@@ -6,9 +6,10 @@ tight spectral bounding box, and vertical profile extraction.
 
 import numpy as np
 
+from astrometricslib.image_processing.image import AstrometricsImage
 from astrometricslib.tasks.stellar_tasks.spectroscopy_tasks.spectroscopy_pipeline import SpectroscopyPipeline
 from astrometricslib.tasks.stellar_tasks.spectroscopy_tasks.spectrum_extractor import SpectrumExtractor
-from astrometricslib.utilities import AstrometricsImage, CameraConfig, SpectroscopyConfig
+from astrometricslib.utilities import CameraConfig, SpectroscopyConfig
 
 
 class MockAstrometricsImage(AstrometricsImage):

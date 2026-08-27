@@ -10,7 +10,7 @@ dimensions, a missing Bayer pattern, sometimes no data at all.
 We have already fixed this exact bug once, in `frame_scanning.py`. This
 module exists so every other reader shares the same rule instead of
 reimplementing (or forgetting to implement) it. `AstrometricsImage`
-(`utilities/image.py`) is the other place this rule is already correctly
+(`image_processing/image.py`) is the other place this rule is already correctly
 handled -- it predates this module and is not rebuilt on top of it here,
 since its lazy-loading and auto-repair behaviour is tightly coupled to
 its own caching, but any *new* file-reading code should use this module

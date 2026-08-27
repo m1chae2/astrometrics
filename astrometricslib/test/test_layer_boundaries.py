@@ -15,9 +15,9 @@ So this file is a ratchet, not a one-time check. It walks every module in
 compares what it finds against `KNOWN_FITS_ACCESS_SITES` below. A new
 call site that is not on the list fails the build -- either the new code
 belongs in one of the modules that already own this rule
-(`data_access/image_type.py` is the current canonical home;
-`utilities/image.py` and `data_access/frame_scanning.py` also handle it,
-each for their own reasons -- see `image_type.py`'s docstring), or, if
+(`image_processing/fits_access.py` is the current canonical home;
+`image_processing/image.py` and `data_access/frame_scanning.py` also handle it,
+each for their own reasons -- see `fits_access.py`'s docstring), or, if
 it genuinely needs to be its own site, it needs to be added to the list *and*
 reviewed for the HDU0/HDU1 rule at the same time. A second check
 makes sure the list can only shrink, never grow stale: every entry on it
@@ -44,8 +44,9 @@ KNOWN_FITS_ACCESS_SITES = frozenset({
     "data_access/frame_scanning.py",
     "data_access/image_conversions.py",
     "data_access/image_quality_metrics.py",
-    "data_access/image_type.py",
     "drivers/siril_interface.py",
+    "image_processing/fits_access.py",
+    "image_processing/image.py",
     "scripts/backfill_focal_length.py",
     "scripts/spectral_registration_quality_analysis.py",
     "tasks/moving_object_tasks/moving_object_pipeline_tasks.py",
@@ -55,7 +56,6 @@ KNOWN_FITS_ACCESS_SITES = frozenset({
     "tasks/stellar_tasks/photometry_tasks/variability_analyzer.py",
     "tasks/target_tasks/pipelines/astrometry.py",
     "utilities/calibration_library.py",
-    "utilities/image.py",
     "visualization/helpers.py",
 })
 
@@ -110,7 +110,7 @@ def test_no_new_files_call_fits_directly():  # ruff: ignore[missing-return-type-
     """Verify no file outside the known list reads or writes FITS data raw.
 
     New code should call through `data_access/frame_scanning.py` or
-    `utilities/image.py`, which already apply the HDU0/HDU1 rule, rather
+    `image_processing/image.py`, which already apply the HDU0/HDU1 rule, rather
     than opening a FITS file directly.
     """
     found = _find_raw_fits_access_sites()
@@ -119,7 +119,7 @@ def test_no_new_files_call_fits_directly():  # ruff: ignore[missing-return-type-
     assert not new_sites, (
         f"New raw fits.* call site(s) found outside KNOWN_FITS_ACCESS_SITES: "
         f"{sorted(new_sites)}. Route the new code through "
-        f"data_access/image_type.py instead, or if it genuinely needs its own "
+        f"image_processing/fits_access.py instead, or if it genuinely needs its own "
         f"call site, review it for the HDU0/HDU1 rule and add it to "
         f"KNOWN_FITS_ACCESS_SITES in this file."
     )

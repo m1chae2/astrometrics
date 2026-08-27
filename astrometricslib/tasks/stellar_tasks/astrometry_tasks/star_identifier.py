@@ -27,11 +27,11 @@ from astropy.wcs import WCS, FITSFixedWarning
 from astroquery.simbad import Simbad
 
 from astrometricslib.data_access.image_quality_metrics import measure_fwhm_from_data
-from astrometricslib.data_access.image_type import collapse_to_2d
+from astrometricslib.image_processing.fits_access import collapse_to_2d
+from astrometricslib.image_processing.image import AstrometricsImage
+from astrometricslib.image_processing.source_detection import SourceDetector
 from astrometricslib.models.stellar_source import StellarObject
-from astrometricslib.tasks.shared.source_detection_shared import SourceDetector
 from astrometricslib.tasks.stellar_tasks.astrometry_tasks.plate_solver import PlateSolver
-from astrometricslib.utilities import AstrometricsImage
 from astrometricslib.utilities.config_loader import AppConfiguration
 from astrometricslib.utilities.exceptions import AstroLibError
 

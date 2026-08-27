@@ -10,10 +10,10 @@ import os
 from typing import Any
 
 from astrometricslib.analysis_context import AnalysisContext
+from astrometricslib.image_processing.image import AstrometricsImage
 from astrometricslib.tasks.stellar_tasks.astrometry_tasks.star_identifier import StarIdentifier
 from astrometricslib.utilities.config_loader import AppConfiguration
 from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
-from astrometricslib.utilities.image import AstrometricsImage
 
 logger = logging.getLogger(__name__)
 

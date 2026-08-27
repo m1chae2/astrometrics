@@ -3,14 +3,14 @@
 Every test here writes a FITS file with the image split across HDU0
 (bare, no data) and HDU1 (the real data), the exact shape that has
 caused silent data loss before -- see the module docstring on
-`image_type.py`. Each test proves the function under test reads HDU1's
+`fits_access.py`. Each test proves the function under test reads HDU1's
 header/data correctly rather than HDU0's near-empty one.
 """
 
 import numpy as np
 from astropy.io import fits
 
-from astrometricslib.data_access import image_type
+from astrometricslib.image_processing import fits_access
 
 
 def _write_two_hdu_frame(path, width, height, bayer_pattern=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
@@ -51,7 +51,7 @@ def test_read_header_falls_back_to_hdu1_when_hdu0_is_bare(tmp_path):  # ruff: ig
     """Verify the header comes from HDU1, not HDU0's near-empty one."""
     path = _write_two_hdu_frame(tmp_path / "frame.fits", 60, 40, bayer_pattern="RGGB")
 
-    header = image_type.read_header(path)
+    header = fits_access.read_header(path)
 
     assert header["NAXIS1"] == 60
     assert header["NAXIS2"] == 40
@@ -62,7 +62,7 @@ def test_read_header_uses_hdu0_when_it_has_data(tmp_path):  # ruff: ignore[missi
     """Verify a normal single-HDU file is read from HDU0 as expected."""
     path = _write_single_hdu_frame(tmp_path / "frame.fits", 60, 40)
 
-    header = image_type.read_header(path)
+    header = fits_access.read_header(path)
 
     assert header["NAXIS1"] == 60
     assert header["NAXIS2"] == 40
@@ -72,7 +72,7 @@ def test_read_data_falls_back_to_hdu1_when_hdu0_is_bare(tmp_path):  # ruff: igno
     """Verify the pixel data comes from HDU1, not a missing HDU0 array."""
     path = _write_two_hdu_frame(tmp_path / "frame.fits", 60, 40)
 
-    data = image_type.read_data(path)
+    data = fits_access.read_data(path)
 
     assert data is not None
     assert data.shape == (40, 60)
@@ -88,14 +88,14 @@ def test_frame_dimensions_falls_back_to_hdu1(tmp_path):  # ruff: ignore[missing-
     """
     path = _write_two_hdu_frame(tmp_path / "frame.fits", 60, 40)
 
-    assert image_type.frame_dimensions(path) == (60, 40)
+    assert fits_access.frame_dimensions(path) == (60, 40)
 
 
 def test_frame_dimensions_is_none_for_an_unreadable_file(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify a file that cannot be read returns None, not an exception."""
     missing_path = str(tmp_path / "does_not_exist.fits")
 
-    assert image_type.frame_dimensions(missing_path) is None
+    assert fits_access.frame_dimensions(missing_path) is None
 
 
 def test_frame_uses_color_filter_array_falls_back_to_hdu1(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
@@ -107,21 +107,21 @@ def test_frame_uses_color_filter_array_falls_back_to_hdu1(tmp_path):  # ruff: ig
     """
     path = _write_two_hdu_frame(tmp_path / "frame.fits", 60, 40, bayer_pattern="RGGB")
 
-    assert image_type.frame_uses_color_filter_array(path) is True
+    assert fits_access.frame_uses_color_filter_array(path) is True
 
 
 def test_frame_uses_color_filter_array_is_false_when_absent(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify no BAYERPAT reads as a definitive, non-guessing "mono"."""
     path = _write_two_hdu_frame(tmp_path / "frame.fits", 60, 40)
 
-    assert image_type.frame_uses_color_filter_array(path) is False
+    assert fits_access.frame_uses_color_filter_array(path) is False
 
 
 def test_frame_uses_color_filter_array_is_none_for_an_unreadable_file(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify an unreadable file is None, not misread as a definitive mono."""
     missing_path = str(tmp_path / "does_not_exist.fits")
 
-    assert image_type.frame_uses_color_filter_array(missing_path) is None
+    assert fits_access.frame_uses_color_filter_array(missing_path) is None
 
 
 def test_select_dominant_frame_dimensions_reads_hdu1_geometry(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
@@ -135,7 +135,7 @@ def test_select_dominant_frame_dimensions_reads_hdu1_geometry(tmp_path):  # ruff
     majority = [_write_two_hdu_frame(tmp_path / f"m{i}.fits", 60, 40) for i in range(4)]
     stray = _write_two_hdu_frame(tmp_path / "stray.fits", 30, 20)
 
-    kept, dominant_dimensions = image_type.select_dominant_frame_dimensions([*majority, stray])
+    kept, dominant_dimensions = fits_access.select_dominant_frame_dimensions([*majority, stray])
 
     assert kept == set(majority)
     assert dominant_dimensions == (60, 40)
@@ -147,7 +147,7 @@ def test_select_dominant_frame_dimensions_keeps_unreadable_frames(tmp_path):  # 
     broken_path = str(tmp_path / "broken.fits")
     (tmp_path / "broken.fits").write_text("not a fits file")
 
-    kept, dimensions = image_type.select_dominant_frame_dimensions([*good, broken_path])
+    kept, dimensions = fits_access.select_dominant_frame_dimensions([*good, broken_path])
 
     assert kept == {*good, broken_path}
     assert dimensions == (60, 40)
@@ -155,14 +155,14 @@ def test_select_dominant_frame_dimensions_keeps_unreadable_frames(tmp_path):  # 
 
 def test_select_dominant_frame_dimensions_of_an_empty_list():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verify the empty-input edge case returns an empty set, no dimensions."""
-    assert image_type.select_dominant_frame_dimensions([]) == (set(), None)
+    assert fits_access.select_dominant_frame_dimensions([]) == (set(), None)
 
 
 def test_collapse_to_2d_leaves_a_2d_array_unchanged():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verify a plain mono frame passes through untouched."""
     data = np.arange(12, dtype=float).reshape(3, 4)
 
-    result = image_type.collapse_to_2d(data)
+    result = fits_access.collapse_to_2d(data)
 
     assert result is data
 
@@ -171,7 +171,7 @@ def test_collapse_to_2d_averages_a_leading_rgb_channel_axis():  # ruff: ignore[m
     """Verify a (3, H, W) debayered stack collapses across its channel axis."""
     data = np.stack([np.full((5, 6), value, dtype=float) for value in (10.0, 20.0, 30.0)])
 
-    result = image_type.collapse_to_2d(data)
+    result = fits_access.collapse_to_2d(data)
 
     assert result.shape == (5, 6)
     assert np.allclose(result, 20.0)
@@ -181,7 +181,7 @@ def test_collapse_to_2d_averages_a_trailing_channel_axis():  # ruff: ignore[miss
     """Verify an (H, W, 3) array collapses across its trailing axis."""
     data = np.stack([np.full((5, 6), value, dtype=float) for value in (10.0, 20.0, 30.0)], axis=-1)
 
-    result = image_type.collapse_to_2d(data)
+    result = fits_access.collapse_to_2d(data)
 
     assert result.shape == (5, 6)
     assert np.allclose(result, 20.0)
@@ -200,7 +200,7 @@ def test_collapse_to_2d_handles_a_degenerate_single_channel_cube():  # ruff: ign
     """
     data = np.arange(30, dtype=float).reshape(1, 5, 6)
 
-    result = image_type.collapse_to_2d(data)
+    result = fits_access.collapse_to_2d(data)
 
     assert result.shape == (5, 6)
     assert np.array_equal(result, data[0])

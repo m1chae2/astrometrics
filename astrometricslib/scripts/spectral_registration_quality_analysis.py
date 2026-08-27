@@ -40,7 +40,7 @@ from astropy.io import fits
 from astropy.stats import sigma_clipped_stats
 
 from astrometricslib import Astrometrics
-from astrometricslib.data_access.image_type import collapse_to_2d
+from astrometricslib.image_processing.fits_access import collapse_to_2d
 
 SWEEP_SIGMA = (3.0, 3.0)
 SWEEP_FILTER_WFWHM_GRID: list[str | None] = [None, "90%", "80%"]

@@ -11,8 +11,9 @@ import numpy as np
 
 from astrometricslib.analysis_context import AnalysisContext
 from astrometricslib.data_access.image_quality_metrics import DEFAULT_SATURATION_ADU_THRESHOLD
+from astrometricslib.image_processing.image import AstrometricsImage
+from astrometricslib.image_processing.saturation import compute_saturated_pixel_fraction
 from astrometricslib.models.stellar_source import StellarObject
-from astrometricslib.tasks.shared.saturation_analysis import compute_saturated_pixel_fraction
 from astrometricslib.tasks.stellar_tasks.spectroscopy_tasks.quantum_efficiency_correction import (
     apply_quantum_efficiency_correction,
 )
@@ -24,7 +25,7 @@ from astrometricslib.tasks.stellar_tasks.spectroscopy_tasks.spectroscopy_instrum
 )
 from astrometricslib.tasks.stellar_tasks.spectroscopy_tasks.spectrum_calibrator import SpectrumCalibrator
 from astrometricslib.tasks.stellar_tasks.spectroscopy_tasks.spectrum_extractor import SpectrumExtractor
-from astrometricslib.utilities import AstrometricsImage, SpectroscopyConfig
+from astrometricslib.utilities import SpectroscopyConfig
 
 logger = logging.getLogger(__name__)
 

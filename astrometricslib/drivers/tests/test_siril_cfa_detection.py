@@ -79,7 +79,7 @@ def test_subdirectories_are_ignored(tmp_path):  # ruff: ignore[missing-type-func
 def test_a_bayerpat_stored_in_hdu1_is_still_found(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Regression test for the second live HDU0/HDU1 bug this function had.
 
-    Before this was routed through `image_type.frame_uses_color_filter_array`,
+    Before this was routed through `fits_access.frame_uses_color_filter_array`,
     this function read `fits.getheader(frame_path)` directly -- HDU0 only.
     A frame whose real header (and BAYERPAT) lives in HDU1, because HDU0
     is a bare primary HDU with no data, would read back with no BAYERPAT

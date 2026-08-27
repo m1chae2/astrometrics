@@ -336,7 +336,7 @@ def _frames_use_color_filter_array(frames_directory: str) -> bool:
     (monochrome) run: every stacked product came out (3, 3008, 3008)
     instead of (3008, 3008), and intermediates grew ~6x (416MB -> 2.5GB).
 
-    Checks each staged frame with `image_type.frame_uses_color_filter_array`
+    Checks each staged frame with `fits_access.frame_uses_color_filter_array`
     (``BAYERPAT`` is the authoritative marker, and is read from whichever
     HDU actually holds a frame's header -- see that function's docstring
     for why), stopping at the first frame that gives a definitive answer.
@@ -351,7 +351,7 @@ def _frames_use_color_filter_array(frames_directory: str) -> bool:
     uses_color_filter_array : `bool`
         `True` only if a frame declares a ``BAYERPAT``.
     """
-    from astrometricslib.data_access.image_type import frame_uses_color_filter_array
+    from astrometricslib.image_processing.fits_access import frame_uses_color_filter_array
 
     try:
         frame_names = sorted(os.listdir(frames_directory))
@@ -714,7 +714,7 @@ class ImageProcessing:
 
             # Applied after the readability filter so a corrupt frame
             # cannot skew which geometry looks dominant.
-            from astrometricslib.data_access.image_type import select_dominant_frame_dimensions
+            from astrometricslib.image_processing.fits_access import select_dominant_frame_dimensions
 
             readable_light_paths, dominant_dimensions = select_dominant_frame_dimensions(
                 sorted(readable_light_paths)

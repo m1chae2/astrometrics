@@ -14,7 +14,7 @@ import warnings
 import numpy as np
 from astropy.modeling import fitting, models
 
-from astrometricslib.utilities import AstrometricsImage
+from astrometricslib.image_processing.image import AstrometricsImage
 
 logger = logging.getLogger(__name__)
 

@@ -13,9 +13,9 @@ from typing import Any
 
 from PIL import Image
 
+from astrometricslib.image_processing.image import AstrometricsImage
 from astrometricslib.tasks.target_tasks.image_scaling_tasks import ImageScaler
 from astrometricslib.utilities.exceptions import AstroLibError
-from astrometricslib.utilities.image import AstrometricsImage
 
 logger = logging.getLogger(__name__)
 

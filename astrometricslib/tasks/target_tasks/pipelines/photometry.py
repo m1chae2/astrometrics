@@ -73,10 +73,10 @@ def _run_variability_analysis_for_session(
     seed_stars = None
     identify_result = None
     if use_astrometry_seed and star_identifier is not None and target is not None:
+        from astrometricslib.image_processing.image import AstrometricsImage
         from astrometricslib.tasks.stellar_tasks.astrometry_tasks.session_identification import (
             identify_session_stars,
         )
-        from astrometricslib.utilities.image import AstrometricsImage
 
         center_ra = None
         center_dec = None

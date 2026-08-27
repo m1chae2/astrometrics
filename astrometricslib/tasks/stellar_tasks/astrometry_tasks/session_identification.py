@@ -13,9 +13,9 @@ from dataclasses import dataclass, field
 from astropy.io import fits
 from astropy.wcs import WCS, FITSFixedWarning
 
+from astrometricslib.image_processing.image import AstrometricsImage
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.tasks.stellar_tasks.astrometry_tasks.star_identifier import StarIdentifier
-from astrometricslib.utilities.image import AstrometricsImage
 
 logger = logging.getLogger(__name__)
 
@@ -234,7 +234,7 @@ def identify_session_stars(
     data = reference_image.data
     is_color_frame = data is not None and data.ndim == 3
     if is_color_frame:
-        from astrometricslib.data_access.image_type import collapse_to_2d
+        from astrometricslib.image_processing.fits_access import collapse_to_2d
 
         data = collapse_to_2d(data)
 

@@ -62,7 +62,7 @@ static PyObject* fit_cross_section_gaussian_c(PyObject *self, PyObject *args) {
     PyObject *perp_obj = NULL;
     double search_radius = 0.0;
 
-    if (!PyArg_ParseTuple(args, "O!OOD", &PyArray_Type, &data_obj, &center_obj, &perp_obj, &search_radius)) {
+    if (!PyArg_ParseTuple(args, "O!OOd", &PyArray_Type, &data_obj, &center_obj, &perp_obj, &search_radius)) {
         return NULL;
     }
 

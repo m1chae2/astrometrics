@@ -13,6 +13,13 @@ import logging
 from typing import Any
 
 from astrometricslib.models.target import Target
+from astrometricslib.tasks.pipeline_contract import (
+    AnalysisPipeline,
+    InputScreening,
+    PipelineRequest,
+    RunOutcome,
+    run_pipeline,
+)
 from astrometricslib.tasks.target_tasks.pipelines.star_persistence import (
     merge_photometry_stellar_object,
     persist_pipeline_stars,
@@ -436,6 +443,405 @@ def _match_and_merge_across_sessions(
     return merged_stellar_objects, sessions_missing_wcs, match_count
 
 
+class PhotometryPipelineAdapter(AnalysisPipeline):
+    """Adapts per-session `VariabilityAnalyzer` runs to the shared shape."""
+
+    @property
+    def pipeline_name(self) -> str:
+        """See `AnalysisPipeline.pipeline_name`.
+
+        Returns
+        -------
+        pipeline_name : `str`
+            Always ``"photometry"``.
+        """
+        return "photometry"
+
+    def screen_input(self, request: PipelineRequest) -> InputScreening:
+        """Check there are frames to use and sessions to assign them to.
+
+        Photometry is the one pipeline with a real screening failure
+        mode: a filter that matches nothing, or frames with no usable
+        capture timestamp to build a session from. Either stops the run
+        before any analysis work starts.
+
+        Returns
+        -------
+        screening : `InputScreening`
+            `can_proceed=False` with the matching "failed" result dict
+            for either failure mode; otherwise `can_proceed=True` with
+            the filtered frames and derived sessions carried in
+            `context`, so `run` does not have to redo this work.
+        """
+        from astrometricslib.tasks.target_tasks.target_session_tasks import derive_target_sessions
+
+        target = request.target
+        filter_type = request.filter_type
+
+        image_paths = []
+        photometry_frames = []
+        target_frames = request.frames if request.frames is not None else target.frames
+        for frame in target_frames:
+            if not frame.path:
+                continue
+            if not filter_type:
+                image_paths.append(frame.path)
+                photometry_frames.append(frame)
+            elif frame.filter and (
+                frame.filter.name == filter_type.upper()
+                or (
+                    filter_type.upper() in ["L", "LUMINANCE"]
+                    and (
+                        frame.filter.name in ["L", "LUMINANCE", "NONE", "UNKNOWN"]
+                        or getattr(frame.filter, "value", "").upper() in ["L", "LUMINANCE", "NONE", "UNKNOWN"]
+                    )
+                )
+            ):
+                image_paths.append(frame.path)
+                photometry_frames.append(frame)
+
+        if not image_paths:
+            return InputScreening(
+                can_proceed=False,
+                early_result={
+                    "status": "failed",
+                    "targetId": target.id,
+                    "analysisMode": "photometry",
+                    "message": f"No frames found for filter: {filter_type}",
+                },
+            )
+
+        # Photometry tracks stars via pixel-position re-centroiding
+        # against a single reference frame per analysis run; that only
+        # holds within one observing session (consistent framing and
+        # rotation). A target's frames can span many separately
+        # registered sessions, so each session gets its own
+        # VariabilityAnalyzer run rather than one run spanning the
+        # target's entire frame history (which corrupts tracking for
+        # most stars once sessions mix).
+        photometry_frames_with_timestamp = [f for f in photometry_frames if f.timestamp is not None]
+        photometry_frames_without_timestamp = [f for f in photometry_frames if f.timestamp is None]
+        photometry_sessions = derive_target_sessions(target.id, photometry_frames_with_timestamp)
+
+        if not photometry_sessions:
+            return InputScreening(
+                can_proceed=False,
+                early_result={
+                    "status": "failed",
+                    "targetId": target.id,
+                    "analysisMode": "photometry",
+                    "message": (
+                        "No frames with a usable capture timestamp to assign a session "
+                        f"for filter: {filter_type}"
+                    ),
+                },
+            )
+
+        return InputScreening(
+            can_proceed=True,
+            context={
+                "image_paths": image_paths,
+                "photometry_frames_without_timestamp": photometry_frames_without_timestamp,
+                "photometry_sessions": photometry_sessions,
+            },
+        )
+
+    def run(self, request: PipelineRequest, screening: InputScreening) -> RunOutcome:
+        """Run one `VariabilityAnalyzer` pass per session, then merge them.
+
+        Returns
+        -------
+        outcome : `RunOutcome`
+            `stellar_objects` is every saved star; `candidates` is the
+            raw (pre-merge) list of stars flagged as variable in their
+            own session. Everything `validate_output` and
+            `to_result_dict` need is in `payload`.
+        """
+        from astrometricslib.models.stellar_source import VariableCandidate
+
+        target = request.target
+        butler = request.butler
+        options = request.options
+        photometry_sessions = screening.context["photometry_sessions"]
+        image_paths = screening.context["image_paths"]
+        photometry_frames_without_timestamp = screening.context["photometry_frames_without_timestamp"]
+
+        per_session_results = []
+        all_candidates = []
+        all_rejected_files = []
+        all_frame_ensemble_composition = []
+        session_empty_reasons = []
+        # Only session-prefix ids when there's more than one session,
+        # so the common single-session target keeps today's plain
+        # Star_N ids and doesn't churn its stellar_catalog rows.
+        # Cross-session star matching (below) is likewise skipped
+        # entirely for a single session -- there is nothing to
+        # cross-match a lone session against.
+        id_prefix_enabled = len(photometry_sessions) > 1
+
+        # Analyze Target should identify the actual stars in an
+        # image against a real catalog, not just track anonymous
+        # per-run pixel detections. Opt-in for now (see rollout
+        # notes) while this is verified against real data before
+        # becoming the caller's default.
+        use_astrometry_seed = bool(options.get("use_astrometry_seed", True))
+        star_identifier = None
+        if use_astrometry_seed:
+            from astrometricslib.tasks.stellar_tasks.astrometry_tasks.star_identifier import StarIdentifier
+
+            star_identifier = StarIdentifier()
+
+        session_wcs_map: dict[str, Any] = {}
+        astrometry_identified_star_count = 0
+        sessions_with_reused_header_wcs: list[str] = []
+        sessions_with_replaced_header_wcs: list[str] = []
+
+        for session in photometry_sessions:
+            id_prefix = f"{session.id}:" if id_prefix_enabled else ""
+            analyzer, session_candidates, identify_result = _run_variability_analysis_for_session(
+                session,
+                options.get("max_workers"),
+                id_prefix,
+                target=target,
+                star_identifier=star_identifier,
+                use_astrometry_seed=use_astrometry_seed,
+            )
+            if identify_result is not None:
+                session_wcs_map[session.id] = identify_result.wcs
+                astrometry_identified_star_count += identify_result.simbad_matched_count
+                if identify_result.reused_existing_header_wcs:
+                    sessions_with_reused_header_wcs.append(session.id)
+                if identify_result.header_wcs_replaced_after_verification:
+                    sessions_with_replaced_header_wcs.append(session.id)
+            if not analyzer.stellar_objects:
+                session_empty_reasons.append(
+                    f"session {session.id}: reference-frame star detection failed, 0 stars processed"
+                )
+            per_session_results.append((analyzer, session_candidates))
+            all_candidates.extend(session_candidates)
+            all_rejected_files.extend(analyzer.rejected_files)
+            all_frame_ensemble_composition.extend(analyzer.frame_ensemble_composition)
+
+        # Captured before cross-session merging/re-flagging below so
+        # each candidate reflects its own session's local adaptive
+        # cutoff -- VariableCandidate copies plain float values, so
+        # later mutating the underlying StellarObjects (merging
+        # light curves, recomputing a long-term CV) cannot retroactively
+        # change an already-built VariableCandidate.
+        candidates_formatted = [
+            VariableCandidate(
+                id=star.id,
+                meanFlux=star.mean_flux,
+                coefficientOfVariation=star.coefficient_of_variation,
+                score=min(1.0, star.variability_score / 100.0),
+                ra=float(star.right_ascension) if star.right_ascension else 0.0,
+                dec=float(star.declination) if star.declination else 0.0,
+            )
+            for star in all_candidates
+        ]
+
+        sessions_missing_wcs: list[str] = []
+        cross_session_match_count = 0
+        long_term_candidates = []
+
+        if id_prefix_enabled:
+            all_stellar_objects, sessions_missing_wcs, cross_session_match_count = (
+                _match_and_merge_across_sessions(
+                    photometry_sessions, per_session_results, target, session_wcs_map=session_wcs_map
+                )
+            )
+            if cross_session_match_count > 0:
+                from astrometricslib.tasks.stellar_tasks.photometry_tasks.variability_analyzer import (
+                    identify_long_term_variable_candidates,
+                )
+
+                long_term_candidates = identify_long_term_variable_candidates(all_stellar_objects)
+        else:
+            all_stellar_objects = per_session_results[0][0].stellar_objects
+
+        long_term_candidates_formatted = [
+            VariableCandidate(
+                id=star.id,
+                meanFlux=star.mean_flux,
+                coefficientOfVariation=star.coefficient_of_variation,
+                score=min(1.0, star.variability_score / 100.0),
+                ra=float(star.right_ascension) if star.right_ascension else 0.0,
+                dec=float(star.declination) if star.declination else 0.0,
+            )
+            for star in long_term_candidates
+        ]
+
+        all_stellar_objects, star_id_breakdown = persist_pipeline_stars(
+            all_stellar_objects,
+            butler=butler,
+            target_id=target.id,
+            merge_function=merge_photometry_stellar_object,
+            pipeline_name="photometry",
+        )
+
+        frames_processed = sum(len(session.frame_paths) for session in photometry_sessions) - len(
+            all_rejected_files
+        )
+
+        return RunOutcome(
+            stellar_objects=all_stellar_objects,
+            candidates=all_candidates,
+            payload={
+                "star_id_breakdown": star_id_breakdown,
+                "photometry_sessions": photometry_sessions,
+                "all_rejected_files": all_rejected_files,
+                "all_frame_ensemble_composition": all_frame_ensemble_composition,
+                "session_empty_reasons": session_empty_reasons,
+                "sessions_missing_wcs": sessions_missing_wcs,
+                "cross_session_match_count": cross_session_match_count,
+                "long_term_candidate_count": len(long_term_candidates),
+                "astrometry_identified_star_count": astrometry_identified_star_count,
+                "sessions_with_reused_header_wcs": sessions_with_reused_header_wcs,
+                "sessions_with_replaced_header_wcs": sessions_with_replaced_header_wcs,
+                "frames_processed": frames_processed,
+                "candidates_formatted": candidates_formatted,
+                "long_term_candidates_formatted": long_term_candidates_formatted,
+                "image_paths": image_paths,
+                "photometry_frames_without_timestamp": photometry_frames_without_timestamp,
+            },
+        )
+
+    def validate_output(self, request: PipelineRequest, outcome: RunOutcome) -> Any:
+        """Build the quality summary and every flag this run's data earns.
+
+        Returns
+        -------
+        summary : `PhotometryQualitySummary`
+            Flagged for a high global-outlier rejection rate, frames
+            excluded for a missing timestamp, a session with zero stars
+            detected, or a session that could not be plate-solved for
+            cross-session matching -- any, all, or none of these.
+        """
+        from astrometricslib.models.quality_summary import (
+            ExcludedFrame,
+            PhotometryPipelineQualityMetrics,
+            PhotometryQualitySummary,
+            TargetSessionContribution,
+        )
+        from astrometricslib.tasks.stellar_tasks.photometry_tasks.variability_analyzer import (
+            median_light_curve_scatter_mag,
+        )
+
+        target = request.target
+        payload = outcome.payload
+        photometry_sessions = payload["photometry_sessions"]
+        all_rejected_files = payload["all_rejected_files"]
+        photometry_frames_without_timestamp = payload["photometry_frames_without_timestamp"]
+        star_id_breakdown = payload["star_id_breakdown"]
+        sessions_missing_wcs = payload["sessions_missing_wcs"]
+        session_empty_reasons = payload["session_empty_reasons"]
+        frames_processed = payload["frames_processed"]
+
+        rejected_paths = set(all_rejected_files)
+        photometry_session_breakdown = [
+            TargetSessionContribution(
+                session_id=session.id,
+                frames_contributed=len(session.frame_paths),
+                frames_clipped=sum(1 for path in session.frame_paths if path in rejected_paths),
+            )
+            for session in photometry_sessions
+        ]
+
+        rejected_frames = [
+            ExcludedFrame(path=path, reason="global frame outlier (ensemble median MAD-clipped)")
+            for path in all_rejected_files
+        ] + [
+            ExcludedFrame(
+                path=frame.path,
+                reason="no capture timestamp available; cannot be assigned to a session",
+            )
+            for frame in photometry_frames_without_timestamp
+        ]
+
+        summary = PhotometryQualitySummary(
+            target_id=target.id,
+            target_session_ids=[session.id for session in photometry_sessions],
+            target_session_breakdown=photometry_session_breakdown,
+            photometry_metrics=PhotometryPipelineQualityMetrics(
+                stars_processed=len(outcome.stellar_objects),
+                stars_found=len(outcome.stellar_objects),
+                frames_processed=frames_processed,
+                rejected_frames=rejected_frames,
+                frame_ensemble_composition=payload["all_frame_ensemble_composition"],
+                variable_candidate_count=len(outcome.candidates),
+                cross_session_match_count=payload["cross_session_match_count"],
+                sessions_missing_wcs=sessions_missing_wcs,
+                long_term_variable_candidate_count=payload["long_term_candidate_count"],
+                astrometry_identified_star_count=payload["astrometry_identified_star_count"],
+                sessions_with_reused_header_wcs=payload["sessions_with_reused_header_wcs"],
+                sessions_with_replaced_header_wcs=payload["sessions_with_replaced_header_wcs"],
+                catalog_matched_star_count=star_id_breakdown.catalog_matched,
+                position_only_star_count=star_id_breakdown.position_only,
+                unresolved_star_count=star_id_breakdown.unresolved,
+                light_curve_scatter_rms_mag=median_light_curve_scatter_mag(outcome.stellar_objects),
+            ),
+        )
+        # The rejected frames are recorded in the metrics either way;
+        # this only decides whether the count is worth a human's
+        # attention, which routine clipping is not.
+        frames_contributed_total = sum(
+            contribution.frames_contributed for contribution in photometry_session_breakdown
+        )
+        rejection_fraction = (
+            len(all_rejected_files) / frames_contributed_total if frames_contributed_total else 0.0
+        )
+        if (
+            len(all_rejected_files) >= MINIMUM_ENSEMBLE_REJECTION_COUNT_TO_FLAG
+            and rejection_fraction >= MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG
+        ):
+            summary.flagged = True
+            summary.flag_reasons.append(
+                f"{len(all_rejected_files)} of {frames_contributed_total} frame(s) "
+                f"({rejection_fraction:.0%}) rejected as global ensemble outliers, which is high "
+                "enough to suspect the comparison ensemble or the observing conditions"
+            )
+        if photometry_frames_without_timestamp:
+            summary.flagged = True
+            summary.flag_reasons.append(
+                f"{len(photometry_frames_without_timestamp)} frame(s) excluded for missing capture timestamp"
+            )
+        if session_empty_reasons:
+            summary.flagged = True
+            summary.flag_reasons.extend(session_empty_reasons)
+        if sessions_missing_wcs:
+            summary.flagged = True
+            summary.flag_reasons.append(
+                f"{len(sessions_missing_wcs)} session(s) could not be plate-solved for "
+                f"cross-session star matching: {', '.join(sessions_missing_wcs)}"
+            )
+        return summary
+
+    def to_result_dict(self, request: PipelineRequest, outcome: RunOutcome, summary: Any) -> dict[str, Any]:
+        """Build the result dict photometry's callers expect back.
+
+        Returns
+        -------
+        result : `dict`
+            The completed shape carrying every brightness-tracking metric.
+        """
+        payload = outcome.payload
+        return {
+            "status": "completed",
+            "targetId": request.target.id,
+            "totalImages": len(payload["image_paths"]),
+            "analysisMode": "photometry",
+            "starsProcessed": len(outcome.stellar_objects),
+            "spectraExtracted": 0,
+            "starsFound": len(outcome.stellar_objects),
+            "framesProcessed": payload["frames_processed"],
+            "rejectedCount": len(payload["all_rejected_files"]),
+            "rejectedFiles": payload["all_rejected_files"],
+            "variableCandidates": payload["candidates_formatted"],
+            "longTermVariableCandidates": payload["long_term_candidates_formatted"],
+            "crossSessionMatchCount": payload["cross_session_match_count"],
+        }
+
+
 def run_photometry_analysis(
     target: Target,
     frames,  # ruff: ignore[missing-type-function-argument]
@@ -445,6 +851,11 @@ def run_photometry_analysis(
     **kwargs,  # ruff: ignore[missing-type-kwargs]
 ) -> dict[str, Any]:
     """Track star brightness across a target's images, session by session.
+
+    A thin wrapper kept at this name and signature for
+    `pipelines.PIPELINE_RUNNERS` -- the actual work is
+    `PhotometryPipelineAdapter`, run through the shared
+    screen/run/validate/report cycle in `run_pipeline`.
 
     Parameters
     ----------
@@ -467,278 +878,7 @@ def run_photometry_analysis(
         ``targetId``, ``analysisMode``, ``message``) or the completed
         shape carrying every brightness-tracking metric.
     """
-    image_paths = []
-    photometry_frames = []
-    target_frames = frames if frames is not None else target.frames
-    for frame in target_frames:
-        if not frame.path:
-            continue
-        if not filter_type:
-            image_paths.append(frame.path)
-            photometry_frames.append(frame)
-        elif frame.filter and (
-            frame.filter.name == filter_type.upper()
-            or (
-                filter_type.upper() in ["L", "LUMINANCE"]
-                and (
-                    frame.filter.name in ["L", "LUMINANCE", "NONE", "UNKNOWN"]
-                    or getattr(frame.filter, "value", "").upper() in ["L", "LUMINANCE", "NONE", "UNKNOWN"]
-                )
-            )
-        ):
-            image_paths.append(frame.path)
-            photometry_frames.append(frame)
-
-    if not image_paths:
-        return {
-            "status": "failed",
-            "targetId": target.id,
-            "analysisMode": "photometry",
-            "message": f"No frames found for filter: {filter_type}",
-        }
-
-    from astrometricslib.models.stellar_source import VariableCandidate
-    from astrometricslib.tasks.target_tasks.target_session_tasks import derive_target_sessions
-
-    # Photometry tracks stars via pixel-position re-centroiding
-    # against a single reference frame per analysis run; that only
-    # holds within one observing session (consistent framing and
-    # rotation). A target's frames can span many separately
-    # registered sessions, so each session gets its own
-    # VariabilityAnalyzer run rather than one run spanning the
-    # target's entire frame history (which corrupts tracking for
-    # most stars once sessions mix).
-    photometry_frames_with_timestamp = [f for f in photometry_frames if f.timestamp is not None]
-    photometry_frames_without_timestamp = [f for f in photometry_frames if f.timestamp is None]
-    photometry_sessions = derive_target_sessions(target.id, photometry_frames_with_timestamp)
-
-    if not photometry_sessions:
-        return {
-            "status": "failed",
-            "targetId": target.id,
-            "analysisMode": "photometry",
-            "message": (
-                f"No frames with a usable capture timestamp to assign a session for filter: {filter_type}"
-            ),
-        }
-
-    per_session_results = []
-    all_candidates = []
-    all_rejected_files = []
-    all_frame_ensemble_composition = []
-    session_empty_reasons = []
-    # Only session-prefix ids when there's more than one session,
-    # so the common single-session target keeps today's plain
-    # Star_N ids and doesn't churn its stellar_catalog rows.
-    # Cross-session star matching (below) is likewise skipped
-    # entirely for a single session -- there is nothing to
-    # cross-match a lone session against.
-    id_prefix_enabled = len(photometry_sessions) > 1
-
-    # Analyze Target should identify the actual stars in an
-    # image against a real catalog, not just track anonymous
-    # per-run pixel detections. Opt-in for now (see rollout
-    # notes) while this is verified against real data before
-    # becoming the caller's default.
-    use_astrometry_seed = bool(kwargs.get("use_astrometry_seed", True))
-    star_identifier = None
-    if use_astrometry_seed:
-        from astrometricslib.tasks.stellar_tasks.astrometry_tasks.star_identifier import StarIdentifier
-
-        star_identifier = StarIdentifier()
-
-    session_wcs_map: dict[str, Any] = {}
-    astrometry_identified_star_count = 0
-    sessions_with_reused_header_wcs: list[str] = []
-    sessions_with_replaced_header_wcs: list[str] = []
-
-    for session in photometry_sessions:
-        id_prefix = f"{session.id}:" if id_prefix_enabled else ""
-        analyzer, session_candidates, identify_result = _run_variability_analysis_for_session(
-            session,
-            kwargs.get("max_workers"),
-            id_prefix,
-            target=target,
-            star_identifier=star_identifier,
-            use_astrometry_seed=use_astrometry_seed,
-        )
-        if identify_result is not None:
-            session_wcs_map[session.id] = identify_result.wcs
-            astrometry_identified_star_count += identify_result.simbad_matched_count
-            if identify_result.reused_existing_header_wcs:
-                sessions_with_reused_header_wcs.append(session.id)
-            if identify_result.header_wcs_replaced_after_verification:
-                sessions_with_replaced_header_wcs.append(session.id)
-        if not analyzer.stellar_objects:
-            session_empty_reasons.append(
-                f"session {session.id}: reference-frame star detection failed, 0 stars processed"
-            )
-        per_session_results.append((analyzer, session_candidates))
-        all_candidates.extend(session_candidates)
-        all_rejected_files.extend(analyzer.rejected_files)
-        all_frame_ensemble_composition.extend(analyzer.frame_ensemble_composition)
-
-    # Captured before cross-session merging/re-flagging below so
-    # each candidate reflects its own session's local adaptive
-    # cutoff -- VariableCandidate copies plain float values, so
-    # later mutating the underlying StellarObjects (merging
-    # light curves, recomputing a long-term CV) cannot retroactively
-    # change an already-built VariableCandidate.
-    candidates_formatted = [
-        VariableCandidate(
-            id=star.id,
-            meanFlux=star.mean_flux,
-            coefficientOfVariation=star.coefficient_of_variation,
-            score=min(1.0, star.variability_score / 100.0),
-            ra=float(star.right_ascension) if star.right_ascension else 0.0,
-            dec=float(star.declination) if star.declination else 0.0,
-        )
-        for star in all_candidates
-    ]
-
-    sessions_missing_wcs: list[str] = []
-    cross_session_match_count = 0
-    long_term_candidates = []
-
-    if id_prefix_enabled:
-        all_stellar_objects, sessions_missing_wcs, cross_session_match_count = (
-            _match_and_merge_across_sessions(
-                photometry_sessions, per_session_results, target, session_wcs_map=session_wcs_map
-            )
-        )
-        if cross_session_match_count > 0:
-            from astrometricslib.tasks.stellar_tasks.photometry_tasks.variability_analyzer import (
-                identify_long_term_variable_candidates,
-            )
-
-            long_term_candidates = identify_long_term_variable_candidates(all_stellar_objects)
-    else:
-        all_stellar_objects = per_session_results[0][0].stellar_objects
-
-    long_term_candidates_formatted = [
-        VariableCandidate(
-            id=star.id,
-            meanFlux=star.mean_flux,
-            coefficientOfVariation=star.coefficient_of_variation,
-            score=min(1.0, star.variability_score / 100.0),
-            ra=float(star.right_ascension) if star.right_ascension else 0.0,
-            dec=float(star.declination) if star.declination else 0.0,
-        )
-        for star in long_term_candidates
-    ]
-
-    all_stellar_objects, star_id_breakdown = persist_pipeline_stars(
-        all_stellar_objects,
-        butler=butler,
-        target_id=target.id,
-        merge_function=merge_photometry_stellar_object,
-        pipeline_name="photometry",
+    request = PipelineRequest(
+        target=target, butler=butler, frames=frames, filter_type=filter_type, path=path, options=kwargs
     )
-
-    from astrometricslib.models.quality_summary import (
-        ExcludedFrame,
-        PhotometryPipelineQualityMetrics,
-        PhotometryQualitySummary,
-        TargetSessionContribution,
-    )
-    from astrometricslib.tasks.stellar_tasks.photometry_tasks.variability_analyzer import (
-        median_light_curve_scatter_mag,
-    )
-
-    rejected_paths = set(all_rejected_files)
-    photometry_session_breakdown = [
-        TargetSessionContribution(
-            session_id=session.id,
-            frames_contributed=len(session.frame_paths),
-            frames_clipped=sum(1 for path in session.frame_paths if path in rejected_paths),
-        )
-        for session in photometry_sessions
-    ]
-
-    frames_processed = sum(len(session.frame_paths) for session in photometry_sessions) - len(
-        all_rejected_files
-    )
-
-    rejected_frames = [
-        ExcludedFrame(path=path, reason="global frame outlier (ensemble median MAD-clipped)")
-        for path in all_rejected_files
-    ] + [
-        ExcludedFrame(
-            path=frame.path,
-            reason="no capture timestamp available; cannot be assigned to a session",
-        )
-        for frame in photometry_frames_without_timestamp
-    ]
-
-    target.photometry_quality_summary = PhotometryQualitySummary(
-        target_id=target.id,
-        target_session_ids=[session.id for session in photometry_sessions],
-        target_session_breakdown=photometry_session_breakdown,
-        photometry_metrics=PhotometryPipelineQualityMetrics(
-            stars_processed=len(all_stellar_objects),
-            stars_found=len(all_stellar_objects),
-            frames_processed=frames_processed,
-            rejected_frames=rejected_frames,
-            frame_ensemble_composition=all_frame_ensemble_composition,
-            variable_candidate_count=len(all_candidates),
-            cross_session_match_count=cross_session_match_count,
-            sessions_missing_wcs=sessions_missing_wcs,
-            long_term_variable_candidate_count=len(long_term_candidates),
-            astrometry_identified_star_count=astrometry_identified_star_count,
-            sessions_with_reused_header_wcs=sessions_with_reused_header_wcs,
-            sessions_with_replaced_header_wcs=sessions_with_replaced_header_wcs,
-            catalog_matched_star_count=star_id_breakdown.catalog_matched,
-            position_only_star_count=star_id_breakdown.position_only,
-            unresolved_star_count=star_id_breakdown.unresolved,
-            light_curve_scatter_rms_mag=median_light_curve_scatter_mag(all_stellar_objects),
-        ),
-    )
-    # The rejected frames are recorded in the metrics either way;
-    # this only decides whether the count is worth a human's
-    # attention, which routine clipping is not.
-    frames_contributed_total = sum(
-        contribution.frames_contributed for contribution in photometry_session_breakdown
-    )
-    rejection_fraction = (
-        len(all_rejected_files) / frames_contributed_total if frames_contributed_total else 0.0
-    )
-    if (
-        len(all_rejected_files) >= MINIMUM_ENSEMBLE_REJECTION_COUNT_TO_FLAG
-        and rejection_fraction >= MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG
-    ):
-        target.photometry_quality_summary.flagged = True
-        target.photometry_quality_summary.flag_reasons.append(
-            f"{len(all_rejected_files)} of {frames_contributed_total} frame(s) "
-            f"({rejection_fraction:.0%}) rejected as global ensemble outliers, which is high "
-            "enough to suspect the comparison ensemble or the observing conditions"
-        )
-    if photometry_frames_without_timestamp:
-        target.photometry_quality_summary.flagged = True
-        target.photometry_quality_summary.flag_reasons.append(
-            f"{len(photometry_frames_without_timestamp)} frame(s) excluded for missing capture timestamp"
-        )
-    if session_empty_reasons:
-        target.photometry_quality_summary.flagged = True
-        target.photometry_quality_summary.flag_reasons.extend(session_empty_reasons)
-    if sessions_missing_wcs:
-        target.photometry_quality_summary.flagged = True
-        target.photometry_quality_summary.flag_reasons.append(
-            f"{len(sessions_missing_wcs)} session(s) could not be plate-solved for "
-            f"cross-session star matching: {', '.join(sessions_missing_wcs)}"
-        )
-
-    return {
-        "status": "completed",
-        "targetId": target.id,
-        "totalImages": len(image_paths),
-        "analysisMode": "photometry",
-        "starsProcessed": len(all_stellar_objects),
-        "spectraExtracted": 0,
-        "starsFound": len(all_stellar_objects),
-        "framesProcessed": frames_processed,
-        "rejectedCount": len(all_rejected_files),
-        "rejectedFiles": all_rejected_files,
-        "variableCandidates": candidates_formatted,
-        "longTermVariableCandidates": long_term_candidates_formatted,
-        "crossSessionMatchCount": cross_session_match_count,
-    }
+    return run_pipeline(PhotometryPipelineAdapter(), request)

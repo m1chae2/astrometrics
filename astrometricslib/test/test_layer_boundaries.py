@@ -40,13 +40,13 @@ _RAW_FITS_ACCESS_METHODS = frozenset({"open", "getheader", "getdata", "writeto",
 # it is only correct alongside a review of the new call site for the
 # HDU0/HDU1 rule.
 KNOWN_FITS_ACCESS_SITES = frozenset({
-    "data_access/background_homogeneity.py",
+    "data_access/background_measurement.py",
     "data_access/frame_scanning.py",
     "data_access/image_conversions.py",
-    "data_access/image_quality_metrics.py",
     "drivers/siril_interface.py",
     "image_processing/fits_access.py",
     "image_processing/image.py",
+    "image_processing/quality_metrics.py",
     "scripts/backfill_focal_length.py",
     "scripts/spectral_registration_quality_analysis.py",
     "tasks/moving_object_tasks/moving_object_pipeline_tasks.py",

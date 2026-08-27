@@ -178,7 +178,7 @@ def stack_frames(
 
     background_split = None
     if get_configuration().get_background_homogeneity_check_enabled():
-        from astrometricslib.data_access.background_homogeneity import (
+        from astrometricslib.data_access.background_measurement import (
             measure_frame_background_level,
             measure_frame_saturated_pixel_fraction,
         )
@@ -457,7 +457,7 @@ def _build_stack_quality_summary(  # ruff: ignore[missing-return-type-private-fu
         A report card on how well the stacking went, with warnings if
         something looks wrong.
     """
-    from astrometricslib.data_access.image_quality_metrics import (
+    from astrometricslib.image_processing.quality_metrics import (
         measure_image_fwhm,
         measure_rejected_fraction,
         measure_saturated_pixel_fraction,

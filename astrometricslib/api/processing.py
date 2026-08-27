@@ -56,7 +56,7 @@ class QualityDiagnostics:
             Median FWHM in pixels across the measured stars, or `None`
             if it could not be measured.
         """
-        from astrometricslib.data_access.image_quality_metrics import measure_image_fwhm
+        from astrometricslib.image_processing.quality_metrics import measure_image_fwhm
 
         return measure_image_fwhm(path)
 
@@ -75,7 +75,7 @@ class QualityDiagnostics:
             Mean rejected-pixel fraction over the rejmap, or `None` if
             the sibling rejmap file does not exist.
         """
-        from astrometricslib.data_access.image_quality_metrics import measure_rejected_fraction
+        from astrometricslib.image_processing.quality_metrics import measure_rejected_fraction
 
         return measure_rejected_fraction(stacked_path)
 
@@ -92,7 +92,7 @@ class QualityDiagnostics:
         frames : `list` of `dict`
             One dict per registered frame, in original submission order.
         """
-        from astrometricslib.data_access.image_quality_metrics import parse_seq_file
+        from astrometricslib.image_processing.quality_metrics import parse_seq_file
 
         return parse_seq_file(seq_path)
 
@@ -110,7 +110,7 @@ class QualityDiagnostics:
             Stats for the brightest star, or `None` if the file does
             not exist or has no data rows.
         """
-        from astrometricslib.data_access.image_quality_metrics import parse_zero_order_star
+        from astrometricslib.image_processing.quality_metrics import parse_zero_order_star
 
         return parse_zero_order_star(lst_path)
 

@@ -105,7 +105,7 @@ def measure_frame_input_quality(
         A dictionary showing how many images were "measured", "skipped",
         or "failed" (because they couldn't be read).
     """
-    from astrometricslib.data_access.image_quality_metrics import (
+    from astrometricslib.image_processing.quality_metrics import (
         measure_frame_input_quality as measure_one_frame,
     )
 

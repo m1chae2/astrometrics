@@ -26,9 +26,9 @@ from astropy.coordinates import SkyCoord
 from astropy.wcs import WCS, FITSFixedWarning
 from astroquery.simbad import Simbad
 
-from astrometricslib.data_access.image_quality_metrics import measure_fwhm_from_data
 from astrometricslib.image_processing.fits_access import collapse_to_2d
 from astrometricslib.image_processing.image import AstrometricsImage
+from astrometricslib.image_processing.quality_metrics import measure_fwhm_from_data
 from astrometricslib.image_processing.source_detection import SourceDetector
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.tasks.stellar_tasks.astrometry_tasks.plate_solver import PlateSolver

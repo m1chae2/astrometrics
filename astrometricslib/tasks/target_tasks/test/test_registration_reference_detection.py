@@ -70,19 +70,19 @@ def _build_summary(  # ruff: ignore[missing-return-type-private-function]
 
     with (
         patch(
-            "astrometricslib.data_access.image_quality_metrics.parse_seq_file",
+            "astrometricslib.image_processing.quality_metrics.parse_seq_file",
             return_value=registration_frames,
         ),
         patch(
-            "astrometricslib.data_access.image_quality_metrics.measure_rejected_fraction",
+            "astrometricslib.image_processing.quality_metrics.measure_rejected_fraction",
             return_value=None,
         ),
         patch(
-            "astrometricslib.data_access.image_quality_metrics.measure_saturated_pixel_fraction",
+            "astrometricslib.image_processing.quality_metrics.measure_saturated_pixel_fraction",
             return_value=None,
         ),
         patch(
-            "astrometricslib.data_access.image_quality_metrics.measure_image_fwhm",
+            "astrometricslib.image_processing.quality_metrics.measure_image_fwhm",
             return_value=None,
         ),
     ):

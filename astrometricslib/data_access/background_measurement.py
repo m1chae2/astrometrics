@@ -1,8 +1,9 @@
 """Tools to check how bright the sky background is in an image.
 
-This file only handles reading the image data from the hard drive.
-The actual math to decide if the background is changing too much is
-kept separately in the target tasks folder.
+This file only handles reading the image data from the hard drive and
+measuring how bright the background is. The actual decision about
+whether that brightness has changed too much during a stacking session
+is kept separately, in `tasks/target_tasks/background_homogeneity_tasks.py`.
 """
 
 import numpy as np
@@ -13,7 +14,7 @@ from astrometricslib.image_processing.fits_access import collapse_to_2d
 from astrometricslib.image_processing.saturation import compute_saturated_pixel_fraction
 
 # Just under the raw 16-bit unsigned max -- same convention as
-# image_quality_metrics.DEFAULT_SATURATION_ADU_THRESHOLD and
+# quality_metrics.DEFAULT_SATURATION_ADU_THRESHOLD and
 # photometry's _SATURATION_ADU_THRESHOLD, not reused directly to keep
 # this module's import surface matching
 # measure_frame_background_level's existing minimal footprint.

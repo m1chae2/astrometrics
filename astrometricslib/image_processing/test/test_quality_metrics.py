@@ -10,7 +10,7 @@ import pytest
 from astropy.io import fits
 from astropy.modeling.models import Gaussian2D
 
-from astrometricslib.data_access.image_quality_metrics import (
+from astrometricslib.image_processing.quality_metrics import (
     measure_image_fwhm,
     measure_rejected_fraction,
     measure_saturated_pixel_fraction,

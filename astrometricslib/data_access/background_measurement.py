@@ -3,7 +3,7 @@
 This file only handles reading the image data from the hard drive and
 measuring how bright the background is. The actual decision about
 whether that brightness has changed too much during a stacking session
-is kept separately, in `tasks/target_tasks/background_homogeneity_tasks.py`.
+is kept separately, in `pipelines/stacking/background_homogeneity.py`.
 """
 
 import numpy as np

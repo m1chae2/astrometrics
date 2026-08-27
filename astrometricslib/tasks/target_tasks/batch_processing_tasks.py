@@ -35,7 +35,7 @@ def _process_single_target_worker(
         or failed), "error" (if any), and "stack_outputs" (the final data).
     """
     from astrometricslib import Astrometrics
-    from astrometricslib.tasks.target_tasks.pipeline_tasks import (
+    from astrometricslib.pipelines.dispatch import (
         run_full_pipeline,
         select_frames_for_camera,
     )

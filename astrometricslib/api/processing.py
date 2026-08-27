@@ -136,7 +136,7 @@ class QualityDiagnostics:
             A list the same length as values, `True` where the
             corresponding entry is an outlier.
         """
-        from astrometricslib.tasks.target_tasks.spectral_registration_quality import flag_outliers
+        from astrometricslib.pipelines.spectroscopy.registration_quality import flag_outliers
 
         return flag_outliers(values, sigma_threshold, low_is_bad)
 
@@ -149,7 +149,7 @@ class QualityDiagnostics:
         thresholds : `dict` [`str`, `float`]
             Threshold values keyed by threshold name.
         """
-        from astrometricslib.tasks.target_tasks import spectral_registration_quality as srq
+        from astrometricslib.pipelines.spectroscopy import registration_quality as srq
 
         return {
             "min_matched_star_pairs": srq.MIN_MATCHED_STAR_PAIRS,
@@ -374,7 +374,7 @@ class ProcessingPipelines:
             stacking did not produce an output.
         """
         if solve:
-            from astrometricslib.tasks.target_tasks.pipeline_tasks import stack_and_solve
+            from astrometricslib.pipelines.dispatch import stack_and_solve
 
             return stack_and_solve(
                 target,
@@ -388,7 +388,7 @@ class ProcessingPipelines:
                 generate_rejmap=generate_rejmap,
             )
 
-        from astrometricslib.tasks.target_tasks import stacking_tasks
+        from astrometricslib.pipelines.stacking import stage as stacking_tasks
 
         return stacking_tasks.stack_frames(
             target,
@@ -421,7 +421,7 @@ class ProcessingPipelines:
         result : `dict[str, Any]`
             Astrometry results and status fields.
         """
-        from astrometricslib.tasks.target_tasks.pipeline_tasks import analyze_target
+        from astrometricslib.pipelines.dispatch import analyze_target
 
         return analyze_target(target, pipeline_type="astrometry", **kwargs)
 
@@ -443,7 +443,7 @@ class ProcessingPipelines:
         result : `dict[str, Any]`
             Photometry results and status fields.
         """
-        from astrometricslib.tasks.target_tasks.pipeline_tasks import analyze_target
+        from astrometricslib.pipelines.dispatch import analyze_target
 
         return analyze_target(target, pipeline_type="photometry", **kwargs)
 
@@ -465,7 +465,7 @@ class ProcessingPipelines:
         result : `dict[str, Any]`
             Spectroscopy results and status fields.
         """
-        from astrometricslib.tasks.target_tasks.pipeline_tasks import analyze_target
+        from astrometricslib.pipelines.dispatch import analyze_target
 
         return analyze_target(target, pipeline_type="spectroscopy", **kwargs)
 
@@ -501,8 +501,8 @@ class ProcessingPipelines:
         session_results : `list` [`tuple`]
             One `(session, identify_result)` pair per session.
         """
-        from astrometricslib.tasks.target_tasks import (
-            spectroscopy_batch_tasks as spectroscopy_batch_operations,
+        from astrometricslib.pipelines.spectroscopy import (
+            batch as spectroscopy_batch_operations,
         )
 
         return spectroscopy_batch_operations.process_spectroscopy_frames_by_session(

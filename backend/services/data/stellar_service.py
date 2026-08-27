@@ -8,7 +8,7 @@ from astrometricslib import Astrometrics, StellarObject
 logger = logging.getLogger(__name__)
 
 # Matches the ID suffix VariabilityAnalyzer stamps onto every per-frame point
-# source it detects during photometry (target_session_tasks.py's
+# source it detects during photometry (target_sessions.py's
 # "{target_id}:{night_date}:{gain}:{offset}" session id, joined with
 # ":Star_{n}" in variability_analyzer.py). These are internal detection
 # artifacts merged into the same stellar_catalog store real catalog objects

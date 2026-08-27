@@ -51,7 +51,7 @@ from astrometricslib.models.target import (
     RenderedImage,
     Target,
 )
-from astrometricslib.tasks.target_tasks.target_session_tasks import derive_target_sessions
+from astrometricslib.pipelines.shared.target_sessions import derive_target_sessions
 from astrometricslib.utilities.concurrency import resolve_worker_counts
 from astrometricslib.utilities.config_loader import AppConfiguration, get_configuration
 from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
@@ -65,12 +65,12 @@ if TYPE_CHECKING:
     from astrometricslib.api.stars import StellarCatalog
     from astrometricslib.api.targets import TargetCatalog
     from astrometricslib.api.visualization import Visualization
-    from astrometricslib.tasks.stellar_tasks.astrometry_tasks.astrometry_pipeline import AstrometryPipeline
-    from astrometricslib.tasks.stellar_tasks.astrometry_tasks.star_identifier import StarIdentifier
+    from astrometricslib.pipelines.astrometry.pipeline import AstrometryPipeline
+    from astrometricslib.pipelines.astrometry.star_identifier import StarIdentifier
 
 _LAZY_EXPORTS = {
-    "AstrometryPipeline": "astrometricslib.tasks.stellar_tasks.astrometry_tasks.astrometry_pipeline",
-    "StarIdentifier": "astrometricslib.tasks.stellar_tasks.astrometry_tasks.star_identifier",
+    "AstrometryPipeline": "astrometricslib.pipelines.astrometry.pipeline",
+    "StarIdentifier": "astrometricslib.pipelines.astrometry.star_identifier",
     "CalibrationCatalog": "astrometricslib.api.processing",
     "ProcessingPipelines": "astrometricslib.api.processing",
     "QualityDiagnostics": "astrometricslib.api.processing",

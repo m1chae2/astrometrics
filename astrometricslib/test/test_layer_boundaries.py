@@ -49,13 +49,13 @@ KNOWN_FITS_ACCESS_SITES = frozenset({
     "image_processing/fits_access.py",
     "image_processing/image.py",
     "image_processing/quality_metrics.py",
+    "pipelines/astrometry/catalog_seeding.py",
+    "pipelines/astrometry/runner.py",
+    "pipelines/astrometry/session_identification.py",
+    "pipelines/asteroid_recovery/pipeline.py",
+    "pipelines/photometry/variability_analyzer.py",
     "scripts/backfill_focal_length.py",
     "scripts/spectral_registration_quality_analysis.py",
-    "tasks/moving_object_tasks/moving_object_pipeline_tasks.py",
-    "tasks/stellar_tasks/astrometry_tasks/catalog_seeding.py",
-    "tasks/stellar_tasks/astrometry_tasks/session_identification.py",
-    "tasks/stellar_tasks/photometry_tasks/variability_analyzer.py",
-    "tasks/target_tasks/pipelines/astrometry.py",
     "visualization/helpers.py",
 })
 

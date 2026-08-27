@@ -131,7 +131,7 @@ def measure_frame_input_quality(
             # Siril's registration PSF fit and this photutils measurement
             # are not on the same absolute scale -- measured on identical
             # NGC 4438 frames, photutils reports ~1.53x Siril's value
-            # (5.1px vs 3.2px), and stacking_tasks.py already documents
+            # (5.1px vs 3.2px), and stage.py already documents
             # the same mismatch from an independent M 13 comparison.
             # Mixing them in one field would make a frame appear to jump
             # ~50% in seeing purely from which stage measured it, which

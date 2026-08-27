@@ -170,7 +170,7 @@ class TargetCatalog:
         frame_record : `astrometricslib.models.target.FrameRecord`
             The newly added frame record.
         """
-        from astrometricslib.tasks.target_tasks.pipeline_tasks import add_frame
+        from astrometricslib.pipelines.dispatch import add_frame
 
         return add_frame(target, path, role, filter_type, camera)
 
@@ -200,7 +200,7 @@ class TargetCatalog:
         butler : `astrometricslib.data_access.butler.AbstractButler`, optional
             Storage backend override; defaults to this catalog's butler.
         """
-        from astrometricslib.tasks.target_tasks.pipeline_tasks import reindex_frames
+        from astrometricslib.pipelines.dispatch import reindex_frames
 
         reindex_frames(target, prune_missing=prune_missing, butler=butler, refresh_headers=refresh_headers)
 
@@ -225,7 +225,7 @@ class TargetCatalog:
             The FITS primary header's card entries for `path`.
         """
         if target is not None:
-            from astrometricslib.tasks.target_tasks.pipeline_tasks import get_header_information
+            from astrometricslib.pipelines.dispatch import get_header_information
 
             return get_header_information(target, path)
 

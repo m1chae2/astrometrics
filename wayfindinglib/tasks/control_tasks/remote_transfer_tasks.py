@@ -625,7 +625,7 @@ def sync_all_remote_folders(
         astrometrics_log.db for this run (default `True`), so a
         script/notebook/CLI call shows up in the UI's job manager
         without the caller doing anything extra -- mirrors
-        `astrometricslib.tasks.target_tasks.pipeline_tasks.analyze_target`'s
+        `astrometricslib.pipelines.dispatch.analyze_target`'s
         `register_job` parameter and its job-registration shape.
         Registration failures are logged and swallowed rather than
         raised, so a database issue never blocks the actual sync.

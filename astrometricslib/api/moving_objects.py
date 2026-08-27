@@ -8,7 +8,7 @@ against the fixed background stars.
 from astrometricslib.models.moving_object import AsteroidRecoveryCandidate
 from astrometricslib.models.moving_object_config import MovingObjectConfig
 from astrometricslib.models.target import Target
-from astrometricslib.tasks.moving_object_tasks.moving_object_pipeline_tasks import (
+from astrometricslib.pipelines.asteroid_recovery.pipeline import (
     AsteroidRecoveryPipeline,
 )
 

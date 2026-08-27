@@ -27,7 +27,7 @@ from typing import Any
 os.environ["HEADLESS"] = "1"
 
 from astrometricslib import Astrometrics
-from astrometricslib.tasks.target_tasks.pipeline_tasks import select_frames_for_camera
+from astrometricslib.pipelines.dispatch import select_frames_for_camera
 from astrometricslib.utilities.parallel_batch import BatchRunSummary
 
 ASI_CAMERA_NAME = "ZWO ASI 533MM Pro"

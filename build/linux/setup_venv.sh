@@ -150,13 +150,13 @@ log "Installing project from $ROOT_DIR (editable)..."
 log "Installing pyindi-client (real INDI hardware control)..."
 "$VENV_PYTHON" -m pip install pyindi-client || log "WARNING: pyindi-client install failed; INDI hardware control will use the no-op stub (see wayfindinglib/drivers/indi/pyindi_compatibility.py)."
 
-if [ -f "$ROOT_DIR/astrometricslib/tasks/stellar_tasks/spectroscopy_tasks/_extractor_c.c" ]; then
+if [ -f "$ROOT_DIR/astrometricslib/pipelines/spectroscopy/_extractor_c.c" ]; then
   log "Compiling CPython C extension (_extractor_c.c)..."
   PYTHON_INC="$("$VENV_PYTHON" -c "import sysconfig; print(sysconfig.get_path('include'))")"
   NUMPY_INC="$("$VENV_PYTHON" -c "import numpy; print(numpy.get_include())")"
   gcc -O3 -shared -fPIC -I"$PYTHON_INC" -I"$NUMPY_INC" \
-      "$ROOT_DIR/astrometricslib/tasks/stellar_tasks/spectroscopy_tasks/_extractor_c.c" \
-      -o "$ROOT_DIR/astrometricslib/tasks/stellar_tasks/spectroscopy_tasks/_extractor_c.so" || {
+      "$ROOT_DIR/astrometricslib/pipelines/spectroscopy/_extractor_c.c" \
+      -o "$ROOT_DIR/astrometricslib/pipelines/spectroscopy/_extractor_c.so" || {
         log "WARNING: C extension compilation failed; pure-Python fallback will be used."
       }
 fi

@@ -190,8 +190,9 @@ class AppConfiguration:
         sweeps against M 81, M 13, and NGC 2403 found stacked-image FWHM
         indistinguishable between sigma=2.5 and sigma=3.0, so the lower,
         frame-count-derived Chauvenet sigma (see
-        targetlib/rejection_thresholds.py) costs no measurable sharpness
-        while rejecting a more statistically-justified fraction of pixels.
+        pipelines/stacking/rejection_thresholds.py) costs no measurable
+        sharpness while rejecting a more statistically-justified fraction of
+        pixels.
         "fixed" falls back to get_stack_rejection_sigma()'s configured
         constant for callers that want the old fixed-sigma behavior.
 

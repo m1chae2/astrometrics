@@ -166,7 +166,7 @@ def create_target(api, target_id: str, ra: str | None = None, dec: str | None = 
         new_target.dec = dec
 
     # Scan filesystem for frames matching the new target ID
-    from astrometricslib.tasks.target_tasks.pipeline_tasks import reindex_frames
+    from astrometricslib.pipelines.dispatch import reindex_frames
 
     reindex_frames(new_target)
     api._targets.append(new_target)
@@ -254,7 +254,7 @@ def refresh_target(api, target_id: str, prune_missing: bool = False) -> None:  #
     if prune_missing:
         target.frames = []
 
-    from astrometricslib.tasks.target_tasks.pipeline_tasks import reindex_frames
+    from astrometricslib.pipelines.dispatch import reindex_frames
 
     reindex_frames(target)
     save_targets(api)

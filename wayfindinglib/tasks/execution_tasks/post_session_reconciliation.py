@@ -13,7 +13,7 @@ than double-counting.
 codebase before this module (`models/calibration.py`); this closes
 that gap. `target_session_ids` are attached by re-deriving each
 imaged target's `TargetSession`s from its actual captured frames
-(`astrometricslib.tasks.target_tasks.target_session_tasks
+(`astrometricslib.pipelines.shared.target_sessions
 .derive_target_sessions`) for the session's night -- Execution
 computes nothing here that isn't already derivable from what the
 science library recorded, since a `TargetSession` id encodes the

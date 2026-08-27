@@ -20,7 +20,7 @@ import sys
 
 from astrometricslib import Astrometrics
 from astrometricslib.drivers.catalog_store import summarize_catalog_coverage
-from astrometricslib.tasks.stellar_tasks.astrometry_tasks.catalog_seeding import (
+from astrometricslib.pipelines.astrometry.catalog_seeding import (
     DEFAULT_FIELD_RADIUS_DEGREES,
     DEFAULT_MAGNITUDE_LIMIT,
     DEFAULT_REQUEST_DELAY_SECONDS,

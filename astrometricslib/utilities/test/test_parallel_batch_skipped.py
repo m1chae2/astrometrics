@@ -54,7 +54,7 @@ def test_summary_defaults_to_no_skips():  # ruff: ignore[missing-return-type-und
 
 def test_merge_preserves_skipped_entries():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Per-session summaries are concatenated without dropping skips."""
-    from astrometricslib.tasks.target_tasks.spectroscopy_batch_tasks import (
+    from astrometricslib.pipelines.spectroscopy.batch import (
         _merge_batch_summaries,
     )
 

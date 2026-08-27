@@ -182,34 +182,6 @@ def _run_analysis_pipeline_match(
     return runner(target, frames, filter_type, butler, path, **kwargs)
 
 
-def reindex_frames(
-    target: Target,
-    prune_missing: bool = False,
-    butler=None,  # ruff: ignore[missing-type-function-argument]
-    refresh_headers: bool = False,
-) -> None:
-    """Update our saved list of images from the actual files on disk.
-
-    This function adds any new image files it finds and updates the
-    total exposure time. If `refresh_headers` is True, it will also
-    re-read the FITS header data for files we already know about.
-    """
-    if butler is None:
-        from astrometricslib.data_access.butler import DiskButler
-
-        butler = DiskButler()
-
-    if prune_missing:
-        target.frames = [
-            f
-            for f in target.frames
-            if butler.exists("raw_frame", {"path": f.path})
-            and not any(k in f.path.lower() for k in ("_stacked", "starless", "starmask"))
-        ]
-
-    butler.get("raw_frames", {"target": target, "refresh_headers": refresh_headers})
-
-
 def get_header_information(target: Target, frame_path: str) -> list[dict[str, str]]:
     """Get the raw metadata (FITS header info) for an image.
 

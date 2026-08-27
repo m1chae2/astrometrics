@@ -187,7 +187,7 @@ class Astrometrics:
         summary : `BatchRunSummary`
             A report showing which targets succeeded and which failed.
         """
-        from astrometricslib.tasks.target_tasks import batch_processing_tasks as batch_processing_operations
+        from astrometricslib.api import batch as batch_processing_operations
 
         return batch_processing_operations.process_all_targets(
             self, target_ids, camera_name=camera_name, focal_length_mm=focal_length_mm

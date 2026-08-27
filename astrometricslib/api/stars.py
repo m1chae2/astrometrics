@@ -73,9 +73,9 @@ class StellarCatalog:
         stellar_objects : `list` [`StellarObject`]
             All stellar objects currently in the library.
         """
-        from astrometricslib.tasks.stellar_tasks import analysis_operations
+        from astrometricslib.api import stellar_operations
 
-        return analysis_operations.list_objects(self)
+        return stellar_operations.list_objects(self)
 
     def list_object_summaries(
         self, target_id: str | None = None, limit: int | None = None
@@ -148,9 +148,9 @@ class StellarCatalog:
         stellar_object : `StellarObject` or `None`
             The matching stellar object, or `None` if not found.
         """
-        from astrometricslib.tasks.stellar_tasks import analysis_operations
+        from astrometricslib.api import stellar_operations
 
-        return analysis_operations.get_object(self, object_id)
+        return stellar_operations.get_object(self, object_id)
 
     def tune_spectroscopy_calibration(
         self,
@@ -177,11 +177,9 @@ class StellarCatalog:
         calibration_result : `dict`
             Tuned calibration parameters and diagnostic metrics.
         """
-        from astrometricslib.tasks.stellar_tasks import analysis_operations
+        from astrometricslib.api import stellar_operations
 
-        return analysis_operations.tune_spectroscopy_calibration(
-            self, image_path, camera_name, star_x, star_y
-        )
+        return stellar_operations.tune_spectroscopy_calibration(self, image_path, camera_name, star_x, star_y)
 
     def delete(self, object_id: str) -> bool:
         """Safely delete a star from the catalog by its ID.

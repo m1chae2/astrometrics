@@ -6,7 +6,7 @@ values, and input-validation boundaries.
 
 import pytest
 
-from astrometricslib.pipelines.stacking.rejection_thresholds import chauvenet_sigma
+from astrometricslib.utilities.rejection_thresholds import chauvenet_sigma
 
 
 def test_chauvenet_sigma_matches_known_reference_values():  # ruff: ignore[missing-return-type-undocumented-public-function]

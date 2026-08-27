@@ -200,7 +200,7 @@ class TargetCatalog:
         butler : `astrometricslib.data_access.butler.AbstractButler`, optional
             Storage backend override; defaults to this catalog's butler.
         """
-        from astrometricslib.pipelines.dispatch import reindex_frames
+        from astrometricslib.data_access.persistence_operations import reindex_frames
 
         reindex_frames(target, prune_missing=prune_missing, butler=butler, refresh_headers=refresh_headers)
 

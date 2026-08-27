@@ -11,7 +11,7 @@ from typing import Any
 
 from astrometricslib.image_processing.image import AstrometricsImage
 from astrometricslib.pipelines.astrometry.star_identifier import StarIdentifier
-from astrometricslib.pipelines.shared.analysis_context import AnalysisContext
+from astrometricslib.pipelines.shared.analysis_context import AnalysisContext, ExtendedSourceHint
 from astrometricslib.utilities.config_loader import AppConfiguration
 from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
 
@@ -177,7 +177,7 @@ class AstrometryPipeline:
             elif "Vega" in base_file:
                 object_name = "Vega"
 
-        extended_target_obj = None
+        extended_source_hint = None
 
         if object_name:
             # 2. Ask the SIMBAD database to figure out what type of object
@@ -217,24 +217,15 @@ class AstrometryPipeline:
                         f"skipping extended-target enrichment."
                     )
                 else:
-                    # 4. Create a special `StellarObject` for this target.
-                    # Unlike a
-                    # normal star (a tiny dot), this object will use a large
-                    # circle
-                    # to measure all the light coming from the whole
-                    # nebula/galaxy.
-                    from astrometricslib.pipelines.spectroscopy.pipeline import (
-                        SpectroscopyPipeline,
-                    )
-                    from astrometricslib.utilities.spectroscopy_models import ConfigLoader
-
-                    spec_config = ConfigLoader.load_spectroscopy_config(app_config=self.config)
-
-                    # Calculate how big the measuring circle needs to be by
-                    # looking at
-                    # the object's actual size in the catalog and our
+                    # 4. Note down where this target sits and how big it
+                    # is, so whichever pipeline needs a measurement
+                    # region for it (spectroscopy, currently) can build
+                    # one without astrometry needing to know how.
+                    #
+                    # Calculate how big that region should be by looking
+                    # at the object's actual size in the catalog and our
                     # telescope's zoom level.
-                    extraction_radius = 60  # Default fallback
+                    extraction_radius_px = 60  # Default fallback
                     if majaxis is not None and wcs:
                         try:
                             from astropy.wcs.utils import proj_plane_pixel_scales
@@ -254,26 +245,21 @@ class AstrometryPipeline:
                                 # program from crashing or slowing down if the
                                 # catalog
                                 # gives us weird or incorrect size data.
-                                extraction_radius = int(max(15, min(200, derived_radius)))
+                                extraction_radius_px = int(max(15, min(200, derived_radius)))
                                 logger.info(
                                     f"Derived extended extraction radius from SIMBAD ({majaxis} arcmin): "
-                                    f"{extraction_radius} pixels"
+                                    f"{extraction_radius_px} pixels"
                                 )
                         except Exception as e:
                             logger.warning(f"Failed to derive extraction radius from WCS/SIMBAD: {e}")
 
-                    config_extended = spec_config.with_overrides(extraction_radius=extraction_radius)
-                    spec_pipeline_extended = SpectroscopyPipeline(config=config_extended)
-
-                    extended_target_obj = spec_pipeline_extended.create_extended_target_object(
-                        extraction_center=extraction_center,
+                    extended_source_hint = ExtendedSourceHint(
                         object_name=object_name,
                         otype=otype,
-                        extraction_radius=config_extended.extraction_radius,
+                        extraction_center=extraction_center,
+                        extraction_radius_px=extraction_radius_px,
                     )
-                    logger.info(
-                        f"Successfully initialized extended target StellarObject for '{object_name}'."
-                    )
+                    logger.info(f"Recorded extended-source hint for '{object_name}'.")
 
         # Start downloading Gaia DR3 stars for this image's area in the
         # background.
@@ -298,7 +284,7 @@ class AstrometryPipeline:
             image=image,
             stellar_objects=stellar_objects,
             wcs=wcs,
-            extended_target=extended_target_obj,
+            extended_source_hint=extended_source_hint,
             sources_detected=self.star_identifier.sources_detected,
             solve_attempted=self.star_identifier.solve_attempted,
             astrometric_residual_rms_arcsec=(self.star_identifier.get_astrometric_residual_rms_arcsec()),

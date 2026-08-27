@@ -8,6 +8,8 @@ to the database system so the rest of the program doesn't have to.
 import os
 from typing import Any
 
+from astrometricslib.models.target import Target
+
 
 def _mark_touched(api, target_id: str) -> None:  # ruff: ignore[missing-type-function-argument]
     """Remember that we changed a target so we know to save it later.
@@ -133,6 +135,34 @@ def get_target(api, target_id: str) -> Any | None:  # ruff: ignore[missing-type-
     return target
 
 
+def reindex_frames(
+    target: Target,
+    prune_missing: bool = False,
+    butler=None,  # ruff: ignore[missing-type-function-argument]
+    refresh_headers: bool = False,
+) -> None:
+    """Update our saved list of images from the actual files on disk.
+
+    This function adds any new image files it finds and updates the
+    total exposure time. If `refresh_headers` is True, it will also
+    re-read the FITS header data for files we already know about.
+    """
+    if butler is None:
+        from astrometricslib.data_access.butler import DiskButler
+
+        butler = DiskButler()
+
+    if prune_missing:
+        target.frames = [
+            f
+            for f in target.frames
+            if butler.exists("raw_frame", {"path": f.path})
+            and not any(k in f.path.lower() for k in ("_stacked", "starless", "starmask"))
+        ]
+
+    butler.get("raw_frames", {"target": target, "refresh_headers": refresh_headers})
+
+
 def create_target(api, target_id: str, ra: str | None = None, dec: str | None = None) -> Any:  # ruff: ignore[missing-type-function-argument]
     """Create a new target and look for its image files on the hard drive.
 
@@ -166,8 +196,6 @@ def create_target(api, target_id: str, ra: str | None = None, dec: str | None = 
         new_target.dec = dec
 
     # Scan filesystem for frames matching the new target ID
-    from astrometricslib.pipelines.dispatch import reindex_frames
-
     reindex_frames(new_target)
     api._targets.append(new_target)
     _mark_touched(api, new_target.id)
@@ -253,8 +281,6 @@ def refresh_target(api, target_id: str, prune_missing: bool = False) -> None:  #
 
     if prune_missing:
         target.frames = []
-
-    from astrometricslib.pipelines.dispatch import reindex_frames
 
     reindex_frames(target)
     save_targets(api)

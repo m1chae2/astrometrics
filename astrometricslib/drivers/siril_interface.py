@@ -806,7 +806,7 @@ class ImageProcessing:
                         return
                     from astropy.io import fits
 
-                    from astrometricslib.pipelines.stacking.frame_homogeneity import (
+                    from astrometricslib.drivers.calibration_library import (
                         is_calibration_gain_compatible,
                         is_dark_calibration_metadata_compatible,
                     )
@@ -1391,7 +1391,7 @@ class ImageProcessing:
             # (the default) derives sigma from num_lights via
             # Chauvenet's criterion rather than using one fixed
             # constant for every stack -- see
-            # pipelines/stacking/rejection_thresholds.py for why. "fixed"
+            # utilities/rejection_thresholds.py for why. "fixed"
             # mode uses the configured constant unconditionally.
             if rejection_sigma is not None:
                 rejection_sigma_low, rejection_sigma_high = rejection_sigma
@@ -1400,7 +1400,7 @@ class ImageProcessing:
                 rejection_sigma_low, rejection_sigma_high = self.config.get_stack_rejection_sigma()
                 rejection_sigma_mode_used = "fixed"
             else:
-                from astrometricslib.pipelines.stacking.rejection_thresholds import chauvenet_sigma
+                from astrometricslib.utilities.rejection_thresholds import chauvenet_sigma
 
                 adaptive_sigma = chauvenet_sigma(max(num_lights, 1))
                 rejection_sigma_low = rejection_sigma_high = adaptive_sigma
@@ -1412,9 +1412,9 @@ class ImageProcessing:
             # num_lights, so the survivor count (and whether it dips
             # below the floor) is knowable in advance without
             # needing Siril to run first. See
-            # pipelines/stacking/stack_quality.py for the
+            # utilities/stack_filter_floor.py for the
             # loosening-ladder logic.
-            from astrometricslib.pipelines.stacking.stack_quality import (
+            from astrometricslib.utilities.stack_filter_floor import (
                 resolve_filter_wfwhm_with_floor,
             )
 

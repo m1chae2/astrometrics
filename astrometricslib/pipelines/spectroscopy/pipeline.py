@@ -97,6 +97,23 @@ class SpectroscopyPipeline:
         ]
         valid_objects = [res["star_source"] for res in results if "error" not in res]
 
+        # If astrometry noticed the target is a large object like a nebula
+        # instead of a star, turn that plain fact into a StellarObject
+        # sized for our own dispersion geometry -- astrometry knows where
+        # the object is and how big it looks, but not how wide a
+        # measurement box our spectrograph needs for it.
+        if context.extended_target is None and context.extended_source_hint is not None:
+            try:
+                hint = context.extended_source_hint
+                context.extended_target = self.create_extended_target_object(
+                    extraction_center=hint.extraction_center,
+                    object_name=hint.object_name,
+                    otype=hint.otype,
+                    extraction_radius=hint.extraction_radius_px,
+                )
+            except Exception as e:
+                logger.warning(f"Failed to build extended target StellarObject from hint: {e}")
+
         # If the user is targeting a large object like a nebula instead of a
         # star,
         # we process it automatically using a wider measuring area.

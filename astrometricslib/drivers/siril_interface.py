@@ -323,66 +323,6 @@ def siril_process_lock(
         yield
 
 
-def select_dominant_frame_dimensions(frame_paths: list[str]) -> tuple[set[str], tuple[int, int] | None]:
-    """Keep only the frames sharing the most common image dimensions.
-
-    Siril builds a sequence from frames of identical geometry and
-    refuses anything else outright -- "Cannot add an image with
-    different properties to an existing sequence" -- which fails the
-    *whole* conversion, not just the offending frame. A handful of
-    odd-sized files therefore costs a target its entire stack.
-
-    Observed on the 2026-08-24 run: Sun had 4 stray frames (2402x1753,
-    2286x2122, 1905x1689, 2233x1761) among 446 at 6000x4000 and lost all
-    450; M 27 had 45 frames at 6016x4016 against 81 at 6000x4000 and
-    lost all 126. Keeping the majority geometry costs those 4 frames of
-    Sun's 450 and recovers everything else.
-
-    Ties are resolved toward the larger frame count first and then the
-    larger pixel area, so a genuinely split set prefers the more
-    detailed geometry rather than whichever happened to be read first.
-
-    Parameters
-    ----------
-    frame_paths : `list` [`str`]
-        Candidate light-frame paths, already known to be readable.
-
-    Returns
-    -------
-    kept_paths : `set` [`str`]
-        Paths whose dimensions match the dominant geometry. Frames
-        whose header cannot be read are kept, so this filter never
-        removes a frame on the strength of a failed read.
-    dominant_dimensions : `tuple` [`int`, `int`] or `None`
-        The winning ``(NAXIS1, NAXIS2)``, or `None` when no header
-        could be read at all.
-    """
-    from astropy.io import fits
-
-    paths_by_dimensions: dict[tuple[int, int], list[str]] = {}
-    unreadable_paths: list[str] = []
-    for frame_path in frame_paths:
-        try:
-            header = fits.getheader(frame_path)
-            dimensions = (int(header["NAXIS1"]), int(header["NAXIS2"]))
-        except Exception:
-            unreadable_paths.append(frame_path)
-            continue
-        paths_by_dimensions.setdefault(dimensions, []).append(frame_path)
-
-    if not paths_by_dimensions:
-        return set(frame_paths), None
-
-    dominant_dimensions = max(
-        paths_by_dimensions,
-        key=lambda dimensions: (
-            len(paths_by_dimensions[dimensions]),
-            dimensions[0] * dimensions[1],
-        ),
-    )
-    return set(paths_by_dimensions[dominant_dimensions]) | set(unreadable_paths), dominant_dimensions
-
-
 def _frames_use_color_filter_array(frames_directory: str) -> bool:
     """Report whether a staged frame directory holds color (CFA) data.
 
@@ -396,15 +336,10 @@ def _frames_use_color_filter_array(frames_directory: str) -> bool:
     (monochrome) run: every stacked product came out (3, 3008, 3008)
     instead of (3008, 3008), and intermediates grew ~6x (416MB -> 2.5GB).
 
-    ``BAYERPAT`` is the authoritative marker and the same one Siril
-    itself looks for: a CFA sensor writes it (e.g. "RGGB"), a mono sensor
-    does not. Frame dimensionality deliberately is *not* used as a
-    signal, because an undebayered CFA frame and a mono frame are both
-    2D and indistinguishable by shape alone.
-
-    Absence of the keyword is treated as monochrome -- the conservative
-    reading, since guessing a pattern is exactly the failure being
-    corrected here.
+    Checks each staged frame with `image_type.frame_uses_color_filter_array`
+    (``BAYERPAT`` is the authoritative marker, and is read from whichever
+    HDU actually holds a frame's header -- see that function's docstring
+    for why), stopping at the first frame that gives a definitive answer.
 
     Parameters
     ----------
@@ -416,7 +351,7 @@ def _frames_use_color_filter_array(frames_directory: str) -> bool:
     uses_color_filter_array : `bool`
         `True` only if a frame declares a ``BAYERPAT``.
     """
-    from astropy.io import fits
+    from astrometricslib.data_access.image_type import frame_uses_color_filter_array
 
     try:
         frame_names = sorted(os.listdir(frames_directory))
@@ -428,18 +363,12 @@ def _frames_use_color_filter_array(frames_directory: str) -> bool:
         frame_path = os.path.join(frames_directory, frame_name)
         if not os.path.isfile(frame_path):
             continue
-        try:
-            bayer_pattern = fits.getheader(frame_path).get("BAYERPAT")
-        except Exception as header_error:
-            # A single unreadable frame must not decide the whole stack's
-            # calibration mode; try the next one instead.
-            logger.debug("Could not read header of %s: %s", frame_path, header_error)
-            continue
-        if bayer_pattern is not None and str(bayer_pattern).strip():
-            return True
-        # A readable header with no BAYERPAT is a definitive mono answer;
-        # no need to open the rest of the sequence.
-        return False
+        # None means the header could not be read at all -- try the next
+        # frame rather than letting one unreadable file decide the whole
+        # stack's calibration mode.
+        result = frame_uses_color_filter_array(frame_path)
+        if result is not None:
+            return result
 
     return False
 
@@ -785,6 +714,8 @@ class ImageProcessing:
 
             # Applied after the readability filter so a corrupt frame
             # cannot skew which geometry looks dominant.
+            from astrometricslib.data_access.image_type import select_dominant_frame_dimensions
+
             readable_light_paths, dominant_dimensions = select_dominant_frame_dimensions(
                 sorted(readable_light_paths)
             )

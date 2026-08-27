@@ -74,3 +74,22 @@ def test_subdirectories_are_ignored(tmp_path):  # ruff: ignore[missing-type-func
     _write_frame(tmp_path, "bbb_light.fits", bayer_pattern="GRBG")
 
     assert _frames_use_color_filter_array(str(tmp_path)) is True
+
+
+def test_a_bayerpat_stored_in_hdu1_is_still_found(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Regression test for the second live HDU0/HDU1 bug this function had.
+
+    Before this was routed through `image_type.frame_uses_color_filter_array`,
+    this function read `fits.getheader(frame_path)` directly -- HDU0 only.
+    A frame whose real header (and BAYERPAT) lives in HDU1, because HDU0
+    is a bare primary HDU with no data, would read back with no BAYERPAT
+    at all and be misclassified as monochrome, silently skipping the
+    debayer step a CFA sensor's frames actually need.
+    """
+    primary = fits.PrimaryHDU()
+    image_header = fits.Header()
+    image_header["BAYERPAT"] = "RGGB"
+    image_hdu = fits.ImageHDU(data=np.zeros((4, 4), dtype=np.uint16), header=image_header)
+    fits.HDUList([primary, image_hdu]).writeto(tmp_path / "light_00001.fits")
+
+    assert _frames_use_color_filter_array(str(tmp_path)) is True

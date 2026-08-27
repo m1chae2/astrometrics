@@ -14,11 +14,9 @@ import time
 import numpy as np
 from astropy.io import fits
 
+from astrometricslib.data_access.image_type import select_dominant_frame_dimensions
 from astrometricslib.drivers import siril_interface
-from astrometricslib.drivers.siril_interface import (
-    purge_stale_work_directories,
-    select_dominant_frame_dimensions,
-)
+from astrometricslib.drivers.siril_interface import purge_stale_work_directories
 
 
 def _write_frame(path, width, height):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]

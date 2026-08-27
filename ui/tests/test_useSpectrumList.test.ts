@@ -84,4 +84,73 @@ describe('useSpectrumList Filtering Suite', () => {
         expect(result.current.items.map((i) => i.id)).toEqual(['star-2']);
         expect(result.current.items[0].hasPhotometry).toBe(true);
     });
+
+    /**
+     * Test case verifying that useSpectrumList caps rendered items at 100.
+     */
+    it('should cap rendered items to 100 when more than 100 stars are returned', () => {
+        /**
+         * Purpose: Ensures that even if more than 100 items are present in data,
+         * the UI only maps and renders at most 100 items at a time.
+         */
+        const manyStars: Spectrum[] = Array.from({ length: 150 }, (_, i) => ({
+            id: `hd-${i}`,
+            label: `HD ${i}`,
+            name: `HD ${i}`,
+        }));
+
+        vi.mocked(useAstronomyListQuery).mockReturnValue({
+            data: manyStars,
+            isLoading: false,
+            error: null,
+            refetch: vi.fn(),
+        } as any);
+
+        const { result } = renderHook(() => useSpectrumList());
+
+        expect(result.current.items).toHaveLength(100);
+        expect(result.current.items[0].id).toBe('hd-0');
+        expect(result.current.items[99].id).toBe('hd-99');
+    });
+
+    /**
+     * Test case verifying that useAstronomyListQuery is called with limit=100 and search options.
+     */
+    it('should pass search filter and limit 100 to useAstronomyListQuery', () => {
+        /**
+         * Purpose: Ensures useSpectrumList provides query options with limit: 100
+         * and debounces search input for backend querying.
+         */
+        vi.useFakeTimers();
+
+        vi.mocked(useAstronomyListQuery).mockReturnValue({
+            data: [],
+            isLoading: false,
+            error: null,
+            refetch: vi.fn(),
+        } as any);
+
+        const { result } = renderHook(() => useSpectrumList());
+
+        // Initial call should have limit: 100
+        expect(useAstronomyListQuery).toHaveBeenCalledWith(
+            expect.objectContaining({ limit: 100, search: '' })
+        );
+
+        // Update search filter text
+        act(() => {
+            result.current.setFilterText('Polaris');
+        });
+
+        // Fast-forward timers for debounce (250ms)
+        act(() => {
+            vi.advanceTimersByTime(300);
+        });
+
+        expect(useAstronomyListQuery).toHaveBeenLastCalledWith(
+            expect.objectContaining({ limit: 100, search: 'Polaris' })
+        );
+
+        vi.useRealTimers();
+    });
 });

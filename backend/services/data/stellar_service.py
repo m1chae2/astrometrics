@@ -175,50 +175,73 @@ class StellarService:
         ]
 
     def get_displayable_stellar_object_summaries(
-        self, target_id: str | None = None, limit: int | None = None
+        self,
+        target_id: str | None = None,
+        limit: int | None = 100,
+        search: str | None = None,
+        filter_type: str | None = None,
     ) -> list[dict]:
         """Lightweight per-star summaries for a catalog-browsing listing.
 
         Same displayability filtering as `get_displayable_stellar_objects`,
         but built on `StellarCatalog.list_object_summaries` (indexed
         columns via `Butler.list_projected`, never touching `data_json`,
-        and -- when `target_id` is not given -- capped server-side at
-        `stars.DEFAULT_UNFILTERED_SUMMARY_LIMIT` rows) instead of fully
-        hydrating every `StellarObject` -- the right choice for a
-        listing that is fetched wholesale and polled on an interval
-        (the astronomy list view), where hydrating and transmitting
-        every star's complete nested light curve/spectra data, for
-        every star in the catalog, is pure cost for a view that only
-        ever reads five scalar fields. Prefer
-        `get_displayable_stellar_objects` for anything that needs a
-        real, complete `StellarObject`.
-
-        The per-frame-detection filter below runs after the cap, so a
-        capped, unfiltered result can come back with slightly fewer
-        than `limit` displayable summaries -- this is a display cap,
-        not a guarantee of exactly `limit` items.
+        and capped at `limit` rows, defaulting to 100) instead of fully
+        hydrating every `StellarObject`. When `search` or `filter_type`
+        is specified, filters across all matching database records before
+        capping results to `limit`.
 
         Parameters
         ----------
         target_id : `str`, optional
             Restrict to stars belonging to this target.
         limit : `int`, optional
-            Maximum number of stars to return; see
-            `StellarCatalog.list_object_summaries` for the default
-            applied when `target_id` is not given.
+            Maximum number of stars to return. Defaults to 100.
+        search : `str`, optional
+            Search query to filter star ID or name across the catalog.
+        filter_type : `str`, optional
+            Filter category, e.g. "With Spectra" / "spectra" or
+            "With Photometry" / "photometry".
 
         Returns
         -------
         summaries : `list` [`dict`]
             One dict per displayable star with keys ``id``, ``name``,
             ``targetIds``, ``hasSpectra``, and ``hasPhotometry``,
-            optionally filtered by ``target_id``.
+            optionally filtered by ``target_id``, ``search``, and
+            ``filter_type``.
         """
-        return [
-            summary
-            for summary in self.astrometrics.stars.list_object_summaries(target_id, limit)
-            if not _is_per_frame_photometry_detection(summary["id"])
-        ]
+        effective_limit = None if (search or filter_type) else limit
+        summaries = self.astrometrics.stars.list_object_summaries(target_id, effective_limit)
+
+        search_needle = search.strip().lower() if search and search.strip() else None
+
+        filtered = []
+        for summary in summaries:
+            summary_id = str(summary.get("id") or "")
+            if _is_per_frame_photometry_detection(summary_id):
+                continue
+
+            summary_name = str(summary.get("name") or "")
+
+            if filter_type:
+                normalized_filter = filter_type.strip().lower()
+                is_spectra_filter = normalized_filter in ("with spectra", "spectra", "hasspectra")
+                if is_spectra_filter and not summary.get("hasSpectra"):
+                    continue
+                is_photometry_filter = normalized_filter in ("with photometry", "photometry", "hasphotometry")
+                if is_photometry_filter and not summary.get("hasPhotometry"):
+                    continue
+
+            if search_needle:
+                if search_needle not in summary_id.lower() and search_needle not in summary_name.lower():
+                    continue
+
+            filtered.append(summary)
+            if limit is not None and limit > 0 and len(filtered) >= limit:
+                break
+
+        return filtered
 
     def load_stellar_objects(self) -> None:
         """No-op retained for backward compatibility.

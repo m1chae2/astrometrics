@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { fetchAstronomyList } from '../services/astronomyService';
+import { fetchAstronomyList, type AstronomyListOptions } from '../services/astronomyService';
 
 /**
  * Shared query for the astronomy/stellar object list (spectra and
@@ -9,12 +9,31 @@ import { fetchAstronomyList } from '../services/astronomyService';
  * Planetarium's target search panel, so the two views share one cached
  * fetch instead of each requesting it independently.
  *
+ * @param optionsOrTargetId Optional target ID or query options object.
+ * @param search Optional search query string.
+ * @param filterType Optional filter category string.
+ * @param limit Maximum number of items to fetch (default: 100).
  * @returns {import('@tanstack/react-query').UseQueryResult} The astronomy list query result.
  */
-export const useAstronomyListQuery = (targetId?: string) =>
-    useQuery({
-        queryKey: ['astronomyList', targetId || 'all'],
-        queryFn: () => fetchAstronomyList(targetId),
+export const useAstronomyListQuery = (
+    optionsOrTargetId?: string | AstronomyListOptions,
+    search?: string,
+    filterType?: string,
+    limit: number = 100
+) => {
+    const opts: AstronomyListOptions =
+        typeof optionsOrTargetId === 'string'
+            ? { targetId: optionsOrTargetId, search, filterType, limit }
+            : optionsOrTargetId || { limit };
+
+    const effectiveTargetId = opts.targetId || 'all';
+    const effectiveSearch = opts.search || '';
+    const effectiveFilterType = opts.filterType || 'all';
+    const effectiveLimit = opts.limit !== undefined ? opts.limit : 100;
+
+    return useQuery({
+        queryKey: ['astronomyList', effectiveTargetId, effectiveSearch, effectiveFilterType, effectiveLimit],
+        queryFn: () => fetchAstronomyList(opts),
         // 3000ms polled the *entire* stellar-object catalog every 3
         // seconds regardless of size. At the catalog scale a full
         // identification pass can now produce (270k+ objects on
@@ -28,3 +47,4 @@ export const useAstronomyListQuery = (targetId?: string) =>
         refetchInterval: 30000,
         refetchOnWindowFocus: true,
     });
+};

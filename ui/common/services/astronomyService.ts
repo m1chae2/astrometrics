@@ -8,11 +8,34 @@ import { callBackend } from './backendApi';
 import { reportError } from '../utils/reportError';
 import { Spectrum } from '../types/backendTypes';
 
-async function getAstronomyList(targetId?: string): Promise<Spectrum[]> {
+export interface AstronomyListOptions {
+    targetId?: string;
+    search?: string;
+    filterType?: string;
+    limit?: number;
+}
+
+async function getAstronomyList(optionsOrTargetId?: string | AstronomyListOptions): Promise<Spectrum[]> {
     try {
         const params: Record<string, unknown> = {};
-        if (targetId && targetId.trim() !== '') {
-            params.target_id = targetId.trim();
+        if (typeof optionsOrTargetId === 'string') {
+            if (optionsOrTargetId.trim() !== '') {
+                params.target_id = optionsOrTargetId.trim();
+            }
+            params.limit = 100;
+        } else if (optionsOrTargetId && typeof optionsOrTargetId === 'object') {
+            if (optionsOrTargetId.targetId && optionsOrTargetId.targetId.trim() !== '') {
+                params.target_id = optionsOrTargetId.targetId.trim();
+            }
+            if (optionsOrTargetId.search && optionsOrTargetId.search.trim() !== '') {
+                params.search = optionsOrTargetId.search.trim();
+            }
+            if (optionsOrTargetId.filterType && optionsOrTargetId.filterType.trim() !== '') {
+                params.filter_type = optionsOrTargetId.filterType.trim();
+            }
+            params.limit = optionsOrTargetId.limit !== undefined ? optionsOrTargetId.limit : 100;
+        } else {
+            params.limit = 100;
         }
         const data = await callBackend("astronomy:list", params);
         return Array.isArray(data) ? (data as Spectrum[]) : [];
@@ -23,12 +46,12 @@ async function getAstronomyList(targetId?: string): Promise<Spectrum[]> {
 }
 
 /**
- * Fetches the list of available astronomy objects, optionally filtered by target ID.
- * @param targetId Optional target identifier to restrict stellar objects.
+ * Fetches the list of available astronomy objects, optionally filtered by target ID, search, and category.
+ * @param optionsOrTargetId Optional target identifier or options object.
  * @return List of Spectrum objects or strings.
  */
-export const fetchAstronomyList = (targetId?: string): Promise<Spectrum[]> => {
-    return getAstronomyList(targetId);
+export const fetchAstronomyList = (optionsOrTargetId?: string | AstronomyListOptions): Promise<Spectrum[]> => {
+    return getAstronomyList(optionsOrTargetId);
 };
 
 /**

@@ -9,6 +9,7 @@ import fcntl
 import json
 import logging
 import os
+import sqlite3
 import time
 from typing import Any
 
@@ -63,8 +64,10 @@ def safe_json_dumps(obj: Any) -> str:
     return json.dumps(obj, cls=NumpyEncoder)
 
 
-def connect_db(db_path: str, timeout: float = 30.0):  # ruff: ignore[missing-return-type-undocumented-public-function]
+def connect_db(db_path: str, timeout: float = 30.0) -> sqlite3.Connection:
     """Connect to a SQLite database with WAL mode enabled.
+
+    Ensures the parent directory exists before creating/opening the database.
 
     Parameters
     ----------
@@ -78,7 +81,9 @@ def connect_db(db_path: str, timeout: float = 30.0):  # ruff: ignore[missing-ret
     connection : `sqlite3.Connection`
         Database connection instance with WAL mode active.
     """
-    import sqlite3
+    parent_dir = os.path.dirname(db_path)
+    if parent_dir:
+        os.makedirs(parent_dir, exist_ok=True)
 
     conn = sqlite3.connect(db_path, timeout=timeout)
     conn.row_factory = sqlite3.Row

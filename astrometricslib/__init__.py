@@ -21,11 +21,16 @@ try:
 except PackageNotFoundError:  # running from a source tree without an install
     __version__ = "0.0.0+unknown"
 
-from astrometricslib.data_access.butler import AbstractButler, DiskButler
-from astrometricslib.data_access.frame_scanning import classify_and_sort_fits_files
-from astrometricslib.drivers.job_logging import JobHandle, capture_job_logs, registered_job
-from astrometricslib.drivers.logger_interface import DbLogHandler, LoggerInterface
-from astrometricslib.drivers.siril_interface import ImageProcessing
+from astrometricslib.api import AbstractButler, DiskButler
+from astrometricslib.api.processing import (
+    DbLogHandler,
+    ImageProcessing,
+    JobHandle,
+    LoggerInterface,
+    capture_job_logs,
+    registered_job,
+)
+from astrometricslib.api.targets import classify_and_sort_fits_files, derive_target_sessions
 from astrometricslib.models.moving_object import AsteroidRecoveryCandidate
 from astrometricslib.models.moving_object_config import MovingObjectConfig
 from astrometricslib.models.quality_summary import (
@@ -51,7 +56,6 @@ from astrometricslib.models.target import (
     RenderedImage,
     Target,
 )
-from astrometricslib.pipelines.shared.target_sessions import derive_target_sessions
 from astrometricslib.utilities.concurrency import resolve_worker_counts
 from astrometricslib.utilities.config_loader import AppConfiguration, get_configuration
 from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string

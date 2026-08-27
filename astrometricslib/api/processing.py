@@ -10,13 +10,22 @@ used to remove noise from raw telescope images.
 from contextlib import AbstractContextManager
 from typing import Any, Literal
 
+from astrometricslib.drivers.job_logging import JobHandle, capture_job_logs, registered_job
+from astrometricslib.drivers.logger_interface import DbLogHandler, LoggerInterface
+from astrometricslib.drivers.siril_interface import ImageProcessing
 from astrometricslib.models.target import Target
 from astrometricslib.utilities.config_loader import AppConfiguration
 
 __all__ = [
     "CalibrationCatalog",
+    "DbLogHandler",
+    "ImageProcessing",
+    "JobHandle",
+    "LoggerInterface",
     "ProcessingPipelines",
     "QualityDiagnostics",
+    "capture_job_logs",
+    "registered_job",
 ]
 
 _CalibrationKind = Literal["dark", "bias", "flat"]

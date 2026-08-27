@@ -14,9 +14,12 @@ from astrometricslib.api.processing import CalibrationCatalog, ProcessingPipelin
 from astrometricslib.api.stars import StellarCatalog
 from astrometricslib.api.targets import TargetCatalog
 from astrometricslib.api.visualization import Visualization
+from astrometricslib.data_access.butler import AbstractButler, DiskButler
 
 __all__ = [
+    "AbstractButler",
     "CalibrationCatalog",
+    "DiskButler",
     "MovingObjectRecovery",
     "ProcessingPipelines",
     "QualityDiagnostics",

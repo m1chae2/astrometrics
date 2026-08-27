@@ -50,7 +50,7 @@ KNOWN_FITS_ACCESS_SITES = frozenset({
     "tasks/stellar_tasks/astrometry_tasks/plate_solver.py",
     "tasks/stellar_tasks/astrometry_tasks/session_identification.py",
     "tasks/stellar_tasks/photometry_tasks/variability_analyzer.py",
-    "tasks/target_tasks/pipeline_tasks.py",
+    "tasks/target_tasks/pipelines/astrometry.py",
     "utilities/calibration_library.py",
     "utilities/image.py",
     "visualization/helpers.py",

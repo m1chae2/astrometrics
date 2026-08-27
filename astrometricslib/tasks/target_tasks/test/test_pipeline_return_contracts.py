@@ -113,13 +113,8 @@ def test_every_analysis_mode_has_a_recorded_key_set():  # ruff: ignore[missing-r
     the table above, so a new mode cannot ship without its shape written
     down.
     """
-    import inspect
+    from astrometricslib.tasks.target_tasks.pipelines import PIPELINE_RUNNERS
 
-    source = inspect.getsource(pipeline_tasks._run_analysis_pipeline_match)
-    dispatched_modes = {
-        line.split('"')[1] for line in source.splitlines() if line.strip().startswith('case "')
-    }
-
-    assert dispatched_modes == set(EXPECTED_RESULT_KEYS), (
-        "The dispatcher and this table disagree about which analysis modes exist."
+    assert set(PIPELINE_RUNNERS) == set(EXPECTED_RESULT_KEYS), (
+        "PIPELINE_RUNNERS and this table disagree about which analysis modes exist."
     )

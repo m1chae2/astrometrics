@@ -37,3 +37,35 @@ def test_parse_whitespace_only_raises():  # ruff: ignore[missing-return-type-und
     """Verify a whitespace-only coordinate string raises ValueError."""
     with pytest.raises(ValueError):
         parse_coordinate_string("   ", is_ra=True)
+
+
+def test_parse_non_string_raises_value_error():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify a non-string input raises ValueError, not AttributeError."""
+    with pytest.raises(ValueError):
+        parse_coordinate_string(123, is_ra=True)  # type: ignore[arg-type]
+
+
+def test_parse_declination_out_of_range_raises():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify a declination outside -90 to 90 degrees raises ValueError."""
+    with pytest.raises(ValueError):
+        parse_coordinate_string("91", is_ra=False)
+    with pytest.raises(ValueError):
+        parse_coordinate_string("-91", is_ra=False)
+
+
+def test_parse_declination_at_boundary_is_valid():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify declinations at exactly -90 and 90 degrees are accepted."""
+    assert parse_coordinate_string("90", is_ra=False) == pytest.approx(90.0)
+    assert parse_coordinate_string("-90", is_ra=False) == pytest.approx(-90.0)
+
+
+def test_parse_unit_marker_only_string_raises():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify a string of only a unit marker (no value) raises ValueError."""
+    with pytest.raises(ValueError):
+        parse_coordinate_string("h", is_ra=True)
+
+
+def test_parse_colon_separated_string():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify colon-separated sexagesimal RA strings are accepted."""
+    ra_deg = parse_coordinate_string("09:55:33", is_ra=True)
+    assert ra_deg == pytest.approx(148.8875, abs=1e-4)

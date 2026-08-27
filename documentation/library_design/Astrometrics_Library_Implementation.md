@@ -25,7 +25,6 @@ Due to the internal nature of these modules, they are deliberately hidden from t
 ### Photometry
 *Located in:* `astrometricslib/pipelines/photometry/`
 - **Aperture photometry:** `variability_analyzer.py`
-- **PSF modeling:** `variability_analyzer.py`
 - **Light curve generation:** `variability_analyzer.py`
 
 ### Spectroscopy

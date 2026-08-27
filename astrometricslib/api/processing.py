@@ -189,7 +189,7 @@ class CalibrationCatalog:
             The underlying calibration library model.
         """
         if self._library is None:
-            from astrometricslib.utilities.calibration_library import CalibrationLibrary
+            from astrometricslib.drivers.calibration_library import CalibrationLibrary
 
             self._library = CalibrationLibrary(app_config=self._config)
         return self._library

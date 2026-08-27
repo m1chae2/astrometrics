@@ -43,6 +43,7 @@ KNOWN_FITS_ACCESS_SITES = frozenset({
     "data_access/background_measurement.py",
     "data_access/frame_scanning.py",
     "data_access/image_conversions.py",
+    "drivers/calibration_library.py",
     "drivers/plate_solve_interface.py",
     "drivers/siril_interface.py",
     "image_processing/fits_access.py",
@@ -55,7 +56,6 @@ KNOWN_FITS_ACCESS_SITES = frozenset({
     "tasks/stellar_tasks/astrometry_tasks/session_identification.py",
     "tasks/stellar_tasks/photometry_tasks/variability_analyzer.py",
     "tasks/target_tasks/pipelines/astrometry.py",
-    "utilities/calibration_library.py",
     "visualization/helpers.py",
 })
 

@@ -10,9 +10,9 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
+from astrometricslib.data_access import frame_statistics
 from astrometricslib.image_processing.quality_metrics import measure_frame_input_quality
 from astrometricslib.models.target import FrameRecord, Target
-from astrometricslib.tasks.target_tasks import statistics_operations
 
 
 def _write_frame(path, background=500.0, saturated_pixels=0, shape=(64, 64)):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
@@ -101,7 +101,7 @@ def test_task_populates_every_frame(tmp_path):  # ruff: ignore[missing-type-func
     ]
     target = _target_with_frames(paths)
 
-    counts = statistics_operations.measure_frame_input_quality(target)
+    counts = frame_statistics.measure_frame_input_quality(target)
 
     assert counts == {"measured": 2, "skipped": 0, "failed": 0}
     assert target.frames[0].background_level == pytest.approx(100.0)
@@ -111,9 +111,9 @@ def test_task_populates_every_frame(tmp_path):  # ruff: ignore[missing-type-func
 def test_task_is_incremental_by_default(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """An interrupted sweep resumes rather than re-measuring everything."""
     target = _target_with_frames([_write_frame(tmp_path / "a.fits")])
-    statistics_operations.measure_frame_input_quality(target)
+    frame_statistics.measure_frame_input_quality(target)
 
-    counts = statistics_operations.measure_frame_input_quality(target)
+    counts = frame_statistics.measure_frame_input_quality(target)
 
     assert counts == {"measured": 0, "skipped": 1, "failed": 0}
 
@@ -121,9 +121,9 @@ def test_task_is_incremental_by_default(tmp_path):  # ruff: ignore[missing-type-
 def test_remeasure_overrides_the_incremental_skip(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Passing remeasure=True re-reads frames that already have values."""
     target = _target_with_frames([_write_frame(tmp_path / "a.fits")])
-    statistics_operations.measure_frame_input_quality(target)
+    frame_statistics.measure_frame_input_quality(target)
 
-    counts = statistics_operations.measure_frame_input_quality(target, remeasure=True)
+    counts = frame_statistics.measure_frame_input_quality(target, remeasure=True)
 
     assert counts == {"measured": 1, "skipped": 0, "failed": 0}
 
@@ -135,7 +135,7 @@ def test_unreadable_frames_are_counted_not_raised(tmp_path):  # ruff: ignore[mis
     broken.write_bytes(b"garbage")
     target = _target_with_frames([good, str(broken)])
 
-    counts = statistics_operations.measure_frame_input_quality(target)
+    counts = frame_statistics.measure_frame_input_quality(target)
 
     assert counts == {"measured": 1, "skipped": 0, "failed": 1}
     assert target.frames[0].background_level is not None
@@ -154,7 +154,7 @@ def test_camera_filter_restricts_measurement(tmp_path):  # ruff: ignore[missing-
         ],
     )
 
-    counts = statistics_operations.measure_frame_input_quality(target, camera_name="Nikon")
+    counts = frame_statistics.measure_frame_input_quality(target, camera_name="Nikon")
 
     assert counts["measured"] == 1
     assert target.frames[0].background_level is None
@@ -172,7 +172,7 @@ def test_measured_fwhm_is_kept_apart_from_registration_fwhm(tmp_path):  # ruff: 
     target.frames[0].registration_fwhm_x_px = 3.2
     target.frames[0].registration_fwhm_y_px = 3.4
 
-    statistics_operations.measure_frame_input_quality(target, include_fwhm=True)
+    frame_statistics.measure_frame_input_quality(target, include_fwhm=True)
 
     assert target.frames[0].registration_fwhm_x_px == pytest.approx(3.2)
     assert target.frames[0].registration_fwhm_y_px == pytest.approx(3.4)

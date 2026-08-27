@@ -400,7 +400,7 @@ class ImageProcessing:
 
     def __init__(self, config=None, calibration_library=None, job_repository=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
         """Initialize the ImageProcessing class with optional dependencies."""
-        from astrometricslib.utilities.calibration_library import CalibrationLibrary
+        from astrometricslib.drivers.calibration_library import CalibrationLibrary
         from astrometricslib.utilities.config_loader import get_configuration
 
         self.config = config or get_configuration()

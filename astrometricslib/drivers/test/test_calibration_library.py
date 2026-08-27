@@ -7,7 +7,7 @@ and their persistence behavior.
 import numpy as np
 from astropy.io import fits
 
-from astrometricslib.utilities.calibration_library import CalibrationLibrary
+from astrometricslib.drivers.calibration_library import CalibrationLibrary
 
 
 def _make_small_fits(path, shape=(20, 20)):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]

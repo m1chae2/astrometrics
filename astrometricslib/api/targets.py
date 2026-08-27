@@ -311,9 +311,9 @@ class TargetCatalog:
         counts : `dict` [`str`, `int`]
             ``measured``/``skipped``/``failed`` frame counts.
         """
-        from astrometricslib.tasks.target_tasks import statistics_operations
+        from astrometricslib.data_access import frame_statistics
 
-        counts = statistics_operations.measure_frame_input_quality(
+        counts = frame_statistics.measure_frame_input_quality(
             target,
             include_fwhm=include_fwhm,
             remeasure=remeasure,
@@ -337,9 +337,9 @@ class TargetCatalog:
             across the whole catalog used it, sorted by count
             descending.
         """
-        from astrometricslib.tasks.target_tasks import statistics_operations
+        from astrometricslib.data_access import frame_statistics
 
-        return statistics_operations.list_camera_names(self.list())
+        return frame_statistics.list_camera_names(self.list())
 
     def get_calibration_frame_statistics(
         self,
@@ -368,12 +368,12 @@ class TargetCatalog:
             Grouped filter/exposure/dark-match statistics if
             `grouped` is `True`; otherwise flat raw frame counts.
         """
-        from astrometricslib.tasks.target_tasks import statistics_operations
+        from astrometricslib.data_access import frame_statistics
 
         if not grouped:
-            return statistics_operations.get_frame_stats(target)
+            return frame_statistics.get_frame_stats(target)
 
         from astrometricslib.api.processing import CalibrationCatalog
 
         calibration = CalibrationCatalog(self._config)
-        return statistics_operations.get_frame_stats_grouped(target, calibration, camera)
+        return frame_statistics.get_frame_stats_grouped(target, calibration, camera)

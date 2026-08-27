@@ -11,9 +11,9 @@ import re
 from datetime import datetime
 from typing import Any
 
+from astrometricslib.image_processing.filter_detection import get_filter_type
 from astrometricslib.image_processing.image import AstrometricsImage
 from astrometricslib.models.target import FrameRecord, Target
-from astrometricslib.tasks.target_tasks.frame_scan_tasks import get_filter_type
 from astrometricslib.utilities.enums import FilterType
 
 logger = logging.getLogger(__name__)

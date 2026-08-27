@@ -1,8 +1,9 @@
-"""Purpose: Unit tests for pipelines/dispatch.py.
+"""Purpose: Unit tests for pipelines/dispatch.py and its Target workflow.
 
-Description: Verifies analyze_target, stack_frames's homogeneous
-frame validation, add_frame, and analyze_frame_spectroscopy -- the
-free functions that replaced Target's former orchestration methods.
+Description: Verifies analyze_target, stack_frames's homogeneous frame
+validation, and the add_frame/analyze_frame_spectroscopy helpers
+dispatch.py's workflow relies on -- the free functions that replaced
+Target's former orchestration methods.
 """
 
 from types import SimpleNamespace
@@ -19,6 +20,8 @@ from astrometricslib.models.moving_object import CascadeStage
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines import dispatch
+from astrometricslib.pipelines.shared.frame_grouping import add_frame
+from astrometricslib.pipelines.spectroscopy.frame_analysis import analyze_frame_spectroscopy
 from astrometricslib.pipelines.test.test_pipeline_return_contracts import (
     assert_result_keys,
 )
@@ -336,7 +339,7 @@ def test_target_add_frame_validation(tmp_path):  # ruff: ignore[missing-type-fun
     target = Target(id="Vega")
 
     # 1. Add standard frame
-    rec1 = dispatch.add_frame(target, str(standard_fit))
+    rec1 = add_frame(target, str(standard_fit))
     assert rec1.filter.name == "L"
     assert rec1.exposure == "5.0"
     assert rec1.iso == "800"
@@ -344,7 +347,7 @@ def test_target_add_frame_validation(tmp_path):  # ruff: ignore[missing-type-fun
     assert len(target.frames) == 1
 
     # 2. Add duplicate frame
-    rec2 = dispatch.add_frame(target, str(standard_fit))
+    rec2 = add_frame(target, str(standard_fit))
     assert rec2 == rec1
     assert len(target.frames) == 1
 
@@ -352,7 +355,7 @@ def test_target_add_frame_validation(tmp_path):  # ruff: ignore[missing-type-fun
     with pytest.raises(
         ValueError, match=r"Target contains a mixed set of spectral.*and standard imaging frames"
     ):
-        dispatch.add_frame(target, str(spectral_fit))
+        add_frame(target, str(spectral_fit))
 
 
 def test_target_analyze_frame_spectroscopy(tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
@@ -396,7 +399,7 @@ def test_target_analyze_frame_spectroscopy(tmp_path, mocker):  # ruff: ignore[mi
         )
 
         target = Target(id="Vega")
-        _context, objs = dispatch.analyze_frame_spectroscopy(target, str(fit_path))
+        _context, objs = analyze_frame_spectroscopy(target, str(fit_path))
 
         assert len(objs) == 1
         assert objs[0].id == "Vega_Star"

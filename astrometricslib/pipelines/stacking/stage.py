@@ -1,4 +1,4 @@
-"""Tools for combining (stacking) images and extracting light spectrums.
+"""Tools for combining (stacking) many images into one.
 
 This file handles running the external stacking software (Siril)
 and checking the quality of the final stacked images.
@@ -298,7 +298,7 @@ def _disambiguating_configuration_tag(target, target_frames) -> str:  # ruff: ig
     configuration_tag : `str`
         The extra tag to add to the filename, or "" if it's not needed.
     """
-    from astrometricslib.pipelines.dispatch import (
+    from astrometricslib.pipelines.shared.frame_grouping import (
         frame_configuration_key,
         group_frames_by_configuration,
     )
@@ -349,7 +349,7 @@ def _record_configuration_stack(target, target_frames, stacked_path) -> bool:  #
         target.
     """
     from astrometricslib.models.target import StackConfigurationResult
-    from astrometricslib.pipelines.dispatch import frame_configuration_key
+    from astrometricslib.pipelines.shared.frame_grouping import frame_configuration_key
 
     keys = {frame_configuration_key(frame) for frame in target_frames}
     keys.discard(None)
@@ -711,112 +711,3 @@ def _build_stack_quality_summary(  # ruff: ignore[missing-return-type-private-fu
     summary.flagged = bool(flag_reasons)
     summary.flag_reasons = flag_reasons
     return summary
-
-
-def add_frame(  # ruff: ignore[missing-return-type-undocumented-public-function]
-    target,  # ruff: ignore[missing-type-function-argument]
-    path: str,
-    role: str = "LIGHT",
-    filter_type: str | None = None,
-    camera: str | None = None,
-):
-    """Add an image to a target, or update it if it's already there.
-
-    This function reads the metadata from the image file and updates the
-    target's total exposure time.
-
-    Returns
-    -------
-    frame_record : `FrameRecord`
-        The new or updated image record.
-
-    Raises
-    ------
-    ValueError
-        If adding this frame would mix spectral ('SPEC') and standard
-        imaging frames on the same target.
-    """
-    from astrometricslib.data_access.frame_scanning import create_frame_record_from_fits
-    from astrometricslib.models.target import FrameRecord
-
-    record = create_frame_record_from_fits(path, camera)
-    record.role = role
-    if filter_type is not None:
-        record.filter = FrameRecord.normalize_filter(filter_type)
-
-    is_spectral = record.filter == FilterType.SPEC
-    has_spectral = any(f.filter == FilterType.SPEC for f in target.frames)
-    has_standard = any(f.filter != FilterType.SPEC for f in target.frames)
-
-    if is_spectral and has_standard:
-        raise ValueError(
-            "Target contains a mixed set of spectral ('SPEC') and standard imaging frames. "
-            "Stacking mixed frame types is not permitted."
-        )
-    if not is_spectral and has_spectral:
-        raise ValueError(
-            "Target contains a mixed set of spectral ('SPEC') and standard imaging frames. "
-            "Stacking mixed frame types is not permitted."
-        )
-
-    for f in target.frames:
-        if f.path == path:
-            f.role = role
-            if filter_type is not None:
-                f.filter = record.filter
-            target.recalculate_total_exposure()
-            return f
-
-    target.frames.append(record)
-    target.recalculate_total_exposure()
-    return record
-
-
-def analyze_frame_spectroscopy(target, path: str, limit: int = 10) -> tuple[Any, list[Any]]:  # ruff: ignore[missing-type-function-argument]
-    """Run spectroscopy analysis on a single frame in this target's context.
-
-    Returns
-    -------
-    result : `tuple[Any, list[Any]]`
-        A tuple ``(context, stellar_objects)`` of the astrometry
-        pipeline context and the extracted stellar objects.
-    """
-    if not any(f.path == path for f in target.frames):
-        add_frame(target, path)
-
-    from astrometricslib.drivers import disk_interface
-    from astrometricslib.pipelines.astrometry.pipeline import AstrometryPipeline
-    from astrometricslib.pipelines.spectroscopy.pipeline import (
-        SpectroscopyPipeline,
-    )
-    from astrometricslib.utilities.config_loader import get_configuration
-
-    config = get_configuration()
-    astrometry = AstrometryPipeline(config)
-    context = astrometry.prepare_image(path, attempt_plate_solving=False)
-
-    from astrometricslib.utilities import ConfigLoader
-
-    spec_config = ConfigLoader.load_spectroscopy_config(app_config=config)
-    spectroscopy = SpectroscopyPipeline(spec_config)
-    stellar_objects = spectroscopy.process(context, limit=limit)
-
-    for obj in stellar_objects:
-        if target.id not in obj.target_ids:
-            obj.target_ids.append(target.id)
-
-    existing = disk_interface.load_stellar_objects(config) or []
-    existing_map = {obj.id: obj for obj in existing}
-
-    for obj in stellar_objects:
-        if obj.id in existing_map:
-            for tid in obj.target_ids:
-                if tid not in existing_map[obj.id].target_ids:
-                    existing_map[obj.id].target_ids.append(tid)
-            existing_map[obj.id].spectrum_data_processed = obj.spectrum_data_processed
-        else:
-            existing_map[obj.id] = obj
-
-    disk_interface.save_stellar_objects(config, list(existing_map.values()))
-
-    return context, stellar_objects

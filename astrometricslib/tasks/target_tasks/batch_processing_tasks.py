@@ -35,10 +35,8 @@ def _process_single_target_worker(
         or failed), "error" (if any), and "stack_outputs" (the final data).
     """
     from astrometricslib import Astrometrics
-    from astrometricslib.pipelines.dispatch import (
-        run_full_pipeline,
-        select_frames_for_camera,
-    )
+    from astrometricslib.pipelines.dispatch import run_full_pipeline
+    from astrometricslib.pipelines.shared.frame_grouping import select_frames_for_camera
 
     result = {"status": "failed", "error": None, "stack_outputs": {}}
     try:

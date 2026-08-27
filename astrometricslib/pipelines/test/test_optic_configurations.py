@@ -14,7 +14,7 @@ single-optic target managed 0.031.
 
 import pytest
 
-from astrometricslib.pipelines.dispatch import (
+from astrometricslib.pipelines.shared.frame_grouping import (
     frame_configuration_key,
     frames_missing_focal_length,
     group_frames_by_configuration,

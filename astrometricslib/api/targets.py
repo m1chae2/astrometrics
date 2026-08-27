@@ -170,7 +170,7 @@ class TargetCatalog:
         frame_record : `astrometricslib.models.target.FrameRecord`
             The newly added frame record.
         """
-        from astrometricslib.pipelines.dispatch import add_frame
+        from astrometricslib.pipelines.shared.frame_grouping import add_frame
 
         return add_frame(target, path, role, filter_type, camera)
 

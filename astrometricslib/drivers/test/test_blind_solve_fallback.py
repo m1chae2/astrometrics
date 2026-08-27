@@ -14,8 +14,8 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from astrometricslib.tasks.stellar_tasks.astrometry_tasks import plate_solver
-from astrometricslib.tasks.stellar_tasks.astrometry_tasks.plate_solver import PlateSolver
+from astrometricslib.drivers import plate_solve_interface
+from astrometricslib.drivers.plate_solve_interface import PlateSolver
 
 
 @pytest.fixture
@@ -107,7 +107,7 @@ def test_solve_field_success_requires_the_output_file(solver, tmp_path, monkeypa
     class _Result:
         returncode = 0
 
-    monkeypatch.setattr(plate_solver.subprocess, "run", lambda *a, **k: _Result())
+    monkeypatch.setattr(plate_solve_interface.subprocess, "run", lambda *a, **k: _Result())
 
     assert solver._run_solve_field(["solve-field"], str(tmp_path), 10) is None
 

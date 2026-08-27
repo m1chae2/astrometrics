@@ -1078,14 +1078,14 @@ def test_solve_session_wcs_failure_does_not_abort_other_sessions(mocker):  # ruf
     target = Target(id="MatchTestTarget")
 
     mocker.patch(
-        "astrometricslib.tasks.stellar_tasks.astrometry_tasks.plate_solver.PlateSolver.solve",
+        "astrometricslib.drivers.plate_solve_interface.PlateSolver.solve",
         return_value=None,
     )
     result_a = _solve_session_wcs(session_a, target)
     assert result_a is None  # ordinary solve failure -- no exception at all
 
     mocker.patch(
-        "astrometricslib.tasks.stellar_tasks.astrometry_tasks.plate_solver.PlateSolver.solve",
+        "astrometricslib.drivers.plate_solve_interface.PlateSolver.solve",
         side_effect=RuntimeError("unexpected local solver failure"),
     )
     result_b = _solve_session_wcs(session_b, target)

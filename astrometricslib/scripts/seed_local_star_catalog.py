@@ -19,13 +19,13 @@ import logging
 import sys
 
 from astrometricslib import Astrometrics
+from astrometricslib.drivers.catalog_store import summarize_catalog_coverage
 from astrometricslib.tasks.stellar_tasks.astrometry_tasks.catalog_seeding import (
     DEFAULT_FIELD_RADIUS_DEGREES,
     DEFAULT_MAGNITUDE_LIMIT,
     DEFAULT_REQUEST_DELAY_SECONDS,
     derive_field_centers,
     seed_local_gaia_catalog,
-    summarize_local_catalog_coverage,
 )
 
 
@@ -107,7 +107,7 @@ def run_catalog_seeding(argv: list[str] | None = None) -> int:
         print("No targets to seed. Index a frame library first.")
         return 2
 
-    coverage_before = summarize_local_catalog_coverage()
+    coverage_before = summarize_catalog_coverage()
     print(f"Local catalog: {coverage_before['cache_path']}")
     print(
         f"  before: {coverage_before['source_count']:,} sources across "

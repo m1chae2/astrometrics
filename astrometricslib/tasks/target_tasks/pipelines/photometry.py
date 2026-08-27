@@ -125,7 +125,7 @@ def _solve_session_wcs(session: Any, target: Target) -> Any | None:
 
     from astropy.wcs import WCS, FITSFixedWarning
 
-    from astrometricslib.tasks.stellar_tasks.astrometry_tasks.plate_solver import PlateSolver
+    from astrometricslib.drivers.plate_solve_interface import PlateSolver
 
     reference_path = session.frame_paths[0]
     try:

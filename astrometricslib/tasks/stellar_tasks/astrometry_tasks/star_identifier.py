@@ -26,12 +26,12 @@ from astropy.coordinates import SkyCoord
 from astropy.wcs import WCS, FITSFixedWarning
 from astroquery.simbad import Simbad
 
+from astrometricslib.drivers.plate_solve_interface import PlateSolver
 from astrometricslib.image_processing.fits_access import collapse_to_2d
 from astrometricslib.image_processing.image import AstrometricsImage
 from astrometricslib.image_processing.quality_metrics import measure_fwhm_from_data
 from astrometricslib.image_processing.source_detection import SourceDetector
 from astrometricslib.models.stellar_source import StellarObject
-from astrometricslib.tasks.stellar_tasks.astrometry_tasks.plate_solver import PlateSolver
 from astrometricslib.utilities.config_loader import AppConfiguration
 from astrometricslib.utilities.exceptions import AstroLibError
 
@@ -719,12 +719,10 @@ class StarIdentifier:
         count : `int`
             How many stars we downloaded or found in the cache.
         """
-        import os
-        import sqlite3
-
         from astropy.table import Table
         from astroquery.gaia import Gaia
 
+        from astrometricslib.drivers import catalog_store
         from astrometricslib.utilities.config_loader import get_configuration
 
         radius_deg = min(max(0.1, radius_deg), 1.0)
@@ -733,40 +731,12 @@ class StarIdentifier:
             return 0
 
         config = get_configuration()
-        cache_dir = config.get_library_path() / "catalogs"
-        os.makedirs(cache_dir, exist_ok=True)
-        cache_db_path = cache_dir / "catalog_cache.db"
         region_key = f"{ra_center:.3f}_{dec_center:.3f}_{radius_deg:.2f}"
 
         try:
-            conn = sqlite3.connect(cache_db_path)
-            cursor = conn.cursor()
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS gaia_sources (
-                    source_id TEXT PRIMARY KEY,
-                    ra REAL,
-                    dec REAL,
-                    phot_g_mean_mag REAL,
-                    designation TEXT
-                )
-            """)
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS cached_regions (
-                    region_key TEXT PRIMARY KEY,
-                    ra REAL,
-                    dec REAL,
-                    radius REAL
-                )
-            """)
-            conn.commit()
-
-            cursor.execute("SELECT 1 FROM cached_regions WHERE region_key = ?", (region_key,))
-            if cursor.fetchone() is not None:
-                conn.close()
+            if catalog_store.is_region_cached(config, region_key):
                 logger.debug(f"Gaia region '{region_key}' already cached.")
                 return 0
-
-            conn.close()
         except Exception as e:
             logger.warning(f"Error checking cached_regions: {e}")
 
@@ -815,8 +785,6 @@ class StarIdentifier:
             return 0
 
         try:
-            conn = sqlite3.connect(cache_db_path)
-            cursor = conn.cursor()
             to_insert = [
                 (
                     str(row["source_id"]),
@@ -827,19 +795,8 @@ class StarIdentifier:
                 )
                 for row in result_table
             ]
-            cursor.executemany(
-                """
-                INSERT OR REPLACE INTO gaia_sources (source_id, ra, dec, phot_g_mean_mag, designation)
-                VALUES (?, ?, ?, ?, ?)
-            """,
-                to_insert,
-            )
-            cursor.execute(
-                "INSERT OR REPLACE INTO cached_regions (region_key, ra, dec, radius) VALUES (?, ?, ?, ?)",
-                (region_key, ra_center, dec_center, radius_deg),
-            )
-            conn.commit()
-            conn.close()
+            catalog_store.insert_gaia_sources(config, to_insert)
+            catalog_store.mark_region_cached(config, region_key, ra_center, dec_center, radius_deg)
             logger.info(
                 f"Successfully cached {len(to_insert)} Gaia DR3 sources for field "
                 f"({ra_center:.4f}, {dec_center:.4f})."
@@ -873,56 +830,25 @@ class StarIdentifier:
             The list of stars and their coordinates, or None if the search
             failed.
         """
-        import os
-        import sqlite3
-
         from astropy.table import Table
         from astroquery.gaia import Gaia
 
+        from astrometricslib.drivers import catalog_store
         from astrometricslib.utilities.config_loader import get_configuration
 
         radius_deg = min(radius_deg, 1.0)
         config = get_configuration()
-        cache_dir = config.get_library_path() / "catalogs"
-        os.makedirs(cache_dir, exist_ok=True)
-        cache_db_path = cache_dir / "catalog_cache.db"
+        cache_db_path = catalog_store.get_catalog_cache_path(config)
 
         # Check local cache first
         try:
-            conn = sqlite3.connect(cache_db_path)
-            cursor = conn.cursor()
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS gaia_sources (
-                    source_id TEXT PRIMARY KEY,
-                    ra REAL,
-                    dec REAL,
-                    phot_g_mean_mag REAL,
-                    designation TEXT
-                )
-            """)
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS cached_regions (
-                    region_key TEXT PRIMARY KEY,
-                    ra REAL,
-                    dec REAL,
-                    radius REAL
-                )
-            """)
-            conn.commit()
-
             # Query existing cached sources within bounding box + radius
             min_ra = ra_center - (radius_deg / max(0.1, np.cos(np.radians(dec_center))))
             max_ra = ra_center + (radius_deg / max(0.1, np.cos(np.radians(dec_center))))
             min_dec = dec_center - radius_deg
             max_dec = dec_center + radius_deg
 
-            cursor.execute(
-                "SELECT source_id, ra, dec, phot_g_mean_mag, designation "
-                "FROM gaia_sources WHERE ra >= ? AND ra <= ? AND dec >= ? AND dec <= ?",
-                (min_ra, max_ra, min_dec, max_dec),
-            )
-            cached_rows = cursor.fetchall()
-            conn.close()
+            cached_rows = catalog_store.query_gaia_sources_in_bounds(config, min_ra, max_ra, min_dec, max_dec)
 
             if cached_rows and len(cached_rows) >= 5:
                 logger.info(
@@ -1022,8 +948,6 @@ class StarIdentifier:
             desig_col = next((c for c in ["DESIGNATION", "designation"] if c in result_table.colnames), None)
 
             if ra_col and dec_col:
-                conn = sqlite3.connect(cache_db_path)
-                cursor = conn.cursor()
                 to_insert = []
                 for row in result_table:
                     sid = str(row[id_col]) if id_col and row[id_col] is not None else ""
@@ -1035,15 +959,7 @@ class StarIdentifier:
                     )
                     to_insert.append((sid, r_val, d_val, m_val, des))
 
-                cursor.executemany(
-                    """
-                    INSERT OR REPLACE INTO gaia_sources (source_id, ra, dec, phot_g_mean_mag, designation)
-                    VALUES (?, ?, ?, ?, ?)
-                """,
-                    to_insert,
-                )
-                conn.commit()
-                conn.close()
+                catalog_store.insert_gaia_sources(config, to_insert)
                 logger.info(f"Cached {len(to_insert)} Gaia DR3 sources locally in {cache_db_path}.")
         except Exception as cache_err:
             logger.warning(f"Failed to cache Gaia sources locally: {cache_err}")

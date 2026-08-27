@@ -202,7 +202,7 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "datastore"]
 # untrusted input into a shell command), which is the safe subprocess pattern.
 "astrometricslib/drivers/siril_interface.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"]
 "astrometricslib/scripts/spectral_registration_quality_analysis.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
-"astrometricslib/tasks/stellar_tasks/astrometry_tasks/plate_solver.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
+"astrometricslib/drivers/plate_solve_interface.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "backend/mcp/mcp_diagnostics.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"]
 "backend/mcp/tools/developer_tools.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "hardcoded-temp-file"] # S108: "/tmp" is an allowlist prefix for the sandbox boundary check, not a path being written to
 "backend/mcp/tools/diagnostics.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]

@@ -136,12 +136,12 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
             Carries the `AnalysisContext`, the saved stars, and the
             counters `validate_output` needs.
         """
-        from astrometricslib.tasks.stellar_tasks.astrometry_tasks.astrometry_pipeline import (
-            AstrometryPipeline,
-        )
-        from astrometricslib.tasks.stellar_tasks.astrometry_tasks.plate_solver import (
+        from astrometricslib.drivers.plate_solve_interface import (
             get_plate_solve_attempt_count,
             reset_plate_solve_statistics,
+        )
+        from astrometricslib.tasks.stellar_tasks.astrometry_tasks.astrometry_pipeline import (
+            AstrometryPipeline,
         )
         from astrometricslib.tasks.stellar_tasks.astrometry_tasks.star_identifier import (
             get_gaia_query_statistics,

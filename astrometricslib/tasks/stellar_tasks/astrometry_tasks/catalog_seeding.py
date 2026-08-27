@@ -20,7 +20,6 @@ __all__ = [
     "DEFAULT_MAGNITUDE_LIMIT",
     "derive_field_centers",
     "seed_local_gaia_catalog",
-    "summarize_local_catalog_coverage",
 ]
 
 
@@ -229,55 +228,6 @@ def derive_field_centers(
     return field_centers
 
 
-def summarize_local_catalog_coverage(config: Any = None) -> dict[str, Any]:
-    """Check how many stars we already have saved on our hard drive.
-
-    Parameters
-    ----------
-    config : `AppConfiguration`, optional
-        The system settings (so we know where the database file is).
-
-    Returns
-    -------
-    coverage : `dict`
-        Stats about our database: where it is, how many stars it holds,
-        and how much disk space it takes up.
-    """
-    import os
-    import sqlite3
-
-    if config is None:
-        from astrometricslib.utilities.config_loader import get_configuration
-
-        config = get_configuration()
-
-    cache_path = config.get_library_path() / "catalogs" / "catalog_cache.db"
-    coverage: dict[str, Any] = {
-        "cache_path": str(cache_path),
-        "exists": os.path.exists(cache_path),
-        "source_count": 0,
-        "region_count": 0,
-        "size_megabytes": 0.0,
-    }
-    if not coverage["exists"]:
-        return coverage
-
-    coverage["size_megabytes"] = round(os.path.getsize(cache_path) / 1_000_000, 2)
-    try:
-        connection = sqlite3.connect(f"file:{cache_path}?mode=ro", uri=True)
-        try:
-            coverage["source_count"] = connection.execute("SELECT COUNT(*) FROM gaia_sources").fetchone()[0]
-            coverage["region_count"] = connection.execute("SELECT COUNT(*) FROM cached_regions").fetchone()[0]
-        finally:
-            connection.close()
-    except sqlite3.Error as cache_error:
-        # A cache that has never been written has no tables yet, which
-        # is an empty result rather than a failure worth raising.
-        logger.debug("Could not read local catalog cache: %s", cache_error)
-
-    return coverage
-
-
 def seed_local_gaia_catalog(
     targets: list[Any],
     radius_degrees: float = DEFAULT_FIELD_RADIUS_DEGREES,
@@ -313,6 +263,7 @@ def seed_local_gaia_catalog(
         A summary of what we did: how many spots we checked, how many
         failed, and how many new stars we added to the database.
     """
+    from astrometricslib.drivers.catalog_store import summarize_catalog_coverage
     from astrometricslib.tasks.stellar_tasks.astrometry_tasks.star_identifier import StarIdentifier
 
     field_centers = derive_field_centers(targets)
@@ -325,7 +276,7 @@ def seed_local_gaia_catalog(
         "results": [],
     }
 
-    coverage_before = summarize_local_catalog_coverage()
+    coverage_before = summarize_catalog_coverage()
     sources_before = coverage_before["source_count"]
 
     for field_index, field_center in enumerate(field_centers):
@@ -380,7 +331,7 @@ def seed_local_gaia_catalog(
         if request_delay_seconds > 0 and field_index < len(field_centers) - 1:
             time.sleep(request_delay_seconds)
 
-    coverage_after = summarize_local_catalog_coverage()
+    coverage_after = summarize_catalog_coverage()
     report["coverage"] = coverage_after
     # A field whose region row already existed returns its stored rows
     # without adding any, so "already cached" is what the sweep reports

@@ -11,8 +11,8 @@ import http.client
 import pytest
 from astropy.io import fits
 
-from astrometricslib.tasks.stellar_tasks.astrometry_tasks import plate_solver
-from astrometricslib.tasks.stellar_tasks.astrometry_tasks.plate_solver import (
+from astrometricslib.drivers import plate_solve_interface
+from astrometricslib.drivers.plate_solve_interface import (
     ONLINE_SOLVE_ATTEMPT_LIMIT,
     _call_with_transient_retry,
     _is_transient_network_error,
@@ -22,7 +22,7 @@ from astrometricslib.tasks.stellar_tasks.astrometry_tasks.plate_solver import (
 @pytest.fixture(autouse=True)
 def _no_retry_sleep(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
     """Keep the backoff from making these tests wait for real seconds."""
-    monkeypatch.setattr(plate_solver.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(plate_solve_interface.time, "sleep", lambda _seconds: None)
 
 
 def test_dropped_connection_is_transient():  # ruff: ignore[missing-return-type-undocumented-public-function]

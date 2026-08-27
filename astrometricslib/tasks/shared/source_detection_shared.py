@@ -12,6 +12,8 @@ from astropy.stats import SigmaClip, sigma_clipped_stats
 from photutils.background import Background2D, MedianBackground
 from photutils.detection import DAOStarFinder
 
+from astrometricslib.data_access.image_type import collapse_to_2d
+
 logger = logging.getLogger(__name__)
 
 # Below this pixel count, background stats are computed on the full
@@ -83,11 +85,7 @@ class SourceDetector:
             brightness value (flux).
         """
         # Ensure data is 2D for DAOStarFinder
-        if data.ndim == 3:
-            if data.shape[0] in [3, 4]:
-                data = np.mean(data, axis=0)
-            else:
-                data = np.mean(data, axis=-1)
+        data = collapse_to_2d(data)
 
         # 1. Estimate background. Prefer a locally-varying 2D map over a
         # single global scalar: a flat global median/std leaves smoothly

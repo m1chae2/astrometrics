@@ -15,12 +15,19 @@ handled -- it predates this module and is not rebuilt on top of it here,
 since its lazy-loading and auto-repair behaviour is tightly coupled to
 its own caching, but any *new* file-reading code should use this module
 instead of adding a fifth copy of the rule.
+
+`collapse_to_2d` handles a related but separate question: once you have
+an image's pixel array, is it already a single 2D plane, or a stack of
+colour channels that needs averaging down to one? Eight call sites
+across the library each answered that question themselves, and five of
+them got it subtly wrong -- see the function's own docstring.
 """
 
 import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 
+import numpy as np
 from astropy.io import fits
 
 logger = logging.getLogger(__name__)
@@ -195,3 +202,41 @@ def select_dominant_frame_dimensions(frame_paths: list[str]) -> tuple[set[str], 
         ),
     )
     return set(paths_by_dimensions[dominant_dimensions]) | set(unreadable_paths), dominant_dimensions
+
+
+def collapse_to_2d(data: np.ndarray) -> np.ndarray:
+    """Average a multi-channel image down to a single 2D plane.
+
+    A 3D image array can have its channel axis first
+    (``(channels, height, width)``, the usual layout for a debayered
+    RGB/RGBA stack, or a degenerate single-channel cube) or last
+    (``(height, width, channels)``). Nothing in a FITS file's NAXIS
+    keywords says which, so channel count is used as the signal: a
+    leading axis of length 1, 3, or 4 is treated as the channel axis;
+    anything else is assumed to be a trailing channel axis instead.
+
+    Checking only for {3, 4} -- what every call site did before this
+    function existed -- misses the degenerate ``(1, height, width)``
+    case. On that shape the check fails, so the *trailing* axis (the
+    image's own width) gets averaged away instead of the leading
+    channel axis, producing a garbage ``(1, height)`` result fed
+    straight into star detection or a quality metric downstream. This
+    is that fix, unified across every site that used the narrower
+    check.
+
+    Parameters
+    ----------
+    data : `numpy.ndarray`
+        A 2D or 3D image array. Returned unchanged if already 2D.
+
+    Returns
+    -------
+    collapsed : `numpy.ndarray`
+        `data` if it was already 2D; otherwise `data` averaged down to
+        2D across its channel axis.
+    """
+    if data.ndim != 3:
+        return data
+    if data.shape[0] in (1, 3, 4):
+        return np.mean(data, axis=0)
+    return np.mean(data, axis=-1)

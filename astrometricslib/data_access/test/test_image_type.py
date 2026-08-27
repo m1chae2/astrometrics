@@ -156,3 +156,51 @@ def test_select_dominant_frame_dimensions_keeps_unreadable_frames(tmp_path):  # 
 def test_select_dominant_frame_dimensions_of_an_empty_list():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verify the empty-input edge case returns an empty set, no dimensions."""
     assert image_type.select_dominant_frame_dimensions([]) == (set(), None)
+
+
+def test_collapse_to_2d_leaves_a_2d_array_unchanged():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify a plain mono frame passes through untouched."""
+    data = np.arange(12, dtype=float).reshape(3, 4)
+
+    result = image_type.collapse_to_2d(data)
+
+    assert result is data
+
+
+def test_collapse_to_2d_averages_a_leading_rgb_channel_axis():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify a (3, H, W) debayered stack collapses across its channel axis."""
+    data = np.stack([np.full((5, 6), value, dtype=float) for value in (10.0, 20.0, 30.0)])
+
+    result = image_type.collapse_to_2d(data)
+
+    assert result.shape == (5, 6)
+    assert np.allclose(result, 20.0)
+
+
+def test_collapse_to_2d_averages_a_trailing_channel_axis():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify an (H, W, 3) array collapses across its trailing axis."""
+    data = np.stack([np.full((5, 6), value, dtype=float) for value in (10.0, 20.0, 30.0)], axis=-1)
+
+    result = image_type.collapse_to_2d(data)
+
+    assert result.shape == (5, 6)
+    assert np.allclose(result, 20.0)
+
+
+def test_collapse_to_2d_handles_a_degenerate_single_channel_cube():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Regression test for the (1, H, W) bug this function replaces.
+
+    Every call site this function consolidates checked `shape[0] in (3,
+    4)` before this fix -- not `(1, 3, 4)`. On a `(1, height, width)`
+    array that check is False, so the old code fell through to
+    `np.mean(data, axis=-1)`, averaging away the image's own *width*
+    instead of the degenerate channel axis, and produced a garbage
+    `(1, height)` result. This must produce a real `(height, width)`
+    image instead.
+    """
+    data = np.arange(30, dtype=float).reshape(1, 5, 6)
+
+    result = image_type.collapse_to_2d(data)
+
+    assert result.shape == (5, 6)
+    assert np.array_equal(result, data[0])

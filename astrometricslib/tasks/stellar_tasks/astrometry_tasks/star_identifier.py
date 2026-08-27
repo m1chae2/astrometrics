@@ -27,6 +27,7 @@ from astropy.wcs import WCS, FITSFixedWarning
 from astroquery.simbad import Simbad
 
 from astrometricslib.data_access.image_quality_metrics import measure_fwhm_from_data
+from astrometricslib.data_access.image_type import collapse_to_2d
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.tasks.shared.source_detection_shared import SourceDetector
 from astrometricslib.tasks.stellar_tasks.astrometry_tasks.plate_solver import PlateSolver
@@ -495,10 +496,7 @@ class StarIdentifier:
 
         is_color_frame = data is not None and data.ndim == 3
         if is_color_frame:
-            if data.shape[0] in [3, 4]:
-                data = np.mean(data, axis=0)
-            else:
-                data = np.mean(data, axis=-1)
+            data = collapse_to_2d(data)
 
         # 2. Detect Stars
         logger.info("Detecting stars...")

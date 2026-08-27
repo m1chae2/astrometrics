@@ -10,6 +10,8 @@ import numpy as np
 from astropy.io import fits
 from astropy.wcs import WCS
 
+from astrometricslib.data_access.image_type import collapse_to_2d
+
 from .enums import FilterType
 
 logger = logging.getLogger(__name__)
@@ -183,13 +185,7 @@ class AstrometricsImage:
                     raw_data = None
 
                 if raw_data is not None:
-                    data = raw_data.astype(float)
-                    if data.ndim == 3:
-                        if data.shape[0] in [1, 3, 4]:
-                            data = np.mean(data, axis=0)
-                        else:
-                            data = np.mean(data, axis=-1)
-                    self._data = data
+                    self._data = collapse_to_2d(raw_data.astype(float))
                 else:
                     self._data = np.zeros((0, 0))
         except Exception as e:

@@ -234,9 +234,9 @@ def identify_session_stars(
     data = reference_image.data
     is_color_frame = data is not None and data.ndim == 3
     if is_color_frame:
-        import numpy as np
+        from astrometricslib.data_access.image_type import collapse_to_2d
 
-        data = np.mean(data, axis=0) if data.shape[0] in (3, 4) else np.mean(data, axis=-1)
+        data = collapse_to_2d(data)
 
     # See StarIdentifier.detect_stars: a colour session reference frame
     # needs the same block-averaging treatment `process_image` gives the

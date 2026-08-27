@@ -14,6 +14,7 @@ import numpy as np
 from astropy.io import fits
 from astropy.stats import sigma_clipped_stats
 
+from astrometricslib.data_access.image_type import collapse_to_2d
 from astrometricslib.tasks.shared.saturation_analysis import compute_saturated_pixel_fraction
 
 logger = logging.getLogger(__name__)
@@ -133,8 +134,7 @@ def measure_image_fwhm(path: str, n_stars: int = FWHM_MEASUREMENT_STAR_COUNT) ->
     if data is None:
         return None
     data = np.asarray(data, dtype=float)
-    if data.ndim == 3:
-        data = np.mean(data, axis=0 if data.shape[0] in (3, 4) else -1)
+    data = collapse_to_2d(data)
 
     return measure_fwhm_from_data(data, n_stars)
 
@@ -180,8 +180,7 @@ def measure_frame_input_quality(path: str, include_fwhm: bool = False) -> dict[s
 
     # Matches the mono-flattening the existing per-frame measurements use,
     # so a value measured here is comparable with one measured there.
-    if data.ndim == 3:
-        data = np.mean(data, axis=0 if data.shape[0] in (3, 4) else -1)
+    data = collapse_to_2d(data)
 
     try:
         _, median, _ = sigma_clipped_stats(data, sigma=3.0)

@@ -16,6 +16,7 @@ import numpy as np
 from astropy.io import fits
 from astropy.stats import mad_std, sigma_clip
 
+from astrometricslib.data_access.image_type import collapse_to_2d
 from astrometricslib.models.quality_summary import FrameEnsembleComposition
 from astrometricslib.models.stellar_source import LightCurve, StellarObject
 from astrometricslib.tasks.shared.saturation_analysis import (
@@ -206,12 +207,7 @@ def _process_single_frame_worker(args):  # ruff: ignore[missing-type-function-ar
         # 1. Load Header & Data
         with fits.open(path) as fits_handle:
             header = fits_handle[0].header
-            data = fits_handle[0].data.astype(float)
-            if data.ndim == 3:
-                if data.shape[0] in [1, 3, 4]:
-                    data = np.mean(data, axis=0)
-                else:
-                    data = np.mean(data, axis=-1)
+            data = collapse_to_2d(fits_handle[0].data.astype(float))
             date_observed = header.get("DATE-OBS", datetime.now().isoformat())
             try:
                 timestamp = datetime.fromisoformat(date_observed)
@@ -526,12 +522,7 @@ class VariabilityAnalyzer:
         logger.info(f"[1/{len(image_paths)}] Processing Reference {os.path.basename(reference_path)}...")
 
         with fits.open(reference_path) as fits_handle:
-            reference_data = fits_handle[0].data.astype(float)
-            if reference_data.ndim == 3:
-                if reference_data.shape[0] in [1, 3, 4]:
-                    reference_data = np.mean(reference_data, axis=0)
-                else:
-                    reference_data = np.mean(reference_data, axis=-1)
+            reference_data = collapse_to_2d(fits_handle[0].data.astype(float))
             reference_header = fits_handle[0].header
             reference_date = reference_header.get("DATE-OBS", datetime.now().isoformat())
             try:

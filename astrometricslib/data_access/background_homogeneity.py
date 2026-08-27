@@ -9,6 +9,7 @@ import numpy as np
 from astropy.io import fits
 from astropy.stats import sigma_clipped_stats
 
+from astrometricslib.data_access.image_type import collapse_to_2d
 from astrometricslib.tasks.shared.saturation_analysis import compute_saturated_pixel_fraction
 
 # Just under the raw 16-bit unsigned max -- same convention as
@@ -41,8 +42,7 @@ def measure_frame_background_level(path: str) -> float | None:
     if data is None:
         return None
     data = np.asarray(data, dtype=float)
-    if data.ndim == 3:
-        data = np.mean(data, axis=0 if data.shape[0] in (3, 4) else -1)
+    data = collapse_to_2d(data)
     _, median, _ = sigma_clipped_stats(data, sigma=3.0)
     return float(median)
 
@@ -70,6 +70,5 @@ def measure_frame_saturated_pixel_fraction(path: str) -> float | None:
     if data is None:
         return None
     data = np.asarray(data, dtype=float)
-    if data.ndim == 3:
-        data = np.mean(data, axis=0 if data.shape[0] in (3, 4) else -1)
+    data = collapse_to_2d(data)
     return compute_saturated_pixel_fraction(data, _SATURATION_ADU_THRESHOLD)

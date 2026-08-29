@@ -16,10 +16,10 @@ compares what it finds against `KNOWN_FITS_ACCESS_SITES` below. A new
 call site that is not on the list fails the build -- either the new code
 belongs in one of the modules that already own this rule
 (`image_processing/fits_access.py` is the current canonical home;
-`image_processing/image.py` and `data_access/frame_scanning.py` also handle it,
-each for their own reasons -- see `fits_access.py`'s docstring), or, if
-it genuinely needs to be its own site, it needs to be added to the list *and*
-reviewed for the HDU0/HDU1 rule at the same time. A second check
+`image_processing/image.py` and `catalog_services/frame_scanning.py` also
+handle it, each for their own reasons -- see `fits_access.py`'s docstring),
+or, if it genuinely needs to be its own site, it needs to be added to the
+list *and* reviewed for the HDU0/HDU1 rule at the same time. A second check
 makes sure the list can only shrink, never grow stale: every entry on it
 must still contain a real call, so deleting the code without deleting the
 matching list entry also fails the build.
@@ -40,9 +40,9 @@ _RAW_FITS_ACCESS_METHODS = frozenset({"open", "getheader", "getdata", "writeto",
 # it is only correct alongside a review of the new call site for the
 # HDU0/HDU1 rule.
 KNOWN_FITS_ACCESS_SITES = frozenset({
+    "catalog_services/frame_scanning.py",
+    "catalog_services/image_conversions.py",
     "data_access/background_measurement.py",
-    "data_access/frame_scanning.py",
-    "data_access/image_conversions.py",
     "drivers/calibration_library.py",
     "drivers/plate_solve_interface.py",
     "drivers/siril_interface.py",
@@ -109,7 +109,7 @@ def _find_raw_fits_access_sites() -> set[str]:
 def test_no_new_files_call_fits_directly():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verify no file outside the known list reads or writes FITS data raw.
 
-    New code should call through `data_access/frame_scanning.py` or
+    New code should call through `catalog_services/frame_scanning.py` or
     `image_processing/image.py`, which already apply the HDU0/HDU1 rule, rather
     than opening a FITS file directly.
     """

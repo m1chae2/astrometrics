@@ -380,7 +380,7 @@ class CatalogAccess(AbstractCatalogAccess):
         ----------
         dataset_type : `str`
             What to load. Options include "target_catalog", "stellar_catalog",
-            "raw_frame", "stacked_image", or "raw_frames".
+            "raw_frame", or "stacked_image".
         selector : `dict`
             Information identifying exactly what to load.
 
@@ -416,17 +416,6 @@ class CatalogAccess(AbstractCatalogAccess):
             from astrometricslib.image_processing.image import AstrometricsImage
 
             return AstrometricsImage(path)
-        elif dataset_type == "raw_frames":
-            target = selector.get("target")
-            if not target:
-                return []
-            from astrometricslib.data_access import frame_scanning as frame_scanning_operations
-
-            frames_root_path = self.config.get_frames_path()
-            frame_scanning_operations.scan_target_directory(
-                target, frames_root_path, refresh_headers=bool(selector.get("refresh_headers"))
-            )
-            return target.frames
         else:
             raise ValueError(f"Unknown dataset type: {dataset_type}")
 

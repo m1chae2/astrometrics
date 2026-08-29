@@ -528,7 +528,7 @@ class ProcessingPipelines:
         frames_root_path : `str`
             Root directory to scan for FITS files.
         """
-        from astrometricslib.data_access.frame_scanning import scan_target_directory
+        from astrometricslib.catalog_services.frame_scanning import scan_target_directory
 
         scan_target_directory(target, frames_root_path)
 
@@ -547,7 +547,7 @@ class ProcessingPipelines:
         frame_record : `astrometricslib.models.target.FrameRecord`
             The frame record derived from the FITS header at `path`.
         """
-        from astrometricslib.data_access.frame_scanning import create_frame_record_from_fits
+        from astrometricslib.catalog_services.frame_scanning import create_frame_record_from_fits
 
         return create_frame_record_from_fits(path, camera)
 

@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from astrometricslib.data_access.frame_scanning import create_frame_record_from_fits
+from astrometricslib.catalog_services.frame_scanning import create_frame_record_from_fits
 
 
 def _write_frame(path, **header_cards):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function, missing-type-kwargs]
@@ -97,7 +97,7 @@ def test_refresh_populates_an_already_indexed_frame(tmp_path):  # ruff: ignore[m
     so without an explicit refresh a newly added FrameRecord field stays
     None on every existing record forever.
     """
-    from astrometricslib.data_access.frame_scanning import refresh_acquisition_conditions
+    from astrometricslib.catalog_services.frame_scanning import refresh_acquisition_conditions
 
     path = _write_frame(tmp_path / "a.fits", PIERSIDE="EAST", AIRMASS=1.4)
     record = create_frame_record_from_fits(path)
@@ -117,7 +117,7 @@ def test_refresh_preserves_measured_values(tmp_path):  # ruff: ignore[missing-ty
     dedicated measurement passes, not the header; re-deriving them would
     cost orders of magnitude more than the ~10ms header read.
     """
-    from astrometricslib.data_access.frame_scanning import refresh_acquisition_conditions
+    from astrometricslib.catalog_services.frame_scanning import refresh_acquisition_conditions
 
     record = create_frame_record_from_fits(_write_frame(tmp_path / "a.fits", PIERSIDE="WEST"))
     record.background_level = 4456.0
@@ -133,7 +133,7 @@ def test_refresh_preserves_measured_values(tmp_path):  # ruff: ignore[missing-ty
 
 def test_refresh_of_a_missing_file_reports_failure(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """A deleted frame cannot be refreshed, and says so rather than raising."""
-    from astrometricslib.data_access.frame_scanning import refresh_acquisition_conditions
+    from astrometricslib.catalog_services.frame_scanning import refresh_acquisition_conditions
     from astrometricslib.models.target import FrameRecord
 
     record = FrameRecord(path=str(tmp_path / "gone.fits"), role="LIGHT", exposure="30.0")

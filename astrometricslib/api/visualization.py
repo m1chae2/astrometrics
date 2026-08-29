@@ -59,7 +59,7 @@ class Visualization:
             The base64-encoded PNG and scale metadata, or `None` if
             conversion fails.
         """
-        from astrometricslib.data_access import image_conversions
+        from astrometricslib.catalog_services import image_conversions
 
         return image_conversions.convert_fits_to_png(path, max_dimensions, stretch)
 
@@ -96,7 +96,7 @@ class Visualization:
             A tuple ``(png_bytes, min_value, max_value)`` of the raw
             PNG bytes and the scale bounds used to render them.
         """
-        from astrometricslib.data_access import image_conversions
+        from astrometricslib.catalog_services import image_conversions
 
         return image_conversions.convert_fits_to_png_with_stats(
             path, max_dimensions, center, width, cmap, stretch
@@ -126,7 +126,7 @@ class Visualization:
         light_frame_data : `dict[str, Any]`
             The scaled base64 PNG data and associated metadata.
         """
-        from astrometricslib.data_access import image_conversions
+        from astrometricslib.catalog_services import image_conversions
 
         return image_conversions.get_light_frame_data(target, iso, exposure, index, stretch)
 
@@ -145,7 +145,7 @@ class Visualization:
             The scaled base64 PNG data for the most recently modified
             FITS file, or `None` if no FITS file is found.
         """
-        from astrometricslib.data_access import image_conversions
+        from astrometricslib.catalog_services import image_conversions
 
         return image_conversions.get_last_captured_image(self._astrometrics.config, stretch)
 

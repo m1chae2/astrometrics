@@ -211,7 +211,7 @@ def get_header_information(target: Target, frame_path: str) -> list[dict[str, st
     if not is_valid:
         raise ValueError(f"Path {frame_path} does not belong to target {target.id}")
 
-    from astrometricslib.data_access import image_conversions
+    from astrometricslib.catalog_services import image_conversions
 
     return image_conversions.get_fits_header(frame_path)
 

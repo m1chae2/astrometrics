@@ -13,7 +13,7 @@ from typing import Any
 
 from PIL import Image
 
-from astrometricslib.data_access.image_scaling import ImageScaler
+from astrometricslib.catalog_services.utilities.image_scaling import ImageScaler
 from astrometricslib.image_processing.image import AstrometricsImage
 from astrometricslib.utilities.exceptions import AstroLibError
 

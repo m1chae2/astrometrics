@@ -2,7 +2,7 @@
 
 While the theoretical algorithms and data flow are covered in the [Astrometrics Library Architecture](./Astrometrics_Library_Architecture.md) document, this map serves as a direct index to the Python source code where those algorithms are physically implemented.
 
-Due to the internal nature of these modules, they are deliberately hidden from the public API Reference. Developers wishing to review or modify the core algorithms should refer to the following directories within `astrometricslib/`. The layout is layered, bottom to top: `models/`/`utilities/` hold data shapes and configuration with no dependency on anything else in the library; `image_processing/` holds pixel-level primitives (FITS access, source detection, saturation checks); `drivers/` wraps every external tool (Siril, Astrometry.net, the SQLite catalog cache, calibration-frame storage); `data_access/` reads and writes the target/frame/stellar-object database; `pipelines/` holds the five analysis columns plus the dispatcher and cross-column shared code; `api/` is the public gate everything above calls through.
+Due to the internal nature of these modules, they are deliberately hidden from the public API Reference. Developers wishing to review or modify the core algorithms should refer to the following directories within `astrometricslib/`. The layout is layered, bottom to top: `models/`/`utilities/` hold data shapes and configuration with no dependency on anything else in the library; `image_processing/` holds pixel-level primitives (FITS access, source detection, saturation checks); `drivers/` wraps every external tool (Siril, Astrometry.net, the SQLite catalog cache, calibration-frame storage); `data_access/` reads and writes the target/frame/stellar-object database; `catalog_services/` is where the public API reaches directly for plain reads and writes that are not an analysis run -- scanning a folder for FITS files, target CRUD, converting a FITS file to a PNG; `pipelines/` holds the five analysis columns plus the dispatcher and cross-column shared code; `api/` is the public gate everything above calls through.
 
 ## Core Processing Pipelines
 
@@ -56,6 +56,15 @@ Due to the internal nature of these modules, they are deliberately hidden from t
 - **Image quality & hardware telemetry:** `quality_metrics.py`
 - **Filter-type detection from FITS headers:** `filter_detection.py`
 
+### Catalog Services
+*Located in:* `astrometricslib/catalog_services/`
+The plain, non-analysis reads and writes the public API calls directly, without
+running a pipeline:
+- **Filesystem frame scanning:** `frame_scanning.py`
+- **Target catalog CRUD:** `target_records.py`
+- **Image format conversion for display:** `image_conversions.py`
+- **Image scaling math shared by `image_conversions.py` and the visualization overlay:** `utilities/image_scaling.py`
+
 ### External-Tool Drivers
 *Located in:* `astrometricslib/drivers/`
 - **Siril stacking/registration:** `siril_interface.py`
@@ -67,10 +76,9 @@ Due to the internal nature of these modules, they are deliberately hidden from t
 
 ### Database Access
 *Located in:* `astrometricslib/data_access/`
-- **Target/frame/stellar-object recording:** `catalog_access.py` and `target_records.py`
-- **Filesystem frame scanning:** `frame_scanning.py`
+- **Target/stellar-catalog repository (`CatalogAccess`), the front door every other layer reaches for the database through:** `catalog_access.py`
 - **Frame statistics:** `frame_statistics.py`
-- **Image format conversion and scaling for display:** `image_conversions.py` and `image_scaling.py`
+- **Background level measurement:** `background_measurement.py`
 
 `catalog_access.py` records through a generic, keyed-record SQLite store shared with
 wayfindinglib, rather than executing SQL itself:

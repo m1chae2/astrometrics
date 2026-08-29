@@ -9,7 +9,7 @@ work.
 
 import builtins
 
-from astrometricslib.data_access.frame_scanning import classify_and_sort_fits_files
+from astrometricslib.catalog_services.frame_scanning import classify_and_sort_fits_files
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.shared.target_sessions import derive_target_sessions
 from astrometricslib.utilities.config_loader import AppConfiguration
@@ -60,7 +60,7 @@ class TargetCatalog:
         result : `list` [`Target`]
             The list of all active targets.
         """
-        from astrometricslib.data_access import target_records
+        from astrometricslib.catalog_services import target_records
 
         return target_records.list_targets(self)
 
@@ -77,7 +77,7 @@ class TargetCatalog:
         target : `Target` or `None`
             The matching target, or `None` if no target matches.
         """
-        from astrometricslib.data_access import target_records
+        from astrometricslib.catalog_services import target_records
 
         return target_records.get_target(self, target_id)
 
@@ -99,7 +99,7 @@ class TargetCatalog:
         target : `Target`
             The newly created (or existing, matching) Target.
         """
-        from astrometricslib.data_access import target_records
+        from astrometricslib.catalog_services import target_records
 
         return target_records.create_target(self, target_id)
 
@@ -129,13 +129,13 @@ class TargetCatalog:
         removed : `bool`
             `True` if a matching target was found and removed.
         """
-        from astrometricslib.data_access import target_records
+        from astrometricslib.catalog_services import target_records
 
         return target_records.delete_target(self, target_id)
 
     def save(self) -> None:
         """Commit all touched targets back to database storage."""
-        from astrometricslib.data_access import target_records
+        from astrometricslib.catalog_services import target_records
 
         target_records.save_targets(self)
 
@@ -204,7 +204,7 @@ class TargetCatalog:
         catalog_access : `AbstractCatalogAccess`, optional
             Storage backend override; defaults to this catalog's own.
         """
-        from astrometricslib.data_access.target_records import reindex_frames
+        from astrometricslib.catalog_services.target_records import reindex_frames
 
         reindex_frames(
             target,
@@ -238,7 +238,7 @@ class TargetCatalog:
 
             return get_header_information(target, path)
 
-        from astrometricslib.data_access import image_conversions
+        from astrometricslib.catalog_services import image_conversions
 
         return image_conversions.get_fits_header(path)
 
@@ -261,7 +261,7 @@ class TargetCatalog:
         frame_path : `str`
             The path of the matching frame.
         """
-        from astrometricslib.data_access import image_conversions
+        from astrometricslib.catalog_services import image_conversions
 
         return image_conversions.get_frame(target, iso, exposure, index)
 
@@ -281,7 +281,7 @@ class TargetCatalog:
         result : `dict`
             A summary of the deletion outcome.
         """
-        from astrometricslib.data_access import image_conversions
+        from astrometricslib.catalog_services import image_conversions
 
         return image_conversions.delete_images(paths, self, target_id)
 

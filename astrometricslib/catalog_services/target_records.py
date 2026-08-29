@@ -1,8 +1,9 @@
-"""Target database operations.
+"""Target catalog operations.
 
 This module contains the functions that actually save, load, update, and
-delete targets (like galaxies or stars) in our database. It talks directly
-to the database system so the rest of the program doesn't have to.
+delete targets (like galaxies or stars) in our catalog. It goes through
+`CatalogAccess` to reach the database, the same way every other part of
+the program does, so nothing here opens a database connection itself.
 """
 
 import os
@@ -147,6 +148,8 @@ def reindex_frames(
     total exposure time. If `refresh_headers` is True, it will also
     re-read the FITS header data for files we already know about.
     """
+    from astrometricslib.catalog_services import frame_scanning
+
     if catalog_access is None:
         from astrometricslib.data_access.catalog_access import CatalogAccess
 
@@ -160,7 +163,9 @@ def reindex_frames(
             and not any(k in f.path.lower() for k in ("_stacked", "starless", "starmask"))
         ]
 
-    catalog_access.get("raw_frames", {"target": target, "refresh_headers": refresh_headers})
+    frame_scanning.scan_target_directory(
+        target, catalog_access.config.get_frames_path(), refresh_headers=refresh_headers
+    )
 
 
 def create_target(api, target_id: str, ra: str | None = None, dec: str | None = None) -> Any:  # ruff: ignore[missing-type-function-argument]

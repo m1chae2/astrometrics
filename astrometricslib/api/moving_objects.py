@@ -48,7 +48,7 @@ class MovingObjectRecovery:
 
         This runs several algorithms to find dots of light that move in a
         consistent, straight line across multiple images. The images must
-        already be plate-solved (stars matched to a database) so we can
+        already be plate-solved (stars matched to a database) so the system can
         accurately measure true movement in the sky.
 
         Parameters

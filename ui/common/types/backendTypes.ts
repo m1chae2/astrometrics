@@ -26,7 +26,7 @@ export enum FilterType {
 }
 
 /**
- * Lists the different categories of images we can process.
+ * Lists the different categories of images that can be processed.
  */
 export enum ImageType {
   STAR_FIELD = "star_field",
@@ -121,7 +121,7 @@ export interface StackConfigurationResult {
 /**
  * The main record for an astronomical target (like a galaxy or nebula).
  *
- * This class only stores data. If you want to stack images or analyze
+ * This class only stores data. If stacking images or analyzing
  * the target, use the tools in the `TargetCatalog`.
  */
 export interface TargetObject {
@@ -241,8 +241,8 @@ export interface Spectrum {
 /**
  * Tracks when a star was detected during a specific observing session.
  *
- * If we observe a star on 5 different nights, it will have 5 of these records
- * combined into its final light curve.
+ * If a star is observed on 5 different nights, it will have 5 of
+ * these records combined into its final light curve.
  */
 export interface StellarSessionMatch {
   sessionId: string;
@@ -426,7 +426,7 @@ export interface ProcessingJob {
 }
 
 /**
- * A summary of what happened when we ran a processing job.
+ * A summary of what happened when a processing job was run.
  */
 export interface AnalysisResult {
   status: string;
@@ -446,7 +446,7 @@ export interface AnalysisResult {
 }
 
 /**
- * A star we think might be changing brightness over time.
+ * A star that might be changing brightness over time.
  */
 export interface VariableCandidate {
   id: string;
@@ -855,9 +855,9 @@ export interface MovingObjectTrack {
 }
 
 /**
- * Tracks how far a possible asteroid made it through our checking process.
+ * Tracks how far a possible asteroid made it through the checking process.
  *
- * We run several tests to see if a moving dot is really an asteroid.
+ * Several tests are run to see if a moving dot is really an asteroid.
  * This shows if it passed all tests, or at which step it was rejected
  * (e.g., it was just a dead pixel).
  */
@@ -874,10 +874,10 @@ export enum CascadeStage {
 }
 
 /**
- * A match between our detected object and a real, known asteroid.
+ * A match between the detected object and a real, known asteroid.
  *
- * We compare our object's speed and location against databases (like SkyBoT)
- * that predict where known asteroids should be.
+ * The object's speed and location are compared against databases
+ * (like SkyBoT) that predict where known asteroids should be.
  */
 export interface EphemerisMatch {
   provider?: string;
@@ -890,7 +890,7 @@ export interface EphemerisMatch {
 }
 
 /**
- * A potential asteroid we tracked across several pictures.
+ * A potential asteroid tracked across several pictures.
  *
  * It holds all the individual detections, its calculated path, and
  * whether it matched any known asteroids.

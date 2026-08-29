@@ -8,25 +8,25 @@ from pydantic import BaseModel, ConfigDict, Field
 class MovingObjectConfig(BaseModel):
     """Settings used when searching for asteroids.
 
-    These values control how strictly we check moving dots to see if they
+    These values control how strictly moving dots are checked to see if they
     are real asteroids or just noise.
 
     Attributes
     ----------
     detection_fwhm_px : `float`
-        How wide (in pixels) we expect a star or asteroid to be, by default
+        How wide (in pixels) a star or asteroid is expected to be, by default
         4.0.
     detection_threshold_sigma : `float`
         How much brighter than the background noise an object must be to get
         noticed, by default 5.0.
     min_frames_for_persistence : `int`
-        How many pictures in a row we need to see the object in before we
+        How many pictures in a row the object must be seen in before it is
         trust it's real, by default 3.
     pixel_match_tolerance_px : `float`
-        If an object moves less than this many pixels, we assume it's a dead
-        camera pixel, by default 1.5.
+        If an object moves less than this many pixels, it's assumed to
+        be a dead camera pixel, by default 1.5.
     sky_match_tolerance_arcsec : `float`
-        If an object moves less than this much across the sky, we assume
+        If an object moves less than this much across the sky, it's assumed
         it's
         just a normal star, by default 3.0.
     rate_min_arcsec_per_hour : `float`
@@ -39,11 +39,11 @@ class MovingObjectConfig(BaseModel):
         How perfectly straight the object's path must be (1.0 is perfectly
         straight), by default 0.98.
     ephemeris_cross_match_radius_arcsec : `float`
-        How close our object must be to a known asteroid's predicted
+        How close the object must be to a known asteroid's predicted
         position
         to count as a match, by default 10.0.
     ephemeris_maximum_visual_magnitude : `float`
-        The faintest known asteroids we'll bother checking against, by default
+        The faintest known asteroids to bother checking against, by default
         16.0.
     mpc_observatory_code : `str`
         The official code for where the telescope is located. "500" means

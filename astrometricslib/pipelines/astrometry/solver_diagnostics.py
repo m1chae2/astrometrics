@@ -1,6 +1,6 @@
 """Tools to check if the local mapping software is installed correctly.
 
-We need specific map files (called index files) downloaded to the
+Specific map files (called index files) must be downloaded to the
 computer for the local solver to work. These functions check if they
 exist.
 """
@@ -15,13 +15,13 @@ def check_local_solver_config(app_config) -> dict[str, Any]:  # ruff: ignore[mis
     Parameters
     ----------
     app_config : `AppConfiguration`
-        The system settings (so we know where to look).
+        The system settings (to determine where to look).
 
     Returns
     -------
     diagnostics : `dict`
-        A report showing exactly where we looked, whether the folder
-        existed, and how many map files we found inside it.
+        A report showing exactly where the check looked, whether the folder
+        existed, and how many map files were found inside it.
     """
     # Assuming app_config provides access to the raw configuration if needed,
     # or specialized methods for processing settings.

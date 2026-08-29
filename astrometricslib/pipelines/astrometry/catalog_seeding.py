@@ -1,9 +1,9 @@
-"""Tool to download the star database before we start processing.
+"""Tool to download the star database before processing starts.
 
-If we try to download star data while we're processing 6 images at
-once, we overwhelm the online database and it kicks us out. This tool
-looks at all our photos, figures out where they are pointing, and
-downloads the stars for those areas one by one before we start the
+Attempting to download star data while processing 6 images at
+once overwhelms the online database and causes disconnects. This tool
+looks at all photos, figures out where they are pointing, and
+downloads the stars for those areas one by one before starting the
 heavy lifting.
 """
 
@@ -63,7 +63,7 @@ _RETRY_BACKOFF_BASE_SECONDS = 2.0
 def _coordinate_from_header(header: Any) -> tuple[float, float] | None:
     """Find out where the photo was pointing by reading its metadata.
 
-    We try the most accurate coordinates first (if the image has already
+    Try the most accurate coordinates first (if the image has already
     been mapped), then fall back to whatever the telescope thought it
     was looking at.
 
@@ -76,7 +76,7 @@ def _coordinate_from_header(header: Any) -> tuple[float, float] | None:
     -------
     center : `tuple` [`float`, `float`] or `None`
         The center coordinates (Right Ascension, Declination), or None
-        if we couldn't find them.
+        if they couldn't be found.
     """
     right_ascension = header.get("CRVAL1")
     declination = header.get("CRVAL2")
@@ -116,8 +116,8 @@ def _angular_separation_degrees(
 ) -> float:
     """Calculate the distance between two points in the sky.
 
-    We have to use complex spherical math (haversine) instead of simple
-    subtraction because the sky is a globe. For example, if you are near
+    Complex spherical math (haversine) must be used instead of simple
+    subtraction because the sky is a globe. For example, near
     the North Star, the lines of longitude are very close together.
 
     Parameters
@@ -153,17 +153,17 @@ def derive_field_centers(
     max_frames_per_target: int = 12,
     separation_threshold_degrees: float = DEFAULT_DEDUPLICATION_SEPARATION_DEGREES,
 ) -> list[dict[str, Any]]:
-    """Make a list of all the unique places we took pictures of.
+    """Make a list of all the unique places pictures were taken of.
 
-    If we took 100 pictures of the exact same spot, we combine them into
-    one spot so we don't download the same star map 100 times. We also
-    stop checking after the first few photos of a target to save time,
-    since a telescope rarely moves far while shooting one object.
+    If 100 pictures were taken of the exact same spot, they combine into
+    one spot so the same star map isn't downloaded 100 times. Checking stops
+    after the first few photos of a target to save time, since a telescope
+    rarely moves far while shooting one object.
 
     Parameters
     ----------
     targets : `list`
-        The list of targets (folders of photos) we plan to process.
+        The list of targets (folders of photos) to process.
     max_frames_per_target : `int`, optional
         How many photos to check per target before we get the idea.
     separation_threshold_degrees : `float`, optional
@@ -172,7 +172,7 @@ def derive_field_centers(
     Returns
     -------
     field_centers : `list` [`dict`]
-        A clean list of the unique sky coordinates we need to download.
+        A clean list of the unique sky coordinates needed to download.
     """
     from astropy.io import fits
 
@@ -238,14 +238,14 @@ def seed_local_gaia_catalog(
 ) -> dict[str, Any]:
     """Go through the list of spots and download the stars for each one.
 
-    If we get interrupted, we can just run this again and it will skip
-    the ones we already downloaded. It pauses between downloads so we
-    don't get banned from the server.
+    If interrupted, this can just be run again and it will skip
+    the ones already downloaded. It pauses between downloads to
+    avoid getting banned from the server.
 
     Parameters
     ----------
     targets : `list`
-        The list of targets (folders of photos) we plan to process.
+        The list of targets (folders of photos) to process.
     radius_degrees : `float`, optional
         How wide of an area to download around each spot.
     magnitude_limit : `float`, optional
@@ -260,8 +260,8 @@ def seed_local_gaia_catalog(
     Returns
     -------
     report : `dict`
-        A summary of what we did: how many spots we checked, how many
-        failed, and how many new stars we added to the database.
+        A summary of what was done: how many spots were checked, how many
+        failed, and how many new stars were added to the database.
     """
     from astrometricslib.drivers.catalog_store import summarize_catalog_coverage
     from astrometricslib.pipelines.astrometry.star_identifier import StarIdentifier

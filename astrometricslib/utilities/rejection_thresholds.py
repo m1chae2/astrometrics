@@ -1,7 +1,7 @@
-"""Adjusting the pixel rejection threshold based on how many images we have.
+"""Adjusting the pixel rejection threshold based on how many images there are.
 
 When combining (stacking) many images, the chance of seeing random noise
-goes up. If we use a fixed limit for throwing out bad pixels, we might
+goes up. If a fixed limit is used for throwing out bad pixels, it might
 throw out too few pixels for small stacks, and too many for large stacks.
 This file calculates a sliding limit based on the number of images, keeping
 the pixel rejection balanced.
@@ -16,7 +16,7 @@ def chauvenet_sigma(n_frames: int) -> float:
     """Calculate the pixel rejection limit for a certain number of images.
 
     This uses a statistical rule called Chauvenet's criterion. It figures
-    out the maximum difference from the average that we should allow before
+    out the maximum difference from the average that should be allowed before
     deciding a pixel is bad (like a cosmic ray or hot pixel).
 
     Parameters

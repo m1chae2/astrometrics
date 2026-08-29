@@ -9,7 +9,7 @@ name:
   ``FIELD_J{ra:.4f}{dec:+.4f}``).
 
 This makes sure every star gets a stable, consistent name before it is saved to
-the database, replacing temporary labels so we don't save duplicates.
+the database, replacing temporary labels so duplicates are not saved.
 """
 
 import logging
@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 # detections and makes it nearly impossible to match real stars to
 # the catalog.
 #
-# To fix this, we shrink the image to half its size (2x2 averaging)
+# To fix this, shrink the image to half its size (2x2 averaging)
 # before looking for stars. Tests prove this successfully breaks up
 # the noise clumps without missing any real stars, dropping false
 # detections significantly.
@@ -111,7 +111,7 @@ def _record_gaia_failure(context: str) -> None:
     Parameters
     ----------
     context : `str`
-        What we were trying to do when it failed.
+        What was being attempted when it failed.
     """
     global _gaia_consecutive_failures, _gaia_circuit_open, _gaia_queries_attempted, _gaia_queries_failed
     with _gaia_failure_state_lock:
@@ -141,7 +141,7 @@ def get_gaia_query_statistics() -> dict[str, int | bool]:
     Returns
     -------
     statistics : `dict` [`str`, `int` or `bool`]
-        How many times we tried to connect, how many times it failed,
+        How many times the connection was attempted, how many times it failed,
         and whether the safety switch has flipped.
     """
     with _gaia_failure_state_lock:
@@ -158,14 +158,14 @@ def _gaia_remote_queries_disabled() -> bool:
     Returns
     -------
     disabled : `bool`
-        True if we've failed to connect too many times in a row.
+        True if the connection failed too many times in a row.
     """
     with _gaia_failure_state_lock:
         return _gaia_circuit_open
 
 
 def reset_gaia_circuit_breaker() -> None:
-    """Reset the safety switch so we can try connecting to Gaia again."""
+    """Reset the safety switch to allow trying to connect to Gaia again."""
     global _gaia_consecutive_failures, _gaia_circuit_open, _gaia_queries_attempted, _gaia_queries_failed
     with _gaia_failure_state_lock:
         _gaia_consecutive_failures = 0
@@ -191,7 +191,7 @@ def _run_with_daemon_thread_timeout(query_function: Callable[[], Any], timeout_s
 
     Normally, if a network connection stalls forever, the program won't
     be allowed to close until that connection finishes. By running it this
-    way, we can abandon a stuck connection and still shut down cleanly.
+    way, a stuck connection can be abandoned while still shutting down cleanly.
 
     Parameters
     ----------
@@ -311,10 +311,10 @@ class StarIdentifier:
 
     @staticmethod
     def _build_stellar_objects_from_sources(sources: list[dict]) -> list[StellarObject]:
-        """Create a `StellarObject` for each dot of light we found.
+        """Create a `StellarObject` for each dot of light found.
 
-        We give every star a temporary name like "Star_1", "Star_2".
-        Later, we'll try to replace these with real database names.
+        Every star is given a temporary name like "Star_1", "Star_2".
+        Later, an attempt is made to replace these with real database names.
 
         Returns
         -------

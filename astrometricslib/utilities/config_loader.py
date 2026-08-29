@@ -55,7 +55,7 @@ class AppConfiguration:
             p = Path(env_path)
             if p.is_file():
                 return p
-            # If specified but doesn't exist yet, we still default to it so
+            # If specified but doesn't exist yet, it is still defaulted to so
             # it gets created there on save
             return p
 
@@ -289,7 +289,7 @@ class AppConfiguration:
     def get_maximum_identified_stars(self) -> int | None:
         """Return the maximum number of stars to identify in an image.
 
-        Defaults to 500. This limits how many detected stars we try to match
+        Defaults to 500. This limits how many detected stars are matched
         against a database. Identifying every single star in a dense area
         takes a lot of time and uses too much memory (RAM), which can crash
         the computer.

@@ -1,7 +1,7 @@
 """Main interface for managing and analyzing individual stars.
 
 This module provides the `StellarCatalog`, which is the primary tool for
-working with specific stars found in your images. You can use it to track
+working with specific stars found in the images. It can be used to track
 a star's brightness over time, analyze its spectrum, and manage its records
 in the database.
 """
@@ -86,7 +86,7 @@ class StellarCatalog:
     ) -> list[dict[str, Any]]:
         """Get a quick, lightweight summary of stars in the catalog.
 
-        If you need all the detailed data for a star, use `list_objects`
+        If all the detailed data for a star is needed, use `list_objects`
         instead. This function is specifically designed to be very fast by
         only grabbing basic info (like ID, name, and if it has spectra),
         which is perfect for building UI lists that need to load quickly.
@@ -280,7 +280,7 @@ class StellarCatalog:
         return new_obj
 
     def get_audit(self) -> dict[str, Any]:
-        """Get a summary of how much data we have in the stellar catalog.
+        """Get a summary of how much data is in the stellar catalog.
 
         Returns
         -------
@@ -305,16 +305,16 @@ class StellarCatalog:
     def save_all(self, objects: list[StellarObject], allow_empty: bool = False) -> str:
         """Save a complete list of stars, entirely replacing the old catalog.
 
-        Warning: This deletes any star that isn't in the new list you provide!
-        If you only want to update a few stars, use `update()` instead.
+        Warning: This deletes any star that isn't in the new list provided!
+        If only a few stars need to be updated, use `update()` instead.
 
         Parameters
         ----------
         objects : `list` [`StellarObject`]
             The full set of stellar objects to record.
         allow_empty : `bool`, optional
-            By default, we stop you from saving an empty list so you don't
-            accidentally delete the entire catalog. Pass `True` if you
+            By default, saving an empty list is stopped so the entire
+            catalog isn't accidentally deleted. Pass `True` if
             really intend to wipe the catalog clean.
 
         Returns

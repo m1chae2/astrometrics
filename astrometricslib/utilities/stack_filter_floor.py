@@ -28,29 +28,29 @@ def resolve_filter_wfwhm_with_floor(
     requested_filter_wfwhm: str | None,
     minimum_surviving_frames: int = DEFAULT_MINIMUM_SURVIVING_FRAMES,
 ) -> tuple[str | None, bool]:
-    """Make sure we don't throw away too many images when filtering.
+    """Make sure too many images aren't thrown away when filtering.
 
-    If we tell the software to only keep the top 80% sharpest images, but
-    we only have 4 images total, keeping 80% might leave us with too few
-    images to make a good stack. This function checks if our filter rule
+    If the software is told to only keep the top 80% sharpest images, but
+    there are only 4 images total, keeping 80% might leave too few
+    images to make a good stack. This function checks if the filter rule
     will leave us with at least a minimum number of frames. If not, it
     loosens the rule (e.g., from 80% to 90%, or turns it off completely)
-    until we have enough frames.
+    until there are enough frames.
 
     Parameters
     ----------
     num_lights : `int`
-        The total number of images we're starting with.
+        The total number of images starting with.
     requested_filter_wfwhm : `str` or `None`
-        The rule we want to use (like "80%").
+        The rule to use (like "80%").
     minimum_surviving_frames : `int`, optional
-        The absolute minimum number of images we need to keep.
+        The absolute minimum number of images needed to keep.
 
     Returns
     -------
     result : `tuple`
-        A pair containing the rule we should actually use, and a True/False
-        flag saying whether we had to loosen the original rule.
+        A pair containing the rule that should actually be used, and a
+        True/False flag saying whether the original rule was loosened.
     """
     if requested_filter_wfwhm is None:
         return None, False

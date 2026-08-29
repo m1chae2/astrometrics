@@ -73,8 +73,8 @@ class LightCurve(BaseModel):
 class StellarSessionMatch(BaseModel):
     """Tracks when a star was detected during a specific observing session.
 
-    If we observe a star on 5 different nights, it will have 5 of these records
-    combined into its final light curve.
+    If a star is observed on 5 different nights, it will have 5 of
+    these records combined into its final light curve.
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -130,7 +130,7 @@ class StellarObject(BaseModel):
     @computed_field(alias="hasSpectra")
     @property
     def has_spectra(self) -> bool:
-        """Check if we have measured this star's light spectrum."""
+        """Check if this star's light spectrum has been measured."""
         return bool(
             self.spectrum_data_processed
             or (self.spectra_history and len(self.spectra_history) > 0)
@@ -141,7 +141,7 @@ class StellarObject(BaseModel):
     @computed_field(alias="hasPhotometry")
     @property
     def has_photometry(self) -> bool:
-        """Check if we have tracked this star's brightness over time."""
+        """Check if this star's brightness has been tracked over time."""
         return bool(
             self.light_curve
             and (
@@ -244,7 +244,7 @@ class StellarObject(BaseModel):
 
 
 class VariableCandidate(BaseModel):
-    """A star we think might be changing brightness over time."""
+    """A star that might be changing brightness over time."""
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -257,7 +257,7 @@ class VariableCandidate(BaseModel):
 
 
 class AnalysisResult(BaseModel):
-    """A summary of what happened when we ran a processing job."""
+    """A summary of what happened when a processing job was run."""
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -303,7 +303,7 @@ class PlotData(BaseModel):
     intensities: list[float] = Field(default_factory=list, alias="intensities")
 
     def validate_lengths(self) -> PlotData:
-        """Make sure we have the same number of X and Y values.
+        """Make sure there is the same number of X and Y values.
 
         Returns
         -------

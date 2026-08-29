@@ -1,6 +1,6 @@
 """Main interface for managing targets in the catalog.
 
-`TargetCatalog` allows you to create, read, update, and delete targets.
+`TargetCatalog` allows creating, reading, updating, and deleting targets.
 It also handles target-specific actions like adding new image frames,
 re-indexing frames, and checking statistics. This class stores the active
 targets in memory and coordinates with lower-level task modules to perform
@@ -84,7 +84,7 @@ class TargetCatalog:
     def create(self, target_id: str) -> Target:
         """Create a Target, scan its directories, and register it.
 
-        This method is used when you want to track a new astronomical
+        This method is used to track a new astronomical
         object. It not only creates the database record but also scans
         the local filesystem directories matching the target's name to
         automatically associate any pre-existing raw image frames.
@@ -335,7 +335,7 @@ class TargetCatalog:
     def list_camera_names(self) -> dict[str, int]:
         """Find out which cameras were used to take the images in the catalog.
 
-        This is helpful when you need to run processing pipelines on images
+        This is helpful when processing pipelines need to be run on images
         taken by a specific camera, but aren't sure which camera names exist
         in the data yet.
 

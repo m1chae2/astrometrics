@@ -1,7 +1,7 @@
 """Target catalog operations.
 
 This module contains the functions that actually save, load, update, and
-delete targets (like galaxies or stars) in our catalog. It goes through
+delete targets (like galaxies or stars) in the catalog. It goes through
 `CatalogAccess` to reach the database, the same way every other part of
 the program does, so nothing here opens a database connection itself.
 """
@@ -13,17 +13,17 @@ from astrometricslib.models.target import Target
 
 
 def _mark_touched(api, target_id: str) -> None:  # ruff: ignore[missing-type-function-argument]
-    """Remember that we changed a target so we know to save it later.
+    """Remember that a target was changed so it can be saved later.
 
-    This prevents us from accidentally saving over someone else's changes
-    if we only modified one target but had a bunch loaded in memory.
+    This prevents accidentally saving over someone else's changes
+    if only one target was modified but a bunch were loaded in memory.
 
     Parameters
     ----------
     api : `Any`
-        The system that keeps track of our loaded targets.
+        The system that keeps track of loaded targets.
     target_id : `str`
-        The name of the target we just changed or looked at.
+        The name of the target just changed or looked at.
     """
     touched_ids = getattr(api, "_touched_target_ids", None)
     if touched_ids is None:
@@ -33,7 +33,7 @@ def _mark_touched(api, target_id: str) -> None:  # ruff: ignore[missing-type-fun
 
 
 def _find_target(targets: list[Any], target_id: str) -> Any | None:
-    """Look for a target in our list, even if the name isn't perfectly typed.
+    """Look for a target in the list, even if the name isn't perfectly typed.
 
     It tries an exact match first. If that fails, it tries replacing
     underscores with spaces, and then it tries ignoring spaces and capitals.
@@ -43,7 +43,7 @@ def _find_target(targets: list[Any], target_id: str) -> Any | None:
     targets : `list`
         The list of targets to look through.
     target_id : `str`
-        The name of the target we want to find.
+        The name of the target to find.
 
     Returns
     -------
@@ -85,12 +85,12 @@ def list_targets(api) -> list[Any]:  # ruff: ignore[missing-type-function-argume
     """Load and return all the targets from the database.
 
     This always reads fresh from the hard drive, so if another program
-    added a target, we will see it.
+    added a target, it will be seen.
 
     Parameters
     ----------
     api : `Any`
-        The system that manages our database connection.
+        The system that manages the database connection.
 
     Returns
     -------
@@ -106,14 +106,14 @@ def list_targets(api) -> list[Any]:  # ruff: ignore[missing-type-function-argume
 def get_target(api, target_id: str) -> Any | None:  # ruff: ignore[missing-type-function-argument]
     """Find a specific target by its name.
 
-    It looks in our already-loaded memory first so we don't wipe out
-    unsaved changes. If it's not there, it checks the hard drive for
+    It looks in already-loaded memory first so unsaved changes aren't wiped
+    out. If it's not there, it checks the hard drive for
     newly added targets.
 
     Parameters
     ----------
     api : `Any`
-        The system managing our loaded targets.
+        The system managing the loaded targets.
     target_id : `str`
         The name of the target to find.
 
@@ -142,11 +142,11 @@ def reindex_frames(
     catalog_access=None,  # ruff: ignore[missing-type-function-argument]
     refresh_headers: bool = False,
 ) -> None:
-    """Update our saved list of images from the actual files on disk.
+    """Update the saved list of images from the actual files on disk.
 
     This function adds any new image files it finds and updates the
     total exposure time. If `refresh_headers` is True, it will also
-    re-read the FITS header data for files we already know about.
+    re-read the FITS header data for files already known.
     """
     from astrometricslib.catalog_services import frame_scanning
 
@@ -174,7 +174,7 @@ def create_target(api, target_id: str, ra: str | None = None, dec: str | None = 
     Parameters
     ----------
     api : `Any`
-        The system that manages our targets.
+        The system that manages the targets.
     target_id : `str`
         The name for the new target.
     ra : `str`, optional
@@ -214,7 +214,7 @@ def update_target(api, target_id: str, updates: dict) -> Any | None:  # ruff: ig
     Parameters
     ----------
     api : `Any`
-        The system that manages our targets.
+        The system that manages the targets.
     target_id : `str`
         The name of the target to update.
     updates : `dict`
@@ -246,7 +246,7 @@ def delete_target(api, target_id: str) -> bool:  # ruff: ignore[missing-type-fun
     Parameters
     ----------
     api : `Any`
-        The system that manages our targets.
+        The system that manages the targets.
     target_id : `str`
         The name of the target to remove.
 
@@ -272,7 +272,7 @@ def refresh_target(api, target_id: str, prune_missing: bool = False) -> None:  #
     Parameters
     ----------
     api : `Any`
-        The system that manages our targets.
+        The system that manages the targets.
     target_id : `str`
         The name of the target to check.
     prune_missing : `bool`, optional
@@ -292,16 +292,16 @@ def refresh_target(api, target_id: str, prune_missing: bool = False) -> None:  #
 
 
 def save_targets(api) -> None:  # ruff: ignore[missing-type-function-argument]
-    """Save our changes back to the database.
+    """Save changes back to the database.
 
-    This is smart and only saves the specific targets we actually changed
-    or looked at. This stops us from accidentally deleting changes that
+    This is smart and only saves the specific targets actually changed
+    or looked at. This prevents accidentally deleting changes that
     other parts of the program might be making at the same time.
 
     Parameters
     ----------
     api : `Any`
-        The system that manages our targets.
+        The system that manages the targets.
     """
     touched_ids = getattr(api, "_touched_target_ids", None)
     if not touched_ids:
@@ -326,7 +326,7 @@ def add_data(api, target_id: str, image_file: Any, camera: str | None = None) ->
     Parameters
     ----------
     api : `Any`
-        The system that manages our targets.
+        The system that manages the targets.
     target_id : `str`
         The name of the target the image belongs to.
     image_file : `Any`

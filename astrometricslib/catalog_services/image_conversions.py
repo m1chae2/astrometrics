@@ -38,7 +38,7 @@ class ImageConverter:
         """Convert a FITS file to PNG bytes, tracking the brightness range.
 
         It uses a cache to remember recent images so they load faster
-        the next time you ask for them.
+        the next time they are requested.
 
         Returns
         -------
@@ -128,7 +128,7 @@ def get_frame(target: Any, iso: str, exposure: str, index: int = 0) -> str:
     Parameters
     ----------
     target : `Target`
-        The astronomical target we are looking at.
+        The astronomical target being looked at.
     iso : `str`
         The camera ISO or gain setting.
     exposure : `str`
@@ -382,7 +382,7 @@ def delete_images(
     paths : `list` of `str`
         The file paths of the images to delete.
     target_catalog : `TargetCatalog`, optional
-        The database containing our targets, to remove the image records.
+        The database containing the targets, to remove the image records.
     target_id : `str`, optional
         The specific target to remove the images from.
 

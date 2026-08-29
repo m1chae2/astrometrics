@@ -35,9 +35,9 @@ _CALIBRATION_KINDS: frozenset[str] = frozenset({"dark", "bias", "flat"})
 class QualityDiagnostics:
     """Tools for checking the quality of processed images.
 
-    This class lets you measure things like star sharpness (FWHM) and
+    This class is used to measure things like star sharpness (FWHM) and
     how much noisy data had to be thrown away during image stacking.
-    This helps you figure out if an observation session had good tracking
+    This helps to figure out if an observation session had good tracking
     and clear skies, or if the resulting data is poor quality.
     """
 
@@ -555,7 +555,7 @@ class ProcessingPipelines:
         """Limit how many analysis jobs can run at the same time.
 
         Processing images takes a lot of CPU power. This function ensures
-        we don't overwhelm the computer by limiting how many jobs can run
+        the computer is not overwhelmed by limiting how many jobs can run
         simultaneously.
 
         Returns
@@ -572,7 +572,7 @@ class ProcessingPipelines:
         """Limit how many image stacking jobs can run at the same time.
 
         Stacking images uses massive amounts of RAM and CPU. This function
-        ensures we don't crash the computer by limiting how many stacking
+        ensures the computer is not crashed by limiting how many stacking
         programs can run simultaneously.
 
         Returns

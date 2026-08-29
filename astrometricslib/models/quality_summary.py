@@ -1,4 +1,4 @@
-"""Data structures for tracking the quality and results of our pipelines.
+"""Data structures for tracking the quality and results of the pipelines.
 
 This module defines classes that record how well a processing job (like
 stacking
@@ -33,7 +33,7 @@ class StarIdentificationMetrics(BaseModel):
     """How many of the stars found in an image could be named.
 
     Some pipelines look up each star's position against a known catalog.
-    A star can end up in one of three buckets: matched to a name we
+    A star can end up in one of three buckets: matched to a known name,
     already know, seen but with no matching catalog entry, or not
     resolved at all. Astrometry, photometry, and spectroscopy all record
     this the same way, so it lives here once instead of three times.
@@ -109,7 +109,7 @@ class StackingPipelineQualityMetrics(BaseModel):
     timed_out: bool = False
     debayer_applied: bool | None = None
     # To align images, one picture is chosen as the "reference" that
-    # all others are matched against. We record which picture was chosen.
+    # all others are matched against. Which picture was chosen is recorded.
     registration_reference_frame: str | None = None
     registration_reference_star_count: int | None = None
 
@@ -148,12 +148,12 @@ class AstrometryPipelineQualityMetrics(StarIdentificationMetrics):
     simbad_matched_count: int
     astrometric_residual_rms_arcsec: float | None = None
 
-    # Tracks whether we had connection issues when trying to look up
+    # Tracks whether there were connection issues when trying to look up
     # star names in online databases (like SIMBAD or Gaia).
     remote_catalog_queries_attempted: int = 0
     remote_catalog_queries_failed: int = 0
     remote_catalog_circuit_breaker_tripped: bool = False
-    # The number of times we tried to calculate coordinates for this image.
+    # The number of times coordinate calculation was attempted for this image.
     plate_solve_attempts: int = 0
 
 

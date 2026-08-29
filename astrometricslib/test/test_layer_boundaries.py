@@ -1,10 +1,10 @@
 """Guards the one rule about reading and writing FITS files.
 
-A FITS file's pixel data does not always live where you would expect.
+A FITS file's pixel data does not always live where expected.
 It can sit in the primary header (HDU 0), or the primary header can be
 empty and the real data sits one HDU later (HDU 1). Get this wrong and a
-whole camera's worth of images silently reads as blank. We have already
-fixed this exact bug once, in `frame_scanning.py`, and it is one of the
+whole camera's worth of images silently reads as blank. This exact bug
+has already been fixed once, in `frame_scanning.py`, and it is one of the
 easiest bugs to reintroduce: any new call to `astropy.io.fits.open` (or
 `getheader`, `getdata`, `writeto`, `getval`, `setval`) written outside the
 handful of places that already account for the HDU0/HDU1 rule brings the

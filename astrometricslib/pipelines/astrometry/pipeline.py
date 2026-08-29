@@ -1,4 +1,4 @@
-"""The main tool that figures out what we're looking at.
+"""The main tool that figures out what is being looked at.
 
 This coordinates all the different steps needed to map out an image:
 finding the stars, running the math to figure out the exact coordinates,
@@ -31,7 +31,7 @@ class AstrometryPipeline:
         Parameters
         ----------
         app_config : `AppConfiguration`, optional
-            The settings to use. If you leave this blank, it will just
+            The settings to use. If left blank, it will just
             use the default system settings.
         """
         if app_config is None:
@@ -54,9 +54,10 @@ class AstrometryPipeline:
         Parameters
         ----------
         image_or_path : `AstrometricsImage` or `str`
-            The image we want to look at, or the file path to it.
+            The image to look at, or the file path to it.
         attempt_plate_solving : `bool`, optional
-            Whether we should try to figure out the map coordinates.
+            Whether an attempt should be made to figure out the map
+            coordinates.
         target_ra : `float`, optional
             A hint for the horizontal coordinate (Right Ascension).
         target_dec : `float`, optional
@@ -81,10 +82,10 @@ class AstrometryPipeline:
         Parameters
         ----------
         image_or_path : `AstrometricsImage` or `str`
-            The image we want to look at, or the file path to it.
+            The image to look at, or the file path to it.
         attempt_plate_solving : `bool`, optional
-            Whether we should try to figure out the exact map coordinates.
-            Default is True.
+            Whether an attempt should be made to figure out the exact
+            map coordinates. Default is True.
         target_ra : `float`, optional
             A hint for where the telescope was pointing horizontally.
         target_dec : `float`, optional
@@ -94,7 +95,7 @@ class AstrometryPipeline:
         -------
         analysis_context : `AnalysisContext`
             An object that holds the original image and all the stars
-            and data we found in it.
+            and data found in it.
         """
         if isinstance(image_or_path, str):
             logger.info(f"Loading image from path: {image_or_path}")
@@ -104,9 +105,9 @@ class AstrometryPipeline:
 
         logger.info("Processing image for stars...")
 
-        # If the user provides specific coordinates, we use those instead of
-        # looking in the image's FITS header. We convert any hour/minute/second
-        # strings into plain decimal degrees so we can do math on them.
+        # If specific coordinates are provided, they are used instead of
+        # looking in the image's FITS header. Any hour/minute/second
+        # strings are converted into plain decimal degrees for math.
         ra_hint = None
         dec_hint = None
         if target_ra is not None and target_dec is not None:
@@ -114,12 +115,10 @@ class AstrometryPipeline:
                 if isinstance(target_ra, str) and ("h" in target_ra or "°" in target_ra or " " in target_ra):
                     resolved_ra_deg = parse_coordinate_string(str(target_ra), is_ra=True)
                     resolved_dec_deg = parse_coordinate_string(str(target_dec), is_ra=False)
-                    # Sometimes an empty database field will default to 0h 0m
-                    # 0s.
-                    # We ignore exact zeros because it's almost certainly a
-                    # blank
-                    # default, not the user actually pointing at the 0,0
-                    # coordinate.
+                    # Sometimes an empty database field will default to
+                    # 0h 0m 0s. Exact zeros are ignored because they are
+                    # almost certainly a blank default, not an actual
+                    # pointing at the 0,0 coordinate.
                     if resolved_ra_deg != 0.0 or resolved_dec_deg != 0.0:  # ruff: ignore[float-equality-comparison] -- 0h0m0s placeholder sentinel, not measured
                         ra_hint = float(resolved_ra_deg)
                         dec_hint = float(resolved_dec_deg)
@@ -169,7 +168,7 @@ class AstrometryPipeline:
         # or by guessing from the file name if the header is missing.
         object_name = image.header.get("OBJECT")
         if not object_name:
-            # Look for specific names in the file path to help our test
+            # Look for specific names in the file path to help the test
             # scripts work.
             base_file = os.path.basename(image.path)
             if "M 13" in base_file or "M_13" in base_file:
@@ -192,7 +191,7 @@ class AstrometryPipeline:
 
                 # 3. Convert the object's real sky coordinates (from the
                 # database)
-                # into exact X/Y pixel coordinates on our image.
+                # into exact X/Y pixel coordinates on the image.
                 extraction_center = None
                 if wcs and target_coord:
                     try:
@@ -223,7 +222,7 @@ class AstrometryPipeline:
                     # one without astrometry needing to know how.
                     #
                     # Calculate how big that region should be by looking
-                    # at the object's actual size in the catalog and our
+                    # at the object's actual size in the catalog and the
                     # telescope's zoom level.
                     extraction_radius_px = 60  # Default fallback
                     if majaxis is not None and wcs:
@@ -244,7 +243,7 @@ class AstrometryPipeline:
                                 # This stops the
                                 # program from crashing or slowing down if the
                                 # catalog
-                                # gives us weird or incorrect size data.
+                                # gives weird or incorrect size data.
                                 extraction_radius_px = int(max(15, min(200, derived_radius)))
                                 logger.info(
                                     f"Derived extended extraction radius from SIMBAD ({majaxis} arcmin): "
@@ -263,7 +262,7 @@ class AstrometryPipeline:
 
         # Start downloading Gaia DR3 stars for this image's area in the
         # background.
-        # This speeds things up by saving the stars to our local database.
+        # This speeds things up by saving the stars to the local database.
         if wcs is not None and wcs.is_celestial:
             try:
                 from astropy.wcs.utils import proj_plane_pixel_scales

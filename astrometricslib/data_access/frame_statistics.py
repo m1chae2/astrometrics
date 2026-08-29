@@ -86,7 +86,7 @@ def measure_frame_input_quality(
 
     This checks things like sky background brightness and how many pixels
     are maxed out (saturated). This helps us throw out bad images before
-    we waste time trying to stack them. It updates the target object directly.
+    time is wasted trying to stack them. It updates the target object directly.
 
     Parameters
     ----------
@@ -147,10 +147,10 @@ def measure_frame_input_quality(
 
 
 def get_frame_stats_grouped(target: Any, calibration: Any, camera: str | None = None) -> list[dict[str, Any]]:
-    """Group image statistics and check if we have matching dark frames.
+    """Group image statistics and check if there are matching dark frames.
 
     This groups the images by filter, ISO, and exposure time. For each group,
-    it also checks the calibration library to see if we have dark frames
+    it also checks the calibration library to see if there are dark frames
     that match those exact settings.
 
     Parameters

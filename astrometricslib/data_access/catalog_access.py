@@ -33,9 +33,9 @@ logger = logging.getLogger(__name__)
 
 
 class FrameSelector(BaseModel):
-    """The fields that say which frames you mean.
+    """The fields that say which frames are meant.
 
-    These are the properties you would use to pick frames out of the
+    These are the properties used to pick frames out of the
     library by hand -- which target, which role, which camera -- so the
     code asking for data never has to know where that data is stored.
 
@@ -77,7 +77,7 @@ class FrameSelector(BaseModel):
 
 
 POSITION_ONLY_STAR_ID_PREFIX = "FIELD_J"
-"""Marks a star we know only by where it sits, with no catalog identity.
+"""Marks a star known only by where it sits, with no catalog identity.
 
 When plate solving finds a star that no catalog can name, the pipeline
 mints an id out of the star's own measured position (see Step 3 of
@@ -110,7 +110,7 @@ class StarSummary(BaseModel):
 class StarPosition(BaseModel):
     """Where one star sits on the sky, and which targets it belongs to.
 
-    Used when the only question is "what have we already recorded near
+    Used when the only question is "what has already been recorded near
     this spot?", which needs coordinates and an id and nothing else.
     """
 
@@ -138,7 +138,7 @@ def _split_target_ids(joined_target_ids: Any) -> list[str]:
 
 
 class AbstractCatalogAccess(ABC):
-    """The blueprint for how we load and save data."""
+    """The blueprint for how data is loaded and saved."""
 
     @abstractmethod
     def get(self, dataset_type: str, selector: dict[str, Any]) -> Any:
@@ -392,7 +392,7 @@ class CatalogAccess(AbstractCatalogAccess):
         Raises
         ------
         ValueError
-            If you ask for a data type it doesn't recognize.
+            If a data type it doesn't recognize is requested.
         """
         if dataset_type == "target_catalog":
             # Goes through local_database.load_targets rather than
@@ -434,7 +434,7 @@ class CatalogAccess(AbstractCatalogAccess):
         Raises
         ------
         ValueError
-            If you try to save a data type it doesn't support.
+            If an unsupported data type is being saved.
         """
         if dataset_type == "target_catalog":
             self._generic.put_all("target_catalog", obj)

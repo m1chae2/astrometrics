@@ -21,14 +21,14 @@ from astroquery.astrometry_net import AstrometryNet
 
 logger = logging.getLogger(__name__)
 
-# A list of network errors that are safe to retry. We only want to retry
+# A list of network errors that are safe to retry. Only retry
 # if the internet connection dropped or glitched. If the solver fails because
 # the image is genuinely unsolvable (like a picture of the moon), retrying
-# won't help, so we don't include those errors here.
+# won't help, so those errors are not included here.
 #
-# Note that we do NOT include `TimeoutError`. The solver library uses that
+# Note that `TimeoutError` is NOT included. The solver library uses that
 # error to say "I tried for a long time but couldn't solve it," not "the
-# internet disconnected." If we retried timeouts, we'd waste time on
+# internet disconnected." If timeouts were retried, time would be wasted on
 # impossible images.
 _TRANSIENT_NETWORK_ERROR_TYPES: tuple[type[BaseException], ...] = (
     ConnectionError,
@@ -39,7 +39,7 @@ _TRANSIENT_NETWORK_ERROR_TYPES: tuple[type[BaseException], ...] = (
 )
 
 # The maximum number of times to retry if the internet connection fails.
-# We stop at 3 so we don't get stuck forever if the website is actually down.
+# Stop at 3 so the process doesn't get stuck forever if the site is down.
 ONLINE_SOLVE_ATTEMPT_LIMIT = 3
 
 # The base number of seconds to wait before retrying a failed connection.
@@ -60,7 +60,7 @@ def get_plate_solve_attempt_count() -> int:
     Returns
     -------
     attempts : `int`
-        The number of tries, including times we had to retry because
+        The number of tries, including times it had to retry because
         the internet dropped.
     """
     return _plate_solve_attempts
@@ -75,8 +75,8 @@ def reset_plate_solve_statistics() -> None:
 def _is_transient_network_error(error: BaseException) -> bool:
     """Check if an error is just a temporary internet glitch.
 
-    We don't want to retry if the image is truly broken, but we DO want
-    to retry if the Wi-Fi just blinked off for a second. We dig through
+    Retry should not happen if the image is truly broken, but it SHOULD happen
+    to retry if the Wi-Fi just blinked off for a second. Dig through
     the error message to see what the root cause was.
 
     Parameters
@@ -87,7 +87,7 @@ def _is_transient_network_error(error: BaseException) -> bool:
     Returns
     -------
     is_transient : `bool`
-        True if it's a temporary internet glitch we should retry.
+        True if it's a temporary internet glitch that should be retried.
     """
     seen: set[int] = set()
     current: BaseException | None = error
@@ -121,7 +121,7 @@ def _call_with_transient_retry(
     solve_call : `Callable`
         The block of code that actually tries the internet solve.
     description : `str`
-        A name for this attempt so we can log it cleanly.
+        A name for this attempt so it can be logged cleanly.
 
     Returns
     -------
@@ -165,8 +165,8 @@ class PlateSolver:
         Parameters
         ----------
         api_key : `str`, optional
-            The password needed to use the online service. If we don't
-            have one, we just won't try the internet backup.
+            The password needed to use the online service. If there isn't
+            one, the internet backup won't be tried.
         """
         self.api_key = api_key
         self.astrometry_net = AstrometryNet()
@@ -183,7 +183,7 @@ class PlateSolver:
     ) -> fits.Header | None:
         """Try everything possible to figure out where the image is pointing.
 
-        We try three things in order:
+        Three things are tried in order:
         1. Run the solver locally on this computer (fastest).
         2. Send just the dots (stars) to the internet (saves bandwidth).
         3. Upload the whole giant image to the internet (last resort).
@@ -193,7 +193,7 @@ class PlateSolver:
         image_path : `str`, optional
             The path to the image file on the hard drive.
         sources : `list` [`dict`], optional
-            The list of stars we already found in the image.
+            The list of stars already found in the image.
         image_width : `int`, optional
             How wide the image is (needed for the "just dots" internet solve).
         image_height : `int`, optional
@@ -204,7 +204,7 @@ class PlateSolver:
         Returns
         -------
         header : `astropy.io.fits.Header` or `None`
-            The final map metadata, or None if we gave up.
+            The final map metadata, or None if the process gave up.
         """
         # astroquery.astrometry_net defaults verbose=True, which prints
         # progress dots and dumps the full source table to stdout. Silence
@@ -345,11 +345,11 @@ class PlateSolver:
         Parameters
         ----------
         command : `list` [`str`]
-            The exact terminal command we want to run.
+            The exact terminal command to run.
         working_directory : `str`
             The temporary folder where it can dump its math files.
         timeout : `int`
-            How long to let it think before we kill it.
+            How long to let it think before it is killed.
 
         Returns
         -------
@@ -381,7 +381,7 @@ class PlateSolver:
         Returns
         -------
         header : `astropy.io.fits.Header` or `None`
-            The map metadata if it worked, or None if we don't have an
+            The map metadata if it worked, or None if there isn't an
             API key or it failed.
         """
         if not self.api_key:
@@ -405,9 +405,9 @@ class PlateSolver:
             return None
 
         # The online solver at astrometry.net only accepts black-and-white (2D)
-        # images. If we send it a color (3D) image, it will crash.
+        # images. If a color (3D) image is sent, it will crash.
         #
-        # To fix this, we squash the color channels together by taking the
+        # To fix this, the color channels are squashed together by taking the
         # average. This turns it into a black-and-white image but keeps all
         # the starlight in the right place so the solver can still work.
         upload_path = image_path

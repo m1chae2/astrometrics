@@ -1,7 +1,7 @@
 """Data structures for tracking astronomical targets.
 
 This module defines the pure data classes (like Target and FrameRecord)
-used to store information about the objects you are photographing.
+used to store information about the objects being photographed.
 These classes only hold data; the actual work (stacking, analysis)
 happens elsewhere to keep the code organized and avoid import errors.
 """
@@ -36,7 +36,7 @@ __all__ = [
 
 
 class ImageType(StrEnum):
-    """Lists the different categories of images we can process."""
+    """Lists the different categories of images that can be processed."""
 
     STAR_FIELD = "star_field"
     TARGET_IMAGE = "target_image"
@@ -58,7 +58,7 @@ class FrameRecord(BaseModel):
 
     # Information about the equipment and sky conditions when the photo was
     # taken.
-    # We read these from the image file to help figure out why a picture
+    # These are read from the image file to help figure out why a picture
     # might be blurry or noisy later on.
     pier_side: str | None = Field(default=None, alias="pierSide")
     airmass: float | None = Field(default=None, alias="airmass")
@@ -66,7 +66,7 @@ class FrameRecord(BaseModel):
     azimuth_degrees: float | None = Field(default=None, alias="azimuthDegrees")
     pixel_scale_arcsec: float | None = Field(default=None, alias="pixelScaleArcsec")
     # The focal length (zoom level) of the telescope, in millimeters.
-    # We must record this per-picture because a user might photograph the
+    # This must be recorded per-picture because a user might photograph the
     # same target with two different telescopes over time, and those pictures
     # cannot be stacked together directly.
     focal_length_mm: float | None = Field(default=None, alias="focalLengthMm")
@@ -90,8 +90,8 @@ class FrameRecord(BaseModel):
     # hasn't been aligned or stacked yet.
     background_level: float | None = Field(default=None, alias="backgroundLevel")
     saturated_pixel_fraction: float | None = Field(default=None, alias="saturatedPixelFraction")
-    # Star sharpness measured directly by our code, rather than by Siril.
-    # You cannot directly compare this number to `registration_fwhm_x_px`.
+    # Star sharpness measured directly by the code, rather than by Siril.
+    # This number cannot be directly compared to `registration_fwhm_x_px`.
     measured_fwhm_px: float | None = Field(default=None, alias="measuredFwhmPx")
 
     @field_validator("filter", mode="before")
@@ -154,7 +154,7 @@ class StackConfigurationResult(BaseModel):
 class Target(BaseModel):
     """The main record for an astronomical target (like a galaxy or nebula).
 
-    This class only stores data. If you want to stack images or analyze
+    This class only stores data. If stacking images or analyzing
     the target, use the tools in the `TargetCatalog`.
     """
 

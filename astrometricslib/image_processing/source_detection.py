@@ -1,6 +1,6 @@
-"""SourceDetector: The shared tool we use to find stars in our photos.
+"""SourceDetector: The shared tool used to find stars in photos.
 
-We use this for basic target alignment, looking for asteroids, and
+This is used for basic target alignment, looking for asteroids, and
 finding the central star in spectroscopy.
 """
 
@@ -56,10 +56,10 @@ class SourceDetector:
         Parameters
         ----------
         fwhm : `float`, optional
-            How wide we expect a typical star to be across the middle,
+            How wide a typical star is expected to be across the middle,
             measured in pixels (default is 4.0).
         threshold_sigma : `float`, optional
-            How bright a dot needs to be before we believe it's a star.
+            How bright a dot needs to be before it is believed to be a star.
             This is measured as a multiple of the background noise
             (default is 5.0x the noise).
         """
@@ -73,14 +73,14 @@ class SourceDetector:
         ----------
         data : `numpy.ndarray`
             The actual pixels of the picture. If it's a color image (3D),
-            we squash it into black and white (2D) first.
+            it is squashed into black and white (2D) first.
         mask : `numpy.ndarray`, optional
-            An optional list of bad pixels we should ignore.
+            An optional list of bad pixels that should be ignored.
 
         Returns
         -------
         sources : `list` [`dict`]
-            A list of the stars we found, sorted from brightest to dimmest.
+            A list of the stars found, sorted from brightest to dimmest.
             Each star has coordinates (xcentroid, ycentroid) and a
             brightness value (flux).
         """
@@ -163,16 +163,16 @@ class SourceDetector:
         """Combine overlapping dots into a single star.
 
         If the math accidentally splits a large star into two dots, this
-        combines them back together. We take the average position and add
-        their brightnesses together.
+        combines them back together. The average position is taken and
+        their brightnesses are added together.
 
         Parameters
         ----------
         sources : `list` [`dict`]
-            The list of stars we found in the previous step.
+            The list of stars found in the previous step.
         separation_px : `float`, optional
-            How close two dots need to be (in pixels) before we assume
-            they are actually just one star. Default is 15.0 pixels.
+            How close two dots need to be (in pixels) before they are assumed
+            to actually just be one star. Default is 15.0 pixels.
 
         Returns
         -------

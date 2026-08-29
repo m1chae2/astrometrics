@@ -30,7 +30,7 @@ def measure_frame_background_level(path: str) -> float | None:
     Parameters
     ----------
     path : `str`
-        The file path to the image we want to check.
+        The file path to the image to check.
 
     Returns
     -------

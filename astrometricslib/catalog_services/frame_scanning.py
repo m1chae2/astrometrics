@@ -47,7 +47,7 @@ def _coerce_header_number(value: Any, cast: type) -> Any:
 
 
 def _populate_acquisition_conditions(record: FrameRecord, header: Any) -> None:
-    """Copy sky and equipment settings from the image file to our records.
+    """Copy sky and equipment settings from the image file to the records.
 
     This reads information like the telescope's position, camera temperature,
     and focus position. If some information is missing (since different cameras
@@ -56,7 +56,7 @@ def _populate_acquisition_conditions(record: FrameRecord, header: Any) -> None:
     Parameters
     ----------
     record : `FrameRecord`
-        The record we are filling with information.
+        The record being filled with information.
     header : `Any`
         The data header from the image file.
     """
@@ -101,7 +101,7 @@ def create_frame_record_from_fits(path: str, camera: str | None = None) -> Frame
     path : `str`
         The full file path to the image.
     camera : `str`, optional
-        The name of the camera, if we want to force it to a specific value.
+        The name of the camera, if it needs to be forced to a specific value.
 
     Returns
     -------
@@ -168,9 +168,9 @@ def create_frame_record_from_fits(path: str, camera: str | None = None) -> Frame
 def refresh_acquisition_conditions(frame: FrameRecord) -> bool:
     """Re-read the basic equipment settings from an image file.
 
-    If we add new things we want to track (like a new temperature sensor),
-    this lets us go back and read those new values from images we've
-    already found, without having to do all the heavy processing again.
+    If new things need to be tracked (like a new temperature sensor),
+    this allows going back and reading those new values from images already
+    found, without having to do all the heavy processing again.
 
     Parameters
     ----------
@@ -210,11 +210,11 @@ def scan_target_directory(target: Target, frames_root_path: str, refresh_headers
     Parameters
     ----------
     target : `Target`
-        The target (like a galaxy or nebula) we are looking for.
+        The target (like a galaxy or nebula) being looked for.
     frames_root_path : `str`
         The main folder where all images are kept.
     refresh_headers : `bool`, optional
-        If True, it will also re-read the settings of images it already knows
+        If True, it will also re-read the settings of images already known
         about.
     """
     variants = [

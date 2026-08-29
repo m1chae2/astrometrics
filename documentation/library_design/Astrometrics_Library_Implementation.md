@@ -4,6 +4,21 @@ While the theoretical algorithms and data flow are covered in the [Astrometrics 
 
 Due to the internal nature of these modules, they are deliberately hidden from the public API Reference. Developers wishing to review or modify the core algorithms should refer to the following directories within `astrometricslib/`. The layout is layered, bottom to top: `models/`/`utilities/` hold data shapes and configuration with no dependency on anything else in the library; `image_processing/` holds pixel-level primitives (FITS access, source detection, saturation checks); `drivers/` wraps every external tool (Siril, Astrometry.net, the SQLite catalog cache, calibration-frame storage); `data_access/` reads and writes the target/frame/stellar-object database; `catalog_services/` is where the public API reaches directly for plain reads and writes that are not an analysis run -- scanning a folder for FITS files, target CRUD, converting a FITS file to a PNG; `pipelines/` holds the five analysis columns plus the dispatcher and cross-column shared code; `api/` is the public gate everything above calls through.
 
+## Implementation Matrix
+
+The library is organized into five layers across five specialized scientific pipelines and a shared orchestration spine. The "Ratchet Rule" strictly forbids any layer from importing from a layer above it.
+
+| Layer | Stacking | Astrometry | Photometry | Spectroscopy | Asteroid Rec. | Shared by All |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **1. Public API**<br>*(calls L2)* | `run_stacking` | `run_astrometry` | `run_photometry` | `run_spectroscopy` | `recover_asteroids` | **Astrometrics facade**<br>`api/`<br>`mcp/` |
+| **2. Public Helpers**<br>*(calls L3)* | `stack_and_solve`<br>*(pre-stage)* | `analyze_target`<br>*(runner)* | `analyze_target`<br>*(runner)* | `analyze_target`<br>*(runner)* | `analyze_target`<br>*(runner)* | **orchestration/**<br>`dispatch`<br>`contract`<br>`runners` |
+| **3. Pipelines**<br>*(calls L4)* | **stacking/**<br>`stage`<br>`stack_quality`<br>`tracking_analysis` | **astrometry/**<br>`star_identifier`<br>`catalog_seeding`<br>`spectral_star_reg` | **photometry/**<br>`variability_anal.`<br>`ensemble normal.` | **spectroscopy/**<br>`spectrum_extract`<br>`optics_physics`<br>`calibration_tuner` | **asteroid_recovery/**<br>`detection`<br>`ephemeris` | **image_processing/**<br>**pipelines/shared/**<br>`frame_grouping`<br>`star_recording` |
+| **4. Driver Access**<br>*(exposed via L1)* | *(handed one by dispatch)* | `catalog_access` | `catalog_access` | `catalog_access` | *(skips L4/L5)* | **driver_access/**<br>`catalog_access`<br>`frame_scanning` |
+| **5. Drivers**<br>*(edge)* | `siril_interface` | `plate_solve_store` | `plate_solve_iface` | *(reaches through astrometry)* | *(none)* | **drivers/**<br>`logger`<br>`local_db` |
+| **Outside** | Siril (headless) | astrometry.net<br>Gaia, SIMBAD | astrometry.net | *(via astrometry)* | IMCCE SkyBoT | FITS on disk<br>SQLite |
+
+> [!NOTE]
+> **Shared Vocabulary:** Modules like `models/`, `enums.py`, `exceptions.py`, and `config_schema.py` contain pure data structures. They perform no I/O, contain no behavior, and import nothing from any layer. They may be safely imported by any module in the system.
 ## Core Processing Pipelines
 
 ### Stacking

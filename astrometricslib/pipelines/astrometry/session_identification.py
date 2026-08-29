@@ -23,25 +23,25 @@ logger = logging.getLogger(__name__)
 # to a real catalog identity (SIMBAD or Gaia) before a *reused* header WCS
 # is trusted. Below this, the header solution is discarded and the frame is
 # plate-solved fresh.
-# We use this number because tests show that a good alignment matches
+# This number is used because tests show that a good alignment matches
 # at least ~28% of stars, while a bad alignment matches less than ~6%.
 # Setting the limit to 0.10 (10%) easily separates the good from the bad,
-# ensuring we don't accidentally throw away a correct solution just
+# ensuring a correct solution isn't accidentally thrown away just
 # because the star field is sparse.
 MIN_CATALOG_MATCH_FRACTION_FOR_REUSED_WCS = 0.10
 
 # Below this many identified stars the match fraction is too noisy to judge
 # a WCS by -- a handful of stars can miss every catalog match by chance.
 # The value 20 is small enough to include very sparse star fields, but
-# large enough to give us a reliable percentage.
+# large enough to give a reliable percentage.
 MIN_STARS_TO_VERIFY_REUSED_WCS = 20
 
 
 def _write_wcs_to_header(path: str, wcs: WCS) -> None:
     """Save the calculated map data back into the image file.
 
-    This means the next time we load this image, we won't have to
-    waste time re-calculating everything.
+    This means the next time this image is loaded, time won't be wasted
+    re-calculating everything.
     """
     if not path or not os.path.exists(path):
         return
@@ -76,29 +76,29 @@ def resolve_frame_wcs(
     Parameters
     ----------
     image : `AstrometricsImage`
-        The image we want to map.
+        The image to map.
     star_identifier : `StarIdentifier`
         The tool that does the heavy lifting to identify stars.
     allow_solve : `bool`, optional
-        If False, we just check the file and give up if the map isn't
-        already there. We don't try to calculate it from scratch.
+        If False, just check the file and give up if the map isn't
+        already there. It won't try to calculate it from scratch.
     center_ra, center_dec : `float`, optional
         Hints about where the telescope was pointing.
     sources : `list` [`dict`], optional
-        A list of stars we already found in the image.
+        A list of stars already found in the image.
     write_back : `bool`, optional
-        Whether we should save our newly calculated map into the image file.
+        Whether the newly calculated map should be saved into the image file.
     ignore_existing_wcs : `bool`, optional
-        If True, we ignore any saved map and force it to calculate a new one.
+        If True, ignore any saved map and force it to calculate a new one.
 
     Returns
     -------
     wcs : `astropy.wcs.WCS` or `None`
         The finished map data, or None if it failed.
     reused_existing_header_wcs : `bool`
-        True if we were lazy and just used the saved map.
+        True if the saved map was used.
     solve_attempted : `bool`
-        True if we actually ran the complex math to calculate a new map.
+        True if the complex math was actually run to calculate a new map.
     """
     if not ignore_existing_wcs and image.wcs is not None and image.wcs.is_celestial:
         # NOTE: is_celestial is a *structural* check (does this WCS have
@@ -143,12 +143,12 @@ def resolve_frame_wcs(
 
 
 def _catalog_matched_count(stellar_objects: list[StellarObject]) -> int:
-    """Count how many stars we successfully looked up in the database.
+    """Count how many stars were successfully looked up in the database.
 
     Returns
     -------
     matched : `int`
-        The number of stars we positively identified.
+        The number of stars positively identified.
     """
     return sum(1 for star in stellar_objects if star.is_catalog_identified)
 
@@ -157,14 +157,14 @@ def _reused_wcs_looks_untrustworthy(stellar_objects: list[StellarObject]) -> boo
     """Check if the saved map in the image file is actually garbage.
 
     Sometimes an image has a saved map, but it's completely wrong.
-    We can tell because when we try to look up the stars using that map,
-    none of them match the real database.
+    This can be determined because when trying to look up the stars
+    using that map, none of them match the real database.
 
     Returns
     -------
     untrustworthy : `bool`
-        True if the saved map is so bad we need to throw it out and
-        recalculate it.
+        True if the saved map is so bad it needs to be thrown out and
+        recalculated.
     """
     if len(stellar_objects) < MIN_STARS_TO_VERIFY_REUSED_WCS:
         return False
@@ -205,16 +205,16 @@ def identify_session_stars(
     Parameters
     ----------
     reference_image : `AstrometricsImage`
-        The image we are analyzing.
+        The image being analyzed.
     star_identifier : `StarIdentifier`
         The tool that does the math and database lookups.
     center_ra, center_dec : `float`, optional
         Hints about where the telescope was pointing.
     max_detections : `int`, optional
-        If we find 5,000 stars, looking them all up might take forever.
-        This puts a cap on how many of the brightest stars we identify.
+        If 5,000 stars are found, looking them all up might take forever.
+        This puts a cap on how many of the brightest stars are identified.
     write_back : `bool`, optional
-        Whether to save our calculated map data back into the image file.
+        Whether to save the calculated map data back into the image file.
 
     Returns
     -------

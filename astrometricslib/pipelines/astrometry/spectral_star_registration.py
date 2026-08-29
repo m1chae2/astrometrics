@@ -2,12 +2,12 @@
 
 Spectroscopy images (the ones that spread star light into rainbows)
 can't be mapped directly because the stars aren't just dots anymore.
-So, we can't look up their names in the database.
+So, their names can't be looked up in the database.
 
-To fix this, we take a normal image of the same target where we DO
-know the names of all the stars, and we try to line up the two images.
-If we can figure out how the two images overlap, we can copy the star
-names from the normal image to the spectroscopy image.
+To fix this, a normal image of the same target where the names of all
+the stars are known is taken, and an attempt is made to line up the two images.
+If how the two images overlap can be figured out, the star
+names can be copied from the normal image to the spectroscopy image.
 """
 
 import logging
@@ -71,7 +71,7 @@ def _estimate_translation_offset(
     max_offset_px: float,
     bin_px: float,
 ) -> tuple[float, float] | None:
-    """Figure out how far we need to slide one image to match the other.
+    """Figure out how far one image needs to be slid to match the other.
 
     This assumes the telescope didn't rotate, it just bumped slightly
     left, right, up, or down.
@@ -79,8 +79,8 @@ def _estimate_translation_offset(
     Returns
     -------
     offset : `tuple[float, float]` or `None`
-        How many pixels to slide the image (X, Y), or None if we couldn't
-        find a clear match.
+        How many pixels to slide the image (X, Y), or None if a clear
+        match couldn't be found.
     """
     diffs = (target_points[np.newaxis, :, :] - source_points[:, np.newaxis, :]).reshape(-1, 2)
     within_window = (np.abs(diffs[:, 0]) <= max_offset_px) & (np.abs(diffs[:, 1]) <= max_offset_px)
@@ -113,13 +113,13 @@ def _apply_matches(
 ) -> int:
     """Once the images are lined up, copy the star names over.
 
-    We pair up stars that are physically very close to each other
-    after sliding the images, assuming they must be the same star.
+    Stars that are physically very close to each other after sliding
+    the images are paired up, assuming they must be the same star.
 
     Returns
     -------
     matched_count : `int`
-        How many stars we successfully copied names to.
+        How many stars successfully had their names copied.
     """
     from scipy.spatial import cKDTree
 
@@ -153,10 +153,10 @@ def identify_spectral_stars_via_registration(
 ) -> int:
     """Give names to the stars in the spectroscopy image.
 
-    We do this by lining up the spectroscopy image with a normal image
-    where we already know all the star names. We try just sliding the
-    images first, and if that doesn't work, we try rotating and scaling
-    them too.
+    This is done by lining up the spectroscopy image with a normal image
+    where all the star names are already known. Sliding the images is
+    tried first, and if that doesn't work, rotating and scaling them is
+    tried too.
 
     Parameters
     ----------
@@ -167,12 +167,12 @@ def identify_spectral_stars_via_registration(
     max_match_distance_px : `float`, optional
         How close the stars have to line up to be considered a match.
     max_translation_offset_px : `float`, optional
-        The furthest we will try to slide the images to make them fit.
+        The furthest the images will be slid to try to make them fit.
 
     Returns
     -------
     matched_count : `int`
-        How many unnamed stars we successfully gave names to.
+        How many unnamed stars were successfully given names.
     """
     spectral_positions = {id(obj): pos for obj in spectral_stellar_objects if (pos := _pixel_position(obj))}
     reference_positions = {id(obj): pos for obj in reference_stellar_objects if (pos := _pixel_position(obj))}

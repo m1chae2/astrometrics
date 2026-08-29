@@ -279,7 +279,7 @@ def test_query_gaia_region_pins_dr3_table_name(tmp_path, monkeypatch):  # ruff: 
 class TestGaiaCircuitBreaker:
     """Unit tests for the Gaia remote-query circuit breaker.
 
-    If the remote Gaia database is unresponsive, we stop trying after
+    If the remote Gaia database is unresponsive, trying is stopped after
     a few consecutive failures to save time. This should not affect
     local cache lookups.
     """

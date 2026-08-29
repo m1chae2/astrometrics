@@ -31,10 +31,10 @@ logger = logging.getLogger(__name__)
 
 _active_image_processing_instances: weakref.WeakSet = weakref.WeakSet()
 
-# We use a file lock to make sure only one Siril process runs at a time
+# A file lock is used to make sure only one Siril process runs at a time
 # across the whole computer. Siril uses a lot of CPU power, so running
 # multiple at once would overload the machine and cause tasks to time out.
-# We use a file lock in the temporary directory because different parts
+# A file lock is used in the temporary directory because different parts
 # of the program (like background workers and scripts) need to share it,
 # and they don't share memory.
 # Note: Only Siril itself is locked; other preparation steps still run
@@ -43,10 +43,10 @@ SIRIL_PROCESS_LOCK_PATH = os.path.join(tempfile.gettempdir(), "astrometricslib-s
 
 
 # Master calibration frames (bias, dark, flat) take a long time to build.
-# To save time, we cache them. This turns hours of processing into
+# To save time, they are cached. This turns hours of processing into
 # minutes by reusing masters that have already been built for the same
 # camera settings.
-# The cache checks the actual source files, so if you add or remove a
+# The cache checks the actual source files, so if a file is added or removed, a
 # calibration frame, it will automatically rebuild a new master.
 CALIBRATION_MASTER_CACHE_DIRECTORY_NAME = "MasterCache"
 
@@ -222,7 +222,7 @@ def siril_process_lock(
 ) -> Iterator[None]:
     """Hold one of a limited number of machine-wide Siril slots.
 
-    Siril is very demanding on the CPU. If we run too many instances at
+    Siril is very demanding on the CPU. If too many instances are run at
     once, the computer will slow down and tasks will fail. This function
     limits how many Siril tasks can run concurrently based on the
     `siril_concurrency` setting in the configuration file.
@@ -396,7 +396,7 @@ class ImageProcessing:
         Siril is launched via flatpak/bwrap, which sandboxes the
         actual `siril` binary as a descendant process. Signaling
         process.pid alone can miss that descendant entirely, leaving it
-        running indefinitely as an orphan. We send SIGTERM and SIGKILL to
+        running indefinitely as an orphan. SIGTERM and SIGKILL are sent to
         the process group and clean up lingering child processes associated
         with the work directory pipes.
         """

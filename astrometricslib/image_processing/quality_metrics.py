@@ -207,8 +207,8 @@ def measure_frame_input_quality(path: str, include_fwhm: bool = False) -> dict[s
 def measure_fwhm_from_data(data: np.ndarray, n_stars: int = FWHM_MEASUREMENT_STAR_COUNT) -> float | None:
     """Measure the average blurriness (FWHM) of stars from a loaded image.
 
-    This does the actual math for `measure_image_fwhm` so we don't have to
-    read the file again if we already have the image open in memory.
+    This does the actual math for `measure_image_fwhm` so the file doesn't
+    have to be read again if the image is already open in memory.
 
     Parameters
     ----------
@@ -284,7 +284,7 @@ def measure_rejected_fraction(stacked_path: str) -> float | None:
     """Calculate what percentage of pixels were thrown out during stacking.
 
     Siril creates a rejection map file when it stacks images. This reads that
-    map to tell us how much bad data (like satellites or clouds) had to be
+    map to tell how much bad data (like satellites or clouds) had to be
     removed to make the final image.
 
     Parameters

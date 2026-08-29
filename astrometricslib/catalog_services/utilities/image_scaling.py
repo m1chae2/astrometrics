@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class ImageScaler:
-    """Adjust an astronomy image's brightness and contrast so we can see it."""
+    """Adjust an astronomy image's brightness and contrast for viewing."""
 
     @staticmethod
     def scale_to_uint8(
@@ -25,7 +25,7 @@ class ImageScaler:
     ) -> tuple[np.ndarray, float, float]:
         """Convert raw image data into standard computer colors (0-255).
 
-        If you don't provide minimum and maximum brightness values, it
+        If minimum and maximum brightness values are not provided, it
         will guess them based on the darkest and lightest pixels.
 
         Returns

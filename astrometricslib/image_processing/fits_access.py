@@ -103,7 +103,7 @@ def frame_uses_color_filter_array(path: str) -> bool | None:
     A color camera uses a Bayer pattern (a specific arrangement of red,
     green, and blue filters) on its sensor. The FITS header usually
     indicates this with a 'BAYERPAT' keyword. If this keyword is missing,
-    we assume the image is from a monochrome (black-and-white) camera.
+    the image is assumed to be from a monochrome (black-and-white) camera.
 
     Parameters
     ----------

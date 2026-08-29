@@ -40,9 +40,9 @@ class MovingObjectTrack(BaseModel):
 
 
 class CascadeStage(StrEnum):
-    """Tracks how far a possible asteroid made it through our checking process.
+    """Tracks how far a possible asteroid made it through the checking process.
 
-    We run several tests to see if a moving dot is really an asteroid.
+    Several tests are run to see if a moving dot is really an asteroid.
     This shows if it passed all tests, or at which step it was rejected
     (e.g., it was just a dead pixel).
     """
@@ -59,10 +59,10 @@ class CascadeStage(StrEnum):
 
 
 class EphemerisMatch(BaseModel):
-    """A match between our detected object and a real, known asteroid.
+    """A match between the detected object and a real, known asteroid.
 
-    We compare our object's speed and location against databases (like SkyBoT)
-    that predict where known asteroids should be.
+    The object's speed and location are compared against databases
+    (like SkyBoT) that predict where known asteroids should be.
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -81,7 +81,7 @@ class EphemerisMatch(BaseModel):
 
 
 class AsteroidRecoveryCandidate(BaseModel):
-    """A potential asteroid we tracked across several pictures.
+    """A potential asteroid tracked across several pictures.
 
     It holds all the individual detections, its calculated path, and
     whether it matched any known asteroids.

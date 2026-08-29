@@ -1,7 +1,7 @@
 """Tools for looking at stars and calibrating the spectroscope.
 
-This contains the functions we need to search for a specific star in
-the database, pull its light spectrum data so we can graph it, and
+This contains the functions needed to search for a specific star in
+the database, pull its light spectrum data so it can be graphed, and
 run the automatic calibration tool.
 """
 
@@ -26,7 +26,7 @@ def get_plot_data(stellar_object) -> dict[str, list[float]]:  # ruff: ignore[mis
 
 
 def list_objects(analysis) -> list[Any]:  # ruff: ignore[missing-type-function-argument]
-    """Get a list of every single star we've ever analyzed.
+    """Get a list of every single star ever analyzed.
 
     Returns
     -------
@@ -43,15 +43,15 @@ def list_objects(analysis) -> list[Any]:  # ruff: ignore[missing-type-function-a
 def get_object(analysis, object_id: str) -> Any | None:  # ruff: ignore[missing-type-function-argument]
     """Find a specific star in the database by its name.
 
-    First we try to look it up exactly (which is very fast). If that
-    doesn't work, we load the whole list of stars and search through
-    it, ignoring spaces and capital letters, just in case the user
-    typed it slightly wrong.
+    First try to look it up exactly (which is very fast). If that
+    doesn't work, load the whole list of stars and search through
+    it, ignoring spaces and capital letters, in case it was
+    typed slightly wrong.
 
     Returns
     -------
     stellar_object : `Any` or `None`
-        The star if we found it, or None if it doesn't exist.
+        The star if it was found, or None if it doesn't exist.
     """
     get_by_ids = getattr(analysis.catalog_access, "get_by_ids", None)
     if callable(get_by_ids):
@@ -91,7 +91,7 @@ def get_plot_data_analysis(analysis, object_id: str):  # ruff: ignore[missing-ty
 
 
 def get_analysis_history(analysis, target_id: str) -> list[Any]:  # ruff: ignore[missing-type-function-argument]
-    """Get the history of everything we've done to a specific target.
+    """Get the history of everything done to a specific target.
 
     Returns
     -------

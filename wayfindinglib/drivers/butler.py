@@ -2,20 +2,20 @@
 
 Description: Follows the same Rubin Observatory Butler pattern
 astrometricslib uses. A thin get/put/exists dataset-type dispatcher over
-wayfindinglib/drivers/disk_interface.py. Deliberately its own minimal
+wayfindinglib/drivers/local_database.py. Deliberately its own minimal
 abstract base rather than subclassing astrometricslib's four-method
 AbstractCatalogAccess (astrometricslib/data_access/catalog_access.py) --
 get_local_path is a FITS-file-path concern that doesn't apply to a
 single SQLite-backed pydantic model.
 
-"observation_session" routes to `disk_interface.save_wayfinding_session`/
+"observation_session" routes to `local_database.save_wayfinding_session`/
 `get_wayfinding_session`, serving
 `wayfindinglib.models.session.observation_session.ObservationSession`
 (the three-function redesign's session, with its queue, telescope_id,
 camera_id, divergence records, etc.) under its own
 table, physically distinct from the deprecated single-target
 telemetry-only `observationlib.observation_session.ObservationSession`
-that `disk_interface`'s original `save_observation_session`/etc.
+that `local_database`'s original `save_observation_session`/etc.
 functions still serve -- those are untouched, since
 `observationlib.session_recorder.ObservationSessionRecorder` still calls
 them directly, bypassing this Butler entirely, until it is relocated
@@ -23,7 +23,7 @@ onto the new model. Every other dataset type -- observation_package,
 site_profile, enclosure, guider_calibration, focus_model,
 delegation_policy, safety_rule_set, commissioning_run -- is dispatched
 generically via `_GENERIC_DATASET_TYPES` to
-`disk_interface.save_model`/`load_models`/`get_model`, keyed by the `id`
+`local_database.save_model`/`load_models`/`get_model`, keyed by the `id`
 field in `selector`.
 """
 
@@ -32,7 +32,7 @@ from typing import Any
 
 from datastore.butler import Butler as _GenericButler
 from datastore.butler import DatasetSpec
-from wayfindinglib.drivers import disk_interface
+from wayfindinglib.drivers import local_database
 from wayfindinglib.models.equipment_and_site.calibration import CalibrationStats
 from wayfindinglib.models.equipment_and_site.enclosure import Enclosure
 from wayfindinglib.models.equipment_and_site.focus_model import FocusModel
@@ -121,10 +121,10 @@ class DiskButler(AbstractButler):
 
     @staticmethod
     def _build_generic_butler(app_config: Any) -> _GenericButler:
-        db_dir = str(disk_interface._wayfinding_library_path(app_config))
+        db_dir = str(local_database._wayfinding_library_path(app_config))
         specs: dict[str, DatasetSpec] = {
             "observation_session": DatasetSpec(
-                table_name=disk_interface._WAYFINDING_SESSION_TABLE_NAME,
+                table_name=local_database._WAYFINDING_SESSION_TABLE_NAME,
                 model_class=ObservationSession,
                 serializer=lambda obj: obj.model_dump(mode="json", by_alias=True),
             ),

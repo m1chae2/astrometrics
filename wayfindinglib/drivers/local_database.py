@@ -1,13 +1,12 @@
-"""Purpose: wayfindinglib's own disk recording, for ObservationSession.
+"""Purpose: wayfindinglib's own local database, for ObservationSession.
 
-Description: A physically separate SQLite database from astrometricslib's
+Description: A physically separate SQLite file from astrometricslib's
 astrometrics.db -- "separate recording per library" from the architecture
 discussion means a distinct database file and schema, not a distinct WAL
-connection helper. Reuses the generic, target-agnostic low-level primitives
-already in astrometricslib/drivers/disk_interface.py (WAL-mode connection,
-JSON encoding) rather than re-deriving them, since those carry no
-Target-specific logic and cross-library imports are already the norm
-throughout this codebase in both directions.
+connection helper. The plumbing for opening that file and encoding values
+as JSON comes from the shared `datastore.local_database` module, so both
+libraries get the same WAL settings and the same encoder without either
+one importing the other.
 """
 
 import configparser

@@ -4,7 +4,7 @@ Description: Defines and exposes low-level drivers including the INDI
 interface, its simulator, and the StellarMate remote-transfer driver.
 
 Resolution is lazy (module `__getattr__`, PEP 562) rather than a
-top-level import: `disk_interface.py` and `butler.py` are also
+top-level import: `local_database.py` and `butler.py` are also
 submodules of this package, needed by Observation Planning for
 recording alone, and eagerly importing INDI hardware modules here
 would mean importing either one transitively imports device drivers --

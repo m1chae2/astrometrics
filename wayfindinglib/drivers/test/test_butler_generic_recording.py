@@ -103,11 +103,11 @@ def test_generic_persistence_handles_bare_date_fields(isolated_butler):  # ruff:
     cover, since `isinstance(a_date, datetime)` is False (date is
     datetime's base class, not the reverse) and json.dumps would
     otherwise raise TypeError. Exercised directly against
-    disk_interface.save_model/get_model, the functions that actually
+    local_database.save_model/get_model, the functions that actually
     perform the mode="json" dump; ObservationSession itself is not a
     generic-registry dataset type (it keeps its own hand-written path).
     """
-    from wayfindinglib.drivers import disk_interface
+    from wayfindinglib.drivers import local_database
 
     session = ObservationSession(
         id="session1",
@@ -117,10 +117,10 @@ def test_generic_persistence_handles_bare_date_fields(isolated_butler):  # ruff:
         camera_id="c1",
         status=SessionStatus.PLANNED,
     )
-    disk_interface.save_model(
+    local_database.save_model(
         isolated_butler.config, "observation_sessions_generic_test", "session1", session
     )
-    loaded = disk_interface.get_model(
+    loaded = local_database.get_model(
         isolated_butler.config, "observation_sessions_generic_test", ObservationSession, "session1"
     )
     assert loaded is not None
@@ -180,7 +180,7 @@ def test_get_all_returns_every_persisted_observation_session(isolated_butler):  
     camera's `CalibrationStats` from every terminal session and
     therefore needs to enumerate all of them, not just look one up by
     id -- unlike the generic dataset types, "observation_session" has
-    its own hand-written storage path (`disk_interface
+    its own hand-written storage path (`local_database
     .load_wayfinding_sessions`), which `get_all` now also delegates to.
     """
     isolated_butler.put(

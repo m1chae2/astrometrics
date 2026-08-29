@@ -291,13 +291,13 @@ class CatalogAccess(AbstractCatalogAccess):
             If you ask for a data type it doesn't recognize.
         """
         if dataset_type == "target_catalog":
-            # Goes through disk_interface.load_targets rather than
+            # Goes through local_database.load_targets rather than
             # self._generic.get_all so the one-time legacy JSON-shard
             # migration it performs on first boot still runs; writes
             # still go through the shared generic Butler below.
-            from astrometricslib.drivers import disk_interface
+            from astrometricslib.drivers import local_database
 
-            return disk_interface.load_targets(self.config)
+            return local_database.load_targets(self.config)
         elif dataset_type == "stellar_catalog":
             # put()/merge_and_record() write through to (or
             # invalidate) self._stellar_catalog_cache specifically so

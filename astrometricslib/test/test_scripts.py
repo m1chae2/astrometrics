@@ -108,7 +108,7 @@ def test_script_reindex_all_targets(tmp_path):  # ruff: ignore[missing-type-func
 
     seed_script = textwrap.dedent(f"""
         from astrometricslib import FrameRecord, Target
-        from astrometricslib.drivers.disk_interface import save_target
+        from astrometricslib.drivers.local_database import save_target
 
         frame = FrameRecord(
             path={str(frame_path)!r},

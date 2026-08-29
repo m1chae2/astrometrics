@@ -1,8 +1,9 @@
-"""Domain-specific disk recording for the targets and stellar catalogs.
+"""The local SQLite database holding the target and stellar catalogs.
 
-The generic bits -- opening a SQLite file, encoding values as JSON --
-come from the shared `datastore.local_database` module. What lives here
-is everything that knows what a target or a stellar object actually is.
+This is where astrometrics.db is actually read and written. The generic
+plumbing -- opening the file, encoding values as JSON -- comes from the
+shared `datastore.local_database` module; what lives here is everything
+that knows what a target or a stellar object actually is.
 """
 
 import json

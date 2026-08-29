@@ -157,7 +157,7 @@ def test_disk_butler_list_projected_reads_stellar_catalog_columns(tmp_path):  # 
     """Verify list_projected reaches the real stellar_catalog registration.
 
     Regression coverage for the target_id-indexed browsing path added
-    alongside disk_interface's lightweight summary loader: confirms the
+    alongside local_database's lightweight summary loader: confirms the
     DatasetSpec registered in this module actually has target_id
     available to list_projected, and that it filters correctly.
     """

@@ -19,7 +19,7 @@ import sqlite3
 
 import pytest
 
-from astrometricslib.drivers import disk_interface
+from astrometricslib.drivers import local_database
 from astrometricslib.utilities.config_loader import AppConfiguration
 
 
@@ -77,17 +77,17 @@ def test_verify_and_upgrade_skips_the_full_pass_once_already_current(tmp_path, m
     # test in the same run can leave it True, which would make this
     # test's own first call a silent no-op against a completely
     # different config/db_path and never set user_version at all.
-    monkeypatch.setattr(disk_interface, "_database_verified", False)
-    disk_interface.verify_and_upgrade_database(config)
+    monkeypatch.setattr(local_database, "_database_verified", False)
+    local_database.verify_and_upgrade_database(config)
 
     conn = sqlite3.connect(db_path)
     version_after_first_call = conn.execute("PRAGMA user_version").fetchone()[0]
     conn.close()
-    assert version_after_first_call == disk_interface.STELLAR_OBJECT_DATA_VERSION
+    assert version_after_first_call == local_database.STELLAR_OBJECT_DATA_VERSION
 
     # Simulate a fresh process: the in-process guard resets, but the
     # on-disk version marker records.
-    monkeypatch.setattr(disk_interface, "_database_verified", False)
+    monkeypatch.setattr(local_database, "_database_verified", False)
 
     conn = sqlite3.connect(db_path)
     conn.execute("UPDATE stellar_objects SET data_json = 'not valid json' WHERE id = 'Polaris'")
@@ -97,7 +97,7 @@ def test_verify_and_upgrade_skips_the_full_pass_once_already_current(tmp_path, m
     # If the pass ran again, it would choke on the deliberately-broken
     # JSON above (or at least rewrite it); since the row is already at
     # the current version, it must be left untouched.
-    disk_interface.verify_and_upgrade_database(config)
+    local_database.verify_and_upgrade_database(config)
 
     conn = sqlite3.connect(db_path)
     row = conn.execute("SELECT data_json FROM stellar_objects WHERE id = 'Polaris'").fetchone()

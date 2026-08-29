@@ -107,7 +107,7 @@ def _seed_synthetic_test_library():  # ruff: ignore[missing-return-type-private-
 
     # 2. Seed SQLite database
     from astrometricslib import Target
-    from astrometricslib.drivers.disk_interface import save_target
+    from astrometricslib.drivers.local_database import save_target
     from astrometricslib.utilities.config_loader import AppConfiguration
 
     app_config = AppConfiguration()

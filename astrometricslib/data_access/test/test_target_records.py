@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 
 from astrometricslib import Astrometrics, Target
-from astrometricslib.drivers import disk_interface
+from astrometricslib.drivers import local_database
 from astrometricslib.utilities.config_loader import AppConfiguration
 
 
@@ -50,8 +50,8 @@ def test_sequential_fetch_mutate_save_persists_both_targets(tmp_path):  # ruff: 
     """
     config = _make_isolated_config(tmp_path)
 
-    disk_interface.save_target(app_config=config, target=Target(id="Target Alpha"))
-    disk_interface.save_target(app_config=config, target=Target(id="Target Beta"))
+    local_database.save_target(app_config=config, target=Target(id="Target Alpha"))
+    local_database.save_target(app_config=config, target=Target(id="Target Beta"))
 
     astrometrics = Astrometrics(app_config=config)
 
@@ -76,8 +76,8 @@ def test_get_target_by_id_does_not_reload_catalog_on_cache_hit(tmp_path, mocker)
     from astrometricslib.data_access.catalog_access import CatalogAccess
 
     config = _make_isolated_config(tmp_path)
-    disk_interface.save_target(app_config=config, target=Target(id="Target Alpha"))
-    disk_interface.save_target(app_config=config, target=Target(id="Target Beta"))
+    local_database.save_target(app_config=config, target=Target(id="Target Alpha"))
+    local_database.save_target(app_config=config, target=Target(id="Target Beta"))
 
     spy = mocker.spy(CatalogAccess, "get")
     astrometrics = Astrometrics(app_config=config)
@@ -98,7 +98,7 @@ def test_get_target_by_id_discovers_new_disk_record_without_dropping_cache(tmp_p
     so an unsaved edit to an already-cached target survives the lookup.
     """
     config = _make_isolated_config(tmp_path)
-    disk_interface.save_target(app_config=config, target=Target(id="Target Alpha"))
+    local_database.save_target(app_config=config, target=Target(id="Target Alpha"))
 
     astrometrics = Astrometrics(app_config=config)
     target_a = astrometrics.targets.get("Target Alpha")
@@ -106,7 +106,7 @@ def test_get_target_by_id_discovers_new_disk_record_without_dropping_cache(tmp_p
 
     # Created by a hypothetical concurrent process/write, not yet known to
     # this high-level interface.
-    disk_interface.save_target(app_config=config, target=Target(id="Target Gamma"))
+    local_database.save_target(app_config=config, target=Target(id="Target Gamma"))
 
     target_gamma = astrometrics.targets.get("Target Gamma")
     assert target_gamma is not None
@@ -128,8 +128,8 @@ def test_save_targets_does_not_clobber_untouched_targets_concurrent_edit(tmp_pat
     snapshot.
     """
     config = _make_isolated_config(tmp_path)
-    disk_interface.save_target(app_config=config, target=Target(id="Target Alpha"))
-    disk_interface.save_target(app_config=config, target=Target(id="Target Charlie", common_name="original"))
+    local_database.save_target(app_config=config, target=Target(id="Target Alpha"))
+    local_database.save_target(app_config=config, target=Target(id="Target Charlie", common_name="original"))
 
     astrometrics = Astrometrics(app_config=config)
 
@@ -139,7 +139,7 @@ def test_save_targets_does_not_clobber_untouched_targets_concurrent_edit(tmp_pat
     # A concurrent process updates Charlie directly on disk; this
     # high-level interface's in-memory copy of Charlie (loaded at
     # construction) is now stale.
-    disk_interface.save_target(
+    local_database.save_target(
         app_config=config, target=Target(id="Target Charlie", common_name="changed by other process")
     )
 
@@ -206,8 +206,8 @@ def test_concurrent_processes_do_not_clobber_each_others_target_edits(tmp_path):
         point within the deadline.
     """
     config = _make_isolated_config(tmp_path)
-    disk_interface.save_target(app_config=config, target=Target(id="Target Alpha"))
-    disk_interface.save_target(app_config=config, target=Target(id="Target Beta"))
+    local_database.save_target(app_config=config, target=Target(id="Target Alpha"))
+    local_database.save_target(app_config=config, target=Target(id="Target Beta"))
 
     config_path = tmp_path / "astrometrics.config"
     library_path = tmp_path / "library"

@@ -5,13 +5,13 @@ save/load round-trip against wayfindinglib's own SQLite database (separate
 from astrometricslib's), and find_quality_contributions_for_session's
 lookup against a Target's quality-summary data.
 
-Deliberately exercises `disk_interface.save_observation_session`/
+Deliberately exercises `local_database.save_observation_session`/
 `get_observation_session`/`load_observation_sessions` directly rather
 than through `DiskButler`: since the three-function redesign,
 `DiskButler`'s "observation_session" dataset type routes to
 `wayfindinglib.models.session.observation_session.ObservationSession` (a
 different, incompatible schema) under its own table --
-`disk_interface`'s functions used here remain correct and unchanged,
+`local_database`'s functions used here remain correct and unchanged,
 serving this module's deprecated `ObservationSession` model until
 `ObservationSessionRecorder` (the only other caller) is relocated onto
 the new model.
@@ -24,7 +24,7 @@ from astrometricslib import (
     Target,
     TargetSessionContribution,
 )
-from wayfindinglib.drivers import disk_interface
+from wayfindinglib.drivers import local_database
 from wayfindinglib.observationlib.observation_session import ObservationSession
 from wayfindinglib.observationlib.session_operations import find_quality_contributions_for_session
 
@@ -49,13 +49,13 @@ def test_observation_session_persistence_round_trip(tmp_path):  # ruff: ignore[m
         session = ObservationSession(
             id="M 13:2026-07-25", target_session_id="M 13:2026-07-25:100:10", created_at="2026-07-25T22:00:00"
         )
-        disk_interface.save_observation_session(config, session)
+        local_database.save_observation_session(config, session)
 
-        reloaded = disk_interface.get_observation_session(config, "M 13:2026-07-25")
+        reloaded = local_database.get_observation_session(config, "M 13:2026-07-25")
         assert reloaded is not None
         assert reloaded.target_session_id == "M 13:2026-07-25:100:10"
 
-        all_sessions = disk_interface.load_observation_sessions(config)
+        all_sessions = local_database.load_observation_sessions(config)
         assert len(all_sessions) == 1
     finally:
         if had_section:
@@ -82,7 +82,7 @@ def test_find_quality_contributions_for_session_matches_target_session_breakdown
             ),
         ),
     )
-    mocker.patch("astrometricslib.drivers.disk_interface.load_targets", return_value=[target])
+    mocker.patch("astrometricslib.drivers.local_database.load_targets", return_value=[target])
 
     contributions = find_quality_contributions_for_session("M 13:2026-07-25:100:10")
 
@@ -95,6 +95,6 @@ def test_find_quality_contributions_for_session_matches_target_session_breakdown
 def test_find_quality_contributions_for_session_returns_empty_when_no_match(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify no contributions returned when no summary references session."""
     target = Target(id="M 13")
-    mocker.patch("astrometricslib.drivers.disk_interface.load_targets", return_value=[target])
+    mocker.patch("astrometricslib.drivers.local_database.load_targets", return_value=[target])
 
     assert find_quality_contributions_for_session("nonexistent-session") == []

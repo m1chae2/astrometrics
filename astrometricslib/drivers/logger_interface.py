@@ -42,8 +42,8 @@ class LoggerInterface:
     def _connect(self, timeout: float = 30.0) -> sqlite3.Connection:
         """Open a connection to astrometrics_log.db with WAL mode.
 
-        Mirrors disk_interface._connect_db(): WAL lets readers and
-        writers proceed concurrently, and the busy timeout makes a
+        Mirrors `datastore.local_database.connect_db`: WAL lets readers
+        and writers proceed concurrently, and the busy timeout makes a
         concurrent writer retry briefly instead of immediately
         raising "database is locked" once multiple processes (not
         just threads within one process) write to this database at

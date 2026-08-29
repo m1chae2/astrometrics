@@ -62,7 +62,7 @@ Due to the internal nature of these modules, they are deliberately hidden from t
 - **Astrometry.net plate solving:** `plate_solve_interface.py`
 - **Local Gaia catalog cache:** `catalog_store.py`
 - **Calibration frame library (darks/bias/flats):** `calibration_library.py`
-- **Disk-backed target/stellar-object storage:** `disk_interface.py`
+- **Disk-backed target/stellar-object storage:** `local_database.py`
 - **Job logging:** `job_logging.py` and `logger_interface.py`
 
 ### Database Access

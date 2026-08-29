@@ -218,10 +218,10 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "datastore"]
 # queries, numeric coordinates formatted as floats -- neither can carry a
 # string value that escapes the query.
 "datastore/butler.py" = ["hardcoded-sql-expression"]
-"astrometricslib/drivers/disk_interface.py" = ["hardcoded-sql-expression"]
+"astrometricslib/drivers/local_database.py" = ["hardcoded-sql-expression"]
 "astrometricslib/drivers/logger_interface.py" = ["hardcoded-sql-expression"]
 "astrometricslib/pipelines/astrometry/star_identifier.py" = ["hardcoded-sql-expression"]
-"wayfindinglib/drivers/disk_interface.py" = ["hardcoded-sql-expression"]
+"wayfindinglib/drivers/local_database.py" = ["hardcoded-sql-expression"]
 "wayfindinglib/drivers/catalog/gaia_catalog_driver.py" = ["hardcoded-sql-expression"]
 "wayfindinglib/drivers/catalog/local_bright_star_catalog_driver.py" = ["hardcoded-sql-expression"]
 "__init__.py" = ["unused-import"] # re-exports for package public API

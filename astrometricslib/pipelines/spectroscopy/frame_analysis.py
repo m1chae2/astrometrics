@@ -25,7 +25,7 @@ def analyze_frame_spectroscopy(target: Target, path: str, limit: int = 10) -> tu
     if not any(f.path == path for f in target.frames):
         add_frame(target, path)
 
-    from astrometricslib.drivers import disk_interface
+    from astrometricslib.drivers import local_database
     from astrometricslib.pipelines.astrometry.pipeline import AstrometryPipeline
     from astrometricslib.pipelines.spectroscopy.pipeline import (
         SpectroscopyPipeline,
@@ -46,7 +46,7 @@ def analyze_frame_spectroscopy(target: Target, path: str, limit: int = 10) -> tu
         if target.id not in obj.target_ids:
             obj.target_ids.append(target.id)
 
-    existing = disk_interface.load_stellar_objects(config) or []
+    existing = local_database.load_stellar_objects(config) or []
     existing_map = {obj.id: obj for obj in existing}
 
     for obj in stellar_objects:
@@ -58,6 +58,6 @@ def analyze_frame_spectroscopy(target: Target, path: str, limit: int = 10) -> tu
         else:
             existing_map[obj.id] = obj
 
-    disk_interface.save_stellar_objects(config, list(existing_map.values()))
+    local_database.save_stellar_objects(config, list(existing_map.values()))
 
     return context, stellar_objects

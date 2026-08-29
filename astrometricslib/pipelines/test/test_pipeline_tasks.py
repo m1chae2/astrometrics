@@ -425,9 +425,9 @@ def test_target_analyze_frame_spectroscopy(tmp_path, mocker):  # ruff: ignore[mi
         assert len(target.frames) == 1
 
         # Verify recording
-        from astrometricslib.drivers import disk_interface
+        from astrometricslib.drivers import local_database
 
-        loaded = disk_interface.load_stellar_objects(config)
+        loaded = local_database.load_stellar_objects(config)
         assert len(loaded) == 1
         assert loaded[0].id == "Vega_Star"
         assert "Vega" in loaded[0].target_ids

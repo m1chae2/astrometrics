@@ -146,14 +146,14 @@ class Astrometrics:
         from astrometricslib.api.targets import TargetCatalog
         from astrometricslib.api.visualization import Visualization
         from astrometricslib.data_access.catalog_access import CatalogAccess
-        from astrometricslib.drivers import disk_interface
+        from astrometricslib.drivers import local_database
         from astrometricslib.utilities.config_loader import get_configuration
 
         self.config = config or app_config or get_configuration()
         self.catalog_access = catalog_access or CatalogAccess(self.config)
 
         # Run database upgrade verification on startup
-        disk_interface.verify_and_upgrade_database(self.config)
+        local_database.verify_and_upgrade_database(self.config)
 
         # Hydrate the stellar object registry via catalog_access; target state
         # is owned by TargetCatalog itself (see its docstring).

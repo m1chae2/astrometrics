@@ -62,7 +62,7 @@ Due to the internal nature of these modules, they are deliberately hidden from t
 - **Astrometry.net plate solving:** `plate_solve_interface.py`
 - **Local Gaia catalog cache:** `catalog_store.py`
 - **Calibration frame library (darks/bias/flats):** `calibration_library.py`
-- **Disk-backed target/stellar-object storage:** `local_database.py`
+- **One-time startup migration and schema backfill for the target/stellar catalogs:** `local_database.py`
 - **Job logging:** `job_logging.py` and `logger_interface.py`
 
 ### Database Access
@@ -71,6 +71,13 @@ Due to the internal nature of these modules, they are deliberately hidden from t
 - **Filesystem frame scanning:** `frame_scanning.py`
 - **Frame statistics:** `frame_statistics.py`
 - **Image format conversion and scaling for display:** `image_conversions.py` and `image_scaling.py`
+
+`catalog_access.py` records through a generic, keyed-record SQLite store shared with
+wayfindinglib, rather than executing SQL itself:
+*Located in:* `datastore/`
+- **Generic keyed-model storage (get/put/exists/merge, one table per dataset type):** `butler.py`
+- **SQLite connection setup and JSON encoding:** `local_database.py`
+- **Cross-process file locking for shared hardware/storage resources:** `process_locks.py`
 
 ## Batch Processing & Maintenance Scripts
 

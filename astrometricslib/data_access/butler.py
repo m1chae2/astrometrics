@@ -120,24 +120,6 @@ class AbstractButler(ABC):
         pass
 
     @abstractmethod
-    def query_coordinates(self, dataset_type: str, query: dict[str, Any]) -> list[dict[str, Any]]:
-        """Find data that matches a search pattern.
-
-        Parameters
-        ----------
-        dataset_type : `str`
-            What kind of data to search.
-        query : `dict`
-            The search pattern to match against.
-
-        Returns
-        -------
-        coordinates : `list` of `dict`
-            A list of coordinates for the data that matched the search.
-        """
-        pass
-
-    @abstractmethod
     def get_local_path(self, dataset_type: str, coordinate: dict[str, Any]) -> str:
         """Get the actual file path on the hard drive for this data.
 
@@ -492,24 +474,6 @@ class DiskButler(AbstractButler):
             return os.path.exists(path)
         except Exception:
             return False
-
-    def query_coordinates(self, dataset_type: str, query: dict[str, Any]) -> list[dict[str, Any]]:
-        """Return the search pattern unchanged (used for basic file routing).
-
-        Parameters
-        ----------
-        dataset_type : `str`
-            What kind of data.
-        query : `dict`
-            The search pattern.
-
-        Returns
-        -------
-        coordinates : `list` of `dict`
-            The exact same search pattern back in a list.
-        """
-        # Minimal query implementation for file routing
-        return [query]
 
     def get_local_path(self, dataset_type: str, coordinate: dict[str, Any]) -> str:
         """Figure out where a file should be saved on the hard drive.

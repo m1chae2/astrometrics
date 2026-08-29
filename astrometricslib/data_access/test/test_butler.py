@@ -53,16 +53,6 @@ class MockButler(AbstractButler):
         """
         return False
 
-    def query_coordinates(self, dataset_type: str, query: dict[str, Any]) -> list[dict[str, Any]]:
-        """Return the query unchanged, wrapped in a single-item list.
-
-        Returns
-        -------
-        list[dict[str, Any]]
-            A single-item list containing `query` unchanged.
-        """
-        return [query]
-
     def get_local_path(self, dataset_type: str, coordinate: dict[str, Any]) -> str:
         """Return a fixed placeholder path for any dataset type.
 

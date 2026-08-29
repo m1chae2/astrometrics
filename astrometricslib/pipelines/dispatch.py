@@ -11,7 +11,6 @@ import threading
 import time
 from typing import Any
 
-from astrometricslib.drivers import disk_interface
 from astrometricslib.drivers.job_logging import registered_job
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.frame_grouping import (
@@ -28,6 +27,7 @@ from astrometricslib.pipelines.shared.star_recording import (
     merge_spectroscopy_stellar_object,
 )
 from astrometricslib.utilities.enums import FilterType
+from datastore.process_locks import acquire_resource_slot
 
 # Re-exported so external callers and tests that import these by their
 # dispatch path keep working -- this module used to define them
@@ -578,7 +578,7 @@ def run_full_pipeline(
     # 3. Photometry Analysis
     analysis_concurrency = astrometrics.config.get_analysis_concurrency()
     print(f"[{target.id}] Running Photometry/Variability Analysis...")
-    with disk_interface.acquire_resource_slot(astrometrics.config, "analysis", analysis_concurrency):
+    with acquire_resource_slot(astrometrics.config, "analysis", analysis_concurrency):
         photometry_results = analyze_target(
             target,
             pipeline_type="photometry",
@@ -596,7 +596,7 @@ def run_full_pipeline(
     # SPEC stack)
     if spectral_frames:
         print(f"[{target.id}] Running Spectroscopy Analysis...")
-        with disk_interface.acquire_resource_slot(astrometrics.config, "analysis", analysis_concurrency):
+        with acquire_resource_slot(astrometrics.config, "analysis", analysis_concurrency):
             spectroscopy_results = analyze_target(
                 target, pipeline_type="spectroscopy", limit=10, catalog_access=astrometrics.catalog_access
             )

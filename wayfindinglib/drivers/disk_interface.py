@@ -17,8 +17,8 @@ import sqlite3
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from datastore.disk_interface import connect_db as _connect_db
-from datastore.disk_interface import safe_json_dumps as _safe_json_dumps
+from datastore.local_database import connect_db as _connect_db
+from datastore.local_database import safe_json_dumps as _safe_json_dumps
 
 if TYPE_CHECKING:
     from wayfindinglib.observationlib.observation_session import ObservationSession

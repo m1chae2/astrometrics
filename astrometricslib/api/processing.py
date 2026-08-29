@@ -564,11 +564,9 @@ class ProcessingPipelines:
             Enter to block until a slot is free, then hold it for the
             analysis run's duration.
         """
-        from astrometricslib.drivers import disk_interface
+        from datastore.process_locks import acquire_resource_slot
 
-        return disk_interface.acquire_resource_slot(
-            self._config, "analysis", self._config.get_analysis_concurrency()
-        )
+        return acquire_resource_slot(self._config, "analysis", self._config.get_analysis_concurrency())
 
     def acquire_stacking_slot(self) -> AbstractContextManager:
         """Limit how many image stacking jobs can run at the same time.
@@ -583,8 +581,6 @@ class ProcessingPipelines:
             Enter to block until a slot is free, then hold it for the
             stacking run's duration.
         """
-        from astrometricslib.drivers import disk_interface
+        from datastore.process_locks import acquire_resource_slot
 
-        return disk_interface.acquire_resource_slot(
-            self._config, "siril", self._config.get_siril_concurrency()
-        )
+        return acquire_resource_slot(self._config, "siril", self._config.get_siril_concurrency())

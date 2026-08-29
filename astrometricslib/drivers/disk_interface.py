@@ -1,11 +1,8 @@
 """Domain-specific disk recording for the targets and stellar catalogs.
 
-The generic SQLite connection, file-locking, and JSON-serialization
-primitives this module used to define now live in the shared
-`datastore` package; they're re-exported here under their historical
-names for backward compatibility with existing callers.
-
-
+The generic bits -- opening a SQLite file, encoding values as JSON --
+come from the shared `datastore.local_database` module. What lives here
+is everything that knows what a target or a stellar object actually is.
 """
 
 import json
@@ -14,21 +11,10 @@ import os
 import sqlite3
 from typing import Any
 
-from datastore.disk_interface import (
-    NumpyEncoder,
-    acquire_resource_slot,
-    connect_db,
-    file_lock,
-    safe_json_dumps,
-)
-
-_connect_db = connect_db
-_safe_json_dumps = safe_json_dumps
+from datastore.local_database import connect_db as _connect_db
+from datastore.local_database import safe_json_dumps as _safe_json_dumps
 
 __all__ = [
-    "NumpyEncoder",
-    "acquire_resource_slot",
-    "file_lock",
     "get_stellar_objects_by_ids",
     "get_targets_by_ids",
     "load_stellar_objects",

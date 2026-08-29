@@ -19,7 +19,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from datastore.disk_interface import connect_db, file_lock, safe_json_dumps
+from datastore.local_database import connect_db, safe_json_dumps
+from datastore.process_locks import file_lock
 
 logger = logging.getLogger(__name__)
 

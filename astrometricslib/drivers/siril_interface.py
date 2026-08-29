@@ -245,7 +245,7 @@ def siril_process_lock(
     `None`
         Control returns to the caller holding a slot.
     """
-    from datastore.disk_interface import acquire_resource_slot
+    from datastore.process_locks import acquire_resource_slot
 
     slot_count = max_concurrent_runs
     configuration = None

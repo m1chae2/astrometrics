@@ -15,9 +15,7 @@ from datastore.local_database import connect_db as _connect_db
 from datastore.local_database import safe_json_dumps as _safe_json_dumps
 
 __all__ = [
-    "load_stellar_objects",
     "load_targets",
-    "save_stellar_objects",
     "save_target",
     "verify_and_upgrade_database",
 ]
@@ -112,60 +110,6 @@ def load_targets(app_config=None) -> list[Any]:  # ruff: ignore[missing-type-fun
     return targets
 
 
-def load_stellar_objects(app_config=None) -> list[Any]:  # ruff: ignore[missing-type-function-argument]
-    """Load stellar objects from the SQLite database.
-
-    Parameters
-    ----------
-    app_config : `AppConfiguration`, optional
-        Application configuration object. If `None` (default), the
-        process-wide singleton from `get_configuration` is used.
-
-    Returns
-    -------
-    stellar_objects : `list` of `StellarObject`
-        List of loaded stellar objects.
-    """
-    from astrometricslib.models.stellar_source import StellarObject
-
-    if app_config is None:
-        from astrometricslib.utilities.config_loader import get_configuration
-
-        app_config = get_configuration()
-    objects = []
-    db_path = os.path.join(str(app_config.get_library_path()), "astrometrics.db")
-
-    try:
-        if os.path.exists(db_path):
-            conn = _connect_db(db_path)
-            cursor = conn.cursor()
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS stellar_objects (
-                    id TEXT PRIMARY KEY,
-                    target_id TEXT,
-                    name TEXT,
-                    ra REAL,
-                    dec REAL,
-                    magnitude REAL,
-                    data_json TEXT
-                )
-            """)
-            cursor.execute("SELECT data_json FROM stellar_objects")
-            rows = cursor.fetchall()
-            for row in rows:
-                data = json.loads(row["data_json"])
-                objects.append(StellarObject.model_validate(data))
-            conn.close()
-            if objects:
-                return objects
-        return objects
-
-    except Exception as e:
-        logger.error(f"Error loading stellar objects: {e}")
-
-    return []
-
-
 def save_target(app_config=None, target=None) -> str:  # ruff: ignore[missing-type-function-argument]
     """Save a single target to the SQLite database.
 
@@ -213,88 +157,6 @@ def save_target(app_config=None, target=None) -> str:  # ruff: ignore[missing-ty
     finally:
         conn.close()
     return db_path
-
-
-def save_stellar_objects(app_config=None, stellar_list=None) -> str:  # ruff: ignore[missing-type-function-argument]
-    """Save stellar objects to SQLite database.
-
-    Args:
-        app_config: Application configuration object.
-        stellar_list: List of stellar objects to record.
-
-    Returns
-    -------
-        str: Database path saved to.
-    """
-    if app_config is None:
-        from astrometricslib.utilities.config_loader import get_configuration
-
-        app_config = get_configuration()
-    db_path = os.path.join(str(app_config.get_library_path()), "astrometrics.db")
-
-    try:
-        conn = _connect_db(db_path)
-        cursor = conn.cursor()
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS stellar_objects (
-                id TEXT PRIMARY KEY,
-                target_id TEXT,
-                name TEXT,
-                ra REAL,
-                dec REAL,
-                magnitude REAL,
-                data_json TEXT
-            )
-        """)
-
-        cursor.execute("DELETE FROM stellar_objects")
-
-        for s in stellar_list:
-            data = s.serialize()
-            ra_val = None
-            if s.right_ascension not in ("", None):
-                try:
-                    ra_val = float(s.right_ascension)
-                except ValueError, TypeError:
-                    pass
-
-            dec_val = None
-            if s.declination not in ("", None):
-                try:
-                    dec_val = float(s.declination)
-                except ValueError, TypeError:
-                    pass
-
-            mag_val = None
-            mag_attr = getattr(s, "magnitude", None)
-            if mag_attr not in ("", None):
-                try:
-                    mag_val = float(mag_attr)
-                except ValueError, TypeError:
-                    pass
-
-            cursor.execute(
-                """
-                INSERT INTO stellar_objects (id, target_id, name, ra, dec, magnitude, data_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-                (
-                    s.id,
-                    ",".join(s.target_ids) if getattr(s, "target_ids", None) else None,
-                    s.name,
-                    ra_val,
-                    dec_val,
-                    mag_val,
-                    _safe_json_dumps(data),
-                ),
-            )
-
-        conn.commit()
-        conn.close()
-        return db_path
-    except Exception as e:
-        logger.error(f"Error saving stellar objects to SQLite: {e}")
-        raise e
 
 
 _database_verified = False

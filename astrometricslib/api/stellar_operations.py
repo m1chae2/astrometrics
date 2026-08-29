@@ -34,10 +34,8 @@ def list_objects(analysis) -> list[Any]:  # ruff: ignore[missing-type-function-a
         The full list of stars from the hard drive, or an empty list
         if something goes wrong.
     """
-    from astrometricslib.drivers import local_database
-
     try:
-        return local_database.load_stellar_objects(analysis._config)
+        return analysis.catalog_access.get("stellar_catalog", {})
     except Exception:
         return []
 

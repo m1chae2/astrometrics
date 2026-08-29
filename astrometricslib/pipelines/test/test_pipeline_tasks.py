@@ -448,12 +448,79 @@ def test_target_analyze_frame_spectroscopy(tmp_path, mocker):  # ruff: ignore[mi
         assert len(target.frames) == 1
 
         # Verify recording
-        from astrometricslib.drivers import local_database
+        from astrometricslib.data_access.catalog_access import CatalogAccess
 
-        loaded = local_database.load_stellar_objects(config)
+        loaded = CatalogAccess(config).get("stellar_catalog", {})
         assert len(loaded) == 1
         assert loaded[0].id == "Vega_Star"
         assert "Vega" in loaded[0].target_ids
+    finally:
+        config.update_config({"Image Library": {"path": original_path}})
+        config_loader._instance = original_instance
+
+
+def test_analyze_frame_spectroscopy_does_not_disturb_other_stars_indexed_columns(tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify an unrelated star's has_spectra survives the write.
+
+    Regression test: analyze_frame_spectroscopy used to load every
+    stellar object, merge this frame's stars in, and write the whole
+    table back out through a hand-rolled INSERT that never populated
+    has_spectra/has_photometry -- silently blanking those two indexed
+    columns for every other star in the catalog on every single-frame
+    analysis. Recording through CatalogAccess.merge_and_record touches
+    only this frame's own star ids, so an unrelated row's indexed
+    columns must come back unchanged.
+    """
+    from astrometricslib.utilities import config_loader
+
+    config = AppConfiguration()
+    original_instance = config_loader._instance
+    config_loader._instance = config
+
+    original_path = config.get_value("Image Library", "path", fallback="./libraryIndex")
+    config.update_config({"Image Library": {"path": str(tmp_path)}})
+
+    try:
+        from astrometricslib.data_access.catalog_access import CatalogAccess
+
+        catalog_access = CatalogAccess(config)
+        other_star = StellarObject(id="Unrelated_Star", name="Unrelated_Star")
+        other_star.spectrum_data_processed = {
+            "wavelengths_angstrom": [4000.0, 5000.0],
+            "intensities": [1.0, 2.0],
+        }
+        assert other_star.has_spectra
+        catalog_access.put([other_star], "stellar_catalog", {})
+
+        fit_path = tmp_path / "vega_spec.fits"
+        arr = np.zeros((10, 10), dtype=np.float32)
+        hdu = fits.PrimaryHDU(arr)
+        hdu.header["OBJECT"] = "Vega"
+        hdu.header["FILTER"] = "SPECTROSCOPY"
+        hdu.header["EXPTIME"] = 5.0
+        hdu.writeto(fit_path, overwrite=True)
+
+        from astrometricslib.image_processing.image import AstrometricsImage
+        from astrometricslib.pipelines.shared.analysis_context import AnalysisContext
+
+        img = AstrometricsImage(str(fit_path))
+        mock_context = AnalysisContext(image=img, stellar_objects=[StellarObject(id="Vega_Star")], wcs=None)
+
+        mocker.patch(
+            "astrometricslib.pipelines.astrometry.pipeline.AstrometryPipeline.prepare_image",
+            return_value=mock_context,
+        )
+        mocker.patch(
+            "astrometricslib.pipelines.spectroscopy.pipeline.SpectroscopyPipeline.process",
+            return_value=[StellarObject(id="Vega_Star")],
+        )
+
+        target = Target(id="Vega")
+        analyze_frame_spectroscopy(target, str(fit_path))
+
+        summaries = {s.id: s for s in catalog_access.list_star_summaries()}
+        assert summaries["Unrelated_Star"].has_spectra is True
+        assert "Vega_Star" in summaries
     finally:
         config.update_config({"Image Library": {"path": original_path}})
         config_loader._instance = original_instance

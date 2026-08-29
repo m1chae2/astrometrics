@@ -25,7 +25,7 @@ def analyze_frame_spectroscopy(target: Target, path: str, limit: int = 10) -> tu
     if not any(f.path == path for f in target.frames):
         add_frame(target, path)
 
-    from astrometricslib.drivers import local_database
+    from astrometricslib.data_access.catalog_access import CatalogAccess
     from astrometricslib.pipelines.astrometry.pipeline import AstrometryPipeline
     from astrometricslib.pipelines.spectroscopy.pipeline import (
         SpectroscopyPipeline,
@@ -46,18 +46,20 @@ def analyze_frame_spectroscopy(target: Target, path: str, limit: int = 10) -> tu
         if target.id not in obj.target_ids:
             obj.target_ids.append(target.id)
 
-    existing = local_database.load_stellar_objects(config) or []
-    existing_map = {obj.id: obj for obj in existing}
+    # Touches only the rows for this frame's own stars, gap-filling
+    # their target_ids and spectrum onto whatever was already recorded
+    # for that id rather than replacing the row outright -- a plain
+    # get()-then-put() here would race a concurrent writer, and a
+    # full-catalog replace would needlessly rewrite every other star.
+    def _merge_frame_star(existing: Any | None, updated: Any) -> Any:
+        if existing is None:
+            return updated
+        for target_id in updated.target_ids:
+            if target_id not in existing.target_ids:
+                existing.target_ids.append(target_id)
+        existing.spectrum_data_processed = updated.spectrum_data_processed
+        return existing
 
-    for obj in stellar_objects:
-        if obj.id in existing_map:
-            for tid in obj.target_ids:
-                if tid not in existing_map[obj.id].target_ids:
-                    existing_map[obj.id].target_ids.append(tid)
-            existing_map[obj.id].spectrum_data_processed = obj.spectrum_data_processed
-        else:
-            existing_map[obj.id] = obj
-
-    local_database.save_stellar_objects(config, list(existing_map.values()))
+    CatalogAccess(config).merge_and_record("stellar_catalog", stellar_objects, _merge_frame_star)
 
     return context, stellar_objects

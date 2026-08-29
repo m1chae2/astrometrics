@@ -5,7 +5,7 @@ session-grouped astrometricslib astrometrics -- the part most likely to
 silently misbehave given this orchestrator had no regression coverage
 at all until now. Coverage for the quality-summary aggregation itself
 now lives in
-astrometricslib/tasks/target_tasks/test/test_spectroscopy_batch_tasks.py,
+astrometricslib/pipelines/spectroscopy/test/test_spectroscopy_batch_tasks.py,
 alongside _attach_spectroscopy_quality_summary, since that's where the
 aggregation now runs.
 """

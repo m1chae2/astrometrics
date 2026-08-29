@@ -29,7 +29,7 @@ def build_calibration_advisory(
     Parameters
     ----------
     butler : `wayfindinglib.drivers.butler.DiskButler`
-        The persistence layer to read `CalibrationStats` from.
+        The storage layer to read `CalibrationStats` from.
     camera_id : `str`
         The camera whose inventory is checked.
     frame_type : `FrameType`

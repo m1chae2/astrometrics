@@ -5,7 +5,7 @@ Uses percentile-based intensity clipping.
 
 import numpy as np
 
-from astrometricslib.tasks.target_tasks.image_scaling_tasks import ImageScaler
+from astrometricslib.catalog_services.utilities.image_scaling import ImageScaler
 
 
 class ImageOverlay:

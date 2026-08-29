@@ -1,1 +1,1 @@
-"""Service layer: orchestration, persistence, and job/state tracking."""
+"""Service layer: orchestration, recording, and job/state tracking."""

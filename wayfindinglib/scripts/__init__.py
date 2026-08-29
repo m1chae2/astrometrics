@@ -1,0 +1,1 @@
+"""Wayfindinglib scripts package."""

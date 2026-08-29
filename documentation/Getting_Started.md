@@ -1,127 +1,73 @@
 # Getting Started
 
-*Version 1.1 · 2026-08-16 · Status: current*
+*Version 1.1 · 2026-08-22 · Status: current*
 
-## Abstract
+## 1. Introduction
 
-This guide introduces our two Python libraries with a quick demo. You will learn how to register an observation target, process its images, and plan when to observe it. Make sure you finish the setup in `Installation.md` first. We recommend reading this guide before looking at the API reference or the architecture papers.
+After completing the setup in `Installation.md`, you are ready to start using Astrometrics to process images and control your telescope.
 
-## Introduction
+Astrometrics is a desktop application designed to streamline astrophotography, photometry, and spectroscopy.
 
-This software uses two main libraries that do different jobs. The `astrometricslib` library handles your data, like observation targets, images, stars, and measurements. The `wayfindinglib` library controls the observatory, helping you operate hardware, plan sessions, and run tasks automatically. It builds on the data organized by `astrometricslib`.
+:::{note}
+**Observatory Control:** The application currently handles image processing and basic telescope control. Planning and running automated observing nights is recommended to be managed by a dedicated INDI-compatible client like [KStars/Ekos](https://docs.kde.org/trunk5/en/kstars/kstars/ekos.html).
+:::
 
+## 2. Hardware Requirements
 
-## Hardware Setup & Spectroscopy
+Astrometrics works with a wide variety of cameras and mounts using INDI. To capture images, you will need:
+1. **A Tracking Mount:** A motorized mount to keep the stars stationary during exposures.
+2. **A Camera:** A dedicated astronomy camera or DSLR.
+3. **Optional (for Spectroscopy):** A diffraction grating like the Star Analyser 100 or 200 to split starlight into a spectrum.
 
-Astrometrics is designed to be hardware-agnostic, meaning you can use almost any camera and mount combination via INDI. However, if you are specifically interested in capturing stellar spectra, you will need a diffraction grating or spectrograph in your optical train.
+## 3. Starting the Application
 
-To give you an idea of a proven, working setup, here is a reference hardware configuration used for spectroscopy with Astrometrics:
+To open the desktop application, run the following command in your terminal:
 
-* **Main Camera:** ZWO ASI 533MM Pro (Monochrome is excellent for spectroscopy, but color works too)
-* **Telescope:** Apertura 75Q
-* **Mount:** Sky-Watcher Star Adventurer GTi (A lightweight, portable tracking mount)
-* **Diffraction Grating:** Star Analyser 200 (The critical component for splitting starlight into a spectrum)
-* **Guiding:** ZWO ASI 120MC-S on an Apertura 32mm Guide Scope
-
-**What do you *actually* need?**
-You do **not** need the exact gear listed above. To get started with spectroscopy and Astrometrics, the minimum viable setup is:
-1. **A Tracking Mount:** Any form of motorized tracking mount (even a basic star tracker) to keep the star and its spectrum stationary during the exposure.
-2. **A Camera:** A dedicated astronomy camera or a DSLR.
-3. **A Diffraction Grating:** A filter-threaded grating like the **Star Analyser 100 or 200**. This is what actually creates the spectrum you will analyze in the software.
-
-## The two entry points
-
-Each library gives you a main object to work with. Everything else under these objects works behind the scenes and might change in future updates.
-
-```python
-from astrometricslib import Astrometrics
-from wayfindinglib import Wayfinder
-
-astrometrics = Astrometrics()
-wayfinder = Wayfinder()
+```bash
+./run_astrometrics.sh
 ```
 
-When you start `Astrometrics`, it opens your target library. `Wayfinder` groups together the three observatory tools shown in Section 4. It won't try to connect to any telescope hardware until you actually run a command, so it is perfectly safe to use on a normal computer.
+## 4. Core Concepts
 
-## Working with observation targets
+Before using the analysis tools in the desktop application, it is helpful to understand the primary concepts and processes Astrometrics uses:
 
-An observation target represents a specific area of the sky. It links together everything about that area: raw photos, calibration images, final stacked pictures, and the stars found in them.
+### Image Types
+- **Light Frames:** The actual pictures of your target (stars, galaxies, nebulas).
+- **Dark Frames:** Pictures taken with the camera covered. These capture thermal noise (heat) from the camera sensor so it can be subtracted from your light frames.
+- **Bias Frames:** Extremely short exposures taken with the camera covered. These capture the baseline electrical noise of the sensor.
+- **Flat Frames:** Pictures of an evenly illuminated surface (like a glowing panel or the twilight sky). These are used to correct vignetting (dark corners) and dust spots on your camera sensor.
 
-Here is how you register a new target and load it:
+### Image Processing
+- **Calibration:** The process of mathematically subtracting dark and bias frames, and dividing by flat frames, to clean the noise and artifacts from your light frames.
+- **Stacking:** The process of aligning and combining dozens or hundreds of light frames into a single master image. This dramatically reduces random noise and reveals faint details that are invisible in a single frame.
 
-```python
-target = astrometrics.targets.create("M 81")
-print(target.id)
+### Scientific Analysis
+- **Astrometry (Plate Solving):** The process of matching the stars in an image to a known star catalog. This determines the exact celestial coordinates the telescope is pointing at.
+- **Photometry:** The measurement of a star's brightness over time. This is used to create light curves to detect variable stars or exoplanet transits.
+- **Spectroscopy:** The process of splitting light into a spectrum using a diffraction grating. This allows for the identification of a star's chemical composition and temperature.
 
-same_target = astrometrics.targets.get("M 81")
-```
+:::{note}
+For a deep dive into the algorithms behind astrometry, photometry, and spectroscopy, see the [Image Processing Architecture](library_design/Astrometrics_Library_Architecture.md) document.
+:::
 
-Calling `list` on `astrometrics.targets` returns the whole library, which is the usual starting point for a survey of what has been collected:
+## 5. Next Steps
 
-```python
-for target in astrometrics.targets.list():
-    print(target.id, len(target.frames))
-```
+Once the application is running, refer to the guides in the [Desktop Application section](user_interface/index.rst) to learn how to:
+- Connect to your hardware and align your telescope mount.
+- Process and stack your captured images.
+- Analyze your data using the photometry and spectroscopy tools.
 
-For a given target object, explicit processing routines in the `processing` namespace are used to execute specific analysis tasks:
+## 6. Scripting & Data Analysis
 
-```python
-astrometrics.processing.run_photometry(
-    target,
-    filter_type="V",
-    use_astrometry_seed=True,
-)
-```
+The desktop application provides a visual interface for operations powered by two underlying Python libraries:
 
-The stellar objects detected for a target become available once astrometry or photometry has run:
+1. **[`astrometricslib`](api/astrometricslib.rst)**: Handles image processing, stacking, star detection, and spectroscopy.
+2. **[`wayfindinglib`](api/wayfindinglib.rst)**: Communicates with hardware to position the telescope and execute observation sessions.
 
-```python
-for stellar_object in astrometrics.stars.list_objects():
-    if "M 81" in stellar_object.target_ids:
-        print(stellar_object.id, stellar_object.magnitude)
-```
+Users can import these libraries directly to perform customized data processing, script automated telescope sequences, or run analysis pipelines.
 
-To interactively inspect the results, high-level multi-panel visualization tools are provided:
+A collection of [Jupyter Notebook tutorials](notebooks/index.md) demonstrates what complete data analysis workflows look like in practice. These notebooks, along with the complete [Python API reference](api/index.rst), are available on the main documentation page.
 
-```python
-astrometrics.visualization.plot_target_dashboard(target)
-```
-
-## Planning an observation
-
-The observatory library divides into three functions, summarized in Table 1.
-
-**Table 1.** Observatory functions and their responsibilities.
-
-| Function | Accessor | Responsibility |
-| :--- | :--- | :--- |
-| Observatory Control | `wayfinder.control` | Direct hardware operation and device state |
-| Observation Planning | `wayfinder.planning` | Target visibility, mosaics, and session authoring |
-| Observation Execution | `wayfinder.execution` | Running a planned session |
-
-Planning never contacts a device, so a full night may be planned with nothing connected. Collect the sources in a region of sky and rank them by how high they currently sit:
-
-```python
-stars = wayfinder.planning.get_sources(0.0, 0.0, 180.0, include_catalog=False)
-visibility = wayfinder.planning.get_visibility(stars)
-visibility.sort(key=lambda entry: entry["altitude"], reverse=True)
-```
-
-The search accepts a centre in degrees and a radius, so the call above covers the whole sky. Each returned entry carries the altitude and azimuth of one star at the requested time, which defaults to now. Passing `include_catalog=True` widens the search from the targets already in the local library to the online catalogs configured for the observatory.
-
-To slew the telescope to a target already registered in the local library, the observatory control function is used:
-
-```python
-slewed = wayfinder.control.slew_to_target("M 81")
-```
-
-Coordinates in degrees can be used instead when the target is not yet in the library:
-
-```python
-slewed = wayfinder.control.slew_to_coordinates(ra=148.888, dec=69.065)
-```
-
-
-## Next steps
-
-The tutorials under `notebooks/index` work through calibration and stacking, aperture and point-spread-function photometry, slitless spectroscopy calibration, and target planning as complete sequences. The architecture papers, `Astrometrics_Library_Architecture.md` and `Wayfinding_Library_Architecture.md`, explain the data models and the observatory design. The API reference documents every public class in both libraries.
+:::{note}
+The API and scripting documentation assumes familiarity with programming and astronomical concepts.
+:::

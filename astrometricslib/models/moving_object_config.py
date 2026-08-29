@@ -1,4 +1,4 @@
-"""Pydantic model and config-file loader for the moving-object pipeline."""
+"""Settings for finding moving objects like asteroids."""
 
 from typing import Any
 
@@ -6,64 +6,49 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class MovingObjectConfig(BaseModel):
-    """Configuration for the moving object detection/recovery pipeline.
+    """Settings used when searching for asteroids.
 
-    All numeric defaults below are initial estimates, not empirically
-    validated against real recovery attempts -- there is no real
-    moving-object run yet to validate them against. They follow
-    the same disclosure discipline as the stacking pipeline's own
-    not-yet-validated defaults (e.g. its minimum-frames floor).
+    These values control how strictly moving dots are checked to see if they
+    are real asteroids or just noise.
 
     Attributes
     ----------
     detection_fwhm_px : `float`
-        Expected point-source FWHM, in pixels, passed to
-        `SourceDetector` for per-frame morphology detection (cascade
-        step 1), by default 4.0.
+        How wide (in pixels) a star or asteroid is expected to be, by default
+        4.0.
     detection_threshold_sigma : `float`
-        Detection threshold as a multiple of background noise
-        standard deviation, passed to `SourceDetector`, by default
-        5.0.
+        How much brighter than the background noise an object must be to get
+        noticed, by default 5.0.
     min_frames_for_persistence : `int`
-        Minimum number of chained frame detections required for a
-        candidate to survive cascade step 2 (persistence); chains
-        shorter than this are treated as single-frame cosmic-ray
-        apparitions, by default 3.
+        How many pictures in a row the object must be seen in before it is
+        trust it's real, by default 3.
     pixel_match_tolerance_px : `float`
-        Below this native-pixel-coordinate spread across a
-        candidate's frame detections, cascade step 3 (reference-frame
-        test) treats the candidate as stationary in pixel space (a
-        hot pixel/CCD defect), by default 1.5.
+        If an object moves less than this many pixels, it's assumed to
+        be a dead camera pixel, by default 1.5.
     sky_match_tolerance_arcsec : `float`
-        Below this sky-coordinate spread across a candidate's frame
-        detections, cascade step 3 treats the candidate as stationary
-        in the sky (a missed star), by default 3.0.
+        If an object moves less than this much across the sky, it's assumed
+        it's
+        just a normal star, by default 3.0.
     rate_min_arcsec_per_hour : `float`
-        Minimum total sky-motion rate for cascade step 4
-        (rate/linearity) to treat a candidate as a plausible mover
-        rather than noise, by default 1.0.
+        The slowest an object can move and still be considered an asteroid, by
+        default 1.0.
     rate_max_arcsec_per_hour : `float`
-        Maximum total sky-motion rate for cascade step 4 to treat a
-        candidate as a plausible slow/bright-asteroid mover rather
-        than a fast-moving object out of this pipeline's recovery
-        scope, by default 300.0.
+        The fastest an object can move. Anything faster is probably a
+        satellite, by default 300.0.
     rate_linearity_r_squared_min : `float`
-        Minimum R² (each sky axis fit independently, the lower of the
-        two used) for cascade step 4 to treat a candidate's motion as
-        sufficiently linear to be a real mover, by default 0.98.
+        How perfectly straight the object's path must be (1.0 is perfectly
+        straight), by default 0.98.
     ephemeris_cross_match_radius_arcsec : `float`
-        Maximum angular separation between a candidate's mean sky
-        position and a queried ephemeris position for cascade step 5
-        to treat them as the same body, by default 10.0.
+        How close the object must be to a known asteroid's predicted
+        position
+        to count as a match, by default 10.0.
     ephemeris_maximum_visual_magnitude : `float`
-        Maximum (faintest) visual magnitude included in the ephemeris
-        cross-match query, reflecting this pipeline's "bright, known
-        body recovery" goal rather than faint-object discovery, by
-        default 16.0.
+        The faintest known asteroids to bother checking against, by default
+        16.0.
     mpc_observatory_code : `str`
-        IAU observatory code used for topocentric ephemeris queries;
-        the geocentric default (``"500"``) is used when the observing
-        site has no registered code, by default ``"500"``.
+        The official code for where the telescope is located. "500" means
+        the
+        center of the Earth, by default "500".
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -81,45 +66,37 @@ class MovingObjectConfig(BaseModel):
     mpc_observatory_code: str = Field(default="500", alias="mpcObservatoryCode")
 
     def with_overrides(self, **kwargs) -> MovingObjectConfig:  # ruff: ignore[missing-type-kwargs]
-        """Return a copy of this config with the given fields overridden.
+        """Make a copy of these settings, changing specific values if needed.
 
         Parameters
         ----------
         **kwargs
-            Field names (by attribute name, not alias) and their
-            override values.
+            The setting names and their new values.
 
         Returns
         -------
         overridden_config : `MovingObjectConfig`
-            A new config instance with the requested fields replaced.
+            A new settings object with your changes applied.
         """
         return self.model_copy(update=kwargs)
 
 
 class MovingObjectConfigLoader:
-    """Load `MovingObjectConfig` from the application configuration."""
+    """Reads moving object settings from the main config file."""
 
     @staticmethod
     def load_moving_object_config(app_config: Any | None = None) -> MovingObjectConfig:
-        """Load the moving-object pipeline's configuration.
-
-        Reads values from the ``[Processing.MovingObject]`` or fallback
-        ``[Processing.AsteroidRecovery]`` config section.
+        """Load settings for finding asteroids.
 
         Parameters
         ----------
         app_config : `Any`, optional
-            The loaded application configuration object providing a
-            `get_value` accessor, by default `None`, in which case
-            the system configuration is loaded automatically via
-            `get_configuration`.
+            The main config object. If None, it loads it automatically.
 
         Returns
         -------
         moving_object_config : `MovingObjectConfig`
-            The resolved configuration, with defaults applied for any
-            unset value.
+            The loaded settings, using defaults for anything missing.
         """
         if app_config is None:
             from astrometricslib.utilities.config_loader import get_configuration

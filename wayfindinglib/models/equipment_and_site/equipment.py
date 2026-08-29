@@ -190,7 +190,7 @@ class EquipmentConfiguration(BaseModel):
     """A resolved active telescope/camera pairing with derived geometry.
 
     Constructed from an `EquipmentCatalog`'s active entries rather than
-    persisted independently, so there is exactly one place activeness is
+    recorded independently, so there is exactly one place activeness is
     recorded (`Wayfinding_Library_Architecture.md` §2.2.2).
     """
 

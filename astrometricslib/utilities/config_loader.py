@@ -1,6 +1,8 @@
 """Load, save, and expose access to the application configuration."""
 
 import configparser
+import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -48,12 +50,12 @@ class AppConfiguration:
         """
         import os
 
-        env_path = os.getenv("ASTROMETRICS_CONFIG_PATH")
+        env_path = os.getenv("ASTROMETRICS_CONFIG_PATH") or os.getenv("ASTROMETRICS_CONFIG")
         if env_path:
             p = Path(env_path)
             if p.is_file():
                 return p
-            # If specified but doesn't exist yet, we still default to it so
+            # If specified but doesn't exist yet, it is still defaulted to so
             # it gets created there on save
             return p
 
@@ -74,22 +76,26 @@ class AppConfiguration:
         # Default to primary astrometrics folder if not found
         return candidates[0]
 
-    def save_configuration(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
-        """Save the current config to the resolved astrometrics.
+    def save_configuration(self) -> None:
+        """Save the current config to the resolved astrometrics config file."""
+        import os
 
-        config file.
-        """
         path = self.config_file_path or self._find_config_file()
+        if os.getenv("ASTROMETRICS_TESTING") == "1" and not (
+            os.getenv("ASTROMETRICS_CONFIG_PATH") or os.getenv("ASTROMETRICS_CONFIG")
+        ):
+            # Guard against writing to repository production config
+            # during testing.
+            return
         with open(path, "w", encoding="utf-8") as configfile:
             self.app_config.write(configfile)
 
-    def _populate_defaults(self):  # ruff: ignore[missing-return-type-private-function]
+    def _populate_defaults(self) -> None:
         """Populate the config with sensible defaults if it's empty."""
         defaults = {
-            "Library": {
-                "path": "libraryIndex",
-                "frames_path": "libraryIndex/frames",
-                "siril_executable": "siril",
+            "Image Library": {
+                "path": "./libraryIndex",
+                "frames_path": "./libraryIndex/frames",
             },
             "Observatory.Telescope": {
                 "hostname": "localhost",
@@ -112,6 +118,10 @@ class AppConfiguration:
                 "generate_rejmap": "true",
                 "background_homogeneity_check_enabled": "true",
             },
+            # 500; see get_maximum_identified_stars for why this isn't 0
+            # (unlimited) despite that having been this setting's first
+            # default.
+            "Processing.Astrometry": {"maximum_identified_stars": "500"},
         }
         for section, values in defaults.items():
             if section not in self.app_config:
@@ -184,8 +194,9 @@ class AppConfiguration:
         sweeps against M 81, M 13, and NGC 2403 found stacked-image FWHM
         indistinguishable between sigma=2.5 and sigma=3.0, so the lower,
         frame-count-derived Chauvenet sigma (see
-        targetlib/rejection_thresholds.py) costs no measurable sharpness
-        while rejecting a more statistically-justified fraction of pixels.
+        utilities/rejection_thresholds.py) costs no measurable
+        sharpness while rejecting a more statistically-justified fraction of
+        pixels.
         "fixed" falls back to get_stack_rejection_sigma()'s configured
         constant for callers that want the old fixed-sigma behavior.
 
@@ -274,6 +285,31 @@ class AppConfiguration:
         """
         val = self.get_value("Processing.Siril", "background_homogeneity_check_enabled", fallback="true")
         return str(val).lower() == "true"
+
+    def get_maximum_identified_stars(self) -> int | None:
+        """Return the maximum number of stars to identify in an image.
+
+        Defaults to 500. This limits how many detected stars are matched
+        against a database. Identifying every single star in a dense area
+        takes a lot of time and uses too much memory (RAM), which can crash
+        the computer.
+
+        Limiting it to the 500 brightest stars gives us plenty of data for
+        tracking and analysis without overloading the system. A user who
+        has enough memory and wants to find every single star can change
+        this setting to 0 (unlimited).
+
+        Returns
+        -------
+        limit : int or None
+            The maximum number of stars to identify. 0 means unlimited.
+        """
+        val = self.get_value("Processing.Astrometry", "maximum_identified_stars", fallback="500")
+        try:
+            maximum = int(str(val).strip())
+        except TypeError, ValueError:
+            return None
+        return maximum if maximum > 0 else None
 
     def get_auto_open_siril_gui(self) -> bool:
         """Return whether Siril GUI should be opened when stacking finishes.
@@ -400,6 +436,49 @@ class AppConfiguration:
         """
         val = self._get_with_fallback("Observatory.Telescope", "Telescope", "focal_length_mm", fallback="0.0")
         return float(val)
+
+    def get_primary_focal_length_mm(self) -> float | None:
+        """Return the focal length of the observer's primary optic, in mm.
+
+        A library may hold frames from several optics -- this one holds
+        1,596 at 300mm and 1,055 at 405mm -- and each needs its own
+        stack, since blending scales that differ by 1.35x produces an
+        image with no single pixel scale. This value decides which of
+        those stacks a target's `stacked_image` points at by default.
+
+        Reads ``[Observatory.Telescope] focal_length_mm``, i.e. the optic
+        already described as the observatory's own.
+
+        Returns
+        -------
+        focal_length_mm : `float` or `None`
+            The configured primary focal length, or `None` when it is
+            unset or zero, in which case callers fall back to whichever
+            configuration has the most frames.
+        """
+        focal_length = self.get_focal_length_mm()
+        return focal_length if focal_length and focal_length > 0 else None
+
+    def get_primary_camera_name(self) -> str | None:
+        """Return the observer's primary camera name, if one is configured.
+
+        Used with `get_primary_focal_length_mm` to decide which of a
+        target's stacks its `stacked_image` points at. Camera alone is
+        not enough -- one camera used through two optics produces two
+        stacks that must not be conflated -- and focal length alone is
+        not either, since two cameras can share a focal length.
+
+        Returns
+        -------
+        camera_name : `str` or `None`
+            The configured ``default_primary_camera``, or `None` when
+            unset.
+        """
+        camera_name = self._get_with_fallback(
+            "Observatory.Camera", "Camera", "default_primary_camera", fallback=""
+        )
+        camera_name = (camera_name or "").strip()
+        return camera_name or None
 
     def get_focal_ratio(self) -> float:
         """Return the telescope focal ratio from the configuration.
@@ -568,8 +647,6 @@ class AppConfiguration:
     def get_min_altitude(self) -> float:
         """Return the minimum allowed altitude for telescope slews.
 
-        REQ: OBS-1.1
-
         Returns
         -------
         min_altitude : `float`
@@ -582,8 +659,6 @@ class AppConfiguration:
 
     def get_max_altitude(self) -> float:
         """Return the maximum allowed altitude for telescope slews.
-
-        REQ: OBS-1.1
 
         Returns
         -------
@@ -613,6 +688,22 @@ class AppConfiguration:
         siril_concurrency : `int`
             Maximum number of concurrent Siril stacking processes.
         """
+        # An environment override is honoured first so a value can reach
+        # worker processes. Batch work runs across a ProcessPoolExecutor,
+        # and those workers re-import and re-read configuration, so
+        # patching this accessor in the parent reaches none of them --
+        # which silently made a concurrency benchmark measure the
+        # configured value at every setting: two Siril processes were
+        # running during its "1 slot" measurement. The environment is
+        # inherited by workers, so it does cross.
+        environment_override = os.environ.get("ASTROMETRICS_SIRIL_CONCURRENCY")
+        if environment_override:
+            try:
+                return max(1, int(environment_override))
+            except ValueError:
+                logging.getLogger(__name__).warning(
+                    "Ignoring non-numeric ASTROMETRICS_SIRIL_CONCURRENCY=%r", environment_override
+                )
         return int(self.get_value("Processing.Parallelism", "siril_concurrency", fallback="2"))
 
     def get_photometry_workers(self):  # ruff: ignore[missing-return-type-undocumented-public-function]

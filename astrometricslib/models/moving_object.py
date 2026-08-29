@@ -1,10 +1,8 @@
-"""Description: Asteroid-recovery pipeline domain schema definitions.
+"""Data structures for tracking moving objects (like asteroids).
 
-Models: FrameDetection, MovingObjectTrack, CascadeStage, EphemerisMatch,
-AsteroidRecoveryCandidate. A moving-object candidate is a transient,
-per-target-per-epoch event, not a stable catalog entity like
-`StellarObject` -- kept as a small, tightly-coupled Pydantic cluster in
-its own module rather than folded into `stellar_source.py`.
+These classes store information about things that move across multiple
+images. Unlike regular stars which stay put, these are temporary events
+tracked across a specific sequence of pictures.
 """
 
 from enum import StrEnum
@@ -13,10 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class FrameDetection(BaseModel):
-    """A single point-source detection on one individual frame.
-
-    En route to being chained into a moving-object candidate track.
-    """
+    """A dot of light in one picture, which might be an asteroid."""
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -32,7 +27,7 @@ class FrameDetection(BaseModel):
 
 
 class MovingObjectTrack(BaseModel):
-    """A fitted linear sky-motion track across a chain of frame detections."""
+    """The calculated path (speed, direction) of an object across pictures."""
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -45,11 +40,11 @@ class MovingObjectTrack(BaseModel):
 
 
 class CascadeStage(StrEnum):
-    """The discrimination-cascade stage an `AsteroidRecoveryCandidate` reached.
+    """Tracks how far a possible asteroid made it through the checking process.
 
-    Ordered stages (a real mover progresses through these in sequence)
-    are followed by the rejection stages (a candidate exits the
-    cascade at exactly one of these).
+    Several tests are run to see if a moving dot is really an asteroid.
+    This shows if it passed all tests, or at which step it was rejected
+    (e.g., it was just a dead pixel).
     """
 
     MORPHOLOGY_DETECTED = "morphology_detected"
@@ -64,10 +59,10 @@ class CascadeStage(StrEnum):
 
 
 class EphemerisMatch(BaseModel):
-    """A cross-match against a known solar-system body's predicted motion.
+    """A match between the detected object and a real, known asteroid.
 
-    From a SkyBoT (or similar) ephemeris query, matched against an
-    `AsteroidRecoveryCandidate`.
+    The object's speed and location are compared against databases
+    (like SkyBoT) that predict where known asteroids should be.
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -86,10 +81,10 @@ class EphemerisMatch(BaseModel):
 
 
 class AsteroidRecoveryCandidate(BaseModel):
-    """A candidate moving object tracked across a target's frames.
+    """A potential asteroid tracked across several pictures.
 
-    Also records how far it progressed through the discrimination
-    cascade.
+    It holds all the individual detections, its calculated path, and
+    whether it matched any known asteroids.
     """
 
     model_config = ConfigDict(populate_by_name=True)

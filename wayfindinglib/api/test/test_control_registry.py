@@ -69,7 +69,7 @@ def _configure_active_rig(app_config):  # ruff: ignore[missing-type-function-arg
 
 
 def test_set_active_telescope_and_camera_round_trip(control, app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify equipment activation persists and resolves via active_*()."""
+    """Verify equipment activation records and resolves via active_*()."""
     _configure_active_rig(app_config)
     assert control.set_active_telescope("Rig A") is True
     assert control.set_active_camera("CamA") is True
@@ -163,7 +163,7 @@ def test_execute_safe_state_delegates_to_task_function(control):  # ruff: ignore
 
 
 def test_apply_promotion_decision_and_summarize_divergence_evidence(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify promotion delegation persists and evidence summarizes."""
+    """Verify promotion delegation records and evidence summarizes."""
     policy = control.apply_promotion_decision(
         ObservatoryCapability.PLATE_SOLVE_ALIGNMENT, DelegationState.SHADOWED
     )
@@ -222,7 +222,9 @@ def test_remote_transfer_methods_delegate_to_the_task_module(mocker, control):  
     remote_transfer_tasks.check_remote_connection.assert_called_once_with(control)
 
     assert control.download_remote_targets("M 81", local_path="/local/M81") is True
-    remote_transfer_tasks.download_remote_targets.assert_called_once_with("M 81", None, None, "/local/M81")
+    remote_transfer_tasks.download_remote_targets.assert_called_once_with(
+        "M 81", None, None, "/local/M81", True
+    )
 
 
 def test_discover_unassociated_remote_targets_delegates_via_astrometrics(mocker, control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
@@ -263,7 +265,7 @@ def test_list_camera_profiles_and_get_equipment_configuration(control, app_confi
 
 
 def test_save_and_get_commissioning_runs_round_trips(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify commissioning runs persist and are returned by get_all."""
+    """Verify commissioning runs record and are returned by get_all."""
     from wayfindinglib.models.policy.commissioning import CommissioningObservation, CommissioningRun
 
     run = CommissioningRun(

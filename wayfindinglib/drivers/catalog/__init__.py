@@ -3,7 +3,7 @@
 Provides a driver interface and concrete implementations for querying online
 star catalogs (SIMBAD, GAIA DR3) plus a locally bundled Hipparcos bright-star
 extract. All drivers return transient StellarObject instances that are NEVER
-persisted to the local astrometrics database.
+recorded to the local astrometrics database.
 
 REQ: PLN-3.1, PLN-3.2
 """

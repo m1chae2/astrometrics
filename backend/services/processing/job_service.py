@@ -24,7 +24,7 @@ class JobService:
         self.repository = job_repository
 
     def create_job(self, target_id: str, job_type: str, log_file: str | None = None) -> ProcessingJob:
-        """Create a new job and persist it to the database.
+        """Create a new job and record it to the database.
 
         Returns
         -------
@@ -82,12 +82,12 @@ class JobService:
         return self.repository.get_job(job_id)
 
     def get_log_entries_for_job(self, job_id: str) -> list[dict]:
-        """Retrieve persisted log entries for a job, oldest first.
+        """Retrieve recorded log entries for a job, oldest first.
 
         Returns
         -------
         entries : `list`
-            The persisted log entries for the job, oldest first.
+            The recorded log entries for the job, oldest first.
         """
         return self.repository.get_log_entries_for_job(job_id)
 
@@ -243,7 +243,7 @@ class JobService:
     def add_agent_knowledge(  # ruff: ignore[missing-return-type-undocumented-public-function]
         self, category: str, content: str, summary: str | None = None, importance: int = 1
     ):
-        """Persist distilled agent knowledge."""
+        """Record distilled agent knowledge."""
         knowledge_id = str(uuid.uuid4())
         self.repository.add_knowledge(knowledge_id, category, content, summary, importance)
 

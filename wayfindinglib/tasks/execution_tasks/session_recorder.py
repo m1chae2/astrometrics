@@ -68,10 +68,10 @@ class ObservationSessionRecorder:
         Hardware driver (`IndiInterface` or `SimulatorIndiInterface`) to
         read status/weather snapshots from.
     butler : `DiskButler`, optional
-        Persistence layer. If `None` (default), a new `DiskButler` is
+        Storage layer. If `None` (default), a new `DiskButler` is
         constructed from the process-wide configuration.
     snapshot_interval_seconds : `int`, optional
-        How often to take a weather snapshot and persist a checkpoint
+        How often to take a weather snapshot and record a checkpoint
         (default 300).
     """
 
@@ -107,12 +107,12 @@ class ObservationSessionRecorder:
         )
 
     def save_checkpoint(self, session: ObservationSession) -> None:
-        """Persist the session recorded so far.
+        """Record the session recorded so far.
 
         Parameters
         ----------
         session : `ObservationSession`
-            The in-progress session to persist, called periodically
+            The in-progress session to record, called periodically
             (not just at the end) so a crash mid-night doesn't lose the
             whole recording.
         """
@@ -132,7 +132,7 @@ class ObservationSessionRecorder:
         Returns
         -------
         session : `ObservationSession`
-            The final recorded session, already persisted via
+            The final recorded session, already recorded via
             `save_checkpoint`.
 
         Raises

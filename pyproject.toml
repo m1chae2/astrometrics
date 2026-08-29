@@ -187,7 +187,8 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "datastore"]
 "astrometricslib.api".msg = "Internal. Import from the top-level `astrometricslib` namespace instead."
 "astrometricslib.models".msg = "Internal. Import from the top-level `astrometricslib` namespace instead."
 "astrometricslib.utilities".msg = "Internal. Import from the top-level `astrometricslib` namespace instead."
-"astrometricslib.tasks".msg = "Internal. Use the facade on `Astrometrics` instead."
+"astrometricslib.image_processing".msg = "Internal. Use the facade on `Astrometrics` instead."
+"astrometricslib.pipelines".msg = "Internal. Use the facade on `Astrometrics` instead."
 "astrometricslib.drivers".msg = "Internal. Use the facade on `Astrometrics` instead."
 "astrometricslib.data_access".msg = "Internal. Use the facade on `Astrometrics` instead."
 
@@ -202,14 +203,14 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "datastore"]
 # untrusted input into a shell command), which is the safe subprocess pattern.
 "astrometricslib/drivers/siril_interface.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"]
 "astrometricslib/scripts/spectral_registration_quality_analysis.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
-"astrometricslib/tasks/stellar_tasks/astrometry_tasks/plate_solver.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
+"astrometricslib/drivers/plate_solve_interface.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "backend/mcp/mcp_diagnostics.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"]
 "backend/mcp/tools/developer_tools.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "hardcoded-temp-file"] # S108: "/tmp" is an allowlist prefix for the sandbox boundary check, not a path being written to
 "backend/mcp/tools/diagnostics.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "backend/services/infrastructure/remote_service.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "backend/services/infrastructure/system_status_service.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"]
 "wayfindinglib/drivers/stellarmate_interface.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
-"astrometricslib/data_access/test/test_persistence_operations.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
+"astrometricslib/data_access/test/test_target_records.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "astrometricslib/test/test_scripts.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 # S608: these all bind values through parameterized `?` placeholders; the
 # only f-string interpolation is a code-defined table name (from a registry
@@ -217,15 +218,16 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "datastore"]
 # queries, numeric coordinates formatted as floats -- neither can carry a
 # string value that escapes the query.
 "datastore/butler.py" = ["hardcoded-sql-expression"]
-"astrometricslib/drivers/disk_interface.py" = ["hardcoded-sql-expression"]
+"astrometricslib/drivers/local_database.py" = ["hardcoded-sql-expression"]
 "astrometricslib/drivers/logger_interface.py" = ["hardcoded-sql-expression"]
-"astrometricslib/tasks/stellar_tasks/astrometry_tasks/star_identifier.py" = ["hardcoded-sql-expression"]
-"wayfindinglib/drivers/disk_interface.py" = ["hardcoded-sql-expression"]
+"astrometricslib/pipelines/astrometry/star_identifier.py" = ["hardcoded-sql-expression"]
+"wayfindinglib/drivers/local_database.py" = ["hardcoded-sql-expression"]
 "wayfindinglib/drivers/catalog/gaia_catalog_driver.py" = ["hardcoded-sql-expression"]
 "wayfindinglib/drivers/catalog/local_bright_star_catalog_driver.py" = ["hardcoded-sql-expression"]
 "__init__.py" = ["unused-import"] # re-exports for package public API
 "astrometricslib/__init__.py" = ["non-empty-init-module"] # Astrometrics facade class is intentionally defined here
 "wayfindinglib/__init__.py" = ["non-empty-init-module"] # Wayfinder facade class is intentionally defined here
+"astrometricslib/pipelines/__init__.py" = ["non-empty-init-module"] # PIPELINE_RUNNERS dispatch table is intentionally defined here
 "astrometricslib/**" = ["banned-api"] # Layer 1 (api/) and lower layers reach into each other directly by design
 "build/codegen/generate_types.py" = ["banned-api"] # TS codegen introspects the full model surface, not just the public API
 "astrometricslib/conftest.py" = ["module-import-not-at-top-of-file"] # sys.modules mocking/config patching must precede import
@@ -238,3 +240,4 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "datastore"]
 "wayfindinglib/drivers/indi/pyindi_compatibility.py" = ["invalid-function-name"] # stub mocks the same PyIndi camelCase interface
 "wayfindinglib/drivers/simulators/indi_simulator.py" = ["invalid-function-name"] # mocks the same PyIndi camelCase interface
 "wayfindinglib/drivers/indi/test/test_mount_controller.py" = ["invalid-function-name"] # fake telescope device mocks PyIndi's camelCase getNumber
+"wayfindinglib/drivers/test/test_indi_property_dispatch.py" = ["invalid-function-name"] # recording client overrides the same PyIndi camelCase callbacks

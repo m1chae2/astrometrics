@@ -1,12 +1,12 @@
 """Shared, generic keyed-model Butler.
 
-`Butler` persists pydantic model instances to SQLite tables keyed by
+`Butler` records pydantic model instances to SQLite tables keyed by
 id, following the same "get/put/exists" Rubin-Butler-derived shape
 astrometricslib's and wayfindinglib's Butlers already used
 independently. It is domain-agnostic: registering a `DatasetSpec` for
 a dataset type is all a consumer needs to get targeted-upsert,
 full-table-replace, and lock-guarded merge/delete operations for that
-table. FITS-file-specific concerns (path resolution, `DataCoordinate`)
+table. FITS-file-specific concerns (path resolution, `FrameSelector`)
 have no analog here and stay in astrometricslib's own extension of
 this class.
 """
@@ -19,7 +19,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from datastore.disk_interface import connect_db, file_lock, safe_json_dumps
+from datastore.local_database import connect_db, safe_json_dumps
+from datastore.process_locks import file_lock
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,7 @@ __all__ = ["AbstractButler", "Butler", "DatasetSpec"]
 
 @dataclass(frozen=True)
 class DatasetSpec:
-    """Registration record for one dataset type's generic persistence shape.
+    """Registration record for one dataset type's generic storage shape.
 
     Attributes
     ----------
@@ -57,6 +58,13 @@ class DatasetSpec:
     id_field: str = "id"
     extra_column_types: dict[str, str] = field(default_factory=dict)
     extra_columns: Callable[[Any], dict[str, Any]] | None = None
+    indexed_columns: tuple[str, ...] = ()
+    """Names from `extra_column_types` that should get a real SQL index,
+    for callers that filter or project on them via `list_projected`
+    without needing every row's `data_json` parsed. Omit columns
+    nothing ever queries by -- an index is write overhead this schema
+    doesn't need for `id`/`data_json` access alone, since `id` is
+    already the primary key."""
     serializer: Callable[[Any], Any] | None = None
     """Override for producing the JSON-serializable payload from a model
     instance. Defaults to ``obj.serialize()``; pass e.g.
@@ -68,16 +76,16 @@ class AbstractButler(ABC):
     """Minimal 3-method Rubin-Butler-derived abstract data access layer."""
 
     @abstractmethod
-    def get(self, dataset_type: str, coordinate: dict[str, Any]) -> Any:
-        """Retrieve a single dataset instance for a coordinate."""
+    def get(self, dataset_type: str, selector: dict[str, Any]) -> Any:
+        """Retrieve the single dataset instance a selector identifies."""
 
     @abstractmethod
-    def put(self, obj: Any, dataset_type: str, coordinate: dict[str, Any]) -> None:
-        """Persist a dataset instance under a given type and coordinate."""
+    def put(self, obj: Any, dataset_type: str, selector: dict[str, Any]) -> None:
+        """Record a dataset instance under the type a selector identifies."""
 
     @abstractmethod
-    def exists(self, dataset_type: str, coordinate: dict[str, Any]) -> bool:
-        """Check whether a dataset instance exists for a coordinate."""
+    def exists(self, dataset_type: str, selector: dict[str, Any]) -> bool:
+        """Check whether the dataset instance a selector identifies exists."""
 
 
 class Butler(AbstractButler):
@@ -120,7 +128,7 @@ class Butler(AbstractButler):
         self._specs: dict[str, DatasetSpec] = dict(specs or {})
 
     def register_dataset_type(self, dataset_type: str, spec: DatasetSpec) -> None:
-        """Register (or replace) the persistence shape for a dataset type."""
+        """Register (or replace) the storage shape for a dataset type."""
         self._specs[dataset_type] = spec
 
     def _db_path(self) -> str:
@@ -141,6 +149,21 @@ class Butler(AbstractButler):
             f"CREATE TABLE IF NOT EXISTS {spec.table_name} "
             f"(id TEXT PRIMARY KEY, data_json TEXT{extra_columns_sql})"
         )
+        # CREATE TABLE IF NOT EXISTS is a no-op on a table that already
+        # exists, so a DatasetSpec that adds a new extra_column_types
+        # entry after rows are already on disk would otherwise leave
+        # that column silently absent -- any write naming it would then
+        # fail with "no such column", and any read would just never see
+        # it. Bring an existing table's columns up to what the spec
+        # declares, once per _ensure_table call; new columns start NULL
+        # until whatever migration populates them backfills a real value.
+        existing_columns = {row[1] for row in cursor.execute(f"PRAGMA table_info({spec.table_name})")}
+        for name, sql_type in spec.extra_column_types.items():
+            if name not in existing_columns:
+                cursor.execute(f"ALTER TABLE {spec.table_name} ADD COLUMN {name} {sql_type}")
+        for column in spec.indexed_columns:
+            index_name = f"idx_{spec.table_name}_{column}"
+            cursor.execute(f"CREATE INDEX IF NOT EXISTS {index_name} ON {spec.table_name}({column})")
 
     def _row_to_obj(self, spec: DatasetSpec, row: Any) -> Any:
         return spec.model_class.model_validate(json.loads(row["data_json"]))
@@ -167,7 +190,7 @@ class Butler(AbstractButler):
         Returns
         -------
         rows : `list`
-            Every persisted instance of `dataset_type`.
+            Every recorded instance of `dataset_type`.
         """
         spec = self._spec(dataset_type)
         db_path = self._db_path()
@@ -182,13 +205,124 @@ class Butler(AbstractButler):
         finally:
             conn.close()
 
+    def list_projected(
+        self,
+        dataset_type: str,
+        columns: list[str],
+        like: dict[str, str] | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """List rows as plain dicts of only the given columns.
+
+        Never touches `data_json` unless it's explicitly named in
+        `columns` -- built for callers that only need a handful of a
+        dataset's indexed fields (e.g. a catalog-browsing list) and
+        would otherwise pay to parse every row's complete nested JSON
+        just to discard most of it. Measured against a real
+        270,450-row stellar-object catalog, a `SELECT id, data_json`
+        with no parsing at all costs ~0.7s; the equivalent through
+        `get_all` (full hydrate) costs 26s+. This method is how a
+        caller reaches that 0.7s floor for the columns it actually
+        reads: skip requesting `data_json`, and the row is never even
+        deserialized.
+
+        Parameters
+        ----------
+        dataset_type : `str`
+            Registered dataset type to query.
+        columns : `list` [`str`]
+            Column names to select, in the order they should appear
+            in each result dict. Each must be ``"id"``, ``"data_json"``,
+            or a key in the dataset's `DatasetSpec.extra_column_types`
+            -- validated against that set (not passed through
+            verbatim) since these can originate from caller-assembled
+            lists.
+        like : `dict`, optional
+            Column-name/substring pairs to filter on with a
+            case-insensitive (SQLite's default LIKE behaviour for
+            ASCII) substring match, ANDed together with each other.
+            Keys are validated the same way as `columns`. Intended as
+            a narrowing prefilter for a caller that must still apply
+            its own exact check afterward (e.g. a comma-joined
+            multi-value column, where LIKE can produce false positives
+            a substring happens to share) -- not a general search
+            feature. The substring is escaped against SQL wildcard
+            injection (a literal ``%`` or ``_`` typed by an end user
+            must match literally, not act as a wildcard).
+        limit : `int`, optional
+            Maximum rows to return. `None` (default) returns every
+            matching row. Applied after `like`, with no defined
+            ordering -- a caller needing a stable "top N" must sort
+            the result itself or add its own ``ORDER BY`` via a future
+            extension of this method.
+
+        Returns
+        -------
+        rows : `list` [`dict`]
+            One dict per matching row, keyed by the requested column
+            names.
+
+        Raises
+        ------
+        ValueError
+            If `columns` is empty, or `columns`/`like` name anything
+            outside ``id``/``data_json``/this dataset's registered
+            extra columns.
+        """
+        spec = self._spec(dataset_type)
+        allowed_columns = {"id", "data_json", *spec.extra_column_types.keys()}
+
+        if not columns:
+            raise ValueError("list_projected requires at least one column")
+        unknown = [column for column in (*columns, *(like or {})) if column not in allowed_columns]
+        if unknown:
+            raise ValueError(
+                f"list_projected: unknown column(s) {unknown} for dataset type {dataset_type!r}; "
+                f"expected one of {sorted(allowed_columns)}"
+            )
+
+        db_path = self._db_path()
+        if not os.path.exists(db_path):
+            return []
+        conn = connect_db(db_path)
+        try:
+            cursor = conn.cursor()
+            self._ensure_table(cursor, spec)
+            query = f"SELECT {', '.join(columns)} FROM {spec.table_name}"
+            params: list[Any] = []
+            conditions = []
+            if like:
+                like_escape_character = "\\"
+                conditions.extend(f"{column} LIKE ? ESCAPE '{like_escape_character}'" for column in like)
+                params.extend(
+                    "%"
+                    # Escaping the escape character itself first is
+                    # required -- otherwise escaping '%'/'_' afterward
+                    # would introduce more of it and double-escape them.
+                    + value
+                    .replace(like_escape_character, like_escape_character * 2)
+                    .replace("%", like_escape_character + "%")
+                    .replace("_", like_escape_character + "_")
+                    + "%"
+                    for value in like.values()
+                )
+            if conditions:
+                query += " WHERE " + " AND ".join(conditions)
+            if limit is not None:
+                query += " LIMIT ?"
+                params.append(limit)
+            cursor.execute(query, params)
+            return [dict(zip(columns, row, strict=True)) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
     def get_by_ids(self, dataset_type: str, ids: list[str]) -> list[Any]:
         """Load only the rows matching the given ids.
 
         Returns
         -------
         rows : `list`
-            The persisted instances matching `ids`.
+            The recorded instances matching `ids`.
         """
         if not ids:
             return []
@@ -206,31 +340,31 @@ class Butler(AbstractButler):
         finally:
             conn.close()
 
-    def get(self, dataset_type: str, coordinate: dict[str, Any]) -> Any:
-        """Retrieve a single row by ``coordinate["id"]``.
+    def get(self, dataset_type: str, selector: dict[str, Any]) -> Any:
+        """Retrieve a single row by ``selector["id"]``.
 
         Returns
         -------
         row : `Any` or `None`
             The matching instance, or `None` if absent.
         """
-        obj_id = coordinate.get("id")
+        obj_id = selector.get("id")
         if obj_id is None:
             return None
         matches = self.get_by_ids(dataset_type, [obj_id])
         return matches[0] if matches else None
 
-    def exists(self, dataset_type: str, coordinate: dict[str, Any]) -> bool:
-        """Check whether a row matching ``coordinate["id"]`` exists.
+    def exists(self, dataset_type: str, selector: dict[str, Any]) -> bool:
+        """Check whether a row matching ``selector["id"]`` exists.
 
         Returns
         -------
         found : `bool`
             `True` if a matching row exists.
         """
-        return self.get(dataset_type, coordinate) is not None
+        return self.get(dataset_type, selector) is not None
 
-    def put(self, obj: Any, dataset_type: str, coordinate: dict[str, Any] | None = None) -> None:
+    def put(self, obj: Any, dataset_type: str, selector: dict[str, Any] | None = None) -> None:
         """Upsert a single record."""
         spec = self._spec(dataset_type)
         conn = connect_db(self._db_path())
@@ -249,7 +383,7 @@ class Butler(AbstractButler):
         not present in `objects`. For callers that legitimately hold
         "this list is now the whole table" (e.g. an explicit bulk
         save), not for partial updates from a process that doesn't
-        hold the full table -- use `merge_and_persist`/`delete_by_ids`
+        hold the full table -- use `merge_and_record`/`delete_by_ids`
         for those instead.
         """
         spec = self._spec(dataset_type)
@@ -269,7 +403,7 @@ class Butler(AbstractButler):
         finally:
             conn.close()
 
-    def merge_and_persist(
+    def merge_and_record(
         self,
         dataset_type: str,
         objects: list[Any],
@@ -321,7 +455,7 @@ class Butler(AbstractButler):
     def delete_by_ids(self, dataset_type: str, ids: list[str]) -> None:
         """Lock-guarded, targeted delete of only the given ids.
 
-        Complements `merge_and_persist`'s upsert-only contract, which
+        Complements `merge_and_record`'s upsert-only contract, which
         cannot express row removal.
         """
         if not ids:

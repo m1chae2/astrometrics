@@ -21,9 +21,81 @@ runs:
       run: |
         sudo apt-get update
         sudo apt-get install -y software-properties-common build-essential swig libcfitsio-dev libnova-dev libdbus-1-dev libglib2.0-dev
-        sudo add-apt-repository -y ppa:mutlaqja/ppa
+
+        # add-apt-repository fetches the PPA's signing key from Launchpad's
+        # keyserver, which intermittently 500s ("GPGKeyTemporarilyNotFoundError")
+        # under normal load. Retry a few times with backoff instead of failing
+        # the whole job on a transient Launchpad hiccup.
+        for attempt in 1 2 3 4 5; do
+          if sudo add-apt-repository -y ppa:mutlaqja/ppa; then
+            break
+          fi
+          if [ "$attempt" -eq 5 ]; then
+            echo "::error::add-apt-repository failed after 5 attempts"
+            exit 1
+          fi
+          echo "add-apt-repository failed (attempt $attempt/5), retrying in $((attempt * 5))s..."
+          sleep $((attempt * 5))
+        done
+
+        # Ubuntu 26.04's native dpkg architecture is amd64v3, but the PPA
+        # builds INDI only for plain amd64: its binary-amd64v3 index holds
+        # nothing but the Architecture:all packages, so apt never sees
+        # libindi-dev/libindi1/indi-bin there and silently settles for
+        # Ubuntu universe's libindi 1.9.9. Enable amd64 as a foreign
+        # architecture so the PPA's binary-amd64 index is fetched too.
+        # x86-64-v3 is a superset of the baseline, so amd64 INDI binaries
+        # run fine here, and an extension compiled for v3 links against
+        # them without trouble.
+        sudo dpkg --add-architecture amd64
+
+        # Pin this PPA's sources entry to amd64. On 26.04 apt prefers a
+        # repository's binary-amd64v3 index over binary-amd64, and the PPA
+        # publishes an amd64v3 index containing only its Architecture:all
+        # packages -- so the variant index shadows the base one and the
+        # real libindi binaries stay invisible no matter which
+        # architectures dpkg has enabled. Naming the architecture
+        # explicitly makes apt read binary-amd64, where they actually are.
+        ppa_sources="$(grep -rl mutlaqja /etc/apt/sources.list.d/ | head -1)"
+        if [ -z "$ppa_sources" ]; then
+          echo "::error::Could not find the mutlaqja PPA sources file after add-apt-repository."
+          exit 1
+        fi
+        sudo sed -i '/^Suites:/a Architectures: amd64' "$ppa_sources"
+        echo "PPA sources entry now reads:"
+        grep -vE "^ |BEGIN PGP|END PGP" "$ppa_sources" || true
+
         sudo apt-get update
-        sudo apt-get install -y indi-full libindi-dev
+        # indi-bin, not indi-full: the PPA dropped indi-full ("has no
+        # installation candidate", replaced by indi-3rdparty-drivers), and
+        # what CI actually needs is indiserver plus the core simulator
+        # drivers that start_indiserver_simulators.sh launches -- all of
+        # which ship in indi-bin. The 3rd-party driver set indi-full also
+        # pulled in is for real hardware CI never touches.
+        #
+        # The :amd64 qualifiers are required, not cosmetic -- unqualified
+        # names resolve to the native amd64v3 architecture, which is
+        # exactly the fallback to 1.9.9 this is working around.
+        sudo apt-get install -y indi-bin:amd64 libindi-dev:amd64
+
+        # Assert we got INDI 2.x from the PPA rather than Ubuntu universe's
+        # 1.9.9. Nothing above fails when apt silently picks the older
+        # archive version -- the install succeeds, pyindi-client installs
+        # from a cached wheel, and the only symptom is 'import PyIndi'
+        # failing much later against an soname that isn't there. Catch the
+        # wrong version here, where the message can name the cause.
+        # Print what apt considered, so a future failure here shows which
+        # sources were in play rather than only the version that won.
+        apt-cache policy libindi-dev libindi-dev:amd64 || true
+
+        indi_version="$(dpkg-query -W -f='${Version}' libindi-dev:amd64)"
+        case "$indi_version" in
+          2.*) echo "libindi-dev $indi_version (INDI 2.x, as required)." ;;
+          *)
+            echo "::error::libindi-dev resolved to $indi_version, but pyindi-client 2.x needs INDI 2.x. The INDI Stable Builds PPA publishes core libindi only for the resolute (26.04) series and only for the amd64 architecture, so this job must run on ubuntu-26.04 with amd64 enabled as a foreign architecture."
+            exit 1
+            ;;
+        esac
 
     - name: Bootstrap Python Virtual Environment
       # pyindi-client is installed by setup_venv.sh itself (not as a

@@ -206,7 +206,7 @@ class EquipmentConfigurationManager:
         return EquipmentConfiguration(telescope=telescope, camera=camera)
 
     def set_active_camera(self, camera_name: str) -> bool:
-        """Persist a new active camera selection to config.
+        """Record a new active camera selection to config.
 
         Parameters
         ----------

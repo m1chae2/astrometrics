@@ -11,7 +11,7 @@ class BaseBackgroundService:
     """Base class for services that manage background tasks.
 
     Runs tasks on a `ThreadPoolExecutor` and provides unified job
-    tracking and optional persistence via `JobService`.
+    tracking and optional recording via `JobService`.
     """
 
     def __init__(self, max_workers: int | None = None, job_service=None, astrometrics_service=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]

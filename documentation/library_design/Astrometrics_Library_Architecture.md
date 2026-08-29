@@ -1,18 +1,18 @@
-# the high-level interface Image Processing Pipeline: Architecture and Design
+# Astrometrics Library: Architecture and Design
 
 *Version 2.3 · 2026-08-16 · Status: current*
 
-## Abstract
+## Overview
 
-Amateur astronomy workflows have historically relied on fragmented standalone software, requiring observers to manually export files across separate tools for frame reduction, image stacking, plate solving, photometry, and spectroscopy. This paper presents an image processing architecture designed for small-aperture observatories and citizen science research. The architecture organizes all observational data around a central Observation Target data model, connecting five processing pipelines: stacking, astrometry, photometry, spectroscopy, and moving object detection. Each pipeline incorporates a dual-stage validation framework combining pre-processing input screening with post-processing quality metrics.
+This document outlines the mathematical models and algorithms used in the Astrometrics processing pipelines. It details the theoretical framework, physical derivations, and mathematical equations governing image processing across five core pipelines: stacking, astrometry, photometry, spectroscopy, and moving object detection.
+
+The architecture organizes all observational data around a central Observation Target data model. Each pipeline incorporates a dual-stage validation framework combining pre-processing input screening with post-processing quality metrics.
 
 ## 1. Introduction
 
-**Statement of need.** Amateur astrophotography has evolved into a valuable platform for citizen science. Key applications include variable star monitoring [2], exoplanet transit timing, stellar spectroscopy, and minor planet tracking. Establishing a unified data model allows multiple astronomical pipelines astrometry, photometry, spectroscopy, and moving object detection to work together seamlessly around a single target region.
+Establishing a unified data model allows multiple astronomical pipelines to work together seamlessly around a single target region. The theoretical framework described here serves as the foundation for both headless programmatic execution and interactive graphical environments. Every interaction, visualization, and processing pipeline available to an end-user is a direct invocation of these underlying computational primitives, guaranteeing that any observational workflow performed interactively can be transitioned into an automated, reproducible script.
 
-This document establishes the theoretical framework, physical derivations, and mathematical equations governing image processing across five core pipelines, alongside the implementation design, module mappings, and empirical benchmarks for each. Complete code-level API references for all public classes and methods are auto-generated directly from docstrings in the Sphinx {doc}`API Reference </api/astrometricslib>`.
-
-Crucially, the system design adheres to a strict dual-interface paradigm. The theoretical framework described here serves as the absolute foundation for both headless programmatic execution and interactive graphical environments. Every interaction, visualization, and processing pipeline available to an end-user is a direct invocation of these underlying computational primitives, guaranteeing that any observational workflow performed interactively can be seamlessly transitioned into an automated, reproducible script.
+Complete code-level API references for all public classes and methods are auto-generated directly from docstrings in the Sphinx {doc}`API Reference </api/astrometricslib>`. For a direct map of these theoretical algorithms to their internal Python implementations, see the [Astrometrics Library Implementation](./Astrometrics_Library_Implementation.md).
 
 Section 2 presents the observational data models. Sections 3 through 7 detail the five major processing pipelines: Stacking, Astrometry, Photometry, Spectroscopy, and Moving Object Detection.
 
@@ -114,6 +114,7 @@ Frame combination executes master calibration reduction, image alignment, and pi
 1. **Pre-stack Master Calibration Reduction:** Individual raw light frames undergo instrumental reduction via Equation (1) prior to alignment using master calibration frames, applying bias subtraction for sensor readout noise, dark subtraction for thermal accumulation, and flat-field division for optical vignetting and dust donut suppression.
 2. **Adaptive Rejection Sigma:** The pixel rejection cutoff $\sigma(N)$ scales automatically with frame count $N$ via Equation (2). This eliminates manual per-dataset threshold tuning, preventing over-clipping of real stellar signal in deep integrations while retaining aggressive outlier removal in short sequences.
 3. **Uniform Quality Filtering with Constrained Registration:** Quality filtering applies a standardized evaluation metric across broadband and spectroscopic exposures. Restricting spectroscopic registration to rigid translation (shift-only) prevents rotation or shear of the dispersion axis relative to zero-order reference stars, while standard broadband imaging utilizes full geometric alignment to maximize point-source sharpness.
+4. **Optic-Partitioned Stacking:** Light frames are strictly partitioned by their optical configuration (focal length and camera pixel scale). Blending exposures from disparate optics invalidates pixel-scale assumptions and Point Spread Function (PSF) metrics. The pipeline constructs a distinct master stack for each unique optic to preserve spatial integrity.
 
 The pipeline evaluates surviving frame counts against the Rejection Safeguard floor to prevent quality filtering from leaving too few frames for valid pixel rejection statistics. Table 3 outlines the sequential stacking pipeline execution steps, inputs/outputs, and algorithmic rules.
 
@@ -132,14 +133,15 @@ The pipeline evaluates surviving frame counts against the Rejection Safeguard fl
 To guarantee high image quality, the stacking pipeline performs two rounds of quality checks: Pre-Processing Screening (rejecting bad raw photos before stacking) and Post-Processing Validation (checking the final stacked image).
 
 #### 3.4.1 Pre-Processing Input Screening (Checking Raw Photos)
-Before combining exposures into a stack, individual raw photos are screened to throw away corrupted frames:
+Before combining exposures into a stack, individual raw photos are evaluated to cull degraded frames without wasting computational resources on registration attempts:
 
-* **Focus & Tracking Checks:** Ranks photos by star sharpness (Full Width at Half Maximum, FWHM) and progressively excludes the softest-focus fraction of the sequence, loosening the cutoff automatically if too few frames would survive.
-* **Cloud & Sky Brightness Checks:** Monitors background sky brightness. Exposures with sudden drops or spikes in brightness (from passing clouds or light pollution) are excluded.
+* **Focus & Tracking Checks:** Extracts raw-frame FWHM and source ellipticity to rank photos by star sharpness. To maintain a universal, camera-agnostic rejection threshold, FWHM is normalized from raw pixels into physical arcseconds using the sensor's pixel scale. The sequence progressively excludes the softest-focus fraction, loosening the cutoff automatically if too few frames would survive.
+* **Hardware Telemetry Context:** Image degradation is correlated against physical hardware state. Airmass, altitude, and azimuth separate atmospheric degradation (target sinking into the horizon) from mount failure. Focuser position and sensor temperature allow the pipeline to measure focus drift, providing empirical feedback for tuning automated temperature compensation routines.
+* **Cloud & Sky Brightness Checks:** Monitors background sky brightness and saturated pixel fractions prior to alignment. Exposures with sudden drops or spikes in brightness (from passing clouds or light pollution) are excluded.
 * **Calibration Frame Checks:** Verifies that bias, dark, and flat frames meet camera specifications before using them to calibrate light photos.
 
 #### 3.4.2 Output Stack Quality Validation (Checking the Final Stack)
-After stacking, the pipeline measures the health of the final image using three key metrics:
+After stacking, the pipeline measures the health of the final image using five key metrics:
 
 1. **Signal-to-Noise Ratio (SNR) Gain:** Measures how much noise was reduced by combining photos. Stacking $N$ photos reduces background noise by a factor of $\sqrt{N}$.
 2. **Star Sharpness Degradation Ratio ($R_{\text{FWHM}}$):** Compares the star sharpness of the final stacked image ($\text{FWHM}_{\text{stack}}$) to the median star sharpness across the input photos ($\text{FWHM}_{\text{median}}$):
@@ -150,6 +152,8 @@ $$
 
    * *Interpretation:* Values near $1.0$ mean perfect star alignment. Values above $1.2$ warn that minor frame misalignments blurred the stacked image.
 3. **Cross-Frame Background Homogeneity:** Before stacking, compares the sky background level of each surviving frame against the sequence, flagging frames with anomalous background gaps that indicate light pollution gradients or passing sky glow not caught by earlier screening.
+4. **Pipeline Resource Health:** Tracks stacking duration and timeout limits to establish empirical baseline costs, providing the feedback needed to tune concurrency limits and prevent processing oversubscription.
+5. **Mount Tracking Analysis:** Extracts frame-to-frame registration shifts and evaluates tracking error in physical arcseconds. By cross-referencing against the telescope's `pier_side`, the pipeline mathematically excludes abrupt meridian flips from the error profile, separating normal mount behavior from hardware faults (e.g., cable snags, wind gusts, or polar alignment drift) on a session-by-session basis.
 
 ---
 
@@ -199,10 +203,11 @@ Table 4 outlines the sequential astrometry pipeline execution steps, inputs/outp
 #### 4.4.1 Pre-Processing Input Screening (Checking Images Before Solving)
 * **Minimum Source Count ($N_{\text{stars}} \ge 4$):** At least four detected point sources are required before a plate-solve attempt is made.
 * **Detection Sharpness & Roundness Filtering:** Source detection itself is bounded by sharpness and roundness ranges, screening out non-stellar or badly distorted detections before they ever reach the solver.
-* **Scale Hints ($\pm 20\%$):** Estimated camera pixel scale is narrowed to a tight search window and progressively relaxed toward $\pm 20\%$ if the initial narrow window fails to solve, speeding up catalog searches.
+* **Scale Hints & Blind Solve Fallback:** Estimated camera pixel scale is initially narrowed to a tight search window and relaxed toward $\pm 20\%$. If the provided scale hint entirely excludes the true scale (a known edge-case with modified optical trains), the pipeline falls back to an unconstrained blind solve.
 
 #### 4.4.2 Output Solution Validation (Checking WCS Accuracy)
 * **Solve Success Flag:** Records whether the solver returned a WCS solution at all; a failed solve halts the pipeline for that target.
+* **Network Health & Circuit Breakers:** Tracks remote catalog queries (failed, successful, and tripped circuit breakers) to distinguish between a sparse star field and a network timeout. This telemetry tunes the HTTP timeout budgets for SIMBAD/Gaia solvers.
 * **SIMBAD Match Count:** Records how many extracted sources were successfully cross-referenced against SIMBAD, as a coarse confidence signal on the solution.
 
 ---

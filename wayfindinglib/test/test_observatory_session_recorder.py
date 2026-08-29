@@ -62,7 +62,7 @@ def butler(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argumen
 
 
 def test_returns_existing_session_unchanged(butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify an already-persisted session is returned as-is."""
+    """Verify an already-recorded session is returned as-is."""
     existing = ObservationSession(
         id="session-1",
         night_date=date(2026, 8, 5),

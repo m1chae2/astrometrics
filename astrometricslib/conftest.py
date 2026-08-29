@@ -1,7 +1,9 @@
-"""Lightweight configuration and mocking context for unit tests.
+"""Setup tools for running automated tests.
 
-Sets up isolated temporary configuration paths and mocks external
-astronomer network queries (astroquery).
+This file creates a safe, temporary environment for tests to run in,
+so they don't accidentally overwrite your real astronomy data. It also
+fakes (mocks) connections to online astronomy databases so tests can run
+offline and quickly.
 """
 
 import os
@@ -39,6 +41,7 @@ path = {test_library_path}
 frames_path = {test_frames_path}
 """)
 os.environ["ASTROMETRICS_CONFIG"] = str(test_config_path)
+os.environ["ASTROMETRICS_CONFIG_PATH"] = str(test_config_path)
 
 # Populate synthetic test data for CI/CD environment
 import astropy.io.fits as fits
@@ -46,14 +49,13 @@ import numpy as np
 
 
 def _seed_synthetic_test_library():  # ruff: ignore[missing-return-type-private-function]
-    """Create synthetic FITS frames and SQLite records for CI/CD runs.
+    """Create fake images and a fake database for testing.
 
     Raises
     ------
     RuntimeError
-        Raised if the resolved library path is outside the sandboxed
-        test directory, which would mean this is about to overwrite
-        the real production database instead of the test one.
+        If it accidentally points to your real database instead of the
+        safe temporary one.
     """
     m81_dir = test_frames_path / "lights" / "M 81" / "ZWO ASI 533MM Pro"
     vega_dir = test_frames_path / "lights" / "Vega"
@@ -105,7 +107,7 @@ def _seed_synthetic_test_library():  # ruff: ignore[missing-return-type-private-
 
     # 2. Seed SQLite database
     from astrometricslib import Target
-    from astrometricslib.drivers.disk_interface import save_target
+    from astrometricslib.drivers.local_database import save_target
     from astrometricslib.utilities.config_loader import AppConfiguration
 
     app_config = AppConfiguration()
@@ -147,28 +149,28 @@ sys.modules["astroquery"] = mock_astroquery
 sys.modules["astroquery.simbad"] = mock_astroquery.simbad
 sys.modules["astroquery.astrometry_net"] = mock_astroquery.astrometry_net
 sys.modules["astroquery.imcce"] = mock_astroquery.imcce
+sys.modules["astroquery.gaia"] = mock_astroquery.gaia
 
 import pytest
 
 
 def pytest_configure(config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Register custom markers to eliminate pytest unknown marker warnings."""
+    """Register custom markers to stop pytest from printing warnings."""
     config.addinivalue_line("markers", "slow: marks tests as slow subprocess integration tests")
 
 
 @pytest.fixture(scope="session", autouse=True)
 def isolate_config_singleton():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Replace the AppConfiguration singleton with a sandboxed instance.
+    """Create a temporary settings object for the tests.
 
-    The sandboxed instance points at the test temporary directory.
-    Restores the original singleton on teardown to prevent
-    cross-process leakage into the real user library database.
+    This makes sure tests don't accidentally change the real settings
+    used by the main program. It puts the original settings back when
+    the tests are done.
 
     Yields
     ------
     sandbox_config : `AppConfiguration`
-        The sandboxed configuration singleton active for the test
-        session.
+        The temporary settings object tests should use.
     """
     original_instance = getattr(config_loader, "_instance", None)
 
@@ -182,7 +184,7 @@ def isolate_config_singleton():  # ruff: ignore[missing-return-type-undocumented
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_environment():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Maintain the isolated testing directory and clean it up when done."""
+    """Create the safe testing folder and delete it when tests are finished."""
     yield
     # Cleanup temp directory when test session ends. SQLite connections
     # can lazily create -wal/-shm files after the last query, which

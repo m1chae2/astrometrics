@@ -9,7 +9,7 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 
-from astrometricslib.utilities.image import AstrometricsImage
+from astrometricslib.image_processing.image import AstrometricsImage
 
 from .layers import ImageOverlay, PhotometryOverlay, SpectrumOverlay, StarOverlay
 from .star_field_visualization import _AnalysisView
@@ -138,7 +138,7 @@ def plot_spectroscopy_analysis(
         stellar_objects = [kwargs["stellar_object"]]
 
     if context is None and kwargs.get("fits_path"):
-        from astrometricslib.analysis_context import AnalysisContext
+        from astrometricslib.pipelines.shared.analysis_context import AnalysisContext
 
         context = AnalysisContext(image=AstrometricsImage(kwargs["fits_path"]))
 

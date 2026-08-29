@@ -131,7 +131,7 @@ class SimbadCatalogDriver(CatalogDriver):
         Returns
         -------
         List[StellarObject]
-            Transient StellarObject instances. Never persisted to the database.
+            Transient StellarObject instances. Never recorded to the database.
         """
         results: list[StellarObject] = []
 

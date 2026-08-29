@@ -1,7 +1,7 @@
 """Purpose: Unit tests for the ObservationExecution astrometrics.
 
 Description: Verifies each method delegates to its underlying task
-function with the interface's own persistence layer where relevant,
+function with the interface's own storage layer where relevant,
 and that this module's own source carries no direct INDI hardware import
 -- a static source-text scan mirroring
 `test_planning_registry.py::test_planning_module_tree_imports_no_device_driver`,
@@ -180,7 +180,7 @@ def test_create_recorder_binds_the_astrometrics_own_butler(butler):  # ruff: ign
 
 
 def test_reconcile_session_delegates_and_persists(butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify reconcile_session runs both reconciliations and persists."""
+    """Verify reconcile_session runs both reconciliations and records."""
 
     class _FakeTargetRegistry:
         def get(self, target_id):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]

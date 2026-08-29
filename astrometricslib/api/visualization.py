@@ -1,9 +1,8 @@
-"""Layer-1 domain high-level interface for plotting and image rendering.
+"""Main interface for plotting graphs and rendering images.
 
-Thin wrappers around `astrometricslib.visualization.helpers` and
-`astrometricslib.data_access.image_conversions`, exposed on the
-client so callers render/plot through the high-level interface
-rather than importing those modules directly.
+This module provides easy-to-use tools for generating charts and images
+so that users do not have to interact with the complex, lower-level
+visualization and data conversion code directly.
 """
 
 from typing import Any
@@ -42,7 +41,7 @@ class Visualization:
     def convert_fits_to_png(
         self, path: str, max_dimensions: int = 2000, stretch: bool = True
     ) -> dict[str, Any] | None:
-        """Convert a FITS file to a base64 PNG with min/max scale values.
+        """Convert a raw FITS data file into a viewable PNG image.
 
         Parameters
         ----------
@@ -51,8 +50,8 @@ class Visualization:
         max_dimensions : `int`, optional
             Maximum output dimension in pixels. Defaults to 2000.
         stretch : `bool`, optional
-            Whether to apply the stretch/normalization before
-            rendering. Defaults to `True`.
+            Whether to automatically adjust the brightness and contrast
+            (stretch) so faint details are visible. Defaults to `True`.
 
         Returns
         -------
@@ -60,7 +59,7 @@ class Visualization:
             The base64-encoded PNG and scale metadata, or `None` if
             conversion fails.
         """
-        from astrometricslib.data_access import image_conversions
+        from astrometricslib.catalog_services import image_conversions
 
         return image_conversions.convert_fits_to_png(path, max_dimensions, stretch)
 
@@ -73,7 +72,7 @@ class Visualization:
         cmap: str = "gray",
         stretch: bool = True,
     ) -> tuple[bytes, float, float]:
-        """Perform standard FITS scaling and return raw PNG bytes and stats.
+        """Convert FITS data to PNG bytes and report the brightness scale used.
 
         Parameters
         ----------
@@ -82,14 +81,14 @@ class Visualization:
         max_dimensions : `int`, optional
             Maximum output dimension in pixels. Defaults to 2000.
         center : `float`, optional
-            Stretch center override.
+            Manually set the midpoint of the brightness stretch.
         width : `float`, optional
-            Stretch width override.
+            Manually set the width (contrast) of the brightness stretch.
         cmap : `str`, optional
             Matplotlib colormap name. Defaults to ``"gray"``.
         stretch : `bool`, optional
-            Whether to apply the stretch/normalization before
-            rendering. Defaults to `True`.
+            Whether to automatically adjust the brightness and contrast
+            (stretch) so faint details are visible. Defaults to `True`.
 
         Returns
         -------
@@ -97,7 +96,7 @@ class Visualization:
             A tuple ``(png_bytes, min_value, max_value)`` of the raw
             PNG bytes and the scale bounds used to render them.
         """
-        from astrometricslib.data_access import image_conversions
+        from astrometricslib.catalog_services import image_conversions
 
         return image_conversions.convert_fits_to_png_with_stats(
             path, max_dimensions, center, width, cmap, stretch
@@ -106,7 +105,7 @@ class Visualization:
     def get_light_frame_data(
         self, target: Target, iso: str, exposure: str, index: int = 0, stretch: bool = True
     ) -> dict[str, Any]:
-        """Find a light frame record and scale it to base64 PNG data.
+        """Find a light frame image and convert it into a viewable PNG.
 
         Parameters
         ----------
@@ -119,26 +118,26 @@ class Visualization:
         index : `int`, optional
             Which matching frame to use, by order. Defaults to 0.
         stretch : `bool`, optional
-            Whether to apply the stretch/normalization before
-            rendering. Defaults to `True`.
+            Whether to automatically adjust the brightness and contrast
+            (stretch) so faint details are visible. Defaults to `True`.
 
         Returns
         -------
         light_frame_data : `dict[str, Any]`
             The scaled base64 PNG data and associated metadata.
         """
-        from astrometricslib.data_access import image_conversions
+        from astrometricslib.catalog_services import image_conversions
 
         return image_conversions.get_light_frame_data(target, iso, exposure, index, stretch)
 
     def get_last_captured_image(self, stretch: bool = True) -> dict[str, Any] | None:
-        """Locate and return the most recently modified FITS image file.
+        """Find the newest FITS image file and convert it to a viewable PNG.
 
         Parameters
         ----------
         stretch : `bool`, optional
-            Whether to apply the stretch/normalization before
-            rendering. Defaults to `True`.
+            Whether to automatically adjust the brightness and contrast
+            (stretch) so faint details are visible. Defaults to `True`.
 
         Returns
         -------
@@ -146,7 +145,7 @@ class Visualization:
             The scaled base64 PNG data for the most recently modified
             FITS file, or `None` if no FITS file is found.
         """
-        from astrometricslib.data_access import image_conversions
+        from astrometricslib.catalog_services import image_conversions
 
         return image_conversions.get_last_captured_image(self._astrometrics.config, stretch)
 

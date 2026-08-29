@@ -52,7 +52,7 @@ class ObservationExecution:
     """Synchronous observation-execution API: queue advancement and support."""
 
     def __init__(self, butler: DiskButler | None = None):  # ruff: ignore[missing-return-type-special-method]
-        """Initialize the high-level interface with a persistence layer."""
+        """Initialize the high-level interface with a storage layer."""
         self._butler = butler or DiskButler()
 
     # -- Queue advancement -------------------------------------------------
@@ -213,11 +213,11 @@ class ObservationExecution:
     # -- Post-session reconciliation -----------------------------------------
 
     def reconcile_session(self, session: ObservationSession, astrometrics: Any) -> ObservationSession:
-        """Run both post-session reconciliations, persisting the results.
+        """Run both post-session reconciliations, recording the results.
 
         Returns
         -------
         session : `ObservationSession`
-            The session after reconciliation, with results persisted.
+            The session after reconciliation, with results recorded.
         """
         return reconcile_session(self._butler, session, astrometrics)

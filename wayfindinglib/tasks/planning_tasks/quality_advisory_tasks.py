@@ -1,7 +1,7 @@
 """Purpose: Target Quality Advisory Computation.
 
 Description: Computed on demand from astrometricslib's public
-high-level interface, never persisted
+high-level interface, never recorded
 (`Wayfinding_Library_Architecture.md` §2.3.2). Reads
 only fields already present on the target's science-side record: the
 `flagged`/`flag_reasons` pair common to every pipeline quality summary,

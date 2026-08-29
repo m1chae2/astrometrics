@@ -1,24 +1,11 @@
-"""Purpose: Shared quality-summary schemas for every analysis pipeline.
+"""Data structures for tracking the quality and results of the pipelines.
 
-Description: Defines PipelineQualitySummaryBase, the common fields every
-per-pipeline quality summary (stacking, astrometry, photometry,
-spectroscopy, asteroid recovery) shares: pipeline identity, target/session
-provenance, resolved parameters, and flag state. Each pipeline's own summary
-class subclasses this and adds a single dedicated field for its
-pipeline-specific metrics (e.g. StackQualitySummary.stacking_metrics) --
-generic code operating on a PipelineQualitySummaryBase must never reach into
-a subclass's pipeline-specific field; metrics needed generically belong on
-this base class instead.
-
-Merged from the former targetlib/{pipeline_quality_summary_base,
-asteroid_recovery_quality, astrometry_quality, photometry_quality,
-spectroscopy_quality, stack_quality}.py -- these were 6 small, tightly
-coupled schema files with no reason to stay separate under the
-Rubin-aligned layered architecture. stack_quality.py's pure decision
-functions (resolve_filter_wfwhm_with_floor, is_stacked_fwhm_degraded,
-is_rejected_fraction_significant) moved to
-tasks/target_tasks/stack_quality_tasks.py instead -- they're algorithm,
-not schema.
+This module defines classes that record how well a processing job (like
+stacking
+images or finding asteroids) performed. It includes a common base class for
+information every pipeline shares (like which target was processed), and
+specific
+classes for each pipeline's unique metrics (like how many stars were found).
 """
 
 from datetime import UTC, datetime
@@ -28,27 +15,40 @@ from pydantic import BaseModel, Field
 
 
 class ExcludedFrame(BaseModel):
-    """A single frame excluded from a pipeline run, and why."""
+    """A record of a single picture that was skipped, and the reason why."""
 
     path: str
     reason: str
 
 
 class TargetSessionContribution(BaseModel):
-    """One TargetSession's contribution of frames to a single pipeline run."""
+    """Tracks how many pictures from a single observing session were used."""
 
     session_id: str
     frames_contributed: int
     frames_clipped: int
 
 
-class PipelineQualitySummaryBase(BaseModel):
-    """Fields every per-pipeline quality summary has in common.
+class StarIdentificationMetrics(BaseModel):
+    """How many of the stars found in an image could be named.
 
-    Pipeline-specific metrics live only in each subclass's own dedicated
-    field (e.g. StackQualitySummary.stacking_metrics) -- generic code
-    operating on a PipelineQualitySummaryBase must never reach into a
-    subclass's pipeline-specific field.
+    Some pipelines look up each star's position against a known catalog.
+    A star can end up in one of three buckets: matched to a known name,
+    already know, seen but with no matching catalog entry, or not
+    resolved at all. Astrometry, photometry, and spectroscopy all record
+    this the same way, so it lives here once instead of three times.
+    """
+
+    catalog_matched_star_count: int = 0
+    position_only_star_count: int = 0
+    unresolved_star_count: int = 0
+
+
+class PipelineQualitySummaryBase(BaseModel):
+    """Basic information recorded by every processing pipeline.
+
+    This includes things like the pipeline's name, the target being processed,
+    and any flags indicating potential problems.
     """
 
     pipeline_name: str
@@ -69,19 +69,14 @@ class PipelineQualitySummaryBase(BaseModel):
 # ---------------------------------------------------------------------------
 
 # Bumped whenever StackingPipelineQualityMetrics's shape changes meaningfully.
-STACKING_PIPELINE_VERSION = "1.0.0"
+STACKING_PIPELINE_VERSION = "1.1.0"
 
 
 class StackingPipelineQualityMetrics(BaseModel):
-    """Quality metrics specific to the stacking pipeline.
+    """Measurements recorded when combining (stacking) multiple images.
 
-    Not shared with other pipelines. Standard and spectral stacks populate
-    different subsets of the optional fields:
-    stacked_fwhm_px/median_input_fwhm_px/fwhm_degraded for standard stacks
-    (whole-field FWHM is meaningful there); spectral stacks populate
-    spectral_registration_flags instead (zero-order-star-tracking based, see
-    tasks/target_tasks/spectral_registration_quality.py) -- a whole-field
-    FWHM doesn't capture what matters for a spectral trace.
+    This tracks how many images were successfully combined and records details
+    like the final image sharpness (FWHM) or if the background was uneven.
     """
 
     is_spectral: bool
@@ -108,18 +103,22 @@ class StackingPipelineQualityMetrics(BaseModel):
     # Spectral-only.
     spectral_registration_flags: list[ExcludedFrame] = Field(default_factory=list)
 
+    # Technical details about the stacking run itself, such as whether
+    # the process timed out or if color-conversion (debayering) was applied.
+    stacking_duration_seconds: float | None = None
+    timed_out: bool = False
+    debayer_applied: bool | None = None
+    # To align images, one picture is chosen as the "reference" that
+    # all others are matched against. Which picture was chosen is recorded.
+    registration_reference_frame: str | None = None
+    registration_reference_star_count: int | None = None
+
 
 class StackQualitySummary(PipelineQualitySummaryBase):
-    """Persisted per-stack quality record for the stacking pipeline.
+    """The final saved report for an image stacking job.
 
-    Subclasses PipelineQualitySummaryBase. rejection_sigma_low/high/mode and
-    filter_wfwhm_requested/effective/loosened live in the inherited
-    resolved_parameters dict rather than as dedicated fields here -- they're
-    resolved-parameter values in the sense the shared base defines, not
-    stacking-specific quality metrics. upstream_quality_summary_reference is
-    always None for stacking: it's the only pipeline with primary,
-    non-inherited input quality (see the architecture discussion this
-    implements).
+    It combines the basic pipeline information with the specific stacking
+    metrics.
     """
 
     pipeline_name: str = "stacking"
@@ -133,13 +132,14 @@ class StackQualitySummary(PipelineQualitySummaryBase):
 
 # Bumped whenever AstrometryPipelineQualityMetrics's shape changes
 # meaningfully.
-ASTROMETRY_PIPELINE_VERSION = "1.0.0"
+ASTROMETRY_PIPELINE_VERSION = "1.2.0"
 
 
-class AstrometryPipelineQualityMetrics(BaseModel):
-    """Astrometry-pipeline-specific quality metrics.
+class AstrometryPipelineQualityMetrics(StarIdentificationMetrics):
+    """Measurements recorded when figuring out where an image is pointing.
 
-    Not shared with other pipelines.
+    This tracks how many stars were found and whether the image's coordinates
+    could be successfully calculated (plate solving).
     """
 
     sources_detected: int
@@ -148,21 +148,17 @@ class AstrometryPipelineQualityMetrics(BaseModel):
     simbad_matched_count: int
     astrometric_residual_rms_arcsec: float | None = None
 
+    # Tracks whether there were connection issues when trying to look up
+    # star names in online databases (like SIMBAD or Gaia).
+    remote_catalog_queries_attempted: int = 0
+    remote_catalog_queries_failed: int = 0
+    remote_catalog_circuit_breaker_tripped: bool = False
+    # The number of times coordinate calculation was attempted for this image.
+    plate_solve_attempts: int = 0
+
 
 class AstrometryQualitySummary(PipelineQualitySummaryBase):
-    """Persisted per-solve quality record.
-
-    Astrometry pipeline's subclass of `PipelineQualitySummaryBase`.
-
-    upstream_quality_summary_reference is always "stacking": astrometry
-    always solves Target.stacked_image, never individual frames, so
-    stacking's StackQualitySummary is its upstream input quality.
-    target_session_ids/target_session_breakdown stay empty: astrometry
-    consumes one already-stacked image rather than individual frames, so a
-    per-session breakdown isn't meaningful here -- session provenance for
-    the underlying stack is reachable via upstream_quality_summary_reference
-    instead.
-    """
+    """The final saved report for an astrometry (coordinate-finding) job."""
 
     pipeline_name: str = "astrometry"
     pipeline_version: str = ASTROMETRY_PIPELINE_VERSION
@@ -176,27 +172,22 @@ class AstrometryQualitySummary(PipelineQualitySummaryBase):
 
 # Bumped whenever PhotometryPipelineQualityMetrics's shape changes
 # meaningfully.
-PHOTOMETRY_PIPELINE_VERSION = "1.0.0"
+PHOTOMETRY_PIPELINE_VERSION = "1.1.0"
 
 
 class FrameEnsembleComposition(BaseModel):
-    """Per-frame comparison-star ensemble composition for normalization.
-
-    ensemble_size is deliberately per-frame rather than a single run-level
-    constant: a saturated comparison star is excluded from the ensemble
-    median only in the frames where it's actually saturated, remaining
-    eligible in every other frame.
-    """
+    """Tracks which known stars were the brightness reference used."""
 
     frame_path: str
     ensemble_size: int
     excluded_comparison_star_ids: list[str] = Field(default_factory=list)
 
 
-class PhotometryPipelineQualityMetrics(BaseModel):
-    """Photometry-pipeline-specific quality metrics.
+class PhotometryPipelineQualityMetrics(StarIdentificationMetrics):
+    """Measurements recorded when measuring the brightness of stars.
 
-    Not shared with other pipelines.
+    This tracks how many stars were processed and if any variable stars
+    were found.
     """
 
     stars_processed: int
@@ -211,18 +202,13 @@ class PhotometryPipelineQualityMetrics(BaseModel):
     long_term_variable_candidate_count: int = 0
     astrometry_identified_star_count: int = 0
     sessions_with_reused_header_wcs: list[str] = Field(default_factory=list)
+    # Lists observing sessions where the image coordinates saved in the file
+    # were bad and had to be recalculated from scratch.
+    sessions_with_replaced_header_wcs: list[str] = Field(default_factory=list)
 
 
 class PhotometryQualitySummary(PipelineQualitySummaryBase):
-    """Persisted per-run quality record.
-
-    Photometry pipeline's subclass of `PipelineQualitySummaryBase`.
-
-    upstream_quality_summary_reference is always None: photometry runs on
-    raw per-session frames rather than a stacked image, so it has no single
-    upstream pipeline run to reference (unlike astrometry, which always
-    solves one stack).
-    """
+    """The final saved report for a photometry (brightness-measuring) job."""
 
     pipeline_name: str = "photometry"
     pipeline_version: str = PHOTOMETRY_PIPELINE_VERSION
@@ -235,19 +221,14 @@ class PhotometryQualitySummary(PipelineQualitySummaryBase):
 
 # Bumped whenever SpectroscopyPipelineQualityMetrics's shape changes
 # meaningfully.
-SPECTROSCOPY_PIPELINE_VERSION = "1.0.0"
+SPECTROSCOPY_PIPELINE_VERSION = "1.1.0"
 
 
-class SpectroscopyPipelineQualityMetrics(BaseModel):
-    """Spectroscopy-pipeline-specific quality metrics.
+class SpectroscopyPipelineQualityMetrics(StarIdentificationMetrics):
+    """Measurements recorded when analyzing a star's light spectrum.
 
-    Not shared with other pipelines.
-
-    trail_width_profile_available/median_trail_width_px are populated once
-    the rung-3 traced-extraction path (SpectrumExtractor.extract_line_traced/
-    extract_with_flare_mask_traced) actually runs for at least one star that
-    run; they stay at their defaults (False/None) when extraction_method is
-    "fixed" (rung 1), since there's no per-position width data to summarize.
+    This tracks details about the spectral lines, like how wide they are
+    and whether any parts of the spectrum were too bright (saturated).
     """
 
     zero_order_saturated_pixel_fraction: float | None = None
@@ -259,30 +240,69 @@ class SpectroscopyPipelineQualityMetrics(BaseModel):
 
 
 class SpectroscopyQualitySummary(PipelineQualitySummaryBase):
-    """Persisted per-extraction quality record.
-
-    Spectroscopy pipeline's subclass of `PipelineQualitySummaryBase`.
-
-    Two distinct pipelines populate this model. The single-stacked-
-    frame path (`pipeline_tasks.analyze_target(pipeline_type="spectroscopy")`,
-    no `frames=` argument) always extracts from
-    `Target.stacked_spectral_target` and defaults
-    `upstream_quality_summary_reference` to "stacking", since
-    stacking's spectral_registration_flags is the directly relevant
-    upstream signal there. The session-grouped, per-frame interactive
-    "Analyze Target" path (`AnalysisOrchestrator._run_spectroscopy_analysis`
-    via `process_spectroscopy_frames_by_session`) instead extracts
-    directly from a target's raw, unstacked frames and sets
-    `upstream_quality_summary_reference` to "raw_frames" -- it also
-    populates `target_session_ids`/`target_session_breakdown`, which
-    the single-stacked-frame path never does (it has no session
-    concept by construction).
-    """
+    """The final saved report for a spectroscopy (light-spectrum) job."""
 
     pipeline_name: str = "spectroscopy"
     pipeline_version: str = SPECTROSCOPY_PIPELINE_VERSION
     upstream_quality_summary_reference: str | None = "stacking"
     spectroscopy_metrics: SpectroscopyPipelineQualityMetrics
+
+
+# ---------------------------------------------------------------------------
+# Tracking
+# ---------------------------------------------------------------------------
+
+# Bumped whenever TrackingPipelineQualityMetrics's shape changes
+# meaningfully.
+TRACKING_PIPELINE_VERSION = "1.1.0"
+
+
+class TrackingPipelineQualityMetrics(BaseModel):
+    """Measurements that describe how well the telescope tracked the sky.
+
+    This looks for problems with the telescope mount (like drifting) or
+    changes in the sky conditions (like the background getting brighter).
+    It records the worst-case values across all observing sessions.
+    """
+
+    sessions_found: int
+    sessions_analyzed: int
+    usable_frames: int
+    span_hours: float | None = None
+
+    drift_rate_x_px_per_hour: float | None = None
+    drift_rate_y_px_per_hour: float | None = None
+    max_excursion_px: float | None = None
+    meridian_flips: int = 0
+
+    # Records if the telescope had a repeating tracking error (like a
+    # gear wobbling every 60 seconds).
+    periodic_error_period_seconds: int | None = None
+    periodic_error_strength: float = 0.0
+    # The chance random noise would fake a peak as strong as
+    # `periodic_error_strength`. Recorded so the reporting cut can
+    # eventually move onto it -- see the note beside
+    # `MAXIMUM_PERIODIC_ERROR_FALSE_ALARM_PROBABILITY` in
+    # `pipelines/stacking/tracking_analysis.py` for why it does not gate
+    # anything yet.
+    periodic_error_false_alarm_probability: float | None = None
+    periodic_error_corroborated: bool = False
+
+    trailed_frame_count: int = 0
+    median_fwhm_px: float | None = None
+    fwhm_spread_px: float | None = None
+    median_roundness: float | None = None
+    median_background: float | None = None
+    background_spread: float | None = None
+
+
+class TrackingQualitySummary(PipelineQualitySummaryBase):
+    """The final saved report for a telescope tracking analysis job."""
+
+    pipeline_name: str = "tracking"
+    pipeline_version: str = TRACKING_PIPELINE_VERSION
+    upstream_quality_summary_reference: str | None = "stacking"
+    tracking_metrics: TrackingPipelineQualityMetrics
 
 
 # ---------------------------------------------------------------------------
@@ -295,12 +315,11 @@ ASTEROID_RECOVERY_PIPELINE_VERSION = "1.0.0"
 
 
 class AsteroidRecoveryPipelineQualityMetrics(BaseModel):
-    """Asteroid-recovery-specific quality metrics; not pipeline-shared.
+    """Measurements for the process that searches for moving asteroids.
 
-    Each count is a strict funnel: frames_with_wcs_estimate <= total
-    light frames; candidates_detected >=
-    candidates_persistence_confirmed >=
-    candidates_rate_linearity_confirmed >= candidates_ephemeris_matched.
+    This tracks how many candidates were found and how many passed each
+    successive check (e.g., did it move in a straight line? did it match a
+    known asteroid?).
     """
 
     frames_with_wcs_estimate: int
@@ -313,13 +332,7 @@ class AsteroidRecoveryPipelineQualityMetrics(BaseModel):
 
 
 class AsteroidRecoveryQualitySummary(PipelineQualitySummaryBase):
-    """Persisted per-run quality record for the asteroid-recovery pipeline.
-
-    upstream_quality_summary_reference defaults to "astrometry": this
-    pipeline's per-frame WCS estimates depend on the stack's
-    plate-solve WCS having already succeeded
-    (`analyze_target(pipeline_type="astrometry")` must run first).
-    """
+    """The final saved report for an asteroid-hunting job."""
 
     pipeline_name: str = "asteroid_recovery"
     pipeline_version: str = ASTEROID_RECOVERY_PIPELINE_VERSION

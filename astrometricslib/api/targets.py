@@ -1,28 +1,23 @@
-"""Layer-1 domain high-level interface for the target catalog domain.
+"""Main interface for managing targets in the catalog.
 
-`TargetCatalog` (exposed as `Astrometrics.targets`) is the CRUD entry
-point for the target catalog, plus target-scoped object-management
-operations (`add_frame`, `reindex_frames`,
-`get_calibration_frame_statistics`, `get_header`, `get_frame`,
-`delete_images`). It owns the in-memory target list and touched-id set
-directly -- see its `__init__` -- rather than the high-level
-interface holding them.
-
-Delegates to `astrometricslib.tasks.target_tasks` and
-`astrometricslib.data_access` directly -- Layer 1 may reach into any
-lower layer, since that is what a astrometrics is for. What those lower
-layers must never do is call back up into a registry; see
-`astrometricslib.data_access.persistence_operations`'s module
-docstring for how that direction is enforced.
+`TargetCatalog` allows creating, reading, updating, and deleting targets.
+It also handles target-specific actions like adding new image frames,
+re-indexing frames, and checking statistics. This class stores the active
+targets in memory and coordinates with lower-level task modules to perform
+work.
 """
 
 import builtins
 
+from astrometricslib.catalog_services.frame_scanning import classify_and_sort_fits_files
 from astrometricslib.models.target import Target
+from astrometricslib.pipelines.shared.target_sessions import derive_target_sessions
 from astrometricslib.utilities.config_loader import AppConfiguration
 
 __all__ = [
     "TargetCatalog",
+    "classify_and_sort_fits_files",
+    "derive_target_sessions",
 ]
 
 
@@ -36,26 +31,23 @@ class TargetCatalog:
     create, or delete targets within your observatory's library.
     """
 
-    def __init__(self, config: AppConfiguration, butler: object):  # ruff: ignore[missing-return-type-special-method]
-        """Initialize with application config and a butler for persistence.
+    def __init__(self, config: AppConfiguration, catalog_access: object):  # ruff: ignore[missing-return-type-special-method]
+        """Initialize with configuration settings and a database manager.
 
-        Owns the in-memory target list and touched-id set directly
-        (rather than the high-level interface holding them), so
-        `data_access.persistence_operations` operates on this catalog
-        without calling back up through it -- avoiding the circular
-        `TargetCatalog` -> `persistence_operations` -> `TargetCatalog`
-        dependency the previous back-reference-only design had.
+        This setup keeps the list of targets and tracked changes right here
+        in memory, which prevents confusing circular dependencies when
+        saving data to disk later.
 
         Parameters
         ----------
         config : `AppConfiguration`
             Application configuration.
-        butler : `astrometricslib.data_access.butler.AbstractButler`
+        catalog_access : `AbstractCatalogAccess`
             Storage backend for the target catalog.
         """
         self._config = config
-        self.butler = butler
-        self._targets: list = butler.get("target_catalog", {}) or []
+        self.catalog_access = catalog_access
+        self._targets: list = catalog_access.get("target_catalog", {}) or []
         self._touched_target_ids: set = set()
 
     # -- CRUD ------------------------------------------------------------
@@ -68,9 +60,9 @@ class TargetCatalog:
         result : `list` [`Target`]
             The list of all active targets.
         """
-        from astrometricslib.data_access import persistence_operations
+        from astrometricslib.catalog_services import target_records
 
-        return persistence_operations.list_targets(self)
+        return target_records.list_targets(self)
 
     def get(self, target_id: str) -> Target | None:
         """Retrieve a single target by id, supporting fuzzy matching.
@@ -85,14 +77,14 @@ class TargetCatalog:
         target : `Target` or `None`
             The matching target, or `None` if no target matches.
         """
-        from astrometricslib.data_access import persistence_operations
+        from astrometricslib.catalog_services import target_records
 
-        return persistence_operations.get_target(self, target_id)
+        return target_records.get_target(self, target_id)
 
     def create(self, target_id: str) -> Target:
         """Create a Target, scan its directories, and register it.
 
-        This method is used when you want to track a new astronomical
+        This method is used to track a new astronomical
         object. It not only creates the database record but also scans
         the local filesystem directories matching the target's name to
         automatically associate any pre-existing raw image frames.
@@ -107,9 +99,9 @@ class TargetCatalog:
         target : `Target`
             The newly created (or existing, matching) Target.
         """
-        from astrometricslib.data_access import persistence_operations
+        from astrometricslib.catalog_services import target_records
 
-        return persistence_operations.create_target(self, target_id)
+        return target_records.create_target(self, target_id)
 
     def add(self, target: Target) -> None:
         """Append an existing Target domain object to the catalog.
@@ -137,15 +129,15 @@ class TargetCatalog:
         removed : `bool`
             `True` if a matching target was found and removed.
         """
-        from astrometricslib.data_access import persistence_operations
+        from astrometricslib.catalog_services import target_records
 
-        return persistence_operations.delete_target(self, target_id)
+        return target_records.delete_target(self, target_id)
 
     def save(self) -> None:
         """Commit all touched targets back to database storage."""
-        from astrometricslib.data_access import persistence_operations
+        from astrometricslib.catalog_services import target_records
 
-        persistence_operations.save_targets(self)
+        target_records.save_targets(self)
 
     # -- Object management (target-scoped, not CRUD) ----------------------
 
@@ -182,11 +174,17 @@ class TargetCatalog:
         frame_record : `astrometricslib.models.target.FrameRecord`
             The newly added frame record.
         """
-        from astrometricslib.tasks.target_tasks.pipeline_tasks import add_frame
+        from astrometricslib.pipelines.shared.frame_grouping import add_frame
 
         return add_frame(target, path, role, filter_type, camera)
 
-    def reindex_frames(self, target: Target, prune_missing: bool = False, butler: object = None) -> None:
+    def reindex_frames(
+        self,
+        target: Target,
+        prune_missing: bool = False,
+        catalog_access: object = None,
+        refresh_headers: bool = False,
+    ) -> None:
         """Sync frame records from disk and recompute total exposure time.
 
         Parameters
@@ -196,20 +194,31 @@ class TargetCatalog:
         prune_missing : `bool`, optional
             If `True`, remove frame records whose files no longer
             exist on disk. Defaults to `False`.
-        butler : `astrometricslib.data_access.butler.AbstractButler`, optional
-            Storage backend override; defaults to this catalog's butler.
+        refresh_headers : `bool`, optional
+            If `True`, also re-read header-derived acquisition
+            conditions (pier side, airmass, altitude, pixel scale,
+            cooling and focuser telemetry) on frames already tracked.
+            Scanning alone only builds records for previously unseen
+            files, so fields added to `FrameRecord` after a frame was
+            indexed stay `None` until this runs. Defaults to `False`.
+        catalog_access : `AbstractCatalogAccess`, optional
+            Storage backend override; defaults to this catalog's own.
         """
-        from astrometricslib.tasks.target_tasks.pipeline_tasks import reindex_frames
+        from astrometricslib.catalog_services.target_records import reindex_frames
 
-        reindex_frames(target, prune_missing=prune_missing, butler=butler)
+        reindex_frames(
+            target,
+            prune_missing=prune_missing,
+            catalog_access=catalog_access,
+            refresh_headers=refresh_headers,
+        )
 
     def get_header(self, path: str, target: Target | None = None) -> builtins.list[dict[str, str]]:
-        """Extract FITS header card entries, optionally ownership-checked.
+        """Read header information from a FITS image file.
 
-        When `target` is given, verifies `path` belongs to it (as a
-        frame, or the target's processed/stacked/spectral output)
-        before reading; raises if it does not. Without `target`, reads
-        `path` unconditionally.
+        If a `target` is provided, this function will first double-check
+        that the image file actually belongs to that target before reading
+        it to ensure data safety.
 
         Parameters
         ----------
@@ -225,11 +234,11 @@ class TargetCatalog:
             The FITS primary header's card entries for `path`.
         """
         if target is not None:
-            from astrometricslib.tasks.target_tasks.pipeline_tasks import get_header_information
+            from astrometricslib.pipelines.dispatch import get_header_information
 
             return get_header_information(target, path)
 
-        from astrometricslib.data_access import image_conversions
+        from astrometricslib.catalog_services import image_conversions
 
         return image_conversions.get_fits_header(path)
 
@@ -252,7 +261,7 @@ class TargetCatalog:
         frame_path : `str`
             The path of the matching frame.
         """
-        from astrometricslib.data_access import image_conversions
+        from astrometricslib.catalog_services import image_conversions
 
         return image_conversions.get_frame(target, iso, exposure, index)
 
@@ -272,9 +281,74 @@ class TargetCatalog:
         result : `dict`
             A summary of the deletion outcome.
         """
-        from astrometricslib.data_access import image_conversions
+        from astrometricslib.catalog_services import image_conversions
 
         return image_conversions.delete_images(paths, self, target_id)
+
+    def measure_frame_input_quality(
+        self,
+        target: Target,
+        include_fwhm: bool = False,
+        remeasure: bool = False,
+        camera_name: str | None = None,
+        save: bool = True,
+    ) -> dict[str, int]:
+        """Measure the image quality of a target's frames before stacking.
+
+        This allows us to evaluate and filter out bad frames early in the
+        process. The checks are incremental, meaning if the process is
+        interrupted, it can pick up where it left off without starting over.
+
+        Parameters
+        ----------
+        target : `Target`
+            The target whose frames are measured.
+        include_fwhm : `bool`, optional
+            Whether to also measure FWHM (default `False`); roughly 50x
+            the cost of the other metrics.
+        remeasure : `bool`, optional
+            Whether to re-measure frames that already have values
+            (default `False`).
+        camera_name : `str`, optional
+            Restrict to frames from this camera, matched
+            case-insensitively as a substring.
+        save : `bool`, optional
+            Whether to record the target afterwards (default `True`).
+
+        Returns
+        -------
+        counts : `dict` [`str`, `int`]
+            ``measured``/``skipped``/``failed`` frame counts.
+        """
+        from astrometricslib.data_access import frame_statistics
+
+        counts = frame_statistics.measure_frame_input_quality(
+            target,
+            include_fwhm=include_fwhm,
+            remeasure=remeasure,
+            camera_name=camera_name,
+        )
+        if save and counts["measured"]:
+            self.save()
+        return counts
+
+    def list_camera_names(self) -> dict[str, int]:
+        """Find out which cameras were used to take the images in the catalog.
+
+        This is helpful when processing pipelines need to be run on images
+        taken by a specific camera, but aren't sure which camera names exist
+        in the data yet.
+
+        Returns
+        -------
+        counts_by_camera : `dict` [`str`, `int`]
+            Each distinct camera name found mapped to how many frames
+            across the whole catalog used it, sorted by count
+            descending.
+        """
+        from astrometricslib.data_access import frame_statistics
+
+        return frame_statistics.list_camera_names(self.list())
 
     def get_calibration_frame_statistics(
         self,
@@ -283,7 +357,7 @@ class TargetCatalog:
         grouped: bool = True,
         camera: str | None = None,
     ) -> object:
-        """Return grouped or flat frame/calibration-match statistics.
+        """Return statistics about how frames match with calibration data.
 
         Parameters
         ----------
@@ -303,12 +377,12 @@ class TargetCatalog:
             Grouped filter/exposure/dark-match statistics if
             `grouped` is `True`; otherwise flat raw frame counts.
         """
-        from astrometricslib.tasks.target_tasks import statistics_operations
+        from astrometricslib.data_access import frame_statistics
 
         if not grouped:
-            return statistics_operations.get_frame_stats(target)
+            return frame_statistics.get_frame_stats(target)
 
         from astrometricslib.api.processing import CalibrationCatalog
 
         calibration = CalibrationCatalog(self._config)
-        return statistics_operations.get_frame_stats_grouped(target, calibration, camera)
+        return frame_statistics.get_frame_stats_grouped(target, calibration, camera)

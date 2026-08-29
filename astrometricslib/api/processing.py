@@ -1,42 +1,31 @@
-"""Layer-1 domain high-level interfaces for the pipeline-execution domain.
+"""Main interfaces for running processing pipelines and calibration data.
 
-`ProcessingPipelines` (exposed as `Astrometrics.processing`) is the
-pipeline-execution entry point, with one explicit method per pipeline
-type (`run_stacking`, `run_astrometry`, `run_photometry`,
-`run_spectroscopy`, `run_spectroscopy_by_session`) rather than a single
-``analyze(type=...)`` dispatch. `QualityDiagnostics`
-(`Astrometrics.processing.diagnostics`) holds the quality/FWHM/
-rejected-fraction methods that used to live directly on the pipeline
-astrometrics. `CalibrationCatalog` (`Astrometrics.processing.calibration`)
-holds the dark/bias/flat calibration frame asset catalog, previously
-reachable only by importing `CalibrationLibrary` directly. Unlike
-`ProcessingPipelines`'s one-method-per-type design, `CalibrationCatalog`
-collapses its per-kind method families into one `kind`-parameterized
-method each -- the two domains made opposite trade-offs: pipeline
-types are a small, closed, well-known set where an explicit method per
-type keeps call sites self-documenting and discoverable via
-autocomplete; calibration kinds are a flatter, more uniform set (three
-near-identical CRUD-shaped operations) where one parameterized method
-avoids tripling the method count for no discoverability gain.
-
-All three delegate to `astrometricslib.tasks.target_tasks` and
-`astrometricslib.data_access` directly -- Layer 1 may reach into any
-lower layer, since that is what a astrometrics is for. What those lower
-layers must never do is call back up into a registry; see
-`astrometricslib.data_access.persistence_operations`'s module
-docstring for how that direction is enforced.
+This module provides the primary ways to trigger large processing jobs like
+stacking images, measuring stars (photometry), and analyzing light
+(spectroscopy). It also provides tools to check the quality of processed
+images and manage calibration frames (darks, biases, and flats) which are
+used to remove noise from raw telescope images.
 """
 
 from contextlib import AbstractContextManager
 from typing import Any, Literal
 
+from astrometricslib.drivers.job_logging import JobHandle, capture_job_logs, registered_job
+from astrometricslib.drivers.logger_interface import DbLogHandler, LoggerInterface
+from astrometricslib.drivers.siril_interface import ImageProcessing
 from astrometricslib.models.target import Target
 from astrometricslib.utilities.config_loader import AppConfiguration
 
 __all__ = [
     "CalibrationCatalog",
+    "DbLogHandler",
+    "ImageProcessing",
+    "JobHandle",
+    "LoggerInterface",
     "ProcessingPipelines",
     "QualityDiagnostics",
+    "capture_job_logs",
+    "registered_job",
 ]
 
 _CalibrationKind = Literal["dark", "bias", "flat"]
@@ -44,14 +33,12 @@ _CALIBRATION_KINDS: frozenset[str] = frozenset({"dark", "bias", "flat"})
 
 
 class QualityDiagnostics:
-    """Quality metrics for stacked images and spectral registration.
+    """Tools for checking the quality of processed images.
 
-    This class provides tools to evaluate the health and quality of
-    your processed images. By measuring things like Full Width at Half
-    Maximum (FWHM) and tracking how many pixels were rejected during
-    stacking, you can objectively determine if a given observation
-    session yielded sharp, usable data or if it suffered from tracking
-    errors or poor seeing conditions.
+    This class is used to measure things like star sharpness (FWHM) and
+    how much noisy data had to be thrown away during image stacking.
+    This helps to figure out if an observation session had good tracking
+    and clear skies, or if the resulting data is poor quality.
     """
 
     def __init__(self, config: AppConfiguration):  # ruff: ignore[missing-return-type-special-method]
@@ -78,7 +65,7 @@ class QualityDiagnostics:
             Median FWHM in pixels across the measured stars, or `None`
             if it could not be measured.
         """
-        from astrometricslib.data_access.image_quality_metrics import measure_image_fwhm
+        from astrometricslib.image_processing.quality_metrics import measure_image_fwhm
 
         return measure_image_fwhm(path)
 
@@ -97,7 +84,7 @@ class QualityDiagnostics:
             Mean rejected-pixel fraction over the rejmap, or `None` if
             the sibling rejmap file does not exist.
         """
-        from astrometricslib.data_access.image_quality_metrics import measure_rejected_fraction
+        from astrometricslib.image_processing.quality_metrics import measure_rejected_fraction
 
         return measure_rejected_fraction(stacked_path)
 
@@ -114,7 +101,7 @@ class QualityDiagnostics:
         frames : `list` of `dict`
             One dict per registered frame, in original submission order.
         """
-        from astrometricslib.data_access.image_quality_metrics import parse_seq_file
+        from astrometricslib.image_processing.quality_metrics import parse_seq_file
 
         return parse_seq_file(seq_path)
 
@@ -132,7 +119,7 @@ class QualityDiagnostics:
             Stats for the brightest star, or `None` if the file does
             not exist or has no data rows.
         """
-        from astrometricslib.data_access.image_quality_metrics import parse_zero_order_star
+        from astrometricslib.image_processing.quality_metrics import parse_zero_order_star
 
         return parse_zero_order_star(lst_path)
 
@@ -158,7 +145,7 @@ class QualityDiagnostics:
             A list the same length as values, `True` where the
             corresponding entry is an outlier.
         """
-        from astrometricslib.tasks.target_tasks.spectral_registration_quality import flag_outliers
+        from astrometricslib.pipelines.spectroscopy.registration_quality import flag_outliers
 
         return flag_outliers(values, sigma_threshold, low_is_bad)
 
@@ -171,7 +158,7 @@ class QualityDiagnostics:
         thresholds : `dict` [`str`, `float`]
             Threshold values keyed by threshold name.
         """
-        from astrometricslib.tasks.target_tasks import spectral_registration_quality as srq
+        from astrometricslib.pipelines.spectroscopy import registration_quality as srq
 
         return {
             "min_matched_star_pairs": srq.MIN_MATCHED_STAR_PAIRS,
@@ -182,12 +169,12 @@ class QualityDiagnostics:
 
 
 class CalibrationCatalog:
-    """Dark/bias/flat calibration frame asset catalog.
+    """A catalog for managing calibration frames (darks, biases, and flats).
 
-    Collapses `CalibrationLibrary`'s per-kind method families
-    (`add_dark_frame`/`add_bias_frame`/`add_flat_frame`, etc.) into one
-    `kind`-parameterized method each, so a fourth calibration kind
-    would extend `kind` rather than requiring three new methods.
+    Telescope cameras produce noise. Calibration frames are special pictures
+    taken with the lens cap on (darks/biases) or pointed at a flat white
+    surface (flats) to map out and remove this noise. This class tracks
+    these files so they can be applied to real images later.
     """
 
     def __init__(self, config: AppConfiguration):  # ruff: ignore[missing-return-type-special-method]
@@ -203,20 +190,15 @@ class CalibrationCatalog:
 
     @property
     def library(self) -> Any:
-        """The underlying `CalibrationLibrary` model, built on first access.
-
-        Exposed so callers needing the raw model (e.g. to inject into
-        `ImageProcessing`, the Siril driver) share this catalog's
-        single instance rather than constructing their own.
+        """The calibration-data model, built the first time it is used.
 
         Returns
         -------
         library : `CalibrationLibrary`
-            The underlying calibration library model
-            (`astrometricslib.utilities.calibration_library.CalibrationLibrary`).
+            The underlying calibration library model.
         """
         if self._library is None:
-            from astrometricslib.utilities.calibration_library import CalibrationLibrary
+            from astrometricslib.drivers.calibration_library import CalibrationLibrary
 
             self._library = CalibrationLibrary(app_config=self._config)
         return self._library
@@ -245,7 +227,7 @@ class CalibrationCatalog:
         self.library.load_library()
 
     def save(self) -> None:
-        """Persist the calibration library to its on-disk JSON file."""
+        """Record the calibration library to its on-disk JSON file."""
         self.library.save_library()
 
     def stats(self) -> dict[str, Any]:
@@ -329,7 +311,7 @@ class CalibrationCatalog:
 
 
 class ProcessingPipelines:
-    """Synchronous pipeline-execution API for stacking and analysis."""
+    """Main interface for triggering image stacking and analysis pipelines."""
 
     def __init__(self, config: AppConfiguration):  # ruff: ignore[missing-return-type-special-method]
         """Initialize with application configuration.
@@ -359,17 +341,12 @@ class ProcessingPipelines:
         log_file: str | None = None,
         generate_rejmap: bool | None = None,
     ) -> str | None:
-        """Run the Siril stacking pipeline, with an optional astrometry solve.
+        """Stack multiple images into one clean image, optionally solving it.
 
-        By default (`solve=False`), never triggers a follow-up
-        astrometry solve -- useful for repeated analysis sweeps (e.g.
-        a rejection-sigma x filter-wfwhm grid) where the plate-solve
-        side effect and its overhead are unwanted on every iteration.
-        Pass `solve=True` to also plate-solve the resulting standard
-        stack (see `tasks.target_tasks.pipeline_tasks.stack_and_solve`
-        for the full follow-up behavior); `output_file` has no effect
-        when `solve=True`, since that path always writes the
-        configured default stack output.
+        Stacking combines many faint, noisy images into one clear image.
+        If `solve` is True, it will also 'plate-solve' the final image,
+        meaning it will calculate exactly where in the sky the camera was
+        pointing by matching the stars in the image to a known database.
 
         Parameters
         ----------
@@ -406,7 +383,7 @@ class ProcessingPipelines:
             stacking did not produce an output.
         """
         if solve:
-            from astrometricslib.tasks.target_tasks.pipeline_tasks import stack_and_solve
+            from astrometricslib.pipelines.dispatch import stack_and_solve
 
             return stack_and_solve(
                 target,
@@ -420,7 +397,7 @@ class ProcessingPipelines:
                 generate_rejmap=generate_rejmap,
             )
 
-        from astrometricslib.tasks.target_tasks import stacking_tasks
+        from astrometricslib.pipelines.stacking import stage as stacking_tasks
 
         return stacking_tasks.stack_frames(
             target,
@@ -453,7 +430,7 @@ class ProcessingPipelines:
         result : `dict[str, Any]`
             Astrometry results and status fields.
         """
-        from astrometricslib.tasks.target_tasks.pipeline_tasks import analyze_target
+        from astrometricslib.pipelines.dispatch import analyze_target
 
         return analyze_target(target, pipeline_type="astrometry", **kwargs)
 
@@ -475,7 +452,7 @@ class ProcessingPipelines:
         result : `dict[str, Any]`
             Photometry results and status fields.
         """
-        from astrometricslib.tasks.target_tasks.pipeline_tasks import analyze_target
+        from astrometricslib.pipelines.dispatch import analyze_target
 
         return analyze_target(target, pipeline_type="photometry", **kwargs)
 
@@ -497,7 +474,7 @@ class ProcessingPipelines:
         result : `dict[str, Any]`
             Spectroscopy results and status fields.
         """
-        from astrometricslib.tasks.target_tasks.pipeline_tasks import analyze_target
+        from astrometricslib.pipelines.dispatch import analyze_target
 
         return analyze_target(target, pipeline_type="spectroscopy", **kwargs)
 
@@ -509,10 +486,7 @@ class ProcessingPipelines:
         max_workers: int | None = None,
         on_item_complete: Any | None = None,
     ) -> Any:
-        """Process a target's spectroscopy frames one session at a time.
-
-        See `Astrometrics.process_spectroscopy_frames_by_session` (its
-        former home) for the full parameter/return documentation.
+        """Analyze a target's spectroscopy frames, grouped by session.
 
         Parameters
         ----------
@@ -536,8 +510,8 @@ class ProcessingPipelines:
         session_results : `list` [`tuple`]
             One `(session, identify_result)` pair per session.
         """
-        from astrometricslib.tasks.target_tasks import (
-            spectroscopy_batch_tasks as spectroscopy_batch_operations,
+        from astrometricslib.pipelines.spectroscopy import (
+            batch as spectroscopy_batch_operations,
         )
 
         return spectroscopy_batch_operations.process_spectroscopy_frames_by_session(
@@ -545,12 +519,7 @@ class ProcessingPipelines:
         )
 
     def scan_target_directory(self, target: Target, frames_root_path: str) -> None:
-        """Walk a target frame directory, indexing newly discovered frames.
-
-        Exposed here so callers outside this library — the observatory
-        library indexing frames just retrieved from a telescope host,
-        for instance — never need to import `astrometricslib.data_access`
-        directly.
+        """Scan a folder to find and catalog any new image frames for a target.
 
         Parameters
         ----------
@@ -559,16 +528,12 @@ class ProcessingPipelines:
         frames_root_path : `str`
             Root directory to scan for FITS files.
         """
-        from astrometricslib.data_access.frame_scanning import scan_target_directory
+        from astrometricslib.catalog_services.frame_scanning import scan_target_directory
 
         scan_target_directory(target, frames_root_path)
 
     def create_frame_record(self, path: str, camera: str | None = None) -> Any:
-        """Build a `FrameRecord` from a FITS file's header metadata.
-
-        Exposed here for the same reason as `scan_target_directory` --
-        callers outside this library should never need to import
-        `astrometricslib.data_access` directly.
+        """Create a frame record by reading a FITS image's header data.
 
         Parameters
         ----------
@@ -582,20 +547,16 @@ class ProcessingPipelines:
         frame_record : `astrometricslib.models.target.FrameRecord`
             The frame record derived from the FITS header at `path`.
         """
-        from astrometricslib.data_access.frame_scanning import create_frame_record_from_fits
+        from astrometricslib.catalog_services.frame_scanning import create_frame_record_from_fits
 
         return create_frame_record_from_fits(path, camera)
 
     def acquire_analysis_slot(self) -> AbstractContextManager:
-        """Context manager limiting concurrent "analysis"-type pipeline work.
+        """Limit how many analysis jobs can run at the same time.
 
-        Bounds how many photometry/spectroscopy analysis runs execute
-        concurrently system-wide (an OS-level lock, respected across
-        processes), the same guard `run_full_pipeline` applies around
-        its own photometry/spectroscopy steps. Exposed here so callers
-        orchestrating their own analysis runs (e.g. the backend's
-        `AnalysisOrchestrator`) never need to import
-        `astrometricslib.drivers.disk_interface` directly.
+        Processing images takes a lot of CPU power. This function ensures
+        the computer is not overwhelmed by limiting how many jobs can run
+        simultaneously.
 
         Returns
         -------
@@ -603,23 +564,16 @@ class ProcessingPipelines:
             Enter to block until a slot is free, then hold it for the
             analysis run's duration.
         """
-        from astrometricslib.drivers import disk_interface
+        from datastore.process_locks import acquire_resource_slot
 
-        return disk_interface.acquire_resource_slot(
-            self._config, "analysis", self._config.get_analysis_concurrency()
-        )
+        return acquire_resource_slot(self._config, "analysis", self._config.get_analysis_concurrency())
 
     def acquire_stacking_slot(self) -> AbstractContextManager:
-        """Context manager limiting concurrent Siril stacking subprocesses.
+        """Limit how many image stacking jobs can run at the same time.
 
-        Bounds how many Siril subprocesses run concurrently
-        system-wide, whether started here or by the offline batch
-        script (`run_full_pipeline`) -- an OS-level lock, respected
-        across processes, not just within one. Exposed here so callers
-        starting their own Siril runs outside `stack_and_solve`/
-        `run_stacking` (e.g. the backend's driver-level stacking task)
-        never need to import `astrometricslib.drivers.disk_interface`
-        directly.
+        Stacking images uses massive amounts of RAM and CPU. This function
+        ensures the computer is not crashed by limiting how many stacking
+        programs can run simultaneously.
 
         Returns
         -------
@@ -627,8 +581,6 @@ class ProcessingPipelines:
             Enter to block until a slot is free, then hold it for the
             stacking run's duration.
         """
-        from astrometricslib.drivers import disk_interface
+        from datastore.process_locks import acquire_resource_slot
 
-        return disk_interface.acquire_resource_slot(
-            self._config, "siril", self._config.get_siril_concurrency()
-        )
+        return acquire_resource_slot(self._config, "siril", self._config.get_siril_concurrency())

@@ -113,3 +113,159 @@ def test_stellar_object_has_spectra_and_has_photometry_computed_fields():  # ruf
     rpc_data = serialize_rpc_result(star_with_spectra)
     assert rpc_data["hasSpectra"] is True
     assert rpc_data["plotData"] == {"wavelengths": [5000.0], "intensities": [1.0]}
+
+
+def test_get_displayable_stellar_object_summaries_excludes_per_frame_detections(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify the lightweight summary listing also drops detection stubs.
+
+    Mirrors test_get_displayable_stellar_objects_excludes_per_frame_detections
+    for get_displayable_stellar_object_summaries, the path astronomy:list
+    actually uses -- built on StellarCatalog.list_object_summaries's
+    disk-backed lightweight read rather than a fully-hydrated
+    StellarObject list, so the per-frame-stub filter needs its own
+    coverage against that path. Uses a real Astrometrics (not a
+    MagicMock) since the point is exercising the actual disk-backed
+    summary read, not a mocked stand-in for it.
+    """
+    import json
+    import sqlite3
+
+    from astrometricslib import AppConfiguration, Astrometrics
+
+    library_path = tmp_path / "library"
+    (library_path / "targets").mkdir(parents=True)
+    (library_path / "frames").mkdir(parents=True)
+    config = AppConfiguration()
+    config.update_config({
+        "Image Library": {"path": str(library_path), "frames_path": str(library_path / "frames")}
+    })
+
+    db_path = str(library_path / "astrometrics.db")
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE stellar_objects (
+            id TEXT PRIMARY KEY, target_id TEXT, name TEXT,
+            ra REAL, dec REAL, magnitude REAL, data_json TEXT
+        )
+        """
+    )
+    conn.execute(
+        "INSERT INTO stellar_objects (id, data_json) VALUES (?, ?)",
+        ("Polaris", json.dumps({"id": "Polaris", "name": "Polaris", "targetIds": []})),
+    )
+    conn.execute(
+        "INSERT INTO stellar_objects (id, data_json) VALUES (?, ?)",
+        (
+            "M 81:2026-01-14:0:0:Star_60",
+            json.dumps({"id": "M 81:2026-01-14:0:0:Star_60", "name": "detection", "targetIds": ["M 81"]}),
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    service = StellarService(config=config, astrometrics=Astrometrics(config=config), wayfinder=MagicMock())
+    summaries = service.get_displayable_stellar_object_summaries()
+
+    assert [s["id"] for s in summaries] == ["Polaris"]
+
+
+def test_get_displayable_stellar_object_summaries_limits_to_100_by_default() -> None:
+    """Verify that get_displayable_stellar_object_summaries defaults to 100.
+
+    Ensures that when more than 100 stars are in the catalog, only the first
+    100 displayable stars are returned to prevent UI loading bottlenecks.
+    """
+    mock_stars = [
+        {"id": f"Star_{i:03d}_Real", "name": f"Catalog Star {i}", "hasSpectra": False, "hasPhotometry": False}
+        for i in range(250)
+    ]
+    astrometrics = MagicMock()
+    astrometrics.stars.list_object_summaries.return_value = mock_stars
+    service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
+
+    summaries = service.get_displayable_stellar_object_summaries()
+    assert len(summaries) == 100
+    assert summaries[0]["id"] == "Star_000_Real"
+    assert summaries[99]["id"] == "Star_099_Real"
+
+
+def test_get_displayable_stellar_object_summaries_searches_across_all_records() -> None:
+    """Verify that search filters evaluate against the full catalog.
+
+    Ensures that an object located past index 100 in the catalog (e.g. index
+    150) is found and returned when matching the search query, rather than
+    only searching within an already-truncated 100 item slice.
+    """
+    mock_stars = [
+        {"id": f"Star_{i:03d}_Real", "name": f"Catalog Star {i}", "hasSpectra": False, "hasPhotometry": False}
+        for i in range(200)
+    ]
+    mock_stars.append({
+        "id": "HD_99999",
+        "name": "Target Star Alpha",
+        "hasSpectra": True,
+        "hasPhotometry": True,
+    })
+    astrometrics = MagicMock()
+    astrometrics.stars.list_object_summaries.return_value = mock_stars
+    service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
+
+    # Search for star at the end of the 200+ list
+    results = service.get_displayable_stellar_object_summaries(search="Target Star")
+    assert len(results) == 1
+    assert results[0]["id"] == "HD_99999"
+
+    # Search by ID substring
+    results_by_id = service.get_displayable_stellar_object_summaries(search="99999")
+    assert len(results_by_id) == 1
+    assert results_by_id[0]["id"] == "HD_99999"
+
+
+def test_get_displayable_stellar_object_summaries_category_filters() -> None:
+    """Verify that category filtering filters across catalog and limits count.
+
+    Ensures that filter_type='With Spectra' and filter_type='With Photometry'
+    only return stars matching the respective capability flag.
+    """
+    mock_stars = [
+        {"id": "Star_Spectra_1", "name": "Spec 1", "hasSpectra": True, "hasPhotometry": False},
+        {"id": "Star_Phot_1", "name": "Phot 1", "hasSpectra": False, "hasPhotometry": True},
+        {"id": "Star_Both_1", "name": "Both 1", "hasSpectra": True, "hasPhotometry": True},
+        {"id": "Star_None_1", "name": "None 1", "hasSpectra": False, "hasPhotometry": False},
+    ]
+    astrometrics = MagicMock()
+    astrometrics.stars.list_object_summaries.return_value = mock_stars
+    service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
+
+    spectra_results = service.get_displayable_stellar_object_summaries(filter_type="With Spectra")
+    assert [s["id"] for s in spectra_results] == ["Star_Spectra_1", "Star_Both_1"]
+
+    phot_results = service.get_displayable_stellar_object_summaries(filter_type="With Photometry")
+    assert [s["id"] for s in phot_results] == ["Star_Phot_1", "Star_Both_1"]
+
+
+def test_get_displayable_stellar_object_summaries_offset_pagination() -> None:
+    """Verify that offset pagination skips items appropriately."""
+    mock_stars = [
+        {"id": f"HD_{i:03d}", "name": f"Star {i}", "hasSpectra": True, "hasPhotometry": True}
+        for i in range(250)
+    ]
+    astrometrics = MagicMock()
+    astrometrics.stars.list_object_summaries.return_value = mock_stars
+    service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
+
+    page_1 = service.get_displayable_stellar_object_summaries(limit=100, offset=0)
+    assert len(page_1) == 100
+    assert page_1[0]["id"] == "HD_000"
+    assert page_1[99]["id"] == "HD_099"
+
+    page_2 = service.get_displayable_stellar_object_summaries(limit=100, offset=100)
+    assert len(page_2) == 100
+    assert page_2[0]["id"] == "HD_100"
+    assert page_2[99]["id"] == "HD_199"
+
+    page_3 = service.get_displayable_stellar_object_summaries(limit=100, offset=200)
+    assert len(page_3) == 50
+    assert page_3[0]["id"] == "HD_200"
+    assert page_3[49]["id"] == "HD_249"

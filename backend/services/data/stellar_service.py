@@ -8,7 +8,7 @@ from astrometricslib import Astrometrics, StellarObject
 logger = logging.getLogger(__name__)
 
 # Matches the ID suffix VariabilityAnalyzer stamps onto every per-frame point
-# source it detects during photometry (target_session_tasks.py's
+# source it detects during photometry (target_sessions.py's
 # "{target_id}:{night_date}:{gain}:{offset}" session id, joined with
 # ":Star_{n}" in variability_analyzer.py). These are internal detection
 # artifacts merged into the same stellar_catalog store real catalog objects
@@ -174,6 +174,89 @@ class StellarService:
             if not _is_per_frame_photometry_detection(obj.id)
         ]
 
+    def get_displayable_stellar_object_summaries(
+        self,
+        target_id: str | None = None,
+        limit: int | None = 100,
+        offset: int | None = 0,
+        search: str | None = None,
+        filter_type: str | None = None,
+    ) -> list[dict]:
+        """Lightweight per-star summaries for a catalog-browsing listing.
+
+        Same displayability filtering as `get_displayable_stellar_objects`,
+        but built on `StellarCatalog.list_object_summaries` (indexed
+        columns via `CatalogAccess.list_star_summaries`, never touching
+        `data_json`, and capped at `limit` rows, defaulting to 100)
+        instead of fully
+        hydrating every `StellarObject`. When `search` or `filter_type`
+        is specified, filters across all matching database records before
+        capping results to `limit`. Supports `offset` pagination.
+
+        Parameters
+        ----------
+        target_id : `str`, optional
+            Restrict to stars belonging to this target.
+        limit : `int`, optional
+            Maximum number of stars to return. Defaults to 100.
+        offset : `int`, optional
+            Number of initial matching stars to skip for pagination.
+            Defaults to 0.
+        search : `str`, optional
+            Search query to filter star ID or name across the catalog.
+        filter_type : `str`, optional
+            Filter category, e.g. "With Spectra" / "spectra" or
+            "With Photometry" / "photometry".
+
+        Returns
+        -------
+        summaries : `list` [`dict`]
+            One dict per displayable star with keys ``id``, ``name``,
+            ``targetIds``, ``hasSpectra``, and ``hasPhotometry``,
+            optionally filtered by ``target_id``, ``search``, and
+            ``filter_type``, paginated by ``offset`` and ``limit``.
+        """
+        effective_limit = None if (search or filter_type or (offset and offset > 0)) else limit
+        summaries = self.astrometrics.stars.list_object_summaries(target_id, effective_limit)
+
+        search_needle = search.strip().lower() if search and search.strip() else None
+
+        filtered = []
+        for summary in summaries:
+            summary_id = str(summary.get("id") or "")
+            if _is_per_frame_photometry_detection(summary_id):
+                continue
+
+            summary_name = str(summary.get("name") or "")
+
+            if filter_type:
+                normalized_filter = filter_type.strip().lower()
+                is_spectra_filter = normalized_filter in (
+                    "with spectra",
+                    "spectra",
+                    "hasspectra",
+                )
+                if is_spectra_filter and not summary.get("hasSpectra"):
+                    continue
+                is_photometry_filter = normalized_filter in (
+                    "with photometry",
+                    "photometry",
+                    "hasphotometry",
+                )
+                if is_photometry_filter and not summary.get("hasPhotometry"):
+                    continue
+
+            if search_needle:
+                if search_needle not in summary_id.lower() and search_needle not in summary_name.lower():
+                    continue
+
+            filtered.append(summary)
+
+        start_offset = max(0, offset or 0)
+        if limit is not None and limit > 0:
+            return filtered[start_offset : start_offset + limit]
+        return filtered[start_offset:]
+
     def load_stellar_objects(self) -> None:
         """No-op retained for backward compatibility.
 
@@ -182,14 +265,14 @@ class StellarService:
         pass
 
     def save_objects(self) -> str:
-        """Persist the current list of stellar objects to SQLite.
+        """Record the current list of stellar objects to SQLite.
 
         Saved via the high-level interface.
 
         Returns
         -------
         result : `str`
-            Status message from the persistence layer.
+            Status message from the storage layer.
         """
         try:
             return self.astrometrics.stars.save_all(self.get_stellar_objects())
@@ -493,7 +576,7 @@ class StellarService:
         """Return serialized StellarObjects from online catalog drivers.
 
         Decoupled from get_sources() — never queries the local database and
-        never persists results. Each returned dict includes a catalog_source
+        never records results. Each returned dict includes a catalog_source
         field identifying which driver produced it.
 
         Parameters

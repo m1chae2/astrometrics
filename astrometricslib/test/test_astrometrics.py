@@ -5,7 +5,7 @@ Astrometrics high-level interface.
 """
 
 from astrometricslib import Astrometrics
-from astrometricslib.tasks.target_tasks.pipeline_tasks import analyze_target
+from astrometricslib.pipelines.dispatch import analyze_target
 from astrometricslib.utilities.config_loader import AppConfiguration
 
 
@@ -77,10 +77,15 @@ def test_astrometry_pulls_solved_coordinates_when_unpopulated(tmp_path):  # ruff
         mock_pipeline_inst.process.return_value = mock_context
 
         with patch(
-            "astrometricslib.tasks.stellar_tasks.astrometry_tasks.astrometry_pipeline.AstrometryPipeline",
+            "astrometricslib.pipelines.astrometry.pipeline.AstrometryPipeline",
             mock_pipeline_class,
         ):
-            analyze_target(target, type="astrometry")
+            # `pipeline_type`, not `type`. `type` is not a parameter of
+            # analyze_target, so it used to fall into **kwargs and get
+            # forwarded all the way down into AstrometryPipeline.process().
+            # It only looked fine because that class is mocked here, so the
+            # bogus argument landed on a MagicMock that accepts anything.
+            analyze_target(target, pipeline_type="astrometry")
 
         # Verify that coordinates were pulled from WCS
         # 180 deg RA -> 12h, -45 deg Dec -> -45d

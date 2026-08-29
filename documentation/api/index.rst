@@ -16,7 +16,7 @@ Comprehensive Python API reference for ``astrometricslib`` and ``wayfindinglib``
         :link: astrometricslib
         :link-type: doc
 
-        Image calibration, plate solving, star field visualization, butler storage access, and spectroscopy pipelines.
+        Image calibration, plate solving, star field visualization, catalog and file storage access, and spectroscopy pipelines.
 
     .. grid-item-card:: Wayfinding Library
         :link: wayfindinglib

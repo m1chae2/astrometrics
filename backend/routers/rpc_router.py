@@ -172,7 +172,7 @@ class RPCHandlerRegistry:
         self.register("target:get_header", ("target_service", "get_frame_header"))
         self.register("target:get_frame_header", ("target_service", "get_frame_header"))
 
-        self.register("astronomy:list", ("stellar_service", "get_displayable_stellar_objects"))
+        self.register("astronomy:list", ("stellar_service", "get_displayable_stellar_object_summaries"))
         self.register("astronomy:get", ("stellar_service", "get_object_fuzzy_by_id"))
         self.register("astronomy:save", ("stellar_service", "save_objects"))
         self.register("astronomy:get_stellar_objects", ("stellar_service", "get_stellar_objects"))

@@ -25,6 +25,11 @@ export interface RadioListManagerProps {
     // Customization
     className?: string;
 
+    // Pagination props
+    page?: number;
+    onPageChange?: (newPage: number) => void;
+    hasMore?: boolean;
+
     // New
     highlightedIds?: Set<string>;
     noWrapper?: boolean;
@@ -49,6 +54,9 @@ export const RadioListManager: React.FC<RadioListManagerProps> = ({
     filterPlaceholder,
     actions,
     className = '',
+    page = 1,
+    onPageChange,
+    hasMore = false,
     highlightedIds,
     noWrapper = false,
     title = 'List',
@@ -79,6 +87,33 @@ export const RadioListManager: React.FC<RadioListManagerProps> = ({
                 onSelect={onSelect}
                 highlightedIds={highlightedIds}
             />
+
+            {/* Pagination Controls */}
+            {onPageChange && (
+                <div className="manager__pagination">
+                    <button
+                        type="button"
+                        className="manager__pagination-btn"
+                        onClick={() => onPageChange(Math.max(1, page - 1))}
+                        disabled={page <= 1}
+                        aria-label="Previous Page"
+                    >
+                        &larr; Prev
+                    </button>
+                    <span className="manager__pagination-label">
+                        Page {page}
+                    </span>
+                    <button
+                        type="button"
+                        className="manager__pagination-btn"
+                        onClick={() => onPageChange(page + 1)}
+                        disabled={!hasMore}
+                        aria-label="Next Page"
+                    >
+                        Next &rarr;
+                    </button>
+                </div>
+            )}
         </>
     );
 

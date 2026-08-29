@@ -46,7 +46,7 @@ class ObservationPlanning:
     """Synchronous observation-planning API: packages, advisories, sessions."""
 
     def __init__(self, butler: DiskButler | None = None, planning_config: PlanningConfig | None = None):  # ruff: ignore[missing-return-type-special-method]
-        """Initialize with a persistence layer and configuration."""
+        """Initialize with a storage layer and configuration."""
         self._butler = butler or DiskButler()
         self._planning_config = planning_config or PlanningConfig()
         self.__sky_engine = None
@@ -239,7 +239,7 @@ class ObservationPlanning:
         quality_weighting_enabled: bool = False,
         notes: str = "",
     ) -> ObservationPackage:
-        """Create and persist a reusable imaging request for a target.
+        """Create and record a reusable imaging request for a target.
 
         Validates that `target_id` resolves to an existing target before
         constructing the package (`Wayfinding_Library_Sequences.md` §1.1).
@@ -247,7 +247,7 @@ class ObservationPlanning:
         Returns
         -------
         package : `ObservationPackage`
-            The newly created and persisted package.
+            The newly created and recorded package.
 
         Raises
         ------
@@ -315,7 +315,7 @@ class ObservationPlanning:
         Returns
         -------
         packages : `list` [`ObservationPackage`]
-            The generated, persisted sibling packages, one per panel.
+            The generated, recorded sibling packages, one per panel.
         """
         from wayfindinglib.tasks.planning_tasks.mosaic_tasks import generate_mosaic_packages
 
@@ -347,7 +347,7 @@ class ObservationPlanning:
         Returns
         -------
         session : `ObservationSession`
-            The assembled, persisted session with its placed queue and
+            The assembled, recorded session with its placed queue and
             unplaced-package diagnostics.
         """
         from wayfindinglib.tasks.planning_tasks.scheduling import plan_observation_session
@@ -377,12 +377,12 @@ class ObservationPlanning:
     def create_empty_session(
         self, site_profile: SiteProfile, telescope: Telescope, camera_id: str, night_date: date
     ) -> ObservationSession:
-        """Create and persist an empty session for hand-authored entries.
+        """Create and record an empty session for hand-authored entries.
 
         Returns
         -------
         session : `ObservationSession`
-            The newly created, persisted, empty session.
+            The newly created, recorded, empty session.
         """
         session = ObservationSession(
             id=str(uuid.uuid4()),
@@ -416,7 +416,7 @@ class ObservationPlanning:
         Returns
         -------
         session : `ObservationSession`
-            The session with the new entry appended and persisted.
+            The session with the new entry appended and recorded.
 
         Raises
         ------
@@ -450,7 +450,7 @@ class ObservationPlanning:
         Returns
         -------
         session : `ObservationSession`
-            The session with its queue reordered and persisted.
+            The session with its queue reordered and recorded.
 
         Raises
         ------

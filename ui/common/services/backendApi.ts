@@ -80,7 +80,7 @@ export interface ActionRegistry {
     // Astronomy & Stellar Library
     "astronomy:get_status": { payload: { target_id: string }; response: TelescopeStatus };
     "astronomy:visible": { payload: Record<string, never>; response: Spectrum[] };
-    "astronomy:list": { payload: { target_id?: string }; response: Spectrum[] };
+    "astronomy:list": { payload: { target_id?: string; limit?: number; search?: string; filter_type?: string }; response: Spectrum[] };
     "astronomy:get": { payload: { object_id: string }; response: Spectrum | null };
     "astronomy:delete": { payload: { object_id: string }; response: boolean };
     "astronomy:update": { payload: { object_id: string; updates: Partial<Spectrum> }; response: Spectrum | null };

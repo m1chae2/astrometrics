@@ -53,20 +53,20 @@ def _policy(*entries: CapabilityDelegation) -> DelegationPolicy:
 
 
 def test_get_delegation_policy_defaults_all_delegated_when_unconfigured(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify no persisted policy resolves to an all-DELEGATED policy."""
+    """Verify no recorded policy resolves to an all-DELEGATED policy."""
     policy = get_delegation_policy(isolated_butler)
     assert policy.state_for(ObservatoryCapability.MOUNT_CONTROL) == DelegationState.DELEGATED
     assert policy.capability_delegations == []
 
 
 def test_get_delegation_policy_reads_persisted_value(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify a persisted policy is returned as-is."""
-    persisted = _policy(
+    """Verify a recorded policy is returned as-is."""
+    recorded = _policy(
         CapabilityDelegation(
             capability=ObservatoryCapability.MOUNT_CONTROL, state=DelegationState.AUTHORITATIVE
         )
     )
-    isolated_butler.put(persisted, "delegation_policy", {"id": "default"})
+    isolated_butler.put(recorded, "delegation_policy", {"id": "default"})
     policy = get_delegation_policy(isolated_butler)
     assert policy.is_authoritative(ObservatoryCapability.MOUNT_CONTROL) is True
 

@@ -40,6 +40,7 @@ from astropy.io import fits
 from astropy.stats import sigma_clipped_stats
 
 from astrometricslib import Astrometrics
+from astrometricslib.image_processing.fits_access import collapse_to_2d
 
 SWEEP_SIGMA = (3.0, 3.0)
 SWEEP_FILTER_WFWHM_GRID: list[str | None] = [None, "90%", "80%"]
@@ -54,21 +55,18 @@ def resolve_spec_frames(target, camera: str, date_prefix: str | None = None):  #
 
     Parameters
     ----------
-    target : `Target`
-        The target whose `frames` should be filtered.
-    camera : `str`
-        The exact camera name a frame's ``camera`` attribute must
-        match.
-    date_prefix : `str`, optional
-        Restricts the selection to frames captured on this date
-        (e.g. ``"2026-05-23"``), by default `None` (no date
-        restriction). Matched as a prefix of `FrameRecord.date`.
+    target : Target
+        The target whose frames should be filtered.
+    camera : str
+        The exact camera name a frame's camera attribute must match.
+    date_prefix : str, optional
+        Restricts the selection to frames captured on this date.
 
     Returns
     -------
-    matching_frames : `list`
-        The subset of `target.frames` with `FilterType.SPEC` matching
-        the given camera and (optional) date criteria.
+    list
+        The subset of target.frames with FilterType.SPEC matching
+        the given criteria.
     """
     from astrometricslib.utilities.enums import FilterType
 
@@ -154,9 +152,7 @@ def measure_zero_order_stacked_fwhm(astrometrics, path: str) -> float | None:  #
         data = hdul[0].data
     if data is None:
         return None
-    data = np.asarray(data, dtype=float)
-    if data.ndim == 3:
-        data = np.mean(data, axis=0 if data.shape[0] in (3, 4) else -1)
+    data = collapse_to_2d(np.asarray(data, dtype=float))
 
     sources = astrometrics.stars.detect_point_sources(data)
     if not sources:

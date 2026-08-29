@@ -2,13 +2,10 @@
 
 Provides `LoggerInterface`, a SQLite-backed repository for
 `ProcessingJob` records, agent long-term-memory tables, and per-job
-log entries, plus `DbLogHandler`, a `logging.Handler` that persists
+log entries, plus `DbLogHandler`, a `logging.Handler` that records
 emitted log records into that same database.
 
-Notes
------
-Implements requirement REQ: IMG-5.6 (persistent job history
-tracking).
+
 """
 
 import logging
@@ -21,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 class LoggerInterface:
-    """Handle persistence for `ProcessingJob` objects in astrometrics_log.db.
+    """Handle recording for `ProcessingJob` objects in astrometrics_log.db.
 
     Attributes
     ----------
@@ -45,8 +42,8 @@ class LoggerInterface:
     def _connect(self, timeout: float = 30.0) -> sqlite3.Connection:
         """Open a connection to astrometrics_log.db with WAL mode.
 
-        Mirrors disk_interface._connect_db(): WAL lets readers and
-        writers proceed concurrently, and the busy timeout makes a
+        Mirrors `datastore.local_database.connect_db`: WAL lets readers
+        and writers proceed concurrently, and the busy timeout makes a
         concurrent writer retry briefly instead of immediately
         raising "database is locked" once multiple processes (not
         just threads within one process) write to this database at
@@ -85,7 +82,7 @@ class LoggerInterface:
                 )
             """)
 
-            # REQ: AGENT-1.7 - Interaction logging for audit and reflection
+            # Interaction logging for audit and reflection
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS agent_interactions (
                     id TEXT PRIMARY KEY,
@@ -96,7 +93,7 @@ class LoggerInterface:
                 )
             """)
 
-            # REQ: AGENT-1.9 - Distilled knowledge for LTM
+            # Distilled knowledge for LTM
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS agent_knowledge (
                     id TEXT PRIMARY KEY,
@@ -109,7 +106,7 @@ class LoggerInterface:
                 )
             """)
 
-            # REQ: SYS-1.4 - Per-component / per-job log persistence
+            # Per-component / per-job log recording
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS log_entries (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -305,7 +302,7 @@ class LoggerInterface:
 
         Notes
         -----
-        Implements requirement REQ: IMG-5.7.
+        Implements persistent job history tracking.
         """
         try:
             conn = self._connect()
@@ -518,7 +515,7 @@ class LoggerInterface:
         message: str,
         job_id: str | None = None,
     ) -> None:
-        """Persist a single emitted log record.
+        """Record a single emitted log record.
 
         Called from DbLogHandler.emit(), which runs inside the logging
         framework itself. Failures here must stay silent (no logger.error
@@ -562,7 +559,7 @@ class LoggerInterface:
             logger.debug("Error recording agent knowledge recall: %s", exc)
 
     def get_log_entries_for_job(self, job_id: str) -> list[dict]:
-        """Retrieve all persisted log entries for a job, oldest first.
+        """Retrieve all recorded log entries for a job, oldest first.
 
         Parameters
         ----------
@@ -638,7 +635,7 @@ class LoggerInterface:
 
 
 class DbLogHandler(logging.Handler):
-    """Logging handler that persists emitted records into log_entries.
+    """Logging handler that records emitted records into log_entries.
 
     Bind a job_id to scope all records emitted through this handler
     instance to a specific processing job; leave it None for
@@ -660,7 +657,7 @@ class DbLogHandler(logging.Handler):
         Parameters
         ----------
         logger_interface : `LoggerInterface`
-            Repository used to persist emitted log records.
+            Repository used to record emitted log records.
         job_id : `str`, optional
             Processing job to scope records to, default `None` for
             general/unscoped logs.
@@ -670,7 +667,7 @@ class DbLogHandler(logging.Handler):
         self.job_id = job_id
 
     def emit(self, record: logging.LogRecord) -> None:
-        """Persist a log record via the bound `LoggerInterface`.
+        """Record a log record via the bound `LoggerInterface`.
 
         Parameters
         ----------

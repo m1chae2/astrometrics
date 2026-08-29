@@ -1,5 +1,5 @@
-"""Layer-4 infrastructure for persistence, FITS I/O, and frame indexing.
+"""Database and file loading tools.
 
-Internal. Import public symbols from the top-level `astrometricslib`
-namespace instead.
+This folder contains the code that actually reads and writes files
+(like images and settings) from your computer's hard drive.
 """

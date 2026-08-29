@@ -220,3 +220,257 @@ def test_discover_unassociated_remote_targets_empty_on_listing_failure():  # ruf
             raise RuntimeError("unreachable")
 
     assert remote_operations.discover_unassociated_remote_targets(_FakeControl(), None) == []
+
+
+def test_download_remote_targets_stages_into_the_resolved_remote_folder(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify staging/classification use the resolved remote folder name.
+
+    A local id of "M 42" resolves to a remote folder of "M_42", which is
+    where the driver actually downloads. Deriving the post-download scan
+    path from the unresolved id instead left every frame unclassified in
+    a parallel directory.
+    """
+    fake_astrometrics = _FakeAstrometrics()
+
+    with (
+        patch(
+            "astrometricslib.get_configuration",
+            return_value=_patched_config(frames_path=str(tmp_path)),
+        ),
+        patch("astrometricslib.Astrometrics", return_value=fake_astrometrics),
+        patch("wayfindinglib.drivers.stellarmate_interface.StellarMateInterface") as mock_driver,
+        patch("astrometricslib.classify_and_sort_fits_files") as mock_classify,
+    ):
+        mock_driver.return_value.resolve_remote_folder_name.return_value = "M_42"
+        mock_driver.return_value.list_remote_files_with_sizes.return_value = [("Light/Luminance/a.fits", 10)]
+        mock_driver.return_value.download_target_folder.return_value = True
+        success = remote_operations.download_remote_targets("M 42")
+
+    assert success is True
+    # The driver is asked for the resolved folder, not the raw target id.
+    assert mock_driver.return_value.download_target_folder.call_args.kwargs["remote_target_name"] == "M_42"
+    # Classification scans the same directory the download landed in.
+    assert mock_classify.call_args.args[0] == [str(tmp_path / "lights" / "M_42")]
+
+
+def test_download_remote_targets_transfers_only_files_not_held_locally(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify already-held frames are excluded from the rsync file list."""
+    fake_astrometrics = _FakeAstrometrics()
+    classified_dir = tmp_path / "lights" / "M 42" / "Apertura 75Q" / "ZWO ASI 533MM Pro"
+    classified_dir.mkdir(parents=True)
+    (classified_dir / "held.fits").write_text("already downloaded")
+
+    with (
+        patch(
+            "astrometricslib.get_configuration",
+            return_value=_patched_config(frames_path=str(tmp_path)),
+        ),
+        patch("astrometricslib.Astrometrics", return_value=fake_astrometrics),
+        patch("wayfindinglib.drivers.stellarmate_interface.StellarMateInterface") as mock_driver,
+        patch("astrometricslib.classify_and_sort_fits_files"),
+    ):
+        mock_driver.return_value.resolve_remote_folder_name.return_value = "M_42"
+        mock_driver.return_value.list_remote_files_with_sizes.return_value = [
+            ("Light/Luminance/held.fits", len("already downloaded")),
+            ("Light/Luminance/fresh.fits", 999),
+        ]
+        mock_driver.return_value.download_target_folder.return_value = True
+        success = remote_operations.download_remote_targets("M 42")
+
+    assert success is True
+    assert mock_driver.return_value.download_target_folder.call_args.kwargs["selected_files"] == [
+        "Light/Luminance/fresh.fits"
+    ]
+
+
+def test_download_remote_targets_skips_transfer_when_nothing_is_new(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify a fully-synced target transfers nothing but still reindexes."""
+    fake_astrometrics = _FakeAstrometrics()
+    staging_dir = tmp_path / "lights" / "M_42"
+    staging_dir.mkdir(parents=True)
+    (staging_dir / "held.fits").write_text("already downloaded")
+
+    with (
+        patch(
+            "astrometricslib.get_configuration",
+            return_value=_patched_config(frames_path=str(tmp_path)),
+        ),
+        patch("astrometricslib.Astrometrics", return_value=fake_astrometrics),
+        patch("wayfindinglib.drivers.stellarmate_interface.StellarMateInterface") as mock_driver,
+        patch("astrometricslib.classify_and_sort_fits_files") as mock_classify,
+    ):
+        mock_driver.return_value.resolve_remote_folder_name.return_value = "M_42"
+        mock_driver.return_value.list_remote_files_with_sizes.return_value = [
+            ("Light/Luminance/held.fits", len("already downloaded"))
+        ]
+        success = remote_operations.download_remote_targets("M 42")
+
+    assert success is True
+    mock_driver.return_value.download_target_folder.assert_not_called()
+    # Still classifies, so staging left by an earlier run gets healed.
+    mock_classify.assert_called_once()
+    assert fake_astrometrics.saved is True
+
+
+def test_download_remote_targets_incremental_false_forces_full_transfer(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify incremental=False bypasses the local-library diff."""
+    fake_astrometrics = _FakeAstrometrics()
+
+    with (
+        patch(
+            "astrometricslib.get_configuration",
+            return_value=_patched_config(frames_path=str(tmp_path)),
+        ),
+        patch("astrometricslib.Astrometrics", return_value=fake_astrometrics),
+        patch("wayfindinglib.drivers.stellarmate_interface.StellarMateInterface") as mock_driver,
+        patch("astrometricslib.classify_and_sort_fits_files"),
+    ):
+        mock_driver.return_value.resolve_remote_folder_name.return_value = "M_42"
+        mock_driver.return_value.download_target_folder.return_value = True
+        success = remote_operations.download_remote_targets("M 42", incremental=False)
+
+    assert success is True
+    mock_driver.return_value.list_remote_files_with_sizes.assert_not_called()
+    assert mock_driver.return_value.download_target_folder.call_args.kwargs["selected_files"] is None
+
+
+def test_download_remote_targets_transfers_same_name_file_of_different_size(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify a same-named but differently-sized remote frame still transfers.
+
+    Separate sessions can reuse a capture-order naming pattern, so a
+    filename-only comparison would treat a genuinely new frame as
+    already held and silently skip it.
+    """
+    fake_astrometrics = _FakeAstrometrics()
+    classified_dir = tmp_path / "lights" / "M 27" / "Nikkor 300mm"
+    classified_dir.mkdir(parents=True)
+    (classified_dir / "M_27_Light_001.fits").write_bytes(b"x" * 100)
+
+    with (
+        patch(
+            "astrometricslib.get_configuration",
+            return_value=_patched_config(frames_path=str(tmp_path)),
+        ),
+        patch("astrometricslib.Astrometrics", return_value=fake_astrometrics),
+        patch("wayfindinglib.drivers.stellarmate_interface.StellarMateInterface") as mock_driver,
+        patch("astrometricslib.classify_and_sort_fits_files"),
+    ):
+        mock_driver.return_value.resolve_remote_folder_name.return_value = "M 27"
+        # Same basename, different size -> a different frame.
+        mock_driver.return_value.list_remote_files_with_sizes.return_value = [
+            ("Light/Luminance/M_27_Light_001.fits", 250)
+        ]
+        mock_driver.return_value.download_target_folder.return_value = True
+        success = remote_operations.download_remote_targets("M 27")
+
+    assert success is True
+    assert mock_driver.return_value.download_target_folder.call_args.kwargs["selected_files"] == [
+        "Light/Luminance/M_27_Light_001.fits"
+    ]
+
+
+class _EmptyTargetCatalog:
+    """Stands in for the target catalog, with nothing in it."""
+
+    def list(self):  # ruff: ignore[missing-return-type-private-function]
+        return []
+
+
+class _EmptyAstrometrics:
+    """Stands in for the Astrometrics facade the sync builds for itself."""
+
+    def __init__(self, *args, **kwargs):  # ruff: ignore[missing-return-type-special-method, missing-type-kwargs, missing-type-args]
+        self.targets = _EmptyTargetCatalog()
+
+
+def _our_log_handlers(logger_name: str) -> list:
+    """List only the log handlers this library attaches.
+
+    pytest adds its own capture handler while a test runs, and that one
+    is not ours to remove.
+
+    Returns
+    -------
+    handlers : `list`
+        The file and database handlers attached to `logger_name`.
+    """
+    import logging
+
+    from astrometricslib import DbLogHandler
+
+    return [
+        handler
+        for handler in logging.getLogger(logger_name).handlers
+        if isinstance(handler, logging.FileHandler | DbLogHandler)
+    ]
+
+
+def test_sync_all_remote_folders_records_a_job_and_cleans_up_its_log_handlers(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify the sync records a job and leaves no log handlers behind.
+
+    The handlers are attached to the shared "wayfindinglib" logger so
+    progress from the download drivers reaches the job's log. Leaving
+    them attached would mean this job's log kept collecting messages from
+    every later job, and leaving the file open leaks a file handle for
+    the life of the process.
+
+    Nothing is actually downloaded here: the remote listings are stubbed
+    empty, so this exercises the job bookkeeping around the sync rather
+    than the sync itself.
+    """
+    import astrometricslib
+    from astrometricslib import AppConfiguration, LoggerInterface
+
+    library_path = tmp_path / "library"
+    library_path.mkdir()
+    logs_path = tmp_path / "logs"
+    logs_path.mkdir()
+
+    configuration = AppConfiguration()
+    configuration.update_config({"Image Library": {"path": str(library_path)}})
+    monkeypatch.setattr(configuration, "get_logs_path", lambda: logs_path)
+    monkeypatch.setattr(astrometricslib, "get_configuration", lambda: configuration)
+    monkeypatch.setattr(astrometricslib, "Astrometrics", _EmptyAstrometrics)
+    monkeypatch.setattr(remote_operations, "list_remote_calibration_folders", lambda api: [])
+    monkeypatch.setattr(remote_operations, "discover_unassociated_remote_targets", lambda api, targets: [])
+
+    handlers_before = len(_our_log_handlers("wayfindinglib"))
+
+    result = remote_operations.sync_all_remote_folders(api=None, register_job=True)
+
+    assert result["succeeded"] == []
+    assert result["failed"] == []
+    assert result["job_id"] is not None
+
+    stored_job = LoggerInterface(configuration.get_logs_db_path()).get_job(result["job_id"])
+    assert stored_job is not None
+    assert stored_job.job_type == "remote_sync"
+    assert stored_job.status == "completed"
+    # This sync sets a finish time, which the shared helper's simpler
+    # status update does not -- proof that behaviour survived the move.
+    assert stored_job.completed_at
+
+    assert len(_our_log_handlers("wayfindinglib")) == handlers_before
+    assert _our_log_handlers(f"job_{result['job_id']}") == []
+
+
+def test_sync_all_remote_folders_without_job_registration_records_nothing(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify the opt-out skips the job row and attaches no handlers."""
+    import astrometricslib
+    from astrometricslib import AppConfiguration
+
+    library_path = tmp_path / "library"
+    library_path.mkdir()
+    configuration = AppConfiguration()
+    configuration.update_config({"Image Library": {"path": str(library_path)}})
+    monkeypatch.setattr(astrometricslib, "get_configuration", lambda: configuration)
+    monkeypatch.setattr(astrometricslib, "Astrometrics", _EmptyAstrometrics)
+    monkeypatch.setattr(remote_operations, "list_remote_calibration_folders", lambda api: [])
+    monkeypatch.setattr(remote_operations, "discover_unassociated_remote_targets", lambda api, targets: [])
+
+    handlers_before = len(_our_log_handlers("wayfindinglib"))
+
+    result = remote_operations.sync_all_remote_folders(api=None, register_job=False)
+
+    assert result["job_id"] is None
+    assert len(_our_log_handlers("wayfindinglib")) == handlers_before

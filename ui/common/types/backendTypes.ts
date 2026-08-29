@@ -26,7 +26,7 @@ export enum FilterType {
 }
 
 /**
- * Enum representing different types of target images.
+ * Lists the different categories of images that can be processed.
  */
 export enum ImageType {
   STAR_FIELD = "star_field",
@@ -34,7 +34,7 @@ export enum ImageType {
 }
 
 /**
- * Represents a single image frame on disk with its associated metadata.
+ * A single raw photograph and its settings (like ISO, exposure).
  */
 export interface FrameRecord {
   path: string;
@@ -47,6 +47,16 @@ export interface FrameRecord {
   camera?: string;
   telescope?: string;
   date?: string;
+  pierSide?: string | null;
+  airmass?: number | null;
+  altitudeDegrees?: number | null;
+  azimuthDegrees?: number | null;
+  pixelScaleArcsec?: number | null;
+  focalLengthMm?: number | null;
+  binning?: number | null;
+  sensorTemperatureC?: number | null;
+  focuserPosition?: number | null;
+  focuserTemperatureC?: number | null;
   registrationFwhmXPx?: number | null;
   registrationFwhmYPx?: number | null;
   registrationRoundness?: number | null;
@@ -56,10 +66,11 @@ export interface FrameRecord {
   registrationDyPx?: number | null;
   backgroundLevel?: number | null;
   saturatedPixelFraction?: number | null;
+  measuredFwhmPx?: number | null;
 }
 
 /**
- * Stores information about a mosaic configuration created for a target.
+ * Details about a multi-panel picture (mosaic) created for this target.
  */
 export interface MosaicInfo {
   /** UUID for the mosaic group */
@@ -93,12 +104,25 @@ export interface TelescopeStatus {
 }
 
 /**
- * Pure data schema for astronomical targets.
+ * The final stacked image for a specific telescope/camera setup.
  *
- * Algorithmic operations (stacking, analysis, pipelines) are free
- * functions in `astrometricslib.tasks.target_tasks.pipeline_tasks`
- * taking a `Target` as their first argument, and are exposed to
- * external callers via `astrometricslib.api.targets.TargetCatalog`.
+ * If a target was shot with two different telescopes, it will produce
+ * two different stacked images. This structure tracks one of them.
+ */
+export interface StackConfigurationResult {
+  configurationKey: string;
+  camera?: string;
+  focalLengthMm?: number | null;
+  framesStacked?: number;
+  stackedImage?: string;
+  isPreferred?: boolean;
+}
+
+/**
+ * The main record for an astronomical target (like a galaxy or nebula).
+ *
+ * This class only stores data. If stacking images or analyzing
+ * the target, use the tools in the `TargetCatalog`.
  */
 export interface TargetObject {
   id?: string;
@@ -114,6 +138,7 @@ export interface TargetObject {
   mount?: string;
   processedImage?: string;
   stackedImage?: string;
+  stacksByConfiguration?: Record<string, StackConfigurationResult>;
   stackedSpectralTarget?: string;
   stackQualitySummary?: StackQualitySummary | null;
   spectralStackQualitySummary?: StackQualitySummary | null;
@@ -122,6 +147,7 @@ export interface TargetObject {
   spectroscopyQualitySummary?: SpectroscopyQualitySummary | null;
   asteroidCandidates?: AsteroidRecoveryCandidate[];
   asteroidRecoveryQualitySummary?: AsteroidRecoveryQualitySummary | null;
+  trackingQualitySummary?: TrackingQualitySummary | null;
   exposureTime?: number;
   numberOfStars?: number;
   frames?: FrameRecord[];
@@ -133,7 +159,7 @@ export interface TargetObject {
 }
 
 /**
- * Represent a single file item for display in the file browser.
+ * A single image file ready to be shown in a UI list.
  */
 export interface FileItem {
   path: string;
@@ -146,7 +172,7 @@ export interface FileItem {
 }
 
 /**
- * Represent the full file response for a target.
+ * All the files and summary statistics that belong to a single target.
  */
 export interface TargetFilesResponse {
   files?: FileItem[];
@@ -157,7 +183,7 @@ export interface TargetFilesResponse {
 }
 
 /**
- * Represent frame statistics grouped by filter and exposure.
+ * A count of how many images share the same filter and exposure time.
  */
 export interface GroupedFrameStat {
   filter: string;
@@ -169,7 +195,7 @@ export interface GroupedFrameStat {
 }
 
 /**
- * Hold wavelengths and flux intensities for interactive plotting.
+ * Holds the X and Y coordinates needed to draw a spectrum graph.
  */
 export interface PlotData {
   wavelengths?: number[];
@@ -177,7 +203,7 @@ export interface PlotData {
 }
 
 /**
- * Define a stellar object with coordinates, flux, and spectra.
+ * The main record for an individual star found in an image.
  */
 export interface Spectrum {
   id?: string;
@@ -213,11 +239,10 @@ export interface Spectrum {
 }
 
 /**
- * Record one observing session detection folded into a merged curve.
+ * Tracks when a star was detected during a specific observing session.
  *
- * One instance per contributing session (a merged star observed across
- * N sessions carries N of these), mirroring how `EphemerisMatch` records
- * a single cross-match rather than a bare boolean.
+ * If a star is observed on 5 different nights, it will have 5 of
+ * these records combined into its final light curve.
  */
 export interface StellarSessionMatch {
   sessionId: string;
@@ -225,7 +250,7 @@ export interface StellarSessionMatch {
 }
 
 /**
- * Represent a single spectral extraction at a specific timestamp.
+ * A measurement of a star's light split into its component colors.
  */
 export interface SpectralObservation {
   timestamp: string;
@@ -234,7 +259,7 @@ export interface SpectralObservation {
 }
 
 /**
- * Hold Lomb-Scargle periodogram analysis results for a light curve.
+ * The result of searching a star's brightness for repeating cycles.
  */
 export interface PeriodogramResult {
   bestPeriodDays?: number;
@@ -243,7 +268,7 @@ export interface PeriodogramResult {
 }
 
 /**
- * Hold Box-fitting Least Squares (BLS) transit candidate parameters.
+ * Data for when a star dims, possibly because a planet passed in front.
  */
 export interface ExoplanetTransitCandidate {
   periodDays?: number;
@@ -254,7 +279,7 @@ export interface ExoplanetTransitCandidate {
 }
 
 /**
- * Represent a light curve of flux variations over time for a star.
+ * A record of how a star's brightness changes over time.
  */
 export interface LightCurve {
   timestamps?: string[];
@@ -401,7 +426,7 @@ export interface ProcessingJob {
 }
 
 /**
- * Summarize an analysis run of the spectroscopy/variability pipeline.
+ * A summary of what happened when a processing job was run.
  */
 export interface AnalysisResult {
   status: string;
@@ -421,7 +446,7 @@ export interface AnalysisResult {
 }
 
 /**
- * Represent a stellar object flagged as a variable star candidate.
+ * A star that might be changing brightness over time.
  */
 export interface VariableCandidate {
   id: string;
@@ -433,7 +458,7 @@ export interface VariableCandidate {
 }
 
 /**
- * Represents a single card entry in a FITS file header.
+ * A single piece of metadata (key/value pair) from a FITS image file.
  */
 export interface FitsHeaderEntry {
   key: string;
@@ -498,7 +523,7 @@ export interface GuidingStatus {
 }
 
 /**
- * Lightweight schema holding scaled visualization PNG data and stats.
+ * A finished PNG image ready to display, plus brightness stats.
  */
 export interface RenderedImage {
   id: string;
@@ -563,7 +588,7 @@ export interface MosaicPanel {
 }
 
 /**
- * A single frame excluded from a pipeline run, and why.
+ * A record of a single picture that was skipped, and the reason why.
  */
 export interface ExcludedFrame {
   path: string;
@@ -571,7 +596,7 @@ export interface ExcludedFrame {
 }
 
 /**
- * One TargetSession's contribution of frames to a single pipeline run.
+ * Tracks how many pictures from a single observing session were used.
  */
 export interface TargetSessionContribution {
   session_id: string;
@@ -580,15 +605,10 @@ export interface TargetSessionContribution {
 }
 
 /**
- * Quality metrics specific to the stacking pipeline.
+ * Measurements recorded when combining (stacking) multiple images.
  *
- * Not shared with other pipelines. Standard and spectral stacks populate
- * different subsets of the optional fields:
- * stacked_fwhm_px/median_input_fwhm_px/fwhm_degraded for standard stacks
- * (whole-field FWHM is meaningful there); spectral stacks populate
- * spectral_registration_flags instead (zero-order-star-tracking based, see
- * tasks/target_tasks/spectral_registration_quality.py) -- a whole-field
- * FWHM doesn't capture what matters for a spectral trace.
+ * This tracks how many images were successfully combined and records details
+ * like the final image sharpness (FWHM) or if the background was uneven.
  */
 export interface StackingPipelineQualityMetrics {
   is_spectral: boolean;
@@ -606,19 +626,18 @@ export interface StackingPipelineQualityMetrics {
   median_input_fwhm_px?: number | null;
   fwhm_degraded?: boolean;
   spectral_registration_flags?: ExcludedFrame[];
+  stacking_duration_seconds?: number | null;
+  timed_out?: boolean;
+  debayer_applied?: boolean | null;
+  registration_reference_frame?: string | null;
+  registration_reference_star_count?: number | null;
 }
 
 /**
- * Persisted per-stack quality record for the stacking pipeline.
+ * The final saved report for an image stacking job.
  *
- * Subclasses PipelineQualitySummaryBase. rejection_sigma_low/high/mode and
- * filter_wfwhm_requested/effective/loosened live in the inherited
- * resolved_parameters dict rather than as dedicated fields here -- they're
- * resolved-parameter values in the sense the shared base defines, not
- * stacking-specific quality metrics. upstream_quality_summary_reference is
- * always None for stacking: it's the only pipeline with primary,
- * non-inherited input quality (see the architecture discussion this
- * implements).
+ * It combines the basic pipeline information with the specific stacking
+ * metrics.
  */
 export interface StackQualitySummary {
   pipeline_name?: string;
@@ -636,31 +655,28 @@ export interface StackQualitySummary {
 }
 
 /**
- * Astrometry-pipeline-specific quality metrics.
+ * Measurements recorded when figuring out where an image is pointing.
  *
- * Not shared with other pipelines.
+ * This tracks how many stars were found and whether the image's coordinates
+ * could be successfully calculated (plate solving).
  */
 export interface AstrometryPipelineQualityMetrics {
+  catalog_matched_star_count?: number;
+  position_only_star_count?: number;
+  unresolved_star_count?: number;
   sources_detected: number;
   solve_attempted: boolean;
   plate_solve_succeeded: boolean;
   simbad_matched_count: number;
   astrometric_residual_rms_arcsec?: number | null;
+  remote_catalog_queries_attempted?: number;
+  remote_catalog_queries_failed?: number;
+  remote_catalog_circuit_breaker_tripped?: boolean;
+  plate_solve_attempts?: number;
 }
 
 /**
- * Persisted per-solve quality record.
- *
- * Astrometry pipeline's subclass of `PipelineQualitySummaryBase`.
- *
- * upstream_quality_summary_reference is always "stacking": astrometry
- * always solves Target.stacked_image, never individual frames, so
- * stacking's StackQualitySummary is its upstream input quality.
- * target_session_ids/target_session_breakdown stay empty: astrometry
- * consumes one already-stacked image rather than individual frames, so a
- * per-session breakdown isn't meaningful here -- session provenance for
- * the underlying stack is reachable via upstream_quality_summary_reference
- * instead.
+ * The final saved report for an astrometry (coordinate-finding) job.
  */
 export interface AstrometryQualitySummary {
   pipeline_name?: string;
@@ -678,12 +694,7 @@ export interface AstrometryQualitySummary {
 }
 
 /**
- * Per-frame comparison-star ensemble composition for normalization.
- *
- * ensemble_size is deliberately per-frame rather than a single run-level
- * constant: a saturated comparison star is excluded from the ensemble
- * median only in the frames where it's actually saturated, remaining
- * eligible in every other frame.
+ * Tracks which known stars were the brightness reference used.
  */
 export interface FrameEnsembleComposition {
   frame_path: string;
@@ -692,11 +703,15 @@ export interface FrameEnsembleComposition {
 }
 
 /**
- * Photometry-pipeline-specific quality metrics.
+ * Measurements recorded when measuring the brightness of stars.
  *
- * Not shared with other pipelines.
+ * This tracks how many stars were processed and if any variable stars
+ * were found.
  */
 export interface PhotometryPipelineQualityMetrics {
+  catalog_matched_star_count?: number;
+  position_only_star_count?: number;
+  unresolved_star_count?: number;
   stars_processed: number;
   stars_found: number;
   frames_processed: number;
@@ -709,17 +724,11 @@ export interface PhotometryPipelineQualityMetrics {
   long_term_variable_candidate_count?: number;
   astrometry_identified_star_count?: number;
   sessions_with_reused_header_wcs?: string[];
+  sessions_with_replaced_header_wcs?: string[];
 }
 
 /**
- * Persisted per-run quality record.
- *
- * Photometry pipeline's subclass of `PipelineQualitySummaryBase`.
- *
- * upstream_quality_summary_reference is always None: photometry runs on
- * raw per-session frames rather than a stacked image, so it has no single
- * upstream pipeline run to reference (unlike astrometry, which always
- * solves one stack).
+ * The final saved report for a photometry (brightness-measuring) job.
  */
 export interface PhotometryQualitySummary {
   pipeline_name?: string;
@@ -737,17 +746,15 @@ export interface PhotometryQualitySummary {
 }
 
 /**
- * Spectroscopy-pipeline-specific quality metrics.
+ * Measurements recorded when analyzing a star's light spectrum.
  *
- * Not shared with other pipelines.
- *
- * trail_width_profile_available/median_trail_width_px are populated once
- * the rung-3 traced-extraction path (SpectrumExtractor.extract_line_traced/
- * extract_with_flare_mask_traced) actually runs for at least one star that
- * run; they stay at their defaults (False/None) when extraction_method is
- * "fixed" (rung 1), since there's no per-position width data to summarize.
+ * This tracks details about the spectral lines, like how wide they are
+ * and whether any parts of the spectrum were too bright (saturated).
  */
 export interface SpectroscopyPipelineQualityMetrics {
+  catalog_matched_star_count?: number;
+  position_only_star_count?: number;
+  unresolved_star_count?: number;
   zero_order_saturated_pixel_fraction?: number | null;
   zero_order_saturation_flagged?: boolean;
   dispersion_angle_deg?: number | null;
@@ -757,24 +764,7 @@ export interface SpectroscopyPipelineQualityMetrics {
 }
 
 /**
- * Persisted per-extraction quality record.
- *
- * Spectroscopy pipeline's subclass of `PipelineQualitySummaryBase`.
- *
- * Two distinct pipelines populate this model. The single-stacked-
- * frame path (`pipeline_tasks.analyze_target(pipeline_type="spectroscopy")`,
- * no `frames=` argument) always extracts from
- * `Target.stacked_spectral_target` and defaults
- * `upstream_quality_summary_reference` to "stacking", since
- * stacking's spectral_registration_flags is the directly relevant
- * upstream signal there. The session-grouped, per-frame interactive
- * "Analyze Target" path (`AnalysisOrchestrator._run_spectroscopy_analysis`
- * via `process_spectroscopy_frames_by_session`) instead extracts
- * directly from a target's raw, unstacked frames and sets
- * `upstream_quality_summary_reference` to "raw_frames" -- it also
- * populates `target_session_ids`/`target_session_breakdown`, which
- * the single-stacked-frame path never does (it has no session
- * concept by construction).
+ * The final saved report for a spectroscopy (light-spectrum) job.
  */
 export interface SpectroscopyQualitySummary {
   pipeline_name?: string;
@@ -792,9 +782,53 @@ export interface SpectroscopyQualitySummary {
 }
 
 /**
- * A single point-source detection on one individual frame.
+ * Measurements that describe how well the telescope tracked the sky.
  *
- * En route to being chained into a moving-object candidate track.
+ * This looks for problems with the telescope mount (like drifting) or
+ * changes in the sky conditions (like the background getting brighter).
+ * It records the worst-case values across all observing sessions.
+ */
+export interface TrackingPipelineQualityMetrics {
+  sessions_found: number;
+  sessions_analyzed: number;
+  usable_frames: number;
+  span_hours?: number | null;
+  drift_rate_x_px_per_hour?: number | null;
+  drift_rate_y_px_per_hour?: number | null;
+  max_excursion_px?: number | null;
+  meridian_flips?: number;
+  periodic_error_period_seconds?: number | null;
+  periodic_error_strength?: number;
+  periodic_error_false_alarm_probability?: number | null;
+  periodic_error_corroborated?: boolean;
+  trailed_frame_count?: number;
+  median_fwhm_px?: number | null;
+  fwhm_spread_px?: number | null;
+  median_roundness?: number | null;
+  median_background?: number | null;
+  background_spread?: number | null;
+}
+
+/**
+ * The final saved report for a telescope tracking analysis job.
+ */
+export interface TrackingQualitySummary {
+  pipeline_name?: string;
+  pipeline_version?: string;
+  target_id: string;
+  target_session_ids?: string[];
+  target_session_breakdown?: TargetSessionContribution[];
+  upstream_quality_summary_reference?: string | null;
+  resolved_parameters?: Record<string, any>;
+  quality_processing_applied?: boolean;
+  flagged?: boolean;
+  flag_reasons?: string[];
+  created_at?: string;
+  tracking_metrics: TrackingPipelineQualityMetrics;
+}
+
+/**
+ * A dot of light in one picture, which might be an asteroid.
  */
 export interface FrameDetection {
   framePath: string;
@@ -809,7 +843,7 @@ export interface FrameDetection {
 }
 
 /**
- * A fitted linear sky-motion track across a chain of frame detections.
+ * The calculated path (speed, direction) of an object across pictures.
  */
 export interface MovingObjectTrack {
   rightAscensionRateArcsecPerHour: number;
@@ -821,11 +855,11 @@ export interface MovingObjectTrack {
 }
 
 /**
- * The discrimination-cascade stage an `AsteroidRecoveryCandidate` reached.
+ * Tracks how far a possible asteroid made it through the checking process.
  *
- * Ordered stages (a real mover progresses through these in sequence)
- * are followed by the rejection stages (a candidate exits the
- * cascade at exactly one of these).
+ * Several tests are run to see if a moving dot is really an asteroid.
+ * This shows if it passed all tests, or at which step it was rejected
+ * (e.g., it was just a dead pixel).
  */
 export enum CascadeStage {
   MORPHOLOGY_DETECTED = "morphology_detected",
@@ -840,10 +874,10 @@ export enum CascadeStage {
 }
 
 /**
- * A cross-match against a known solar-system body's predicted motion.
+ * A match between the detected object and a real, known asteroid.
  *
- * From a SkyBoT (or similar) ephemeris query, matched against an
- * `AsteroidRecoveryCandidate`.
+ * The object's speed and location are compared against databases
+ * (like SkyBoT) that predict where known asteroids should be.
  */
 export interface EphemerisMatch {
   provider?: string;
@@ -856,10 +890,10 @@ export interface EphemerisMatch {
 }
 
 /**
- * A candidate moving object tracked across a target's frames.
+ * A potential asteroid tracked across several pictures.
  *
- * Also records how far it progressed through the discrimination
- * cascade.
+ * It holds all the individual detections, its calculated path, and
+ * whether it matched any known asteroids.
  */
 export interface AsteroidRecoveryCandidate {
   id: string;
@@ -871,12 +905,11 @@ export interface AsteroidRecoveryCandidate {
 }
 
 /**
- * Asteroid-recovery-specific quality metrics; not pipeline-shared.
+ * Measurements for the process that searches for moving asteroids.
  *
- * Each count is a strict funnel: frames_with_wcs_estimate <= total
- * light frames; candidates_detected >=
- * candidates_persistence_confirmed >=
- * candidates_rate_linearity_confirmed >= candidates_ephemeris_matched.
+ * This tracks how many candidates were found and how many passed each
+ * successive check (e.g., did it move in a straight line? did it match a
+ * known asteroid?).
  */
 export interface AsteroidRecoveryPipelineQualityMetrics {
   frames_with_wcs_estimate: number;
@@ -889,12 +922,7 @@ export interface AsteroidRecoveryPipelineQualityMetrics {
 }
 
 /**
- * Persisted per-run quality record for the asteroid-recovery pipeline.
- *
- * upstream_quality_summary_reference defaults to "astrometry": this
- * pipeline's per-frame WCS estimates depend on the stack's
- * plate-solve WCS having already succeeded
- * (`analyze_target(pipeline_type="astrometry")` must run first).
+ * The final saved report for an asteroid-hunting job.
  */
 export interface AsteroidRecoveryQualitySummary {
   pipeline_name?: string;

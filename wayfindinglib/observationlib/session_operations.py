@@ -38,7 +38,7 @@ def find_quality_contributions_for_session(
 ) -> list[QualityContribution]:
     """Find every quality-summary contribution recorded for a TargetSession.
 
-    Scans every persisted Target's quality summaries for a
+    Scans every recorded Target's quality summaries for a
     target_session_breakdown entry matching target_session_id -- the
     quality-data conduit an ObservationSession's target_session_id
     reference is meant to follow.

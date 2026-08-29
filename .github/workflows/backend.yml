@@ -30,7 +30,12 @@ concurrency:
 jobs:
   test:
     name: Run backend Tests
-    runs-on: ubuntu-latest
+    # ubuntu-26.04, not ubuntu-latest: this job installs INDI via
+    # setup-python-env, and the INDI Stable Builds PPA now publishes the
+    # core libindi packages only for the resolute (26.04) series. On
+    # noble, apt silently falls back to Ubuntu universe's libindi 1.9.9,
+    # which pyindi-client 2.x cannot load.
+    runs-on: ubuntu-26.04
     permissions:
       contents: write
       pull-requests: write

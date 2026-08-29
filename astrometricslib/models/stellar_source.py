@@ -1,10 +1,8 @@
-"""Schema definitions for Scientific Analysis, Spectroscopy, and Stacking.
+"""Data structures for stars, light curves, and spectroscopy.
 
-Models: LightCurve, SpectralObservation, StellarObject,
-StellarSessionMatch, VariableCandidate, AnalysisResult, PlotData,
-FileItem, GroupedFrameStat, TargetFilesResponse
-# REQ: AST-1: Spectroscopy
-# REQ: AST-2: Ångström Units
+This module defines the pure data classes used to track individual stars,
+measure how their brightness changes over time, and analyze their light
+spectrums.
 """
 
 import logging
@@ -35,7 +33,7 @@ __all__ = [
 
 
 class PeriodogramResult(BaseModel):
-    """Hold Lomb-Scargle periodogram analysis results for a light curve."""
+    """The result of searching a star's brightness for repeating cycles."""
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -45,7 +43,7 @@ class PeriodogramResult(BaseModel):
 
 
 class ExoplanetTransitCandidate(BaseModel):
-    """Hold Box-fitting Least Squares (BLS) transit candidate parameters."""
+    """Data for when a star dims, possibly because a planet passed in front."""
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -57,7 +55,7 @@ class ExoplanetTransitCandidate(BaseModel):
 
 
 class LightCurve(BaseModel):
-    """Represent a light curve of flux variations over time for a star."""
+    """A record of how a star's brightness changes over time."""
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -73,11 +71,10 @@ class LightCurve(BaseModel):
 
 
 class StellarSessionMatch(BaseModel):
-    """Record one observing session detection folded into a merged curve.
+    """Tracks when a star was detected during a specific observing session.
 
-    One instance per contributing session (a merged star observed across
-    N sessions carries N of these), mirroring how `EphemerisMatch` records
-    a single cross-match rather than a bare boolean.
+    If a star is observed on 5 different nights, it will have 5 of
+    these records combined into its final light curve.
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -87,7 +84,7 @@ class StellarSessionMatch(BaseModel):
 
 
 class SpectralObservation(BaseModel):
-    """Represent a single spectral extraction at a specific timestamp."""
+    """A measurement of a star's light split into its component colors."""
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -97,7 +94,7 @@ class SpectralObservation(BaseModel):
 
 
 class StellarObject(BaseModel):
-    """Define a stellar object with coordinates, flux, and spectra."""
+    """The main record for an individual star found in an image."""
 
     model_config = ConfigDict(populate_by_name=True, validate_assignment=True)
 
@@ -133,7 +130,7 @@ class StellarObject(BaseModel):
     @computed_field(alias="hasSpectra")
     @property
     def has_spectra(self) -> bool:
-        """True if this stellar object has spectral data."""
+        """Check if this star's light spectrum has been measured."""
         return bool(
             self.spectrum_data_processed
             or (self.spectra_history and len(self.spectra_history) > 0)
@@ -144,7 +141,7 @@ class StellarObject(BaseModel):
     @computed_field(alias="hasPhotometry")
     @property
     def has_photometry(self) -> bool:
-        """True if this object has light curve photometry data."""
+        """Check if this star's brightness has been tracked over time."""
         return bool(
             self.light_curve
             and (
@@ -157,16 +154,17 @@ class StellarObject(BaseModel):
     @computed_field(alias="plotData")
     @property
     def plot_data(self) -> dict[str, list[float]]:
-        """Normalized plot data containing wavelengths and intensities."""
+        """The star's spectrum, formatted so it's easy to draw on a graph."""
         return self.get_plot_data()
 
     def get_plot_data(self) -> dict[str, list[float]]:
-        """Normalize internal spectrum formats into a canonical plot format.
+        """Convert whatever format the spectrum is in to a standard graph one.
 
         Returns
         -------
-        plot_data : `dict` [`str`, `list` [`float`]]
-            Dict with ``"wavelengths"`` and ``"intensities"`` keys.
+        plot_data : `dict`
+            A dictionary with ``"wavelengths"`` (x-axis) and ``"intensities"``
+            (y-axis).
         """
 
         def normalize(wls: Any, flux: Any) -> dict[str, list[float]]:
@@ -211,12 +209,12 @@ class StellarObject(BaseModel):
         return {"wavelengths": [], "intensities": []}
 
     def serialize(self) -> dict[str, Any]:
-        """Convert the object to a dict, including normalized plot data.
+        """Package the star's data into a basic dictionary format.
 
         Returns
         -------
         data : `dict`
-            The object's field values plus a ``"plotData"`` key.
+            The star's fields, plus the ready-to-graph ``"plotData"``.
         """
         data = self.model_dump(mode="python", by_alias=True)
         raw_plot = self.get_plot_data()
@@ -227,7 +225,7 @@ class StellarObject(BaseModel):
         return data
 
     def deserialize(self, object_info: dict[str, Any]) -> None:
-        """Hydrate this stellar object using the provided dictionary."""
+        """Load values from a dictionary back into this star object."""
         if not isinstance(object_info, dict):
             return
 
@@ -246,7 +244,7 @@ class StellarObject(BaseModel):
 
 
 class VariableCandidate(BaseModel):
-    """Represent a stellar object flagged as a variable star candidate."""
+    """A star that might be changing brightness over time."""
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -259,7 +257,7 @@ class VariableCandidate(BaseModel):
 
 
 class AnalysisResult(BaseModel):
-    """Summarize an analysis run of the spectroscopy/variability pipeline."""
+    """A summary of what happened when a processing job was run."""
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -280,7 +278,7 @@ class AnalysisResult(BaseModel):
 
     @property
     def summary(self) -> str:
-        """Formatted summary of the analysis execution results."""
+        """A readable text summary of the job's results."""
         rejected_cnt = len(self.rejected_files) if self.rejected_files else self.rejected_count
         lines = [
             f"Analysis Target: {self.target_id}",
@@ -297,7 +295,7 @@ class AnalysisResult(BaseModel):
 
 
 class PlotData(BaseModel):
-    """Hold wavelengths and flux intensities for interactive plotting."""
+    """Holds the X and Y coordinates needed to draw a spectrum graph."""
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -305,18 +303,17 @@ class PlotData(BaseModel):
     intensities: list[float] = Field(default_factory=list, alias="intensities")
 
     def validate_lengths(self) -> PlotData:
-        """Assert parity between coordinate and telemetry arrays.
+        """Make sure there is the same number of X and Y values.
 
         Returns
         -------
-        validated : `PlotData`
-            This instance, unchanged, once validated.
+        self : `PlotData`
+            This same object, once the lengths are confirmed to match.
 
         Raises
         ------
         ValueError
-            Raised if `wavelengths` and `intensities` differ in
-            length.
+            If the list of wavelengths doesn't match the list of intensities.
         """
         if len(self.wavelengths) != len(self.intensities):
             raise ValueError(
@@ -327,7 +324,7 @@ class PlotData(BaseModel):
 
 
 class FileItem(BaseModel):
-    """Represent a single file item for display in the file browser."""
+    """A single image file ready to be shown in a UI list."""
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -341,7 +338,7 @@ class FileItem(BaseModel):
 
 
 class GroupedFrameStat(BaseModel):
-    """Represent frame statistics grouped by filter and exposure."""
+    """A count of how many images share the same filter and exposure time."""
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -354,7 +351,7 @@ class GroupedFrameStat(BaseModel):
 
 
 class TargetFilesResponse(BaseModel):
-    """Represent the full file response for a target."""
+    """All the files and summary statistics that belong to a single target."""
 
     model_config = ConfigDict(populate_by_name=True)
 

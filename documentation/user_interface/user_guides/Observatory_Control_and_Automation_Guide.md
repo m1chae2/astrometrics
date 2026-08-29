@@ -2,7 +2,7 @@
 
 *Version 2.2 · 2026-08-21 · Status: current*
 
-## Abstract
+## Overview
 
 This guide provides comprehensive operational procedures for configuring INDI hardware drivers, calibrating autoguiders, running autofocus V-curves, executing plate solving alignments, and setting up automated weather safety interlocks within the Astrometrics software.
 
@@ -10,7 +10,7 @@ This guide provides comprehensive operational procedures for configuring INDI ha
 
 ## 1. Introduction
 
-**Statement of need.** Unattended remote observatory operation requires robust, repeatable hardware control. This guide outlines the standard operating procedures for achieving precise mount alignment, accurate focus, and stable autoguiding, along with the necessary safety interlocks to protect equipment during automated runs.
+This guide demonstrates how to connect to hardware, align the telescope mount, set up autofocus, and start autoguiding. It also covers the safety features that protect equipment.
 
 
 ---
@@ -32,14 +32,15 @@ Before initiating any automated sequence, the hardware must be successfully conn
    - Focuser Driver (e.g., `EAF` or `Focuser Simulator`)
    - Filter Wheel (e.g., `EFW` or `Filter Simulator`)
 
-> [!WARNING]
-> If a device shows a yellow warning dot or fails to connect, verify that the device is powered on, USB cables are securely connected, and no other software (like an instance of Ekos or PHD2) is exclusively locking the COM port.
+:::{warning}
+If a device shows a yellow warning dot or fails to connect, verify that the device is powered on, USB cables are securely connected, and no other software (like an instance of Ekos or PHD2) is exclusively locking the COM port.
+:::
 
 ---
 
 ## 3. Plate Solving & Mount Alignment
 
-Plate solving syncs your telescope mount's reported coordinates $(\text{RA}_{\text{mount}}, \text{Dec}_{\text{mount}})$ with true sky position $(\text{RA}_{\text{true}}, \text{Dec}_{\text{true}})$ by analyzing the star patterns in a captured image.
+Plate solving syncs the telescope mount's reported coordinates $(\text{RA}_{\text{mount}}, \text{Dec}_{\text{mount}})$ with true sky position $(\text{RA}_{\text{true}}, \text{Dec}_{\text{true}})$ by analyzing the star patterns in a captured image.
 
 ### 3.1 Alignment Workflow
 1. Slew the telescope to a bright catalog target near the zenith (avoiding the horizon where atmospheric refraction degrades plate solving accuracy).
@@ -51,7 +52,7 @@ Plate solving syncs your telescope mount's reported coordinates $(\text{RA}_{\te
 ### 3.2 Troubleshooting Plate Solving Failures
 If the solver fails to find a match:
 - **Check Exposure:** Ensure stars are visible and not trailed. Increase exposure time to 5 seconds if the field is sparse.
-- **Check Focal Length/Pixel Size:** The solver relies on the image scale. Ensure the focal length and pixel size configured in the camera profile accurately reflect your optical train (including reducers/flatteners).
+- **Check Focal Length/Pixel Size:** The solver relies on the image scale. Ensure the focal length and pixel size configured in the camera profile accurately reflect the optical train (including reducers/flatteners).
 
 ---
 
@@ -67,15 +68,16 @@ Achieving critical focus is essential for resolving fine details and maximizing 
    - The engine automatically calculates the curve to find the exact point where stars are smallest and sharpest.
    - The focuser automatically moves to this optimal position.
 
-*(For algorithmic details on focus parabola fitting, refer to the {py:class}`~wayfindinglib.api.control_registry.ObservatoryControl` API Reference)*
 
-> [!TIP]
-> If the V-curve is flat or erratic, you may have set the step size too small (failing to leave the critical focus zone) or atmospheric seeing is exceptionally poor. Increase the step size and try again.
+
+:::{tip}
+If the V-curve is flat or erratic, the step size may be too small (failing to leave the critical focus zone) or atmospheric seeing is exceptionally poor. Increase the step size and try again.
+:::
 
 ### 4.2 Temperature Compensation
 As ambient temperature drops throughout the night, optical tubes contract, shifting the focal plane.
 1. Enable the **Temp Comp** toggle in the Focuser Control panel.
-2. Enter the thermal coefficient (e.g., -35 steps per degree Celsius). The system will automatically adjust the focus position in the background as the temperature drops, preventing the need to frequently interrupt your imaging session to refocus.
+2. Enter the thermal coefficient (e.g., -35 steps per degree Celsius). The system will automatically adjust the focus position in the background as the temperature drops, preventing the need to frequently interrupt the imaging session to refocus.
 
 ---
 
@@ -86,13 +88,13 @@ Autoguiding continuously measures and corrects small mechanical tracking errors 
 ### 5.1 Calibration and Guiding
 1. **PHD2 Connection**: Confirm an active connection to the internal guiding engine or external PHD2 instance in the **Guiding Trends** card.
 2. **Calibration Run**: Slew near the celestial equator and meridian. Click **Calibrate Guider**. The mount steps in all four directions to learn how the mount responds to corrections.
-3. **Error Monitoring**: Monitor the total guiding error on the real-time graph. Target total error should remain below your imaging scale (typically under 0.8 arcseconds) for round stars.
+3. **Error Monitoring**: Monitor the total guiding error on the real-time graph. Target total error should remain below the imaging scale (typically under 0.8 arcseconds) for round stars.
 
-*(For math and theory behind autoguider pulse calculations, refer to the {py:class}`~wayfindinglib.api.control_registry.ObservatoryControl` API Reference)*
+
 
 ### 5.2 Dither Configuration
 Dithering shifts target coordinates slightly between exposures to eliminate fixed-pattern sensor noise and hot pixels during the stacking process.
-1. In **Observation Manager** (`Ctrl + 6`), set the Dither Scale (default `2` pixels) and frequency (e.g., every `1` sub).
+1. In the session settings, set the Dither Scale (default `2` pixels) and frequency (e.g., every `1` image).
 2. During sequence execution, the mount will dither and wait for guiding to settle before starting the next exposure.
 
 ---
@@ -109,14 +111,9 @@ Unattended operation relies on automated safety systems to protect equipment fro
    - The Roof/Dome shutter sends a **CLOSE** command.
    - The camera cooler is turned off to save power.
 
-> [!CAUTION]
-> Ensure the mount is configured with strict software slew limits and cord-wrap limits. If the safety system triggers a park, the mount must be able to return to its home position without colliding with the pier or snagging cables.
+:::{caution}
+Ensure the mount is configured with strict software slew limits and cord-wrap limits. If the safety system triggers a park, the mount must be able to return to its home position without colliding with the pier or snagging cables.
+:::
 
 ### 6.2 Manual Emergency Stop
 Click the red **EMERGENCY STOP** button at any time to immediately interrupt all hardware operations, halt mount slewing, and abort any active camera exposures.
-
----
-
-## References
-
-[1] M. Coniglio, "Observatory Safety and Capability Delegation Model," 2026.

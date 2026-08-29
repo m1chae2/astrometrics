@@ -37,6 +37,8 @@ from astrometricslib.models.quality_summary import (
     StackingPipelineQualityMetrics,
     StackQualitySummary,
     TargetSessionContribution,
+    TrackingPipelineQualityMetrics,
+    TrackingQualitySummary,
 )
 from astrometricslib.models.stellar_source import (
     AnalysisResult,
@@ -58,6 +60,7 @@ from astrometricslib.models.target import (
     ImageType,
     MosaicInfo,
     RenderedImage,
+    StackConfigurationResult,
     Target,
 )
 from astrometricslib.utilities.pipeline_models import ProcessingJob, ProcessStatus
@@ -250,6 +253,7 @@ def main() -> None:
         generate_interface(FrameRecord, "FrameRecord"),
         generate_interface(MosaicInfo, "MosaicInfo"),
         generate_interface(TelescopeStatus, "TelescopeStatus"),
+        generate_interface(StackConfigurationResult, "StackConfigurationResult"),
         generate_interface(Target, "TargetObject"),
         generate_interface(FileItem, "FileItem"),
         generate_interface(TargetFilesResponse, "TargetFilesResponse"),
@@ -294,6 +298,8 @@ def main() -> None:
         generate_interface(PhotometryQualitySummary, "PhotometryQualitySummary"),
         generate_interface(SpectroscopyPipelineQualityMetrics, "SpectroscopyPipelineQualityMetrics"),
         generate_interface(SpectroscopyQualitySummary, "SpectroscopyQualitySummary"),
+        generate_interface(TrackingPipelineQualityMetrics, "TrackingPipelineQualityMetrics"),
+        generate_interface(TrackingQualitySummary, "TrackingQualitySummary"),
         generate_interface(FrameDetection, "FrameDetection"),
         generate_interface(MovingObjectTrack, "MovingObjectTrack"),
         generate_enum(CascadeStage, "CascadeStage"),

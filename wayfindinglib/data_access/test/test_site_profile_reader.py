@@ -2,9 +2,9 @@
 
 Description: Verifies get_or_seed_default_site_profile() seeds from the
 [Observatory.Location] config section when present, falls back to the
-same Denver coordinates wayfindinglib.sky.Sky uses when absent, persists
+same Denver coordinates wayfindinglib.sky.Sky uses when absent, records
 the seeded profile so a second call reads it back rather than
-re-seeding, and returns an already-persisted profile unchanged.
+re-seeding, and returns an already-recorded profile unchanged.
 """
 
 import pytest
@@ -60,7 +60,7 @@ def test_seeds_from_configured_location(isolated_butler_and_config):  # ruff: ig
 
 
 def test_seeding_persists_so_second_call_does_not_reseed(isolated_butler_and_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify the seeded profile persists rather than regenerating."""
+    """Verify the seeded profile records rather than regenerating."""
     butler, config = isolated_butler_and_config
     first = get_or_seed_default_site_profile(butler, config)
     second = get_or_seed_default_site_profile(butler, config)
@@ -69,7 +69,7 @@ def test_seeding_persists_so_second_call_does_not_reseed(isolated_butler_and_con
 
 
 def test_returns_existing_profile_unchanged(isolated_butler_and_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify an already-persisted profile is returned as-is, not reseeded."""
+    """Verify an already-recorded profile is returned as-is, not reseeded."""
     butler, config = isolated_butler_and_config
     existing = SiteProfile(id="default", name="My Backyard", latitude_deg=1.0, longitude_deg=2.0)
     butler.put(existing, "site_profile", {"id": "default"})

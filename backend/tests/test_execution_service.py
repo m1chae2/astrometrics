@@ -28,13 +28,13 @@ def execution_service():  # ruff: ignore[missing-return-type-undocumented-public
     return ExecutionService(wayfinder=Wayfinder(config), astrometrics=Astrometrics(config), config=config)
 
 
-def _persist_session(service: ExecutionService, session_id: str):  # ruff: ignore[missing-return-type-private-function]
+def _record_session(service: ExecutionService, session_id: str):  # ruff: ignore[missing-return-type-private-function]
     """Store a minimal observation session.
 
     Returns
     -------
     session : `ObservationSession`
-        The session that was persisted.
+        The session that was recorded.
     """
     from wayfindinglib.models.session.observation_session import ObservationSession
 
@@ -55,8 +55,8 @@ def test_list_sessions_is_empty_before_anything_is_stored(execution_service):  #
 
 
 def test_stored_session_is_listed_and_retrievable(execution_service):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """A persisted session round-trips through list and get."""
-    _persist_session(execution_service, "session-round-trip")
+    """A recorded session round-trips through list and get."""
+    _record_session(execution_service, "session-round-trip")
 
     summaries = execution_service.list_sessions()
     assert any(entry["id"] == "session-round-trip" for entry in summaries)
@@ -74,7 +74,7 @@ def test_missing_session_raises_rather_than_returning_none(execution_service):  
 
 def test_abort_session_marks_it_aborted(execution_service):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Aborting reaches the high-level interface and changes session status."""
-    _persist_session(execution_service, "session-to-abort")
+    _record_session(execution_service, "session-to-abort")
 
     aborted = execution_service.abort_session("session-to-abort", "clouds rolled in")
 

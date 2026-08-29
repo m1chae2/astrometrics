@@ -1,22 +1,15 @@
-"""Layer-1 domain high-level interface for the stellar domain.
+"""Main interface for managing and analyzing individual stars.
 
-`StellarCatalog` is the entry point external callers -- scripts,
-backend services -- should use for stellar-object analysis and
-spectroscopy calibration; callers should never import
-`astrometricslib.tasks.stellar_tasks` or `self.butler`'s underlying
-`data_access` module directly. Most methods delegate to
-`tasks.stellar_tasks.analysis_operations`; `delete`/`update`/`create`/
-`save_all` instead call `self.butler` directly for their lock-guarded
-persistence -- both are Layer 1 reaching into a lower layer, which is
-fine (see `astrometricslib.api`'s module docstring); the split is a
-historical artifact of these four methods predating the delegation
-convention, not a designed distinction.
+This module provides the `StellarCatalog`, which is the primary tool for
+working with specific stars found in the images. It can be used to track
+a star's brightness over time, analyze its spectrum, and manage its records
+in the database.
 """
 
 import logging
 from typing import Any
 
-from astrometricslib.data_access.butler import AbstractButler
+from astrometricslib.data_access.catalog_access import AbstractCatalogAccess
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.utilities.config_loader import AppConfiguration
 
@@ -29,28 +22,40 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
+# Bounds StellarCatalog.list_object_summaries's "browse everything, no
+# target filter" case: without a cap, a UI listing polling that RPC
+# hydrates and transmits the whole catalog's summaries every request --
+# at 270,450 rows, real network and JSON-parse cost even after
+# list_star_summaries already skipped loading full StellarObjects. A
+# caller wanting the true, unbounded catalog for scripting should use
+# list_objects() instead; this cap only applies to the summary path
+# documented for UI catalog-browsing callers.
+DEFAULT_UNFILTERED_SUMMARY_LIMIT = 5000
+
 
 class StellarCatalog:
-    """Synchronous analysis operations for spectral/variability pipelines.
+    """A catalog for tracking and analyzing individual stars.
 
-    This class manages 'Stellar Objects', which are the individual
-    stars and point sources extracted from your images. While the
-    TargetCatalog deals with the whole picture, this catalog tracks
+    While the TargetCatalog deals with the whole picture, this catalog tracks
     the properties of specific stars over time—like their brightness
     (photometry) or chemical composition (spectroscopy)—enabling
     deeper scientific analysis.
     """
 
-    def __init__(self, config: AppConfiguration | None = None, butler: AbstractButler | None = None):  # ruff: ignore[missing-return-type-special-method]
-        """Initialize with application configuration and a butler.
+    def __init__(
+        self,
+        config: AppConfiguration | None = None,
+        catalog_access: AbstractCatalogAccess | None = None,
+    ) -> None:
+        """Initialize with a configuration and a way to reach storage.
 
         Parameters
         ----------
         config : `AppConfiguration`, optional
             Application configuration. Loaded from the application
             configuration when omitted.
-        butler : `AbstractButler`, optional
-            Storage backend for the stellar catalog. A `DiskButler`
+        catalog_access : `AbstractCatalogAccess`, optional
+            Storage backend for the stellar catalog. A `CatalogAccess`
             over `config` is constructed when omitted.
         """
         if config is None:
@@ -58,11 +63,11 @@ class StellarCatalog:
 
             config = get_configuration()
         self._config = config
-        if butler is None:
-            from astrometricslib.data_access.butler import DiskButler
+        if catalog_access is None:
+            from astrometricslib.data_access.catalog_access import CatalogAccess
 
-            butler = DiskButler(config)
-        self.butler = butler
+            catalog_access = CatalogAccess(config)
+        self.catalog_access = catalog_access
 
     def list_objects(self) -> list[StellarObject]:
         """List all stellar objects extracted across the library.
@@ -72,12 +77,62 @@ class StellarCatalog:
         stellar_objects : `list` [`StellarObject`]
             All stellar objects currently in the library.
         """
-        from astrometricslib.tasks.stellar_tasks import analysis_operations
+        from astrometricslib.api import stellar_operations
 
-        return analysis_operations.list_objects(self)
+        return stellar_operations.list_objects(self)
+
+    def list_object_summaries(
+        self, target_id: str | None = None, limit: int | None = None
+    ) -> list[dict[str, Any]]:
+        """Get a quick, lightweight summary of stars in the catalog.
+
+        If all the detailed data for a star is needed, use `list_objects`
+        instead. This function is specifically designed to be very fast by
+        only grabbing basic info (like ID, name, and if it has spectra),
+        which is perfect for building UI lists that need to load quickly.
+
+        Parameters
+        ----------
+        target_id : `str`, optional
+            Restrict to stars belonging to this target.
+        limit : `int`, optional
+            Maximum number of stars to return. When `target_id` is not
+            given, defaults to `DEFAULT_UNFILTERED_SUMMARY_LIMIT` --
+            an unfiltered "browse everything" request is exactly the
+            case worth bounding, since it is the one whose size scales
+            with the whole catalog rather than with one target's own
+            star count. Pass an explicit value to override either
+            default.
+
+        Returns
+        -------
+        summaries : `list` [`dict`]
+            One dict per star with keys ``id``, ``name``, ``ra``,
+            ``dec``, ``targetIds``, ``hasSpectra``, and
+            ``hasPhotometry``, optionally filtered by ``target_id``.
+        """
+        effective_limit = limit
+        if effective_limit is None and not target_id:
+            effective_limit = DEFAULT_UNFILTERED_SUMMARY_LIMIT
+
+        # Keys are camelCase because this dict is handed straight to the
+        # user interface; the record's own field names are the Python
+        # ones.
+        return [
+            {
+                "id": star.id,
+                "name": star.name,
+                "ra": star.right_ascension,
+                "dec": star.declination,
+                "targetIds": star.target_ids,
+                "hasSpectra": star.has_spectra,
+                "hasPhotometry": star.has_photometry,
+            }
+            for star in self.catalog_access.list_star_summaries(target_id=target_id, limit=effective_limit)
+        ]
 
     def get_object(self, object_id: str) -> StellarObject | None:
-        """Get a single stellar object by ID using exact/fuzzy matching.
+        """Find a single star in the catalog using its ID.
 
         Parameters
         ----------
@@ -89,9 +144,9 @@ class StellarCatalog:
         stellar_object : `StellarObject` or `None`
             The matching stellar object, or `None` if not found.
         """
-        from astrometricslib.tasks.stellar_tasks import analysis_operations
+        from astrometricslib.api import stellar_operations
 
-        return analysis_operations.get_object(self, object_id)
+        return stellar_operations.get_object(self, object_id)
 
     def tune_spectroscopy_calibration(
         self,
@@ -100,7 +155,7 @@ class StellarCatalog:
         star_x: float | None = None,
         star_y: float | None = None,
     ) -> dict[str, Any]:
-        """Run the autonomous physical-model spectroscopy calibration tuner.
+        """Automatically calibrate the physical model for a spectroscopy image.
 
         Parameters
         ----------
@@ -118,18 +173,12 @@ class StellarCatalog:
         calibration_result : `dict`
             Tuned calibration parameters and diagnostic metrics.
         """
-        from astrometricslib.tasks.stellar_tasks import analysis_operations
+        from astrometricslib.api import stellar_operations
 
-        return analysis_operations.tune_spectroscopy_calibration(
-            self, image_path, camera_name, star_x, star_y
-        )
+        return stellar_operations.tune_spectroscopy_calibration(self, image_path, camera_name, star_x, star_y)
 
     def delete(self, object_id: str) -> bool:
-        """Delete a stellar object by ID.
-
-        Uses a lock-guarded, targeted delete so a concurrent
-        create/update on a different object never races against this
-        removal.
+        """Safely delete a star from the catalog by its ID.
 
         Parameters
         ----------
@@ -145,15 +194,11 @@ class StellarCatalog:
         existing = self.get_object(object_id)
         if existing is None:
             return False
-        self.butler.delete_by_ids("stellar_catalog", [existing.id])
+        self.catalog_access.delete_by_ids("stellar_catalog", [existing.id])
         return True
 
     def update(self, object_id: str, updates: dict[str, Any]) -> StellarObject | None:
-        """Update a stellar object by ID.
-
-        Uses a lock-guarded, targeted merge so a concurrent
-        create/update/delete on a different object never races
-        against this write.
+        """Safely update a star's properties in the catalog.
 
         Parameters
         ----------
@@ -183,7 +228,7 @@ class StellarCatalog:
                     setattr(target_obj, key, value)
             return target_obj
 
-        self.butler.merge_and_persist_records("stellar_catalog", [existing], _apply_updates)
+        self.catalog_access.merge_and_record("stellar_catalog", [existing], _apply_updates)
         return self.get_object(object_id)
 
     def create(
@@ -192,11 +237,7 @@ class StellarCatalog:
         ra: str | None = None,
         dec: str | None = None,
     ) -> StellarObject:
-        """Create a stellar object.
-
-        Uses a lock-guarded, targeted merge so a concurrent
-        create/update/delete on a different object never races
-        against this write.
+        """Safely create a new star record in the catalog.
 
         Parameters
         ----------
@@ -233,13 +274,13 @@ class StellarCatalog:
         if dec:
             new_obj.declination = dec
 
-        self.butler.merge_and_persist_records(
+        self.catalog_access.merge_and_record(
             "stellar_catalog", [new_obj], lambda current, updated: current if current is not None else updated
         )
         return new_obj
 
     def get_audit(self) -> dict[str, Any]:
-        """Summarize database metrics for spectral and variability records.
+        """Get a summary of how much data is in the stellar catalog.
 
         Returns
         -------
@@ -261,20 +302,39 @@ class StellarCatalog:
             "stats": {"names": with_names, "spectral": with_spectral, "magnitude": with_magnitude},
         }
 
-    def save_all(self, objects: list[StellarObject]) -> str:
-        """Persist stellar library records, replacing the whole table.
+    def save_all(self, objects: list[StellarObject], allow_empty: bool = False) -> str:
+        """Save a complete list of stars, entirely replacing the old catalog.
+
+        Warning: This deletes any star that isn't in the new list provided!
+        If only a few stars need to be updated, use `update()` instead.
 
         Parameters
         ----------
         objects : `list` [`StellarObject`]
-            The full set of stellar objects to persist.
+            The full set of stellar objects to record.
+        allow_empty : `bool`, optional
+            By default, saving an empty list is stopped so the entire
+            catalog isn't accidentally deleted. Pass `True` if
+            really intend to wipe the catalog clean.
 
         Returns
         -------
         result : `str`
-            Status message describing the persisted write.
+            Status message describing the recorded write.
+
+        Raises
+        ------
+        ValueError
+            Raised if `objects` is empty and `allow_empty` is `False`.
         """
-        self.butler.put(objects, "stellar_catalog")
+        if not objects and not allow_empty:
+            raise ValueError(
+                "save_all() received an empty list, which would delete every stellar object. "
+                "Pass allow_empty=True to clear the catalog deliberately."
+            )
+        # `coordinate` is required by the AbstractCatalogAccess.put signature;
+        # omitting it previously made every call raise TypeError.
+        self.catalog_access.put(objects, "stellar_catalog", {})
         return "stellar catalog saved"
 
     def detect_point_sources(
@@ -283,12 +343,7 @@ class StellarCatalog:
         threshold_sigma: float = 5.0,
         fwhm: float = 4.0,
     ) -> list[dict[str, Any]]:
-        """Detect point sources in already-loaded image data.
-
-        A thin pass-through to `SourceDetector`, exposed here so
-        scripts detect sources through the Layer-1 astrometrics rather than
-        importing `astrometricslib.tasks.shared.source_detection_shared`
-        directly.
+        """Find stars (point sources) inside raw image pixel data.
 
         Parameters
         ----------
@@ -306,6 +361,6 @@ class StellarCatalog:
         sources : `list` [`dict`]
             Detected point sources, sorted by flux.
         """
-        from astrometricslib.tasks.shared.source_detection_shared import SourceDetector
+        from astrometricslib.image_processing.source_detection import SourceDetector
 
         return SourceDetector(threshold_sigma=threshold_sigma, fwhm=fwhm).detect(image_data)

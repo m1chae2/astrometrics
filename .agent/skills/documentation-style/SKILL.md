@@ -56,24 +56,21 @@ Match the document to its tier before writing; each tier has different rules.
 
 ## Admonitions (Siril convention)
 
-Use GitHub-flavored markdown alerts, sparingly (a handful per document, not decoration):
+Use MyST "colon fence" syntax for markdown documents and Sphinx reStructuredText syntax (`.. warning::`) for Python docstrings. Use them sparingly (a handful per document, not decoration):
 
-- `> [!NOTE]` with a `**Theory.**` lead-in — optional mathematical background a reader may skip.
-- `> [!WARNING]` — a genuine trap (e.g., "never compare FWHM values from two different
+- `:::{note}` with a `**Theory.**` lead-in — optional mathematical background a reader may skip.
+- `:::{warning}` — a genuine trap (e.g., "never compare FWHM values from two different
   estimators").
 - Do not use alerts for emphasis; if everything is noteworthy, nothing is.
 
 ## Writing style
 
-- Professional scientific register; no bold-for-emphasis mid-sentence (italics at most).
-- Sentences do one job; split anything past ~40 words carrying multiple parentheticals.
-- Assume an engineering-degree reader with basic image-processing knowledge: define
-  domain-specific terms at first use (ADU, zero order) and keep the glossary
-  (`Image_Processing_Architecture.md`, Appendix B) current when introducing new ones.
-- Rationale first, mechanism second: every design decision states *why* before *how*, and
-  implementation pointers are terse trailing parentheticals or appendix rows, not the spine of
-  the prose.
-- No adverb-ly hyphenation ("locally installed", not "locally-installed").
+- **Tone**: Strictly neutral, objective, and direct. Avoid conversational filler, marketing speak, and overly academic phrasing.
+- **Reading Level**: Accessible and clear. Write for a general technical reader or hobbyist, not necessarily someone with an engineering degree. Use plain English where possible.
+- **Clarity**: Sentences do one job. Use shorter, punchy sentences and avoid long, multi-clause paragraphs.
+- **Terminology**: Define domain-specific terms at first use (ADU, zero order) and keep the glossary (`Image_Processing_Architecture.md`, Appendix B) current when introducing new ones.
+- **Structure**: Rationale first, mechanism second. Explain *why* before *how*. Keep implementation pointers as terse trailing parentheticals or appendix rows, not the spine of the prose.
+- **Formatting**: No bold-for-emphasis mid-sentence (italics at most). No adverb-ly hyphenation ("locally installed", not "locally-installed").
 
 ## Template: new topic document
 

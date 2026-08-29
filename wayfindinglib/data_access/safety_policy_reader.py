@@ -1,6 +1,6 @@
 """Purpose: Safety Rule Set Resolution.
 
-Description: Reads the persisted `SafetyRuleSet`. Returns `None` when
+Description: Reads the recorded `SafetyRuleSet`. Returns `None` when
 none has been configured, rather than a default rule set -- an absent
 rule set has nothing to evaluate a reading against, and the safety
 monitor (`Wayfinding_Library_Architecture.md` §2.5.6) must treat that
@@ -17,17 +17,17 @@ _DEFAULT_RULE_SET_ID = "default"
 
 
 def get_safety_rule_set(butler) -> SafetyRuleSet | None:  # ruff: ignore[missing-type-function-argument]
-    """Return the persisted `SafetyRuleSet`, or `None` if none is configured.
+    """Return the recorded `SafetyRuleSet`, or `None` if none is configured.
 
     Parameters
     ----------
     butler : `wayfindinglib.drivers.butler.DiskButler`
-        The persistence layer to read from.
+        The storage layer to read from.
 
     Returns
     -------
     rule_set : `SafetyRuleSet` or `None`
-        The persisted rule set, or `None` when unconfigured. Callers
+        The recorded rule set, or `None` when unconfigured. Callers
         must treat `None` as grounds for an `UNKNOWN` safety verdict,
         never as permission to proceed.
     """
@@ -35,17 +35,17 @@ def get_safety_rule_set(butler) -> SafetyRuleSet | None:  # ruff: ignore[missing
 
 
 def save_safety_rule_set(butler, rule_set: SafetyRuleSet) -> None:  # ruff: ignore[missing-type-function-argument]
-    """Persist `rule_set` as the active configuration.
+    """Record `rule_set` as the active configuration.
 
-    Persisted under `rule_set.id` -- callers who want the result found
+    Recorded under `rule_set.id` -- callers who want the result found
     by `get_safety_rule_set` must set `id="default"` on the rule set
     they pass in.
 
     Parameters
     ----------
     butler : `wayfindinglib.drivers.butler.DiskButler`
-        The persistence layer to write to.
+        The storage layer to write to.
     rule_set : `SafetyRuleSet`
-        The rule set to persist.
+        The rule set to record.
     """
     butler.put(rule_set, "safety_rule_set", {"id": rule_set.id})

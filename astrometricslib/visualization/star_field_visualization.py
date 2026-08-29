@@ -6,8 +6,8 @@ into interactive 2-panel views.
 
 import matplotlib.pyplot as plt
 
-from astrometricslib.analysis_context import AnalysisContext
 from astrometricslib.models.stellar_source import StellarObject
+from astrometricslib.pipelines.shared.analysis_context import AnalysisContext
 
 from .geometry import hit_test_rectangle, map_point_to_relative_x, rotate_point
 from .interaction_handler import InteractionHandler

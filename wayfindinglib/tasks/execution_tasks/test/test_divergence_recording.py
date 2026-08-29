@@ -116,7 +116,7 @@ def test_optional_queued_package_id_may_be_none():  # ruff: ignore[missing-retur
 
 
 def test_tolerance_is_stored_on_the_record():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify the tolerance a comparison was evaluated against is persisted."""
+    """Verify the tolerance a comparison was evaluated against is recorded."""
     record = record_divergence(
         "div-7",
         "session-1",
@@ -148,7 +148,7 @@ def test_converged_defaults_to_none():  # ruff: ignore[missing-return-type-undoc
 
 
 def test_converged_is_stored_when_supplied():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify a supplied converged value is persisted on the record."""
+    """Verify a supplied converged value is recorded on the record."""
     record = record_divergence(
         "div-9",
         "session-1",

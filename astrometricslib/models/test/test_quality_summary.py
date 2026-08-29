@@ -1,11 +1,8 @@
-"""Purpose: Unit tests for the per-pipeline quality-summary schemas.
+"""Tests for the processing quality reports.
 
-Description: Verifies each summary model constructs with its required
-fields and that the shared-base defaults (upstream reference, pipeline
-identity, session provenance) are correctly set for each pipeline.
-Merged from the former targetlib/test_{asteroid_recovery_quality,
-astrometry_quality, photometry_quality, spectroscopy_quality}.py, since
-their source modules were merged into models/quality_summary.py.
+These tests make sure that when we create a quality report (like for stacking
+or astrometry), it starts with the correct default values and requires
+all the necessary information.
 """
 
 import pytest
@@ -40,7 +37,7 @@ def _make_asteroid_recovery_metrics(**overrides) -> AsteroidRecoveryPipelineQual
 
 
 def test_asteroid_recovery_quality_summary_constructs_with_minimal_fields():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verifies the model can be constructed with just the required fields."""
+    """Check that we can create an asteroid report with only required data."""
     summary = AsteroidRecoveryQualitySummary(
         target_id="M 81", asteroid_recovery_metrics=_make_asteroid_recovery_metrics()
     )
@@ -51,7 +48,7 @@ def test_asteroid_recovery_quality_summary_constructs_with_minimal_fields():  # 
 
 
 def test_asteroid_recovery_quality_summary_defaults_to_empty_session_provenance():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verifies session fields default empty until a caller populates them."""
+    """Check that the list of observing sessions starts out empty."""
     summary = AsteroidRecoveryQualitySummary(
         target_id="M 81", asteroid_recovery_metrics=_make_asteroid_recovery_metrics()
     )
@@ -60,7 +57,7 @@ def test_asteroid_recovery_quality_summary_defaults_to_empty_session_provenance(
 
 
 def test_astrometry_quality_summary_constructs_with_minimal_fields():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verifies the model can be constructed with just the required fields."""
+    """Check that we can create an astrometry report with minimal data."""
     summary = AstrometryQualitySummary(
         target_id="M 13",
         astrometry_metrics=AstrometryPipelineQualityMetrics(
@@ -77,7 +74,7 @@ def test_astrometry_quality_summary_constructs_with_minimal_fields():  # ruff: i
 
 
 def test_astrometry_quality_summary_defaults_to_empty_session_provenance():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verifies session fields stay empty; astrometry solves one stack."""
+    """Check that the list of observing sessions stays empty for astrometry."""
     summary = AstrometryQualitySummary(
         target_id="M 13",
         astrometry_metrics=AstrometryPipelineQualityMetrics(
@@ -92,7 +89,7 @@ def test_astrometry_quality_summary_defaults_to_empty_session_provenance():  # r
 
 
 def test_photometry_quality_summary_constructs_with_minimal_fields():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verifies the model can be constructed with just the required fields."""
+    """Check that we can create a photometry report with only required data."""
     summary = PhotometryQualitySummary(
         target_id="M 13",
         photometry_metrics=PhotometryPipelineQualityMetrics(
@@ -111,7 +108,7 @@ def test_photometry_quality_summary_constructs_with_minimal_fields():  # ruff: i
 
 
 def test_photometry_quality_summary_has_no_upstream_reference():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verifies upstream_quality_summary_reference defaults to None."""
+    """Check that photometry reports don't link back to a previous step."""
     summary = PhotometryQualitySummary(
         target_id="M 13",
         photometry_metrics=PhotometryPipelineQualityMetrics(
@@ -122,7 +119,7 @@ def test_photometry_quality_summary_has_no_upstream_reference():  # ruff: ignore
 
 
 def test_spectroscopy_quality_summary_constructs_with_minimal_fields():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verifies the model can be constructed with just the required fields."""
+    """Check that we can create a spectroscopy report with minimal data."""
     summary = SpectroscopyQualitySummary(
         target_id="M 13",
         spectroscopy_metrics=SpectroscopyPipelineQualityMetrics(
@@ -137,7 +134,7 @@ def test_spectroscopy_quality_summary_constructs_with_minimal_fields():  # ruff:
 
 
 def test_spectroscopy_quality_summary_trail_width_profile_defaults_unavailable():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify trail_width_profile_available defaults False pre-tracing."""
+    """Check that we correctly assume trail width data is missing at first."""
     summary = SpectroscopyQualitySummary(
         target_id="M 13",
         spectroscopy_metrics=SpectroscopyPipelineQualityMetrics(),
@@ -146,7 +143,7 @@ def test_spectroscopy_quality_summary_trail_width_profile_defaults_unavailable()
 
 
 def test_stack_quality_summary_constructs_with_minimal_fields():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verifies the model can be constructed with just the required fields."""
+    """Check that we can create a stacking report with only required data."""
     summary = StackQualitySummary(
         target_id="M 13",
         resolved_parameters={

@@ -1,8 +1,8 @@
 """StellarMate remote telescope driver for Wayfinding.
 
 Handles connection probes, target listing, recursive FITS file
-discovery, and robust downloads (rsync with SCP fallback) from
-StellarMate or SSH-enabled telescopes.
+discovery, and rsync-based downloads from StellarMate or SSH-enabled
+telescopes.
 
 Relocated here from astrometricslib per the cross-library litmus test
 (`Wayfinding_Library_Architecture.md` Design Invariant 4): pulling files
@@ -22,8 +22,8 @@ logger = logging.getLogger(__name__)
 class StellarMateInterface:
     """Interface driver for the remote StellarMate telescope controller.
 
-    Communicates over SSH, SCP, and Rsync. Configured with a host
-    alias and the telescope's remote pictures path.
+    Communicates over SSH and Rsync. Configured with a host alias and
+    the telescope's remote pictures path.
     """
 
     def __init__(  # ruff: ignore[missing-return-type-special-method]
@@ -155,6 +155,23 @@ class StellarMateInterface:
                 logger.error(f"Failed to list remote targets: {e}")
             return []
 
+    def resolve_remote_folder_name(self, folder_name: str) -> str:
+        """Return the actual remote directory name for a target name.
+
+        Public entry point for callers that must know where a download
+        will actually land: `download_target_folder` resolves
+        space/underscore naming mismatches internally, so a caller that
+        derives its own post-download path from the *unresolved* name
+        would look in the wrong directory.
+
+        Returns
+        -------
+        resolved_folder_name : `str`
+            The matching remote directory name, or `folder_name`
+            unchanged if no space/underscore variant matches.
+        """
+        return self._resolve_remote_folder_name(folder_name)
+
     def _resolve_remote_folder_name(self, folder_name: str) -> str:
         """Resolve the actual remote folder name for a target.
 
@@ -205,6 +222,47 @@ class StellarMateInterface:
                 logger.error(f"Failed to list files in {folder_name}: {e}")
             return []
 
+    def list_remote_files_with_sizes(self, folder_name: str) -> list[tuple[str, int]]:
+        """List remote FITS file relative paths paired with byte sizes.
+
+        Size is what lets a caller distinguish two genuinely different
+        frames that happen to share a filename -- which does occur in
+        practice, where separate sessions reuse a capture-order naming
+        pattern. Matching on filename alone would treat the second one
+        as already held and silently skip transferring it.
+
+        Parameters
+        ----------
+        folder_name : `str`
+            Name of the remote directory corresponding to the target.
+
+        Returns
+        -------
+        files_with_sizes : `list` [`tuple` [`str`, `int`]]
+            ``(relative_path, size_in_bytes)`` for each FITS file, or
+            an empty list if the listing command fails.
+        """
+        try:
+            folder_name = self._resolve_remote_folder_name(folder_name)
+            remote_path = f"{self.remote_pictures_path}/{folder_name}"
+            cmd = (
+                f"find '{remote_path}' -type f \\( -name '*.fits' -o -name '*.fit' \\) "
+                f"-printf '%s\\t%P\\n' | sort -k2"
+            )
+            output = self._run_command(["ssh", self.host_alias, cmd])
+            files_with_sizes = []
+            for line in output.split("\n"):
+                if "\t" not in line:
+                    continue
+                size_text, _, relative_path = line.partition("\t")
+                if relative_path.strip() and size_text.strip().isdigit():
+                    files_with_sizes.append((relative_path.strip(), int(size_text.strip())))
+            return files_with_sizes
+        except Exception as e:
+            if self._last_connection_status is not False:
+                logger.error(f"Failed to list files with sizes in {folder_name}: {e}")
+            return []
+
     def get_remote_folder_count(self, folder_name: str) -> int:
         """Count the FITS frames inside a remote target folder.
 
@@ -237,7 +295,16 @@ class StellarMateInterface:
         log_callback: Any | None = None,
         selected_files: list[str] | None = None,
     ) -> bool:
-        """Download files robustly via rsync with automatic SCP fallback.
+        """Download files via rsync.
+
+        Deliberately rsync-only, with no SCP (or other tool) fallback:
+        a partial rsync run can leave its own temp/partial-file
+        artifacts behind (e.g. rsync's dotfile-prefixed in-progress
+        files), and a second transfer tool re-fetching into the same
+        destination has no way to know about or reconcile those --
+        risking leftover/duplicate files alongside the complete ones.
+        A failed rsync run is reported as `False` so the caller can
+        retry the same, single, well-understood transfer path.
 
         Parameters
         ----------
@@ -253,16 +320,13 @@ class StellarMateInterface:
         Returns
         -------
         succeeded : `bool`
-            `True` if the download completed successfully via rsync
-            or the SCP fallback.
+            `True` if the rsync download completed successfully,
+            `False` otherwise.
 
         Raises
         ------
         ValueError
             Raised if no host alias is configured.
-        subprocess.CalledProcessError
-            Raised if the SCP fallback process exits with a nonzero
-            return code.
         """
         if not self.host_alias:
             raise ValueError("No host alias configured for remote service.")
@@ -305,7 +369,8 @@ class StellarMateInterface:
                 "--no-p",
                 "--no-g",
                 "--no-o",
-                f'{self.host_alias}:"{remote_path}"',
+                "-s",
+                f"{self.host_alias}:{remote_path}",
                 local_target_path,
             ]
 
@@ -344,51 +409,13 @@ class StellarMateInterface:
                 logger.info(f"rsync completed successfully for {remote_target_name}")
                 return True
             else:
-                logger.warning(f"rsync failed with code {return_code}. Falling back to scp...")
+                logger.error(f"rsync failed with code {return_code} for {remote_target_name}.")
+                return False
         except Exception as e:
             if files_from_path:
                 try:
                     os.remove(files_from_path)
                 except OSError:
                     pass
-            logger.warning(f"rsync execution error: {e}. Falling back to scp...")
-
-        # SCP Fallback
-        remote_scp_path = f'{self.host_alias}:"{self.remote_pictures_path}/{remote_target_name}"'
-        scp_cmd = ["scp", "-r", "-v", remote_scp_path, local_dest_path]
-
-        logger.info(f"Starting fallback SCP download: {remote_scp_path} -> {local_dest_path}")
-
-        try:
-            process = subprocess.Popen(
-                scp_cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-                universal_newlines=True,
-            )
-
-            scp_output = []
-            for line in process.stdout:
-                line = line.strip()
-                if not line:
-                    continue
-
-                scp_output.append(line)
-                if "Fetching" in line and "debug1" in line:
-                    if log_callback:
-                        log_callback(f"Downloading: {line.split('Fetching')[1].strip()}")
-
-                logger.debug(f"scp: {line}")
-
-            return_code = process.wait()
-            if return_code != 0:
-                last_err = "\n".join(scp_output[-10:])
-                logger.error(f"SCP failed with code {return_code}. Last output:\n{last_err}")
-                raise subprocess.CalledProcessError(return_code, scp_cmd)
-
-            return True
-        except Exception as e:
-            logger.error(f"Remote download completely failed: {e}")
-            raise
+            logger.error(f"rsync execution error for {remote_target_name}: {e}")
+            return False

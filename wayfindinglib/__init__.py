@@ -113,7 +113,7 @@ class Wayfinder:
 
         Description: Composes the three root-function high-level interfaces
         (control, planning, execution) over a shared config and
-        persistence butler.
+        recording butler.
         """
         from astrometricslib import get_configuration
         from wayfindinglib.api.control_registry import ObservatoryControl

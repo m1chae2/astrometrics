@@ -5,8 +5,8 @@
    full desktop header forced into a fixed 2.75rem bar. */
 @media (min-width: 960px) {
   .bd-header {
-    height: 2.75rem !important;
-    min-height: 2.75rem !important;
+    height: 3.25rem !important;
+    min-height: 3.25rem !important;
     padding-top: 0 !important;
     padding-bottom: 0 !important;
   }
@@ -31,6 +31,19 @@
     padding-top: 0 !important;
     padding-bottom: 0 !important;
     font-size: 1rem !important;
+  }
+
+  /* The theme's default logo height (4rem) overflows the compact header
+     above, so the image pokes out above the bar. Size it to stay visible
+     but fit within the header instead. */
+  .bd-header .navbar-brand.logo {
+    height: 2.25rem !important;
+  }
+
+  .bd-header .logo__image {
+    height: 2.25rem !important;
+    width: 2.25rem !important;
+    max-height: 2.25rem !important;
   }
 
   .bd-header .navbar-header-items__center {
@@ -125,4 +138,25 @@
   max-width: none !important;
   margin-left: 0 !important;
   padding-left: 0 !important;
+}
+
+/* Astrometrics Desktop Application Theme overrides.
+   Despite the "on-*" naming (which reads like a Material Design foreground
+   token), PyData Sphinx Theme uses --pst-color-on-background and
+   --pst-color-on-surface as background colors for raised elements (header,
+   dropdowns, sd-card bodies) — see .bd-header and .sd-card-body rules in
+   pydata-sphinx-theme.css. Setting them to light values here previously
+   left the header and every grid card as light-gray boxes on the dark page. */
+html[data-theme="dark"] {
+  --pst-color-primary: #1890ff;
+  --pst-color-primary-highlight: #40a9ff;
+  --pst-color-background: #1e1e1e;
+  --pst-color-on-background: #252526;
+  --pst-color-surface: #252526;
+  --pst-color-on-surface: #e0e0e0;
+}
+
+html[data-theme="light"] {
+  --pst-color-primary: #1890ff;
+  --pst-color-primary-highlight: #40a9ff;
 }

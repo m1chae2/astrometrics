@@ -121,7 +121,7 @@ class TargetService:
         dec: str | None = None,
         target_id: str | None = None,
     ) -> Target:
-        """Generate a new target, scan physical frames, and persist it.
+        """Generate a new target, scan physical frames, and record it.
 
         Accepts either a target_id (str) or a pre-instantiated Target
         object. # REQ: BKD-5.2
@@ -295,7 +295,7 @@ class TargetService:
     def save_target(self, target: Target) -> None:
         """Save target database states.
 
-        Uses the library's persistence controllers.
+        Uses the library's storage controllers.
         """
         try:
             self.astrometrics.targets.save()

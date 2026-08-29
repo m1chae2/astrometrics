@@ -1,7 +1,6 @@
-"""Unit tests for MovingObjectConfig and its ConfigLoader.
+"""Tests for the moving object settings.
 
-Verifies default field values, with_overrides creating a modified copy of the
-original, and that load_moving_object_config reads real values.
+Checks that we can load settings properly and create modified copies of them.
 """
 
 import pytest
@@ -14,7 +13,7 @@ from astrometricslib.utilities.config_loader import AppConfiguration
 
 
 def test_moving_object_config_with_overrides():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify that with_overrides returns a copy with updated field values."""
+    """Make sure we can copy the settings and change just a few of them."""
     original = MovingObjectConfig()
     overridden = original.with_overrides(detection_fwhm_px=6.0, rate_min_arcsec_per_hour=2.5)
 
@@ -25,7 +24,7 @@ def test_moving_object_config_with_overrides():  # ruff: ignore[missing-return-t
 
 
 def test_load_moving_object_config_reads_real_config_section():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify that load_moving_object_config successfully reads real config."""
+    """Check that we can successfully read the real settings file."""
     config = MovingObjectConfigLoader.load_moving_object_config(AppConfiguration())
     assert isinstance(config, MovingObjectConfig)
     assert config.detection_fwhm_px > 0.0
@@ -34,7 +33,7 @@ def test_load_moving_object_config_reads_real_config_section():  # ruff: ignore[
 
 
 def test_load_moving_object_config_falls_back_to_defaults_when_section_missing(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify fallback defaults when application config section is missing."""
+    """Check that we use safe default values if the settings file is empty."""
     import configparser
 
     config_path = tmp_path / "empty.config"

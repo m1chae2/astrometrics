@@ -1,15 +1,12 @@
-"""Domain-astrometrics classes for astrometricslib (Layer 1).
+"""High-level interfaces for the astrometrics library.
 
-Each astrometrics class is the single entry point external callers (scripts,
-backend services, other libraries) should use for a given domain.
-Layer 1 may reach into any lower layer (`astrometricslib.tasks`,
-`astrometricslib.data_access`, `astrometricslib.drivers`) directly --
-that is what a astrometrics is for. The rule runs the other way: nothing
-above Layer 1 imports those lower-layer modules directly, and nothing
-in those lower-layer modules calls back up into a astrometrics.
+This folder contains the primary classes used to interact
+with the library. Think of these classes as the front door: they hide
+the complex, lower-level code and provide a clean, easy-to-use API
+for scripts, services, or other programs.
 
-Internal. Import these from the top-level `astrometricslib` namespace
-instead -- this subpackage is not part of the supported public API.
+Note: Import from this folder should not be done directly. Import these
+classes from the main `astrometricslib` namespace instead.
 """
 
 from astrometricslib.api.moving_objects import MovingObjectRecovery
@@ -17,9 +14,12 @@ from astrometricslib.api.processing import CalibrationCatalog, ProcessingPipelin
 from astrometricslib.api.stars import StellarCatalog
 from astrometricslib.api.targets import TargetCatalog
 from astrometricslib.api.visualization import Visualization
+from astrometricslib.data_access.catalog_access import AbstractCatalogAccess, CatalogAccess
 
 __all__ = [
+    "AbstractCatalogAccess",
     "CalibrationCatalog",
+    "CatalogAccess",
     "MovingObjectRecovery",
     "ProcessingPipelines",
     "QualityDiagnostics",

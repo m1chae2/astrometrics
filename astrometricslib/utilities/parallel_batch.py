@@ -23,10 +23,16 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class BatchRunSummary:
-    """Aggregated outcome of a run_parallel_batch() call."""
+    """Aggregated outcome of a run_parallel_batch() call.
+
+    `skipped` holds items a worker reported as having no work to do, kept
+    apart from `succeeded` so a run's headline counts describe work that
+    actually happened rather than counting no-ops as successes.
+    """
 
     succeeded: list[str] = field(default_factory=list)
     failed: list[tuple[str, str]] = field(default_factory=list)
+    skipped: list[tuple[str, str]] = field(default_factory=list)
     results: dict[str, Any] = field(default_factory=dict)
 
 
@@ -52,15 +58,50 @@ def _run_worker_with_captured_output(
     print each item's output as one contiguous block instead of
     interleaving lines from concurrently-running items.
 
+    Log records are captured alongside stdout. Worker processes never run
+    `logging.basicConfig` -- the pool's only initializer sets niceness, and
+    under the "forkserver"/"spawn" start methods a worker does not inherit
+    the parent's handlers -- so without this every `logger.info`/`warning`
+    raised inside a worker was silently discarded, leaving batch runs with
+    only whatever the pipeline happened to `print`.
+
+    The handler is attached here rather than in the pool initializer
+    because `redirect_stdout` swaps `sys.stdout` per item: a handler bound
+    once at worker startup would hold the *original* stdout and write past
+    the capture, interleaving lines from concurrent items onto the
+    terminal. Binding it to this item's buffer keeps each item's logs in
+    the same contiguous block as its prints.
+
     Returns
     -------
     result : `tuple` [`dict`, `str`]
         The worker_function's returned dict, paired with the captured
-        stdout produced while it ran.
+        stdout and log output produced while it ran.
     """
     output_buffer = io.StringIO()
-    with contextlib.redirect_stdout(output_buffer):
-        result = worker_function(item_id, *worker_arguments)
+
+    # Matches the package logger that pipeline_tasks' job logging already
+    # targets, so both mechanisms observe the same records.
+    package_logger = logging.getLogger("astrometricslib")
+    log_handler = logging.StreamHandler(output_buffer)
+    log_handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+    previous_level = package_logger.level
+    package_logger.addHandler(log_handler)
+    if not package_logger.isEnabledFor(logging.INFO):
+        # NOTSET here would defer to root, which defaults to WARNING and
+        # would drop the INFO-level pipeline diagnostics entirely.
+        package_logger.setLevel(logging.INFO)
+
+    try:
+        with contextlib.redirect_stdout(output_buffer):
+            result = worker_function(item_id, *worker_arguments)
+    finally:
+        # Always detach: workers are reused across items, so a leaked
+        # handler would keep writing this item's buffer for every later
+        # item the same process handles.
+        package_logger.removeHandler(log_handler)
+        package_logger.setLevel(previous_level)
+
     return result, output_buffer.getvalue()
 
 
@@ -77,9 +118,11 @@ def run_parallel_batch(
 
     worker_function must be a module-level (picklable) callable with the
     signature (item_id, *worker_arguments) -> dict, where the returned
-    dict has at least a "status" key ("success" or "failed") and an
-    "error" key populated when status is "failed". Any other keys are
-    passed through to the summary's results mapping unchanged.
+    dict has at least a "status" key ("success", "skipped", or "failed")
+    and an "error" key populated when status is "failed" or "skipped"
+    (carrying the reason, in the latter case). Any other keys are passed
+    through to the summary's results mapping unchanged. A worker that
+    never reports "skipped" simply leaves that summary list empty.
 
     Handles four concerns generically, regardless of what worker_function
     actually does:
@@ -182,8 +225,11 @@ def run_parallel_batch(
                     print(captured_output, end="")
 
                 summary.results[item_id] = result
-                if result.get("status") == "success":
+                item_status = result.get("status")
+                if item_status == "success":
                     summary.succeeded.append(item_id)
+                elif item_status == "skipped":
+                    summary.skipped.append((item_id, result.get("error") or "No work for this item"))
                 else:
                     summary.failed.append((item_id, result.get("error") or "Unknown failure"))
                 report_item_complete(item_id, result)

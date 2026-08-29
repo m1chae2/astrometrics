@@ -1,3 +1,5 @@
+<a href="https://astrometrics.readthedocs.io/en/latest/?badge=latest"><img align="right" src="https://readthedocs.org/projects/astrometrics/badge/?version=latest" alt="Documentation Status"></a>
+
 # Astrometrics
 
 **Making Amateur Astronomy and Citizen Science More Accessible**
@@ -69,7 +71,7 @@ Observatory control, sequence planning, and safety execution engine:
 
 ## Documentation Guide
 
-User manuals, step-by-step processing tutorials, and technical architecture specifications are located in the [`documentation/`](documentation/) directory:
+The full documentation is published at **[astrometrics.readthedocs.io](https://astrometrics.readthedocs.io/)** — rendered, searchable, and the recommended way to read it. User manuals, step-by-step processing tutorials, and technical architecture specifications also live as source files in the [`documentation/`](documentation/) directory, if you'd rather browse them directly on GitHub:
 
 ### User Guides & Manuals
 * **[Desktop User Manual](documentation/user_interface/user_guides/User_Manual.md)**: Official user handbook covering all display workspaces with screenshots, control descriptions, status indicators, and keyboard shortcuts.

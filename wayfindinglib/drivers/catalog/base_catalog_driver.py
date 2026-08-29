@@ -2,7 +2,7 @@
 
 Each concrete driver encapsulates the query logic for one online catalog
 service and returns transient StellarObject instances that are NEVER
-persisted to the local astrometrics database.
+recorded to the local astrometrics database.
 
 REQ: PLN-3.1
 """

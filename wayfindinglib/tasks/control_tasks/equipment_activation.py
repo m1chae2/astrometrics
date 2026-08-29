@@ -6,9 +6,9 @@ equipment catalog is a Foundation concern both Control and Planning
 need, but *changing* which entry is active is a Control operation, so
 it lives here rather than in `data_access/equipment_catalog_reader.py`.
 
-Carries forward the validate-before-persist pattern of the deprecated
+Carries forward the validate-before-record pattern of the deprecated
 `observatorylib.equipment_configuration.EquipmentConfigurationManager.set_active_camera`:
-an unrecognized id is rejected rather than silently persisted, so a
+an unrecognized id is rejected rather than silently recorded, so a
 typo cannot leave the active selection pointing at nothing.
 
 `list_camera_profiles`/`get_equipment_configuration` delegate to the
@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 
 def set_active_telescope(config, telescope_id: str) -> bool:  # ruff: ignore[missing-type-function-argument]
-    """Persist a new active telescope selection.
+    """Record a new active telescope selection.
 
     Parameters
     ----------
@@ -63,7 +63,7 @@ def set_active_telescope(config, telescope_id: str) -> bool:  # ruff: ignore[mis
 
 
 def set_active_camera(config, camera_id: str) -> bool:  # ruff: ignore[missing-type-function-argument]
-    """Persist a new active camera selection.
+    """Record a new active camera selection.
 
     Parameters
     ----------

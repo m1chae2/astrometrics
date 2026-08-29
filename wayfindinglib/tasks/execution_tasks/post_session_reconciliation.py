@@ -5,7 +5,7 @@ Description: Runs once a session reaches `COMPLETED` or `ABORTED`, per
 calibration frames into `CalibrationStats`, and attaches
 `target_session_ids`. Both are idempotent on session identity --
 neither incrementally accumulates onto prior state; each recomputes
-its result from source data (persisted sessions, a target's frame
+its result from source data (recorded sessions, a target's frame
 records) every time, so re-running produces the same output rather
 than double-counting.
 
@@ -13,7 +13,7 @@ than double-counting.
 codebase before this module (`models/calibration.py`); this closes
 that gap. `target_session_ids` are attached by re-deriving each
 imaged target's `TargetSession`s from its actual captured frames
-(`astrometricslib.tasks.target_tasks.target_session_tasks
+(`astrometricslib.pipelines.shared.target_sessions
 .derive_target_sessions`) for the session's night -- Execution
 computes nothing here that isn't already derivable from what the
 science library recorded, since a `TargetSession` id encodes the
@@ -49,7 +49,7 @@ def compute_calibration_stats(camera_id: str, sessions: list[ObservationSession]
     camera_id : `str`
         The camera to compute inventory for.
     sessions : `list` [`ObservationSession`]
-        Every persisted session to consider (e.g. from
+        Every recorded session to consider (e.g. from
         `butler.get_all("observation_session")`); sessions for other
         cameras, and non-terminal sessions, are ignored.
 
@@ -125,12 +125,12 @@ def attach_target_session_ids(session: ObservationSession, astrometrics: Any) ->
 def reconcile_session(
     butler: DiskButler, session: ObservationSession, astrometrics: Any
 ) -> ObservationSession:
-    """Run both reconciliations for a terminal session and persist the results.
+    """Run both reconciliations for a terminal session and record the results.
 
     Parameters
     ----------
     butler : `DiskButler`
-        Persistence layer: reads every session to recompute
+        Storage layer: reads every session to recompute
         `CalibrationStats`, and writes both results.
     session : `ObservationSession`
         The just-terminated session to reconcile.
@@ -141,7 +141,7 @@ def reconcile_session(
     Returns
     -------
     session : `ObservationSession`
-        The session with `target_session_ids` attached and persisted.
+        The session with `target_session_ids` attached and recorded.
 
     Raises
     ------

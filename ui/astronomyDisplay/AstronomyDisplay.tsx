@@ -40,6 +40,9 @@ export const AstronomyDisplay: React.FC = () => {
     filterText,
     setFilterText,
     highlightedIds,
+    page,
+    setPage,
+    hasMore,
   } = useSpectrumList(undefined, pendingId, selectedSpectrum, setPendingId);
 
   useEffect(() => {
@@ -113,6 +116,9 @@ export const AstronomyDisplay: React.FC = () => {
       filterText={filterText}
       onFilterTextChange={setFilterText}
       highlightedIds={highlightedIds}
+      page={page}
+      onPageChange={setPage}
+      hasMore={hasMore}
     />
   );
 

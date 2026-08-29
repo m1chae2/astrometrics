@@ -243,3 +243,29 @@ def test_get_displayable_stellar_object_summaries_category_filters() -> None:
 
     phot_results = service.get_displayable_stellar_object_summaries(filter_type="With Photometry")
     assert [s["id"] for s in phot_results] == ["Star_Phot_1", "Star_Both_1"]
+
+
+def test_get_displayable_stellar_object_summaries_offset_pagination() -> None:
+    """Verify that offset pagination skips items appropriately."""
+    mock_stars = [
+        {"id": f"HD_{i:03d}", "name": f"Star {i}", "hasSpectra": True, "hasPhotometry": True}
+        for i in range(250)
+    ]
+    astrometrics = MagicMock()
+    astrometrics.stars.list_object_summaries.return_value = mock_stars
+    service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
+
+    page_1 = service.get_displayable_stellar_object_summaries(limit=100, offset=0)
+    assert len(page_1) == 100
+    assert page_1[0]["id"] == "HD_000"
+    assert page_1[99]["id"] == "HD_099"
+
+    page_2 = service.get_displayable_stellar_object_summaries(limit=100, offset=100)
+    assert len(page_2) == 100
+    assert page_2[0]["id"] == "HD_100"
+    assert page_2[99]["id"] == "HD_199"
+
+    page_3 = service.get_displayable_stellar_object_summaries(limit=100, offset=200)
+    assert len(page_3) == 50
+    assert page_3[0]["id"] == "HD_200"
+    assert page_3[49]["id"] == "HD_249"

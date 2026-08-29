@@ -13,6 +13,7 @@ export interface AstronomyListOptions {
     search?: string;
     filterType?: string;
     limit?: number;
+    offset?: number;
 }
 
 async function getAstronomyList(optionsOrTargetId?: string | AstronomyListOptions): Promise<Spectrum[]> {
@@ -23,6 +24,7 @@ async function getAstronomyList(optionsOrTargetId?: string | AstronomyListOption
                 params.target_id = optionsOrTargetId.trim();
             }
             params.limit = 100;
+            params.offset = 0;
         } else if (optionsOrTargetId && typeof optionsOrTargetId === 'object') {
             if (optionsOrTargetId.targetId && optionsOrTargetId.targetId.trim() !== '') {
                 params.target_id = optionsOrTargetId.targetId.trim();
@@ -34,8 +36,12 @@ async function getAstronomyList(optionsOrTargetId?: string | AstronomyListOption
                 params.filter_type = optionsOrTargetId.filterType.trim();
             }
             params.limit = optionsOrTargetId.limit !== undefined ? optionsOrTargetId.limit : 100;
+            if (optionsOrTargetId.offset !== undefined) {
+                params.offset = optionsOrTargetId.offset;
+            }
         } else {
             params.limit = 100;
+            params.offset = 0;
         }
         const data = await callBackend("astronomy:list", params);
         return Array.isArray(data) ? (data as Spectrum[]) : [];

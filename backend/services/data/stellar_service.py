@@ -178,6 +178,7 @@ class StellarService:
         self,
         target_id: str | None = None,
         limit: int | None = 100,
+        offset: int | None = 0,
         search: str | None = None,
         filter_type: str | None = None,
     ) -> list[dict]:
@@ -189,7 +190,7 @@ class StellarService:
         and capped at `limit` rows, defaulting to 100) instead of fully
         hydrating every `StellarObject`. When `search` or `filter_type`
         is specified, filters across all matching database records before
-        capping results to `limit`.
+        capping results to `limit`. Supports `offset` pagination.
 
         Parameters
         ----------
@@ -197,6 +198,9 @@ class StellarService:
             Restrict to stars belonging to this target.
         limit : `int`, optional
             Maximum number of stars to return. Defaults to 100.
+        offset : `int`, optional
+            Number of initial matching stars to skip for pagination.
+            Defaults to 0.
         search : `str`, optional
             Search query to filter star ID or name across the catalog.
         filter_type : `str`, optional
@@ -209,9 +213,9 @@ class StellarService:
             One dict per displayable star with keys ``id``, ``name``,
             ``targetIds``, ``hasSpectra``, and ``hasPhotometry``,
             optionally filtered by ``target_id``, ``search``, and
-            ``filter_type``.
+            ``filter_type``, paginated by ``offset`` and ``limit``.
         """
-        effective_limit = None if (search or filter_type) else limit
+        effective_limit = None if (search or filter_type or (offset and offset > 0)) else limit
         summaries = self.astrometrics.stars.list_object_summaries(target_id, effective_limit)
 
         search_needle = search.strip().lower() if search and search.strip() else None
@@ -226,10 +230,18 @@ class StellarService:
 
             if filter_type:
                 normalized_filter = filter_type.strip().lower()
-                is_spectra_filter = normalized_filter in ("with spectra", "spectra", "hasspectra")
+                is_spectra_filter = normalized_filter in (
+                    "with spectra",
+                    "spectra",
+                    "hasspectra",
+                )
                 if is_spectra_filter and not summary.get("hasSpectra"):
                     continue
-                is_photometry_filter = normalized_filter in ("with photometry", "photometry", "hasphotometry")
+                is_photometry_filter = normalized_filter in (
+                    "with photometry",
+                    "photometry",
+                    "hasphotometry",
+                )
                 if is_photometry_filter and not summary.get("hasPhotometry"):
                     continue
 
@@ -238,10 +250,11 @@ class StellarService:
                     continue
 
             filtered.append(summary)
-            if limit is not None and limit > 0 and len(filtered) >= limit:
-                break
 
-        return filtered
+        start_offset = max(0, offset or 0)
+        if limit is not None and limit > 0:
+            return filtered[start_offset : start_offset + limit]
+        return filtered[start_offset:]
 
     def load_stellar_objects(self) -> None:
         """No-op retained for backward compatibility.

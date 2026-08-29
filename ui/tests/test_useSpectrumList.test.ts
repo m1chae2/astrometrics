@@ -153,4 +153,58 @@ describe('useSpectrumList Filtering Suite', () => {
 
         vi.useRealTimers();
     });
+
+    /**
+     * Test case verifying pagination state, offset calculation, and page switching.
+     */
+    it('should support pagination and calculate offset properly', () => {
+        /**
+         * Purpose: Ensures useSpectrumList provides pagination controls (nextPage, prevPage, setPage)
+         * and properly calculates offset for query options.
+         */
+        const manyStars: Spectrum[] = Array.from({ length: 100 }, (_, i) => ({
+            id: `star-${i}`,
+            label: `Star ${i}`,
+        }));
+
+        vi.mocked(useAstronomyListQuery).mockReturnValue({
+            data: manyStars,
+            isLoading: false,
+            error: null,
+            refetch: vi.fn(),
+        } as any);
+
+        const { result, rerender } = renderHook(() => useSpectrumList());
+
+        expect(result.current.page).toBe(1);
+        expect(result.current.hasMore).toBe(true);
+        expect(result.current.hasPrevious).toBe(false);
+        expect(useAstronomyListQuery).toHaveBeenCalledWith(
+            expect.objectContaining({ limit: 100, offset: 0 })
+        );
+
+        // Advance to next page
+        act(() => {
+            result.current.nextPage();
+        });
+        rerender();
+
+        expect(result.current.page).toBe(2);
+        expect(result.current.hasPrevious).toBe(true);
+        expect(useAstronomyListQuery).toHaveBeenCalledWith(
+            expect.objectContaining({ limit: 100, offset: 100 })
+        );
+
+        // Go back to previous page
+        act(() => {
+            result.current.prevPage();
+        });
+        rerender();
+
+        expect(result.current.page).toBe(1);
+        expect(result.current.hasPrevious).toBe(false);
+        expect(useAstronomyListQuery).toHaveBeenCalledWith(
+            expect.objectContaining({ limit: 100, offset: 0 })
+        );
+    });
 });

@@ -20,7 +20,19 @@ export const useSpectrumList = (
     const [dropdown, setDropdown] = useState<string>('All');
     const [filterText, setFilterText] = useState<string>('');
     const [debouncedFilterText, setDebouncedFilterText] = useState<string>('');
+    const [page, setPage] = useState<number>(1);
     const toast = useToast();
+
+    // Reset page to 1 when search or filter changes
+    const handleSetFilterText = useCallback((text: string) => {
+        setFilterText(text);
+        setPage(1);
+    }, []);
+
+    const handleSetDropdown = useCallback((opt: string) => {
+        setDropdown(opt);
+        setPage(1);
+    }, []);
 
     // Debounce search text input by 250ms to prevent excessive backend queries
     useEffect(() => {
@@ -60,13 +72,14 @@ export const useSpectrumList = (
         return undefined;
     }, [dropdown]);
 
-    // Fetch astronomy list capped at 100 stars with full database search
+    // Fetch astronomy list capped at 100 stars with full database search and offset pagination
     const queryOptions = useMemo(() => ({
         targetId: activeTargetId,
         search: debouncedFilterText,
         filterType: activeFilterType,
         limit: 100,
-    }), [activeTargetId, debouncedFilterText, activeFilterType]);
+        offset: (page - 1) * 100,
+    }), [activeTargetId, debouncedFilterText, activeFilterType, page]);
 
     const astronomyListQuery = useAstronomyListQuery(queryOptions);
     const spectra = useMemo(() => astronomyListQuery.data ?? [], [astronomyListQuery.data]);
@@ -222,13 +235,21 @@ export const useSpectrumList = (
             .map(s => String(s.id || s.label || s))
     );
 
+    const hasMore = spectra.length >= 100;
+
     return {
         items: filteredItems,
         filterOptions,
         selectedFilterOption: dropdown,
-        setFilterOption: setDropdown,
+        setFilterOption: handleSetDropdown,
         filterText,
-        setFilterText,
+        setFilterText: handleSetFilterText,
         highlightedIds,
+        page,
+        setPage,
+        hasMore,
+        hasPrevious: page > 1,
+        nextPage: () => setPage((p) => p + 1),
+        prevPage: () => setPage((p) => Math.max(1, p - 1)),
     };
 };

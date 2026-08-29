@@ -68,7 +68,7 @@ def _run_holder_and_waiter(slot_count: int) -> float:
     context = multiprocessing.get_context("spawn")
     ready_queue = context.Queue()
     result_queue = context.Queue()
-    holder = context.Process(target=_hold_slot_briefly, args=(ready_queue, 3.0))
+    holder = context.Process(target=_hold_slot_briefly, args=(ready_queue, 8.0))
     holder.start()
     try:
         assert ready_queue.get(timeout=60) == "holding"

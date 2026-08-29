@@ -109,8 +109,8 @@ def test_list_object_summaries_reports_the_expected_fields(tmp_path):  # ruff: i
     """Verify summaries carry id/name/targetIds/hasSpectra/hasPhotometry.
 
     Exercises StellarCatalog.list_object_summaries end-to-end through a
-    real DiskButler -- has_spectra/has_photometry are real columns
-    populated by data_access.butler._stellar_extra_columns at write
+    real CatalogAccess -- has_spectra/has_photometry are real columns
+    populated by data_access.catalog_access._stellar_extra_columns at write
     time (via StellarObject's own computed properties), not derived
     from the JSON at read time the way the code this superseded did.
     """
@@ -125,7 +125,7 @@ def test_list_object_summaries_reports_the_expected_fields(tmp_path):  # ruff: i
     betelgeuse = StellarObject(id="Betelgeuse", name="Betelgeuse", target_ids=["Orion Field"])
     betelgeuse.light_curve = {"timestamps": ["2026-01-01T00:00:00Z"], "magnitudes": [0.5]}
     empty_star = StellarObject(id="EmptyStar", name="EmptyStar", target_ids=[])
-    catalog.butler.put([vega, betelgeuse, empty_star], "stellar_catalog", {})
+    catalog.catalog_access.put([vega, betelgeuse, empty_star], "stellar_catalog", {})
 
     summaries = {s["id"]: s for s in catalog.list_object_summaries()}
 
@@ -155,7 +155,7 @@ def test_list_object_summaries_filters_by_target_id(tmp_path):  # ruff: ignore[m
 
     in_field = StellarObject(id="InField", name="InField", target_ids=["M 13"])
     out_of_field = StellarObject(id="OutOfField", name="OutOfField", target_ids=["M 81"])
-    catalog.butler.put([in_field, out_of_field], "stellar_catalog", {})
+    catalog.catalog_access.put([in_field, out_of_field], "stellar_catalog", {})
 
     summaries = catalog.list_object_summaries(target_id="M 13")
 
@@ -165,7 +165,7 @@ def test_list_object_summaries_filters_by_target_id(tmp_path):  # ruff: ignore[m
 def test_list_object_summaries_target_id_substring_collision_is_still_exact(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """A target id that is a substring of another must not false-match.
 
-    target_id is passed to Butler.list_projected as a `like` prefilter
+    target_id is passed to CatalogAccess.list_projected as a `like` prefilter
     for performance, but "M 1" is a substring of "M 13" -- the LIKE
     narrowing alone would incorrectly include a star that only belongs
     to "M 13" when asked for "M 1". Correctness must come entirely from
@@ -181,7 +181,7 @@ def test_list_object_summaries_target_id_substring_collision_is_still_exact(tmp_
     in_m1 = StellarObject(id="InM1", name="InM1", target_ids=["M 1"])
     in_m13_only = StellarObject(id="InM13Only", name="InM13Only", target_ids=["M 13"])
     in_both = StellarObject(id="InBoth", name="InBoth", target_ids=["M 1", "M 13"])
-    catalog.butler.put([in_m1, in_m13_only, in_both], "stellar_catalog", {})
+    catalog.catalog_access.put([in_m1, in_m13_only, in_both], "stellar_catalog", {})
 
     summaries = catalog.list_object_summaries(target_id="M 1")
 
@@ -203,7 +203,7 @@ def test_list_object_summaries_caps_the_unfiltered_case_by_default(tmp_path, mon
     monkeypatch.setattr(stars_module, "DEFAULT_UNFILTERED_SUMMARY_LIMIT", 3)
     config = _make_isolated_config(tmp_path)
     catalog = StellarCatalog(config=config)
-    catalog.butler.put(
+    catalog.catalog_access.put(
         [StellarObject(id=f"Star{i}", name=f"Star{i}") for i in range(10)], "stellar_catalog", {}
     )
 
@@ -221,7 +221,7 @@ def test_list_object_summaries_explicit_limit_overrides_the_default(tmp_path, mo
     monkeypatch.setattr(stars_module, "DEFAULT_UNFILTERED_SUMMARY_LIMIT", 3)
     config = _make_isolated_config(tmp_path)
     catalog = StellarCatalog(config=config)
-    catalog.butler.put(
+    catalog.catalog_access.put(
         [StellarObject(id=f"Star{i}", name=f"Star{i}") for i in range(10)], "stellar_catalog", {}
     )
 
@@ -239,7 +239,7 @@ def test_list_object_summaries_a_target_scoped_request_is_not_capped_by_default(
     monkeypatch.setattr(stars_module, "DEFAULT_UNFILTERED_SUMMARY_LIMIT", 3)
     config = _make_isolated_config(tmp_path)
     catalog = StellarCatalog(config=config)
-    catalog.butler.put(
+    catalog.catalog_access.put(
         [StellarObject(id=f"Star{i}", name=f"Star{i}", target_ids=["M 13"]) for i in range(10)],
         "stellar_catalog",
         {},
@@ -254,7 +254,7 @@ def test_list_object_summaries_matches_the_model_computed_properties(tmp_path): 
     """Verify the persisted columns agree with StellarObject's own properties.
 
     has_spectra/has_photometry are computed once at write time (see
-    data_access.butler._stellar_extra_columns) by calling
+    data_access.catalog_access._stellar_extra_columns) by calling
     StellarObject's own computed properties directly, so there is no
     separate logic to drift out of sync with the model -- this checks
     that wiring, not a reimplementation of the model's rules.
@@ -268,7 +268,7 @@ def test_list_object_summaries_matches_the_model_computed_properties(tmp_path): 
     vega = StellarObject(id="Vega", name="Vega", target_ids=["Lyra Field"])
     vega.spectrum_data_processed = {"wavelengths_angstrom": [5000], "intensities": [1.0]}
     vega.light_curve = {"timestamps": ["2026-01-01T00:00:00Z"], "fluxes": [1.0]}
-    catalog.butler.put([vega], "stellar_catalog", {})
+    catalog.catalog_access.put([vega], "stellar_catalog", {})
 
     (summary,) = catalog.list_object_summaries()
 

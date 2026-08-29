@@ -31,7 +31,7 @@ class TargetCatalog:
     create, or delete targets within your observatory's library.
     """
 
-    def __init__(self, config: AppConfiguration, butler: object):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, config: AppConfiguration, catalog_access: object):  # ruff: ignore[missing-return-type-special-method]
         """Initialize with configuration settings and a database manager.
 
         This setup keeps the list of targets and tracked changes right here
@@ -42,12 +42,12 @@ class TargetCatalog:
         ----------
         config : `AppConfiguration`
             Application configuration.
-        butler : `astrometricslib.data_access.butler.AbstractButler`
+        catalog_access : `AbstractCatalogAccess`
             Storage backend for the target catalog.
         """
         self._config = config
-        self.butler = butler
-        self._targets: list = butler.get("target_catalog", {}) or []
+        self.catalog_access = catalog_access
+        self._targets: list = catalog_access.get("target_catalog", {}) or []
         self._touched_target_ids: set = set()
 
     # -- CRUD ------------------------------------------------------------
@@ -182,7 +182,7 @@ class TargetCatalog:
         self,
         target: Target,
         prune_missing: bool = False,
-        butler: object = None,
+        catalog_access: object = None,
         refresh_headers: bool = False,
     ) -> None:
         """Sync frame records from disk and recompute total exposure time.
@@ -201,12 +201,17 @@ class TargetCatalog:
             Scanning alone only builds records for previously unseen
             files, so fields added to `FrameRecord` after a frame was
             indexed stay `None` until this runs. Defaults to `False`.
-        butler : `astrometricslib.data_access.butler.AbstractButler`, optional
-            Storage backend override; defaults to this catalog's butler.
+        catalog_access : `AbstractCatalogAccess`, optional
+            Storage backend override; defaults to this catalog's own.
         """
         from astrometricslib.data_access.persistence_operations import reindex_frames
 
-        reindex_frames(target, prune_missing=prune_missing, butler=butler, refresh_headers=refresh_headers)
+        reindex_frames(
+            target,
+            prune_missing=prune_missing,
+            catalog_access=catalog_access,
+            refresh_headers=refresh_headers,
+        )
 
     def get_header(self, path: str, target: Target | None = None) -> builtins.list[dict[str, str]]:
         """Read header information from a FITS image file.

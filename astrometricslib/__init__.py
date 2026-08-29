@@ -21,7 +21,7 @@ try:
 except PackageNotFoundError:  # running from a source tree without an install
     __version__ = "0.0.0+unknown"
 
-from astrometricslib.api import AbstractButler, DiskButler
+from astrometricslib.api import AbstractCatalogAccess, CatalogAccess
 from astrometricslib.api.processing import (
     DbLogHandler,
     ImageProcessing,
@@ -125,7 +125,7 @@ class Astrometrics:
         self,
         config: AppConfiguration | None = None,
         app_config: AppConfiguration | None = None,
-        butler: AbstractButler | None = None,
+        catalog_access: AbstractCatalogAccess | None = None,
     ):
         """Set up the main Astrometrics tools.
 
@@ -136,7 +136,7 @@ class Astrometrics:
             default settings.
         app_config : `AppConfiguration`, optional
             Another way to provide the settings.
-        butler : `AbstractButler`, optional
+        catalog_access : `AbstractCatalogAccess`, optional
             The database tool used to save and load data. If not provided,
             it will create a default one.
         """
@@ -145,22 +145,22 @@ class Astrometrics:
         from astrometricslib.api.stars import StellarCatalog
         from astrometricslib.api.targets import TargetCatalog
         from astrometricslib.api.visualization import Visualization
-        from astrometricslib.data_access.butler import DiskButler
+        from astrometricslib.data_access.catalog_access import CatalogAccess
         from astrometricslib.drivers import disk_interface
         from astrometricslib.utilities.config_loader import get_configuration
 
         self.config = config or app_config or get_configuration()
-        self.butler = butler or DiskButler(self.config)
+        self.catalog_access = catalog_access or CatalogAccess(self.config)
 
         # Run database upgrade verification on startup
         disk_interface.verify_and_upgrade_database(self.config)
 
-        # Hydrate the stellar object registry via butler; target state
+        # Hydrate the stellar object registry via catalog_access; target state
         # is owned by TargetCatalog itself (see its docstring).
-        self.stellar_objects: list[StellarObject] = self.butler.get("stellar_catalog", {}) or []
+        self.stellar_objects: list[StellarObject] = self.catalog_access.get("stellar_catalog", {}) or []
 
-        self.targets = TargetCatalog(self.config, self.butler)
-        self.stars = StellarCatalog(self.config, butler=self.butler)
+        self.targets = TargetCatalog(self.config, self.catalog_access)
+        self.stars = StellarCatalog(self.config, catalog_access=self.catalog_access)
         self.moving_objects = MovingObjectRecovery()
         self.processing = ProcessingPipelines(self.config)
         self.visualization = Visualization(self)
@@ -199,7 +199,7 @@ class Astrometrics:
 
 
 __all__ = [
-    "AbstractButler",
+    "AbstractCatalogAccess",
     "AnalysisResult",
     "AppConfiguration",
     "AsteroidRecoveryCandidate",
@@ -209,8 +209,8 @@ __all__ = [
     "AstrometryQualitySummary",
     "BatchRunSummary",
     "CalibrationCatalog",
+    "CatalogAccess",
     "DbLogHandler",
-    "DiskButler",
     "FileItem",
     "FilterType",
     "FitsHeaderEntry",

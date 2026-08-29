@@ -7,12 +7,12 @@ analysis mode means adding a module here and one entry to this dict --
 `dispatch.py` itself does not need to change.
 
 Every runner takes the same five arguments (``target``, ``frames``,
-``filter_type``, ``butler``, ``path``, plus ``**kwargs``) even though most
-of them ignore some of it -- astrometry and spectroscopy never look at
-``frames``/``filter_type``, and asteroid recovery does not even use
-``butler``. One shared signature is what lets this dict dispatch on name
-alone, instead of every call site needing to know which pipeline wants
-which subset of arguments.
+``filter_type``, ``catalog_access``, ``path``, plus ``**kwargs``) even
+though most of them ignore some of it -- astrometry and spectroscopy
+never look at ``frames``/``filter_type``, and asteroid recovery does not
+even use ``catalog_access``. One shared signature is what lets this dict
+dispatch on name alone, instead of every call site needing to know which
+pipeline wants which subset of arguments.
 """
 
 from astrometricslib.pipelines.asteroid_recovery.runner import run_asteroid_recovery_analysis

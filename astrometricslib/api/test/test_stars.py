@@ -1,6 +1,6 @@
 """Purpose: Unit tests for the StellarCatalog high-level interface.
 
-Description: Verifies `save_all` passes the butler's required
+Description: Verifies `save_all` passes the catalog_access's required
 `coordinate` argument (omitting it previously made every call raise
 TypeError, including the backend's own save path), and that its
 replace-all semantics cannot silently wipe the catalog when handed an
@@ -17,17 +17,17 @@ from astrometricslib.models.stellar_source import StellarObject
 
 def _make_catalog() -> StellarCatalog:
     config = MagicMock()
-    butler = MagicMock()
-    return StellarCatalog(config=config, butler=butler)
+    catalog_access = MagicMock()
+    return StellarCatalog(config=config, catalog_access=catalog_access)
 
 
 class TestSaveAll:
     """Unit test suite for StellarCatalog.save_all."""
 
-    def test_passes_required_coordinate_argument_to_butler(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
-        """Verify the butler receives all three required arguments.
+    def test_passes_required_coordinate_argument_to_catalog_access(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        """Verify the catalog_access receives all three required arguments.
 
-        `AbstractButler.put(obj, dataset_type, coordinate)` requires
+        `AbstractCatalogAccess.put(obj, dataset_type, coordinate)` requires
         `coordinate`; the previous two-argument call raised TypeError on
         every invocation.
         """
@@ -36,7 +36,7 @@ class TestSaveAll:
 
         result = catalog.save_all(objects)
 
-        catalog.butler.put.assert_called_once_with(objects, "stellar_catalog", {})
+        catalog.catalog_access.put.assert_called_once_with(objects, "stellar_catalog", {})
         assert result == "stellar catalog saved"
 
     def test_empty_list_is_refused_by_default(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
@@ -51,7 +51,7 @@ class TestSaveAll:
         with pytest.raises(ValueError, match="empty list"):
             catalog.save_all([])
 
-        catalog.butler.put.assert_not_called()
+        catalog.catalog_access.put.assert_not_called()
 
     def test_empty_list_allowed_when_explicitly_requested(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Deliberately clearing the catalog remains possible."""
@@ -59,5 +59,5 @@ class TestSaveAll:
 
         result = catalog.save_all([], allow_empty=True)
 
-        catalog.butler.put.assert_called_once_with([], "stellar_catalog", {})
+        catalog.catalog_access.put.assert_called_once_with([], "stellar_catalog", {})
         assert result == "stellar catalog saved"

@@ -15,7 +15,7 @@ from astropy.io import fits
 from astropy.modeling.models import Gaussian2D
 
 from astrometricslib import Astrometrics
-from astrometricslib.data_access.butler import DiskButler
+from astrometricslib.data_access.catalog_access import CatalogAccess
 from astrometricslib.models.moving_object import CascadeStage
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import FrameRecord, Target
@@ -101,8 +101,8 @@ def _position_only_star(id_: str, ra: float, dec: float) -> StellarObject:
     return star
 
 
-class _StubButler:
-    """Fake butler that only knows how to answer list_projected."""
+class _StubCatalogAccess:
+    """Fake catalog_access that only knows how to answer list_projected."""
 
     def __init__(self, rows: list[dict]):  # ruff: ignore[missing-return-type-special-method]
         self._rows = rows
@@ -124,10 +124,14 @@ def test_reconcile_position_only_star_ids_reuses_a_nearby_existing_row(caplog): 
 
     existing_id = "FIELD_J083344.3000-263740.0000"
     new_star = _position_only_star("FIELD_J083344.3050-263739.9980", ra=128.834305, dec=-26.62777)
-    stub_butler = _StubButler([{"id": existing_id, "ra": 128.834300, "dec": -26.627778, "target_id": "M42"}])
+    stub_catalog_access = _StubCatalogAccess([
+        {"id": existing_id, "ra": 128.834300, "dec": -26.627778, "target_id": "M42"}
+    ])
 
     with caplog.at_level(logging.INFO, logger="astrometricslib.pipelines.dispatch"):
-        result = dispatch._reconcile_position_only_star_ids([new_star], butler=stub_butler, target_id="M42")
+        result = dispatch._reconcile_position_only_star_ids(
+            [new_star], catalog_access=stub_catalog_access, target_id="M42"
+        )
 
     assert result[0].id == existing_id
     assert result[0].name == existing_id
@@ -138,12 +142,14 @@ def test_reconcile_position_only_star_ids_leaves_a_distant_star_alone():  # ruff
     """Verify a distant star keeps its own freshly minted id."""
     fresh_id = "FIELD_J083344.3050-263739.9980"
     new_star = _position_only_star(fresh_id, ra=128.834305, dec=-26.62777)
-    stub_butler = _StubButler([
+    stub_catalog_access = _StubCatalogAccess([
         # 0.5 degrees away -- nowhere near CATALOG_MATCH_RADIUS_ARCSEC.
         {"id": "FIELD_J083744.3000-263740.0000", "ra": 129.334300, "dec": -26.627778, "target_id": "M42"}
     ])
 
-    result = dispatch._reconcile_position_only_star_ids([new_star], butler=stub_butler, target_id="M42")
+    result = dispatch._reconcile_position_only_star_ids(
+        [new_star], catalog_access=stub_catalog_access, target_id="M42"
+    )
 
     assert result[0].id == fresh_id
 
@@ -157,7 +163,7 @@ def test_reconcile_position_only_star_ids_only_matches_the_same_targets_rows(): 
     StellarCatalog.list_object_summaries's identical filter documents.
     """
     new_star = _position_only_star("FIELD_J083344.3050-263739.9980", ra=128.834305, dec=-26.62777)
-    stub_butler = _StubButler([
+    stub_catalog_access = _StubCatalogAccess([
         {
             "id": "FIELD_J083344.3000-263740.0000",
             "ra": 128.834300,
@@ -166,7 +172,9 @@ def test_reconcile_position_only_star_ids_only_matches_the_same_targets_rows(): 
         }
     ])
 
-    result = dispatch._reconcile_position_only_star_ids([new_star], butler=stub_butler, target_id="M42")
+    result = dispatch._reconcile_position_only_star_ids(
+        [new_star], catalog_access=stub_catalog_access, target_id="M42"
+    )
 
     assert result[0].id == "FIELD_J083344.3050-263739.9980"
 
@@ -175,11 +183,13 @@ def test_reconcile_position_only_star_ids_matches_a_multi_target_row():  # ruff:
     """Verify a comma-joined target_id matches this target among several."""
     existing_id = "FIELD_J083344.3000-263740.0000"
     new_star = _position_only_star("FIELD_J083344.3050-263739.9980", ra=128.834305, dec=-26.62777)
-    stub_butler = _StubButler([
+    stub_catalog_access = _StubCatalogAccess([
         {"id": existing_id, "ra": 128.834300, "dec": -26.627778, "target_id": "M42,M43"}
     ])
 
-    result = dispatch._reconcile_position_only_star_ids([new_star], butler=stub_butler, target_id="M42")
+    result = dispatch._reconcile_position_only_star_ids(
+        [new_star], catalog_access=stub_catalog_access, target_id="M42"
+    )
 
     assert result[0].id == existing_id
 
@@ -194,9 +204,13 @@ def test_reconcile_position_only_star_ids_never_lets_two_new_stars_collide():  #
     existing_id = "FIELD_J083344.3000-263740.0000"
     first = _position_only_star("FIELD_J083344.3010-263739.9990", ra=128.834304, dec=-26.627777)
     second = _position_only_star("FIELD_J083344.3020-263739.9970", ra=128.834308, dec=-26.627769)
-    stub_butler = _StubButler([{"id": existing_id, "ra": 128.834300, "dec": -26.627778, "target_id": "M42"}])
+    stub_catalog_access = _StubCatalogAccess([
+        {"id": existing_id, "ra": 128.834300, "dec": -26.627778, "target_id": "M42"}
+    ])
 
-    result = dispatch._reconcile_position_only_star_ids([first, second], butler=stub_butler, target_id="M42")
+    result = dispatch._reconcile_position_only_star_ids(
+        [first, second], catalog_access=stub_catalog_access, target_id="M42"
+    )
 
     reconciled_ids = {star.id for star in result}
     assert existing_id in reconciled_ids
@@ -215,30 +229,34 @@ def test_reconcile_position_only_star_ids_skips_catalog_matched_stars():  # ruff
     catalog_star.right_ascension = 279.234735
     catalog_star.declination = 38.783689
     catalog_star.is_catalog_identified = True
-    stub_butler = _StubButler([
+    stub_catalog_access = _StubCatalogAccess([
         {"id": "FIELD_J184257.9364+384701.2804", "ra": 279.234735, "dec": 38.783689, "target_id": "Vega"}
     ])
 
-    result = dispatch._reconcile_position_only_star_ids([catalog_star], butler=stub_butler, target_id="Vega")
+    result = dispatch._reconcile_position_only_star_ids(
+        [catalog_star], catalog_access=stub_catalog_access, target_id="Vega"
+    )
 
     assert result[0].id == "* alf Lyr"
 
 
 def test_reconcile_position_only_star_ids_handles_a_lookup_failure_gracefully():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify a butler error doesn't block persistence of this run's own stars.
+    """Verify a lookup error doesn't block persistence of this run's stars.
 
     Reconciliation is an optimisation over an already-correct (if
     duplicative) persistence path, so its own failure must be
     swallowed rather than propagated.
     """
 
-    class _BrokenButler:
+    class _BrokenCatalogAccess:
         def list_projected(self, *args: Any, **kwargs: Any) -> Never:
             raise RuntimeError("catalog unreachable")
 
     new_star = _position_only_star("FIELD_J083344.3050-263739.9980", ra=128.834305, dec=-26.62777)
 
-    result = dispatch._reconcile_position_only_star_ids([new_star], butler=_BrokenButler(), target_id="M42")
+    result = dispatch._reconcile_position_only_star_ids(
+        [new_star], catalog_access=_BrokenCatalogAccess(), target_id="M42"
+    )
 
     assert result[0].id == "FIELD_J083344.3050-263739.9980"
 
@@ -592,7 +610,7 @@ def test_target_analyze_target_photometry_runs_each_session_independently(tmp_pa
     monkeypatch.setenv("ASTROMETRICS_CONFIG_PATH", str(tmp_path / "astrometrics.config"))
     config = AppConfiguration()
     config.update_config({"Image Library": {"path": str(tmp_path)}})
-    butler = DiskButler(config=config)
+    catalog_access = CatalogAccess(config=config)
 
     session_a_positions = _grid_star_positions(12)
     session_b_positions = _grid_star_positions(18)
@@ -658,7 +676,7 @@ def test_target_analyze_target_photometry_runs_each_session_independently(tmp_pa
     target = Target(id="PhotometrySessionSplitTestTarget", frames=frames)
 
     result = dispatch.analyze_target(
-        target, pipeline_type="photometry", butler=butler, use_astrometry_seed=True
+        target, pipeline_type="photometry", catalog_access=catalog_access, use_astrometry_seed=True
     )
 
     expected_independent_total = len(session_a_positions) + len(session_b_positions)
@@ -684,7 +702,7 @@ def test_target_analyze_target_photometry_runs_each_session_independently(tmp_pa
     # both sessions' identification results made it into the merged,
     # persisted set rather than one session's output overwriting or
     # crowding out the other's.
-    persisted_stars = butler.get("stellar_catalog", {}) or []
+    persisted_stars = catalog_access.get("stellar_catalog", {}) or []
     persisted_ids = {star.id for star in persisted_stars}
     assert sum(1 for star_id in persisted_ids if star_id.startswith("SessA-")) == len(session_a_positions)
     assert sum(1 for star_id in persisted_ids if star_id.startswith("SessB-")) == len(session_b_positions)
@@ -703,7 +721,7 @@ def test_target_analyze_target_photometry_with_astrometry_seed_uses_identified_s
     monkeypatch.setenv("ASTROMETRICS_CONFIG_PATH", str(tmp_path / "astrometrics.config"))
     config = AppConfiguration()
     config.update_config({"Image Library": {"path": str(tmp_path)}})
-    butler = DiskButler(config=config)
+    catalog_access = CatalogAccess(config=config)
 
     positions = _grid_star_positions(5)
 
@@ -750,14 +768,14 @@ def test_target_analyze_target_photometry_with_astrometry_seed_uses_identified_s
     target = Target(id="PhotometryAstrometrySeedTestTarget", frames=frames)
 
     result = dispatch.analyze_target(
-        target, pipeline_type="photometry", butler=butler, use_astrometry_seed=True
+        target, pipeline_type="photometry", catalog_access=catalog_access, use_astrometry_seed=True
     )
 
     assert_result_keys(result, "photometry")
     assert result["status"] == "completed"
     assert result["starsProcessed"] == 1
 
-    persisted_stars = butler.get("stellar_catalog", {}) or []
+    persisted_stars = catalog_access.get("stellar_catalog", {}) or []
     matching = [star for star in persisted_stars if star.id == "* alf Lyr"]
     assert len(matching) == 1
     assert matching[0].name == "Vega"
@@ -785,7 +803,7 @@ def test_target_analyze_target_photometry_without_astrometry_seed_persists_nothi
     monkeypatch.setenv("ASTROMETRICS_CONFIG_PATH", str(tmp_path / "astrometrics.config"))
     config = AppConfiguration()
     config.update_config({"Image Library": {"path": str(tmp_path)}})
-    butler = DiskButler(config=config)
+    catalog_access = CatalogAccess(config=config)
 
     positions = _grid_star_positions(5)
 
@@ -799,7 +817,7 @@ def test_target_analyze_target_photometry_without_astrometry_seed_persists_nothi
     target = Target(id="PhotometryNoSeedTestTarget", frames=frames)
 
     result = dispatch.analyze_target(
-        target, pipeline_type="photometry", butler=butler, use_astrometry_seed=False
+        target, pipeline_type="photometry", catalog_access=catalog_access, use_astrometry_seed=False
     )
 
     assert_result_keys(result, "photometry")
@@ -810,7 +828,7 @@ def test_target_analyze_target_photometry_without_astrometry_seed_persists_nothi
     assert summary.photometry_metrics.astrometry_identified_star_count == 0
     assert summary.photometry_metrics.sessions_with_reused_header_wcs == []
 
-    persisted_stars = butler.get("stellar_catalog", {}) or []
+    persisted_stars = catalog_access.get("stellar_catalog", {}) or []
     assert persisted_stars == []
 
 

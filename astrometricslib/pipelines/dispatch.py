@@ -91,7 +91,7 @@ def analyze_target(
     frames: list[FrameRecord] | None = None,
     pipeline_type: str = "astrometry",
     filter_type: str | None = None,
-    butler=None,  # ruff: ignore[missing-type-function-argument]
+    catalog_access=None,  # ruff: ignore[missing-type-function-argument]
     register_job: bool = True,
     path: str | None = None,
     **kwargs,  # ruff: ignore[missing-type-kwargs]
@@ -121,10 +121,10 @@ def analyze_target(
         If you ask for an unknown pipeline type, or if we don't have
         the right images needed to run it.
     """
-    if butler is None:
-        from astrometricslib.data_access.butler import DiskButler
+    if catalog_access is None:
+        from astrometricslib.data_access.catalog_access import CatalogAccess
 
-        butler = DiskButler()
+        catalog_access = CatalogAccess()
 
     # Record this run in the job list so work started from a script,
     # notebook, or the command line shows up in the user interface the
@@ -159,7 +159,7 @@ def analyze_target(
                 )
 
         return _run_analysis_pipeline_match(
-            target, frames, pipeline_type, filter_type, butler, path, **kwargs
+            target, frames, pipeline_type, filter_type, catalog_access, path, **kwargs
         )
 
 
@@ -168,7 +168,7 @@ def _run_analysis_pipeline_match(
     frames,  # ruff: ignore[missing-type-function-argument]
     pipeline_type,  # ruff: ignore[missing-type-function-argument]
     filter_type,  # ruff: ignore[missing-type-function-argument]
-    butler,  # ruff: ignore[missing-type-function-argument]
+    catalog_access,  # ruff: ignore[missing-type-function-argument]
     path,  # ruff: ignore[missing-type-function-argument]
     **kwargs,  # ruff: ignore[missing-type-kwargs]
 ) -> dict[str, Any]:
@@ -177,7 +177,7 @@ def _run_analysis_pipeline_match(
     runner = PIPELINE_RUNNERS.get(pipeline_type)
     if runner is None:
         raise ValueError(f"Unknown analysis type: {pipeline_type}")
-    return runner(target, frames, filter_type, butler, path, **kwargs)
+    return runner(target, frames, filter_type, catalog_access, path, **kwargs)
 
 
 def get_header_information(target: Target, frame_path: str) -> list[dict[str, str]]:
@@ -565,7 +565,9 @@ def run_full_pipeline(
 
     # 2. Astrometry Analysis
     print(f"[{target.id}] Running Astrometry Analysis...")
-    astrometry_results = analyze_target(target, pipeline_type="astrometry", butler=astrometrics.butler)
+    astrometry_results = analyze_target(
+        target, pipeline_type="astrometry", catalog_access=astrometrics.catalog_access
+    )
     if astrometry_results is None:
         raise ValueError("Astrometry analysis failed.")
     print(
@@ -581,7 +583,7 @@ def run_full_pipeline(
             target,
             pipeline_type="photometry",
             frames=camera_frames,
-            butler=astrometrics.butler,
+            catalog_access=astrometrics.catalog_access,
             max_workers=max_workers,
         )
     if photometry_results.get("status") == "failed":
@@ -596,7 +598,7 @@ def run_full_pipeline(
         print(f"[{target.id}] Running Spectroscopy Analysis...")
         with disk_interface.acquire_resource_slot(astrometrics.config, "analysis", analysis_concurrency):
             spectroscopy_results = analyze_target(
-                target, pipeline_type="spectroscopy", limit=10, butler=astrometrics.butler
+                target, pipeline_type="spectroscopy", limit=10, catalog_access=astrometrics.catalog_access
             )
         if spectroscopy_results is None:
             raise ValueError("Spectroscopy analysis failed.")
@@ -606,7 +608,7 @@ def run_full_pipeline(
 
     # Save this target's own record (safe under concurrent callers,
     # unlike a full-catalog resync)
-    astrometrics.butler.put(target, "target_record", {})
+    astrometrics.catalog_access.put(target, "target_record", {})
     print(f"[{target.id}] Processing completed and metadata saved successfully.")
 
     return stack_outputs

@@ -21,8 +21,8 @@ from datastore.butler import DatasetSpec
 # documents every imported name too, which is what produced the
 # "stub file not found" warnings for re-exports and typing helpers.
 __all__ = [
-    "AbstractButler",
-    "DiskButler",
+    "AbstractCatalogAccess",
+    "CatalogAccess",
     "FrameSelector",
 ]
 
@@ -73,7 +73,7 @@ class FrameSelector(BaseModel):
     path: str | None = Field(default=None, description="Optional physical path override")
 
 
-class AbstractButler(ABC):
+class AbstractCatalogAccess(ABC):
     """The blueprint for how we load and save data."""
 
     @abstractmethod
@@ -196,15 +196,17 @@ def _stellar_extra_columns(stellar_object: Any) -> dict[str, Any]:
     }
 
 
-class DiskButler(AbstractButler):
-    """A Butler that saves data to your local hard drive and a SQLite database.
+class CatalogAccess(AbstractCatalogAccess):
+    """Loads and saves data using this computer's own disk.
 
-    This handles both database records (like star catalogs) and actual
-    image files (like FITS files).
+    Handles both database records (like the star catalog) and image
+    files (like FITS frames). Code that asks for data goes through here
+    and never has to know which of the two it is getting, or where on
+    disk it sits.
     """
 
     def __init__(self, config=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
-        """Set up the DiskButler.
+        """Set up the CatalogAccess.
 
         Parameters
         ----------

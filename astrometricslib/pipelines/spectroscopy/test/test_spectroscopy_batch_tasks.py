@@ -16,7 +16,7 @@ from astropy.io import fits
 from astropy.modeling.models import Gaussian2D
 from astropy.wcs import WCS
 
-from astrometricslib.data_access.butler import DiskButler
+from astrometricslib.data_access.catalog_access import CatalogAccess
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.spectroscopy import batch
@@ -164,8 +164,8 @@ class TestProcessSingleSpectroscopyFrameWorkerV2:
         assert result["status"] == "success"
         assert result["stars_processed"] == 1
 
-        butler = DiskButler(config=config)
-        persisted = butler.get("stellar_catalog", {}) or []
+        catalog_access = CatalogAccess(config=config)
+        persisted = catalog_access.get("stellar_catalog", {}) or []
         assert any(star.id == "* alf Lyr" for star in persisted)
 
     def test_uses_session_wcs_when_frame_has_no_own_header_wcs(self, tmp_path, isolated_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]

@@ -225,7 +225,7 @@ def find_position_only_clusters(
         that target's clusters (clusters of size 1 are omitted --
         nothing to merge).
     """
-    rows = astrometrics.butler.list_projected("stellar_catalog", ["id", "ra", "dec", "target_id"])
+    rows = astrometrics.catalog_access.list_projected("stellar_catalog", ["id", "ra", "dec", "target_id"])
     position_only_rows = [
         row
         for row in rows
@@ -281,7 +281,7 @@ def apply_clusters(
             # fixed rule keeps a re-run of this script idempotent.
             survivor_id, *duplicate_ids = ids
 
-            hydrated = {obj.id: obj for obj in astrometrics.butler.get_by_ids("stellar_catalog", ids)}
+            hydrated = {obj.id: obj for obj in astrometrics.catalog_access.get_by_ids("stellar_catalog", ids)}
             survivor = hydrated.get(survivor_id)
             if survivor is None:
                 logger.warning(
@@ -295,10 +295,10 @@ def apply_clusters(
                     continue
                 _merge_duplicate_into_survivor(survivor, duplicate)
 
-            astrometrics.butler.merge_and_persist_records(
+            astrometrics.catalog_access.merge_and_persist_records(
                 "stellar_catalog", [survivor], lambda _existing, updated: updated
             )
-            astrometrics.butler.delete_by_ids("stellar_catalog", duplicate_ids)
+            astrometrics.catalog_access.delete_by_ids("stellar_catalog", duplicate_ids)
             rows_removed += len(duplicate_ids)
 
     return rows_removed

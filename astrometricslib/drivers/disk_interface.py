@@ -297,7 +297,7 @@ def get_targets_by_ids(app_config=None, target_ids: list[str] | None = None) -> 
     """Load only the targets matching the given ids from the SQLite database.
 
     A targeted counterpart to load_targets, which reads the entire table.
-    Used by DiskButler.merge_and_persist_records so a caller only reads the
+    Used by CatalogAccess.merge_and_persist_records so a caller only reads the
     rows it is about to update, rather than the whole catalog.
 
     Args:
@@ -491,7 +491,7 @@ _database_verified = False
 # protect against.
 STELLAR_OBJECT_DATA_VERSION = 2
 # v1 -> v2: backfill the has_spectra/has_photometry columns
-# (astrometricslib.data_access.butler._stellar_extra_columns) for rows
+# (astrometricslib.data_access.catalog_access._stellar_extra_columns) for rows
 # written before those columns existed, from the same hydrated object
 # this pass already builds -- see the UPDATE below.
 
@@ -601,10 +601,10 @@ def verify_and_upgrade_database(app_config=None) -> None:  # ruff: ignore[missin
                     "Stellar object catalog already verified at the current schema version; skipping."
                 )
             else:
-                # This table is also reachable through Butler, whose
+                # This table is also reachable through CatalogAccess, whose
                 # _ensure_table adds any column a DatasetSpec declares
                 # that isn't on disk yet -- but this pass writes via a
-                # raw cursor, not through Butler, so it can't assume
+                # raw cursor, not through CatalogAccess, so it can't assume
                 # that has already run. Bring the two new v2 columns
                 # in the same way _ensure_table does, so the UPDATE
                 # below has somewhere to write.
@@ -635,8 +635,8 @@ def verify_and_upgrade_database(app_config=None) -> None:  # ruff: ignore[missin
                     # hydrated object -- these mirror StellarObject's
                     # own computed properties of the same name, kept in
                     # sync going forward by
-                    # data_access.butler._stellar_extra_columns on every
-                    # write through Butler.
+                    # data_access.catalog_access._stellar_extra_columns
+                    # on every write through CatalogAccess.
                     cursor.execute(
                         "UPDATE stellar_objects SET data_json = ?, has_spectra = ?, has_photometry = ? "
                         "WHERE id = ?",
@@ -727,7 +727,7 @@ def get_stellar_objects_by_ids(app_config=None, stellar_object_ids: list[str] | 
     """Load only the stellar objects matching the given ids.
 
     A targeted counterpart to load_stellar_objects, which reads the entire
-    table. Used by DiskButler.merge_and_persist_records so a caller only
+    table. Used by CatalogAccess.merge_and_persist_records so a caller only
     reads the rows it is about to update, rather than the whole catalog.
 
     Args:

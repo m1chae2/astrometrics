@@ -6,7 +6,7 @@ find-clusters -> apply -> delete flow end to end against a throwaway
 isolated catalog database -- never the real one.
 """
 
-from astrometricslib.data_access.butler import DiskButler
+from astrometricslib.data_access.catalog_access import CatalogAccess
 from astrometricslib.models.stellar_source import LightCurve, StellarObject
 from astrometricslib.scripts.reconcile_position_only_star_catalog import (
     _is_empty_value,
@@ -41,7 +41,7 @@ class _FakeAstrometrics:
 
     def __init__(self, config: AppConfiguration):  # ruff: ignore[missing-return-type-special-method]
         self.config = config
-        self.butler = DiskButler(config)
+        self.catalog_access = CatalogAccess(config)
 
 
 def _row(id_: str, ra: float, dec: float, target_id: str = "M42") -> dict:
@@ -161,7 +161,7 @@ def test_find_and_apply_clusters_merges_and_deletes_against_a_real_catalog(tmp_p
     unrelated.declination = -26.0
     unrelated.target_ids = ["M42"]
 
-    astrometrics.butler.merge_and_persist_records(
+    astrometrics.catalog_access.merge_and_persist_records(
         "stellar_catalog", [survivor, duplicate, unrelated], lambda _existing, updated: updated
     )
 
@@ -174,7 +174,9 @@ def test_find_and_apply_clusters_merges_and_deletes_against_a_real_catalog(tmp_p
     rows_removed = apply_clusters(astrometrics, clusters_by_target)
 
     assert rows_removed == 1
-    remaining = astrometrics.butler.get_by_ids("stellar_catalog", [survivor.id, duplicate.id, unrelated.id])
+    remaining = astrometrics.catalog_access.get_by_ids(
+        "stellar_catalog", [survivor.id, duplicate.id, unrelated.id]
+    )
     remaining_by_id = {obj.id: obj for obj in remaining}
     assert set(remaining_by_id) == {survivor.id, unrelated.id}
     # The duplicate's light curve was gap-filled onto the surviving row,
@@ -197,7 +199,7 @@ def test_find_position_only_clusters_respects_target_id_filter(tmp_path):  # ruf
         second.right_ascension = 100.0001
         second.declination = 10.0001
         second.target_ids = [target_id]
-        astrometrics.butler.merge_and_persist_records(
+        astrometrics.catalog_access.merge_and_persist_records(
             "stellar_catalog", [first, second], lambda _existing, updated: updated
         )
 

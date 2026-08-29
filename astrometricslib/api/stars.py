@@ -9,7 +9,7 @@ in the database.
 import logging
 from typing import Any
 
-from astrometricslib.data_access.butler import AbstractButler
+from astrometricslib.data_access.catalog_access import AbstractCatalogAccess
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.utilities.config_loader import AppConfiguration
 
@@ -42,16 +42,20 @@ class StellarCatalog:
     deeper scientific analysis.
     """
 
-    def __init__(self, config: AppConfiguration | None = None, butler: AbstractButler | None = None):  # ruff: ignore[missing-return-type-special-method]
-        """Initialize with application configuration and a butler.
+    def __init__(
+        self,
+        config: AppConfiguration | None = None,
+        catalog_access: AbstractCatalogAccess | None = None,
+    ) -> None:
+        """Initialize with a configuration and a way to reach storage.
 
         Parameters
         ----------
         config : `AppConfiguration`, optional
             Application configuration. Loaded from the application
             configuration when omitted.
-        butler : `AbstractButler`, optional
-            Storage backend for the stellar catalog. A `DiskButler`
+        catalog_access : `AbstractCatalogAccess`, optional
+            Storage backend for the stellar catalog. A `CatalogAccess`
             over `config` is constructed when omitted.
         """
         if config is None:
@@ -59,11 +63,11 @@ class StellarCatalog:
 
             config = get_configuration()
         self._config = config
-        if butler is None:
-            from astrometricslib.data_access.butler import DiskButler
+        if catalog_access is None:
+            from astrometricslib.data_access.catalog_access import CatalogAccess
 
-            butler = DiskButler(config)
-        self.butler = butler
+            catalog_access = CatalogAccess(config)
+        self.catalog_access = catalog_access
 
     def list_objects(self) -> list[StellarObject]:
         """List all stellar objects extracted across the library.
@@ -98,7 +102,7 @@ class StellarCatalog:
             case worth bounding, since it is the one whose size scales
             with the whole catalog rather than with one target's own
             star count. Pass an explicit value (or `0` for
-            `Butler.list_projected`'s own no-limit-argument behavior
+            `CatalogAccess.list_projected`'s own no-limit-argument behavior
             -- i.e. omit `limit` from the call) to override either
             default.
 
@@ -113,7 +117,7 @@ class StellarCatalog:
         if effective_limit is None and not target_id:
             effective_limit = DEFAULT_UNFILTERED_SUMMARY_LIMIT
 
-        rows = self.butler.list_projected(
+        rows = self.catalog_access.list_projected(
             "stellar_catalog",
             ["id", "name", "ra", "dec", "target_id", "has_spectra", "has_photometry"],
             like={"target_id": target_id} if target_id else None,
@@ -198,7 +202,7 @@ class StellarCatalog:
         existing = self.get_object(object_id)
         if existing is None:
             return False
-        self.butler.delete_by_ids("stellar_catalog", [existing.id])
+        self.catalog_access.delete_by_ids("stellar_catalog", [existing.id])
         return True
 
     def update(self, object_id: str, updates: dict[str, Any]) -> StellarObject | None:
@@ -232,7 +236,7 @@ class StellarCatalog:
                     setattr(target_obj, key, value)
             return target_obj
 
-        self.butler.merge_and_persist_records("stellar_catalog", [existing], _apply_updates)
+        self.catalog_access.merge_and_persist_records("stellar_catalog", [existing], _apply_updates)
         return self.get_object(object_id)
 
     def create(
@@ -278,7 +282,7 @@ class StellarCatalog:
         if dec:
             new_obj.declination = dec
 
-        self.butler.merge_and_persist_records(
+        self.catalog_access.merge_and_persist_records(
             "stellar_catalog", [new_obj], lambda current, updated: current if current is not None else updated
         )
         return new_obj
@@ -336,9 +340,9 @@ class StellarCatalog:
                 "save_all() received an empty list, which would delete every stellar object. "
                 "Pass allow_empty=True to clear the catalog deliberately."
             )
-        # `coordinate` is required by the AbstractButler.put signature;
+        # `coordinate` is required by the AbstractCatalogAccess.put signature;
         # omitting it previously made every call raise TypeError.
-        self.butler.put(objects, "stellar_catalog", {})
+        self.catalog_access.put(objects, "stellar_catalog", {})
         return "stellar catalog saved"
 
     def detect_point_sources(

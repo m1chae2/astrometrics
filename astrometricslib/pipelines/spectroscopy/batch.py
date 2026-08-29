@@ -52,7 +52,10 @@ def _process_single_spectroscopy_frame_worker(path: str, target_id: str) -> dict
             return result
 
         analysis_outcome = analyze_target(
-            target, frames=[FrameRecord(path=path)], pipeline_type="spectroscopy", butler=astrometrics.butler
+            target,
+            frames=[FrameRecord(path=path)],
+            pipeline_type="spectroscopy",
+            catalog_access=astrometrics.catalog_access,
         )
         result["stars_processed"] = len(analysis_outcome.get("stellar_objects") or [])
         result["status"] = "success"
@@ -129,7 +132,10 @@ def _fallback_independent_frame_analysis(astrometrics: Any, target_id: str, path
         return result
 
     analysis_outcome = analyze_target(
-        target, frames=[FrameRecord(path=path)], pipeline_type="spectroscopy", butler=astrometrics.butler
+        target,
+        frames=[FrameRecord(path=path)],
+        pipeline_type="spectroscopy",
+        catalog_access=astrometrics.catalog_access,
     )
     result["stars_processed"] = len(analysis_outcome.get("stellar_objects") or [])
     result["status"] = "success"
@@ -249,7 +255,7 @@ def _process_single_spectroscopy_frame_worker_v2(
             if target_id not in obj.target_ids:
                 obj.target_ids.append(target_id)
 
-        astrometrics.butler.merge_and_persist_records(
+        astrometrics.catalog_access.merge_and_persist_records(
             "stellar_catalog", stellar_objects, merge_spectroscopy_stellar_object
         )
 

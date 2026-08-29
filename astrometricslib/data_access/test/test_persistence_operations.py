@@ -73,13 +73,13 @@ def test_sequential_fetch_mutate_save_persists_both_targets(tmp_path):  # ruff: 
 
 def test_get_target_by_id_does_not_reload_catalog_on_cache_hit(tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Repeated by-id lookups of already-cached targets skip the disk read."""
-    from astrometricslib.data_access.butler import DiskButler
+    from astrometricslib.data_access.catalog_access import CatalogAccess
 
     config = _make_isolated_config(tmp_path)
     disk_interface.save_target(app_config=config, target=Target(id="Target Alpha"))
     disk_interface.save_target(app_config=config, target=Target(id="Target Beta"))
 
-    spy = mocker.spy(DiskButler, "get")
+    spy = mocker.spy(CatalogAccess, "get")
     astrometrics = Astrometrics(app_config=config)
     calls_after_construction = spy.call_count
 

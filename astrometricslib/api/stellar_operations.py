@@ -55,7 +55,7 @@ def get_object(analysis, object_id: str) -> Any | None:  # ruff: ignore[missing-
     stellar_object : `Any` or `None`
         The star if we found it, or None if it doesn't exist.
     """
-    get_by_ids = getattr(analysis.butler, "get_by_ids", None)
+    get_by_ids = getattr(analysis.catalog_access, "get_by_ids", None)
     if callable(get_by_ids):
         exact_matches = get_by_ids("stellar_catalog", [object_id])
         if exact_matches:

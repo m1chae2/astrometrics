@@ -560,7 +560,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         from astrometricslib.models.stellar_source import VariableCandidate
 
         target = request.target
-        butler = request.butler
+        catalog_access = request.catalog_access
         options = request.options
         photometry_sessions = screening.context["photometry_sessions"]
         image_paths = screening.context["image_paths"]
@@ -673,7 +673,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
 
         all_stellar_objects, star_id_breakdown = persist_pipeline_stars(
             all_stellar_objects,
-            butler=butler,
+            catalog_access=catalog_access,
             target_id=target.id,
             merge_function=merge_photometry_stellar_object,
             pipeline_name="photometry",
@@ -846,7 +846,7 @@ def run_photometry_analysis(
     target: Target,
     frames,  # ruff: ignore[missing-type-function-argument]
     filter_type,  # ruff: ignore[missing-type-function-argument]
-    butler,  # ruff: ignore[missing-type-function-argument]
+    catalog_access,  # ruff: ignore[missing-type-function-argument]
     path,  # ruff: ignore[missing-type-function-argument] -- unused; photometry works from `frames`/`target.frames`
     **kwargs,  # ruff: ignore[missing-type-kwargs]
 ) -> dict[str, Any]:
@@ -866,7 +866,7 @@ def run_photometry_analysis(
         The frames to use; `target.frames` if not given.
     filter_type : `str` or `None`
         Only frames with this filter are used, if given.
-    butler : `Any`
+    catalog_access : `Any`
         Saves the stars this run found.
     path : `Any`
         Unused. Present so every pipeline runner shares one call signature.
@@ -879,6 +879,11 @@ def run_photometry_analysis(
         shape carrying every brightness-tracking metric.
     """
     request = PipelineRequest(
-        target=target, butler=butler, frames=frames, filter_type=filter_type, path=path, options=kwargs
+        target=target,
+        catalog_access=catalog_access,
+        frames=frames,
+        filter_type=filter_type,
+        path=path,
+        options=kwargs,
     )
     return run_pipeline(PhotometryPipelineAdapter(), request)

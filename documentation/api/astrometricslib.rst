@@ -12,7 +12,7 @@ Astrometrics Library (`astrometricslib`)
 
 .. automodapi:: astrometricslib
    :no-inheritance-diagram:
-   :skip: AbstractButler
+   :skip: AbstractCatalogAccess
    :skip: AnalysisResult
    :skip: AppConfiguration
    :skip: AsteroidRecoveryCandidate
@@ -20,8 +20,8 @@ Astrometrics Library (`astrometricslib`)
    :skip: AstrometryPipelineQualityMetrics
    :skip: AstrometryQualitySummary
    :skip: BatchRunSummary
+   :skip: CatalogAccess
    :skip: DbLogHandler
-   :skip: DiskButler
    :skip: FileItem
    :skip: FilterType
    :skip: FitsHeaderEntry

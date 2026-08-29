@@ -90,7 +90,7 @@ def test_time_blocked_on_a_slot_is_recorded():  # ruff: ignore[missing-return-ty
         "ctx = siril_process_lock(max_concurrent_runs=1);"
         "ctx.__enter__();"
         "print('holding', flush=True);"
-        "time.sleep(3);"
+        "time.sleep(8);"
         "ctx.__exit__(None, None, None)"
     )
     waiter_source = (
@@ -116,7 +116,7 @@ def test_time_blocked_on_a_slot_is_recorded():  # ruff: ignore[missing-return-ty
 
         assert recorded_wait > 0.5
     finally:
-        holder.wait(timeout=15)
+        holder.wait(timeout=20)
 
 
 def test_queue_time_does_not_consume_the_stacking_budget(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]

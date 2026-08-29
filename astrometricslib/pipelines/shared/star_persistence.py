@@ -112,7 +112,7 @@ def _drop_unresolved_stars(
 def _reconcile_position_only_star_ids(
     stellar_objects: list,
     *,
-    butler,  # ruff: ignore[missing-type-function-argument]
+    catalog_access,  # ruff: ignore[missing-type-function-argument]
     target_id: str,
 ) -> list:
     """Reconcile and merge catalog IDs based on star positions.
@@ -138,7 +138,7 @@ def _reconcile_position_only_star_ids(
         Candidate stars about to be persisted, mutated in place (each
         reassigned star's `id`/`name` are overwritten with the id of
         the existing catalog row it matched).
-    butler : `Any`
+    catalog_access : `Any`
         Provides `list_projected` for reading the target's existing
         position-only rows.
     target_id : `str`
@@ -178,7 +178,7 @@ def _reconcile_position_only_star_ids(
         return stellar_objects
 
     try:
-        existing_rows = butler.list_projected("stellar_catalog", ["id", "ra", "dec", "target_id"])
+        existing_rows = catalog_access.list_projected("stellar_catalog", ["id", "ra", "dec", "target_id"])
     except Exception as lookup_error:
         # Reconciliation is an optimization over an already-correct (if
         # duplicative) persistence path; a lookup failure must not block
@@ -245,7 +245,7 @@ def _reconcile_position_only_star_ids(
 def persist_pipeline_stars(
     stellar_objects: list,
     *,
-    butler,  # ruff: ignore[missing-type-function-argument]
+    catalog_access,  # ruff: ignore[missing-type-function-argument]
     target_id: str,
     merge_function,  # ruff: ignore[missing-type-function-argument]
     pipeline_name: str | None = None,
@@ -270,7 +270,7 @@ def persist_pipeline_stars(
     ----------
     stellar_objects : `list`
         The stars this pipeline found.
-    butler : `Any`
+    catalog_access : `Any`
         Provides catalog reads and the merge/persist call.
     target_id : `str`
         The target these stars belong to.
@@ -305,8 +305,10 @@ def persist_pipeline_stars(
         if target_id not in stellar_object.target_ids:
             stellar_object.target_ids.append(target_id)
 
-    stellar_objects = _reconcile_position_only_star_ids(stellar_objects, butler=butler, target_id=target_id)
-    butler.merge_and_persist_records("stellar_catalog", stellar_objects, merge_function)
+    stellar_objects = _reconcile_position_only_star_ids(
+        stellar_objects, catalog_access=catalog_access, target_id=target_id
+    )
+    catalog_access.merge_and_persist_records("stellar_catalog", stellar_objects, merge_function)
 
     return stellar_objects, breakdown
 

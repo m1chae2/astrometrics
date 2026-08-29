@@ -61,7 +61,7 @@ class AsteroidRecoveryPipelineAdapter(AnalysisPipeline):
             `candidates` is the surviving subset, already written onto
             `request.target.asteroid_candidates` -- this pipeline's one
             genuine output side effect, since its result has no catalog
-            counterpart to persist through the butler.
+            counterpart to persist through the catalog_access.
         """
         from astrometricslib.pipelines.asteroid_recovery.pipeline import (
             AsteroidRecoveryPipeline,
@@ -175,7 +175,7 @@ def run_asteroid_recovery_analysis(
     target,  # ruff: ignore[missing-type-function-argument]
     frames,  # ruff: ignore[missing-type-function-argument] -- unused; asteroid recovery reads target.frames itself
     filter_type,  # ruff: ignore[missing-type-function-argument] -- unused; asteroid recovery has no filter concept
-    butler,  # ruff: ignore[missing-type-function-argument] -- unused; candidates persist on the target record, not via the butler
+    catalog_access,  # ruff: ignore[missing-type-function-argument] -- unused; candidates persist on the target record, not via the catalog_access
     path,  # ruff: ignore[missing-type-function-argument] -- unused; asteroid recovery reads target.frames itself
     **kwargs,  # ruff: ignore[missing-type-kwargs] -- unused
 ) -> dict[str, Any]:
@@ -195,7 +195,7 @@ def run_asteroid_recovery_analysis(
         Unused. Present so every pipeline runner shares one call signature.
     filter_type : `Any`
         Unused. Present so every pipeline runner shares one call signature.
-    butler : `Any`
+    catalog_access : `Any`
         Unused. Present so every pipeline runner shares one call signature.
     path : `Any`
         Unused. Present so every pipeline runner shares one call signature.
@@ -209,6 +209,11 @@ def run_asteroid_recovery_analysis(
         `target.asteroid_candidates`).
     """
     request = PipelineRequest(
-        target=target, butler=butler, frames=frames, filter_type=filter_type, path=path, options=kwargs
+        target=target,
+        catalog_access=catalog_access,
+        frames=frames,
+        filter_type=filter_type,
+        path=path,
+        options=kwargs,
     )
     return run_pipeline(AsteroidRecoveryPipelineAdapter(), request)

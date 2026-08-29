@@ -1,19 +1,19 @@
-"""Purpose: Unit tests for the Butler data access layer and its integration.
+"""Purpose: Unit tests for the CatalogAccess layer and its integration.
 
-Description: Verifies that DiskButler resolves paths and catalogs
-correctly, and that a mock butler can be injected to isolate scientific
+Description: Verifies that CatalogAccess resolves paths and catalogs
+correctly, and that a mock catalog_access can be injected to isolate scientific
 core logic.
 """
 
 from typing import Any
 from unittest.mock import MagicMock
 
-from astrometricslib import AbstractButler, Astrometrics, DiskButler, StellarObject, Target
+from astrometricslib import AbstractCatalogAccess, Astrometrics, CatalogAccess, StellarObject, Target
 from astrometricslib.models.target import FrameRecord
 
 
-class MockButler(AbstractButler):
-    """A mock implementation of the Butler for testing in-memory data flows."""
+class MockCatalogAccess(AbstractCatalogAccess):
+    """A mock CatalogAccess for testing in-memory data flows."""
 
     def __init__(self):  # ruff: ignore[missing-return-type-special-method]
         self.targets = [Target(id="M 31"), Target(id="Orion")]
@@ -65,29 +65,29 @@ class MockButler(AbstractButler):
 
 
 def test_disk_butler_instantiation():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verifies that DiskButler can be instantiated with default config."""
-    butler = DiskButler()
-    assert butler.config is not None
+    """Verifies that CatalogAccess can be instantiated with default config."""
+    catalog_access = CatalogAccess()
+    assert catalog_access.config is not None
 
 
-def test_mock_butler_injection():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify a mock Butler can be injected into the high-level interface."""
-    mock_butler = MockButler()
-    astrometrics = Astrometrics(butler=mock_butler)
+def test_mock_catalog_access_injection():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify a mock CatalogAccess can be injected into the facade."""
+    mock_catalog_access = MockCatalogAccess()
+    astrometrics = Astrometrics(catalog_access=mock_catalog_access)
 
-    # Verify hydration used the mock butler
+    # Verify hydration used the mock catalog_access
     targets = astrometrics.targets.list()
     assert len(targets) == 2
     assert targets[0].id == "M 31"
     assert targets[1].id == "Orion"
 
-    # Verify saving routes back to mock butler
+    # Verify saving routes back to mock catalog_access
     astrometrics.targets.save()
-    assert len(mock_butler.targets) == 2
+    assert len(mock_catalog_access.targets) == 2
 
 
 def test_disk_butler_raw_frames_skips_already_tracked_frames(tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify DiskButler re-parses only new, untracked frames."""
+    """Verify CatalogAccess re-parses only new, untracked frames."""
     lights_dir = tmp_path / "lights" / "TestTarget"
     lights_dir.mkdir(parents=True)
     known_file = lights_dir / "known.fits"
@@ -97,7 +97,7 @@ def test_disk_butler_raw_frames_skips_already_tracked_frames(tmp_path, mocker): 
 
     mock_config = MagicMock()
     mock_config.get_frames_path.return_value = str(tmp_path)
-    butler = DiskButler(config=mock_config)
+    catalog_access = CatalogAccess(config=mock_config)
 
     target = Target(id="TestTarget", frames=[FrameRecord(path=str(known_file))])
 
@@ -106,7 +106,7 @@ def test_disk_butler_raw_frames_skips_already_tracked_frames(tmp_path, mocker): 
         side_effect=lambda path, camera=None: FrameRecord(path=path),
     )
 
-    result = butler.get("raw_frames", {"target": target})
+    result = catalog_access.get("raw_frames", {"target": target})
 
     assert mock_create_record.call_count == 1
     assert mock_create_record.call_args[0][0] == str(new_file)
@@ -117,16 +117,16 @@ def test_disk_butler_raw_frames_skips_already_tracked_frames(tmp_path, mocker): 
 def test_disk_butler_caches_stellar_catalog_reads(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify repeated stellar_catalog reads avoid redundant disk I/O."""
     mock_config = MagicMock()
-    butler = DiskButler(config=mock_config)
+    catalog_access = CatalogAccess(config=mock_config)
 
     mock_load = mocker.patch.object(
-        butler._generic,
+        catalog_access._generic,
         "get_all",
         return_value=[StellarObject(id="Star1")],
     )
 
-    first = butler.get("stellar_catalog", {})
-    second = butler.get("stellar_catalog", {})
+    first = catalog_access.get("stellar_catalog", {})
+    second = catalog_access.get("stellar_catalog", {})
 
     assert mock_load.call_count == 1
     assert first is second
@@ -135,18 +135,18 @@ def test_disk_butler_caches_stellar_catalog_reads(mocker):  # ruff: ignore[missi
 def test_disk_butler_put_refreshes_stellar_catalog_cache(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify put() writes through to disk and refreshes the cache."""
     mock_config = MagicMock()
-    butler = DiskButler(config=mock_config)
+    catalog_access = CatalogAccess(config=mock_config)
 
     mock_load = mocker.patch.object(
-        butler._generic,
+        catalog_access._generic,
         "get_all",
         return_value=[StellarObject(id="Star1")],
     )
-    mock_save = mocker.patch.object(butler._generic, "put_all")
+    mock_save = mocker.patch.object(catalog_access._generic, "put_all")
 
     updated = [StellarObject(id="Star2")]
-    butler.put(updated, "stellar_catalog", {})
-    result = butler.get("stellar_catalog", {})
+    catalog_access.put(updated, "stellar_catalog", {})
+    result = catalog_access.get("stellar_catalog", {})
 
     assert mock_save.call_count == 1
     assert result == updated
@@ -171,14 +171,14 @@ def test_disk_butler_list_projected_reads_stellar_catalog_columns(tmp_path):  # 
         "Image Library": {"path": str(library_path), "frames_path": str(library_path / "frames")}
     })
 
-    butler = DiskButler(config=config)
+    catalog_access = CatalogAccess(config=config)
     in_field = StellarObject(id="InField", name="InField")
     in_field.target_ids = ["M 13"]
     out_of_field = StellarObject(id="OutOfField", name="OutOfField")
     out_of_field.target_ids = ["M 81"]
-    butler.put([in_field, out_of_field], "stellar_catalog", {})
+    catalog_access.put([in_field, out_of_field], "stellar_catalog", {})
 
-    rows = butler.list_projected("stellar_catalog", ["id", "name"], where={"target_id": "M 13"})
+    rows = catalog_access.list_projected("stellar_catalog", ["id", "name"], where={"target_id": "M 13"})
 
     assert rows == [{"id": "InField", "name": "InField"}]
 
@@ -202,8 +202,8 @@ def test_disk_butler_stellar_catalog_has_a_target_id_index(tmp_path):  # ruff: i
         "Image Library": {"path": str(library_path), "frames_path": str(library_path / "frames")}
     })
 
-    butler = DiskButler(config=config)
-    butler.put([StellarObject(id="Polaris", name="Polaris")], "stellar_catalog", {})
+    catalog_access = CatalogAccess(config=config)
+    catalog_access.put([StellarObject(id="Polaris", name="Polaris")], "stellar_catalog", {})
 
     conn = sqlite3.connect(str(library_path / "astrometrics.db"))
     indexes = {

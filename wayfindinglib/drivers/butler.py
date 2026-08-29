@@ -4,7 +4,7 @@ Description: Follows the same Rubin Observatory Butler pattern
 astrometricslib uses. A thin get/put/exists dataset-type dispatcher over
 wayfindinglib/drivers/disk_interface.py. Deliberately its own minimal
 abstract base rather than subclassing astrometricslib's four-method
-AbstractButler (astrometricslib/data_access/butler.py) --
+AbstractCatalogAccess (astrometricslib/data_access/catalog_access.py) --
 get_local_path is a FITS-file-path concern that doesn't apply to a
 single SQLite-backed pydantic model.
 

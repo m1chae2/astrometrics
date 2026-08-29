@@ -73,7 +73,7 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
         )
 
         target = request.target
-        butler = request.butler
+        catalog_access = request.catalog_access
 
         # Use the AstrometryPipeline to identify the stars in the field
         astrometry = AstrometryPipeline()
@@ -100,7 +100,7 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
         # spectrum extracted.
         reference_stellar_objects = [
             stellar_object
-            for stellar_object in butler.get("stellar_catalog", {})
+            for stellar_object in catalog_access.get("stellar_catalog", {})
             if target.id in stellar_object.target_ids
             and stellar_object.is_catalog_identified
             and not stellar_object.id.endswith("::spectroscopy")
@@ -116,7 +116,7 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
         limit = request.options.get("limit", 10)
         stellar_objects, star_id_breakdown = persist_pipeline_stars(
             spectroscopy.process(context, limit=limit),
-            butler=butler,
+            catalog_access=catalog_access,
             target_id=target.id,
             merge_function=merge_spectroscopy_stellar_object,
             pipeline_name="spectroscopy",
@@ -198,7 +198,7 @@ def run_spectroscopy_analysis(
     target,  # ruff: ignore[missing-type-function-argument]
     frames,  # ruff: ignore[missing-type-function-argument] -- unused; spectroscopy always solves `path`
     filter_type,  # ruff: ignore[missing-type-function-argument] -- unused; spectroscopy has no filter concept
-    butler,  # ruff: ignore[missing-type-function-argument]
+    catalog_access,  # ruff: ignore[missing-type-function-argument]
     path: str | None,
     **kwargs,  # ruff: ignore[missing-type-kwargs]
 ) -> dict[str, Any]:
@@ -218,7 +218,7 @@ def run_spectroscopy_analysis(
         Unused. Present so every pipeline runner shares one call signature.
     filter_type : `Any`
         Unused. Present so every pipeline runner shares one call signature.
-    butler : `Any`
+    catalog_access : `Any`
         Reads any existing catalog-identified stars for this target, for
         spectral-to-astrometric registration, and saves the stars this
         run found.
@@ -232,6 +232,11 @@ def run_spectroscopy_analysis(
         built) and ``"stellar_objects"``.
     """
     request = PipelineRequest(
-        target=target, butler=butler, frames=frames, filter_type=filter_type, path=path, options=kwargs
+        target=target,
+        catalog_access=catalog_access,
+        frames=frames,
+        filter_type=filter_type,
+        path=path,
+        options=kwargs,
     )
     return run_pipeline(SpectroscopyPipelineAdapter(), request)

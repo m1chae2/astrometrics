@@ -39,7 +39,7 @@ class PipelineRequest:
     ----------
     target : `Target`
         The target being analyzed.
-    butler : `Any`
+    catalog_access : `Any`
         Reads and writes the shared star catalog.
     frames : `list` [`FrameRecord`] or `None`
         The frames to use, for pipelines that work from a frame list
@@ -53,7 +53,7 @@ class PipelineRequest:
     """
 
     target: Target
-    butler: Any
+    catalog_access: Any
     frames: list[FrameRecord] | None = None
     filter_type: str | None = None
     path: str | None = None

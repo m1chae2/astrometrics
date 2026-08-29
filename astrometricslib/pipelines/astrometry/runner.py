@@ -182,7 +182,7 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
 
         context.stellar_objects, _ = persist_pipeline_stars(
             context.stellar_objects,
-            butler=request.butler,
+            catalog_access=request.catalog_access,
             target_id=target.id,
             merge_function=merge_astrometry_stellar_object,
             already_dropped=True,
@@ -256,7 +256,7 @@ def run_astrometry_analysis(
     target,  # ruff: ignore[missing-type-function-argument]
     frames,  # ruff: ignore[missing-type-function-argument] -- unused; astrometry always solves `path`
     filter_type,  # ruff: ignore[missing-type-function-argument] -- unused; astrometry has no filter concept
-    butler,  # ruff: ignore[missing-type-function-argument]
+    catalog_access,  # ruff: ignore[missing-type-function-argument]
     path: str | None,
     **kwargs,  # ruff: ignore[missing-type-kwargs]
 ) -> dict[str, Any]:
@@ -277,7 +277,7 @@ def run_astrometry_analysis(
         Unused. Present so every pipeline runner shares one call signature.
     filter_type : `Any`
         Unused. Present so every pipeline runner shares one call signature.
-    butler : `Any`
+    catalog_access : `Any`
         Reads the existing star catalog for id reconciliation and saves
         the stars this run found.
     path : `str`
@@ -290,6 +290,11 @@ def run_astrometry_analysis(
         ``"stellar_objects"``, ``"wcs"``, and ``"image_stats"``.
     """
     request = PipelineRequest(
-        target=target, butler=butler, frames=frames, filter_type=filter_type, path=path, options=kwargs
+        target=target,
+        catalog_access=catalog_access,
+        frames=frames,
+        filter_type=filter_type,
+        path=path,
+        options=kwargs,
     )
     return run_pipeline(AstrometryPipelineAdapter(), request)

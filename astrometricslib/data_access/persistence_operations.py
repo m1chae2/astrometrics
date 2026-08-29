@@ -96,7 +96,7 @@ def list_targets(api) -> list[Any]:  # ruff: ignore[missing-type-function-argume
     targets : `list`
         A list of all targets in the database.
     """
-    api._targets = api.butler.get("target_catalog", {}) or []
+    api._targets = api.catalog_access.get("target_catalog", {}) or []
     for target in api._targets:
         _mark_touched(api, target.id)
     return api._targets
@@ -125,7 +125,7 @@ def get_target(api, target_id: str) -> Any | None:  # ruff: ignore[missing-type-
 
     if target is None:
         known_ids = {existing.id for existing in api._targets}
-        for fresh_target in api.butler.get("target_catalog", {}) or []:
+        for fresh_target in api.catalog_access.get("target_catalog", {}) or []:
             if fresh_target.id not in known_ids:
                 api._targets.append(fresh_target)
         target = _find_target(api._targets, target_id)
@@ -138,7 +138,7 @@ def get_target(api, target_id: str) -> Any | None:  # ruff: ignore[missing-type-
 def reindex_frames(
     target: Target,
     prune_missing: bool = False,
-    butler=None,  # ruff: ignore[missing-type-function-argument]
+    catalog_access=None,  # ruff: ignore[missing-type-function-argument]
     refresh_headers: bool = False,
 ) -> None:
     """Update our saved list of images from the actual files on disk.
@@ -147,20 +147,20 @@ def reindex_frames(
     total exposure time. If `refresh_headers` is True, it will also
     re-read the FITS header data for files we already know about.
     """
-    if butler is None:
-        from astrometricslib.data_access.butler import DiskButler
+    if catalog_access is None:
+        from astrometricslib.data_access.catalog_access import CatalogAccess
 
-        butler = DiskButler()
+        catalog_access = CatalogAccess()
 
     if prune_missing:
         target.frames = [
             f
             for f in target.frames
-            if butler.exists("raw_frame", {"path": f.path})
+            if catalog_access.exists("raw_frame", {"path": f.path})
             and not any(k in f.path.lower() for k in ("_stacked", "starless", "starmask"))
         ]
 
-    butler.get("raw_frames", {"target": target, "refresh_headers": refresh_headers})
+    catalog_access.get("raw_frames", {"target": target, "refresh_headers": refresh_headers})
 
 
 def create_target(api, target_id: str, ra: str | None = None, dec: str | None = None) -> Any:  # ruff: ignore[missing-type-function-argument]
@@ -252,10 +252,10 @@ def delete_target(api, target_id: str) -> bool:  # ruff: ignore[missing-type-fun
     """
     target = get_target(api, target_id)
     if target:
-        targets = api.butler.get("target_catalog", {})
+        targets = api.catalog_access.get("target_catalog", {})
         filtered_targets = [t for t in targets if t.id != target.id]
-        api.butler.put(filtered_targets, "target_catalog", {})
-        api._targets = api.butler.get("target_catalog", {}) or []
+        api.catalog_access.put(filtered_targets, "target_catalog", {})
+        api._targets = api.catalog_access.get("target_catalog", {}) or []
         getattr(api, "_touched_target_ids", set()).discard(target.id)
         return True
     return False
@@ -302,15 +302,15 @@ def save_targets(api) -> None:  # ruff: ignore[missing-type-function-argument]
     if not touched_ids:
         return
 
-    if not hasattr(api.butler, "merge_and_persist_records"):
-        api.butler.put(api._targets, "target_catalog", {})
+    if not hasattr(api.catalog_access, "merge_and_persist_records"):
+        api.catalog_access.put(api._targets, "target_catalog", {})
         return
 
     touched_targets = [target for target in api._targets if target.id in touched_ids]
     if not touched_targets:
         return
 
-    api.butler.merge_and_persist_records(
+    api.catalog_access.merge_and_persist_records(
         "target_catalog", touched_targets, lambda existing_target, updated_target: updated_target
     )
 

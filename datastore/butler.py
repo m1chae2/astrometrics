@@ -6,7 +6,7 @@ astrometricslib's and wayfindinglib's Butlers already used
 independently. It is domain-agnostic: registering a `DatasetSpec` for
 a dataset type is all a consumer needs to get targeted-upsert,
 full-table-replace, and lock-guarded merge/delete operations for that
-table. FITS-file-specific concerns (path resolution, `DataCoordinate`)
+table. FITS-file-specific concerns (path resolution, `FrameSelector`)
 have no analog here and stay in astrometricslib's own extension of
 this class.
 """
@@ -75,16 +75,16 @@ class AbstractButler(ABC):
     """Minimal 3-method Rubin-Butler-derived abstract data access layer."""
 
     @abstractmethod
-    def get(self, dataset_type: str, coordinate: dict[str, Any]) -> Any:
-        """Retrieve a single dataset instance for a coordinate."""
+    def get(self, dataset_type: str, selector: dict[str, Any]) -> Any:
+        """Retrieve the single dataset instance a selector identifies."""
 
     @abstractmethod
-    def put(self, obj: Any, dataset_type: str, coordinate: dict[str, Any]) -> None:
-        """Persist a dataset instance under a given type and coordinate."""
+    def put(self, obj: Any, dataset_type: str, selector: dict[str, Any]) -> None:
+        """Persist a dataset instance under the type a selector identifies."""
 
     @abstractmethod
-    def exists(self, dataset_type: str, coordinate: dict[str, Any]) -> bool:
-        """Check whether a dataset instance exists for a coordinate."""
+    def exists(self, dataset_type: str, selector: dict[str, Any]) -> bool:
+        """Check whether the dataset instance a selector identifies exists."""
 
 
 class Butler(AbstractButler):
@@ -350,31 +350,31 @@ class Butler(AbstractButler):
         finally:
             conn.close()
 
-    def get(self, dataset_type: str, coordinate: dict[str, Any]) -> Any:
-        """Retrieve a single row by ``coordinate["id"]``.
+    def get(self, dataset_type: str, selector: dict[str, Any]) -> Any:
+        """Retrieve a single row by ``selector["id"]``.
 
         Returns
         -------
         row : `Any` or `None`
             The matching instance, or `None` if absent.
         """
-        obj_id = coordinate.get("id")
+        obj_id = selector.get("id")
         if obj_id is None:
             return None
         matches = self.get_by_ids(dataset_type, [obj_id])
         return matches[0] if matches else None
 
-    def exists(self, dataset_type: str, coordinate: dict[str, Any]) -> bool:
-        """Check whether a row matching ``coordinate["id"]`` exists.
+    def exists(self, dataset_type: str, selector: dict[str, Any]) -> bool:
+        """Check whether a row matching ``selector["id"]`` exists.
 
         Returns
         -------
         found : `bool`
             `True` if a matching row exists.
         """
-        return self.get(dataset_type, coordinate) is not None
+        return self.get(dataset_type, selector) is not None
 
-    def put(self, obj: Any, dataset_type: str, coordinate: dict[str, Any] | None = None) -> None:
+    def put(self, obj: Any, dataset_type: str, selector: dict[str, Any] | None = None) -> None:
         """Upsert a single record."""
         spec = self._spec(dataset_type)
         conn = connect_db(self._db_path())

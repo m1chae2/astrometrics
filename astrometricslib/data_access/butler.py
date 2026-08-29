@@ -22,15 +22,23 @@ from datastore.butler import DatasetSpec
 # "stub file not found" warnings for re-exports and typing helpers.
 __all__ = [
     "AbstractButler",
-    "DataCoordinate",
     "DiskButler",
+    "FrameSelector",
 ]
 
 logger = logging.getLogger(__name__)
 
 
-class DataCoordinate(BaseModel):
-    """Structured metadata coordinates (Data ID) identifying a dataset.
+class FrameSelector(BaseModel):
+    """The fields that say which frames you mean.
+
+    These are the properties you would use to pick frames out of the
+    library by hand -- which target, which role, which camera -- so the
+    code asking for data never has to know where that data is stored.
+
+    Despite selecting frames of the sky, none of these fields is a sky
+    position: `target` names an object, not a right ascension and
+    declination.
 
     Attributes
     ----------
@@ -69,14 +77,14 @@ class AbstractButler(ABC):
     """The blueprint for how we load and save data."""
 
     @abstractmethod
-    def get(self, dataset_type: str, coordinate: dict[str, Any]) -> Any:
+    def get(self, dataset_type: str, selector: dict[str, Any]) -> Any:
         """Load a specific piece of data.
 
         Parameters
         ----------
         dataset_type : `str`
             What kind of data to load (like "target_catalog" or "raw_frame").
-        coordinate : `dict`
+        selector : `dict`
             Information to help find the exact piece of data.
 
         Returns
@@ -87,7 +95,7 @@ class AbstractButler(ABC):
         pass
 
     @abstractmethod
-    def put(self, obj: Any, dataset_type: str, coordinate: dict[str, Any]) -> None:
+    def put(self, obj: Any, dataset_type: str, selector: dict[str, Any]) -> None:
         """Save a piece of data.
 
         Parameters
@@ -96,20 +104,20 @@ class AbstractButler(ABC):
             The data to save.
         dataset_type : `str`
             What kind of data this is.
-        coordinate : `dict`
+        selector : `dict`
             Information to help store the data in the right place.
         """
         pass
 
     @abstractmethod
-    def exists(self, dataset_type: str, coordinate: dict[str, Any]) -> bool:
+    def exists(self, dataset_type: str, selector: dict[str, Any]) -> bool:
         """Check if a specific piece of data exists without loading it.
 
         Parameters
         ----------
         dataset_type : `str`
             What kind of data to check for.
-        coordinate : `dict`
+        selector : `dict`
             Information identifying the data.
 
         Returns
@@ -120,14 +128,14 @@ class AbstractButler(ABC):
         pass
 
     @abstractmethod
-    def get_local_path(self, dataset_type: str, coordinate: dict[str, Any]) -> str:
+    def get_local_path(self, dataset_type: str, selector: dict[str, Any]) -> str:
         """Get the actual file path on the hard drive for this data.
 
         Parameters
         ----------
         dataset_type : `str`
             What kind of data to find the path for.
-        coordinate : `dict`
+        selector : `dict`
             Information identifying the data.
 
         Returns
@@ -259,7 +267,7 @@ class DiskButler(AbstractButler):
             },
         )
 
-    def get(self, dataset_type: str, coordinate: dict[str, Any]) -> Any:
+    def get(self, dataset_type: str, selector: dict[str, Any]) -> Any:
         """Load data from the database or hard drive.
 
         Parameters
@@ -267,7 +275,7 @@ class DiskButler(AbstractButler):
         dataset_type : `str`
             What to load. Options include "target_catalog", "stellar_catalog",
             "raw_frame", "stacked_image", or "raw_frames".
-        coordinate : `dict`
+        selector : `dict`
             Information identifying exactly what to load.
 
         Returns
@@ -298,25 +306,25 @@ class DiskButler(AbstractButler):
             return self._stellar_catalog_cache
 
         elif dataset_type == "raw_frame" or dataset_type == "stacked_image":
-            path = self.get_local_path(dataset_type, coordinate)
+            path = self.get_local_path(dataset_type, selector)
             from astrometricslib.image_processing.image import AstrometricsImage
 
             return AstrometricsImage(path)
         elif dataset_type == "raw_frames":
-            target = coordinate.get("target")
+            target = selector.get("target")
             if not target:
                 return []
             from astrometricslib.data_access import frame_scanning as frame_scanning_operations
 
             frames_root_path = self.config.get_frames_path()
             frame_scanning_operations.scan_target_directory(
-                target, frames_root_path, refresh_headers=bool(coordinate.get("refresh_headers"))
+                target, frames_root_path, refresh_headers=bool(selector.get("refresh_headers"))
             )
             return target.frames
         else:
             raise ValueError(f"Unknown dataset type: {dataset_type}")
 
-    def put(self, obj: Any, dataset_type: str, coordinate: dict[str, Any]) -> None:
+    def put(self, obj: Any, dataset_type: str, selector: dict[str, Any]) -> None:
         """Save data to the database or hard drive.
 
         Parameters
@@ -325,7 +333,7 @@ class DiskButler(AbstractButler):
             The data to save.
         dataset_type : `str`
             What kind of data this is (e.g., "target_catalog").
-        coordinate : `dict`
+        selector : `dict`
             Information on where to store the data (currently unused here).
 
         Raises
@@ -454,14 +462,14 @@ class DiskButler(AbstractButler):
         """
         return self._generic.list_projected(dataset_type, columns, where, like, limit)
 
-    def exists(self, dataset_type: str, coordinate: dict[str, Any]) -> bool:
+    def exists(self, dataset_type: str, selector: dict[str, Any]) -> bool:
         """Check if a file exists on the hard drive.
 
         Parameters
         ----------
         dataset_type : `str`
             What kind of file it is.
-        coordinate : `dict`
+        selector : `dict`
             Information to build the file path.
 
         Returns
@@ -470,19 +478,19 @@ class DiskButler(AbstractButler):
             True if the file is found, False otherwise.
         """
         try:
-            path = self.get_local_path(dataset_type, coordinate)
+            path = self.get_local_path(dataset_type, selector)
             return os.path.exists(path)
         except Exception:
             return False
 
-    def get_local_path(self, dataset_type: str, coordinate: dict[str, Any]) -> str:
+    def get_local_path(self, dataset_type: str, selector: dict[str, Any]) -> str:
         """Figure out where a file should be saved on the hard drive.
 
         Parameters
         ----------
         dataset_type : `str`
             What kind of file (e.g., "stacked_image" or "raw_frame").
-        coordinate : `dict`
+        selector : `dict`
             Information about the target and what kind of frame it is.
 
         Returns
@@ -495,11 +503,11 @@ class DiskButler(AbstractButler):
         ValueError
             If it doesn't know how to build a path for that data type.
         """
-        if coordinate.get("path"):
-            return coordinate["path"]
+        if selector.get("path"):
+            return selector["path"]
 
-        target = coordinate.get("target", "Unknown")
-        role = coordinate.get("role", "LIGHT").upper()
+        target = selector.get("target", "Unknown")
+        role = selector.get("role", "LIGHT").upper()
 
         if dataset_type == "stacked_image":
             safe_target = target.replace(" ", "_")

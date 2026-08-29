@@ -19,7 +19,7 @@ class MockButler(AbstractButler):
         self.targets = [Target(id="M 31"), Target(id="Orion")]
         self.stellar_objects = [StellarObject(id="Star1"), StellarObject(id="Star2")]
 
-    def get(self, dataset_type: str, coordinate: dict[str, Any]) -> Any:
+    def get(self, dataset_type: str, selector: dict[str, Any]) -> Any:
         """Return the in-memory targets, stellar objects, or frames.
 
         Returns
@@ -36,14 +36,14 @@ class MockButler(AbstractButler):
             return []
         return None
 
-    def put(self, obj: Any, dataset_type: str, coordinate: dict[str, Any]) -> None:
+    def put(self, obj: Any, dataset_type: str, selector: dict[str, Any]) -> None:
         """Store obj as the in-memory targets or stellar objects."""
         if dataset_type == "target_catalog":
             self.targets = obj
         elif dataset_type == "stellar_catalog":
             self.stellar_objects = obj
 
-    def exists(self, dataset_type: str, coordinate: dict[str, Any]) -> bool:
+    def exists(self, dataset_type: str, selector: dict[str, Any]) -> bool:
         """Return `False` always; this mock never reports existence.
 
         Returns
@@ -53,7 +53,7 @@ class MockButler(AbstractButler):
         """
         return False
 
-    def get_local_path(self, dataset_type: str, coordinate: dict[str, Any]) -> str:
+    def get_local_path(self, dataset_type: str, selector: dict[str, Any]) -> str:
         """Return a fixed placeholder path for any dataset type.
 
         Returns

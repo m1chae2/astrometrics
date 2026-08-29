@@ -24,7 +24,7 @@ site_profile, enclosure, guider_calibration, focus_model,
 delegation_policy, safety_rule_set, commissioning_run -- is dispatched
 generically via `_GENERIC_DATASET_TYPES` to
 `disk_interface.save_model`/`load_models`/`get_model`, keyed by the `id`
-field in `coordinate`.
+field in `selector`.
 """
 
 from abc import ABC, abstractmethod
@@ -61,7 +61,7 @@ _GENERIC_DATASET_TYPES: dict[str, tuple[str, type]] = {
 }
 """Maps a dataset_type string to its (table_name, model_class).
 
-`calibration_stats` uses `camera_id` as its coordinate/id, matching
+`calibration_stats` uses `camera_id` as its selector key, matching
 `CalibrationStats.camera_id` being the natural key for one camera's
 inventory (`Wayfinding_Library_Architecture.md` §2.2.2).
 """
@@ -75,16 +75,16 @@ class AbstractButler(ABC):
     """Minimal get/put/exists data access layer for wayfindinglib."""
 
     @abstractmethod
-    def get(self, dataset_type: str, coordinate: dict[str, Any]) -> Any:
-        """Retrieve a dataset for a coordinate."""
+    def get(self, dataset_type: str, selector: dict[str, Any]) -> Any:
+        """Retrieve the dataset a selector identifies."""
 
     @abstractmethod
-    def put(self, obj: Any, dataset_type: str, coordinate: dict[str, Any]) -> None:
-        """Persist a dataset under a given type and coordinate."""
+    def put(self, obj: Any, dataset_type: str, selector: dict[str, Any]) -> None:
+        """Persist a dataset under a given type, identified by a selector."""
 
     @abstractmethod
-    def exists(self, dataset_type: str, coordinate: dict[str, Any]) -> bool:
-        """Check if the dataset exists for the coordinate."""
+    def exists(self, dataset_type: str, selector: dict[str, Any]) -> bool:
+        """Check whether the dataset a selector identifies exists."""
 
 
 class DiskButler(AbstractButler):
@@ -138,15 +138,15 @@ class DiskButler(AbstractButler):
             )
         return _GenericButler(app_config, db_name="wayfinding.db", db_dir=db_dir, specs=specs)
 
-    def get(self, dataset_type: str, coordinate: dict[str, Any]) -> Any:
-        """Retrieve a dataset for a coordinate.
+    def get(self, dataset_type: str, selector: dict[str, Any]) -> Any:
+        """Retrieve the dataset a selector identifies.
 
         Parameters
         ----------
         dataset_type : `str`
             Identifier of the dataset kind to retrieve: "observation_session",
             or one of the generic types in `_GENERIC_DATASET_TYPES`.
-        coordinate : `dict`
+        selector : `dict`
             Data ID fields identifying which dataset instance to load;
             expects a "session_id" key for "observation_session", or an
             "id" key (or the dataset's natural key, e.g. "camera_id" for
@@ -163,10 +163,10 @@ class DiskButler(AbstractButler):
             Raised if `dataset_type` is not recognized.
         """
         if dataset_type == "observation_session":
-            return self._generic.get("observation_session", {"id": coordinate.get("session_id", "")})
+            return self._generic.get("observation_session", {"id": selector.get("session_id", "")})
         if dataset_type in _GENERIC_DATASET_TYPES:
             id_field = _ID_FIELD_FOR.get(dataset_type, "id")
-            model_id = coordinate.get("id") or coordinate.get(id_field, "")
+            model_id = selector.get("id") or selector.get(id_field, "")
             return self._generic.get(dataset_type, {"id": model_id})
         raise ValueError(f"Unknown dataset type: {dataset_type}")
 
@@ -195,8 +195,8 @@ class DiskButler(AbstractButler):
             raise ValueError(f"Unknown generic dataset type: {dataset_type}")
         return self._generic.get_all(dataset_type)
 
-    def put(self, obj: Any, dataset_type: str, coordinate: dict[str, Any]) -> None:
-        """Persist a dataset under a given type and coordinate.
+    def put(self, obj: Any, dataset_type: str, selector: dict[str, Any]) -> None:
+        """Persist a dataset under a given type, identified by a selector.
 
         Parameters
         ----------
@@ -206,7 +206,7 @@ class DiskButler(AbstractButler):
             Identifier of the dataset kind being written:
             "observation_session", or one of the generic types in
             `_GENERIC_DATASET_TYPES`.
-        coordinate : `dict`
+        selector : `dict`
             Unused for "observation_session" -- the session's own `id`
             field is the primary key. Unused for generic types -- the
             object's own natural key (`obj.id`, or `obj.camera_id` for
@@ -225,14 +225,14 @@ class DiskButler(AbstractButler):
             return
         raise ValueError(f"Write operation not supported on dataset type: {dataset_type}")
 
-    def exists(self, dataset_type: str, coordinate: dict[str, Any]) -> bool:
-        """Check if the dataset exists for the coordinate.
+    def exists(self, dataset_type: str, selector: dict[str, Any]) -> bool:
+        """Check whether the dataset a selector identifies exists.
 
         Parameters
         ----------
         dataset_type : `str`
             Identifier of the dataset kind to check.
-        coordinate : `dict`
+        selector : `dict`
             Expects a "session_id" key for "observation_session", or an
             "id" key (or the dataset's natural key) for generic types.
 
@@ -248,4 +248,4 @@ class DiskButler(AbstractButler):
         """
         if dataset_type != "observation_session" and dataset_type not in _GENERIC_DATASET_TYPES:
             raise ValueError(f"Unknown dataset type: {dataset_type}")
-        return self.get(dataset_type, coordinate) is not None
+        return self.get(dataset_type, selector) is not None

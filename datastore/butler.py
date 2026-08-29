@@ -209,7 +209,6 @@ class Butler(AbstractButler):
         self,
         dataset_type: str,
         columns: list[str],
-        where: dict[str, Any] | None = None,
         like: dict[str, str] | None = None,
         limit: int | None = None,
     ) -> list[dict[str, Any]]:
@@ -238,29 +237,24 @@ class Butler(AbstractButler):
             -- validated against that set (not passed through
             verbatim) since these can originate from caller-assembled
             lists.
-        where : `dict`, optional
-            Column-name/value pairs to filter on with exact equality,
-            ANDed together with each other and with `like`. Keys are
-            validated the same way as `columns`. `None` (default)
-            applies no equality filter.
         like : `dict`, optional
             Column-name/substring pairs to filter on with a
             case-insensitive (SQLite's default LIKE behaviour for
-            ASCII) substring match, ANDed together with each other and
-            with `where`. Keys are validated the same way as `columns`.
-            Intended as a narrowing prefilter for a caller that must
-            still apply its own exact check afterward (e.g. a
-            comma-joined multi-value column, where LIKE can produce
-            false positives a substring happens to share) -- not a
-            general search feature. The substring is escaped against
-            SQL wildcard injection (a literal ``%`` or ``_`` typed by
-            an end user must match literally, not act as a wildcard).
+            ASCII) substring match, ANDed together with each other.
+            Keys are validated the same way as `columns`. Intended as
+            a narrowing prefilter for a caller that must still apply
+            its own exact check afterward (e.g. a comma-joined
+            multi-value column, where LIKE can produce false positives
+            a substring happens to share) -- not a general search
+            feature. The substring is escaped against SQL wildcard
+            injection (a literal ``%`` or ``_`` typed by an end user
+            must match literally, not act as a wildcard).
         limit : `int`, optional
             Maximum rows to return. `None` (default) returns every
-            matching row. Applied after `where`/`like`, with no
-            defined ordering -- a caller needing a stable "top N" must
-            sort the result itself or add its own ``ORDER BY`` via a
-            future extension of this method.
+            matching row. Applied after `like`, with no defined
+            ordering -- a caller needing a stable "top N" must sort
+            the result itself or add its own ``ORDER BY`` via a future
+            extension of this method.
 
         Returns
         -------
@@ -271,18 +265,16 @@ class Butler(AbstractButler):
         Raises
         ------
         ValueError
-            If `columns` is empty, or `columns`/`where`/`like` name
-            anything outside ``id``/``data_json``/this dataset's
-            registered extra columns.
+            If `columns` is empty, or `columns`/`like` name anything
+            outside ``id``/``data_json``/this dataset's registered
+            extra columns.
         """
         spec = self._spec(dataset_type)
         allowed_columns = {"id", "data_json", *spec.extra_column_types.keys()}
 
         if not columns:
             raise ValueError("list_projected requires at least one column")
-        unknown = [
-            column for column in (*columns, *(where or {}), *(like or {})) if column not in allowed_columns
-        ]
+        unknown = [column for column in (*columns, *(like or {})) if column not in allowed_columns]
         if unknown:
             raise ValueError(
                 f"list_projected: unknown column(s) {unknown} for dataset type {dataset_type!r}; "
@@ -299,9 +291,6 @@ class Butler(AbstractButler):
             query = f"SELECT {', '.join(columns)} FROM {spec.table_name}"
             params: list[Any] = []
             conditions = []
-            if where:
-                conditions.extend(f"{column} = ?" for column in where)
-                params.extend(where.values())
             if like:
                 like_escape_character = "\\"
                 conditions.extend(f"{column} LIKE ? ESCAPE '{like_escape_character}'" for column in like)

@@ -195,17 +195,6 @@ def test_list_projected_returns_only_the_requested_columns(tmp_path):  # ruff: i
     ]
 
 
-def test_list_projected_filters_with_where(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify where= restricts results to matching rows."""
-    butler = _make_indexed_butler(tmp_path)
-    butler.put(_Widget(id="w1", label="alpha"), "widget")
-    butler.put(_Widget(id="w2", label="beta"), "widget")
-
-    rows = butler.list_projected("widget", ["id"], where={"label": "beta"})
-
-    assert rows == [{"id": "w2"}]
-
-
 def test_list_projected_never_touches_data_json_unless_asked(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify data_json is absent from results that don't request it.
 
@@ -224,21 +213,13 @@ def test_list_projected_never_touches_data_json_unless_asked(tmp_path):  # ruff:
 def test_list_projected_rejects_an_unregistered_column(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify an unknown column name raises rather than building raw SQL.
 
-    columns/where can originate from caller-assembled lists, so this
+    columns/like can originate from caller-assembled lists, so this
     is a real injection guard, not just input validation.
     """
     butler = _make_indexed_butler(tmp_path)
 
     with pytest.raises(ValueError, match="unknown column"):
         butler.list_projected("widget", ["id", "; DROP TABLE widgets"])
-
-
-def test_list_projected_rejects_an_unregistered_where_column(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify where= keys are validated the same way columns are."""
-    butler = _make_indexed_butler(tmp_path)
-
-    with pytest.raises(ValueError, match="unknown column"):
-        butler.list_projected("widget", ["id"], where={"nonexistent_column": "x"})
 
 
 def test_list_projected_requires_at_least_one_column(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
@@ -266,17 +247,6 @@ def test_list_projected_like_matches_a_substring(tmp_path):  # ruff: ignore[miss
     rows = butler.list_projected("widget", ["id"], like={"label": "M 13"})
 
     assert rows == [{"id": "w1"}]
-
-
-def test_list_projected_like_and_where_are_anded_together(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify like= and where= combine rather than either alone deciding."""
-    butler = _make_indexed_butler(tmp_path)
-    butler.put(_Widget(id="w1", label="M 13 Field", score=1.0), "widget")
-    butler.put(_Widget(id="w2", label="M 13 Other", score=2.0), "widget")
-
-    rows = butler.list_projected("widget", ["id"], where={"score": 2.0}, like={"label": "M 13"})
-
-    assert rows == [{"id": "w2"}]
 
 
 def test_list_projected_like_escapes_sql_wildcard_characters(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
@@ -308,7 +278,7 @@ def test_list_projected_limit_caps_the_row_count(tmp_path):  # ruff: ignore[miss
 
 
 def test_list_projected_rejects_an_unregistered_like_column(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify like= keys are validated the same way columns/where are."""
+    """Verify like= keys are validated the same way columns are."""
     butler = _make_indexed_butler(tmp_path)
 
     with pytest.raises(ValueError, match="unknown column"):

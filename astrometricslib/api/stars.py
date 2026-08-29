@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 # target filter" case: without a cap, a UI listing polling that RPC
 # hydrates and transmits the whole catalog's summaries every request --
 # at 270,450 rows, real network and JSON-parse cost even after
-# list_projected already skipped hydrating full StellarObjects. A
+# list_star_summaries already skipped loading full StellarObjects. A
 # caller wanting the true, unbounded catalog for scripting should use
 # list_objects() instead; this cap only applies to the summary path
 # documented for UI catalog-browsing callers.
@@ -101,9 +101,7 @@ class StellarCatalog:
             an unfiltered "browse everything" request is exactly the
             case worth bounding, since it is the one whose size scales
             with the whole catalog rather than with one target's own
-            star count. Pass an explicit value (or `0` for
-            `CatalogAccess.list_projected`'s own no-limit-argument behavior
-            -- i.e. omit `limit` from the call) to override either
+            star count. Pass an explicit value to override either
             default.
 
         Returns
@@ -117,27 +115,21 @@ class StellarCatalog:
         if effective_limit is None and not target_id:
             effective_limit = DEFAULT_UNFILTERED_SUMMARY_LIMIT
 
-        rows = self.catalog_access.list_projected(
-            "stellar_catalog",
-            ["id", "name", "ra", "dec", "target_id", "has_spectra", "has_photometry"],
-            like={"target_id": target_id} if target_id else None,
-            limit=effective_limit,
-        )
-        summaries = []
-        for row in rows:
-            target_ids = row["target_id"].split(",") if row["target_id"] else []
-            if target_id and target_id not in target_ids:
-                continue
-            summaries.append({
-                "id": row["id"],
-                "name": row["name"],
-                "ra": row["ra"],
-                "dec": row["dec"],
-                "targetIds": target_ids,
-                "hasSpectra": bool(row["has_spectra"]),
-                "hasPhotometry": bool(row["has_photometry"]),
-            })
-        return summaries
+        # Keys are camelCase because this dict is handed straight to the
+        # user interface; the record's own field names are the Python
+        # ones.
+        return [
+            {
+                "id": star.id,
+                "name": star.name,
+                "ra": star.right_ascension,
+                "dec": star.declination,
+                "targetIds": star.target_ids,
+                "hasSpectra": star.has_spectra,
+                "hasPhotometry": star.has_photometry,
+            }
+            for star in self.catalog_access.list_star_summaries(target_id=target_id, limit=effective_limit)
+        ]
 
     def get_object(self, object_id: str) -> StellarObject | None:
         """Find a single star in the catalog using its ID.

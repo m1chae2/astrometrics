@@ -6,13 +6,13 @@ find-clusters -> apply -> delete flow end to end against a throwaway
 isolated catalog database -- never the real one.
 """
 
-from astrometricslib.data_access.catalog_access import CatalogAccess
+from astrometricslib.data_access.catalog_access import CatalogAccess, StarPosition
 from astrometricslib.models.stellar_source import LightCurve, StellarObject
 from astrometricslib.scripts.reconcile_position_only_star_catalog import (
     _is_empty_value,
     _merge_duplicate_into_survivor,
     apply_clusters,
-    cluster_position_only_rows,
+    cluster_position_only_stars,
     find_position_only_clusters,
 )
 from astrometricslib.utilities.config_loader import AppConfiguration
@@ -44,48 +44,48 @@ class _FakeAstrometrics:
         self.catalog_access = CatalogAccess(config)
 
 
-def _row(id_: str, ra: float, dec: float, target_id: str = "M42") -> dict:
-    return {"id": id_, "ra": ra, "dec": dec, "target_id": target_id}
+def _star(id_: str, ra: float, dec: float, target_id: str = "M42") -> StarPosition:
+    return StarPosition(id=id_, right_ascension=ra, declination=dec, target_ids=[target_id])
 
 
-def test_cluster_position_only_rows_groups_nearby_positions():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify rows within the match radius cluster and distant ones don't."""
+def test_cluster_position_only_stars_groups_nearby_positions():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify stars within the match radius cluster and distant ones don't."""
     close_pair = [
-        _row("FIELD_J083344.3000-263740.0000", 128.834300, -26.627778),
-        _row("FIELD_J083344.3050-263739.9980", 128.834305, -26.627770),
+        _star("FIELD_J083344.3000-263740.0000", 128.834300, -26.627778),
+        _star("FIELD_J083344.3050-263739.9980", 128.834305, -26.627770),
     ]
-    distant = _row("FIELD_J083744.3000-263740.0000", 129.334300, -26.627778)
+    distant = _star("FIELD_J083744.3000-263740.0000", 129.334300, -26.627778)
 
-    clusters = cluster_position_only_rows([*close_pair, distant])
+    clusters = cluster_position_only_stars([*close_pair, distant])
 
     sizes = sorted(len(cluster) for cluster in clusters)
     assert sizes == [1, 2]
 
 
-def test_cluster_position_only_rows_chains_through_intermediate_points():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_cluster_position_only_stars_chains_through_intermediate_points():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verify clustering chains: A-B and B-C close, A-C not directly close.
 
     A chain of independent re-solves lands each new solve near the
-    *previous* one, not necessarily near the very first -- three rows
+    *previous* one, not necessarily near the very first -- three stars
     a few arcsec apart in sequence must still collapse to one cluster
     even though the first and last are further apart than the radius
     on their own.
     """
     # ~3 arcsec steps at this declination.
     step_deg = 3.0 / 3600.0 / 0.894  # roughly correct for cos(dec) at -26.6
-    rows = [_row(f"FIELD_J{i}", 128.8343 + i * step_deg, -26.627778) for i in range(4)]
+    stars = [_star(f"FIELD_J{i}", 128.8343 + i * step_deg, -26.627778) for i in range(4)]
 
-    clusters = cluster_position_only_rows(rows)
+    clusters = cluster_position_only_stars(stars)
 
     assert len(clusters) == 1
     assert len(clusters[0]) == 4
 
 
-def test_cluster_position_only_rows_handles_zero_and_one_row():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_cluster_position_only_stars_handles_zero_and_one_star():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verify the trivial cases return without touching the scipy machinery."""
-    assert cluster_position_only_rows([]) == []
-    single = _row("FIELD_J1", 128.0, -26.0)
-    assert cluster_position_only_rows([single]) == [[single]]
+    assert cluster_position_only_stars([]) == []
+    single = _star("FIELD_J1", 128.0, -26.0)
+    assert cluster_position_only_stars([single]) == [[single]]
 
 
 def test_is_empty_value_covers_every_shape_of_empty():  # ruff: ignore[missing-return-type-undocumented-public-function]
@@ -169,7 +169,7 @@ def test_find_and_apply_clusters_merges_and_deletes_against_a_real_catalog(tmp_p
     assert set(clusters_by_target) == {"M42"}
     clusters = clusters_by_target["M42"]
     assert len(clusters) == 1
-    assert {row["id"] for row in clusters[0]} == {survivor.id, duplicate.id}
+    assert {star.id for star in clusters[0]} == {survivor.id, duplicate.id}
 
     rows_removed = apply_clusters(astrometrics, clusters_by_target)
 

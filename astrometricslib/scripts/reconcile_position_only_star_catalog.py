@@ -45,12 +45,11 @@ import time
 from typing import Any
 
 from astrometricslib import Astrometrics
+from astrometricslib.data_access.catalog_access import StarPosition
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.astrometry.star_identifier import CATALOG_MATCH_RADIUS_ARCSEC
 
 logger = logging.getLogger(__name__)
-
-_POSITION_ONLY_STAR_ID_PREFIX = "FIELD_J"
 
 # Fields that identify the row itself or are recomputed fresh by every
 # pipeline run regardless of what is already on disk -- never gap-filled
@@ -119,10 +118,10 @@ def _is_empty_value(value: Any) -> bool:
     return False
 
 
-def cluster_position_only_rows(rows: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
-    """Group position-only rows into clusters within the catalog match radius.
+def cluster_position_only_stars(stars: list[StarPosition]) -> list[list[StarPosition]]:
+    """Group position-only stars into clusters within the catalog match radius.
 
-    Uses simple nearest-neighbour connected-components: two rows in the
+    Uses simple nearest-neighbour connected-components: two stars in the
     same cluster if there is a chain of pairwise separations, each
     under `CATALOG_MATCH_RADIUS_ARCSEC`, linking them -- not
     necessarily a single tight group all mutually within the radius of
@@ -132,26 +131,26 @@ def cluster_position_only_rows(rows: list[dict[str, Any]]) -> list[list[dict[str
 
     Parameters
     ----------
-    rows : `list` [`dict`]
-        Rows with ``id``, ``ra``, ``dec`` keys, already known to share
-        this target and to have real numeric coordinates.
+    stars : `list` [`StarPosition`]
+        Stars already known to share this target and to have real
+        numeric coordinates.
 
     Returns
     -------
-    clusters : `list` [`list` [`dict`]]
-        Every input row, partitioned into clusters of size 1 (no
+    clusters : `list` [`list` [`StarPosition`]]
+        Every input star, partitioned into clusters of size 1 (no
         duplicate found) or more.
     """
-    if len(rows) < 2:
-        return [[row] for row in rows]
+    if len(stars) < 2:
+        return [[star] for star in stars]
 
     import numpy as np
     from scipy.sparse import coo_matrix
     from scipy.sparse.csgraph import connected_components
     from scipy.spatial import cKDTree
 
-    ra = np.radians(np.array([row["ra"] for row in rows]))
-    dec = np.radians(np.array([row["dec"] for row in rows]))
+    ra = np.radians(np.array([star.right_ascension for star in stars]))
+    dec = np.radians(np.array([star.declination for star in stars]))
     xyz = np.column_stack([np.cos(dec) * np.cos(ra), np.cos(dec) * np.sin(ra), np.sin(dec)])
 
     # Chord length on the unit sphere corresponding to the match radius,
@@ -161,16 +160,16 @@ def cluster_position_only_rows(rows: list[dict[str, Any]]) -> list[list[dict[str
 
     tree = cKDTree(xyz)
     pairs = np.array(list(tree.query_pairs(chord_radius)))
-    row_count = len(rows)
+    star_count = len(stars)
     if len(pairs) == 0:
-        return [[row] for row in rows]
+        return [[star] for star in stars]
 
-    graph = coo_matrix((np.ones(len(pairs)), (pairs[:, 0], pairs[:, 1])), shape=(row_count, row_count))
+    graph = coo_matrix((np.ones(len(pairs)), (pairs[:, 0], pairs[:, 1])), shape=(star_count, star_count))
     _, labels = connected_components(graph, directed=False)
 
-    clusters: dict[int, list[dict[str, Any]]] = {}
-    for row, label in zip(rows, labels, strict=True):
-        clusters.setdefault(int(label), []).append(row)
+    clusters: dict[int, list[StarPosition]] = {}
+    for star, label in zip(stars, labels, strict=True):
+        clusters.setdefault(int(label), []).append(star)
     return list(clusters.values())
 
 
@@ -207,7 +206,7 @@ def _merge_duplicate_into_survivor(survivor: StellarObject, duplicate: StellarOb
 
 def find_position_only_clusters(
     astrometrics: Astrometrics, target_ids: list[str] | None = None
-) -> dict[str, list[list[dict[str, Any]]]]:
+) -> dict[str, list[list[StarPosition]]]:
     """Find every target's position-only duplicate clusters.
 
     Parameters
@@ -220,42 +219,32 @@ def find_position_only_clusters(
 
     Returns
     -------
-    clusters_by_target : `dict` [`str`, `list` [`list` [`dict`]]]
+    clusters_by_target : `dict` [`str`, `list` [`list` [`StarPosition`]]]
         Every target with at least one cluster of size 2+, mapped to
         that target's clusters (clusters of size 1 are omitted --
         nothing to merge).
     """
-    rows = astrometrics.catalog_access.list_projected("stellar_catalog", ["id", "ra", "dec", "target_id"])
-    position_only_rows = [
-        row
-        for row in rows
-        if row["id"].startswith(_POSITION_ONLY_STAR_ID_PREFIX)
-        and row["ra"] is not None
-        and row["dec"] is not None
-    ]
+    position_only_stars = astrometrics.catalog_access.list_position_only_stars()
 
     wanted_targets = {t.strip().casefold() for t in target_ids} if target_ids else None
 
-    rows_by_target: dict[str, list[dict[str, Any]]] = {}
-    for row in position_only_rows:
-        for target_id in (row["target_id"] or "").split(","):
-            target_id = target_id.strip()
-            if not target_id:
-                continue
+    stars_by_target: dict[str, list[StarPosition]] = {}
+    for star in position_only_stars:
+        for target_id in star.target_ids:
             if wanted_targets is not None and target_id.casefold() not in wanted_targets:
                 continue
-            rows_by_target.setdefault(target_id, []).append(row)
+            stars_by_target.setdefault(target_id, []).append(star)
 
-    clusters_by_target: dict[str, list[list[dict[str, Any]]]] = {}
-    for target_id, target_rows in rows_by_target.items():
-        clusters = [cluster for cluster in cluster_position_only_rows(target_rows) if len(cluster) > 1]
+    clusters_by_target: dict[str, list[list[StarPosition]]] = {}
+    for target_id, target_stars in stars_by_target.items():
+        clusters = [cluster for cluster in cluster_position_only_stars(target_stars) if len(cluster) > 1]
         if clusters:
             clusters_by_target[target_id] = clusters
     return clusters_by_target
 
 
 def apply_clusters(
-    astrometrics: Astrometrics, clusters_by_target: dict[str, list[list[dict[str, Any]]]]
+    astrometrics: Astrometrics, clusters_by_target: dict[str, list[list[StarPosition]]]
 ) -> int:
     """Merge and delete every cluster's duplicate rows.
 
@@ -263,7 +252,7 @@ def apply_clusters(
     ----------
     astrometrics : `Astrometrics`
         Provides catalog read/write access.
-    clusters_by_target : `dict` [`str`, `list` [`list` [`dict`]]]
+    clusters_by_target : `dict` [`str`, `list` [`list` [`StarPosition`]]]
         As returned by `find_position_only_clusters`.
 
     Returns
@@ -274,7 +263,7 @@ def apply_clusters(
     rows_removed = 0
     for target_id, clusters in clusters_by_target.items():
         for cluster in clusters:
-            ids = sorted(row["id"] for row in cluster)
+            ids = sorted(star.id for star in cluster)
             # Deterministic and reproducible: which id happens to
             # survive doesn't matter for the data itself, since every
             # other member's fields are merged into it below, but a

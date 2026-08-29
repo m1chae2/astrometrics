@@ -22,6 +22,8 @@ import logging
 import re
 from typing import NamedTuple
 
+from astrometricslib.data_access.catalog_access import POSITION_ONLY_STAR_ID_PREFIX
+
 logger = logging.getLogger(__name__)
 
 # Matches the synthetic placeholder id assigned by
@@ -34,11 +36,11 @@ logger = logging.getLogger(__name__)
 _UNRESOLVED_STAR_ID_PATTERN = re.compile(r"^(?:.*:)?Star_\d+$")
 
 # Prefix minted by star_identifier.identify_stars_with_wcs's Step 3 for a
-# star with a solved sky position but no SIMBAD/Gaia match. Duplicated
-# here rather than imported, matching _UNRESOLVED_STAR_ID_PATTERN's own
-# precedent of matching the format by convention instead of taking a
-# dependency in the other direction.
-_POSITION_ONLY_STAR_ID_PREFIX = "FIELD_J"
+# star with a solved sky position but no SIMBAD/Gaia match. Taken from
+# the data access layer, which is where the catalog's own definition of
+# a position-only star now lives, rather than from star_identifier --
+# that would be a dependency in the wrong direction.
+_POSITION_ONLY_STAR_ID_PREFIX = POSITION_ONLY_STAR_ID_PREFIX
 
 
 class StarIdentificationBreakdown(NamedTuple):
@@ -139,8 +141,8 @@ def _reconcile_position_only_star_ids(
         reassigned star's `id`/`name` are overwritten with the id of
         the existing catalog row it matched).
     catalog_access : `Any`
-        Provides `list_projected` for reading the target's existing
-        position-only rows.
+        Provides `list_position_only_stars` for reading the target's
+        existing position-only stars.
     target_id : `str`
         The target these stars belong to. Scoped to one target both to
         keep the candidate set small and because that is where this
@@ -178,7 +180,7 @@ def _reconcile_position_only_star_ids(
         return stellar_objects
 
     try:
-        existing_rows = catalog_access.list_projected("stellar_catalog", ["id", "ra", "dec", "target_id"])
+        existing_position_only = catalog_access.list_position_only_stars(target_id=target_id)
     except Exception as lookup_error:
         # Reconciliation is an optimization over an already-correct (if
         # duplicative) storage path; a lookup failure must not block
@@ -188,23 +190,12 @@ def _reconcile_position_only_star_ids(
         )
         return stellar_objects
 
-    # target_id is a comma-joined string (a star can belong to more than
-    # one target), so membership is checked in Python -- same reasoning
-    # as StellarCatalog.list_object_summaries's identical filter.
-    existing_position_only = [
-        row
-        for row in existing_rows
-        if row["id"].startswith(_POSITION_ONLY_STAR_ID_PREFIX)
-        and row["ra"] is not None
-        and row["dec"] is not None
-        and target_id in (row["target_id"] or "").split(",")
-    ]
     if not existing_position_only:
         return stellar_objects
 
     existing_coords = SkyCoord(
-        ra=[row["ra"] for row in existing_position_only] * u.deg,
-        dec=[row["dec"] for row in existing_position_only] * u.deg,
+        ra=[star.right_ascension for star in existing_position_only] * u.deg,
+        dec=[star.declination for star in existing_position_only] * u.deg,
     )
 
     reused_ids: set[str] = set()
@@ -217,7 +208,7 @@ def _reconcile_position_only_star_ids(
         if d2d >= CATALOG_MATCH_RADIUS_ARCSEC * u.arcsec:
             continue
 
-        existing_id = existing_position_only[idx]["id"]
+        existing_id = existing_position_only[idx].id
         if existing_id in reused_ids:
             # Already claimed by another star from this same run -- two
             # distinct stars should never collapse onto one row. Leave

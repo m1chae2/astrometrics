@@ -63,6 +63,26 @@ class MockCatalogAccess(AbstractCatalogAccess):
         """
         return "/mock/path"
 
+    def list_star_summaries(self, target_id=None, limit=None) -> list:  # ruff: ignore[missing-type-function-argument]
+        """Return no summaries; this mock keeps no indexed columns.
+
+        Returns
+        -------
+        list
+            Always empty.
+        """
+        return []
+
+    def list_position_only_stars(self, target_id=None) -> list:  # ruff: ignore[missing-type-function-argument]
+        """Return no positions; this mock keeps no indexed columns.
+
+        Returns
+        -------
+        list
+            Always empty.
+        """
+        return []
+
 
 def test_disk_butler_instantiation():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verifies that CatalogAccess can be instantiated with default config."""
@@ -153,13 +173,13 @@ def test_disk_butler_put_refreshes_stellar_catalog_cache(mocker):  # ruff: ignor
     assert mock_load.call_count == 0
 
 
-def test_disk_butler_list_projected_reads_stellar_catalog_columns(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify list_projected reaches the real stellar_catalog registration.
+def test_catalog_access_list_star_summaries_reads_the_stellar_catalog(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify list_star_summaries reaches the real catalog registration.
 
     Regression coverage for the target_id-indexed browsing path added
     alongside local_database's lightweight summary loader: confirms the
     DatasetSpec registered in this module actually has target_id
-    available to list_projected, and that it filters correctly.
+    available to filter on, and that it filters correctly.
     """
     from astrometricslib.utilities.config_loader import AppConfiguration
 
@@ -178,16 +198,64 @@ def test_disk_butler_list_projected_reads_stellar_catalog_columns(tmp_path):  # 
     out_of_field.target_ids = ["M 81"]
     catalog_access.put([in_field, out_of_field], "stellar_catalog", {})
 
-    rows = catalog_access.list_projected("stellar_catalog", ["id", "name"], where={"target_id": "M 13"})
+    summaries = catalog_access.list_star_summaries(target_id="M 13")
 
-    assert rows == [{"id": "InField", "name": "InField"}]
+    assert [(star.id, star.name) for star in summaries] == [("InField", "InField")]
+
+
+def test_catalog_access_list_position_only_stars_filters_by_prefix_and_target(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify only position-only stars of the asked-for target come back.
+
+    Covers both filters against real SQL at once. The target narrowing
+    runs as a substring LIKE for speed, so "M 1" would drag in a star
+    that only belongs to "M 13" if the exact membership check after it
+    were missing, and a star with a real catalog name must never be
+    offered up for position matching however close it sits.
+    """
+    from astrometricslib.utilities.config_loader import AppConfiguration
+
+    library_path = tmp_path / "library"
+    (library_path / "targets").mkdir(parents=True)
+    (library_path / "frames").mkdir(parents=True)
+    config = AppConfiguration()
+    config.update_config({
+        "Image Library": {"path": str(library_path), "frames_path": str(library_path / "frames")}
+    })
+
+    catalog_access = CatalogAccess(config=config)
+
+    wanted = StellarObject(id="FIELD_J1000-2600", name="FIELD_J1000-2600")
+    wanted.right_ascension = 100.0
+    wanted.declination = -26.0
+    wanted.target_ids = ["M 1"]
+
+    # Same target, but a named star -- not a candidate for position
+    # matching, since it already has a catalog identity.
+    named = StellarObject(id="HD 12345", name="HD 12345")
+    named.right_ascension = 100.0
+    named.declination = -26.0
+    named.target_ids = ["M 1"]
+
+    # Position-only, but "M 13" only looks like "M 1" to a LIKE.
+    other_target = StellarObject(id="FIELD_J2000+3000", name="FIELD_J2000+3000")
+    other_target.right_ascension = 200.0
+    other_target.declination = 30.0
+    other_target.target_ids = ["M 13"]
+
+    catalog_access.put([wanted, named, other_target], "stellar_catalog", {})
+
+    stars = catalog_access.list_position_only_stars(target_id="M 1")
+
+    assert [star.id for star in stars] == ["FIELD_J1000-2600"]
+    assert stars[0].right_ascension == 100.0  # ruff: ignore[float-equality-comparison]
+    assert stars[0].target_ids == ["M 1"]
 
 
 def test_disk_butler_stellar_catalog_has_a_target_id_index(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify the real stellar_objects table gets its target_id index.
 
-    A raw sqlite_master check rather than trusting list_projected alone
-    to work -- correct query results don't prove the index exists, only
+    A raw sqlite_master check rather than trusting the query results
+    alone -- correct results don't prove the index exists, only
     that filtering is correct; a full scan would return the same rows.
     """
     import sqlite3

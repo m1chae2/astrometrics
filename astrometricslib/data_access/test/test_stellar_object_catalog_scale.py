@@ -165,8 +165,8 @@ def test_list_object_summaries_filters_by_target_id(tmp_path):  # ruff: ignore[m
 def test_list_object_summaries_target_id_substring_collision_is_still_exact(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """A target id that is a substring of another must not false-match.
 
-    target_id is passed to CatalogAccess.list_projected as a `like` prefilter
-    for performance, but "M 1" is a substring of "M 13" -- the LIKE
+    target_id narrows the SQL query with a LIKE prefilter for
+    performance, but "M 1" is a substring of "M 13" -- the LIKE
     narrowing alone would incorrectly include a star that only belongs
     to "M 13" when asked for "M 1". Correctness must come entirely from
     the exact `target_ids` membership check that runs after the SQL

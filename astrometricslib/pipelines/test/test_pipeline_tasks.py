@@ -15,7 +15,7 @@ from astropy.io import fits
 from astropy.modeling.models import Gaussian2D
 
 from astrometricslib import Astrometrics
-from astrometricslib.data_access.catalog_access import CatalogAccess
+from astrometricslib.data_access.catalog_access import CatalogAccess, StarPosition
 from astrometricslib.models.moving_object import CascadeStage
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import FrameRecord, Target
@@ -102,14 +102,22 @@ def _position_only_star(id_: str, ra: float, dec: float) -> StellarObject:
 
 
 class _StubCatalogAccess:
-    """Fake catalog_access that only knows how to answer list_projected."""
+    """Fake catalog_access that only answers list_position_only_stars."""
 
-    def __init__(self, rows: list[dict]):  # ruff: ignore[missing-return-type-special-method]
-        self._rows = rows
+    def __init__(self, stars: list[StarPosition]):  # ruff: ignore[missing-return-type-special-method]
+        self._stars = stars
 
-    def list_projected(self, dataset_type: str, columns: list[str], where: dict | None = None) -> list[dict]:
-        assert dataset_type == "stellar_catalog"
-        return [{column: row.get(column) for column in columns} for row in self._rows]
+    def list_position_only_stars(self, target_id: str | None = None) -> list[StarPosition]:
+        """Return this stub's stars, filtered the way the real one would.
+
+        Returns
+        -------
+        list [`StarPosition`]
+            The stub's stars belonging to `target_id`.
+        """
+        if target_id is None:
+            return list(self._stars)
+        return [star for star in self._stars if target_id in star.target_ids]
 
 
 def test_reconcile_position_only_star_ids_reuses_a_nearby_existing_row(caplog):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
@@ -125,7 +133,7 @@ def test_reconcile_position_only_star_ids_reuses_a_nearby_existing_row(caplog): 
     existing_id = "FIELD_J083344.3000-263740.0000"
     new_star = _position_only_star("FIELD_J083344.3050-263739.9980", ra=128.834305, dec=-26.62777)
     stub_catalog_access = _StubCatalogAccess([
-        {"id": existing_id, "ra": 128.834300, "dec": -26.627778, "target_id": "M42"}
+        StarPosition(id=existing_id, right_ascension=128.834300, declination=-26.627778, target_ids=["M42"])
     ])
 
     with caplog.at_level(logging.INFO, logger="astrometricslib.pipelines.dispatch"):
@@ -144,7 +152,12 @@ def test_reconcile_position_only_star_ids_leaves_a_distant_star_alone():  # ruff
     new_star = _position_only_star(fresh_id, ra=128.834305, dec=-26.62777)
     stub_catalog_access = _StubCatalogAccess([
         # 0.5 degrees away -- nowhere near CATALOG_MATCH_RADIUS_ARCSEC.
-        {"id": "FIELD_J083744.3000-263740.0000", "ra": 129.334300, "dec": -26.627778, "target_id": "M42"}
+        StarPosition(
+            id="FIELD_J083744.3000-263740.0000",
+            right_ascension=129.334300,
+            declination=-26.627778,
+            target_ids=["M42"],
+        )
     ])
 
     result = dispatch._reconcile_position_only_star_ids(
@@ -164,12 +177,12 @@ def test_reconcile_position_only_star_ids_only_matches_the_same_targets_rows(): 
     """
     new_star = _position_only_star("FIELD_J083344.3050-263739.9980", ra=128.834305, dec=-26.62777)
     stub_catalog_access = _StubCatalogAccess([
-        {
-            "id": "FIELD_J083344.3000-263740.0000",
-            "ra": 128.834300,
-            "dec": -26.627778,
-            "target_id": "OtherTarget",
-        }
+        StarPosition(
+            id="FIELD_J083344.3000-263740.0000",
+            right_ascension=128.834300,
+            declination=-26.627778,
+            target_ids=["OtherTarget"],
+        )
     ])
 
     result = dispatch._reconcile_position_only_star_ids(
@@ -184,7 +197,12 @@ def test_reconcile_position_only_star_ids_matches_a_multi_target_row():  # ruff:
     existing_id = "FIELD_J083344.3000-263740.0000"
     new_star = _position_only_star("FIELD_J083344.3050-263739.9980", ra=128.834305, dec=-26.62777)
     stub_catalog_access = _StubCatalogAccess([
-        {"id": existing_id, "ra": 128.834300, "dec": -26.627778, "target_id": "M42,M43"}
+        StarPosition(
+            id=existing_id,
+            right_ascension=128.834300,
+            declination=-26.627778,
+            target_ids=["M42", "M43"],
+        )
     ])
 
     result = dispatch._reconcile_position_only_star_ids(
@@ -205,7 +223,7 @@ def test_reconcile_position_only_star_ids_never_lets_two_new_stars_collide():  #
     first = _position_only_star("FIELD_J083344.3010-263739.9990", ra=128.834304, dec=-26.627777)
     second = _position_only_star("FIELD_J083344.3020-263739.9970", ra=128.834308, dec=-26.627769)
     stub_catalog_access = _StubCatalogAccess([
-        {"id": existing_id, "ra": 128.834300, "dec": -26.627778, "target_id": "M42"}
+        StarPosition(id=existing_id, right_ascension=128.834300, declination=-26.627778, target_ids=["M42"])
     ])
 
     result = dispatch._reconcile_position_only_star_ids(
@@ -230,7 +248,12 @@ def test_reconcile_position_only_star_ids_skips_catalog_matched_stars():  # ruff
     catalog_star.declination = 38.783689
     catalog_star.is_catalog_identified = True
     stub_catalog_access = _StubCatalogAccess([
-        {"id": "FIELD_J184257.9364+384701.2804", "ra": 279.234735, "dec": 38.783689, "target_id": "Vega"}
+        StarPosition(
+            id="FIELD_J184257.9364+384701.2804",
+            right_ascension=279.234735,
+            declination=38.783689,
+            target_ids=["Vega"],
+        )
     ])
 
     result = dispatch._reconcile_position_only_star_ids(
@@ -249,7 +272,7 @@ def test_reconcile_position_only_star_ids_handles_a_lookup_failure_gracefully():
     """
 
     class _BrokenCatalogAccess:
-        def list_projected(self, *args: Any, **kwargs: Any) -> Never:
+        def list_position_only_stars(self, *args: Any, **kwargs: Any) -> Never:
             raise RuntimeError("catalog unreachable")
 
     new_star = _position_only_star("FIELD_J083344.3050-263739.9980", ra=128.834305, dec=-26.62777)

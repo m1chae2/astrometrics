@@ -186,8 +186,9 @@ class StellarService:
 
         Same displayability filtering as `get_displayable_stellar_objects`,
         but built on `StellarCatalog.list_object_summaries` (indexed
-        columns via `Butler.list_projected`, never touching `data_json`,
-        and capped at `limit` rows, defaulting to 100) instead of fully
+        columns via `CatalogAccess.list_star_summaries`, never touching
+        `data_json`, and capped at `limit` rows, defaulting to 100)
+        instead of fully
         hydrating every `StellarObject`. When `search` or `filter_type`
         is specified, filters across all matching database records before
         capping results to `limit`. Supports `offset` pagination.

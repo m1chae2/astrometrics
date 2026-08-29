@@ -1,12 +1,8 @@
 """Tests for AppConfiguration's identified-star ceiling default.
 
-get_maximum_identified_stars used to default to 0 (unlimited): the
-detected sources are real stars, and this same ceiling also bounds
-identify_session_stars's seed population for photometry. On 2026-08-25
-NGC 6888 seeded 2,439 stars this way across a 166-frame session and two
-photometry workers were OOM-killed after exhausting an 8GB swap. 500
-keeps a comfortable margin over the normalization ensemble's own target
-size (100) while capping that worst case.
+This ensures the `get_maximum_identified_stars` returns a safe default
+(e.g., 500) so we don't run out of memory trying to process too many
+stars at once.
 """
 
 from astrometricslib.utilities.config_loader import AppConfiguration

@@ -7,11 +7,9 @@
 #
 # Only targets that star-based registration can NEVER handle belong in
 # the active list below. Siril aligns frames by matching star fields, so
-# a target that presents a bright resolved disk and no surrounding stars
-# has nothing to register against, no matter how many frames are taken.
-# Confirmed on the 2026-08-25 full-catalog run: Sun reported "Found 2
-# stars in reference" across 31 converted frames and aborted
-# registration.
+# a target that presents a bright disk (like the Sun or Jupiter) and no
+# surrounding stars has nothing to register against, no matter how many
+# frames are taken.
 
 Sun
 Venus
@@ -20,11 +18,11 @@ Jupiter
 # ---------------------------------------------------------------------
 # NOT skipped, deliberately: data-limited, not impossible.
 #
-# These also failed on 2026-08-25, but for want of frames rather than
-# for any reason inherent to the target. Skipping them would hide
-# targets that start working the moment more data is captured, so they
-# stay in the run and are expected to fail until then. Frame counts are
-# as of that run.
+#
+# The targets below failed previously, but only because they didn't have
+# enough valid frames yet. Skipping them would hide targets that will
+# start working the moment more data is captured, so they stay in the run
+# and are expected to fail until they have enough data.
 #
 #   Polaris   1 frame          registration needs at least two frames
 #   M 44      1 frame          same
@@ -34,8 +32,6 @@ Jupiter
 #   Arcturus  61 frames        mixed target, only 1 standard frame
 #                              remained after the standard/spectral split
 #
-# M 42 also failed on that run, but for a different reason entirely --
-# one frame at ~2324 ADU against 22 at ~236 became the registration
-# reference and had no detectable stars. That is fixed in
-# background_homogeneity_tasks.find_dominant_background_subset, so M 42
-# is expected to stack and must not be skipped.
+# M 42 is also expected to stack successfully now that we handle sky
+# brightness changes better (like filtering out frames with too much
+# moonlight or twilight), so it must not be skipped.

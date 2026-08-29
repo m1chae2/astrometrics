@@ -1,14 +1,8 @@
 """Tests for how long a stack is allowed to run before being abandoned.
 
-A flat 600s budget discarded finished work on the 2026-08-24 DSLR pass:
-four targets were declared timed out and three then stacked
-*successfully* minutes later. NGC 7000 was abandoned at 06:27:21 and
-finished at 06:35:11, leaving a complete 288MB stack on disk with
-nothing in the catalog pointing at it.
-
-Two separate causes, one per half of this module: colour stacks simply
-need longer than 600s, and time queued behind another target's Siril run
-was being charged to the waiting target's own budget.
+We use a dynamic timeout budget instead of a flat one. This is because
+large stacks take longer, and targets waiting in the queue shouldn't
+be penalized for their wait time.
 """
 
 import os

@@ -304,12 +304,9 @@ class StarIdentifier:
         self.stellar_objects: list[StellarObject] = []
         self.sources_detected: int = 0
         self.solve_attempted: bool = False
-        # Angular separations between each catalog-matched star's solved
-        # position and its catalog position, in arcsec. Their RMS is the
-        # astrometric residual -- the direct measure of solution quality
-        # that `AstrometryPipelineQualityMetrics` declared but nothing
-        # ever produced, leaving it None on all 28 solved targets of the
-        # 2026-08-24 run.
+        # The distance between where we calculated a star is and where the
+        # database says it should be (measured in arcseconds). We use this
+        # to figure out how accurate our image alignment is.
         self.catalog_match_separations_arcsec: list[float] = []
 
     @staticmethod
@@ -505,19 +502,14 @@ class StarIdentifier:
         self.sources_detected = len(unique_sources)
         self.catalog_match_separations_arcsec = []
 
-        # Only the plate solver gets a capped list. astrometry.net
-        # matches quads built from the brightest sources, so a couple
-        # hundred is ample and thousands of faint detections mostly add
-        # solve time. Everything downstream wants the opposite: the
-        # comparison ensemble, catalog cross-matching and variable-star
-        # detection all get better with more stars, and capping the
-        # shared list at 100 starved them on every deep target. On the
-        # 2026-08-25 catalog run the median frame detected 4,235
-        # sources and kept 100.
+        # We limit how many stars we send to the plate solver because it
+        # only needs the brightest ones to figure out where the image is
+        # pointing. Sending too many faint stars just slows it down.
+        # However, the rest of the program wants as many stars as possible
+        # for analysis, so we keep the full list for them.
         #
-        # detect() returns sources by descending flux and deduplicate()
-        # preserves that order, so this is the brightest N rather than
-        # an arbitrary slice.
+        # We take the stars from the beginning of the list because they
+        # are already sorted from brightest to dimmest.
         solver_sources = unique_sources[:MAXIMUM_PLATE_SOLVE_SOURCES]
 
         # An explicit argument wins over configuration, and an explicit

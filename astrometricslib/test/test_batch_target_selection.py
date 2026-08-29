@@ -1,10 +1,7 @@
 """Tests for running the batch script over a chosen subset of targets.
 
-Reprocessing a handful of targets previously meant editing the script.
-After the 2026-08-24 run only about a third of the catalog needed
-redoing -- 10 targets were complete and would have produced identical
-results from a 30-minute re-run -- so selecting a subset is the
-difference between a 40-minute job and a 3-hour one.
+Selecting a subset of targets allows us to skip ones that are already
+finished, reducing a multi-hour job into a much shorter one.
 """
 
 import pytest

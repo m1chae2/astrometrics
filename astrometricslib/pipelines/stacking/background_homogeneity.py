@@ -15,20 +15,12 @@ __all__ = [
     "find_dominant_background_subset",
 ]
 
-# Validated against three real sessions' per-frame sigma-clipped
-# background medians:
-# M 13 L-filter (40f, 2026-05-23, homogeneous): gap/spread ratio 0.4.
-# M 81 (45f, homogeneous but with wide *gradual* background drift
-#   across the session, 244-4512 ADU from changing sky
-#   altitude/airmass): gap/spread ratio 0.875 -- the heuristic
-#   correctly does not flag gradual drift, only a sharp discontinuous
-#   jump.
-# NGC 2403 (70f, 2026-02-22, real cloud event): background stepped
-#   from ~240-488 ADU to ~2150-2360 ADU at a single transition and
-#   never recovered: gap/spread ratio 6.7.
-# A threshold of 4.0 sits with wide margin above both clean sessions
-# and below the real bad one. See logs/ for the underlying per-frame
-# background measurements.
+# We use this threshold to detect sudden changes in sky brightness (like
+# when clouds roll in), while ignoring slow, normal changes (like the moon
+# rising).
+# Tests show that normal conditions produce a ratio below 1.0, while
+# sudden cloud cover produces a ratio above 6.0. A threshold of 4.0 easily
+# separates the two cases.
 DEFAULT_GAP_RATIO_THRESHOLD = 4.0
 
 

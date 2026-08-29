@@ -54,6 +54,20 @@ _MINIMUM_CROSS_SECTION_SAMPLES = 5
 # the star's light without accidentally including too much empty black sky.
 APERTURE_SIGMA_MULTIPLIER = 2.5
 
+# The narrowest line width (in pixels) we'll accept as a real measurement,
+# not a math mistake. A Gaussian fit needs a handful of pixels spread
+# across its width to tell a real line from noise; if the fitter reports
+# something narrower than half a pixel, it isn't describing the star --
+# it has locked onto a single noisy sample and shrunk the curve down to
+# fit that one point almost exactly, the same way you could draw a
+# "curve" through just one dot on a graph. This exact failure was found
+# empirically while testing this file's C extension against its Python
+# fallback: on a noisy, barely-resolved line, one solver's fit collapsed
+# to a sigma of about 1e-38, which is far below anything a real spectral
+# line could be, but was still being accepted because the only existing
+# check was "greater than zero".
+_MINIMUM_FIT_SIGMA_PX = 0.5
+
 
 def fit_cross_section_gaussian(
     data: np.ndarray,
@@ -79,14 +93,66 @@ def fit_cross_section_gaussian(
     fit_result : `tuple[float, float]` or `None`
         How far off our guess was (offset) and how wide the line is (sigma).
         Returns None if we couldn't find a clear line.
+
+    Raises
+    ------
+    ValueError
+        If `data` is not a 2-D array.
     """
+    if data.ndim != 2:
+        raise ValueError(f"Cross-section fitting needs a 2-D image, got {data.ndim} dimensions.")
+
     if HAS_C_EXTENSION and _fit_cross_section_c is not None:
+        # The C path reads float64 pixels directly out of the array
+        # buffer, so hand it exactly that. This is free on the hot path:
+        # AstrometricsImage.data is already contiguous float64, and
+        # ascontiguousarray returns that same object untouched rather
+        # than copying (measured at 0.3 microseconds for a 4000x6000
+        # frame). Only an unusual dtype or a strided view pays a copy,
+        # and those would otherwise be the cases the C path got wrong.
+        c_input = np.ascontiguousarray(data, dtype=np.float64)
         try:
-            c_res = _fit_cross_section_c(data, center, perpendicular_vector, float(search_radius))
+            c_res = _fit_cross_section_c(c_input, center, perpendicular_vector, float(search_radius))
             if c_res is not None:
                 return c_res
         except Exception as exc:
             logger.debug("C extension cross-section fit failed, falling back to Python: %s", exc)
+
+    return _fit_cross_section_gaussian_python(data, center, perpendicular_vector, search_radius)
+
+
+def _fit_cross_section_gaussian_python(
+    data: np.ndarray,
+    center: tuple[float, float],
+    perpendicular_vector: tuple[float, float],
+    search_radius: float,
+) -> tuple[float, float] | None:
+    """Fit the cross section with astropy, without trying the C extension.
+
+    This is the reference implementation. `fit_cross_section_gaussian`
+    uses the C extension when it is available and falls back to this,
+    and `test_extractor_c_equivalence.py` fits the same cross sections
+    both ways to show the two agree. It is a separate function so that
+    test can reach the astropy path directly, instead of switching a
+    module-level flag off and hoping nothing else reads it.
+
+    Parameters
+    ----------
+    data : `numpy.ndarray`
+        The picture data.
+    center : `tuple[float, float]`
+        Where we think the center is `(x, y)`.
+    perpendicular_vector : `tuple[float, float]`
+        An arrow pointing exactly sideways across the spectrum.
+    search_radius : `float`
+        How many pixels sideways to look.
+
+    Returns
+    -------
+    fit_result : `tuple[float, float]` or `None`
+        How far off our guess was (offset) and how wide the line is (sigma).
+        Returns None if we couldn't find a clear line.
+    """
     height, width = data.shape
     perpendicular_x, perpendicular_y = perpendicular_vector
     center_x, center_y = center
@@ -128,7 +194,7 @@ def fit_cross_section_gaussian(
 
     if not np.isfinite(center_offset) or not np.isfinite(sigma):
         return None
-    if sigma <= 0 or sigma > search_radius * 2:
+    if sigma < _MINIMUM_FIT_SIGMA_PX or sigma > search_radius * 2:
         return None
     if abs(center_offset) > search_radius:
         return None

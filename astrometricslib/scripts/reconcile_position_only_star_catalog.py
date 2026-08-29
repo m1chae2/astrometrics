@@ -4,15 +4,14 @@ r"""One-time cleanup for duplicate position-only stellar catalog rows.
 adding to this problem, but it never touches rows already on disk --
 those still need a cleanup pass, which is what this script is.
 
-Background: a star that never matched SIMBAD or Gaia gets a position-
-derived id, ``FIELD_J{ra:.4f}{dec:+.4f}``, which bins sky position to
-0.36 arcsec. Two solves of the same physical star routinely disagree by
-more than that -- solved-target astrometric residuals in this catalog
-run 1-6 arcsec -- so every re-solve of a field minted a fresh id for
-the same star instead of updating its existing row. Measured against a
-real 270,450-row catalog on 2026-08-26, clustering FIELD_J rows at
-`CATALOG_MATCH_RADIUS_ARCSEC` collapsed 234,812 rows to roughly
-155,000 distinct positions, a ~1.5x duplication factor.
+Background: a star that never matched a known database gets an ID based on
+its location in the sky, like ``FIELD_J{ra:.4f}{dec:+.4f}``. This location
+is very precise (0.36 arcseconds). However, our image alignment isn't perfect
+and can be off by a few arcseconds. So, if we measure the same star twice,
+its measured location might change slightly, and we accidentally give it a
+brand new ID instead of updating the existing one. This script groups these
+very close "duplicate" stars together and merges them to clean up the
+database.
 
 This finds those clusters (grouped per target, the same scope
 `_reconcile_position_only_star_ids` uses, since that is where this

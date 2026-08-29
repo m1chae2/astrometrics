@@ -1,13 +1,8 @@
 """Tests for pre-filling the local Gaia cache from a target catalog.
 
-Star identification fell back to ESA's Gaia TAP service whenever a field
-had never been queried before, which inside a parallel batch meant six
-worker processes querying at once; the 2026-08-24 run tripped the remote
-circuit breaker and left Moon with "0 catalog-matched, 100
-position-only". Seeding removes the network from the batch entirely.
-
-Every test here is offline: the one function that would download is
-replaced, so the suite never contacts ESA.
+This tests the process of downloading star data before the batch runs,
+so that parallel workers don't overwhelm the remote server and get
+blocked. Every test here runs offline.
 """
 
 import numpy as np

@@ -6,16 +6,31 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MAX_SAMPLES 256
+// Upper bound on samples taken across one spectral cross section. The
+// caller's search radius sets the real count (2 * radius + 1), and
+// astrometry/pipeline.py derives extraction radii up to 200, so 512
+// leaves headroom above the 401 samples that cap produces. The gather
+// loop below enforces this bound rather than trusting the radius --
+// overrunning these buffers is a stack smash, not a wrong answer.
+#define MAX_SAMPLES 512
 #define MAX_LM_ITER 50
 #define LM_EPS 1e-7
+
+// The narrowest line width, in pixels, we'll accept as a real
+// measurement rather than the fit collapsing onto one noisy sample.
+// Must match spectrum_extractor.py's _MINIMUM_FIT_SIGMA_PX -- both
+// paths fit the same problem and are checked against each other by
+// test_extractor_c_equivalence.py, so they need the same acceptance
+// rule. See that Python constant's comment for the full reasoning.
+#define MINIMUM_FIT_SIGMA_PX 0.5
 
 static double median_of_array(double *arr, int count) {
     if (count <= 0) return 0.0;
     if (count == 1) return arr[0];
+    if (count > MAX_SAMPLES) return 0.0;
 
-    double temp[4];
-    for (int i = 0; i < count && i < 4; i++) temp[i] = arr[i];
+    double temp[MAX_SAMPLES];
+    for (int i = 0; i < count; i++) temp[i] = arr[i];
 
     for (int i = 0; i < count - 1; i++) {
         for (int j = i + 1; j < count; j++) {
@@ -85,31 +100,44 @@ static PyObject* fit_cross_section_gaussian_c(PyObject *self, PyObject *args) {
     npy_intp height = PyArray_DIM(data_obj, 0);
     npy_intp width = PyArray_DIM(data_obj, 1);
 
+    // Only float64 is read directly. Anything else returns None, which
+    // makes the Python wrapper fall through to its astropy fitter and
+    // still produce an answer. fit_cross_section_gaussian() already
+    // coerces to contiguous float64 before calling in, so this is a
+    // guard rather than a path taken in practice. The previous code
+    // instead reached back into Python for unrecognised dtypes via
+    // PyArray_PyIntAsInt, which truncated floats to int, leaked both
+    // temporaries, and returned a value with an exception still set --
+    // surfacing to the caller as SystemError on float16/float128/bool.
+    if (PyArray_TYPE(data_obj) != NPY_DOUBLE) {
+        Py_RETURN_NONE;
+    }
+
     int radius_int = (int)search_radius;
-    int max_points = 2 * radius_int + 1;
-    if (max_points > MAX_SAMPLES) max_points = MAX_SAMPLES;
 
     double offsets[MAX_SAMPLES];
     double values[MAX_SAMPLES];
     int n_valid = 0;
 
-    for (int i = -radius_int; i <= radius_int; i++) {
+    for (int i = -radius_int; i <= radius_int && n_valid < MAX_SAMPLES; i++) {
         double x = center_x + i * perp_x;
         double y = center_y + i * perp_y;
         int px = (int)lround(x);
         int py = (int)lround(y);
 
         if (px >= 0 && px < width && py >= 0 && py < height) {
+            double val = *(double*)PyArray_GETPTR2(data_obj, py, px);
+
+            // A non-finite sample makes every residual non-finite, so the
+            // LM loop below never accepts a step and returns its initial
+            // guess unchanged -- indistinguishable from a converged fit
+            // once it clears the isfinite() check at the end. The astropy
+            // fallback gives up and returns None here, so match it.
+            if (!isfinite(val)) {
+                Py_RETURN_NONE;
+            }
+
             offsets[n_valid] = (double)i;
-            void *ptr = PyArray_GETPTR2(data_obj, py, px);
-            double val = 0.0;
-            int type = PyArray_TYPE(data_obj);
-
-            if (type == NPY_DOUBLE) val = *(double*)ptr;
-            else if (type == NPY_FLOAT) val = (double)*(float*)ptr;
-            else if (type == NPY_INT64) val = (double)*(int64_t*)ptr;
-            else val = PyArray_PyIntAsInt(PyObject_GetItem((PyObject*)data_obj, Py_BuildValue("(ii)", py, px)));
-
             values[n_valid] = val;
             n_valid++;
         }
@@ -233,7 +261,7 @@ static PyObject* fit_cross_section_gaussian_c(PyObject *self, PyObject *args) {
     double sig_fit = p[2];
 
     if (!isnan(mu_fit) && !isnan(sig_fit) && !isinf(mu_fit) && !isinf(sig_fit)) {
-        if (sig_fit > 0.0 && sig_fit <= search_radius * 2.0 && fabs(mu_fit) <= search_radius) {
+        if (sig_fit >= MINIMUM_FIT_SIGMA_PX && sig_fit <= search_radius * 2.0 && fabs(mu_fit) <= search_radius) {
             return Py_BuildValue("(dd)", mu_fit, sig_fit);
         }
     }

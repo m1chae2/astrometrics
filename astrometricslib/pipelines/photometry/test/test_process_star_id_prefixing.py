@@ -106,15 +106,8 @@ def test_process_seeded_stars_skip_entries_missing_a_centroid(tmp_path):  # ruff
 def test_process_excludes_seed_stars_with_no_signal_on_the_reference_frame(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """A seed star with no detectable flux on the reference frame is dropped.
 
-    identify_session_stars now defers to the uncapped
-    Processing.Astrometry.maximum_identified_stars, so seed_stars can
-    number in the thousands -- and every accepted one re-enters the
-    per-frame parallel worker's per-star loop for every frame in the
-    session. A star with no signal above background never contributes a
-    usable measurement, so tracking it is pure cost with no benefit; on
-    2026-08-25 this scaled badly enough to exhaust system memory. This
-    only decides whether *this* photometry call gives the star a light
-    curve -- its catalog identity from astrometry is untouched.
+    Tracking a star with no signal is a waste of memory and CPU. This
+    verifies that such stars are ignored during photometry.
     """
     path = tmp_path / "frame.fits"
     _write_single_star_fits(path)

@@ -1,9 +1,9 @@
 """Tests for measuring raw-frame quality before anything is stacked.
 
-Per-frame quality numbers were previously written only during
-registration, so a frame that had never been stacked carried no evidence
-at all -- exactly the frames worth triaging. On the 2026-08-23 catalog
-only 238 of 4,244 frames (5.6%) had any.
+Per-frame quality numbers were previously calculated only during the stacking
+process, meaning we had no quality data for frames that were rejected early.
+These tests verify that we now measure frame quality independently, so we can
+judge how good a frame is before we even try to stack it.
 """
 
 import numpy as np

@@ -50,7 +50,7 @@ class AppConfiguration:
         """
         import os
 
-        env_path = os.getenv("ASTROMETRICS_CONFIG_PATH")
+        env_path = os.getenv("ASTROMETRICS_CONFIG_PATH") or os.getenv("ASTROMETRICS_CONFIG")
         if env_path:
             p = Path(env_path)
             if p.is_file():
@@ -76,22 +76,26 @@ class AppConfiguration:
         # Default to primary astrometrics folder if not found
         return candidates[0]
 
-    def save_configuration(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
-        """Save the current config to the resolved astrometrics.
+    def save_configuration(self) -> None:
+        """Save the current config to the resolved astrometrics config file."""
+        import os
 
-        config file.
-        """
         path = self.config_file_path or self._find_config_file()
+        if os.getenv("ASTROMETRICS_TESTING") == "1" and not (
+            os.getenv("ASTROMETRICS_CONFIG_PATH") or os.getenv("ASTROMETRICS_CONFIG")
+        ):
+            # Guard against writing to repository production config
+            # during testing.
+            return
         with open(path, "w", encoding="utf-8") as configfile:
             self.app_config.write(configfile)
 
-    def _populate_defaults(self):  # ruff: ignore[missing-return-type-private-function]
+    def _populate_defaults(self) -> None:
         """Populate the config with sensible defaults if it's empty."""
         defaults = {
-            "Library": {
-                "path": "libraryIndex",
-                "frames_path": "libraryIndex/frames",
-                "siril_executable": "siril",
+            "Image Library": {
+                "path": "./libraryIndex",
+                "frames_path": "./libraryIndex/frames",
             },
             "Observatory.Telescope": {
                 "hostname": "localhost",
@@ -283,48 +287,22 @@ class AppConfiguration:
         return str(val).lower() == "true"
 
     def get_maximum_identified_stars(self) -> int | None:
-        """Return the ceiling on how many detected stars are identified.
+        """Return the maximum number of stars to identify in an image.
 
-        Defaults to 500, brightest first. The detected sources are real
-        stars, not noise, and discarding them silently loses data --
-        measured on the 2026-08-25 catalog run, NGC 2244's stacked frame
-        detected 7,280 sources of which 5,154 (71%) matched SIMBAD
-        entries within 10 arcsec, and its 5-sigma detection count sits
-        far below the star density expected at its galactic latitude of
-        -2.2 degrees. That observation argued for no limit at all, which
-        was this setting's first default.
+        Defaults to 500. This limits how many detected stars we try to match
+        against a database. Identifying every single star in a dense area
+        takes a lot of time and uses too much memory (RAM), which can crash
+        the computer.
 
-        Unlimited turned out to be the wrong default, though: this same
-        ceiling also bounds `identify_session_stars`'s seed population
-        for photometry (see that function's docstring), and on
-        2026-08-25 NGC 6888 seeded 2,439 stars this way across a
-        166-frame session -- two photometry workers reached ~6GB RSS
-        each, exhausted an 8GB swap, and were OOM-killed by the kernel.
-        500 keeps a comfortable margin over
-        `variability_analyzer.TARGET_ENSEMBLE_SIZE` (100, the
-        normalization ensemble's own target size, itself chosen because
-        60 bright stars measurably beat 201 fainter ones) while capping
-        the worst case a deep field can hand the seeding/identification
-        path. A caller who wants NGC 2244's full completeness back, and
-        has the memory budget for it, can still set this to 0.
-
-        Identification is not free: every star above this ceiling is
-        cross-matched against the catalogs and persisted, so cost grows
-        roughly linearly with the count. This exists so a caller who
-        cares more about runtime (or memory) than completeness can trade
-        one for the other explicitly, rather than the pipeline making
-        that choice for them.
-
-        Unrelated to `star_identifier.MAXIMUM_PLATE_SOLVE_SOURCES`,
-        which bounds what astrometry.net receives and has no bearing on
-        what the pipeline reports.
+        Limiting it to the 500 brightest stars gives us plenty of data for
+        tracking and analysis without overloading the system. A user who
+        has enough memory and wants to find every single star can change
+        this setting to 0 (unlimited).
 
         Returns
         -------
-        maximum : `int` or `None`
-            The maximum number of stars to identify, brightest first, or
-            `None` for no limit. A configured value of 0 (or a negative
-            or unparseable one) means no limit.
+        limit : int or None
+            The maximum number of stars to identify. 0 means unlimited.
         """
         val = self.get_value("Processing.Astrometry", "maximum_identified_stars", fallback="500")
         try:

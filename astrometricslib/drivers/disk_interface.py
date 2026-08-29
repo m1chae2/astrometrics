@@ -572,26 +572,17 @@ def verify_and_upgrade_database(app_config=None) -> None:  # ruff: ignore[missin
 
         # 2. StellarObjects verification
         #
-        # This is a schema migration, not a general integrity scan --
-        # its job is bringing existing rows up to the current
-        # StellarObject serialization format, not catching arbitrary
-        # corruption. It used to run unconditionally on every startup,
-        # fully hydrating and re-serializing every row regardless of
-        # whether anything had actually changed. That was fine at a few
-        # hundred rows; measured against a real 270,450-row catalog on
-        # 2026-08-25 it took ~26 seconds and rewrote 0 rows (every one
-        # already matched the current format), which was long enough to
-        # push backend startup close to the launcher's 60s health-check
-        # timeout and made every restart pay a tax proportional to
-        # total catalog size for no benefit.
+        # This step upgrades the database format for stars when we change how
+        # they are stored.
+        # Checking and rewriting every star in a large database takes a lot
+        # of time and can make the program slow to start. To fix this, we
+        # only run the upgrade if the database version
+        # (STELLAR_OBJECT_DATA_VERSION) is older than the current code expects.
         #
-        # STELLAR_OBJECT_DATA_VERSION gates the whole pass behind
-        # PRAGMA user_version, so a steady-state restart costs one
-        # PRAGMA read instead of an O(row count) rewrite. Increment the
-        # constant whenever StellarObject's persisted JSON shape
-        # changes in a way that requires rewriting existing rows -- that
-        # is what triggers the next full pass, which then advances
-        # user_version so subsequent restarts skip it again.
+        # If you change the StellarObject format, increase
+        # STELLAR_OBJECT_DATA_VERSION so the database knows to update itself
+        # on the next launch. After that, it skips the upgrade again until
+        # the next version change.
         try:
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS stellar_objects (

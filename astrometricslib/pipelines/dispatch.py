@@ -48,11 +48,9 @@ logger = logging.getLogger(__name__)
 # frames increases the amount of work the stacking process has to do.
 #
 # The base time (300s) and per-frame time (30s) act as a safety net
-# to detect if the process is stuck, not as an expected run time. These
-# limits come from tests on different targets (e.g., the 2026-08-24 DSLR
-# survey of NGC 7000). They make sure that slow color processing
-# (~9.5s/frame) can finish without being cut off early, while giving
-# plenty of extra time for fast black-and-white processing (<1s/frame).
+# to detect if the process is stuck, not as an expected run time. They
+# make sure that slow color processing can finish without being cut off
+# early, while giving plenty of extra time for fast black-and-white processing.
 STACKING_TIMEOUT_BASE_SECONDS = 300
 STACKING_TIMEOUT_PER_FRAME_SECONDS = 30
 
@@ -515,15 +513,13 @@ def run_full_pipeline(
         else:
             standard_frames.append(frame)
 
-    # Deliberately no slot acquired here. `siril_interface.siril_process_lock`
-    # takes one around the Siril launch itself, and taking a second from the
-    # same "siril" semaphore here nests them: with two slots and two workers
-    # each takes this outer slot, then both wait forever for an inner slot
-    # neither can release. Observed on 2026-08-24 as two workers parked on
-    # "Waiting for a free Siril slot" with no Siril process running.
+    # We do not lock the Siril process here because the `siril_interface`
+    # already does it during the actual Siril launch. If we lock it here too,
+    # two workers could grab the outer locks and then wait forever for each
+    # other to release the inner locks, causing a deadlock.
     #
-    # The driver is also the better place for it -- it covers every Siril
-    # launch, including the backend service's, not just this batch path.
+    # The driver is the right place for the lock because it protects
+    # every Siril launch, not just the ones started by this batch script.
     if standard_frames and spectral_frames:
         print(
             f"[{target.id}] Target contains mixed frames. Stacking standard and spectral frames separately."

@@ -1,22 +1,8 @@
 r"""Measure how many Siril runs this machine should allow at once.
 
-Stacking dominates a batch run -- 87 of 199 minutes on 2026-08-24, 44%
-of the wall clock -- and it is serialised by a slot limit, so that limit
-sets the floor on how long a run can take. Siril is internally
-multithreaded and took roughly 688% CPU of 12 cores while holding the
-only slot, about 57% utilisation: enough headroom that a second
-concurrent run may finish two targets in less than twice the time, and
-enough contention that it may not.
-
-Which it is depends on the machine, so it is measured rather than
-assumed. The same target is stacked at each candidate slot count and the
-wall clock compared.
-
-Two costs are deliberately surfaced rather than hidden. Peak scratch
-scales with concurrency -- one 167-frame colour target held 69GB -- so
-the disk headroom needed multiplies. And a run that oversubscribes the
-CPU does not merely go slower: on the 2026-08-23 run it pushed stacks
-past their timeout, turning a slow stack into a failed one.
+This tool runs stacking tasks with different concurrency limits to
+help you find the fastest setting for your computer without running
+out of memory or causing tasks to time out.
 
 Usage::
 

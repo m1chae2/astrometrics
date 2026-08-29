@@ -55,21 +55,18 @@ def resolve_spec_frames(target, camera: str, date_prefix: str | None = None):  #
 
     Parameters
     ----------
-    target : `Target`
-        The target whose `frames` should be filtered.
-    camera : `str`
-        The exact camera name a frame's ``camera`` attribute must
-        match.
-    date_prefix : `str`, optional
-        Restricts the selection to frames captured on this date
-        (e.g. ``"2026-05-23"``), by default `None` (no date
-        restriction). Matched as a prefix of `FrameRecord.date`.
+    target : Target
+        The target whose frames should be filtered.
+    camera : str
+        The exact camera name a frame's camera attribute must match.
+    date_prefix : str, optional
+        Restricts the selection to frames captured on this date.
 
     Returns
     -------
-    matching_frames : `list`
-        The subset of `target.frames` with `FilterType.SPEC` matching
-        the given camera and (optional) date criteria.
+    list
+        The subset of target.frames with FilterType.SPEC matching
+        the given criteria.
     """
     from astrometricslib.utilities.enums import FilterType
 

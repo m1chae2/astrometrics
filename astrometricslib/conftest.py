@@ -41,6 +41,7 @@ path = {test_library_path}
 frames_path = {test_frames_path}
 """)
 os.environ["ASTROMETRICS_CONFIG"] = str(test_config_path)
+os.environ["ASTROMETRICS_CONFIG_PATH"] = str(test_config_path)
 
 # Populate synthetic test data for CI/CD environment
 import astropy.io.fits as fits

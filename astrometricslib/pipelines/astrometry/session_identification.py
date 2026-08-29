@@ -23,26 +23,17 @@ logger = logging.getLogger(__name__)
 # to a real catalog identity (SIMBAD or Gaia) before a *reused* header WCS
 # is trusted. Below this, the header solution is discarded and the frame is
 # plate-solved fresh.
-#
-# Derivation: measured across the 12 targets processed in the 2026-08-23
-# full-catalog batch run, comparing each session's header WCS against its
-# target's independently plate-solved stacked-image WCS. Sessions whose
-# header WCS agreed to within the 10 arcsec SIMBAD/Gaia match tolerance
-# used by `StarIdentifier.identify_stars_with_wcs` matched 28.5-42% of
-# detected stars; sessions disagreeing by 33-73 arcsec collapsed to
-# 0-6.2%. The two populations separate cleanly with no observed values
-# between 6.2% and 17%, so 0.10 sits inside that gap with margin on both
-# sides -- high enough to catch every inaccurate-WCS session observed, low
-# enough that a correctly-solved but genuinely sparse field is not
-# re-solved needlessly.
+# We use this number because tests show that a good alignment matches
+# at least ~28% of stars, while a bad alignment matches less than ~6%.
+# Setting the limit to 0.10 (10%) easily separates the good from the bad,
+# ensuring we don't accidentally throw away a correct solution just
+# because the star field is sparse.
 MIN_CATALOG_MATCH_FRACTION_FOR_REUSED_WCS = 0.10
 
 # Below this many identified stars the match fraction is too noisy to judge
 # a WCS by -- a handful of stars can miss every catalog match by chance.
-# Derivation: Alcor, the sparsest real field in the same run, contributed
-# 34 detected stars at an 11.8% match rate; 20 keeps a field that sparse
-# eligible for verification while excluding ones too thin to conclude
-# anything from.
+# The value 20 is small enough to include very sparse star fields, but
+# large enough to give us a reliable percentage.
 MIN_STARS_TO_VERIFY_REUSED_WCS = 20
 
 

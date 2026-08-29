@@ -292,9 +292,8 @@ def run_full_processing(argv: list[str] | None = None) -> None:
     would silently overwrite that target's ASI533MM stack reference
     and quality summaries with the DSLR-camera results (the ASI533MM
     FITS files themselves stay on disk; the target record would simply
-    stop pointing at them). 9 of this catalog's targets have frames
-    from both cameras as of 2026-08-23; excluding them from the second
-    pass keeps their existing ASI533MM results intact.
+    stop pointing at them). Some targets have frames from both cameras;
+    excluding them from the second pass keeps their first-pass results intact.
     """
     arguments = _build_argument_parser().parse_args(argv)
     logging.basicConfig(
@@ -356,11 +355,10 @@ def run_full_processing(argv: list[str] | None = None) -> None:
     # whose files are not currently readable, and this library lives on
     # an external drive. A drive that is slow to mount would silently
     # erase real frame history rather than fail loudly.
-    # Reclaim scratch left by earlier failed or interrupted runs before
-    # this one starts staging its own. A successful stack removes its own
+    # Reclaim scratch space left by earlier failed or interrupted runs before
+    # this one starts staging its own files. A successful stack removes its own
     # work directory, so anything old enough to be swept here belongs to
-    # a run that never got that far -- 142GB across seven targets was
-    # still sitting from the 2026-08-23 run a day later.
+    # a run that crashed or was cancelled.
     from astrometricslib.drivers.siril_interface import purge_stale_work_directories
 
     siril_work_directory = os.path.join(os.path.expanduser("~"), "Siril", "Work")

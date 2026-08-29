@@ -31,48 +31,28 @@ logger = logging.getLogger(__name__)
 
 _active_image_processing_instances: weakref.WeakSet = weakref.WeakSet()
 
-# Serializes Siril across every process on this machine. Siril is
-# internally multithreaded and takes the whole box when it runs (400-650%
-# CPU observed on a 12-core machine), so the batch runner's 3 concurrent
-# target workers each launching their own Siril oversubscribes the CPU
-# badly. That is not merely slower: on the 2026-08-23 DSLR run it pushed
-# stacks past `pipeline_tasks.STACKING_TIMEOUT_SECONDS`, producing real
-# failures ("[Sun] Stacking timed out after 600 seconds. Abandoning this
-# stack.") alongside two 300s `solve-field` timeouts.
-#
-# A file lock rather than a `multiprocessing.Lock`: the batch workers are
-# separate processes created by a pool this module knows nothing about,
-# and `process_target` is also reachable from the backend and from
-# scripts, which share no lock object with each other. A lock file in the
-# system temp directory is the one rendezvous point all of them can find.
-#
-# Only the Siril run itself is serialized -- directory building, frame
-# symlinking, and every non-Siril pipeline stage stay parallel, so the
-# concurrency that is actually helping is preserved.
+# We use a file lock to make sure only one Siril process runs at a time
+# across the whole computer. Siril uses a lot of CPU power, so running
+# multiple at once would overload the machine and cause tasks to time out.
+# We use a file lock in the temporary directory because different parts
+# of the program (like background workers and scripts) need to share it,
+# and they don't share memory.
+# Note: Only Siril itself is locked; other preparation steps still run
+# in parallel to save time.
 SIRIL_PROCESS_LOCK_PATH = os.path.join(tempfile.gettempdir(), "astrometricslib-siril.lock")
 
 
-# Master bias/dark/flat frames are rebuilt from scratch for every target,
-# even though the calibration frames themselves come from a shared library
-# keyed by camera/ISO/exposure/filter -- so the *same* master is re-stacked
-# once per target. Measured on the 2026-08-23 DSLR run: master-building
-# cost 168-474s per target (~295s average) across 35 targets, but those 35
-# targets resolve to only 9 distinct calibration combinations. Caching
-# turns ~172 minutes of master-building into ~44.
-#
-# The cache key is derived from the source frames themselves (resolved
-# path, size, mtime) rather than the camera/ISO/exposure metadata, so a
-# changed, added, or removed calibration frame invalidates the master
-# automatically instead of silently serving a stale one.
+# Master calibration frames (bias, dark, flat) take a long time to build.
+# To save time, we cache them. This turns hours of processing into
+# minutes by reusing masters that have already been built for the same
+# camera settings.
+# The cache checks the actual source files, so if you add or remove a
+# calibration frame, it will automatically rebuild a new master.
 CALIBRATION_MASTER_CACHE_DIRECTORY_NAME = "MasterCache"
 
-# How long an abandoned work directory is kept before a later run sweeps
-# it away. A directory is only ever left behind by a failed stack or by a
-# run that was interrupted before its cleanup ran; a successful stack
-# removes its own. Seven days keeps a failure available for as long as
-# anyone realistically investigates it while stopping cancelled runs from
-# accumulating -- the 2026-08-23 run left 142GB across seven targets that
-# was still sitting there a day later.
+# This decides how long to keep leftover work folders from failed tasks
+# before deleting them. Seven days gives us enough time to investigate
+# errors without filling up the hard drive with junk data over time.
 WORK_DIRECTORY_RETENTION_DAYS = 7
 
 
@@ -81,10 +61,10 @@ def purge_stale_work_directories(
 ) -> tuple[int, int]:
     """Remove work directories left behind by failed or cancelled runs.
 
-    Skips the master cache and anything modified within the retention
-    window, so a directory belonging to a run in progress is never
-    touched. Errors are swallowed per directory: reclaiming disk is
-    never worth failing a run over.
+    This function skips the cache and any folders that were recently modified,
+    so it won't delete data that is currently being used. It also ignores
+    errors if a folder can't be deleted, since freeing up space isn't worth
+    crashing the program.
 
     Parameters
     ----------
@@ -192,17 +172,10 @@ def _calibration_source_fingerprint(frames_directory: str) -> str | None:
     return digest.hexdigest()
 
 
-# Seconds this process has spent blocked waiting for the Siril lock,
-# accumulated across every acquisition since the last reset. A worker
-# process runs one target at a time, so a module-level total is scoped
-# to exactly one target's stacking attempt.
-#
-# The caller enforcing a stacking timeout reads this to extend its
-# deadline: serialising Siril means a target can sit in the queue for
-# minutes, and charging that wait to the target's own stacking budget
-# turns a queue into a cascade of timeouts. On the 2026-08-24 run
-# NGC 1499 was given 600s at 06:27:21 but did not reach Siril until
-# 06:31:51, losing 4.5 of its 10 minutes before any work began.
+# This keeps track of how many seconds this process has spent waiting
+# for the Siril lock. This helps us extend the timeout limit for the
+# stacking process, so targets don't fail just because they had to wait
+# in line for their turn.
 _siril_lock_wait_state_lock = threading.Lock()
 _siril_lock_wait_seconds = 0.0
 
@@ -249,25 +222,14 @@ def siril_process_lock(
 ) -> Iterator[None]:
     """Hold one of a limited number of machine-wide Siril slots.
 
-    Siril is internally multithreaded and takes most of the machine when
-    it runs (400-688% CPU observed on 12 cores), so unbounded concurrent
-    launches oversubscribe the box badly enough to push stacks past
-    their timeout. A limit is therefore necessary -- but the limit is a
-    tuning knob, not a constant.
+    Siril is very demanding on the CPU. If we run too many instances at
+    once, the computer will slow down and tasks will fail. This function
+    limits how many Siril tasks can run concurrently based on the
+    `siril_concurrency` setting in the configuration file.
 
-    How many slots is read from ``[Processing.Parallelism]
-    siril_concurrency``, the setting that already existed for exactly
-    this purpose. An earlier version of this function took a single
-    exclusive lock regardless, which silently overrode that setting and
-    pinned the machine to one Siril at a time: on the 2026-08-24 run
-    stacking was 44% of a 199-minute wall clock at roughly 57% CPU
-    utilisation, so the serialisation itself became the bottleneck.
-
-    Slots are POSIX advisory file locks via
-    `datastore.disk_interface.acquire_resource_slot`, so they bind every
-    process on the machine -- the batch script and the backend service
-    both -- and the kernel releases them even if a holder is killed
-    outright, so a crashed stack cannot wedge every later one.
+    It uses a file lock system so that all different parts of the program
+    respect the same limit, and the lock is automatically released even
+    if the program crashes.
 
     Parameters
     ----------
@@ -326,20 +288,10 @@ def siril_process_lock(
 def _frames_use_color_filter_array(frames_directory: str) -> bool:
     """Report whether a staged frame directory holds color (CFA) data.
 
-    Siril's ``-cfa``/``-equalize_cfa``/``-debayer`` calibration flags are
-    only meaningful for a sensor with a Bayer color filter array. Applied
-    to a monochrome camera they are actively wrong: Siril logs "No Bayer
-    pattern found in the header file", falls back to a *guessed* RGGB
-    pattern, and demosaics anyway -- turning a 2D mono frame into a
-    3-channel RGB one whose pixels are interpolations across neighbours
-    that were never a color mosaic. Observed on a real ZWO ASI 533MM Pro
-    (monochrome) run: every stacked product came out (3, 3008, 3008)
-    instead of (3008, 3008), and intermediates grew ~6x (416MB -> 2.5GB).
-
-    Checks each staged frame with `fits_access.frame_uses_color_filter_array`
-    (``BAYERPAT`` is the authoritative marker, and is read from whichever
-    HDU actually holds a frame's header -- see that function's docstring
-    for why), stopping at the first frame that gives a definitive answer.
+    This checks if the images use a Bayer color filter array. If we
+    tell Siril to process a black-and-white (monochrome) image as a
+    color image, it will guess a color pattern and ruin the data. This
+    function looks at the image headers to prevent that mistake.
 
     Parameters
     ----------
@@ -1621,6 +1573,18 @@ class ImageProcessing:
                 # With relax=on the same frame yields 472.
                 register_commands = ["setfindstar -relax=on"]
 
+                # Field-star population is typically rich enough in
+                # spectral frames too (see below), so FWHM/roundness
+                # selection applies to both frame types -- they're a
+                # proxy for overall seeing/focus quality, not something
+                # specific to standard imaging. Which command carries
+                # them differs by path; see each branch.
+                frame_filter_options = []
+                if filter_wfwhm:
+                    frame_filter_options.append(f"-filter-wfwhm={filter_wfwhm}")
+                if filter_round:
+                    frame_filter_options.append(f"-filter-round={filter_round}")
+
                 if is_spectral:
                     # Multi-frame Stacking
                     # Spectroscopy frames need a shift-only transform: a
@@ -1640,8 +1604,13 @@ class ImageProcessing:
                     # only against standard frames, and the spectral
                     # path's shift-only constraint is the more delicate
                     # of the two to disturb.
+                    #
+                    # Single-pass `register` applies its transforms as
+                    # it goes and offers no separate filtering step, so
+                    # this path's frame filters stay on `stack` below.
                     register_commands.append(f"register {seq} -transf=shift")
                     registered_seq = f"r_{seq}"
+                    stack_filter_options = frame_filter_options
                 else:
                     # Two-pass registration scores every frame before
                     # picking a reference, where single-pass just takes
@@ -1656,20 +1625,30 @@ class ImageProcessing:
                     # -2pass computes the transforms without applying
                     # them, so the registered sequence only exists once
                     # seqapplyreg has run.
-                    register_commands.append(f"seqapplyreg {seq}")
+                    #
+                    # The frame filters ride on seqapplyreg rather than
+                    # on `stack` below. Both commands accept the same
+                    # -filter-* options and select on the same per-frame
+                    # FWHM/roundness that -2pass just measured, so the
+                    # surviving frame set is the same either way -- but
+                    # filtering here means a rejected frame is never
+                    # interpolated and never written to disk at all,
+                    # where filtering at stack time pays for the
+                    # full-resolution resample first and discards the
+                    # result afterwards. On the 238-frame M 106 run
+                    # whose intermediates measured 65GB, a 90% wfwhm
+                    # setting is ~24 frames of resample-and-write
+                    # avoided.
+                    register_commands.append(" ".join([f"seqapplyreg {seq}", *frame_filter_options]))
                     registered_seq = f"r_{seq}"
+                    # Deliberately empty: seqapplyreg already dropped
+                    # those frames, and passing the same filters again
+                    # would filter an already-filtered sequence,
+                    # compounding to 81% of the input for a 90% setting.
+                    stack_filter_options = []
 
-                # Field-star population is typically rich enough in
-                # spectral frames too (see above), so
-                # FWHM/roundness-based selection and weighting apply
-                # to both frame types -- they're a proxy for overall
-                # seeing/focus quality, not something specific to
-                # standard imaging.
                 stack_options = [f"rej {rejection_sigma_low:.4f} {rejection_sigma_high:.4f}"]
-                if filter_wfwhm:
-                    stack_options.append(f"-filter-wfwhm={filter_wfwhm}")
-                if filter_round:
-                    stack_options.append(f"-filter-round={filter_round}")
+                stack_options += stack_filter_options
                 if stack_weight:
                     stack_options.append(f"-weight={stack_weight}")
                 if generate_rejmap:

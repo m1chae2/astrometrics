@@ -58,11 +58,40 @@ class TelescopeStatus(BaseModel):
     guiding_history: list = Field([], alias="guidingHistory")
 
 
+# Maps an INDI property type constant to the name of the per-type
+# callback `IndiClient.updateProperty` should hand it to, and the wrapper
+# class that casts the generic property into the specific one that
+# callback expects. Built once at import time, and empty when PyIndi
+# isn't installed (the stub in pyindi_compatibility carries none of these
+# names), in which case updateProperty simply has nothing to dispatch.
+_INDI_PROPERTY_TYPE_DISPATCH: list[tuple[Any, str, Any]] = [
+    (getattr(PyIndi, type_constant_name, None), callback_name, getattr(PyIndi, wrapper_name, None))
+    for type_constant_name, callback_name, wrapper_name in (
+        ("INDI_NUMBER", "newNumber", "PropertyNumber"),
+        ("INDI_SWITCH", "newSwitch", "PropertySwitch"),
+        ("INDI_TEXT", "newText", "PropertyText"),
+        ("INDI_LIGHT", "newLight", "PropertyLight"),
+    )
+    if getattr(PyIndi, type_constant_name, None) is not None
+    and getattr(PyIndi, wrapper_name, None) is not None
+]
+
+
 class IndiClient(PyIndi.BaseClient):
     """Define properties and methods for an INDI server connection.
 
-    Overrides `PyIndi.BaseClient` callbacks with no-op implementations
-    to avoid a C++ proxy type mismatch (see individual methods).
+    Defines the per-property-type callbacks (`newNumber`, `newSwitch`,
+    `newText`, `newLight`) as no-op hooks for subclasses to override,
+    and dispatches to them from `updateProperty`.
+
+    INDI Core 2.0 removed those four callbacks from `BaseClient` and
+    replaced them with a single `updateProperty`, so on a 2.x client
+    library nothing calls them unless `updateProperty` does. Keeping
+    them as the extension point (rather than making subclasses override
+    `updateProperty` and re-derive the property type themselves) means a
+    subclass reads the same either way, and works on a 1.x client
+    library too, where PyIndi calls them directly and `updateProperty`
+    is never invoked.
     """
 
     def __init__(self):  # ruff: ignore[missing-return-type-special-method]
@@ -72,70 +101,97 @@ class IndiClient(PyIndi.BaseClient):
     def newDevice(self, device):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
         """Handle a new INDI device.
 
-        Overridden to avoid C++ proxy type mismatch.
+        No-op hook; override in a subclass to react to a device
+        appearing on the server.
         """
         pass
 
     def removeDevice(self, device):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
         """Handle a removed INDI device.
 
-        Overridden to avoid C++ proxy type mismatch.
+        No-op hook; override in a subclass to react to a device leaving
+        the server.
         """
         pass
 
     def newProperty(self, property):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-        """Handle a new INDI property.
+        """Handle an INDI property being created.
 
-        Overridden to avoid C++ proxy type mismatch.
+        No-op hook; override in a subclass to react to a property
+        appearing for the first time. Value *changes* to an existing
+        property arrive through `updateProperty` instead.
         """
         pass
 
     def removeProperty(self, property):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
         """Handle a removed INDI property.
 
-        Overridden to avoid C++ proxy type mismatch.
+        No-op hook; override in a subclass to react to a property being
+        withdrawn.
         """
         pass
 
     def updateProperty(self, property):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-        """Handle an updated INDI property.
+        """Route an updated INDI property to its per-type callback.
 
-        Overridden to avoid C++ proxy type mismatch.
+        Casts the generic property into the specific type its callback
+        expects and calls that callback, so a subclass can override
+        `newNumber` (or the switch/text/light equivalents) and have it
+        fire on a 2.x client library. This is the compatibility
+        dispatcher the pyindi-client migration guide describes.
+
+        Parameters
+        ----------
+        property : `PyIndi.Property`
+            The property whose value the server just changed.
         """
-        pass
+        property_type = property.getType()
+        for dispatch_type, callback_name, wrapper_class in _INDI_PROPERTY_TYPE_DISPATCH:
+            if property_type == dispatch_type:
+                getattr(self, callback_name)(wrapper_class(property))
+                return
 
     def newMessage(self, device, id):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
         """Handle a new INDI message.
 
-        Overridden to avoid C++ proxy type mismatch.
+        No-op hook; override in a subclass to react to a device's log
+        messages.
         """
         pass
 
     def newLight(self, property):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-        """Handle a new INDI light property.
+        """Handle an updated INDI light property.
 
-        Overridden to avoid C++ proxy type mismatch.
+        No-op hook; override in a subclass. Reached via
+        `updateProperty` on a 2.x client library, and called directly by
+        PyIndi on a 1.x one.
         """
         pass
 
     def newNumber(self, property):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-        """Handle a new INDI number property.
+        """Handle an updated INDI number property.
 
-        Overridden to avoid C++ proxy type mismatch.
+        No-op hook; override in a subclass. Reached via
+        `updateProperty` on a 2.x client library, and called directly by
+        PyIndi on a 1.x one.
         """
         pass
 
     def newSwitch(self, property):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-        """Handle a new INDI switch property.
+        """Handle an updated INDI switch property.
 
-        Overridden to avoid C++ proxy type mismatch.
+        No-op hook; override in a subclass. Reached via
+        `updateProperty` on a 2.x client library, and called directly by
+        PyIndi on a 1.x one.
         """
         pass
 
     def newText(self, property):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-        """Handle a new INDI text property.
+        """Handle an updated INDI text property.
 
-        Overridden to avoid C++ proxy type mismatch.
+        No-op hook; override in a subclass. Reached via
+        `updateProperty` on a 2.x client library, and called directly by
+        PyIndi on a 1.x one.
         """
         pass
 

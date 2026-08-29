@@ -1,13 +1,8 @@
 """Tests for surviving a wrong pixel-scale hint during plate solving.
 
-Scale hints come from FOCALLEN/XPIXSZ, and a wrong focal length makes
-the hinted window exclude the truth, at which point no amount of good
-data can solve the field. Measured on 2026-08-24: the DSLR's "Nikkor
-300mm" frames actually resolve at ~404mm, so the computed 2.68
-arcsec/px window of 2.03-3.37 excluded M 31's real 1.996 arcsec/px.
-Same image, same solver -- constrained did not solve, blind solved in
-seconds. Four DSLR targets were lost that way in one run, each with a
-perfectly good stack already on disk.
+If the focal length in the image metadata is incorrect, the constrained
+solve will fail. This tests that we successfully fall back to a blind
+solve without scale hints.
 """
 
 import numpy as np

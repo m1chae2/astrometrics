@@ -1,12 +1,9 @@
-"""Tests for the two headline quality metrics that had no producer.
+"""Tests for the two headline quality metrics.
 
-`astrometric_residual_rms_arcsec` and `light_curve_scatter_rms_mag` were
-declared on their metric models but never assigned anywhere in the
-codebase, so both came back `None` on all 28 solved targets of the
-2026-08-24 run. They are the primary quality numbers for their
-respective pipelines: without them a solve reports only that it
-succeeded, and a variability search reports candidates without the
-noise floor those candidates were picked out against.
+Verifies that `astrometric_residual_rms_arcsec` and
+`light_curve_scatter_rms_mag` are correctly calculated and assigned.
+These metrics are essential for reporting the quality of the
+astrometry solve and the photometry light curves.
 """
 
 import math

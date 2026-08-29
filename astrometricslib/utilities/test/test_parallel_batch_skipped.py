@@ -1,8 +1,8 @@
 """Tests for the "skipped" outcome in the parallel batch engine.
 
-A full-catalog run on 2026-08-23 reported "40 succeeded" when only 12
-targets actually had frames for the requested camera; the other 28 were
-no-ops counted as successes. Skips are now tracked separately.
+Previously, targets that were skipped because they had no valid frames
+were counted as successes. This made it look like more work was done
+than actually was. Skips are now tracked separately.
 """
 
 from astrometricslib.utilities import parallel_batch

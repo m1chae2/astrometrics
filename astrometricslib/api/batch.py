@@ -46,11 +46,9 @@ def _process_single_target_worker(
             result["error"] = "Target not found in catalog"
             return result
 
-        # Reported separately from "success" so a run's headline numbers
-        # describe work actually done. A full-catalog run on 2026-08-23
-        # reported "40 succeeded" when only 12 targets had frames for the
-        # requested camera; the other 28 were no-ops indistinguishable
-        # from real successes.
+        # We report "skipped" instead of "success" when there is no work to do.
+        # This makes sure the success count only includes targets that were
+        # actually processed, rather than targets that were just ignored.
         if not select_frames_for_camera(target, camera_name):
             result["status"] = "skipped"
             result["error"] = f"No frames matching camera '{camera_name}'"

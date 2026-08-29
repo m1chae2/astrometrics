@@ -48,6 +48,11 @@ jobs:
           PYTHONPATH: .
           ASTROMETRICS_TESTING: "1"
           ASTROMETRICS_FAST_TEST: "1"
+          # setup_venv.sh treats a failed _extractor_c.c compile as a
+          # non-fatal warning (some dev machines lack a C toolchain), so
+          # without this a broken build would just silently skip
+          # test_extractor_c_equivalence.py instead of failing CI.
+          ASTROMETRICS_REQUIRE_C_EXTENSION: "1"
         run: |
           COVERAGE=1 ./build/linux/run_tests.sh astrometricslib
 

@@ -1,11 +1,9 @@
 """Tests for frame-geometry filtering and work-directory housekeeping.
 
-Both behaviours come from the 2026-08-24 batch run. Siril refuses to
-build a sequence from frames of differing geometry and fails the whole
-conversion rather than the offending frame, so Sun lost all 450 frames
-to 4 strays and M 27 all 126 to 45. Separately, failed runs kept their
-entire work directory for diagnosis -- 65GB for M 106, of which the
-artifacts anyone actually reads came to about 1MB.
+These tests ensure that we filter out frames with the wrong dimensions before
+sending them to Siril, because Siril will fail the entire batch if even one
+frame is the wrong size. They also verify that we clean up large temporary
+files from failed runs to save disk space.
 """
 
 import os

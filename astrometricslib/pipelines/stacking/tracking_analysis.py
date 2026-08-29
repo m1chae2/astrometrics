@@ -96,18 +96,13 @@ MINIMUM_SESSION_FRAMES = 5
 # still produces a stackable sequence; a value that large means the
 # registration transform for that frame is not a small translation.
 #
-# On the 2026-08-24 catalog 670 of 1,666 registered frames (40%) carried
-# such values, exclusively on the colour DSLR targets, clustering at
-# dx~6023/dy~3947 -- essentially the 6000x4000 frame size. NGC 7023 was
-# the worst at 456 of 535, yet stacked all 535 frames with its FWHM
-# *improving* from 8.15px to 5.68px, so the alignment Siril actually
-# applied was sound and only the recorded numbers are wrong.
+# Sometimes the registration program writes very large, incorrect shift
+# numbers (like the size of the whole image) into the log file, especially
+# for color images, even though the actual image alignment works perfectly.
 #
-# The cause is unconfirmed: `parse_registration_data`'s docstring assumes
-# "only one registration layer is ever present per file", which holds for
-# mono but not for a 3-channel colour sequence where Siril writes R0/R1/R2.
-# Verify against a real colour .seq before trusting these values; until
-# then they are excluded so they cannot masquerade as tracking faults.
+# Because we know these huge numbers are just a logging glitch and not
+# real telescope movement, we exclude them here so they don't get wrongly
+# flagged as tracking errors.
 IMPLAUSIBLE_REGISTRATION_SHIFT_PX = 1000.0
 
 # Above this, a frame's stars are elongated enough that the frame looks

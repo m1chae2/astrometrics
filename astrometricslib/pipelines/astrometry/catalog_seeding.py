@@ -38,12 +38,12 @@ DEFAULT_FIELD_RADIUS_DEGREES = 0.8
 # opportunistically cached one hold the same population.
 DEFAULT_MAGNITUDE_LIMIT = 18.0
 
-# Two pointings closer together than half the field radius overlap so
-# heavily that a second download would return mostly rows already
-# stored. Deduplicating at 0.4 degrees collapsed the 2026-08-24
-# catalog's per-frame pointings (which drift by a few arcmin between
-# sessions on the same object) without merging genuinely distinct
-# fields.
+# Two image centers that are very close to each other will look at mostly
+# the same stars. If they are closer than half the field radius, we treat
+# them as the same location to avoid downloading the same data twice.
+# This successfully combines separate sessions of the same target (where
+# the telescope pointing drifts slightly) without accidentally merging
+# two different targets.
 DEFAULT_DEDUPLICATION_SEPARATION_DEGREES = DEFAULT_FIELD_RADIUS_DEGREES / 2
 
 # Serial pacing is the whole point of this module -- see the module

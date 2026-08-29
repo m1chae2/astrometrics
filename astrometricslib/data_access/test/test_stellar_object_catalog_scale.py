@@ -1,25 +1,17 @@
 """Purpose: Regression tests for stellar-object catalog performance at scale.
 
-Description: Covers problems that only showed up once a real catalog grew
-to 270,450 stellar objects on 2026-08-25, after an earlier fix removed the
-100-star identification cap:
+Description: Covers performance issues that appear when the catalog grows
+to hundreds of thousands of stellar objects:
 
-1. verify_and_upgrade_database's stellar_objects pass used to fully
-   hydrate, re-serialize, and rewrite every row on every single call --
-   including every Astrometrics() construction, not just backend
-   startup -- regardless of whether anything had changed. Measured
-   against the real catalog it took ~26 seconds and rewrote 0 rows.
-   It now gates the whole pass behind PRAGMA user_version so a
-   steady-state call costs one PRAGMA read.
+1. Database upgrades: Instead of rewriting every star in the database
+   every time the program starts (which takes a long time), the code now
+   checks the database version first and skips the rewrite if it's already
+   up to date.
 
-2. The astronomy-list view (polled on an interval, needing only id/
-   name/targetIds/hasSpectra/hasPhotometry per star) used to be served
-   by fully hydrating a StellarObject -- nested light curve, spectra
-   history, everything -- for every row, then discarding most of it.
-   StellarCatalog.list_object_summaries now reads has_spectra/
-   has_photometry as real, indexed-alongside-data_json columns via
-   Butler.list_projected, which never touches data_json at all for
-   this use case: ~0.6s against the real catalog, versus 7-25s before.
+2. Catalog summaries: Instead of loading all the heavy data (like light
+   curves and spectra) for every single star just to show a simple list,
+   the code now reads only the specific summary columns it needs directly
+   from the database. This is much faster.
 """
 
 import json

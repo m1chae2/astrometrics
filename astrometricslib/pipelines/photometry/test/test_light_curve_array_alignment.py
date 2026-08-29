@@ -63,11 +63,11 @@ _UNUSABLE_FRAME_START = 30
 
 
 def _build_stars_with_unusable_tail(timestamps: list):  # ruff: ignore[missing-return-type-private-function]
-    """Build stars measured on only the first frames of the run.
+    """Build stars measured on only the first frames of the sequence.
 
     Returns
     -------
-    stars : `list` [`StellarObject`]
+    list
         Stars whose trailing frames carry zero flux.
     """
     stars = []
@@ -152,8 +152,8 @@ def test_a_pre_existing_length_mismatch_is_not_silently_reindexed():  # ruff: ig
 def test_the_surviving_saturation_flag_belongs_to_its_own_frame():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verify filtering preserves which frame each flag describes.
 
-    Equal lengths alone would not catch a shift, so this checks the flag
-    still travels with the frame it was measured on.
+    Checks that the saturation flag stays with the correct frame after
+    alignment.
     """
     timestamps = [datetime(2026, 7, 20, 22, 0) + timedelta(minutes=5 * i) for i in range(_FRAME_COUNT)]
     stars = [_build_star(f"Star_{i}", [1000.0 + i] * _FRAME_COUNT, timestamps) for i in range(40)]

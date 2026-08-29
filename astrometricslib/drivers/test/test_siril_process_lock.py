@@ -1,9 +1,7 @@
 """Tests for the machine-wide Siril serialization lock.
 
-Siril takes the whole CPU when it runs, so the batch runner's concurrent
-target workers each launching their own Siril oversubscribed the machine
-badly enough to push stacks past their timeout on the 2026-08-23 run
-("[Sun] Stacking timed out after 600 seconds").
+Siril takes the whole CPU when it runs, so this tests that we
+limit the number of Siril tasks running at once to prevent timeouts.
 """
 
 import multiprocessing
@@ -146,16 +144,8 @@ def _acquire_via_driver(result_queue, barrier, slot_count: int) -> None:  # ruff
 def test_the_stacking_path_takes_exactly_one_slot():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Two workers must both stack when two slots are configured.
 
-    This is the invariant that the 2026-08-24 deadlock broke. Stacking
-    acquired a "siril" slot in `pipeline_tasks.stack_frames` and again in
-    this driver around the Siril launch, from the same semaphore. With
-    two slots and two workers each took the outer slot, then both waited
-    forever for an inner slot neither could release -- two workers parked
-    on "Waiting for a free Siril slot" with no Siril process running.
-
-    The fix was removing the outer acquisition, leaving the driver as the
-    single place a slot is taken. If a second acquisition is ever
-    reintroduced anywhere in the stacking path, this hangs.
+    This ensures that stacking only takes a single slot per worker.
+    If multiple slots are taken by accident, it will cause a deadlock.
     """
     context = multiprocessing.get_context("spawn")
     result_queue = context.Queue()

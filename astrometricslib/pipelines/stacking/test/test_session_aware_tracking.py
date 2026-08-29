@@ -1,16 +1,9 @@
 """Tests for analysing mount tracking one observing session at a time.
 
-Concatenating a target's frames across nights reported the re-pointing
-between them as tracking error. On the 2026-08-24 catalog NGC 7023's 535
-frames span 9 separate nights and produced a "span" of 8,094 hours with
-a 9,779 px excursion -- 1.6x the sensor width -- while M 51's three
-nights over 15 months reported 10,962 hours.
-
-A second defect surfaced in the same data: 670 of 1,666 registered
-frames (40%) carried shifts of order the frame size itself, clustering
-at dx~6023/dy~3947 on 6000x4000 colour frames. NGC 7023 was worst at 456
-of 535, yet stacked all 535 with its FWHM improving 8.15px -> 5.68px, so
-the alignment applied was sound and only the recorded numbers are wrong.
+Tracking error should only be measured across a single continuous
+observing session. If we measure across different nights, the
+telescope pointing changes and it looks like a massive tracking error.
+This test ensures we analyze sessions individually.
 """
 
 from astrometricslib.pipelines.stacking import tracking_analysis as tracking

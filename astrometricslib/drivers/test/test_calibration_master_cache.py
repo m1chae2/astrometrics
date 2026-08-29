@@ -1,9 +1,7 @@
 """Tests for reuse of master bias/dark/flat calibration frames.
 
-Master frames were rebuilt from scratch for every target even though the
-source calibration frames come from a shared library, so the same master
-was re-stacked once per target: 168-474s each across 35 targets on the
-2026-08-23 DSLR run, for only 9 distinct calibration combinations.
+Master frames take a long time to build. This ensures we reuse
+them across targets when the camera settings match, saving time.
 """
 
 import os

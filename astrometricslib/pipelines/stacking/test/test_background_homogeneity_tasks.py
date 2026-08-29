@@ -14,10 +14,9 @@ from astrometricslib.pipelines.stacking.background_homogeneity import (
 
 
 def test_detect_background_split_flags_a_real_cloud_event_pattern():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verifies a pattern modeled on the real NGC 2403 cloud event is detected.
+    """Verifies a sudden background change (like clouds) is detected.
 
-    15 frames at ~240-488 ADU, then 55 frames at ~2150-2360 ADU -- the real
-    magnitude/shape of the NGC 2403 (2026-02-22) background step-change.
+    Simulates a step-change in background brightness to test the detector.
     """
     low_group = [240, 484, 484, 480, 484, 488, 480, 480, 480, 476, 476, 472, 472, 468, 468]
     high_group = [2360, 2356, 2344, 2300, 2292, 2292, 2280, 2272, 2264, 2248, 2244, 2236, 2228] * 4 + [
@@ -67,11 +66,10 @@ class _Frame:
 
 
 def test_a_lone_washed_out_frame_is_excluded_not_stacked():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify the real M 42 pattern keeps the 22 good frames.
+    """Verify a lone washed-out frame is excluded.
 
-    22 frames at ~236 ADU and a single frame at ~2324 -- the split that
-    cost M 42 its whole stack on 2026-08-25 when the outlier became the
-    registration reference and no stars could be found in it.
+    Simulates a mostly good session with one bad frame to ensure the
+    bad frame is dropped and the rest are kept.
     """
     frames = [_Frame(f"good_{i}.fits", 236 + i) for i in range(22)]
     outlier = _Frame("washed_out.fits", 2324.0)

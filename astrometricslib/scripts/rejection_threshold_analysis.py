@@ -34,31 +34,20 @@ def resolve_target_frames(  # ruff: ignore[missing-return-type-undocumented-publ
 
     Parameters
     ----------
-    target : `Target`
-        The target whose `frames` should be filtered.
-    camera : `str`
-        The exact camera name a frame's ``camera`` attribute must
-        match.
-    filter_type_names : `tuple` of `str`
-        Names of `FilterType` enum members (e.g. ``("L", "NONE")``)
-        a frame's ``filter`` attribute must be one of.
-    date_prefix : `str`, optional
-        Restricts the selection to frames captured on this date
-        (e.g. ``"2026-05-23"``), by default `None` (no date
-        restriction). Matched as a prefix of `FrameRecord.date`, a
-        ``"YYYY-MM-DD HH:MM:SS"`` capture timestamp string.
+    target : Target
+        The target whose frames should be filtered.
+    camera : str
+        The exact camera name a frame's camera attribute must match.
+    filter_type_names : tuple of str
+        Names of FilterType enum members a frame's filter must match.
+    date_prefix : str, optional
+        Restricts the selection to frames captured on this date.
+        Matched as a prefix of FrameRecord.date.
 
     Returns
     -------
-    matching_frames : `list`
-        The subset of `target.frames` matching all of the above
-        criteria.
-
-    Notes
-    -----
-    Mirrors the frame-selection logic in target_stacking.py so this
-    analysis sweeps the same frame set that the production stacking
-    demo would use.
+    list
+        The subset of target.frames matching the criteria.
     """
     from astrometricslib.utilities.enums import FilterType
 

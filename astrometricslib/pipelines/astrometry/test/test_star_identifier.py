@@ -279,10 +279,9 @@ def test_query_gaia_region_pins_dr3_table_name(tmp_path, monkeypatch):  # ruff: 
 class TestGaiaCircuitBreaker:
     """Unit tests for the Gaia remote-query circuit breaker.
 
-    When ESA's Gaia TAP service is unresponsive every call burns its
-    full timeout before failing, so the breaker stops attempting remote
-    queries after a run of consecutive failures. Local cache reads and
-    SIMBAD identification must stay unaffected.
+    If the remote Gaia database is unresponsive, we stop trying after
+    a few consecutive failures to save time. This should not affect
+    local cache lookups.
     """
 
     def setup_method(self):  # ruff: ignore[missing-return-type-undocumented-public-function]

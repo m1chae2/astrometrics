@@ -53,7 +53,7 @@ def test_recovers_a_known_periodic_error_period():  # ruff: ignore[missing-retur
     """An 8-minute sinusoid must be reported as an ~8-minute period."""
     values = [3.0 * math.sin(2 * math.pi * t / 480.0) for t in SAMPLE_TIMES]
 
-    period, power = _dominant_period_seconds(SAMPLE_TIMES, values)
+    period, power, _fap = _dominant_period_seconds(SAMPLE_TIMES, values)
 
     assert period == pytest.approx(480.0, abs=20.0)
     assert power > 0.5
@@ -69,7 +69,7 @@ def test_periodic_error_survives_superimposed_drift():  # ruff: ignore[missing-r
     """
     values = [3.0 * math.sin(2 * math.pi * t / 480.0) + 0.02 * t for t in SAMPLE_TIMES]
 
-    period, power = _dominant_period_seconds(SAMPLE_TIMES, values)
+    period, power, _fap = _dominant_period_seconds(SAMPLE_TIMES, values)
 
     assert period == pytest.approx(480.0, abs=20.0)
     assert power > 0.5
@@ -79,7 +79,7 @@ def test_pure_drift_is_not_reported_as_periodic_error():  # ruff: ignore[missing
     """A straight ramp has no period and must not claim one."""
     values = [0.01 * t for t in SAMPLE_TIMES]
 
-    _period, power = _dominant_period_seconds(SAMPLE_TIMES, values)
+    _period, power, _fap = _dominant_period_seconds(SAMPLE_TIMES, values)
 
     assert power < 0.25
 
@@ -89,7 +89,7 @@ def test_noise_is_not_reported_as_periodic_error():  # ruff: ignore[missing-retu
     random.seed(7)
     values = [random.gauss(0, 1) for _ in SAMPLE_TIMES]
 
-    _period, power = _dominant_period_seconds(SAMPLE_TIMES, values)
+    _period, power, _fap = _dominant_period_seconds(SAMPLE_TIMES, values)
 
     assert power < 0.25
 
@@ -273,6 +273,6 @@ def test_a_weak_period_no_longer_clears_the_reporting_bar():  # ruff: ignore[mis
     times = [index * 30.0 for index in range(80)]
     random.seed(11)
     values = [1.0 * math.sin(2 * math.pi * t / 480.0) + random.gauss(0, 1.4) for t in times]
-    _period, power = _dominant_period_seconds(times, values)
+    _period, power, _fap = _dominant_period_seconds(times, values)
 
     assert power < 0.5

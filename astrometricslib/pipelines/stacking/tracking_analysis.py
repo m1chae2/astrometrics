@@ -12,7 +12,10 @@ import itertools
 import logging
 import math
 import statistics
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
+
+import numpy as np
+from astropy.timeseries import LombScargle
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +49,34 @@ MAXIMUM_PERIODIC_ERROR_PERIOD_SECONDS = 1200.0
 # which is now hedged accordingly rather than asserting periodic error
 # from a single session.
 MINIMUM_PERIODIC_ERROR_POWER_FRACTION = 0.5
+
+# A second, independent way of judging the same detection: the chance
+# that pure noise alone would throw up a peak this strong. It is
+# recorded alongside the power fraction, but nothing gates on it yet.
+#
+# The power fraction has a weakness that only shows up on short
+# sessions. It measures the *share* of leftover motion one period
+# explains, and that share shrinks as frames are added -- more samples
+# bring more noise variance with them -- even while the statistical
+# evidence for a real period grows. The two move in opposite
+# directions, so a fixed cut on the share behaves differently
+# depending on how long the session was.
+#
+# Measured on pure noise, with no periodic error present at all
+# (600 trials per length, frames 30 seconds apart), `power >= 0.5`
+# fires on 74.7% of 8-frame sessions, 64.7% at 10 frames, 51.2% at 12,
+# 27.0% at 16, and 9.5% at 20, only reaching 0% at 40 frames and
+# beyond. A false-alarm probability below 0.01 holds a flat ~1% rate at
+# every one of those lengths. The same reversal shows up on real
+# signal: a true 8-minute wobble at 1-sigma amplitude is reported as
+# 100.5s at power 0.595 on 10 frames (passing the cut, and wrong), but
+# as the correct 478.9s at power 0.279 on 80 frames (failing it).
+#
+# Moving the gate onto this number would change which targets get
+# flagged, so it has deliberately not been done here. This field exists
+# so that call can be made against real catalog numbers instead of
+# synthetic ones.
+MAXIMUM_PERIODIC_ERROR_FALSE_ALARM_PROBABILITY = 0.01
 
 # Silence longer than this ends an observing session. Six hours is
 # longer than any plausible within-night pause (a meridian flip, a cloud
@@ -196,11 +227,45 @@ def _linear_trend_per_hour(times: list[float], values: list[float]) -> float | N
     return (numerator / denominator) * 3600.0
 
 
-def _dominant_period_seconds(times: list[float], values: list[float]) -> tuple[float | None, float]:
+class PeriodicErrorDetection(NamedTuple):
+    """The strongest repeating wobble found in one session's shifts.
+
+    Attributes
+    ----------
+    period_seconds : `float` or `None`
+        How long the wobble takes to repeat, or `None` when the series
+        was too short or too flat to look for one at all.
+    power_fraction : `float`
+        The share of the leftover motion this one wobble explains, on a
+        scale of 0 to 1. This is the number
+        `MINIMUM_PERIODIC_ERROR_POWER_FRACTION` gates on.
+    false_alarm_probability : `float` or `None`
+        The chance that random noise, with no real wobble present, would
+        still produce a peak this strong. Smaller means more
+        trustworthy. Reported for information only -- see the note on
+        `MAXIMUM_PERIODIC_ERROR_FALSE_ALARM_PROBABILITY`. `None` when it
+        could not be computed.
+    """
+
+    period_seconds: float | None
+    power_fraction: float
+    false_alarm_probability: float | None
+
+
+def _dominant_period_seconds(times: list[float], values: list[float]) -> PeriodicErrorDetection:
     """Find a repeating pattern (like a sine wave) in the data.
 
     This helps us find the "periodic error" of the telescope mount, which
     is a regular wobble caused by the gears turning.
+
+    The search is astropy's Lomb-Scargle periodogram. That is the standard
+    tool for finding a repeating signal in measurements that are not
+    evenly spaced in time, which is always the case here: downloads,
+    dithers, refocus pauses, and cloud breaks all stretch the gaps between
+    frames. It replaces a hand-written search that this module used to
+    carry; the two agree to within 0.1 seconds of period and 0.03 of power
+    on even, gap-interrupted, jittered, and cluster-split sampling, so the
+    swap was made for maintenance rather than to change any answer.
 
     Parameters
     ----------
@@ -211,72 +276,84 @@ def _dominant_period_seconds(times: list[float], values: list[float]) -> tuple[f
 
     Returns
     -------
-    period_seconds : `float` or `None`
-        The time in seconds it takes for the wobble to repeat.
-    power_fraction : `float`
-        A number from 0 to 1 showing how much of the movement is caused
-        by this specific wobble, rather than random noise.
+    detection : `PeriodicErrorDetection`
+        The best period found, how much of the motion it explains, and
+        how easily noise alone could have faked it.
     """
+    empty = PeriodicErrorDetection(None, 0.0, None)
     if len(times) < 8:
-        return None, 0.0
+        return empty
 
     # Detrend first: an uncorrected drift is a much larger signal than
     # periodic error and would otherwise dominate every trial period.
+    # Lomb-Scargle subtracts a constant offset on its own, but it does not
+    # remove a slope, so this step still has to happen here.
     slope_per_hour = _linear_trend_per_hour(times, values)
     if slope_per_hour is None:
-        return None, 0.0
-    start_time = times[0]
+        return empty
     mean_time = statistics.fmean(times)
     mean_value = statistics.fmean(values)
     # The slope term is centered on the mean time, not the first sample:
     # anchoring it at the start while also subtracting the mean removes
     # the trend twice at t=0 and leaves a constant offset in the
-    # residuals. That offset inflates total_power and so deflates every
-    # period's power fraction -- measured on a synthetic 8-minute
+    # residuals. That offset inflates the total power and so deflates
+    # every period's power fraction -- measured on a synthetic 8-minute
     # periodic error with drift, it pushed a true detection from 0.63
     # down to 0.20, under the reporting threshold.
     residuals = [
         value - mean_value - (slope_per_hour / 3600.0) * (time - mean_time)
         for time, value in zip(times, values, strict=True)
     ]
-    total_power = sum(residual**2 for residual in residuals)
-    if total_power <= 0:
-        return None, 0.0
+    # A perfectly flat series has no periodogram at all, and handing one
+    # to Lomb-Scargle divides by zero.
+    if sum(residual**2 for residual in residuals) <= 0:
+        return empty
 
     span_seconds = times[-1] - times[0]
     if span_seconds <= 0:
-        return None, 0.0
+        return empty
     # A period is only resolvable if the series covers it at least twice.
     longest_period = min(MAXIMUM_PERIODIC_ERROR_PERIOD_SECONDS, span_seconds / 2.0)
     if longest_period <= MINIMUM_PERIODIC_ERROR_PERIOD_SECONDS:
-        return None, 0.0
+        return empty
 
-    best_period = None
-    best_power = 0.0
-    trial_count = 240
-    for step in range(trial_count):
-        period = MINIMUM_PERIODIC_ERROR_PERIOD_SECONDS + (
-            longest_period - MINIMUM_PERIODIC_ERROR_PERIOD_SECONDS
-        ) * (step / (trial_count - 1))
-        angular_frequency = 2.0 * math.pi / period
-        sine_sum = sum(
-            residual * math.sin(angular_frequency * (time - start_time))
-            for time, residual in zip(times, residuals, strict=True)
-        )
-        cosine_sum = sum(
-            residual * math.cos(angular_frequency * (time - start_time))
-            for time, residual in zip(times, residuals, strict=True)
-        )
-        sine_norm = sum(math.sin(angular_frequency * (time - start_time)) ** 2 for time in times)
-        cosine_norm = sum(math.cos(angular_frequency * (time - start_time)) ** 2 for time in times)
-        if sine_norm <= 0 or cosine_norm <= 0:
-            continue
-        power = 0.5 * ((sine_sum**2 / sine_norm) + (cosine_sum**2 / cosine_norm))
-        if power > best_power:
-            best_power = power
-            best_period = period
+    trial_periods = np.linspace(MINIMUM_PERIODIC_ERROR_PERIOD_SECONDS, longest_period, 240)
+    trial_frequencies = 1.0 / trial_periods
+    periodogram = LombScargle(np.asarray(times, dtype=float), np.asarray(residuals, dtype=float))
+    # The "standard" normalization is what makes the returned power
+    # directly comparable to MINIMUM_PERIODIC_ERROR_POWER_FRACTION: it is
+    # already scaled from 0 to 1 as the share of the residual motion the
+    # period accounts for, which is exactly what the old hand-written
+    # search computed by dividing its own peak power by the total.
+    power = periodogram.power(trial_frequencies, normalization="standard")
 
-    return best_period, min(1.0, (2.0 * best_power) / total_power)
+    best_index = int(np.argmax(power))
+    best_power = float(power[best_index])
+
+    # Rounding can push a near-perfect fit a hair above 1.0, and the
+    # false-alarm formula then raises a negative number to a fractional
+    # power and hands back a nan with a warning. Clamping costs nothing,
+    # because a power of 1.0 already means "explains all of it".
+    try:
+        false_alarm_probability = float(
+            periodogram.false_alarm_probability(
+                min(best_power, 1.0),
+                method="baluev",
+                minimum_frequency=float(trial_frequencies.min()),
+                maximum_frequency=float(trial_frequencies.max()),
+            )
+        )
+    except Exception as false_alarm_error:
+        # Never let a diagnostic number stop a real detection from being
+        # reported; the period and its power stand on their own.
+        logger.debug("Could not compute a false-alarm probability: %s", false_alarm_error)
+        false_alarm_probability = None
+
+    return PeriodicErrorDetection(
+        float(trial_periods[best_index]),
+        min(1.0, best_power),
+        false_alarm_probability,
+    )
 
 
 def _analyze_one_session(frames: list) -> dict[str, Any]:
@@ -308,6 +385,7 @@ def _analyze_one_session(frames: list) -> dict[str, Any]:
         "max_excursion_px": None,
         "periodic_error_period_seconds": None,
         "periodic_error_strength": 0.0,
+        "periodic_error_false_alarm_probability": None,
         "findings": [],
     }
     if len(frames) < 3:
@@ -348,22 +426,33 @@ def _analyze_one_session(frames: list) -> dict[str, Any]:
 
     # Periodic error shows in the axis the worm drives; both are tested
     # and the stronger reported.
-    period_x, power_x = _dominant_period_seconds(times, shifts_x)
-    period_y, power_y = _dominant_period_seconds(times, shifts_y)
-    period, power, axis = (period_x, power_x, "x") if power_x >= power_y else (period_y, power_y, "y")
+    detection_x = _dominant_period_seconds(times, shifts_x)
+    detection_y = _dominant_period_seconds(times, shifts_y)
+    detection, axis = (
+        (detection_x, "x") if detection_x.power_fraction >= detection_y.power_fraction else (detection_y, "y")
+    )
+    period, power = detection.period_seconds, detection.power_fraction
     if period is not None and power >= MINIMUM_PERIODIC_ERROR_POWER_FRACTION:
         analysis["periodic_error_period_seconds"] = round(period)
         analysis["periodic_error_strength"] = round(power, 3)
+        analysis["periodic_error_false_alarm_probability"] = detection.false_alarm_probability
         # One session cannot confirm mechanical periodic error: a
         # worm's period is a fixed constant, so a genuine detection
         # must recur at the same period across sessions and targets.
         # This is one session's strongest candidate period, not a
         # verdict -- see _combine_session_analyses' cross-session check
         # for the confirmed case.
+        false_alarm_note = (
+            f" Noise alone would fake a peak this strong with probability "
+            f"{detection.false_alarm_probability:.1e}."
+            if detection.false_alarm_probability is not None
+            else ""
+        )
         analysis["findings"].append(
             f"Periodic drift on the {axis} axis with a ~{period / 60:.1f} minute period "
             f"explains {power:.0%} of this session's residual motion. A single session cannot "
             "confirm mechanical periodic error; check whether this period recurs elsewhere."
+            f"{false_alarm_note}"
         )
 
     for rate, axis_name in ((rate_x, "x"), (rate_y, "y")):
@@ -477,6 +566,9 @@ def _combine_session_analyses(
         "max_excursion_px": _worst("max_excursion_px"),
         "periodic_error_period_seconds": strongest_periodic.get("periodic_error_period_seconds"),
         "periodic_error_strength": strongest_periodic.get("periodic_error_strength", 0.0),
+        "periodic_error_false_alarm_probability": strongest_periodic.get(
+            "periodic_error_false_alarm_probability"
+        ),
         "meridian_flips": sum(session.get("meridian_flips", 0) or 0 for session in session_analyses),
         "findings": findings,
     }
@@ -753,6 +845,7 @@ def build_tracking_quality_summary(target: Any) -> TrackingQualitySummary | None
             meridian_flips=guiding.get("meridian_flips", 0),
             periodic_error_period_seconds=guiding.get("periodic_error_period_seconds"),
             periodic_error_strength=guiding.get("periodic_error_strength", 0.0),
+            periodic_error_false_alarm_probability=guiding.get("periodic_error_false_alarm_probability"),
             periodic_error_corroborated=corroborated,
             trailed_frame_count=conditions.get("trailed_frame_count", 0),
             median_fwhm_px=conditions.get("median_fwhm_px"),

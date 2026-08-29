@@ -799,6 +799,7 @@ export interface TrackingPipelineQualityMetrics {
   meridian_flips?: number;
   periodic_error_period_seconds?: number | null;
   periodic_error_strength?: number;
+  periodic_error_false_alarm_probability?: number | null;
   periodic_error_corroborated?: boolean;
   trailed_frame_count?: number;
   median_fwhm_px?: number | null;

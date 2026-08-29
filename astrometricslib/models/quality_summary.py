@@ -254,7 +254,7 @@ class SpectroscopyQualitySummary(PipelineQualitySummaryBase):
 
 # Bumped whenever TrackingPipelineQualityMetrics's shape changes
 # meaningfully.
-TRACKING_PIPELINE_VERSION = "1.0.0"
+TRACKING_PIPELINE_VERSION = "1.1.0"
 
 
 class TrackingPipelineQualityMetrics(BaseModel):
@@ -279,6 +279,13 @@ class TrackingPipelineQualityMetrics(BaseModel):
     # gear wobbling every 60 seconds).
     periodic_error_period_seconds: int | None = None
     periodic_error_strength: float = 0.0
+    # The chance random noise would fake a peak as strong as
+    # `periodic_error_strength`. Recorded so the reporting cut can
+    # eventually move onto it -- see the note beside
+    # `MAXIMUM_PERIODIC_ERROR_FALSE_ALARM_PROBABILITY` in
+    # `pipelines/stacking/tracking_analysis.py` for why it does not gate
+    # anything yet.
+    periodic_error_false_alarm_probability: float | None = None
     periodic_error_corroborated: bool = False
 
     trailed_frame_count: int = 0

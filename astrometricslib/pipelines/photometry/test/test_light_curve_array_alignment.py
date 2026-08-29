@@ -6,7 +6,7 @@ normalize_light_curves drops frames twice (those without a normalization
 factor, then per-star sigma clipping), and both filters must apply to every
 array. Rewriting only some of them left the rest longer and positionally
 misaligned, so a flux was later paired with a different frame's saturation
-verdict; persisted M 106 light curves showed 52 fluxes against 61 saturation
+verdict; recorded M 106 light curves showed 52 fluxes against 61 saturation
 flags because of it.
 """
 

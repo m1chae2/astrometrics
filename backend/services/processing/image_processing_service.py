@@ -95,7 +95,7 @@ class ImageProcessingService(BaseBackgroundService):
         return {"status": "cancelled" if cancelled else "none"}
 
     def fetch_job_log_tail(self, job_id: str, lines: int = 100) -> list:
-        """Fetch the tail of DB-persisted log entries for a job.
+        """Fetch the tail of DB-recorded log entries for a job.
 
         Returns
         -------

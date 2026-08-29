@@ -2,7 +2,7 @@
 
 Description: Verifies get_safety_rule_set() returns None when
 unconfigured (never a default-permissive rule set) and that a
-persisted rule set round-trips.
+recorded rule set round-trips.
 """
 
 import pytest
@@ -46,7 +46,7 @@ def test_get_safety_rule_set_returns_none_when_unconfigured(isolated_butler):  #
 
 
 def test_save_and_get_safety_rule_set_round_trips(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify a persisted rule set is returned by get_safety_rule_set()."""
+    """Verify a recorded rule set is returned by get_safety_rule_set()."""
     rule_set = SafetyRuleSet(
         id="default",
         rules=[

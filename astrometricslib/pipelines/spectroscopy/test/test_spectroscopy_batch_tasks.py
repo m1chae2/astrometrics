@@ -3,7 +3,7 @@
 Description: Verifies the session-grouped spectroscopy processing path
 (process_spectroscopy_frames_by_session and its worker/helpers) --
 frame-pixel projection, per-frame WCS resolution priority (own header
-over session-level over fallback), persistence, and session-level
+over session-level over fallback), recording, and session-level
 orchestration -- without depending on solve-field or real
 multiprocessing dispatch.
 """
@@ -165,8 +165,8 @@ class TestProcessSingleSpectroscopyFrameWorkerV2:
         assert result["stars_processed"] == 1
 
         catalog_access = CatalogAccess(config=config)
-        persisted = catalog_access.get("stellar_catalog", {}) or []
-        assert any(star.id == "* alf Lyr" for star in persisted)
+        recorded = catalog_access.get("stellar_catalog", {}) or []
+        assert any(star.id == "* alf Lyr" for star in recorded)
 
     def test_uses_session_wcs_when_frame_has_no_own_header_wcs(self, tmp_path, isolated_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
         """Verify the session WCS is used when a frame has none of its own."""

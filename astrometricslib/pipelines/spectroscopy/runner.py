@@ -21,9 +21,9 @@ from astrometricslib.pipelines.contract import (
     RunOutcome,
     run_pipeline,
 )
-from astrometricslib.pipelines.shared.star_persistence import (
+from astrometricslib.pipelines.shared.star_recording import (
     merge_spectroscopy_stellar_object,
-    persist_pipeline_stars,
+    record_pipeline_stars,
 )
 
 
@@ -114,7 +114,7 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
 
         spectroscopy = SpectroscopyPipeline()
         limit = request.options.get("limit", 10)
-        stellar_objects, star_id_breakdown = persist_pipeline_stars(
+        stellar_objects, star_id_breakdown = record_pipeline_stars(
             spectroscopy.process(context, limit=limit),
             catalog_access=catalog_access,
             target_id=target.id,

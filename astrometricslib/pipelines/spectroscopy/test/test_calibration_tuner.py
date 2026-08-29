@@ -1,7 +1,7 @@
 """Purpose: Unit tests for SpectroscopyCalibrationTuner.
 
 Description: Verifies autonomous physical-model fitting of grating
-parameters and configuration persistence.
+parameters and configuration recording.
 """
 
 import os

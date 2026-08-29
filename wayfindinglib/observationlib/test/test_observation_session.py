@@ -1,4 +1,4 @@
-"""Purpose: Unit tests for ObservationSession and its persistence.
+"""Purpose: Unit tests for ObservationSession and its recording.
 
 Description: Verifies ObservationSession construction defaults, a real
 save/load round-trip against wayfindinglib's own SQLite database (separate

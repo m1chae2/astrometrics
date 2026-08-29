@@ -338,7 +338,7 @@ def query_online_catalogs(
     -------
     List[Tuple[str, StellarObject]]
         Tagged (driver_name, StellarObject) pairs, deduplicated by source ID.
-        Results are transient and must never be persisted to the database.
+        Results are transient and must never be recorded to the database.
 
     REQ: PLN-3.1, PLN-3.2
     """

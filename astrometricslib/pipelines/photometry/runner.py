@@ -20,9 +20,9 @@ from astrometricslib.pipelines.contract import (
     RunOutcome,
     run_pipeline,
 )
-from astrometricslib.pipelines.shared.star_persistence import (
+from astrometricslib.pipelines.shared.star_recording import (
     merge_photometry_stellar_object,
-    persist_pipeline_stars,
+    record_pipeline_stars,
 )
 from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
 
@@ -671,7 +671,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             for star in long_term_candidates
         ]
 
-        all_stellar_objects, star_id_breakdown = persist_pipeline_stars(
+        all_stellar_objects, star_id_breakdown = record_pipeline_stars(
             all_stellar_objects,
             catalog_access=catalog_access,
             target_id=target.id,

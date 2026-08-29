@@ -64,7 +64,7 @@ logging.getLogger().addHandler(socket_handler)
 # Register DB Log Handler (general/unscoped logs; job-scoped loggers attach
 # their own job_id-bound instance directly and do not propagate here since
 # they set propagate = False).
-# REQ: SYS-1.4: Persist astrometricslib/wayfindinglib/backend logs to
+# REQ: SYS-1.4: Record astrometricslib/wayfindinglib/backend logs to
 # astrometrics_log.db
 #
 # DbLogHandler.emit() opens its own SQLite connection and commits per record,

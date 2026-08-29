@@ -4,7 +4,7 @@ Description: Verifies calibration-frame folding counts only completed
 calibration-type requests on terminal sessions, is idempotent when
 recomputed, target_session_ids attach only for completed entries whose
 target has matching frames, and reconcile_session raises for a
-non-terminal session and persists both results for a terminal one --
+non-terminal session and records both results for a terminal one --
 the cases `Wayfinding_Library_Architecture.md` §2.4.11 calls out
 ("reconciliation run twice yields identical CalibrationStats").
 """
@@ -250,7 +250,7 @@ def test_reconcile_session_raises_for_non_terminal_session(butler):  # ruff: ign
 
 
 def test_reconcile_session_persists_calibration_stats_and_session(butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify a terminal session's reconciliation persists both results."""
+    """Verify a terminal session's reconciliation records both results."""
     entry = _entry(
         "entry-1",
         "M 81",

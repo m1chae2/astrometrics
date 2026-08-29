@@ -227,7 +227,7 @@ class CalibrationCatalog:
         self.library.load_library()
 
     def save(self) -> None:
-        """Persist the calibration library to its on-disk JSON file."""
+        """Record the calibration library to its on-disk JSON file."""
         self.library.save_library()
 
     def stats(self) -> dict[str, Any]:

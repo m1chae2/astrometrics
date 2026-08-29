@@ -1433,7 +1433,7 @@ class ImageProcessing:
                                         job.progress_current = int(val)
                                         self.job_repository.upsert_job(job)
                                 except Exception as exc:
-                                    logger.debug("Failed to parse/persist Siril progress line: %s", exc)
+                                    logger.debug("Failed to parse/record Siril progress line: %s", exc)
                 except Exception as e:
                     if job_logger:
                         job_logger.error(f"Error in Siril stdout reader thread: {e}")
@@ -1560,7 +1560,7 @@ class ImageProcessing:
                 # between frames, breaking wavelength calibration
                 # consistency across the stack.
                 # Pin star detection instead of inheriting whatever the
-                # Siril GUI last persisted to its own config: detection
+                # Siril GUI last recorded to its own config: detection
                 # settings are global user state, so without this the
                 # pipeline's registration behaviour differs between
                 # machines and silently changes if someone adjusts the

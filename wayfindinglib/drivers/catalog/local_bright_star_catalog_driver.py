@@ -137,7 +137,7 @@ class LocalBrightStarCatalogDriver(CatalogDriver):
         -------
         List[StellarObject]
             Transient StellarObject instances, capped to the _MAX_RESULTS
-            brightest matches. Never persisted to the database.
+            brightest matches. Never recorded to the database.
         """
         rows = self._load_rows()
         if rows.size == 0:

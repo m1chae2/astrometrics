@@ -1,4 +1,4 @@
-"""Purpose: Regression tests for target_catalog persistence semantics.
+"""Purpose: Regression tests for target_catalog recording semantics.
 
 Description: Covers the data-integrity bug where get_targets(target_id)
 silently reloaded and replaced the whole in-memory target cache on every

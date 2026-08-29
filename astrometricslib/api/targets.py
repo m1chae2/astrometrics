@@ -60,9 +60,9 @@ class TargetCatalog:
         result : `list` [`Target`]
             The list of all active targets.
         """
-        from astrometricslib.data_access import persistence_operations
+        from astrometricslib.data_access import target_records
 
-        return persistence_operations.list_targets(self)
+        return target_records.list_targets(self)
 
     def get(self, target_id: str) -> Target | None:
         """Retrieve a single target by id, supporting fuzzy matching.
@@ -77,9 +77,9 @@ class TargetCatalog:
         target : `Target` or `None`
             The matching target, or `None` if no target matches.
         """
-        from astrometricslib.data_access import persistence_operations
+        from astrometricslib.data_access import target_records
 
-        return persistence_operations.get_target(self, target_id)
+        return target_records.get_target(self, target_id)
 
     def create(self, target_id: str) -> Target:
         """Create a Target, scan its directories, and register it.
@@ -99,9 +99,9 @@ class TargetCatalog:
         target : `Target`
             The newly created (or existing, matching) Target.
         """
-        from astrometricslib.data_access import persistence_operations
+        from astrometricslib.data_access import target_records
 
-        return persistence_operations.create_target(self, target_id)
+        return target_records.create_target(self, target_id)
 
     def add(self, target: Target) -> None:
         """Append an existing Target domain object to the catalog.
@@ -129,15 +129,15 @@ class TargetCatalog:
         removed : `bool`
             `True` if a matching target was found and removed.
         """
-        from astrometricslib.data_access import persistence_operations
+        from astrometricslib.data_access import target_records
 
-        return persistence_operations.delete_target(self, target_id)
+        return target_records.delete_target(self, target_id)
 
     def save(self) -> None:
         """Commit all touched targets back to database storage."""
-        from astrometricslib.data_access import persistence_operations
+        from astrometricslib.data_access import target_records
 
-        persistence_operations.save_targets(self)
+        target_records.save_targets(self)
 
     # -- Object management (target-scoped, not CRUD) ----------------------
 
@@ -204,7 +204,7 @@ class TargetCatalog:
         catalog_access : `AbstractCatalogAccess`, optional
             Storage backend override; defaults to this catalog's own.
         """
-        from astrometricslib.data_access.persistence_operations import reindex_frames
+        from astrometricslib.data_access.target_records import reindex_frames
 
         reindex_frames(
             target,
@@ -313,7 +313,7 @@ class TargetCatalog:
             Restrict to frames from this camera, matched
             case-insensitively as a substring.
         save : `bool`, optional
-            Whether to persist the target afterwards (default `True`).
+            Whether to record the target afterwards (default `True`).
 
         Returns
         -------

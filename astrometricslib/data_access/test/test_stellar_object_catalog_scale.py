@@ -86,7 +86,7 @@ def test_verify_and_upgrade_skips_the_full_pass_once_already_current(tmp_path, m
     assert version_after_first_call == disk_interface.STELLAR_OBJECT_DATA_VERSION
 
     # Simulate a fresh process: the in-process guard resets, but the
-    # on-disk version marker persists.
+    # on-disk version marker records.
     monkeypatch.setattr(disk_interface, "_database_verified", False)
 
     conn = sqlite3.connect(db_path)
@@ -251,7 +251,7 @@ def test_list_object_summaries_a_target_scoped_request_is_not_capped_by_default(
 
 
 def test_list_object_summaries_matches_the_model_computed_properties(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify the persisted columns agree with StellarObject's own properties.
+    """Verify the recorded columns agree with StellarObject's own properties.
 
     has_spectra/has_photometry are computed once at write time (see
     data_access.catalog_access._stellar_extra_columns) by calling

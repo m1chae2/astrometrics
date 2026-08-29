@@ -729,7 +729,7 @@ def sync_all_remote_folders(
                 job.completed_at = datetime.now().isoformat()
             logger_if.upsert_job(job)
         except Exception as update_err:
-            _logging.getLogger(__name__).debug(f"Failed to persist job status update: {update_err}")
+            _logging.getLogger(__name__).debug(f"Failed to record job status update: {update_err}")
 
     succeeded: list[str] = []
     failed: list[tuple[str, str]] = []

@@ -80,7 +80,7 @@ class AbstractButler(ABC):
 
     @abstractmethod
     def put(self, obj: Any, dataset_type: str, selector: dict[str, Any]) -> None:
-        """Persist a dataset under a given type, identified by a selector."""
+        """Record a dataset under a given type, identified by a selector."""
 
     @abstractmethod
     def exists(self, dataset_type: str, selector: dict[str, Any]) -> bool:
@@ -171,7 +171,7 @@ class DiskButler(AbstractButler):
         raise ValueError(f"Unknown dataset type: {dataset_type}")
 
     def get_all(self, dataset_type: str) -> list[Any]:
-        """Retrieve every persisted instance of a dataset type.
+        """Retrieve every recorded instance of a dataset type.
 
         Parameters
         ----------
@@ -182,7 +182,7 @@ class DiskButler(AbstractButler):
         Returns
         -------
         datasets : `list`
-            Every persisted instance of that dataset type.
+            Every recorded instance of that dataset type.
 
         Raises
         ------
@@ -196,12 +196,12 @@ class DiskButler(AbstractButler):
         return self._generic.get_all(dataset_type)
 
     def put(self, obj: Any, dataset_type: str, selector: dict[str, Any]) -> None:
-        """Persist a dataset under a given type, identified by a selector.
+        """Record a dataset under a given type, identified by a selector.
 
         Parameters
         ----------
         obj : `Any`
-            The model instance to persist.
+            The model instance to record.
         dataset_type : `str`
             Identifier of the dataset kind being written:
             "observation_session", or one of the generic types in

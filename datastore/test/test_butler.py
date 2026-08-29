@@ -79,15 +79,15 @@ def test_round_trip_with_extra_columns(tmp_path):  # ruff: ignore[missing-type-f
 
 
 def test_merge_and_persist_disjoint_ids_do_not_clobber(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Two merge_and_persist calls on disjoint ids both survive."""
+    """Two merge_and_record calls on disjoint ids both survive."""
     butler = _make_butler(tmp_path)
     butler.put_all("widget", [_Widget(id="a", label="Alpha"), _Widget(id="b", label="Beta")])
 
     def keep_updated(existing, updated):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
         return updated
 
-    butler.merge_and_persist("widget", [_Widget(id="a", label="Alpha-updated")], keep_updated)
-    butler.merge_and_persist("widget", [_Widget(id="b", label="Beta-updated")], keep_updated)
+    butler.merge_and_record("widget", [_Widget(id="a", label="Alpha-updated")], keep_updated)
+    butler.merge_and_record("widget", [_Widget(id="b", label="Beta-updated")], keep_updated)
 
     loaded = {widget.id: widget for widget in butler.get_all("widget")}
     assert loaded["a"].label == "Alpha-updated"
@@ -95,14 +95,14 @@ def test_merge_and_persist_disjoint_ids_do_not_clobber(tmp_path):  # ruff: ignor
 
 
 def test_merge_and_persist_preserves_untouched_rows(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """merge_and_persist never deletes rows outside the given objects."""
+    """merge_and_record never deletes rows outside the given objects."""
     butler = _make_butler(tmp_path)
     butler.put_all("widget", [_Widget(id="a"), _Widget(id="b")])
 
     def keep_updated(existing, updated):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
         return updated
 
-    butler.merge_and_persist("widget", [_Widget(id="a", label="only-a-touched")], keep_updated)
+    butler.merge_and_record("widget", [_Widget(id="a", label="only-a-touched")], keep_updated)
 
     ids = {widget.id for widget in butler.get_all("widget")}
     assert ids == {"a", "b"}

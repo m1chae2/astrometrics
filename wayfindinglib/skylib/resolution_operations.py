@@ -184,7 +184,7 @@ def get_online_catalog_sources(
     Returns
     -------
     List[Tuple[str, StellarObject]]
-        Tagged (driver_name, StellarObject) pairs. Never persisted.
+        Tagged (driver_name, StellarObject) pairs. Never recorded.
 
     REQ: PLN-3.1, PLN-3.2
     """

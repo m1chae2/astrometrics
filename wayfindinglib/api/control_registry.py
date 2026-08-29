@@ -71,7 +71,7 @@ class ObservatoryControl:
         butler: DiskButler | None = None,
         correction_config: CorrectionConfig | None = None,
     ):
-        """Initialize the interface with config, a driver, and persistence."""
+        """Initialize the interface with config, a driver, and recording."""
         if config is None:
             from astrometricslib import get_configuration
 
@@ -443,24 +443,24 @@ class ObservatoryControl:
     # -- Equipment selection ----------------------------------------------
 
     def set_active_telescope(self, telescope_id: str) -> bool:
-        """Persist a new active telescope selection.
+        """Record a new active telescope selection.
 
         Returns
         -------
         success : `bool`
-            Whether the selection was persisted successfully.
+            Whether the selection was recorded successfully.
         """
         from wayfindinglib.tasks.control_tasks.equipment_activation import set_active_telescope
 
         return set_active_telescope(self._config, telescope_id)
 
     def set_active_camera(self, camera_id: str) -> bool:
-        """Persist a new active camera selection.
+        """Record a new active camera selection.
 
         Returns
         -------
         success : `bool`
-            Whether the selection was persisted successfully.
+            Whether the selection was recorded successfully.
         """
         from wayfindinglib.tasks.control_tasks.equipment_activation import set_active_camera
 
@@ -596,7 +596,7 @@ class ObservatoryControl:
         Returns
         -------
         calibration : `GuiderCalibration` or `None`
-            The persisted calibration for the active telescope/camera
+            The recorded calibration for the active telescope/camera
             pairing, or `None` if none exists.
         """
         telescope = self.active_telescope()
@@ -609,7 +609,7 @@ class ObservatoryControl:
         return None
 
     def save_guider_calibration(self, calibration: GuiderCalibration) -> None:
-        """Persist a measured `GuiderCalibration`."""
+        """Record a measured `GuiderCalibration`."""
         self._butler.put(calibration, "guider_calibration", {"id": calibration.id})
 
     def active_focus_model(self) -> FocusModel | None:
@@ -618,7 +618,7 @@ class ObservatoryControl:
         Returns
         -------
         focus_model : `FocusModel` or `None`
-            The persisted focus model for the active telescope/camera
+            The recorded focus model for the active telescope/camera
             pairing, or `None` if none exists.
         """
         telescope = self.active_telescope()
@@ -631,13 +631,13 @@ class ObservatoryControl:
         return None
 
     def save_focus_model(self, focus_model: FocusModel) -> None:
-        """Persist a measured `FocusModel`."""
+        """Record a measured `FocusModel`."""
         self._butler.put(focus_model, "focus_model", {"id": focus_model.id})
 
     # -- Environmental safety -----------------------------------------------
 
     def assess_safety(self, readings: SensorReadings, now: datetime | None = None) -> SafetyAssessment:
-        """Evaluate the persisted `SafetyRuleSet` against `readings`.
+        """Evaluate the recorded `SafetyRuleSet` against `readings`.
 
         Uses this high-level interface's own `SafetyMonitor` instance,
         so hysteresis state (the timestamp of the last non-safe
@@ -654,28 +654,28 @@ class ObservatoryControl:
         return self._safety_monitor.evaluate(rule_set, readings, now or datetime.now(UTC))
 
     def get_safety_rule_set(self) -> SafetyRuleSet | None:
-        """Return the persisted `SafetyRuleSet`, or `None` if unconfigured.
+        """Return the recorded `SafetyRuleSet`, or `None` if unconfigured.
 
         Returns
         -------
         rule_set : `SafetyRuleSet` or `None`
-            The persisted rule set, or `None` if unconfigured.
+            The recorded rule set, or `None` if unconfigured.
         """
         return get_safety_rule_set(self._butler)
 
     def save_safety_rule_set(self, rule_set: SafetyRuleSet) -> None:
-        """Persist `rule_set` as the active safety configuration."""
+        """Record `rule_set` as the active safety configuration."""
         save_safety_rule_set(self._butler, rule_set)
 
     # -- Enclosure and safe state -------------------------------------------
 
     def active_enclosure(self) -> Enclosure | None:
-        """Return the configured `Enclosure`, or `None` if unpersisted.
+        """Return the configured `Enclosure`, or `None` if unrecorded.
 
         Returns
         -------
         enclosure : `Enclosure` or `None`
-            The configured enclosure, or `None` if unpersisted.
+            The configured enclosure, or `None` if unrecorded.
         """
         enclosures = self._butler.get_all("enclosure")
         return enclosures[0] if enclosures else None
@@ -735,7 +735,7 @@ class ObservatoryControl:
     # -- Commissioning evidence --------------------------------------------
 
     def save_commissioning_run(self, run: CommissioningRun) -> None:
-        """Persist a `CommissioningRun`.
+        """Record a `CommissioningRun`.
 
         Append-only: re-saving under the same `id` overwrites, so
         callers must give each drill invocation a fresh `id` rather
@@ -744,24 +744,24 @@ class ObservatoryControl:
         self._butler.put(run, "commissioning_run", {"id": run.id})
 
     def get_commissioning_runs(self) -> list[CommissioningRun]:
-        """Return every persisted `CommissioningRun`.
+        """Return every recorded `CommissioningRun`.
 
         Returns
         -------
         runs : `list` [`CommissioningRun`]
-            Every persisted commissioning run.
+            Every recorded commissioning run.
         """
         return self._butler.get_all("commissioning_run")
 
     # -- Capability promotion ----------------------------------------------
 
     def delegation_policy(self) -> DelegationPolicy:
-        """Return the persisted `DelegationPolicy`.
+        """Return the recorded `DelegationPolicy`.
 
         Returns
         -------
         policy : `DelegationPolicy`
-            The persisted delegation policy.
+            The recorded delegation policy.
         """
         return get_delegation_policy(self._butler)
 
@@ -772,12 +772,12 @@ class ObservatoryControl:
         *,
         evidence_note: str = "",
     ) -> DelegationPolicy:
-        """Apply an operator's promotion decision and persist the result.
+        """Apply an operator's promotion decision and record the result.
 
         Returns
         -------
         policy : `DelegationPolicy`
-            The resulting, persisted delegation policy.
+            The resulting, recorded delegation policy.
         """
         from wayfindinglib.tasks.control_tasks.capability_promotion import apply_promotion_decision
 
@@ -791,7 +791,7 @@ class ObservatoryControl:
         )
 
     def summarize_divergence_evidence(self, capability: ObservatoryCapability) -> DivergenceEvidenceSummary:
-        """Summarize persisted divergence evidence for `capability`.
+        """Summarize recorded divergence evidence for `capability`.
 
         Returns
         -------

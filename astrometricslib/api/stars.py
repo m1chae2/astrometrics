@@ -236,7 +236,7 @@ class StellarCatalog:
                     setattr(target_obj, key, value)
             return target_obj
 
-        self.catalog_access.merge_and_persist_records("stellar_catalog", [existing], _apply_updates)
+        self.catalog_access.merge_and_record("stellar_catalog", [existing], _apply_updates)
         return self.get_object(object_id)
 
     def create(
@@ -282,7 +282,7 @@ class StellarCatalog:
         if dec:
             new_obj.declination = dec
 
-        self.catalog_access.merge_and_persist_records(
+        self.catalog_access.merge_and_record(
             "stellar_catalog", [new_obj], lambda current, updated: current if current is not None else updated
         )
         return new_obj
@@ -319,7 +319,7 @@ class StellarCatalog:
         Parameters
         ----------
         objects : `list` [`StellarObject`]
-            The full set of stellar objects to persist.
+            The full set of stellar objects to record.
         allow_empty : `bool`, optional
             By default, we stop you from saving an empty list so you don't
             accidentally delete the entire catalog. Pass `True` if you
@@ -328,7 +328,7 @@ class StellarCatalog:
         Returns
         -------
         result : `str`
-            Status message describing the persisted write.
+            Status message describing the recorded write.
 
         Raises
         ------

@@ -1,6 +1,6 @@
 """Purpose: Capability Promotion Decisions.
 
-Description: Summarizes persisted `DivergenceRecord` evidence against a
+Description: Summarizes recorded `DivergenceRecord` evidence against a
 phase gate and applies an operator's decision, per
 `Wayfinding_Library_Architecture.md` §2.5.2. Building on
 `data_access/delegation_policy_reader.py`'s `promote_capability` (which
@@ -8,7 +8,7 @@ already re-validates shadow precedence and every snapshot-checkable
 policy rule before returning a candidate policy), this module adds the
 two pieces that sit above it: turning raw divergence evidence into an
 agreement-rate summary an operator can judge a phase gate against, and
-persisting the validated decision.
+recording the validated decision.
 """
 
 from dataclasses import dataclass
@@ -66,7 +66,7 @@ def summarize_divergence_evidence(
     capability : `ObservatoryCapability`
         The capability to summarize evidence for.
     divergence_records : `list` [`DivergenceRecord`]
-        Every persisted divergence record (e.g. from
+        Every recorded divergence record (e.g. from
         `butler.get_all("divergence_record")`); records for other
         capabilities are ignored.
 
@@ -91,19 +91,19 @@ def apply_promotion_decision(
     has_guider_calibration: bool = False,
     has_focus_model: bool = False,
 ) -> DelegationPolicy:
-    """Apply an operator's promotion decision and persist the result.
+    """Apply an operator's promotion decision and record the result.
 
     Re-validates the full set of delegation policy rules (via
     `promote_capability`, which raises `DelegationPolicyValidationError`
     on any violation) before writing anything, so an invalid decision
     -- one that would violate shadow precedence, the safety exemption,
     capture's dependency ordering, or calibration presence -- is
-    rejected rather than persisted.
+    rejected rather than recorded.
 
     Parameters
     ----------
     butler : `wayfindinglib.drivers.butler.DiskButler`
-        The persistence layer to read the current policy from and
+        The storage layer to read the current policy from and
         write the new one to.
     capability : `ObservatoryCapability`
         The capability being promoted or demoted.
@@ -117,7 +117,7 @@ def apply_promotion_decision(
     Returns
     -------
     policy : `DelegationPolicy`
-        The new policy, already persisted.
+        The new policy, already recorded.
     """
     current_policy = get_delegation_policy(butler)
     new_policy = promote_capability(

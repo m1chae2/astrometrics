@@ -19,7 +19,7 @@ from astrometricslib.pipelines.shared.frame_grouping import (
     frames_missing_focal_length,
     select_frames_for_camera,
 )
-from astrometricslib.pipelines.shared.star_persistence import (
+from astrometricslib.pipelines.shared.star_recording import (
     StarIdentificationBreakdown,
     _drop_unresolved_stars,
     _reconcile_position_only_star_ids,
@@ -31,7 +31,7 @@ from astrometricslib.utilities.enums import FilterType
 
 # Re-exported so external callers and tests that import these by their
 # dispatch path keep working -- this module used to define them
-# directly, before they moved to pipelines/shared/star_persistence.py.
+# directly, before they moved to pipelines/shared/star_recording.py.
 __all__ = [
     "StarIdentificationBreakdown",
     "_drop_unresolved_stars",

@@ -255,7 +255,7 @@ def _process_single_spectroscopy_frame_worker_v2(
             if target_id not in obj.target_ids:
                 obj.target_ids.append(target_id)
 
-        astrometrics.catalog_access.merge_and_persist_records(
+        astrometrics.catalog_access.merge_and_record(
             "stellar_catalog", stellar_objects, merge_spectroscopy_stellar_object
         )
 

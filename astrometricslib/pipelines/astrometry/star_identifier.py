@@ -795,7 +795,7 @@ class StarIdentifier:
             )
             return len(to_insert)
         except Exception as e:
-            logger.warning(f"Failed to persist Gaia DR3 sources to cache: {e}")
+            logger.warning(f"Failed to record Gaia DR3 sources to cache: {e}")
             return 0
 
     @staticmethod
@@ -931,7 +931,7 @@ class StarIdentifier:
 
         logger.info(f"  Found {len(result_table)} Gaia sources in field.")
 
-        # Persist downloaded sources to local SQLite cache
+        # Record downloaded sources to local SQLite cache
         try:
             ra_col = next((c for c in ["ra", "RA", "ra_epoch2000"] if c in result_table.colnames), None)
             dec_col = next((c for c in ["dec", "DEC", "dec_epoch2000"] if c in result_table.colnames), None)

@@ -1,4 +1,4 @@
-"""Shared, generic persistence infrastructure.
+"""Shared, generic storage infrastructure.
 
 Used by both astrometricslib and wayfindinglib. Provides the
 SQLite/file-locking primitives (`connect_db`, `file_lock`,

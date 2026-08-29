@@ -241,10 +241,10 @@ def test_reconcile_position_only_star_ids_skips_catalog_matched_stars():  # ruff
 
 
 def test_reconcile_position_only_star_ids_handles_a_lookup_failure_gracefully():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify a lookup error doesn't block persistence of this run's stars.
+    """Verify a lookup error doesn't block recording of this run's stars.
 
     Reconciliation is an optimisation over an already-correct (if
-    duplicative) persistence path, so its own failure must be
+    duplicative) storage path, so its own failure must be
     swallowed rather than propagated.
     """
 
@@ -424,7 +424,7 @@ def test_target_analyze_frame_spectroscopy(tmp_path, mocker):  # ruff: ignore[mi
         assert "Vega" in objs[0].target_ids
         assert len(target.frames) == 1
 
-        # Verify persistence
+        # Verify recording
         from astrometricslib.drivers import disk_interface
 
         loaded = disk_interface.load_stellar_objects(config)
@@ -516,15 +516,15 @@ def test_target_analyze_target_asteroid_recovery(tmp_path, mocker):  # ruff: ign
 
 
 def test_target_analyze_target_asteroid_recovery_drops_rejected_candidates(tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify only surviving candidates are persisted onto the target.
+    """Verify only surviving candidates are recorded onto the target.
 
     A cosmic-ray-like point source appearing in a single frame only
     chains into its own single-detection candidate alongside the
     genuine moving-object track. `analyze_target` should still report
     it in the run's metrics (the full discrimination-cascade audit
-    trail), but must not persist it onto `target.asteroid_candidates`
+    trail), but must not record it onto `target.asteroid_candidates`
     -- otherwise a dense field's rejected noise chains bloat the
-    target's persisted record without limit.
+    target's recorded record without limit.
     """
     mocker.patch("astroquery.imcce.Skybot.cone_search", return_value=None)
 
@@ -547,13 +547,13 @@ def test_target_analyze_target_asteroid_recovery_drops_rejected_candidates(tmp_p
 
     assert_result_keys(result, "asteroid_recovery")
     assert result["status"] == "completed"
-    # Only the confirmed track is persisted -- the single-frame cosmic
+    # Only the confirmed track is recorded -- the single-frame cosmic
     # ray is dropped, not carried onto the target.
     assert len(target.asteroid_candidates) == 1
     assert target.asteroid_candidates[0].cascade_stage == CascadeStage.RATE_LINEARITY_CONFIRMED
 
     # But the pipeline's own metrics still account for both candidates
-    # it evaluated, proving the drop happens at persistence time, not
+    # it evaluated, proving the drop happens at recording time, not
     # inside the discrimination cascade itself.
     summary = target.asteroid_recovery_quality_summary
     assert summary.asteroid_recovery_metrics.candidates_detected == 2
@@ -700,12 +700,12 @@ def test_target_analyze_target_photometry_runs_each_session_independently(tmp_pa
 
     # Each session's stars keep their own distinct, real ids -- proof
     # both sessions' identification results made it into the merged,
-    # persisted set rather than one session's output overwriting or
+    # recorded set rather than one session's output overwriting or
     # crowding out the other's.
-    persisted_stars = catalog_access.get("stellar_catalog", {}) or []
-    persisted_ids = {star.id for star in persisted_stars}
-    assert sum(1 for star_id in persisted_ids if star_id.startswith("SessA-")) == len(session_a_positions)
-    assert sum(1 for star_id in persisted_ids if star_id.startswith("SessB-")) == len(session_b_positions)
+    recorded_stars = catalog_access.get("stellar_catalog", {}) or []
+    recorded_ids = {star.id for star in recorded_stars}
+    assert sum(1 for star_id in recorded_ids if star_id.startswith("SessA-")) == len(session_a_positions)
+    assert sum(1 for star_id in recorded_ids if star_id.startswith("SessB-")) == len(session_b_positions)
 
 
 def test_target_analyze_target_photometry_with_astrometry_seed_uses_identified_stars(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
@@ -714,7 +714,7 @@ def test_target_analyze_target_photometry_with_astrometry_seed_uses_identified_s
     Bypasses real plate-solving/SIMBAD by monkeypatching
     identify_session_stars to return a canned identification result,
     so this test exercises the wiring (seeded stars flow through
-    VariabilityAnalyzer, quality metrics get populated, the persisted
+    VariabilityAnalyzer, quality metrics get populated, the recorded
     star carries its real astrometry-derived id) without depending on
     solve-field or a network SIMBAD query.
     """
@@ -775,8 +775,8 @@ def test_target_analyze_target_photometry_with_astrometry_seed_uses_identified_s
     assert result["status"] == "completed"
     assert result["starsProcessed"] == 1
 
-    persisted_stars = catalog_access.get("stellar_catalog", {}) or []
-    matching = [star for star in persisted_stars if star.id == "* alf Lyr"]
+    recorded_stars = catalog_access.get("stellar_catalog", {}) or []
+    matching = [star for star in recorded_stars if star.id == "* alf Lyr"]
     assert len(matching) == 1
     assert matching[0].name == "Vega"
 
@@ -790,7 +790,7 @@ def test_target_analyze_target_photometry_with_astrometry_seed_uses_identified_s
 
 
 def test_target_analyze_target_photometry_without_astrometry_seed_persists_nothing(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify use_astrometry_seed=False's synthetic-id stars aren't persisted.
+    """Verify use_astrometry_seed=False's synthetic-id stars aren't recorded.
 
     Without astrometry seeding, every tracked star only ever gets a
     synthetic `Star_N` placeholder id -- there's no sky position or
@@ -828,8 +828,8 @@ def test_target_analyze_target_photometry_without_astrometry_seed_persists_nothi
     assert summary.photometry_metrics.astrometry_identified_star_count == 0
     assert summary.photometry_metrics.sessions_with_reused_header_wcs == []
 
-    persisted_stars = catalog_access.get("stellar_catalog", {}) or []
-    assert persisted_stars == []
+    recorded_stars = catalog_access.get("stellar_catalog", {}) or []
+    assert recorded_stars == []
 
 
 class _FakeLinearWcs:
@@ -949,7 +949,7 @@ def test_match_and_merge_across_sessions_merges_matching_stars(mocker):  # ruff:
 
     merged_by_id = {star.id: star for star in merged}
     assert star_a1.id in merged_by_id
-    assert star_b1.id not in merged_by_id  # folded into star_a1, not persisted separately
+    assert star_b1.id not in merged_by_id  # folded into star_a1, not recorded separately
     assert star_a2.id in merged_by_id
     assert star_b2.id in merged_by_id
 

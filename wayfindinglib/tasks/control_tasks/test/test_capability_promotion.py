@@ -2,7 +2,7 @@
 
 Description: Verifies divergence evidence summarizes to an agreement
 rate a phase gate can be judged against, and that a promotion decision
-re-validates policy rules before persisting -- an invalid decision
+re-validates policy rules before recording -- an invalid decision
 must not reach the butler at all.
 """
 

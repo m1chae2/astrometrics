@@ -61,7 +61,7 @@ class AsteroidRecoveryPipelineAdapter(AnalysisPipeline):
             `candidates` is the surviving subset, already written onto
             `request.target.asteroid_candidates` -- this pipeline's one
             genuine output side effect, since its result has no catalog
-            counterpart to persist through the catalog_access.
+            counterpart to record through the catalog_access.
         """
         from astrometricslib.pipelines.asteroid_recovery.pipeline import (
             AsteroidRecoveryPipeline,
@@ -71,12 +71,12 @@ class AsteroidRecoveryPipelineAdapter(AnalysisPipeline):
         pipeline = AsteroidRecoveryPipeline()
         all_candidates = pipeline.process(target)
         metrics = pipeline.last_run_metrics
-        # Persist only candidates that survived the discrimination
+        # Record only candidates that survived the discrimination
         # cascade (or were matched to a known body) -- `process()`
         # deliberately returns every rejected chain too (cosmic
         # rays, hot pixels, missed stars) so `metrics` above can
         # summarize them, but writing all of those into the
-        # target's persisted record is unbounded: a single dense
+        # target's recorded record is unbounded: a single dense
         # field can produce tens of thousands of single-frame noise
         # chains, each carrying its own frame-detection payload.
         target.asteroid_candidates = [
@@ -175,7 +175,7 @@ def run_asteroid_recovery_analysis(
     target,  # ruff: ignore[missing-type-function-argument]
     frames,  # ruff: ignore[missing-type-function-argument] -- unused; asteroid recovery reads target.frames itself
     filter_type,  # ruff: ignore[missing-type-function-argument] -- unused; asteroid recovery has no filter concept
-    catalog_access,  # ruff: ignore[missing-type-function-argument] -- unused; candidates persist on the target record, not via the catalog_access
+    catalog_access,  # ruff: ignore[missing-type-function-argument] -- unused; candidates record on the target record, not via the catalog_access
     path,  # ruff: ignore[missing-type-function-argument] -- unused; asteroid recovery reads target.frames itself
     **kwargs,  # ruff: ignore[missing-type-kwargs] -- unused
 ) -> dict[str, Any]:

@@ -48,7 +48,7 @@ class CalibrationStats(BaseModel):
 class CalibrationAdvisory(BaseModel):
     """Computed-on-demand inventory lookup for one requested calibration entry.
 
-    Never persisted; purely informational
+    Never recorded; purely informational
     (`Wayfinding_Library_Architecture.md` §2.3.4, "Advisory, Not
     Authority").
     """

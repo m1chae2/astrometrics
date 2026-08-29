@@ -288,7 +288,7 @@ def main() -> None:
         print("\n==================================================")
         print("EMPIRICAL PIPELINE VALIDATION COMPLETED")
         print("==================================================")
-        print("All target quality summaries have been generated and persisted to astrometrics.db.")
+        print("All target quality summaries have been generated and recorded to astrometrics.db.")
 
     except Exception as fatal_err:
         print(f"\nFatal error during validation execution: {fatal_err}")

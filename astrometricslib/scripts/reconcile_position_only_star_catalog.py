@@ -295,7 +295,7 @@ def apply_clusters(
                     continue
                 _merge_duplicate_into_survivor(survivor, duplicate)
 
-            astrometrics.catalog_access.merge_and_persist_records(
+            astrometrics.catalog_access.merge_and_record(
                 "stellar_catalog", [survivor], lambda _existing, updated: updated
             )
             astrometrics.catalog_access.delete_by_ids("stellar_catalog", duplicate_ids)

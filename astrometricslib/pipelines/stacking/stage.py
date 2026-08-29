@@ -188,7 +188,7 @@ def stack_frames(
 
         for frame in target_frames:
             try:
-                # Computed once, persisted onto the FrameRecord (which
+                # Computed once, recorded onto the FrameRecord (which
                 # rides along with Target's normal save path) -- later
                 # pipelines/runs read these instead of recomputing them.
                 if frame.background_level is None:
@@ -540,7 +540,7 @@ def _build_stack_quality_summary(  # ruff: ignore[missing-return-type-private-fu
             # computed for free during registration) -- these are
             # distinct from the measure_image_fwhm-based comparison below
             # (see that block's docstring for why the two aren't on the
-            # same scale) and are persisted as facts on FrameRecord for
+            # same scale) and are recorded as facts on FrameRecord for
             # later pipelines/runs to read, not used for any verdict
             # here. Frame order in the .seq file follows Siril's own
             # symlink submission order, which can differ from

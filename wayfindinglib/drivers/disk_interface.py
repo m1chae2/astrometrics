@@ -1,7 +1,7 @@
-"""Purpose: wayfindinglib's own disk persistence, for ObservationSession.
+"""Purpose: wayfindinglib's own disk recording, for ObservationSession.
 
 Description: A physically separate SQLite database from astrometricslib's
-astrometrics.db -- "separate persistence per library" from the architecture
+astrometrics.db -- "separate recording per library" from the architecture
 discussion means a distinct database file and schema, not a distinct WAL
 connection helper. Reuses the generic, target-agnostic low-level primitives
 already in astrometricslib/drivers/disk_interface.py (WAL-mode connection,
@@ -32,7 +32,7 @@ def _wayfinding_library_path(app_config) -> Path:  # ruff: ignore[missing-type-f
     """Return wayfindinglib's own libraryIndex directory path.
 
     Physically separate from astrometricslib's own libraryIndex --
-    wayfindinglib persists its own data (e.g. ObservationSession) in
+    wayfindinglib records its own data (e.g. ObservationSession) in
     its own database file, not astrometricslib's.
 
     Returns
@@ -123,7 +123,7 @@ def save_observation_session(app_config=None, session=None) -> str:  # ruff: ign
 
 
 def load_observation_sessions(app_config=None) -> list[ObservationSession]:  # ruff: ignore[missing-type-function-argument]
-    """Load every persisted ObservationSession.
+    """Load every recorded ObservationSession.
 
     Parameters
     ----------
@@ -134,7 +134,7 @@ def load_observation_sessions(app_config=None) -> list[ObservationSession]:  # r
     Returns
     -------
     sessions : `list` of `ObservationSession`
-        Every session currently persisted.
+        Every session currently recorded.
     """
     from wayfindinglib.observationlib.observation_session import ObservationSession
 
@@ -149,7 +149,7 @@ def load_observation_sessions(app_config=None) -> list[ObservationSession]:  # r
 
 
 def get_observation_session(app_config=None, session_id: str = "") -> ObservationSession | None:  # ruff: ignore[missing-type-function-argument]
-    """Load a single persisted ObservationSession by ID.
+    """Load a single recorded ObservationSession by ID.
 
     Parameters
     ----------
@@ -195,7 +195,7 @@ not-yet-done milestone).
 
 
 def save_wayfinding_session(app_config, session: Any) -> str:  # ruff: ignore[missing-type-function-argument]
-    """Persist an `ObservationSession` (three-function redesign model).
+    """Record an `ObservationSession` (three-function redesign model).
 
     Parameters
     ----------
@@ -203,7 +203,7 @@ def save_wayfinding_session(app_config, session: Any) -> str:  # ruff: ignore[mi
         Application configuration object. If `None`, the process-wide
         singleton from `get_configuration` is used.
     session : `ObservationSession`
-        The session instance to persist.
+        The session instance to record.
 
     Returns
     -------
@@ -214,7 +214,7 @@ def save_wayfinding_session(app_config, session: Any) -> str:  # ruff: ignore[mi
 
 
 def load_wayfinding_sessions(app_config, model_class: type) -> list:  # ruff: ignore[missing-type-function-argument]
-    """Load every persisted `ObservationSession` of the redesigned model.
+    """Load every recorded `ObservationSession` of the redesigned model.
 
     Parameters
     ----------
@@ -229,13 +229,13 @@ def load_wayfinding_sessions(app_config, model_class: type) -> list:  # ruff: ig
     Returns
     -------
     sessions : `list`
-        Every persisted session.
+        Every recorded session.
     """
     return load_models(app_config, _WAYFINDING_SESSION_TABLE_NAME, model_class)
 
 
 def get_wayfinding_session(app_config, model_class: type, session_id: str) -> Any:  # ruff: ignore[missing-type-function-argument]
-    """Load a single persisted `ObservationSession` of the redesigned model.
+    """Load a single recorded `ObservationSession` of the redesigned model.
 
     Parameters
     ----------
@@ -256,7 +256,7 @@ def get_wayfinding_session(app_config, model_class: type, session_id: str) -> An
 
 
 # ---------------------------------------------------------------------------
-# Generic per-dataset-type persistence, added for the Foundation models
+# Generic per-dataset-type recording, added for the Foundation models
 # introduced by the three-function redesign (site_profile, enclosure,
 # guider_calibration, focus_model, delegation_policy, safety_rule_set,
 # commissioning_run -- Wayfinding_Library_Architecture.md Table 3). Each
@@ -267,7 +267,7 @@ def get_wayfinding_session(app_config, model_class: type, session_id: str) -> An
 # Deliberately does not touch
 # _TABLE_NAME/_ensure_table/save_observation_session/
 # load_observation_sessions/get_observation_session above: those already
-# persist real data and their exact behavior (including the extra indexed
+# record real data and their exact behavior (including the extra indexed
 # target_session_id/created_at columns) is left unchanged.
 #
 # Uses model_dump(mode="json") rather than mode="python" (which
@@ -292,7 +292,7 @@ def _ensure_generic_table(conn: sqlite3.Connection, table_name: str) -> None:
 
 
 def save_model(app_config, table_name: str, model_id: str, model: Any) -> str:  # ruff: ignore[missing-type-function-argument]
-    """Persist a Pydantic model to its own table under the given id.
+    """Record a Pydantic model to its own table under the given id.
 
     Parameters
     ----------
@@ -308,7 +308,7 @@ def save_model(app_config, table_name: str, model_id: str, model: Any) -> str:  
         not every dataset type's natural key is named `id` (e.g.
         `CalibrationStats.camera_id`).
     model : `Any`
-        The Pydantic model instance to persist.
+        The Pydantic model instance to record.
 
     Returns
     -------
@@ -333,7 +333,7 @@ def save_model(app_config, table_name: str, model_id: str, model: Any) -> str:  
 
 
 def load_models(app_config, table_name: str, model_class: type) -> list:  # ruff: ignore[missing-type-function-argument]
-    """Load every persisted instance of one dataset type.
+    """Load every recorded instance of one dataset type.
 
     Parameters
     ----------
@@ -348,7 +348,7 @@ def load_models(app_config, table_name: str, model_class: type) -> list:  # ruff
     Returns
     -------
     models : `list`
-        Every persisted instance, hydrated from its stored JSON.
+        Every recorded instance, hydrated from its stored JSON.
     """
     db_path = _db_path(app_config)
     conn = _connect_db(db_path)
@@ -361,7 +361,7 @@ def load_models(app_config, table_name: str, model_class: type) -> list:  # ruff
 
 
 def get_model(app_config, table_name: str, model_class: type, model_id: str) -> Any:  # ruff: ignore[missing-type-function-argument]
-    """Load a single persisted instance of one dataset type by id.
+    """Load a single recorded instance of one dataset type by id.
 
     Parameters
     ----------

@@ -2,7 +2,7 @@
 
 This takes a list of possible star-like dots from our images and runs them
 through a series of tests to find the real asteroids:
-1. Does it show up in multiple pictures over time? (Persistence)
+1. Does it show up in multiple pictures over time? (Recording)
 2. Is it actually moving across the sky, or just a bad pixel on the camera?
 3. Is it moving in a straight line at a reasonable speed? (Linearity/Rate)
 
@@ -145,7 +145,7 @@ class MovingObjectDetector:
             it in this list with a note explaining why it failed.
         """
         # Step 2: Chain detections that appear consistently across
-        # multiple frames (Persistence test)
+        # multiple frames (Recording test)
         chains = self._chain_detections_by_persistence(frame_detections)
         candidates = []
         for chain in chains:

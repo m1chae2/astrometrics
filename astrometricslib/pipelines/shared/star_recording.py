@@ -11,7 +11,7 @@ once a star is found, saving it works the same way for all three:
    carry data from more than one target and more than one pipeline
    (`merge_astrometry_stellar_object` and its two siblings).
 
-`persist_pipeline_stars` does all three in order. Astrometry is the one
+`record_pipeline_stars` does all three in order. Astrometry is the one
 exception: it needs the drop step's counts *before* it can finish
 building its quality summary, and that summary-building work sits between
 the drop and the save, so it calls the drop step itself, earlier, and
@@ -60,7 +60,7 @@ def _drop_unresolved_stars(
     placeholder id is arbitrary and not reproducible across runs, so
     saving it would only pollute `stellar_catalog` with rows that can
     never be merged back into the real star they came from. Dropping
-    it here, right before persistence, keeps this rule in one place
+    it here, right before recording, keeps this rule in one place
     regardless of which pipeline (astrometry, spectroscopy,
     photometry) produced the star.
 
@@ -135,7 +135,7 @@ def _reconcile_position_only_star_ids(
     Parameters
     ----------
     stellar_objects : `list`
-        Candidate stars about to be persisted, mutated in place (each
+        Candidate stars about to be recorded, mutated in place (each
         reassigned star's `id`/`name` are overwritten with the id of
         the existing catalog row it matched).
     catalog_access : `Any`
@@ -166,7 +166,7 @@ def _reconcile_position_only_star_ids(
     # below. Every real `FIELD_J...` star has both set to real floats at
     # the same place its id is minted (star_identifier.py's Step 3), so
     # this only excludes a malformed star that should never reach
-    # persistence in the first place.
+    # recording in the first place.
     position_only_stars = [
         stellar_object
         for stellar_object in stellar_objects
@@ -181,7 +181,7 @@ def _reconcile_position_only_star_ids(
         existing_rows = catalog_access.list_projected("stellar_catalog", ["id", "ra", "dec", "target_id"])
     except Exception as lookup_error:
         # Reconciliation is an optimization over an already-correct (if
-        # duplicative) persistence path; a lookup failure must not block
+        # duplicative) storage path; a lookup failure must not block
         # a run's own stars from being saved.
         logger.debug(
             "[%s] Could not read existing catalog for id reconciliation: %s", target_id, lookup_error
@@ -242,7 +242,7 @@ def _reconcile_position_only_star_ids(
     return stellar_objects
 
 
-def persist_pipeline_stars(
+def record_pipeline_stars(
     stellar_objects: list,
     *,
     catalog_access,  # ruff: ignore[missing-type-function-argument]
@@ -271,7 +271,7 @@ def persist_pipeline_stars(
     stellar_objects : `list`
         The stars this pipeline found.
     catalog_access : `Any`
-        Provides catalog reads and the merge/persist call.
+        Provides catalog reads and the merge/record call.
     target_id : `str`
         The target these stars belong to.
     merge_function : callable
@@ -308,7 +308,7 @@ def persist_pipeline_stars(
     stellar_objects = _reconcile_position_only_star_ids(
         stellar_objects, catalog_access=catalog_access, target_id=target_id
     )
-    catalog_access.merge_and_persist_records("stellar_catalog", stellar_objects, merge_function)
+    catalog_access.merge_and_record("stellar_catalog", stellar_objects, merge_function)
 
     return stellar_objects, breakdown
 

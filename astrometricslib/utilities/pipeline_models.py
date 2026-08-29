@@ -1,7 +1,7 @@
 """Domain models for tracking background processing tasks.
 
 These models provide type safety and schema validation for job
-tracking in memory and within the persistence layer, within the
+tracking in memory and within the storage layer, within the
 Astrometrics ecosystem.
 """
 

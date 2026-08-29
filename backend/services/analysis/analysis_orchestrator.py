@@ -120,7 +120,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
                             return {"status": "error", "error": str(e)}
 
                 # Not tracked in this process's memory (e.g. no Future was
-                # ever submitted here) -- fall back to the DB-persisted
+                # ever submitted here) -- fall back to the DB-recorded
                 # status, which also covers jobs started outside this
                 # backend process entirely (a standalone script calling
                 # analyze_target() directly).
@@ -451,7 +451,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
         try:
             self._target_service.save_targets()
         except Exception as save_error:
-            log.error(f"[{target_id}] Failed to persist target after spectroscopy analysis: {save_error}")
+            log.error(f"[{target_id}] Failed to record target after spectroscopy analysis: {save_error}")
 
         log.info(
             f"[{target_id}] Spectroscopy analysis complete. "
@@ -520,7 +520,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
             try:
                 self._target_service.save_targets()
             except Exception as save_error:
-                log.error(f"[{target_id}] Failed to persist target after photometry analysis: {save_error}")
+                log.error(f"[{target_id}] Failed to record target after photometry analysis: {save_error}")
 
             if self._notification_service:
                 msg = (

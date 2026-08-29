@@ -6,7 +6,7 @@ interface, its simulator, and the StellarMate remote-transfer driver.
 Resolution is lazy (module `__getattr__`, PEP 562) rather than a
 top-level import: `disk_interface.py` and `butler.py` are also
 submodules of this package, needed by Observation Planning for
-persistence alone, and eagerly importing INDI hardware modules here
+recording alone, and eagerly importing INDI hardware modules here
 would mean importing either one transitively imports device drivers --
 directly undermining "Planning Is Hardware-Free"
 (`Wayfinding_Library_Architecture.md` §2.3.4). Since Python must execute

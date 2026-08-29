@@ -1,1 +1,1 @@
-"""Data services: target, image, and stellar catalog persistence."""
+"""Data services: target, image, and stellar catalog recording."""

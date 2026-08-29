@@ -1,6 +1,6 @@
 """Shared, generic keyed-model Butler.
 
-`Butler` persists pydantic model instances to SQLite tables keyed by
+`Butler` records pydantic model instances to SQLite tables keyed by
 id, following the same "get/put/exists" Rubin-Butler-derived shape
 astrometricslib's and wayfindinglib's Butlers already used
 independently. It is domain-agnostic: registering a `DatasetSpec` for
@@ -28,7 +28,7 @@ __all__ = ["AbstractButler", "Butler", "DatasetSpec"]
 
 @dataclass(frozen=True)
 class DatasetSpec:
-    """Registration record for one dataset type's generic persistence shape.
+    """Registration record for one dataset type's generic storage shape.
 
     Attributes
     ----------
@@ -80,7 +80,7 @@ class AbstractButler(ABC):
 
     @abstractmethod
     def put(self, obj: Any, dataset_type: str, selector: dict[str, Any]) -> None:
-        """Persist a dataset instance under the type a selector identifies."""
+        """Record a dataset instance under the type a selector identifies."""
 
     @abstractmethod
     def exists(self, dataset_type: str, selector: dict[str, Any]) -> bool:
@@ -127,7 +127,7 @@ class Butler(AbstractButler):
         self._specs: dict[str, DatasetSpec] = dict(specs or {})
 
     def register_dataset_type(self, dataset_type: str, spec: DatasetSpec) -> None:
-        """Register (or replace) the persistence shape for a dataset type."""
+        """Register (or replace) the storage shape for a dataset type."""
         self._specs[dataset_type] = spec
 
     def _db_path(self) -> str:
@@ -189,7 +189,7 @@ class Butler(AbstractButler):
         Returns
         -------
         rows : `list`
-            Every persisted instance of `dataset_type`.
+            Every recorded instance of `dataset_type`.
         """
         spec = self._spec(dataset_type)
         db_path = self._db_path()
@@ -332,7 +332,7 @@ class Butler(AbstractButler):
         Returns
         -------
         rows : `list`
-            The persisted instances matching `ids`.
+            The recorded instances matching `ids`.
         """
         if not ids:
             return []
@@ -393,7 +393,7 @@ class Butler(AbstractButler):
         not present in `objects`. For callers that legitimately hold
         "this list is now the whole table" (e.g. an explicit bulk
         save), not for partial updates from a process that doesn't
-        hold the full table -- use `merge_and_persist`/`delete_by_ids`
+        hold the full table -- use `merge_and_record`/`delete_by_ids`
         for those instead.
         """
         spec = self._spec(dataset_type)
@@ -413,7 +413,7 @@ class Butler(AbstractButler):
         finally:
             conn.close()
 
-    def merge_and_persist(
+    def merge_and_record(
         self,
         dataset_type: str,
         objects: list[Any],
@@ -465,7 +465,7 @@ class Butler(AbstractButler):
     def delete_by_ids(self, dataset_type: str, ids: list[str]) -> None:
         """Lock-guarded, targeted delete of only the given ids.
 
-        Complements `merge_and_persist`'s upsert-only contract, which
+        Complements `merge_and_record`'s upsert-only contract, which
         cannot express row removal.
         """
         if not ids:

@@ -5,7 +5,7 @@ observing session (pixel-position re-centroiding against a single
 reference frame only holds within one session's consistent framing).
 Since Star_N ids are otherwise only unique within a single process()
 call, each session's call must be able to give its stars a distinct,
-deterministic id prefix so they don't collide when persisted together.
+deterministic id prefix so they don't collide when recorded together.
 """
 
 import numpy as np

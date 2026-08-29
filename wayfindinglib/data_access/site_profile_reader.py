@@ -57,12 +57,12 @@ def _seed_from_config(config) -> SiteProfile:  # ruff: ignore[missing-type-funct
 
 
 def get_or_seed_default_site_profile(butler, config=None) -> SiteProfile:  # ruff: ignore[missing-type-function-argument]
-    """Return the persisted default `SiteProfile`, seeding one if none exists.
+    """Return the recorded default `SiteProfile`, seeding one if none exists.
 
     Parameters
     ----------
     butler : `wayfindinglib.drivers.butler.DiskButler`
-        The persistence layer to read from and, if seeding, write to.
+        The storage layer to read from and, if seeding, write to.
     config : `AppConfiguration`, optional
         Application configuration to seed the default from. If `None`,
         the Denver fallback is used directly.
@@ -70,7 +70,7 @@ def get_or_seed_default_site_profile(butler, config=None) -> SiteProfile:  # ruf
     Returns
     -------
     site_profile : `SiteProfile`
-        The persisted or newly seeded default site profile.
+        The recorded or newly seeded default site profile.
     """
     existing = butler.get("site_profile", {"id": _DEFAULT_SITE_PROFILE_ID})
     if existing is not None:

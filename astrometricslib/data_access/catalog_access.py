@@ -299,7 +299,7 @@ class CatalogAccess(AbstractCatalogAccess):
 
             return disk_interface.load_targets(self.config)
         elif dataset_type == "stellar_catalog":
-            # put()/merge_and_persist_records() write through to (or
+            # put()/merge_and_record() write through to (or
             # invalidate) self._stellar_catalog_cache specifically so
             # this can skip disk I/O on repeated reads -- serve from it
             # when populated, instead of unconditionally hitting disk.
@@ -353,7 +353,7 @@ class CatalogAccess(AbstractCatalogAccess):
         else:
             raise ValueError(f"Write operation not supported on dataset type: {dataset_type}")
 
-    def merge_and_persist_records(
+    def merge_and_record(
         self,
         dataset_type: str,
         objects: list[Any],
@@ -381,9 +381,9 @@ class CatalogAccess(AbstractCatalogAccess):
             If the dataset type isn't supported for merging.
         """
         if dataset_type not in ("stellar_catalog", "target_catalog"):
-            raise ValueError(f"merge_and_persist_records is not supported for dataset type: {dataset_type}")
+            raise ValueError(f"merge_and_record is not supported for dataset type: {dataset_type}")
 
-        self._generic.merge_and_persist(dataset_type, objects, merge_function)
+        self._generic.merge_and_record(dataset_type, objects, merge_function)
 
         # Invalidate the cache so the next get() re-reads the merged
         # state from disk.

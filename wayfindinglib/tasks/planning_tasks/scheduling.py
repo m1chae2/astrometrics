@@ -17,7 +17,7 @@ diagrams and are resolved here as documented implementation decisions:
   the package itself, matching how `add_to_queue` already takes
   `start_time_mode` as a separate parameter
   (`Wayfinding_Library_Sequences.md` §1.6). `PlacementRequest` below is
-  that pairing -- a plain, unpersisted parameter object, not a new
+  that pairing -- a plain, unrecorded parameter object, not a new
   Foundation model, since nothing about it needs to survive past one
   `place()` call.
 - `ObservationSession.camera_id` is required (Appendix B), but no

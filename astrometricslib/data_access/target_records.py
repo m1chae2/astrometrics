@@ -302,7 +302,7 @@ def save_targets(api) -> None:  # ruff: ignore[missing-type-function-argument]
     if not touched_ids:
         return
 
-    if not hasattr(api.catalog_access, "merge_and_persist_records"):
+    if not hasattr(api.catalog_access, "merge_and_record"):
         api.catalog_access.put(api._targets, "target_catalog", {})
         return
 
@@ -310,7 +310,7 @@ def save_targets(api) -> None:  # ruff: ignore[missing-type-function-argument]
     if not touched_targets:
         return
 
-    api.catalog_access.merge_and_persist_records(
+    api.catalog_access.merge_and_record(
         "target_catalog", touched_targets, lambda existing_target, updated_target: updated_target
     )
 

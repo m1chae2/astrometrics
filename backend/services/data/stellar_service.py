@@ -264,14 +264,14 @@ class StellarService:
         pass
 
     def save_objects(self) -> str:
-        """Persist the current list of stellar objects to SQLite.
+        """Record the current list of stellar objects to SQLite.
 
         Saved via the high-level interface.
 
         Returns
         -------
         result : `str`
-            Status message from the persistence layer.
+            Status message from the storage layer.
         """
         try:
             return self.astrometrics.stars.save_all(self.get_stellar_objects())
@@ -575,7 +575,7 @@ class StellarService:
         """Return serialized StellarObjects from online catalog drivers.
 
         Decoupled from get_sources() — never queries the local database and
-        never persists results. Each returned dict includes a catalog_source
+        never records results. Each returned dict includes a catalog_source
         field identifying which driver produced it.
 
         Parameters

@@ -1,4 +1,4 @@
-"""Domain-specific disk persistence for the targets and stellar catalogs.
+"""Domain-specific disk recording for the targets and stellar catalogs.
 
 The generic SQLite connection, file-locking, and JSON-serialization
 primitives this module used to define now live in the shared
@@ -243,7 +243,7 @@ def save_targets(app_config=None, targets_list=None) -> str:  # ruff: ignore[mis
     app_config
         Application configuration object.
     targets_list
-        List of targets to persist.
+        List of targets to record.
 
     Returns
     -------
@@ -297,7 +297,7 @@ def get_targets_by_ids(app_config=None, target_ids: list[str] | None = None) -> 
     """Load only the targets matching the given ids from the SQLite database.
 
     A targeted counterpart to load_targets, which reads the entire table.
-    Used by CatalogAccess.merge_and_persist_records so a caller only reads the
+    Used by CatalogAccess.merge_and_record so a caller only reads the
     rows it is about to update, rather than the whole catalog.
 
     Args:
@@ -405,7 +405,7 @@ def save_stellar_objects(app_config=None, stellar_list=None) -> str:  # ruff: ig
 
     Args:
         app_config: Application configuration object.
-        stellar_list: List of stellar objects to persist.
+        stellar_list: List of stellar objects to record.
 
     Returns
     -------
@@ -484,7 +484,7 @@ def save_stellar_objects(app_config=None, stellar_list=None) -> str:  # ruff: ig
 
 _database_verified = False
 
-# Persisted in the database itself via PRAGMA user_version, so the
+# Recorded in the database itself via PRAGMA user_version, so the
 # stellar_objects migration pass in verify_and_upgrade_database can tell
 # whether it has already brought every row up to this format -- see
 # that function's comments for why this exists and what it does not
@@ -497,7 +497,7 @@ STELLAR_OBJECT_DATA_VERSION = 2
 
 
 def verify_and_upgrade_database(app_config=None) -> None:  # ruff: ignore[missing-type-function-argument]
-    """Validate and upgrade all persisted rows in the SQLite tables.
+    """Validate and upgrade all recorded rows in the SQLite tables.
 
     Hydrates rows in the targets and stellar_objects tables using the
     new core Pydantic models, and rewrites them in the updated
@@ -727,7 +727,7 @@ def get_stellar_objects_by_ids(app_config=None, stellar_object_ids: list[str] | 
     """Load only the stellar objects matching the given ids.
 
     A targeted counterpart to load_stellar_objects, which reads the entire
-    table. Used by CatalogAccess.merge_and_persist_records so a caller only
+    table. Used by CatalogAccess.merge_and_record so a caller only
     reads the rows it is about to update, rather than the whole catalog.
 
     Args:

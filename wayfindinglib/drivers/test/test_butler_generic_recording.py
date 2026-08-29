@@ -1,9 +1,9 @@
-"""Purpose: Unit tests for DiskButler's generic dataset-type persistence.
+"""Purpose: Unit tests for DiskButler's generic dataset-type recording.
 
 Description: Verifies get/put/exists/get_all round-trip real SQLite
-persistence (not mocked) for the dataset types introduced by the
+recording (not mocked) for the dataset types introduced by the
 three-function redesign, that "observation_session" round-trips
-through get_all() via its own hand-written persistence path, that a
+through get_all() via its own hand-written storage path, that a
 genuinely unrecognized type still raises, and that a model with
 `date`/`datetime`/StrEnum fields survives a round trip through
 model_dump(mode="json").
@@ -45,7 +45,7 @@ def isolated_butler(tmp_path, monkeypatch):  # ruff: ignore[missing-type-functio
 
 
 def test_site_profile_round_trips(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify a SiteProfile persists and loads back with identical fields."""
+    """Verify a SiteProfile records and loads back with identical fields."""
     profile = SiteProfile(id="site1", name="Backyard", latitude_deg=39.7392, longitude_deg=-104.9903)
     isolated_butler.put(profile, "site_profile", {"id": "site1"})
 
@@ -174,13 +174,13 @@ def test_unknown_dataset_type_raises_on_put(isolated_butler):  # ruff: ignore[mi
 
 
 def test_get_all_returns_every_persisted_observation_session(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify get_all("observation_session") returns every persisted session.
+    """Verify get_all("observation_session") returns every recorded session.
 
     Added for `post_session_reconciliation`, which recomputes a
     camera's `CalibrationStats` from every terminal session and
     therefore needs to enumerate all of them, not just look one up by
     id -- unlike the generic dataset types, "observation_session" has
-    its own hand-written persistence path (`disk_interface
+    its own hand-written storage path (`disk_interface
     .load_wayfinding_sessions`), which `get_all` now also delegates to.
     """
     isolated_butler.put(

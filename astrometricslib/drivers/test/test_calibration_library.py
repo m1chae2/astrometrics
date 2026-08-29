@@ -1,7 +1,7 @@
 """Purpose: Unit tests for CalibrationLibrary and its compatibility checks.
 
 Description: Verifies addition of dark, bias, and flat calibration frames,
-their persistence behavior, and the gain/exposure compatibility checks
+their recording behavior, and the gain/exposure compatibility checks
 used to flag a mismatched calibration master.
 """
 

@@ -628,7 +628,7 @@ class VariabilityAnalyzer:
             # cost with no photometric benefit. Excluding it here only
             # decides whether this call gives it a light curve -- it
             # stays fully present in the catalog, since astrometry
-            # identification and persistence are separate and untouched.
+            # identification and recording are separate and untouched.
             #
             # On 2026-08-25, NGC 6888 seeded 2,439 stars this way across
             # a 166-frame session; two photometry workers reached ~6GB
@@ -1034,7 +1034,7 @@ class VariabilityAnalyzer:
             # is_saturated and airmasses are per-frame too, so they have
             # to be filtered with the same mask. Rewriting only
             # timestamps/fluxes left them at their original length and
-            # positionally misaligned, which is how a persisted light
+            # positionally misaligned, which is how a recorded light
             # curve ended up with 52 fluxes against 61 saturation flags
             # -- every later zip of the two then paired a flux with some
             # other frame's saturation verdict.

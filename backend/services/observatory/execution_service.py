@@ -60,7 +60,7 @@ class ExecutionService:
         return self.wayfinder.execution
 
     def _load_session(self, session_id: str) -> Any:
-        """Load a persisted observation session by identifier.
+        """Load a recorded observation session by identifier.
 
         Parameters
         ----------
@@ -83,7 +83,7 @@ class ExecutionService:
         return session
 
     def list_sessions(self) -> list[dict[str, Any]]:
-        """Summarize every persisted observation session.
+        """Summarize every recorded observation session.
 
         Returns
         -------
@@ -140,7 +140,7 @@ class ExecutionService:
         return aborted.model_dump(mode="json")
 
     def reconcile_session(self, session_id: str) -> dict[str, Any]:
-        """Run post-session reconciliation and persist the results.
+        """Run post-session reconciliation and record the results.
 
         Parameters
         ----------

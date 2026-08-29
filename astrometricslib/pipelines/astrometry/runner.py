@@ -20,10 +20,10 @@ from astrometricslib.pipelines.contract import (
     RunOutcome,
     run_pipeline,
 )
-from astrometricslib.pipelines.shared.star_persistence import (
+from astrometricslib.pipelines.shared.star_recording import (
     _drop_unresolved_stars,
     merge_astrometry_stellar_object,
-    persist_pipeline_stars,
+    record_pipeline_stars,
 )
 from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
 
@@ -180,7 +180,7 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
         _backfill_target_ra_dec_from_wcs(target, context)
         _write_solved_wcs_to_fits_header(path, context)
 
-        context.stellar_objects, _ = persist_pipeline_stars(
+        context.stellar_objects, _ = record_pipeline_stars(
             context.stellar_objects,
             catalog_access=request.catalog_access,
             target_id=target.id,

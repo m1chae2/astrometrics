@@ -1,6 +1,6 @@
 """Purpose: Unit tests for the ObservationPlanning astrometrics.
 
-Description: Verifies package authoring persists and validates targets,
+Description: Verifies package authoring records and validates targets,
 manual queue authoring writes the same structure the automated path
 does, reorder_queue rejects a mismatched entry set, and
 plan_observation_session runs end to end against a fake astrometrics
@@ -68,7 +68,7 @@ def _telescope():  # ruff: ignore[missing-return-type-private-function]
 
 
 def test_create_observation_package_validates_and_persists(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify package creation validates the target and persists the result."""
+    """Verify package creation validates the target and records the result."""
     planning = ObservationPlanning(butler=isolated_butler)
     astrometrics = _FakeAstrometrics([_FakeTarget("M 81")])
 

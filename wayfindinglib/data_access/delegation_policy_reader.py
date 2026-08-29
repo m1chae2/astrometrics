@@ -1,6 +1,6 @@
 """Purpose: Delegation Policy Resolution.
 
-Description: Reads the persisted `DelegationPolicy` -- which system
+Description: Reads the recorded `DelegationPolicy` -- which system
 performs each hardware-facing capability -- defaulting every capability
 to `DELEGATED` when unconfigured, the safe default since `DELEGATED`
 issues no command this system did not previously issue
@@ -47,17 +47,17 @@ class DelegationPolicyValidationError(ValueError):
 
 
 def get_delegation_policy(butler) -> DelegationPolicy:  # ruff: ignore[missing-type-function-argument]
-    """Return the persisted `DelegationPolicy`, or an all-`DELEGATED` default.
+    """Return the recorded `DelegationPolicy`, or an all-`DELEGATED` default.
 
     Parameters
     ----------
     butler : `wayfindinglib.drivers.butler.DiskButler`
-        The persistence layer to read from.
+        The storage layer to read from.
 
     Returns
     -------
     policy : `DelegationPolicy`
-        The persisted policy, or an empty one -- which resolves every
+        The recorded policy, or an empty one -- which resolves every
         capability to `DELEGATED` via `DelegationPolicy.state_for`'s own
         default -- when none has been configured yet.
     """

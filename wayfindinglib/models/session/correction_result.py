@@ -8,7 +8,7 @@ anything they produce.
 
 Per the "Corrections Are Pure" invariant (§2.5.9), computing one of
 these records issues nothing to hardware -- issuing is a separate,
-delegation-gated step layered on top. Each record is persisted through
+delegation-gated step layered on top. Each record is recorded through
 the `DivergenceRecord` it contributes to while its capability is
 shadowed, and through `GuidingSample` (pointing/guiding) while
 authoritative (§2.5.10).

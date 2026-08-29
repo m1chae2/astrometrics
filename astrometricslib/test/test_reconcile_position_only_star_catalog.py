@@ -161,7 +161,7 @@ def test_find_and_apply_clusters_merges_and_deletes_against_a_real_catalog(tmp_p
     unrelated.declination = -26.0
     unrelated.target_ids = ["M42"]
 
-    astrometrics.catalog_access.merge_and_persist_records(
+    astrometrics.catalog_access.merge_and_record(
         "stellar_catalog", [survivor, duplicate, unrelated], lambda _existing, updated: updated
     )
 
@@ -199,7 +199,7 @@ def test_find_position_only_clusters_respects_target_id_filter(tmp_path):  # ruf
         second.right_ascension = 100.0001
         second.declination = 10.0001
         second.target_ids = [target_id]
-        astrometrics.catalog_access.merge_and_persist_records(
+        astrometrics.catalog_access.merge_and_record(
             "stellar_catalog", [first, second], lambda _existing, updated: updated
         )
 

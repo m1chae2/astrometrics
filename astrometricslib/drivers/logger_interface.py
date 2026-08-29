@@ -2,7 +2,7 @@
 
 Provides `LoggerInterface`, a SQLite-backed repository for
 `ProcessingJob` records, agent long-term-memory tables, and per-job
-log entries, plus `DbLogHandler`, a `logging.Handler` that persists
+log entries, plus `DbLogHandler`, a `logging.Handler` that records
 emitted log records into that same database.
 
 
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 class LoggerInterface:
-    """Handle persistence for `ProcessingJob` objects in astrometrics_log.db.
+    """Handle recording for `ProcessingJob` objects in astrometrics_log.db.
 
     Attributes
     ----------
@@ -106,7 +106,7 @@ class LoggerInterface:
                 )
             """)
 
-            # Per-component / per-job log persistence
+            # Per-component / per-job log recording
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS log_entries (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -515,7 +515,7 @@ class LoggerInterface:
         message: str,
         job_id: str | None = None,
     ) -> None:
-        """Persist a single emitted log record.
+        """Record a single emitted log record.
 
         Called from DbLogHandler.emit(), which runs inside the logging
         framework itself. Failures here must stay silent (no logger.error
@@ -559,7 +559,7 @@ class LoggerInterface:
             logger.debug("Error recording agent knowledge recall: %s", exc)
 
     def get_log_entries_for_job(self, job_id: str) -> list[dict]:
-        """Retrieve all persisted log entries for a job, oldest first.
+        """Retrieve all recorded log entries for a job, oldest first.
 
         Parameters
         ----------
@@ -635,7 +635,7 @@ class LoggerInterface:
 
 
 class DbLogHandler(logging.Handler):
-    """Logging handler that persists emitted records into log_entries.
+    """Logging handler that records emitted records into log_entries.
 
     Bind a job_id to scope all records emitted through this handler
     instance to a specific processing job; leave it None for
@@ -657,7 +657,7 @@ class DbLogHandler(logging.Handler):
         Parameters
         ----------
         logger_interface : `LoggerInterface`
-            Repository used to persist emitted log records.
+            Repository used to record emitted log records.
         job_id : `str`, optional
             Processing job to scope records to, default `None` for
             general/unscoped logs.
@@ -667,7 +667,7 @@ class DbLogHandler(logging.Handler):
         self.job_id = job_id
 
     def emit(self, record: logging.LogRecord) -> None:
-        """Persist a log record via the bound `LoggerInterface`.
+        """Record a log record via the bound `LoggerInterface`.
 
         Parameters
         ----------

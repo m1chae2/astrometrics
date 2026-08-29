@@ -7,7 +7,7 @@ today. PHD2GuidingService fills that seam: it runs PHD2Client's event
 stream on a background thread, accumulates GuideStep events as
 GuidingSample records, and exposes them both in the pre-existing legacy
 history shape and as real GuidingSample objects for ObservationSession
-persistence.
+recording.
 """
 
 import logging

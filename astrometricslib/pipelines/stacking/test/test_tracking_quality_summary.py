@@ -1,8 +1,8 @@
-"""Tests for persisting tracking/input-condition analysis as a quality summary.
+"""Tests for recording tracking/input-condition analysis as a quality summary.
 
 `analyze_guiding` and `analyze_input_conditions` are read-only analyses
 that existed with no caller outside their own tests; this wires their
-results into the same queryable, persisted form every other pipeline's
+results into the same queryable, recorded form every other pipeline's
 findings already take.
 """
 
@@ -53,7 +53,7 @@ def test_a_healthy_target_produces_an_unflagged_summary():  # ruff: ignore[missi
 
 
 def test_trailed_frames_are_counted_and_flagged():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Elongated stars must reach the persisted record and set flagged."""
+    """Elongated stars must reach the recorded record and set flagged."""
     frames = [_frame(i, dx=i * 0.001, roundness=0.9) for i in range(15)]
     frames += [_frame(20 + i, dx=(20 + i) * 0.001, roundness=0.3) for i in range(5)]
     target = Target(id="TrailedTarget", frames=frames)

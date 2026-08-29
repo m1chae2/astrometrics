@@ -43,7 +43,7 @@ Due to the internal nature of these modules, they are deliberately hidden from t
 ### Shared Pipeline Code
 *Located in:* `astrometricslib/pipelines/shared/`
 - **Frame selection and grouping by camera/optic:** `frame_grouping.py`
-- **Star persistence shared by all three stellar pipelines:** `star_persistence.py`
+- **Star recording shared by all three stellar pipelines:** `star_recording.py`
 - **Observing-session grouping:** `target_sessions.py`
 - **Per-image analysis state:** `analysis_context.py`
 
@@ -67,7 +67,7 @@ Due to the internal nature of these modules, they are deliberately hidden from t
 
 ### Database Access
 *Located in:* `astrometricslib/data_access/`
-- **Target/frame/stellar-object persistence:** `butler.py` and `persistence_operations.py`
+- **Target/frame/stellar-object recording:** `catalog_access.py` and `target_records.py`
 - **Filesystem frame scanning:** `frame_scanning.py`
 - **Frame statistics:** `frame_statistics.py`
 - **Image format conversion and scaling for display:** `image_conversions.py` and `image_scaling.py`

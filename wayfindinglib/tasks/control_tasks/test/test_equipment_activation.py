@@ -1,7 +1,7 @@
 """Purpose: Unit tests for equipment_activation.
 
 Description: Verifies activation validates against the resolved
-catalog before persisting, against a real `AppConfiguration` backed by
+catalog before recording, against a real `AppConfiguration` backed by
 a temporary config file (real parsing, not a mock), mirroring
 `data_access/test/test_equipment_catalog_reader.py`'s isolation
 pattern.
@@ -38,7 +38,7 @@ def app_config(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-arg
 
 
 def test_set_active_telescope_persists_known_id(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify a recognized telescope id is persisted as active."""
+    """Verify a recognized telescope id is recorded as active."""
     app_config.update_config({
         "Observatory.Telescope": {"models": "Rig A"},
         "Observatory.Telescope.Rig A": {"focal_length_mm": "450.0", "focal_ratio": "6.0"},
@@ -48,7 +48,7 @@ def test_set_active_telescope_persists_known_id(app_config):  # ruff: ignore[mis
 
 
 def test_set_active_telescope_rejects_unknown_id(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify an unrecognized telescope id is rejected without persisting."""
+    """Verify an unrecognized telescope id is rejected without recording."""
     app_config.update_config({
         "Observatory.Telescope": {"models": "Rig A"},
         "Observatory.Telescope.Rig A": {"focal_length_mm": "450.0", "focal_ratio": "6.0"},
@@ -58,7 +58,7 @@ def test_set_active_telescope_rejects_unknown_id(app_config):  # ruff: ignore[mi
 
 
 def test_set_active_camera_persists_known_id(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify a recognized camera id is persisted as active."""
+    """Verify a recognized camera id is recorded as active."""
     app_config.update_config({
         "Observatory.Camera": {"models": "ASI2600MM"},
         "Observatory.Camera.ASI2600MM": {
@@ -72,7 +72,7 @@ def test_set_active_camera_persists_known_id(app_config):  # ruff: ignore[missin
 
 
 def test_set_active_camera_rejects_unknown_id(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify an unrecognized camera id is rejected without persisting."""
+    """Verify an unrecognized camera id is rejected without recording."""
     before = get_active_camera_id(app_config)
     assert set_active_camera(app_config, "does-not-exist") is False
     assert get_active_camera_id(app_config) == before

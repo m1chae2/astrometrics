@@ -5,7 +5,7 @@ counterpart to astrometricslib's TargetSession. Composition, not
 subclassing: references a TargetSession by ID rather than inheriting from
 it, since the two live in different libraries with different lifecycles --
 TargetSession is regenerable from frames, ObservationSession is irreplaceable
-live-capture data (guiding telemetry, weather) persisted in its own library.
+live-capture data (guiding telemetry, weather) recorded in its own library.
 """
 
 from pydantic import BaseModel, ConfigDict, Field

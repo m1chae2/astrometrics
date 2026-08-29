@@ -238,7 +238,7 @@ class SpectroscopyCalibrationTuner:
             pixel_size_um=spec_pipeline.config.camera.pixel_size_um,
         )
 
-        # 5. Persist calibrated parameters to configuration
+        # 5. Record calibrated parameters to configuration
         tuned_grating_distance_mm = round(float(best_grating_distance_mm), 2)
         tuned_x0 = round(float(best_x0), 1)
 

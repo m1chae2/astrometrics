@@ -1,0 +1,82 @@
+# ==============================================================================
+# Purpose: Blocks a PR from merging until every issue it closes has an
+#          "Analysis and Plan" section written into it.
+#
+#          An issue is filed with just a problem/enhancement statement and
+#          acceptance criteria -- on purpose, it says nothing about which
+#          files change or how. That's meant to get figured out once someone
+#          actually starts the work, and written back into the issue at that
+#          point: what was found investigating it, and what the fix is going
+#          to do. This job is the check that makes that step mandatory
+#          instead of optional.
+#
+#          It reads the PR body for GitHub's own closing keywords (closes,
+#          fixes, resolves, etc. followed by #123), and for every issue
+#          matched that way, requires that issue's body to contain a
+#          non-trivial "## Analysis and Plan" section. A PR that doesn't
+#          close any issue is left alone -- this only gates tracked work.
+#
+#          This check is wired into branch protection on main as a required
+#          check, so a PR literally cannot be merged while it fails.
+# ==============================================================================
+
+name: Issue Progress Required
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+    branches: [main, master]
+
+permissions:
+  issues: read
+  pull-requests: read
+
+jobs:
+  require-issue-analysis:
+    name: require-issue-analysis
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check linked issues for an Analysis and Plan section
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const CLOSING_KEYWORD_PATTERN =
+              /\b(close[sd]?|fix(es|ed)?|resolve[sd]?)\s*:?\s+#(\d+)/gi;
+            const REQUIRED_SECTION_PATTERN =
+              /##+\s*Analysis\s+and\s+Plan\b[^\n]*\n+([^\n][^\n]*)/i;
+            const MIN_SECTION_LENGTH = 40;
+
+            const prBody = context.payload.pull_request.body || "";
+            const issueNumbers = new Set();
+            let match;
+            while ((match = CLOSING_KEYWORD_PATTERN.exec(prBody)) !== null) {
+              issueNumbers.add(Number(match[3]));
+            }
+
+            if (issueNumbers.size === 0) {
+              console.log("No linked issues found via closing keywords -- nothing to check.");
+              return;
+            }
+
+            const failures = [];
+            for (const issueNumber of issueNumbers) {
+              const { data: issue } = await github.rest.issues.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+              });
+              const sectionMatch = REQUIRED_SECTION_PATTERN.exec(issue.body || "");
+              const content = sectionMatch ? sectionMatch[1].trim() : "";
+              if (content.length < MIN_SECTION_LENGTH) {
+                failures.push(issueNumber);
+              }
+            }
+
+            if (failures.length > 0) {
+              core.setFailed(
+                `Issue(s) ${failures.map((n) => `#${n}`).join(", ")} need an ` +
+                `"## Analysis and Plan" section (what was found investigating ` +
+                `the problem, and what this PR does about it) before this PR ` +
+                `can merge.`
+              );
+            }

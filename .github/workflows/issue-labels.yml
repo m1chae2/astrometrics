@@ -1,7 +1,10 @@
 # ==============================================================================
 # Purpose: Keeps every issue labeled with a subsystem (astrometricslib /
 #          wayfindinglib / ui), a component (api / pipelines / drivers /
-#          infrastructure), and a type (enhancement / problem).
+#          infrastructure), and a type (enhancement / problem) -- and, for
+#          anything that isn't a tracking issue, gives it a
+#          "type(scope): summary" title and a body with a "Problem /
+#          Enhancement" section and an "Acceptance Criteria" section.
 #
 #          Two jobs. The first reads the dropdown answers a submitter picked
 #          in the issue form (.github/ISSUE_TEMPLATE/issue.yml) and applies
@@ -11,13 +14,17 @@
 #
 #          The second is the actual backstop: it runs on every issue however
 #          it was created, including ones filed with `gh issue create` or
-#          the API, which skip the form entirely, and checks whether at
-#          least one label from each of the three groups above is present.
-#          If not, it adds "needs-labels" and comments which group is
-#          missing; it removes the flag once the labels are fixed. GitHub
-#          has no way to block issue creation the way branch protection
-#          blocks a merge, so this after-the-fact flag is the closest this
-#          repo can get to real enforcement.
+#          the API, which skip the form entirely, and checks the title
+#          format, the two required body sections, and the three label
+#          groups. Issues carrying the "epic" label (tracking issues with
+#          sub-issues, not units of work themselves) are exempt from the
+#          title and body checks, but still need the three label groups.
+#          If anything is missing, "incomplete" is added and a comment says
+#          what; the flag comes off once the issue is fixed. GitHub has no
+#          way to block issue creation the way branch protection blocks a
+#          merge, so this after-the-fact flag is the closest this repo can
+#          get to enforcing it at filing time -- the actual merge-time gate
+#          is issue-progress-required.yml.
 # ==============================================================================
 
 name: Issue Labels
@@ -65,20 +72,25 @@ jobs:
               labels: [...found],
             });
 
-  enforce-required-labels:
-    name: Check for a full subsystem/component/type label set
+  enforce-issue-shape:
+    name: Check labels, title, and required body sections
     runs-on: ubuntu-latest
     needs: apply-form-labels
     if: always()
     steps:
-      - name: Check labels and flag if incomplete
+      - name: Check the issue and flag if incomplete
         uses: actions/github-script@v7
         with:
           script: |
             const SUBSYSTEM = ["astrometricslib", "wayfindinglib", "ui"];
             const COMPONENT = ["api", "pipelines", "drivers", "infrastructure"];
             const TYPE = ["enhancement", "problem"];
-            const FLAG_LABEL = "needs-labels";
+            const FLAG_LABEL = "incomplete";
+            const EPIC_LABEL = "epic";
+            // Matches this repo's own commit-prefix convention (doc:,
+            // refactor:, new:, fix:, maintenance:), reused here as the
+            // issue-title scope prefix: "refactor(config_loader): ...".
+            const TITLE_PATTERN = /^(doc|refactor|new|fix|maintenance)\([^)]+\):\s+\S/;
 
             const { data: issue } = await github.rest.issues.get({
               owner: context.repo.owner,
@@ -86,6 +98,7 @@ jobs:
               issue_number: context.issue.number,
             });
             const current = new Set(issue.labels.map((l) => l.name));
+            const body = issue.body || "";
 
             const missing = [];
             if (!SUBSYSTEM.some((l) => current.has(l))) {
@@ -96,6 +109,23 @@ jobs:
             }
             if (!TYPE.some((l) => current.has(l))) {
               missing.push(`a type label (${TYPE.join(", ")})`);
+            }
+
+            if (!current.has(EPIC_LABEL)) {
+              if (!TITLE_PATTERN.test(issue.title)) {
+                missing.push('a title in the form "type(scope): brief summary", e.g. "refactor(config_loader): ..."');
+              }
+              const hasSection = (heading) => {
+                const pattern = new RegExp(`##+\\s*${heading}\\b[^\\n]*\\n+([^\\n][^\\n]*)`, "i");
+                const found = pattern.exec(body);
+                return found !== null && found[1].trim().length >= 10;
+              };
+              if (!hasSection("Problem\\s*/?\\s*Enhancement")) {
+                missing.push('a non-empty "Problem / Enhancement" section');
+              }
+              if (!hasSection("Acceptance Criteria")) {
+                missing.push('a non-empty "Acceptance Criteria" section');
+              }
             }
 
             const hasFlag = current.has(FLAG_LABEL);
@@ -112,7 +142,7 @@ jobs:
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   issue_number: context.issue.number,
-                  body: `This issue is missing ${missing.join(" and ")}. Please add the missing label(s) so this can be triaged.`,
+                  body: `This issue is missing:\n\n${missing.map((m) => `- ${m}`).join("\n")}\n\nPlease fix it up so this can be triaged.`,
                 });
               }
             } else if (hasFlag) {

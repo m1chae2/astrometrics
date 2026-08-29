@@ -1,15 +1,19 @@
 name: New issue
 description: File a bug, enhancement, or task against this repo.
-title: "[Subsystem] Short summary"
+title: "refactor(scope): brief problem or enhancement summary"
 labels: []
 body:
   - type: markdown
     attributes:
       value: |
-        Every issue in this repo is labeled three ways: which subsystem it affects, which
-        kind of code it touches, and whether it's a new capability or something that needs
-        fixing. Fill in all three below -- a bot double-checks this after you submit and
-        will flag the issue if a label is missing.
+        Describe what's wrong or what's missing -- not how to fix it. Where the fix lands
+        gets figured out (and written up here) once someone starts the work; this issue is
+        for defining the problem and how to know it's solved.
+
+        Every issue also needs three labels: which subsystem it affects, which kind of code
+        it touches, and whether it's a new capability or something that needs fixing. A bot
+        double-checks the title, the two sections below, and all three labels after you
+        submit, and will flag the issue if anything is missing.
 
   - type: dropdown
     id: subsystem
@@ -49,19 +53,22 @@ body:
       required: true
 
   - type: textarea
-    id: description
+    id: problem
     attributes:
-      label: What's going on
-      description: Describe the problem or the capability in plain terms.
+      label: Problem / Enhancement
+      description: >-
+        Define what's wrong or what capability is missing. Describe the symptom and where
+        it currently lives if that helps -- don't prescribe which files should change or
+        where the fix should go.
     validations:
       required: true
 
   - type: textarea
     id: acceptance
     attributes:
-      label: Acceptance criteria
+      label: Acceptance Criteria
       description: A checklist of concrete, testable conditions for calling this done.
       value: |
         - [ ]
     validations:
-      required: false
+      required: true

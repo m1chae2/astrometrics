@@ -1,0 +1,67 @@
+name: New issue
+description: File a bug, enhancement, or task against this repo.
+title: "[Subsystem] Short summary"
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Every issue in this repo is labeled three ways: which subsystem it affects, which
+        kind of code it touches, and whether it's a new capability or something that needs
+        fixing. Fill in all three below -- a bot double-checks this after you submit and
+        will flag the issue if a label is missing.
+
+  - type: dropdown
+    id: subsystem
+    attributes:
+      label: Subsystem
+      description: Which part of the app does this affect?
+      options:
+        - astrometricslib
+        - wayfindinglib
+        - ui
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which kind of code does this touch? Select every option that applies.
+      multiple: true
+      options:
+        - api
+        - pipelines
+        - drivers
+        - infrastructure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: type
+    attributes:
+      label: Type
+      description: Is this adding a capability that doesn't exist yet, or fixing something that's wrong today?
+      options:
+        - enhancement
+        - problem
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What's going on
+      description: Describe the problem or the capability in plain terms.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: A checklist of concrete, testable conditions for calling this done.
+      value: |
+        - [ ]
+    validations:
+      required: false

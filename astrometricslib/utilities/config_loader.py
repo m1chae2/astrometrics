@@ -108,13 +108,22 @@ class AppConfiguration:
             "Observatory.Camera": {"default_primary_camera": "Unknown", "models": "Unknown"},
             "Observatory.Constraints": {"min_altitude": "0.0", "max_altitude": "90.0"},
             "Processing.Siril": {
-                "siril_executable": "siril",
+                # The -cli entry point, matching astrometrics.config.example.
+                # Plain "siril" is the GUI build: it needs a display
+                # connection and so fails in headless pipe mode, which is how
+                # every stack runs. This default is what a configuration
+                # written before [Processing.Siril] existed falls back to, so
+                # it has to be the working value, not the historical one.
+                "siril_executable": "siril-cli",
                 "rejection_sigma_mode": "adaptive",
                 "rejection_sigma_low": "3.0",
                 "rejection_sigma_high": "3.0",
                 "filter_wfwhm_percentile": "",
                 "filter_round_percentile": "",
-                "stack_weight": "wfwhm",
+                # Blank, matching astrometrics.config.example: -weight= needs
+                # a newer Siril than the default apt install provides, and a
+                # default that breaks the default install is not a default.
+                "stack_weight": "",
                 "generate_rejmap": "true",
                 "background_homogeneity_check_enabled": "true",
             },
@@ -253,7 +262,7 @@ class AppConfiguration:
         weight_mode : `str` or `None`
             The configured weight mode, or `None` if disabled.
         """
-        return self.get_value("Processing.Siril", "stack_weight", fallback="wfwhm") or None
+        return self.get_value("Processing.Siril", "stack_weight", fallback="") or None
 
     def get_stack_generate_rejmap(self) -> bool:
         """Return whether Siril should generate a rejection map (-rejmap).

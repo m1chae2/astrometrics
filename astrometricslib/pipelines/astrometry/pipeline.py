@@ -334,13 +334,13 @@ class AstrometryPipeline:
             from astropy import units as u
             from astropy.coordinates import SkyCoord
             from astropy.wcs import FITSFixedWarning
-            from astroquery.simbad import Simbad
+
+            from astrometricslib.drivers import simbad_interface
 
             warnings.simplefilter("ignore", FITSFixedWarning)
-            Simbad.reset_votable_fields()
-            Simbad.add_votable_fields("otype", "ra", "dec", "galdim_majaxis")
-
-            result = Simbad.query_object(object_name)
+            result = simbad_interface.query_object(
+                object_name, votable_fields=("otype", "ra", "dec", "galdim_majaxis")
+            )
             if result is not None and len(result) > 0:
                 otype = str(result["otype"][0]).strip()
                 ra_deg = float(result["ra"][0])

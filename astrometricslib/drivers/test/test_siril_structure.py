@@ -111,7 +111,7 @@ def test_image_processing_instances_do_not_pin_after_deletion():  # ruff: ignore
     assert len(siril_interface._active_image_processing_instances) == 0
 
 
-def test_process_target_closes_logger_handler_on_completion(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_process_target_closes_logger_handler_on_completion(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify process_target closes its FileHandler even on failure."""
     mock_config = MagicMock()
     mock_config.get_siril_executable.return_value = "siril"
@@ -121,10 +121,17 @@ def test_process_target_closes_logger_handler_on_completion(tmp_path):  # ruff: 
     mock_config.get_stack_filter_round_percentile.return_value = None
     mock_config.get_stack_weight.return_value = "wfwhm"
     mock_config.get_stack_generate_rejmap.return_value = True
-    # Force an early failure inside process_target's try block so we
-    # reach `finally` quickly
-    mock_config.get_frames_path.side_effect = RuntimeError("boom")
     mock_library = MagicMock()
+
+    # Force an early failure inside process_target's try block so we
+    # reach `finally` quickly. It has to be raised from build_directories
+    # rather than get_frames_path: process_target catches the latter and
+    # carries on to open Siril's command FIFO, whose blocking open never
+    # returns when no Siril is running to open the other end.
+    def explode(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(siril_interface.ImageProcessing, "build_directories", explode)
 
     driver = siril_interface.ImageProcessing(mock_config, mock_library)
     result = driver.process_target(id="TestLeakTarget", image_files=[])

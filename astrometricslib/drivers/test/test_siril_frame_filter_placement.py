@@ -40,7 +40,7 @@ def captured_siril_script(tmp_path, monkeypatch):  # ruff: ignore[missing-type-f
     """
     sent_commands: list[str] = []
 
-    def fake_send_commands(self, command_pipe, commands, job_logger=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def fake_send_commands(self, command_pipe, commands, job_logger=None, status_queue=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
         sent_commands.clear()
         sent_commands.extend(commands)
 

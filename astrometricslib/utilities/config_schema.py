@@ -80,7 +80,9 @@ class ProcessingConfig(BaseModel):
     filter_round_percentile : `str` or `None`
         Siril ``-filter-round`` percentile setting, by default `None`.
     stack_weight : `str` or `None`
-        Stack weighting strategy, by default ``"wfwhm"``.
+        Stack weighting strategy, by default `None` (unweighted). Siril's
+        ``-weight=`` argument is only available in releases newer than the
+        one Ubuntu's apt package ships.
     generate_rejmap : `bool`
         Whether to generate a rejection map alongside the stack, by
         default `True`.
@@ -97,7 +99,7 @@ class ProcessingConfig(BaseModel):
     rejection_sigma_high: float = 3.0
     filter_wfwhm_percentile: str | None = None
     filter_round_percentile: str | None = None
-    stack_weight: str | None = "wfwhm"
+    stack_weight: str | None = None
     generate_rejmap: bool = True
     background_homogeneity_check_enabled: bool = True
 

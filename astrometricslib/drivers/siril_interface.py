@@ -42,6 +42,14 @@ _active_image_processing_instances: weakref.WeakSet = weakref.WeakSet()
 # in parallel to save time.
 SIRIL_PROCESS_LOCK_PATH = os.path.join(tempfile.gettempdir(), "astrometricslib-siril.lock")
 
+# How long send_commands waits for one Siril command to report its own
+# completion before giving up on the whole script. This is a deadlock
+# guard, not a per-command budget: it has to exceed the slowest single
+# command a real run issues, and `stack` over a few hundred frames is
+# comfortably minutes. Five minutes is far above that while still
+# bounding a Siril that has died without closing the output pipe.
+SIRIL_COMMAND_TIMEOUT_SECONDS = 300
+
 
 # Master calibration frames (bias, dark, flat) take a long time to build.
 # To save time, they are cached. This turns hours of processing into
@@ -993,7 +1001,11 @@ class ImageProcessing:
         return process
 
     def send_commands(
-        self, command_pipe: str, commands: list[str], job_logger: logging.Logger | None = None
+        self,
+        command_pipe: str,
+        commands: list[str],
+        job_logger: logging.Logger | None = None,
+        status_queue: queue.Queue[str] | None = None,
     ) -> None:
         """Write a sequence of commands to the Siril command pipe.
 
@@ -1004,13 +1016,10 @@ class ImageProcessing:
         only happened to work on trivially small/fast commands -- any
         real FITS frame's `convert`/`register`/`stack` step routinely
         takes longer than that, so every real stacking run raced and
-        lost. When `process_target` has registered a status queue for
-        this pipe (keyed by `command_pipe`, populated by `read_output`
-        as it observes each command's own "status: success"/"status:
-        error" line on the other, output pipe), each command now waits
-        for that signal before the next is sent. Without a registered
-        queue (e.g. called outside `process_target`), falls back to the
-        old blind delay.
+        lost. Pass `status_queue` (fed by `read_output` on the other,
+        output pipe as it observes each command's own "status:
+        success"/"status: error" line) to make each command wait for
+        that signal before the next is sent.
 
         Parameters
         ----------
@@ -1022,8 +1031,13 @@ class ImageProcessing:
         job_logger : `logging.Logger`, optional
             Logger to record write errors to. If `None` (default),
             errors are silently swallowed.
+        status_queue : `queue.Queue` [`str`], optional
+            Queue that the paired `read_output` call publishes each
+            command's Siril status line to. If `None` (default), falls
+            back to a blind fixed delay between commands, which is only
+            safe when every command is known to complete faster than
+            it -- pass a queue for any real frame.
         """
-        status_queue = getattr(self, "_siril_status_queues", {}).get(command_pipe)
         try:
             with open(command_pipe, "w") as pipe:
                 for cmd in commands:
@@ -1035,7 +1049,7 @@ class ImageProcessing:
                         continue
 
                     try:
-                        result_line = status_queue.get(timeout=300)
+                        result_line = status_queue.get(timeout=SIRIL_COMMAND_TIMEOUT_SECONDS)
                     except queue.Empty:
                         if job_logger:
                             job_logger.error(f"Timed out waiting for Siril to finish command: {cmd!r}")
@@ -1052,9 +1066,6 @@ class ImageProcessing:
         except Exception as e:
             if job_logger:
                 job_logger.error(f"Pipe write error: {e}")
-        finally:
-            if status_queue is not None:
-                getattr(self, "_siril_status_queues", {}).pop(command_pipe, None)
 
     def read_output(
         self,
@@ -1066,6 +1077,7 @@ class ImageProcessing:
         job_logger: logging.Logger | None = None,
         generate_rejmap: bool = False,
         registered_seq_name: str | None = None,
+        status_queue: queue.Queue[str] | None = None,
     ) -> str | None:
         """Read Siril's status output and copy out the finished stack.
 
@@ -1099,6 +1111,10 @@ class ImageProcessing:
         registered_seq_name : `str`, optional
             Base name of the registered ``.seq`` file to copy out.
             If `None` (default), no registration sequence is copied.
+        status_queue : `queue.Queue` [`str`], optional
+            Queue to publish each Siril status line to, so that the
+            paired `send_commands` call can send one command at a time.
+            If `None` (default), status lines are only logged.
 
         Returns
         -------
@@ -1107,9 +1123,6 @@ class ImageProcessing:
             reported an error or no result was found.
         """
         log = job_logger.info if job_logger else logger.info
-        status_queue = getattr(self, "_siril_status_queues", {}).get(
-            os.path.join(os.path.dirname(output_pipe), "siril_command.in")
-        )
         try:
             with open(output_pipe) as pipe:
                 for line in pipe:
@@ -1356,12 +1369,11 @@ class ImageProcessing:
             # Lets send_commands wait for each command's own completion
             # line (read by read_output, on a different thread) instead
             # of a blind sleep -- see send_commands for why that races
-            # on any non-trivial image. Keyed by command_pipe (unique
-            # per job) rather than stored on self directly, since
-            # siril_concurrency allows multiple process_target calls to
-            # share this same ImageProcessing instance concurrently.
-            status_queues = self.__dict__.setdefault("_siril_status_queues", {})
-            status_queues[command_pipe] = queue.Queue()
+            # on any non-trivial image. It is a local, handed to both
+            # halves explicitly, rather than instance state:
+            # siril_concurrency allows several process_target calls to
+            # share one ImageProcessing instance, and each needs its own.
+            status_queue: queue.Queue[str] = queue.Queue()
 
             # Get actual counts to handle 1-frame sequence issue in
             # Siril. Siril's 'convert' does not create a .seq file
@@ -1712,7 +1724,7 @@ class ImageProcessing:
                 ]
 
             def write_commands():  # ruff: ignore[missing-return-type-private-function]
-                self.send_commands(command_pipe, script, job_logger=job_logger)
+                self.send_commands(command_pipe, script, job_logger=job_logger, status_queue=status_queue)
 
             writer = threading.Thread(target=write_commands)
             writer.daemon = True
@@ -1727,6 +1739,7 @@ class ImageProcessing:
                 job_logger=job_logger,
                 generate_rejmap=generate_rejmap,
                 registered_seq_name=seq,
+                status_queue=status_queue,
             )
 
             self.last_run_diagnostics["stacking_duration_seconds"] = round(

@@ -1,6 +1,6 @@
 # Astrometrics Installation
 
-*Version 1.3 · 2026-08-30 · Status: current*
+*Version 1.4 · 2026-08-30 · Status: current*
 
 ## 1. Introduction
 
@@ -24,17 +24,32 @@ Run the following command in the terminal:
 sudo ./build/linux/install_ubuntu_deps.sh
 ```
 
-This installs Siril, the external engine stacking depends on, from Ubuntu's own archive.
-To track upstream's latest release instead, install it from Flatpak/Flathub:
+The script takes two optional settings. Run it with `--help` to see them in the terminal.
+
+The first chooses where Siril comes from. Siril is the external program that does the stacking. The default is Ubuntu's own package:
+
+```bash
+sudo ./build/linux/install_ubuntu_deps.sh --siril-source=apt
+```
+
+Ubuntu's package stays at whatever version Ubuntu ships. To get a newer Siril, install it from Flathub instead. This is also the only option that supports weighted stacking, described in Section 4:
 
 ```bash
 sudo ./build/linux/install_ubuntu_deps.sh --siril-source=flatpak
 ```
 
-Astrometry (plate solving) works out of the box with an [astrometry.net API key](https://nova.astrometry.net/api_help) and no local install. To solve offline instead, add `--with-local-solver`, which installs `solve-field` plus index files sized for the config template's default rig:
+The second chooses where plate solving runs. Plate solving is the step that works out which part of the sky an image shows. It is off by default, because the alternative is the online [astrometry.net](https://nova.astrometry.net/api_help) service, which needs no local install — only an API key. To solve on your own machine instead, turn it on:
 
 ```bash
 sudo ./build/linux/install_ubuntu_deps.sh --with-local-solver
+```
+
+Plate solving needs one of the two. Neither is set up by default, so pick one and configure it in Section 4.
+
+The two settings are independent, so they can be combined:
+
+```bash
+sudo ./build/linux/install_ubuntu_deps.sh --siril-source=flatpak --with-local-solver
 ```
 
 Next, run the setup script to create the Python environment and install the application:
@@ -45,22 +60,25 @@ Next, run the setup script to create the Python environment and install the appl
 
 ## 4. Configuration
 
-After installation, the setup script creates a configuration file at `astrometricslib/astrometrics.config`. Three settings should be verified before proceeding:
+After installation, the setup script creates a configuration file at `astrometricslib/astrometrics.config`. Its values suit the default install, but four of them depend on choices only you can make. Check each one before proceeding:
 
-- `frames_path` (under `[Image Library]`): The path to the folder where images are saved.
-- `api_key` (under `[Processing.Astrometry.Online Solver]`): An Astrometry.net API key, if the online solver is to be used.
-- `siril_executable` (under `[Processing.Siril]`): defaults to `siril-cli`, matching an apt install. Installing from Flatpak instead requires changing this to `flatpak run --command=siril-cli org.siril.Siril`.
+- `frames_path` (under `[Image Library]`): The path to the folder where images are saved. Set this to your own folder.
+- `api_key` (under `[Processing.Astrometry.Online Solver]`): An astrometry.net API key. Set this if you did not install the local solver.
+- `siril_executable` (under `[Processing.Siril]`): The command used to run Siril. It ships as `siril-cli`, which is correct for an apt install. If you installed Siril from Flathub, change it to `flatpak run --command=siril-cli org.siril.Siril`.
+- `stack_weight` (under `[Processing.Siril]`): Ships blank, which is correct for an apt install. If you installed Siril from Flathub, you can set it to `wfwhm` to turn on weighted stacking.
+
+The installer prints the exact values to use when it finishes. It does not edit the configuration file itself.
 
 :::{warning}
-Stacking must run through Siril's `-cli` entry point. The plain `siril`/`flatpak run org.siril.Siril` command launches the GUI build, which refuses to run headless without a display connection, even in pipe mode.
+Stacking must use Siril's `-cli` command. The plain `siril` and `flatpak run org.siril.Siril` commands start the graphical build, which will not run without a display connection, even when stacking headlessly.
 :::
 
 :::{warning}
-Weighted stacking (`stack_weight = wfwhm`, the default) needs a Siril new enough to support the `stack` command's `-weight=` argument. Ubuntu's apt package does not, and stacking will fail with `Unexpected argument to stacking`. Install Siril via `--siril-source=flatpak` for a version that supports it, or blank `stack_weight` in `astrometrics.config` to stack unweighted.
+Weighted stacking (`stack_weight = wfwhm`) needs a Siril new enough to accept the `stack` command's `-weight=` argument. Ubuntu's apt package is not, and stacking fails with `Unexpected argument to stacking`. This is why `stack_weight` ships blank. Install Siril with `--siril-source=flatpak` to get a version that supports it.
 :::
 
 :::{note}
-`--with-local-solver` installs index files sized for the config template's default camera/telescope only. A different rig has a different field of view and needs different index scales -- see index files by field-of-view size at [data.astrometry.net](http://data.astrometry.net) or `apt-cache search astrometry-data`.
+`--with-local-solver` installs index files sized for the camera and telescope in the configuration template. A different camera or telescope sees a different amount of sky and needs index files sized to match. These are listed by field-of-view size at [data.astrometry.net](https://data.astrometry.net), or run `apt-cache search astrometry-data`.
 :::
 
 ## 5. Launching the application

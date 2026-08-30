@@ -3,31 +3,44 @@ set -euo pipefail
 
 # install_ubuntu_deps.sh
 # Installs the system-level dependencies required for Astrometrics on Ubuntu.
-#
-# Usage:
-#   sudo ./build/linux/install_ubuntu_deps.sh
-#   sudo ./build/linux/install_ubuntu_deps.sh --siril-source=flatpak --with-local-solver
-#
-# Options:
-#   --siril-source=apt|flatpak
-#       Where to install Siril (the external stacking engine) from.
-#       apt (default): Ubuntu's archive package -- simplest, no extra
-#         runtime, but frozen at whatever version the archive carries.
-#       flatpak: installs flatpak itself, adds the Flathub remote, and
-#         installs org.siril.Siril from there, which tracks upstream's
-#         latest release far more closely than Ubuntu's archive.
-#   --with-local-solver
-#       Off by default -- skip this if you're using the online
-#       astrometry.net API instead (set api_key under
-#       [Processing.Astrometry.Online Solver] in astrometrics.config).
-#       Installs astrometry.net (the solve-field binary) plus Tycho-2
-#       index files sized for the config template's default rig (a
-#       ZWO ASI533MM Pro at 405mm focal length, ~1.6 degree field of
-#       view). A different camera/telescope needs different index
-#       scales -- see index files sized by field-of-view at
-#       https://data.astrometry.net or `apt-cache search astrometry-data`.
-#   --help, -h
-#       Show this help message.
+# Run with --help for the available options.
+
+usage() {
+  cat <<'EOF'
+install_ubuntu_deps.sh
+Installs the system-level dependencies required for Astrometrics on Ubuntu.
+
+Usage:
+  sudo ./build/linux/install_ubuntu_deps.sh
+  sudo ./build/linux/install_ubuntu_deps.sh --siril-source=flatpak --with-local-solver
+
+Options:
+  --siril-source=apt|flatpak    (default: apt)
+      Where to install Siril, the external program that does the stacking.
+      apt: Ubuntu's own package. Simplest, and needs no extra runtime, but
+        it stays at whatever version Ubuntu ships.
+      flatpak: installs flatpak, adds the Flathub repository, then installs
+        org.siril.Siril from it. This tracks Siril's latest release much
+        more closely, and is the option that supports weighted stacking
+        (stack_weight in astrometrics.config).
+
+  --with-local-solver           (default: off)
+      Installs astrometry.net (the solve-field program) so that plate
+      solving runs on this machine instead of over the internet. Leave it
+      off if you would rather use the online astrometry.net service, which
+      needs an api_key under [Processing.Astrometry.Online Solver] in
+      astrometrics.config. Plate solving needs one or the other.
+      The Tycho-2 index files this installs are sized for the camera and
+      telescope in the config template (a ZWO ASI533MM Pro at 405mm focal
+      length, which sees about 1.6 degrees of sky). A different camera or
+      telescope sees a different amount of sky and needs index files sized
+      to match, listed by field-of-view size at
+      https://data.astrometry.net or via `apt-cache search astrometry-data`.
+
+  --help, -h
+      Show this help message.
+EOF
+}
 
 SIRIL_SOURCE="apt"
 WITH_LOCAL_SOLVER=0
@@ -36,15 +49,21 @@ for arg in "$@"; do
     --siril-source=apt|--siril-source=flatpak)
       SIRIL_SOURCE="${arg#--siril-source=}"
       ;;
+    --siril-source=*)
+      echo "Invalid value for --siril-source: '${arg#--siril-source=}'." >&2
+      echo "Valid values are 'apt' (default) or 'flatpak'." >&2
+      exit 1
+      ;;
     --with-local-solver)
       WITH_LOCAL_SOLVER=1
       ;;
     --help|-h)
-      sed -n '4,30p' "$0" | sed 's/^# \{0,1\}//'
+      usage
       exit 0
       ;;
     *)
       echo "Unknown argument: $arg" >&2
+      echo "Run with --help to see the available options." >&2
       exit 1
       ;;
   esac
@@ -92,9 +111,10 @@ fi
 
 if [ "$WITH_LOCAL_SOLVER" = "1" ]; then
   echo "=== Installing local astrometry.net solver ==="
-  # Tycho-2 index scales 07-19 span quad diameters from 22' up to 2000',
-  # covering the config template's default ~96'-wide field of view (and
-  # everything smaller solve-field would want to try below it).
+  # Tycho-2 index scales 07-19 span quad diameters from 22 arcminutes up to
+  # 2000 arcminutes, covering the roughly 1.6 degree (96 arcminute) field of
+  # view of the config template's camera and telescope, plus everything
+  # smaller that solve-field would want to try below it.
   sudo apt-get install -y \
     astrometry.net \
     astrometry-data-tycho2-07 \
@@ -106,15 +126,39 @@ fi
 echo "=== Dependencies installed successfully! ==="
 echo "You can now run ./build/linux/setup_venv.sh to create the virtual environment."
 echo ""
-echo "Set siril_executable under [Processing.Siril] in astrometrics.config to:"
-echo "  $SIRIL_EXECUTABLE_HINT"
-echo "(the plain 'siril'/'flatpak run org.siril.Siril' GUI entry point needs a"
-echo "display even for headless stacking; the -cli command does not.)"
+echo "This script does not edit astrometrics.config for you. After"
+echo "setup_venv.sh creates it, apply the settings below."
+echo ""
+echo "Siril (source: $SIRIL_SOURCE), under [Processing.Siril]:"
+if [ "$SIRIL_SOURCE" = "flatpak" ]; then
+  echo "  siril_executable = $SIRIL_EXECUTABLE_HINT"
+  echo "      (the template ships the apt value, so this one needs changing)"
+  echo "  stack_weight = wfwhm"
+  echo "      (optional; this Siril is new enough to weight frames by star"
+  echo "      sharpness, so you can turn it on)"
+else
+  echo "  siril_executable = $SIRIL_EXECUTABLE_HINT"
+  echo "      (already the template default, nothing to change)"
+  echo "  stack_weight ="
+  echo "      (already blank in the template; leave it blank, because this"
+  echo "      Siril is too old to accept the -weight= argument)"
+fi
+echo ""
+echo "The plain 'siril' / 'flatpak run org.siril.Siril' command starts the"
+echo "graphical build, which needs a display even when stacking headlessly."
+echo "The -cli command does not, which is why it is the one to use."
+echo ""
+echo "Plate solving, under [Processing.Astrometry...]:"
 if [ "$WITH_LOCAL_SOLVER" = "1" ]; then
-  echo ""
-  echo "Local plate-solving is ready via [Processing.Astrometry.Local Solver]"
-  echo "(index_path = /usr/share/astrometry, already the default). Sized for"
-  echo "the default camera/telescope in astrometrics.config.example -- if"
-  echo "yours differs, install index files matching your actual field of"
-  echo "view instead (apt-cache search astrometry-data)."
+  echo "  Ready to use via [Processing.Astrometry.Local Solver]"
+  echo "  (index_path = /usr/share/astrometry, already the template default)."
+  echo "  The index files installed are sized for the camera and telescope in"
+  echo "  astrometrics.config.example. If yours differ, install index files"
+  echo "  matching how much sky your setup actually sees"
+  echo "  (apt-cache search astrometry-data)."
+else
+  echo "  No local solver was installed. Set api_key under"
+  echo "  [Processing.Astrometry.Online Solver] to use the online"
+  echo "  astrometry.net service, or re-run this script with"
+  echo "  --with-local-solver to solve on this machine instead."
 fi

@@ -98,6 +98,11 @@ rejection_sigma_low = 3.0
 rejection_sigma_high = 3.0
 filter_wfwhm_percentile =
 filter_round_percentile =
+# Requires a Siril new enough to support `stack`'s -weight= argument --
+# Ubuntu's apt package (1.2.1) does not, and stacking will fail with
+# "Unexpected argument to stacking `-weight=wfwhm'". Install Siril via
+# --siril-source=flatpak (see build/linux/install_ubuntu_deps.sh) for a
+# version that supports it, or blank this out to stack unweighted.
 stack_weight = wfwhm
 generate_rejmap = true
 rejection_sigma_mode = adaptive

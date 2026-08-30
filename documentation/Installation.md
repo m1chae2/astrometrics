@@ -49,6 +49,10 @@ After installation, the setup script creates a configuration file at `astrometri
 Stacking must run through Siril's `-cli` entry point. The plain `siril`/`flatpak run org.siril.Siril` command launches the GUI build, which refuses to run headless without a display connection, even in pipe mode.
 :::
 
+:::{warning}
+Weighted stacking (`stack_weight = wfwhm`, the default) needs a Siril new enough to support the `stack` command's `-weight=` argument. Ubuntu's apt package does not, and stacking will fail with `Unexpected argument to stacking`. Install Siril via `--siril-source=flatpak` for a version that supports it, or blank `stack_weight` in `astrometrics.config` to stack unweighted.
+:::
+
 ## 5. Launching the application
 
 To start the Astrometrics Desktop App, run:

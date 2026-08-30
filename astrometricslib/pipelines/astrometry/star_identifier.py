@@ -57,7 +57,16 @@ _COLOR_DETECTION_BIN_FACTOR = 2
 # an entire analysis run for that long with no visible progress before
 # failing over to Gaia. 30s is generous for a single region query against a
 # responsive server and fails fast on a genuinely stuck connection instead.
-Simbad.timeout = 30
+#
+# Set the backing attribute directly rather than `Simbad.timeout = 30`:
+# astroquery's timeout setter validates the value against the service's
+# advertised maximum by fetching its TAP capabilities endpoint, i.e. it
+# makes a live network call. That turns importing this module -- something
+# every test and the app itself does unconditionally -- into something that
+# can hang or crash whenever SIMBAD is slow or unreachable, which is the
+# opposite of "fail fast" this line exists for. The getter just returns
+# `_timeout`, so this has the same effect with no network I/O.
+Simbad._timeout = 30
 
 # SIMBAD class-level state is not thread-safe. Use this lock to
 # protect configuration and queries.

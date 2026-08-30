@@ -1,6 +1,6 @@
 # Astrometrics Installation
 
-*Version 1.1 · 2026-08-22 · Status: current*
+*Version 1.2 · 2026-08-30 · Status: current*
 
 ## 1. Introduction
 
@@ -24,6 +24,13 @@ Run the following command in the terminal:
 sudo ./build/linux/install_ubuntu_deps.sh
 ```
 
+This installs Siril, the external engine stacking depends on, from Ubuntu's own archive.
+To track upstream's latest release instead, install it from Flatpak/Flathub:
+
+```bash
+sudo ./build/linux/install_ubuntu_deps.sh --siril-source=flatpak
+```
+
 Next, run the setup script to create the Python environment and install the application:
 
 ```bash
@@ -32,10 +39,15 @@ Next, run the setup script to create the Python environment and install the appl
 
 ## 4. Configuration
 
-After installation, the setup script creates a configuration file at `astrometricslib/astrometrics.config`. Two settings should be verified before proceeding:
+After installation, the setup script creates a configuration file at `astrometricslib/astrometrics.config`. Three settings should be verified before proceeding:
 
 - `frames_path` (under `[Image Library]`): The path to the folder where images are saved.
 - `api_key` (under `[Processing.Astrometry.Online Solver]`): An Astrometry.net API key, if the online solver is to be used.
+- `siril_executable` (under `[Processing.Siril]`): defaults to `siril-cli`, matching an apt install. Installing from Flatpak instead requires changing this to `flatpak run --command=siril-cli org.siril.Siril`.
+
+:::{warning}
+Stacking must run through Siril's `-cli` entry point. The plain `siril`/`flatpak run org.siril.Siril` command launches the GUI build, which refuses to run headless without a display connection, even in pipe mode.
+:::
 
 ## 5. Launching the application
 

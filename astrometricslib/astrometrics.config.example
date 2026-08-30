@@ -86,7 +86,14 @@ autoindex = true
 cpulimit = 300
 
 [Processing.Siril]
-siril_executable = flatpak run org.siril.Siril
+# Set by build/linux/install_ubuntu_deps.sh to match whichever
+# --siril-source it installed:
+#   apt (default):  siril-cli
+#   flatpak:        flatpak run --command=siril-cli org.siril.Siril
+# Either way, use the -cli entry point, not plain "siril" or
+# "flatpak run org.siril.Siril" -- those launch the GUI build, which
+# needs a display connection even for headless pipe-mode stacking.
+siril_executable = siril-cli
 rejection_sigma_low = 3.0
 rejection_sigma_high = 3.0
 filter_wfwhm_percentile =
@@ -126,4 +133,4 @@ enable_observation = false
 [Library]
 path = libraryIndex
 frames_path = libraryIndex/frames
-siril_executable = siril
+siril_executable = siril-cli

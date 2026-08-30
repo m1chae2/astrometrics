@@ -6,7 +6,7 @@ set -euo pipefail
 #
 # Usage:
 #   sudo ./build/linux/install_ubuntu_deps.sh
-#   sudo ./build/linux/install_ubuntu_deps.sh --siril-source=flatpak
+#   sudo ./build/linux/install_ubuntu_deps.sh --siril-source=flatpak --with-local-solver
 #
 # Options:
 #   --siril-source=apt|flatpak
@@ -16,17 +16,31 @@ set -euo pipefail
 #       flatpak: installs flatpak itself, adds the Flathub remote, and
 #         installs org.siril.Siril from there, which tracks upstream's
 #         latest release far more closely than Ubuntu's archive.
+#   --with-local-solver
+#       Off by default -- skip this if you're using the online
+#       astrometry.net API instead (set api_key under
+#       [Processing.Astrometry.Online Solver] in astrometrics.config).
+#       Installs astrometry.net (the solve-field binary) plus Tycho-2
+#       index files sized for the config template's default rig (a
+#       ZWO ASI533MM Pro at 405mm focal length, ~1.6 degree field of
+#       view). A different camera/telescope needs different index
+#       scales -- see index files sized by field-of-view at
+#       https://data.astrometry.net or `apt-cache search astrometry-data`.
 #   --help, -h
 #       Show this help message.
 
 SIRIL_SOURCE="apt"
+WITH_LOCAL_SOLVER=0
 for arg in "$@"; do
   case "$arg" in
     --siril-source=apt|--siril-source=flatpak)
       SIRIL_SOURCE="${arg#--siril-source=}"
       ;;
+    --with-local-solver)
+      WITH_LOCAL_SOLVER=1
+      ;;
     --help|-h)
-      sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '4,30p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -76,6 +90,19 @@ else
   SIRIL_EXECUTABLE_HINT="siril-cli"
 fi
 
+if [ "$WITH_LOCAL_SOLVER" = "1" ]; then
+  echo "=== Installing local astrometry.net solver ==="
+  # Tycho-2 index scales 07-19 span quad diameters from 22' up to 2000',
+  # covering the config template's default ~96'-wide field of view (and
+  # everything smaller solve-field would want to try below it).
+  sudo apt-get install -y \
+    astrometry.net \
+    astrometry-data-tycho2-07 \
+    astrometry-data-tycho2-08 \
+    astrometry-data-tycho2-09 \
+    astrometry-data-tycho2-10-19
+fi
+
 echo "=== Dependencies installed successfully! ==="
 echo "You can now run ./build/linux/setup_venv.sh to create the virtual environment."
 echo ""
@@ -83,3 +110,11 @@ echo "Set siril_executable under [Processing.Siril] in astrometrics.config to:"
 echo "  $SIRIL_EXECUTABLE_HINT"
 echo "(the plain 'siril'/'flatpak run org.siril.Siril' GUI entry point needs a"
 echo "display even for headless stacking; the -cli command does not.)"
+if [ "$WITH_LOCAL_SOLVER" = "1" ]; then
+  echo ""
+  echo "Local plate-solving is ready via [Processing.Astrometry.Local Solver]"
+  echo "(index_path = /usr/share/astrometry, already the default). Sized for"
+  echo "the default camera/telescope in astrometrics.config.example -- if"
+  echo "yours differs, install index files matching your actual field of"
+  echo "view instead (apt-cache search astrometry-data)."
+fi

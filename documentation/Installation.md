@@ -1,6 +1,6 @@
 # Astrometrics Installation
 
-*Version 1.2 · 2026-08-30 · Status: current*
+*Version 1.3 · 2026-08-30 · Status: current*
 
 ## 1. Introduction
 
@@ -31,6 +31,12 @@ To track upstream's latest release instead, install it from Flatpak/Flathub:
 sudo ./build/linux/install_ubuntu_deps.sh --siril-source=flatpak
 ```
 
+Astrometry (plate solving) works out of the box with an [astrometry.net API key](https://nova.astrometry.net/api_help) and no local install. To solve offline instead, add `--with-local-solver`, which installs `solve-field` plus index files sized for the config template's default rig:
+
+```bash
+sudo ./build/linux/install_ubuntu_deps.sh --with-local-solver
+```
+
 Next, run the setup script to create the Python environment and install the application:
 
 ```bash
@@ -51,6 +57,10 @@ Stacking must run through Siril's `-cli` entry point. The plain `siril`/`flatpak
 
 :::{warning}
 Weighted stacking (`stack_weight = wfwhm`, the default) needs a Siril new enough to support the `stack` command's `-weight=` argument. Ubuntu's apt package does not, and stacking will fail with `Unexpected argument to stacking`. Install Siril via `--siril-source=flatpak` for a version that supports it, or blank `stack_weight` in `astrometrics.config` to stack unweighted.
+:::
+
+:::{note}
+`--with-local-solver` installs index files sized for the config template's default camera/telescope only. A different rig has a different field of view and needs different index scales -- see index files by field-of-view size at [data.astrometry.net](http://data.astrometry.net) or `apt-cache search astrometry-data`.
 :::
 
 ## 5. Launching the application

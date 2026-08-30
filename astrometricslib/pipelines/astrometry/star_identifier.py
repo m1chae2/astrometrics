@@ -57,7 +57,16 @@ _COLOR_DETECTION_BIN_FACTOR = 2
 # an entire analysis run for that long with no visible progress before
 # failing over to Gaia. 30s is generous for a single region query against a
 # responsive server and fails fast on a genuinely stuck connection instead.
-Simbad.timeout = 30
+#
+# Setting this attribute makes astroquery reach out to SIMBAD to validate it
+# against the mirror's advertised capabilities, so it can raise on import in
+# offline environments (no network, sandboxed CI, etc). SIMBAD lookups are
+# already best-effort here (this module falls back to Gaia and then to
+# coordinate-based naming), so a failure here should not block import.
+try:
+    Simbad.timeout = 30
+except Exception:
+    logger.warning("Could not set SIMBAD timeout (offline or SIMBAD unreachable); using astroquery's default.")
 
 # SIMBAD class-level state is not thread-safe. Use this lock to
 # protect configuration and queries.

@@ -94,6 +94,17 @@ kill_port_pids() {
 }
 
 check_and_fix_sandbox() {
+  # Chromium's setuid sandbox refuses to run when Electron itself is
+  # already running as root (EUID 0), regardless of chrome-sandbox's own
+  # ownership/permission bits -- it exits with "Running as root without
+  # --no-sandbox is not supported". This is common in containers, which
+  # often run as root. Skip the permission dance entirely in that case.
+  if [ "$(id -u)" = "0" ]; then
+    echo "Running as root: sandbox is unsupported, using --no-sandbox."
+    FORCE_NO_SANDBOX=1
+    return 0
+  fi
+
   local cs_path="$ROOT_DIR/node_modules/electron/dist/chrome-sandbox"
   [ ! -f "$cs_path" ] && return 0
   owner=$(stat -c '%u' "$cs_path" 2>/dev/null || echo "")

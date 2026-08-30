@@ -9,6 +9,7 @@ import atexit
 import contextlib
 import logging
 import os
+import queue
 import shutil
 import signal
 import subprocess
@@ -996,6 +997,21 @@ class ImageProcessing:
     ) -> None:
         """Write a sequence of commands to the Siril command pipe.
 
+        Siril's pipe protocol runs one command at a time: sending the
+        next command while it's still executing the current one aborts
+        it ("status: error command interrupted"), rather than queuing.
+        A fixed delay between writes (this function's old behavior)
+        only happened to work on trivially small/fast commands -- any
+        real FITS frame's `convert`/`register`/`stack` step routinely
+        takes longer than that, so every real stacking run raced and
+        lost. When `process_target` has registered a status queue for
+        this pipe (keyed by `command_pipe`, populated by `read_output`
+        as it observes each command's own "status: success"/"status:
+        error" line on the other, output pipe), each command now waits
+        for that signal before the next is sent. Without a registered
+        queue (e.g. called outside `process_target`), falls back to the
+        old blind delay.
+
         Parameters
         ----------
         command_pipe : `str`
@@ -1007,17 +1023,38 @@ class ImageProcessing:
             Logger to record write errors to. If `None` (default),
             errors are silently swallowed.
         """
+        status_queue = getattr(self, "_siril_status_queues", {}).get(command_pipe)
         try:
             with open(command_pipe, "w") as pipe:
                 for cmd in commands:
                     pipe.write(cmd + "\n")
                     pipe.flush()
-                    time.sleep(0.05)
+
+                    if status_queue is None:
+                        time.sleep(0.05)
+                        continue
+
+                    try:
+                        result_line = status_queue.get(timeout=300)
+                    except queue.Empty:
+                        if job_logger:
+                            job_logger.error(f"Timed out waiting for Siril to finish command: {cmd!r}")
+                        break
+
+                    if "status: error" in result_line:
+                        if job_logger:
+                            job_logger.error(
+                                f"Siril reported an error after command {cmd!r}: {result_line.strip()}"
+                            )
+                        break
                 pipe.write("exit\n")
                 pipe.flush()
         except Exception as e:
             if job_logger:
                 job_logger.error(f"Pipe write error: {e}")
+        finally:
+            if status_queue is not None:
+                getattr(self, "_siril_status_queues", {}).pop(command_pipe, None)
 
     def read_output(
         self,
@@ -1070,10 +1107,15 @@ class ImageProcessing:
             reported an error or no result was found.
         """
         log = job_logger.info if job_logger else logger.info
+        status_queue = getattr(self, "_siril_status_queues", {}).get(
+            os.path.join(os.path.dirname(output_pipe), "siril_command.in")
+        )
         try:
             with open(output_pipe) as pipe:
                 for line in pipe:
                     log(line.strip())
+                    if status_queue is not None and ("status: success" in line or "status: error" in line):
+                        status_queue.put(line)
                     if "status: success stack" in line:
                         stacked_file = os.path.join(target_folder, "process", "result_stacked.fits")
                         if not os.path.exists(stacked_file):
@@ -1311,6 +1353,15 @@ class ImageProcessing:
                 safe_id, image_files, camera_filter=camera_filter, job_logger=job_logger
             )
             command_pipe, output_pipe = self.create_named_pipes(target_folder)
+            # Lets send_commands wait for each command's own completion
+            # line (read by read_output, on a different thread) instead
+            # of a blind sleep -- see send_commands for why that races
+            # on any non-trivial image. Keyed by command_pipe (unique
+            # per job) rather than stored on self directly, since
+            # siril_concurrency allows multiple process_target calls to
+            # share this same ImageProcessing instance concurrently.
+            status_queues = self.__dict__.setdefault("_siril_status_queues", {})
+            status_queues[command_pipe] = queue.Queue()
 
             # Get actual counts to handle 1-frame sequence issue in
             # Siril. Siril's 'convert' does not create a .seq file

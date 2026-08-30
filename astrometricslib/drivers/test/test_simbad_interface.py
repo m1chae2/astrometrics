@@ -1,17 +1,22 @@
-"""Tests for the SIMBAD driver's client configuration and timeout.
+"""Tests for the driver that owns this process's one SIMBAD client.
 
-The point of this module is that nothing else touches astroquery's
-process-global `Simbad` object. These tests pin the two things that are
-easy to get wrong and impossible to watch failing in production: that a
-request timeout really is applied to the HTTP session, and that the
-shared client is reset and reconfigured under the lock on every query.
+Two invariants are pinned here. First, that there really is only one
+client and this module makes it: `test_the_driver_owns_the_only_client`
+and `test_no_other_module_imports_the_simbad_client` together say nobody
+else builds or borrows one. Second, that the client is configured and
+queried without ever exposing a half-applied configuration to a second
+caller.
 
-They drive the driver against a stand-in client rather than astroquery's
-own. The root `conftest.py` replaces `astroquery` with a `MagicMock`
-whenever it has not already been imported, so a test that asserted
-against the real object would pass or fail depending on import order.
+The behavioural tests drive the driver against a stand-in client rather
+than astroquery's own. Both `conftest.py` files replace `astroquery` in
+`sys.modules` with a `MagicMock` -- the root one with `setdefault`, the
+`astrometricslib` one by assignment -- after the real package has already
+been imported. Which object a module ends up holding therefore depends on
+whether it was imported before or after that, so a test asserting against
+"the real client" passes or fails on collection order.
 """
 
+import pathlib
 import queue
 import threading
 from typing import Any
@@ -33,7 +38,7 @@ class _FakeSession:
 
 
 class _FakeSimbad:
-    """Stands in for astroquery's shared `Simbad` client object."""
+    """Stands in for an astroquery `SimbadClass` instance."""
 
     def __init__(self, result: Any = "table") -> None:
         self._session = _FakeSession()
@@ -61,52 +66,151 @@ class _FakeSimbad:
 
 
 @pytest.fixture
-def fake_simbad(monkeypatch: pytest.MonkeyPatch) -> _FakeSimbad:
-    """Swap in a stand-in client and re-arm the one-time timeout install.
+def fake_client(monkeypatch: pytest.MonkeyPatch) -> _FakeSimbad:
+    """Install a stand-in as the driver's one client.
 
     Returns
     -------
     client : `_FakeSimbad`
-        The stand-in installed as the driver's module-level client.
+        The stand-in the driver will hand out from `_get_client`.
     """
     client = _FakeSimbad()
-    monkeypatch.setattr(simbad_interface, "Simbad", client)
-    monkeypatch.setattr(simbad_interface, "_timeout_installed", False)
+    monkeypatch.setattr(simbad_interface, "_client", client)
     return client
 
 
-def test_query_requests_carry_a_timeout(fake_simbad: _FakeSimbad) -> None:
-    """The session gains a default timeout, so a stall cannot hang a run.
+@pytest.fixture
+def unbuilt_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Clear the cached client so a test can watch it being built."""
+    monkeypatch.setattr(simbad_interface, "_client", None)
+
+
+# --- One client, one owner --------------------------------------------------
+
+
+def test_the_driver_owns_the_only_client(unbuilt_client: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The client is built once here and reused, never rebuilt per query."""
+    built: list[_FakeSimbad] = []
+
+    def build() -> _FakeSimbad:
+        client = _FakeSimbad()
+        built.append(client)
+        return client
+
+    monkeypatch.setattr(simbad_interface, "SimbadClass", build)
+
+    simbad_interface.query_object("M 13")
+    simbad_interface.query_object("M 81")
+    simbad_interface.query_region("coord", radius="0.5d")
+
+    assert len(built) == 1
+    assert simbad_interface._client is built[0]
+
+
+def test_the_client_is_not_astroquerys_module_level_singleton(unbuilt_client: None) -> None:
+    """Our client must be our own, so nothing else can reconfigure it.
+
+    astroquery's module-level `Simbad` is shared with every other user of
+    the library in the process; configuring it would leak our row limit
+    and columns to them, and theirs to us.
+    """
+    with simbad_interface.SIMBAD_LOCK:
+        client = simbad_interface._get_client()
+
+    astroquery_simbad = pytest.importorskip("astroquery.simbad")
+    module_singleton = getattr(astroquery_simbad, "Simbad", None)
+    if module_singleton is not None:
+        assert client is not module_singleton
+
+
+def test_concurrent_first_use_still_builds_one_client(
+    unbuilt_client: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Racing threads must not each build their own client."""
+    built: list[_FakeSimbad] = []
+    start = threading.Barrier(4)
+
+    def build() -> _FakeSimbad:
+        client = _FakeSimbad()
+        built.append(client)
+        return client
+
+    monkeypatch.setattr(simbad_interface, "SimbadClass", build)
+
+    def query() -> None:
+        start.wait(timeout=5)
+        simbad_interface.query_object("M 13")
+
+    threads = [threading.Thread(target=query) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=5)
+
+    assert len(built) == 1
+
+
+def test_no_other_module_imports_the_simbad_client() -> None:
+    """Only this driver may import from `astroquery.simbad`.
+
+    The one-client rule is only worth anything if nothing else reaches
+    past the driver to astroquery directly. `wayfindinglib` is a separate
+    library with its own catalog drivers and is deliberately not covered.
+    """
+    package_root = pathlib.Path(simbad_interface.__file__).parent.parent
+    driver = pathlib.Path(simbad_interface.__file__).resolve()
+
+    offenders = []
+    for path in package_root.rglob("*.py"):
+        if path.resolve() == driver or "__pycache__" in path.parts:
+            continue
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue
+            if "astroquery.simbad" in stripped and (
+                stripped.startswith("import ") or stripped.startswith("from ")
+            ):
+                offenders.append(f"{path.relative_to(package_root)}:{number}: {stripped}")
+
+    assert offenders == [], (
+        "these modules bypass drivers/simbad_interface.py and would give the "
+        "process a second SIMBAD client:\n  " + "\n  ".join(offenders)
+    )
+
+
+# --- Request timeout --------------------------------------------------------
+
+
+def test_the_client_session_carries_a_timeout(unbuilt_client: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The client is built with a request timeout already installed.
 
     `requests` applies no timeout of its own, so without this a stalled
     SIMBAD connection blocks the calling analysis run indefinitely.
     """
-    simbad_interface.query_object("M 13")
+    monkeypatch.setattr(simbad_interface, "SimbadClass", _FakeSimbad)
 
-    fake_simbad._session.request("GET", "https://simbad.invalid/tap")
+    with simbad_interface.SIMBAD_LOCK:
+        client = simbad_interface._get_client()
+    client._session.request("GET", "https://simbad.invalid/tap")
 
-    assert fake_simbad._session.calls[0]["timeout"] == (simbad_interface.SIMBAD_QUERY_TIMEOUT_SECONDS)
+    assert client._session.calls[0]["timeout"] == simbad_interface.SIMBAD_QUERY_TIMEOUT_SECONDS
 
 
-def test_an_explicit_timeout_is_not_overridden(fake_simbad: _FakeSimbad) -> None:
+def test_an_explicit_timeout_is_not_overridden() -> None:
     """The default only fills in; a caller's own timeout still wins."""
-    simbad_interface._install_request_timeout()
+    client = _FakeSimbad()
+    simbad_interface._install_request_timeout(client)
 
-    fake_simbad._session.request("GET", "https://simbad.invalid/tap", timeout=5)
+    client._session.request("GET", "https://simbad.invalid/tap", timeout=5)
 
-    assert fake_simbad._session.calls[0]["timeout"] == 5
-
-
-def test_installing_the_timeout_twice_does_not_stack_wrappers(fake_simbad: _FakeSimbad) -> None:
-    """Repeated installs must not nest one wrapper per query."""
-    simbad_interface._install_request_timeout()
-    once = fake_simbad._session.request
-    simbad_interface._install_request_timeout()
-
-    assert fake_simbad._session.request is once
+    assert client._session.calls[0]["timeout"] == 5
 
 
-def test_query_region_resets_before_requesting_its_columns(fake_simbad: _FakeSimbad) -> None:
+# --- Configuration and locking ----------------------------------------------
+
+
+def test_query_region_resets_before_requesting_its_columns(fake_client: _FakeSimbad) -> None:
     """Each query clears the previous caller's columns before adding its own.
 
     astroquery accumulates requested columns, so skipping the reset would
@@ -117,36 +221,36 @@ def test_query_region_resets_before_requesting_its_columns(fake_simbad: _FakeSim
     )
 
     assert result == "table"
-    assert fake_simbad.events == [
+    assert fake_client.events == [
         ("reset",),
         ("add", ("otype", "ids")),
         ("query_region", "coord", "0.5d"),
     ]
-    assert fake_simbad.ROW_LIMIT == 100
+    assert fake_client.ROW_LIMIT == 100
 
 
-def test_query_object_passes_its_columns_through(fake_simbad: _FakeSimbad) -> None:
-    """Named lookups configure the same shared client the same way."""
+def test_query_object_passes_its_columns_through(fake_client: _FakeSimbad) -> None:
+    """Named lookups configure the same client the same way."""
     result = simbad_interface.query_object("M 13", votable_fields=("otype", "ra", "dec"))
 
     assert result == "table"
-    assert fake_simbad.events == [
+    assert fake_client.events == [
         ("reset",),
         ("add", ("otype", "ra", "dec")),
         ("query_object", "M 13"),
     ]
 
 
-def test_no_columns_requested_still_resets(fake_simbad: _FakeSimbad) -> None:
+def test_no_columns_requested_still_resets(fake_client: _FakeSimbad) -> None:
     """An empty field list must not leave the previous caller's columns."""
     simbad_interface.query_object("M 13")
 
-    assert fake_simbad.events == [("reset",), ("query_object", "M 13")]
-    assert fake_simbad.ROW_LIMIT is None
+    assert fake_client.events == [("reset",), ("query_object", "M 13")]
+    assert fake_client.ROW_LIMIT is None
 
 
 def test_queries_hold_the_lock_while_configuring(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The shared client is never reconfigured by two callers at once."""
+    """The client is never reconfigured by two callers at once."""
     observed: list[bool] = []
 
     class _LockObservingSimbad(_FakeSimbad):
@@ -154,8 +258,7 @@ def test_queries_hold_the_lock_while_configuring(monkeypatch: pytest.MonkeyPatch
             observed.append(simbad_interface.SIMBAD_LOCK.locked())
             return "table"
 
-    monkeypatch.setattr(simbad_interface, "Simbad", _LockObservingSimbad())
-    monkeypatch.setattr(simbad_interface, "_timeout_installed", False)
+    monkeypatch.setattr(simbad_interface, "_client", _LockObservingSimbad())
 
     simbad_interface.query_object("M 13")
 
@@ -166,8 +269,9 @@ def test_queries_hold_the_lock_while_configuring(monkeypatch: pytest.MonkeyPatch
 
 def test_the_lock_is_released_when_a_query_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     """A SIMBAD outage must not deadlock every later lookup."""
-    monkeypatch.setattr(simbad_interface, "Simbad", _FakeSimbad(result=ConnectionError("SIMBAD unreachable")))
-    monkeypatch.setattr(simbad_interface, "_timeout_installed", False)
+    monkeypatch.setattr(
+        simbad_interface, "_client", _FakeSimbad(result=ConnectionError("SIMBAD unreachable"))
+    )
 
     with pytest.raises(ConnectionError):
         simbad_interface.query_object("M 13")
@@ -175,7 +279,9 @@ def test_the_lock_is_released_when_a_query_raises(monkeypatch: pytest.MonkeyPatc
     assert not simbad_interface.SIMBAD_LOCK.locked()
 
 
-def test_concurrent_queries_do_not_interleave_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_concurrent_queries_do_not_interleave_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Two threads must not see each other's half-applied column set.
 
     This is the failure the lock exists to prevent: without it, one
@@ -183,17 +289,16 @@ def test_concurrent_queries_do_not_interleave_configuration(monkeypatch: pytest.
     own `add_votable_fields`, and the second query returns the wrong
     columns.
     """
-    barrier = queue.Queue()
+    handoff: queue.Queue = queue.Queue()
 
     class _SlowSimbad(_FakeSimbad):
         def add_votable_fields(self, *fields: str) -> None:
             # Give the other thread every chance to interleave here.
-            barrier.put(fields)
+            handoff.put(fields)
             self.events.append(("add", fields))
 
     client = _SlowSimbad()
-    monkeypatch.setattr(simbad_interface, "Simbad", client)
-    monkeypatch.setattr(simbad_interface, "_timeout_installed", False)
+    monkeypatch.setattr(simbad_interface, "_client", client)
 
     threads = [
         threading.Thread(

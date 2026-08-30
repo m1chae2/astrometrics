@@ -1,3 +1,7 @@
+---
+orphan: true
+---
+
 # Sample Data
 
 Example FITS frames for following along with the tutorials and notebooks in

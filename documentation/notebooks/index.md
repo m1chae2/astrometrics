@@ -8,8 +8,8 @@ and `wayfindinglib`.
 
 Each tutorial is an executable Jupyter Notebook stored in the
 `documentation/notebooks/` directory. You can open and run them interactively
-in VS Code or JupyterLab, or click any card below to view the rendered
-notebook in the browser.
+in VS Code or JupyterLab, or click any card below to view the rendered notebook
+in the browser.
 
 ---
 

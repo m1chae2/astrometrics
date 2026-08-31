@@ -29,8 +29,14 @@ run `git lfs install` once per clone before pulling.
 
 ## Using the sample data
 
-Register a frame under a target with the ingestion script from
-`documentation/notebooks/astrometrics/scripts/`:
+The `user_guide/` notebooks (`01_working_with_targets.ipynb`,
+`09_end_to_end_pipeline_M13.ipynb`, and others) register these files
+automatically, through `scripts/sample_data_staging.py`'s
+`stage_m13_sample_data()`. Use those rather than registering a file from
+this directory directly — see the warning below.
+
+To register a frame by hand instead, the ingestion script from
+`documentation/notebooks/astrometrics/scripts/` takes any local path:
 
 ```bash
 .venv/bin/python documentation/notebooks/astrometrics/scripts/local_image_ingestion.py \
@@ -38,9 +44,14 @@ Register a frame under a target with the ingestion script from
   --role LIGHT
 ```
 
-Repeat for each light/stacked frame you want indexed, then continue with
-the `user_guide/` notebooks (e.g. `03_stacking_and_calibration.ipynb`,
-`09_end_to_end_pipeline_M13.ipynb`).
+:::{warning}
+Point that at a copy, not the file under this directory. Astrometrics
+caches a solved WCS by writing it back into whichever FITS file it
+solved — the right behavior for your own capture library, where it
+saves re-solving the same frame on a later run, but not for this
+directory's checked-in reference data: running astrometry or photometry
+against a frame registered this way rewrites that file in place.
+:::
 
 ## Provenance
 

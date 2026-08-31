@@ -24,8 +24,8 @@ import numpy as np
 from astropy import units as u
 from astropy.coordinates import SkyCoord
 from astropy.wcs import WCS, FITSFixedWarning
-from astroquery.simbad import Simbad
 
+from astrometricslib.drivers import simbad_interface
 from astrometricslib.drivers.plate_solve_interface import PlateSolver
 from astrometricslib.image_processing.fits_access import collapse_to_2d
 from astrometricslib.image_processing.image import AstrometricsImage
@@ -53,15 +53,10 @@ logger = logging.getLogger(__name__)
 # detections significantly.
 _COLOR_DETECTION_BIN_FACTOR = 2
 
-# astroquery's default is 1080s (18 min) -- a stalled/slow connection blocks
-# an entire analysis run for that long with no visible progress before
-# failing over to Gaia. 30s is generous for a single region query against a
-# responsive server and fails fast on a genuinely stuck connection instead.
-Simbad.timeout = 30
-
-# SIMBAD class-level state is not thread-safe. Use this lock to
-# protect configuration and queries.
-SIMBAD_LOCK = threading.Lock()
+# SIMBAD's client configuration, request timeout and thread lock live in
+# drivers/simbad_interface.py, alongside every other external-service
+# driver, rather than here: they describe how to talk to astroquery, not
+# how this pipeline identifies a star.
 
 # Gaia TAP service queries are also not thread-safe for the shared
 # Gaia singleton; serialise them with a dedicated lock.
@@ -605,39 +600,39 @@ class StarIdentifier:
             The list of known stars and their coordinates, or None if the
             download failed.
         """
-        with SIMBAD_LOCK:
-            # Calculate a reasonable radius based on image size (if
-            # WCS is available)
-            radius_deg = 0.2  # default 12 arcmin
-            if radius_deg_override is not None:
-                radius_deg = radius_deg_override
-            elif wcs and width and height:
-                try:
-                    from astropy.wcs.utils import proj_plane_pixel_scales
-
-                    pixel_scales = proj_plane_pixel_scales(wcs)  # in degrees
-                    fov_x = pixel_scales[0] * width
-                    fov_y = pixel_scales[1] * height
-                    radius_deg = max(fov_x, fov_y) / 2.0 * 1.1  # 10% buffer
-                    radius_deg = min(radius_deg, 1.0)  # Cap at 1 degree
-                except Exception as e:
-                    logger.warning(f"Failed to calculate FOV from WCS: {e}")
-
-            logger.info(
-                f"Querying SIMBAD bulk region at {ra_center:.4f}, {dec_center:.4f} "
-                f"with {radius_deg:.3f} degree radius..."
-            )
+        # Calculate a reasonable radius based on image size (if
+        # WCS is available)
+        radius_deg = 0.2  # default 12 arcmin
+        if radius_deg_override is not None:
+            radius_deg = radius_deg_override
+        elif wcs and width and height:
             try:
-                Simbad.reset_votable_fields()
-                Simbad.ROW_LIMIT = 5000  # Prevent massive result sets
-                # common names
-                Simbad.add_votable_fields("flux(V)", "sp_type", "ids", "ra(d)", "dec(d)", "otype")
+                from astropy.wcs.utils import proj_plane_pixel_scales
 
-                coord = SkyCoord(ra_center * u.deg, dec_center * u.deg)
-                result_table = Simbad.query_region(coord, radius=f"{radius_deg}d")
+                pixel_scales = proj_plane_pixel_scales(wcs)  # in degrees
+                fov_x = pixel_scales[0] * width
+                fov_y = pixel_scales[1] * height
+                radius_deg = max(fov_x, fov_y) / 2.0 * 1.1  # 10% buffer
+                radius_deg = min(radius_deg, 1.0)  # Cap at 1 degree
             except Exception as e:
-                logger.error(f"SIMBAD query failed: {e}")
-                return None, None
+                logger.warning(f"Failed to calculate FOV from WCS: {e}")
+
+        logger.info(
+            f"Querying SIMBAD bulk region at {ra_center:.4f}, {dec_center:.4f} "
+            f"with {radius_deg:.3f} degree radius..."
+        )
+        try:
+            coord = SkyCoord(ra_center * u.deg, dec_center * u.deg)
+            result_table = simbad_interface.query_region(
+                coord,
+                radius=f"{radius_deg}d",
+                # "ids" carries the common names used to label a star.
+                votable_fields=("flux(V)", "sp_type", "ids", "ra(d)", "dec(d)", "otype"),
+                row_limit=5000,  # Prevent massive result sets
+            )
+        except Exception as e:
+            logger.error(f"SIMBAD query failed: {e}")
+            return None, None
 
         if result_table is None or len(result_table) == 0:
             logger.info("No SIMBAD results for this region.")

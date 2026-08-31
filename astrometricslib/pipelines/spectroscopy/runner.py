@@ -27,6 +27,47 @@ from astrometricslib.pipelines.shared.star_recording import (
 )
 
 
+def _registration_reference_candidates(catalog_access: Any) -> list:
+    """Collect the stars a spectral field can register its identity against.
+
+    `identify_spectral_stars_via_registration` needs a reference set of
+    stars with known identities and pixel positions to match a
+    spectroscopy image's blind detections against. That set is every
+    catalog-identified star on record, regardless of which target found
+    it: a SPEC target's own astrometry pass never produces
+    catalog-identified stars (astrometricslib refuses to mix SPEC and
+    standard frames on one target, and blind detection on a spectral
+    image has no WCS to identify against), so filtering to the SPEC
+    target's own id -- the natural first guess -- always comes back
+    empty. There is also no field recording which imaging target's
+    frames a given SPEC target's exposures were taken alongside, so
+    there is nothing narrower to filter to.
+
+    This is safe against unrelated targets:
+    `identify_spectral_stars_via_registration` requires several points
+    to agree on one consistent pixel offset (see `_MIN_CONTROL_POINTS`
+    there) before accepting a match, so a field with no real geometric
+    relationship to this one just fails to register, exactly as an
+    empty candidate list would have.
+
+    Parameters
+    ----------
+    catalog_access : `Any`
+        Provides the read of `stellar_catalog`.
+
+    Returns
+    -------
+    candidates : `list` [`StellarObject`]
+        Every catalog-identified, non-spectroscopy-derived star in the
+        catalog.
+    """
+    return [
+        stellar_object
+        for stellar_object in catalog_access.get("stellar_catalog", {})
+        if stellar_object.is_catalog_identified and not stellar_object.id.endswith("::spectroscopy")
+    ]
+
+
 class SpectroscopyPipelineAdapter(AnalysisPipeline):
     """Adapts `SpectroscopyPipeline` to the shared `AnalysisPipeline` shape."""
 
@@ -81,13 +122,13 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
 
         # The spectral stack has no WCS of its own (see the module
         # docstring on spectral_star_registration), so these stars
-        # would otherwise stay permanently unidentified. If this
-        # target already has a plate-solved, catalog-identified
-        # star field (from an earlier astrometry run), register the
-        # two point sets purely by their geometry and carry each
-        # matched star's real identity over -- automatically,
-        # whenever a reference field is available, no caller opt-in
-        # needed. Registered against the *full* blind detection set
+        # would otherwise stay permanently unidentified. If a
+        # plate-solved, catalog-identified star field is available
+        # (from an earlier astrometry run), register the two point
+        # sets purely by their geometry and carry each matched star's
+        # real identity over -- automatically, whenever a reference
+        # field is available, no caller opt-in needed. Registered
+        # against the *full* blind detection set
         # (`context.stellar_objects`, up to ~100 stars) rather than
         # just the handful spectroscopy.process() below goes on to
         # extract a spectrum for -- astroalign's triangle-asterism
@@ -98,13 +139,7 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
         # instances spectroscopy.process() mutates next, so it
         # doesn't matter that most of them won't end up with a
         # spectrum extracted.
-        reference_stellar_objects = [
-            stellar_object
-            for stellar_object in catalog_access.get("stellar_catalog", {})
-            if target.id in stellar_object.target_ids
-            and stellar_object.is_catalog_identified
-            and not stellar_object.id.endswith("::spectroscopy")
-        ]
+        reference_stellar_objects = _registration_reference_candidates(catalog_access)
         if reference_stellar_objects:
             from astrometricslib.pipelines.astrometry.spectral_star_registration import (
                 identify_spectral_stars_via_registration,

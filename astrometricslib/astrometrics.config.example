@@ -5,7 +5,10 @@
 # from version control because it holds machine-specific paths and an
 # astrometry.net API key; edit the copy, not this template.
 #
-# Every value below is a working default except the two marked EDIT ME.
+# Every value below is a working default for the standard install
+# (build/linux/install_ubuntu_deps.sh with no options), except the two
+# marked EDIT ME. Installing Siril from Flatpak instead requires the two
+# changes noted under [Processing.Siril].
 
 [Image Library]
 path = ./libraryIndex
@@ -76,8 +79,11 @@ sensor_max_wavelength = 700
 
 [Processing.Astrometry.Online Solver]
 # EDIT ME: your astrometry.net API key, from
-# https://nova.astrometry.net/api_help -- required only for online plate
-# solving. Leave blank to use the local solver configured below.
+# https://nova.astrometry.net/api_help. Plate solving needs either this key
+# or the local solver below; the standard install provides neither, so set
+# one of the two before running astrometry. Leaving this blank falls back to
+# the local solver, which requires installing it first with
+# build/linux/install_ubuntu_deps.sh --with-local-solver.
 api_key =
 
 [Processing.Astrometry.Local Solver]
@@ -86,12 +92,26 @@ autoindex = true
 cpulimit = 300
 
 [Processing.Siril]
-siril_executable = flatpak run org.siril.Siril
+# Match this to whichever --siril-source you passed to
+# build/linux/install_ubuntu_deps.sh (the script prints the right value
+# when it finishes; it does not edit this file for you):
+#   apt (default):  siril-cli
+#   flatpak:        flatpak run --command=siril-cli org.siril.Siril
+# Either way, use the -cli entry point, not plain "siril" or
+# "flatpak run org.siril.Siril" -- those launch the GUI build, which
+# needs a display connection even for headless pipe-mode stacking.
+siril_executable = siril-cli
 rejection_sigma_low = 3.0
 rejection_sigma_high = 3.0
 filter_wfwhm_percentile =
 filter_round_percentile =
-stack_weight = wfwhm
+# Blank by default, because the default apt install cannot use it:
+# weighting requires a Siril new enough to support `stack`'s -weight=
+# argument, and Ubuntu's package (1.2.1) is not, so stacking fails with
+# "Unexpected argument to stacking `-weight=wfwhm'". If you installed via
+# --siril-source=flatpak (see build/linux/install_ubuntu_deps.sh), set
+# this to wfwhm to weight each frame by its measured star sharpness.
+stack_weight =
 generate_rejmap = true
 rejection_sigma_mode = adaptive
 background_homogeneity_check_enabled = true
@@ -124,6 +144,10 @@ enable_astronomy = true
 enable_observation = false
 
 [Library]
+# Legacy section, read only as a fallback for configurations written before
+# [Image Library] existed. siril_executable is deliberately not repeated
+# here: get_siril_executable() always prefers [Processing.Siril], so a copy
+# in this section would never be read and would drift out of sync with the
+# one that is.
 path = libraryIndex
 frames_path = libraryIndex/frames
-siril_executable = siril

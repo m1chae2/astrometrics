@@ -39,6 +39,13 @@ astrometricslib/libraryIndex/locks/
 # CalibrationLibrary.load_library() treats a missing file as an empty
 # library and save_library() writes a fresh one.
 astrometricslib/libraryIndex/calibration_frames.json
+# The legacy [Library] config section resolves its "libraryIndex" path
+# relative to the process's current working directory rather than the
+# repo, so running the app/scripts from the repo root recreates it there
+# instead of under astrometricslib/libraryIndex/. Local runtime output,
+# not shipped seed data -- same as the astrometricslib/libraryIndex/
+# entries above.
+/libraryIndex/
 # Local configuration: machine-specific frames_path plus the astrometry.net
 # API key. Seeded from astrometrics.config.example by setup_venv.sh.
 astrometricslib/astrometrics.config

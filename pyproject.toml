@@ -212,6 +212,11 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "datastore"]
 "wayfindinglib/drivers/stellarmate_interface.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "astrometricslib/data_access/test/test_target_records.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "astrometricslib/test/test_scripts.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
+# These stand in for a Siril process without needing Siril installed, using
+# `true`/`sleep` off PATH like any other list-form subprocess call in this
+# codebase (never shell=True, never interpolated).
+"astrometricslib/drivers/test/test_siril_command_synchronisation.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"]
+"astrometricslib/drivers/test/test_siril_process_target_pipe_timeout.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"]
 # S608: these all bind values through parameterized `?` placeholders; the
 # only f-string interpolation is a code-defined table name (from a registry
 # constant, never a request body or user text field) or, for the Gaia ADQL

@@ -192,11 +192,28 @@ class AstrometryPipeline:
                 # 3. Convert the object's real sky coordinates (from the
                 # database)
                 # into exact X/Y pixel coordinates on the image.
+                #
+                # A WCS that is celestial in shape (real CTYPE keywords)
+                # but degenerate in content -- e.g. copied verbatim from
+                # a capture-time header rather than plate-solved --
+                # doesn't raise here; world_to_pixel just returns NaN.
+                # `(nan, nan)` is a 2-tuple, and a 2-tuple is always
+                # truthy, so `if not extraction_center` alone can't catch
+                # this: `_is_finite_pixel` is what actually distinguishes
+                # a real answer from a degenerate one.
+                def _is_finite_pixel(pixel: tuple[Any, Any] | None) -> bool:
+                    if pixel is None:
+                        return False
+                    import numpy as np
+
+                    return bool(np.isfinite(pixel[0]) and np.isfinite(pixel[1]))
+
                 extraction_center = None
                 if wcs and target_coord:
                     try:
                         x, y = wcs.world_to_pixel(target_coord)
-                        extraction_center = (x, y)
+                        if _is_finite_pixel((x, y)):
+                            extraction_center = (x, y)
                     except Exception as e:
                         logger.warning(f"WCS target conversion failed: {e}")
 
@@ -206,7 +223,8 @@ class AstrometryPipeline:
 
                         coord = SkyCoord(target_ra, target_dec, unit="deg")
                         x, y = wcs.world_to_pixel(coord)
-                        extraction_center = (x, y)
+                        if _is_finite_pixel((x, y)):
+                            extraction_center = (x, y)
                     except Exception as e:
                         logger.warning(f"WCS RA/Dec coordinate conversion failed: {e}")
 

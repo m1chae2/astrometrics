@@ -7,12 +7,21 @@ published to a queue by `read_output` reading the other pipe -- before
 writing the next. These tests pin that handshake without needing Siril:
 they drive `send_commands` against a real FIFO and feed the queue by
 hand.
+
+They also cover `_open_pipe_or_die`, the helper that bounds the wait for
+Siril to open its end of a FIFO in the first place: a plain `open()` on a
+FIFO blocks until a peer connects, and if Siril dies before ever reaching
+that point (a crash inside a sandbox, a version too old to understand
+`-p/-r/-w`), nothing will ever connect and that open() hangs forever with
+no way for the caller to notice.
 """
 
 import os
 import pathlib
 import queue
+import subprocess
 import threading
+import time
 
 import pytest
 
@@ -145,3 +154,70 @@ def test_read_output_publishes_status_lines_to_the_queue(
     assert status_queue.get_nowait().strip() == "status: success convert"
     assert status_queue.get_nowait().strip() == "status: error stack"
     assert status_queue.empty()
+
+
+def test_open_pipe_or_die_returns_once_a_peer_connects(tmp_path: pathlib.Path) -> None:
+    """The common case: a peer opens the pipe before the deadline."""
+    pipe_path = str(tmp_path / "command.in")
+    os.mkfifo(pipe_path)
+    process = subprocess.Popen(["sleep", "5"])
+    try:
+        reader = threading.Thread(target=lambda: open(pipe_path).close(), daemon=True)
+        reader.start()
+
+        pipe = siril_interface._open_pipe_or_die(pipe_path, "w", process, timeout=5)
+        pipe.close()
+        reader.join(timeout=5)
+    finally:
+        process.kill()
+        process.wait()
+
+
+def test_open_pipe_or_die_raises_once_the_process_exits(tmp_path: pathlib.Path) -> None:
+    """A dead Siril is reported, instead of waited on forever."""
+    pipe_path = str(tmp_path / "command.in")
+    os.mkfifo(pipe_path)
+    # Nothing ever opens the other end of this FIFO.
+    process = subprocess.Popen(["true"])
+    process.wait()
+
+    started_at = time.monotonic()
+    with pytest.raises(RuntimeError, match="exited"):
+        siril_interface._open_pipe_or_die(pipe_path, "w", process, timeout=30)
+    elapsed = time.monotonic() - started_at
+
+    # The failure must be reported promptly off the dead process, not
+    # only once the full 30s timeout budget elapses.
+    assert elapsed < 5
+
+
+def test_open_pipe_or_die_times_out_on_a_process_that_never_connects(tmp_path: pathlib.Path) -> None:
+    """A stuck-but-alive Siril is bounded by the timeout, not waited on."""
+    pipe_path = str(tmp_path / "command.in")
+    os.mkfifo(pipe_path)
+    process = subprocess.Popen(["sleep", "30"])
+    try:
+        with pytest.raises(TimeoutError):
+            siril_interface._open_pipe_or_die(pipe_path, "w", process, timeout=0.3)
+    finally:
+        process.kill()
+        process.wait()
+
+
+def test_send_commands_uses_the_bounded_open_when_given_a_process(
+    tmp_path: pathlib.Path, processor: siril_interface.ImageProcessing
+) -> None:
+    """A dead Siril fails send_commands promptly, not by hanging it."""
+    command_pipe = str(tmp_path / "siril_command.in")
+    os.mkfifo(command_pipe)
+    process = subprocess.Popen(["true"])
+    process.wait()
+
+    started_at = time.monotonic()
+    # send_commands swallows the failure and logs it rather than raising,
+    # matching its existing "Pipe write error" behavior -- the point here
+    # is that it returns promptly instead of hanging in open().
+    processor.send_commands(command_pipe, ["convert light"], process=process)
+    elapsed = time.monotonic() - started_at
+
+    assert elapsed < 5

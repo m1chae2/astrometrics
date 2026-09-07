@@ -301,13 +301,13 @@ class SpectroscopyPipeline:
 
                 # If it's a StellarObject, enrich it with results
                 if is_stellar_obj:
-                    self._enrich_stellar_object_with_result(star, result)
+                    self._apply_result_to_stellar_object(star, result)
 
                 results.append(result)
 
         return results
 
-    def _enrich_stellar_object_with_result(self, star: StellarObject, result: dict[str, Any]) -> None:
+    def _apply_result_to_stellar_object(self, star: StellarObject, result: dict[str, Any]) -> None:
         """Copy a single star's extraction result onto its `StellarObject`.
 
         "Quantum Efficiency" (QE) corrects for the fact that camera

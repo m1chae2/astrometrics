@@ -483,7 +483,7 @@ def _analyze_one_session(frames: list) -> dict[str, Any]:
                 "consistent with polar misalignment or an uncorrected tracking rate."
             )
 
-    meridian_flips, excursion_findings = _detect_excursion_findings(
+    meridian_flips, excursion_findings = _detect_tracking_excursions(
         frames, excursions, analysis["max_excursion_px"]
     )
     analysis["meridian_flips"] = meridian_flips
@@ -546,7 +546,7 @@ def _detect_periodic_error(
     return round(period), round(power, 3), detection.false_alarm_probability, finding
 
 
-def _detect_excursion_findings(
+def _detect_tracking_excursions(
     frames: list, excursions: list[float], max_excursion_px: float | None
 ) -> tuple[int, list[str]]:
     """Flag meridian flips and any single frame that jumped abnormally far.

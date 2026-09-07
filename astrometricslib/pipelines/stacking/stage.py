@@ -516,7 +516,7 @@ def _measure_stacked_pixel_fractions(summary, stacked_path: str) -> None:  # ruf
         summary.stacking_metrics.saturation_flagged = is_saturation_significant(saturated_fraction)
 
 
-def _update_frame_registration_facts(
+def _update_frame_registration_results(
     summary,  # ruff: ignore[missing-type-function-argument]
     stacked_path: str,
     target_frames: list[Any],
@@ -758,7 +758,7 @@ def _build_stack_quality_summary(  # ruff: ignore[missing-return-type-private-fu
         _measure_stacked_pixel_fractions(summary, stacked_path)
 
         if not is_spectral and summary.quality_processing_applied:
-            _update_frame_registration_facts(summary, stacked_path, target_frames, diagnostics)
+            _update_frame_registration_results(summary, stacked_path, target_frames, diagnostics)
             _measure_fwhm_degradation(summary, stacked_path, target_frames)
 
         if is_spectral and summary.quality_processing_applied:

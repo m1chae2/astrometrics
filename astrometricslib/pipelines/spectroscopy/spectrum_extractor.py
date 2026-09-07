@@ -469,7 +469,7 @@ class SpectrumExtractor:
         h, w = data.shape
 
         # 1. Centroid Anchor (21x21 subgrid around rough start position)
-        anchor_x, anchor_y = self._compute_centroid_anchor(data, start_pos)
+        anchor_x, anchor_y = self._compute_centroid_reference_point(data, start_pos)
 
         # 2. Bounding Box & Profile Extraction with Dynamic Tilt Tracking
         profile = []
@@ -514,7 +514,7 @@ class SpectrumExtractor:
 
         return np.array(profile), anchor_x, anchor_y
 
-    def _compute_centroid_anchor(
+    def _compute_centroid_reference_point(
         self, data: np.ndarray, start_pos: tuple[float, float]
     ) -> tuple[float, float]:
         """Find the sub-pixel centroid of a star in a 21x21 pixel box.
@@ -594,7 +594,7 @@ class SpectrumExtractor:
             How fat the spectrum was at each step.
         """
         data = image.data
-        anchor_x, anchor_y = self._compute_centroid_anchor(data, start_pos)
+        anchor_x, anchor_y = self._compute_centroid_reference_point(data, start_pos)
 
         steps, nominal_centers, perpendicular_vector = self._nominal_trace_centers(
             anchor_x, anchor_y, flare_offset_pixels, max_offset_pixels, orientation, angle_degrees

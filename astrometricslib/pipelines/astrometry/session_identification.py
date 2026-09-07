@@ -245,7 +245,7 @@ def identify_session_stars(
         star_identifier.identify_stars_with_wcs(stellar_objects, wcs, width, height)
 
     wcs, stellar_objects, reused_existing_header_wcs, solve_attempted, header_wcs_replaced = (
-        _verify_and_reresolve_wcs(
+        _reverify_wcs_solution(
             reference_image,
             star_identifier,
             unique_sources,
@@ -321,7 +321,7 @@ def _detect_and_limit_session_sources(
     return data, unique_sources, sources_detected
 
 
-def _verify_and_reresolve_wcs(
+def _reverify_wcs_solution(
     reference_image: AstrometricsImage,
     star_identifier: StarIdentifier,
     unique_sources: list[dict],

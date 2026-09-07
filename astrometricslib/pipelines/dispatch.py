@@ -437,28 +437,62 @@ def run_full_pipeline(
     stack_outputs : dict
         A dictionary mapping the stack type ("standard" or "spectral")
         to the final saved image file path.
-
-    Raises
-    ------
-    ValueError
-        If the stacking process fails to make a final image file.
     """
-    stack_outputs: dict[str, str] = {}
     print("\n==========================================")
     print(f"STARTING BATCH PROCESSING FOR TARGET: {target.id}")
     print("==========================================")
 
+    camera_frames = _select_frames_for_processing(target, camera_name, focal_length_mm)
+    if camera_frames is None:
+        return {}
+
+    standard_frames, spectral_frames = _split_standard_and_spectral_frames(target, camera_frames)
+    stack_outputs = _stack_camera_frames(target, camera_name, standard_frames, spectral_frames)
+
+    # 1b. Tracking Analysis.
+    _run_tracking_analysis_stage(target)
+
+    # 2. Astrometry Analysis
+    _run_astrometry_stage(target, astrometrics)
+
+    # 3. Photometry Analysis
+    analysis_concurrency = astrometrics.config.get_analysis_concurrency()
+    _run_photometry_stage(target, astrometrics, camera_frames, max_workers, analysis_concurrency)
+
+    # 4. Spectroscopy Analysis (only when this target actually has a
+    # SPEC stack)
+    _run_spectroscopy_stage(target, astrometrics, spectral_frames, analysis_concurrency)
+
+    # Save this target's own record (safe under concurrent callers,
+    # unlike a full-catalog resync)
+    astrometrics.catalog_access.put(target, "target_record", {})
+    print(f"[{target.id}] Processing completed and metadata saved successfully.")
+
+    return stack_outputs
+
+
+def _select_frames_for_processing(
+    target: Target, camera_name: str, focal_length_mm: float | None
+) -> list[FrameRecord] | None:
+    """Narrow a target's frames down to one camera and (optionally) one optic.
+
+    Frames of different focal length image at different scales -- this
+    library's 300mm and 405mm optics differ by 1.35x -- so a stack
+    blending them has no single pixel scale, cannot be plate solved
+    accurately, and produces fluxes that are not comparable between
+    frames. Seven targets were being stacked that way, NGC 7023 worst
+    at 424 frames of one optic mixed with 111 of the other.
+
+    Returns
+    -------
+    camera_frames : `list` [`FrameRecord`] or `None`
+        The matching frames, or `None` if there are none to process
+        (already logged, so the caller should stop with no work done).
+    """
     # Restrict all processing to frames captured with the requested
     # camera; every other camera's frames on this target are excluded.
     camera_frames = select_frames_for_camera(target, camera_name)
 
-    # Then narrow to a single optic. Frames of different focal length
-    # image at different scales -- this library's 300mm and 405mm optics
-    # differ by 1.35x -- so a stack blending them has no single pixel
-    # scale, cannot be plate solved accurately, and produces fluxes that
-    # are not comparable between frames. Seven targets were being
-    # stacked that way, NGC 7023 worst at 424 frames of one optic mixed
-    # with 111 of the other.
     if focal_length_mm is not None:
         requested_key_suffix = f"@{round(float(focal_length_mm))}mm"
         selected_frames = [
@@ -471,7 +505,7 @@ def run_full_pipeline(
                 f"[{target.id}] No frames at {focal_length_mm:g}mm for camera '{camera_name}'. "
                 "Skipping all processing steps."
             )
-            return stack_outputs
+            return None
         unassignable = frames_missing_focal_length(target, camera_name)
         if unassignable:
             # Never dropped silently: a frame with no FOCALLEN cannot be
@@ -488,8 +522,24 @@ def run_full_pipeline(
             f"[{target.id}] No frames matching camera '{camera_name}' found for this target. "
             "Skipping all processing steps."
         )
-        return stack_outputs
+        return None
 
+    return camera_frames
+
+
+def _split_standard_and_spectral_frames(
+    target: Target, camera_frames: list[FrameRecord]
+) -> tuple[list[FrameRecord], list[FrameRecord]]:
+    """Split a target's camera frames into standard and spectral groups.
+
+    Excludes derived frames (already-stacked images, starless/starmask
+    products) before classifying what's left by filter.
+
+    Returns
+    -------
+    standard_frames, spectral_frames : `list` [`FrameRecord`]
+        The non-SPEC and SPEC frames, respectively.
+    """
     print(f"[{target.id}] Stacking frames...")
     target_frames = [
         frame
@@ -512,6 +562,31 @@ def run_full_pipeline(
             spectral_frames.append(frame)
         else:
             standard_frames.append(frame)
+
+    return standard_frames, spectral_frames
+
+
+def _stack_camera_frames(
+    target: Target,
+    camera_name: str,
+    standard_frames: list[FrameRecord],
+    spectral_frames: list[FrameRecord],
+) -> dict[str, str]:
+    """Stack a target's standard and/or spectral frames.
+
+    Returns
+    -------
+    stack_outputs : `dict`
+        Maps the stack type ("standard" or "spectral") to the final
+        saved image file path, for whichever kinds of frames existed.
+
+    Raises
+    ------
+    ValueError
+        If a kind of frame that needed stacking failed to produce a
+        valid output file.
+    """
+    stack_outputs: dict[str, str] = {}
 
     # We do not lock the Siril process here because the `siril_interface`
     # already does it during the actual Siril launch. If we lock it here too,
@@ -551,11 +626,17 @@ def run_full_pipeline(
             "Skipping stacking step."
         )
 
-    # 1b. Tracking Analysis. Read-only over the registration data
-    # stacking just wrote, so it belongs right after stacking and
-    # before any pipeline that could fail and end this run early --
-    # rig-quality findings are worth having even if astrometry or
-    # photometry later fails on this target.
+    return stack_outputs
+
+
+def _run_tracking_analysis_stage(target: Target) -> None:
+    """Build and attach the target's tracking-quality summary, best-effort.
+
+    Read-only over the registration data stacking just wrote, so it
+    belongs right after stacking and before any pipeline that could
+    fail and end this run early -- rig-quality findings are worth
+    having even if astrometry or photometry later fails on this target.
+    """
     from astrometricslib.pipelines.stacking.tracking_analysis import build_tracking_quality_summary
 
     try:
@@ -563,7 +644,20 @@ def run_full_pipeline(
     except Exception as tracking_error:
         logger.warning(f"[{target.id}] Tracking analysis failed: {tracking_error}")
 
-    # 2. Astrometry Analysis
+
+def _run_astrometry_stage(target: Target, astrometrics: Any) -> dict[str, Any]:
+    """Run astrometry analysis on the target's stacked image.
+
+    Returns
+    -------
+    astrometry_results : `dict`
+        The astrometry pipeline's result dict.
+
+    Raises
+    ------
+    ValueError
+        If astrometry analysis failed to produce a result.
+    """
     print(f"[{target.id}] Running Astrometry Analysis...")
     astrometry_results = analyze_target(
         target, pipeline_type="astrometry", catalog_access=astrometrics.catalog_access
@@ -574,9 +668,23 @@ def run_full_pipeline(
         f"[{target.id}] Astrometry Analysis complete. "
         f"Resolved WCS: {astrometry_results.get('wcs') is not None}"
     )
+    return astrometry_results
 
-    # 3. Photometry Analysis
-    analysis_concurrency = astrometrics.config.get_analysis_concurrency()
+
+def _run_photometry_stage(
+    target: Target,
+    astrometrics: Any,
+    camera_frames: list[FrameRecord],
+    max_workers: int | None,
+    analysis_concurrency: int,
+) -> dict[str, Any]:
+    """Run photometry/variability analysis on the target's camera frames.
+
+    Returns
+    -------
+    photometry_results : `dict`
+        The photometry pipeline's result dict.
+    """
     print(f"[{target.id}] Running Photometry/Variability Analysis...")
     with acquire_resource_slot(astrometrics.config, "analysis", analysis_concurrency):
         photometry_results = analyze_target(
@@ -589,24 +697,31 @@ def run_full_pipeline(
     print(
         f"[{target.id}] Photometry Analysis complete. Stars found: {photometry_results.get('starsFound', 0)}"
     )
+    return photometry_results
 
-    # 4. Spectroscopy Analysis (only when this target actually has a
-    # SPEC stack)
-    if spectral_frames:
-        print(f"[{target.id}] Running Spectroscopy Analysis...")
-        with acquire_resource_slot(astrometrics.config, "analysis", analysis_concurrency):
-            spectroscopy_results = analyze_target(
-                target, pipeline_type="spectroscopy", limit=10, catalog_access=astrometrics.catalog_access
-            )
-        if spectroscopy_results is None:
-            raise ValueError("Spectroscopy analysis failed.")
-        print(f"[{target.id}] Spectroscopy Analysis complete.")
-    else:
+
+def _run_spectroscopy_stage(
+    target: Target,
+    astrometrics: Any,
+    spectral_frames: list[FrameRecord],
+    analysis_concurrency: int,
+) -> None:
+    """Run spectroscopy analysis when the target has SPEC frames.
+
+    Raises
+    ------
+    ValueError
+        If spectroscopy analysis failed to produce a result.
+    """
+    if not spectral_frames:
         print(f"[{target.id}] No SPEC frames found for this target. Skipping spectroscopy analysis.")
+        return
 
-    # Save this target's own record (safe under concurrent callers,
-    # unlike a full-catalog resync)
-    astrometrics.catalog_access.put(target, "target_record", {})
-    print(f"[{target.id}] Processing completed and metadata saved successfully.")
-
-    return stack_outputs
+    print(f"[{target.id}] Running Spectroscopy Analysis...")
+    with acquire_resource_slot(astrometrics.config, "analysis", analysis_concurrency):
+        spectroscopy_results = analyze_target(
+            target, pipeline_type="spectroscopy", limit=10, catalog_access=astrometrics.catalog_access
+        )
+    if spectroscopy_results is None:
+        raise ValueError("Spectroscopy analysis failed.")
+    print(f"[{target.id}] Spectroscopy Analysis complete.")

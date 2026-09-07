@@ -468,9 +468,11 @@ def _build_stack_quality_summary(  # ruff: ignore[missing-return-type-private-fu
         ExcludedFrame,
         StackingPipelineQualityMetrics,
         StackQualitySummary,
-        TargetSessionContribution,
     )
-    from astrometricslib.pipelines.shared.target_sessions import derive_target_sessions
+    from astrometricslib.pipelines.shared.target_sessions import (
+        build_target_session_breakdown,
+        derive_target_sessions,
+    )
     from astrometricslib.pipelines.stacking.stack_quality import (
         is_rejected_fraction_significant,
         is_stacked_fwhm_degraded,
@@ -480,14 +482,7 @@ def _build_stack_quality_summary(  # ruff: ignore[missing-return-type-private-fu
 
     target_sessions = derive_target_sessions(target.id, target_frames)
     excluded_paths = {excluded_frame.path for excluded_frame in excluded_frames}
-    target_session_breakdown = [
-        TargetSessionContribution(
-            session_id=session.id,
-            frames_contributed=len(session.frame_paths),
-            frames_clipped=sum(1 for path in session.frame_paths if path in excluded_paths),
-        )
-        for session in target_sessions
-    ]
+    target_session_breakdown = build_target_session_breakdown(target_sessions, excluded_paths)
 
     summary = StackQualitySummary(
         target_id=target.id,

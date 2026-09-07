@@ -340,8 +340,8 @@ def process_spectroscopy_frames_by_session(
         identify_session_stars,
     )
     from astrometricslib.pipelines.astrometry.star_identifier import StarIdentifier
+    from astrometricslib.pipelines.shared.target_center_hint import resolve_target_center_hint
     from astrometricslib.pipelines.shared.target_sessions import derive_target_sessions
-    from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
 
     if max_workers is None:
         worker_counts = resolve_worker_counts("1", api.config.get_photometry_workers())
@@ -350,14 +350,7 @@ def process_spectroscopy_frames_by_session(
     frames_with_timestamp = [frame for frame in frame_records if frame.timestamp is not None]
     sessions = derive_target_sessions(target.id, frames_with_timestamp)
 
-    center_ra = None
-    center_dec = None
-    try:
-        center_ra = parse_coordinate_string(str(target.ra), is_ra=True)
-        center_dec = parse_coordinate_string(str(target.dec), is_ra=False)
-    except Exception as exc:
-        # Blind solve (no center hint) if the target has no usable RA/Dec yet.
-        logger.debug("Falling back to blind solve, could not parse target RA/Dec: %s", exc)
+    center_ra, center_dec = resolve_target_center_hint(target)
 
     star_identifier = StarIdentifier()
     session_results = []
@@ -401,8 +394,8 @@ def _attach_spectroscopy_quality_summary(
     from astrometricslib.models.quality_summary import (
         SpectroscopyPipelineQualityMetrics,
         SpectroscopyQualitySummary,
-        TargetSessionContribution,
     )
+    from astrometricslib.pipelines.shared.target_sessions import build_target_session_breakdown
 
     all_dispersion_angles = []
     all_trail_widths = []
@@ -420,14 +413,8 @@ def _attach_spectroscopy_quality_summary(
     median_trail_width_px = statistics.median(all_trail_widths) if trail_width_profile_available else None
 
     failed_paths = {path for path, _error in summary.failed}
-    target_session_breakdown = [
-        TargetSessionContribution(
-            session_id=session.id,
-            frames_contributed=len(session.frame_paths),
-            frames_clipped=sum(1 for path in session.frame_paths if path in failed_paths),
-        )
-        for session, _identify_result in session_results
-    ]
+    sessions = [session for session, _identify_result in session_results]
+    target_session_breakdown = build_target_session_breakdown(sessions, failed_paths)
 
     target.spectroscopy_quality_summary = SpectroscopyQualitySummary(
         target_id=target.id,

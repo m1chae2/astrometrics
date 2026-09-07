@@ -24,7 +24,7 @@ from astrometricslib.pipelines.shared.star_recording import (
     merge_photometry_stellar_object,
     record_pipeline_stars,
 )
-from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
+from astrometricslib.pipelines.shared.target_center_hint import resolve_target_center_hint
 
 logger = logging.getLogger(__name__)
 
@@ -78,15 +78,7 @@ def _run_variability_analysis_for_session(
             identify_session_stars,
         )
 
-        center_ra = None
-        center_dec = None
-        try:
-            center_ra = parse_coordinate_string(str(target.ra), is_ra=True)
-            center_dec = parse_coordinate_string(str(target.dec), is_ra=False)
-        except Exception as exc:
-            # Blind solve (no center hint) if the target has no usable
-            # RA/Dec yet.
-            logger.debug("Falling back to blind solve, could not parse target RA/Dec: %s", exc)
+        center_ra, center_dec = resolve_target_center_hint(target)
 
         reference_image = AstrometricsImage(session.frame_paths[0])
         if reference_image.wcs is None and target and target.stacked_image:
@@ -129,15 +121,7 @@ def _solve_session_wcs(session: Any, target: Target) -> Any | None:
 
     reference_path = session.frame_paths[0]
     try:
-        center_ra = None
-        center_dec = None
-        try:
-            center_ra = parse_coordinate_string(str(target.ra), is_ra=True)
-            center_dec = parse_coordinate_string(str(target.dec), is_ra=False)
-        except Exception as exc:
-            # Blind solve (no center hint) if the target has no usable
-            # RA/Dec yet.
-            logger.debug("Falling back to blind solve, could not parse target RA/Dec: %s", exc)
+        center_ra, center_dec = resolve_target_center_hint(target)
 
         solver = PlateSolver()
         header = solver.solve(
@@ -721,11 +705,11 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             ExcludedFrame,
             PhotometryPipelineQualityMetrics,
             PhotometryQualitySummary,
-            TargetSessionContribution,
         )
         from astrometricslib.pipelines.photometry.variability_analyzer import (
             median_light_curve_scatter_mag,
         )
+        from astrometricslib.pipelines.shared.target_sessions import build_target_session_breakdown
 
         target = request.target
         payload = outcome.payload
@@ -738,14 +722,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         frames_processed = payload["frames_processed"]
 
         rejected_paths = set(all_rejected_files)
-        photometry_session_breakdown = [
-            TargetSessionContribution(
-                session_id=session.id,
-                frames_contributed=len(session.frame_paths),
-                frames_clipped=sum(1 for path in session.frame_paths if path in rejected_paths),
-            )
-            for session in photometry_sessions
-        ]
+        photometry_session_breakdown = build_target_session_breakdown(photometry_sessions, rejected_paths)
 
         rejected_frames = [
             ExcludedFrame(path=path, reason="global frame outlier (ensemble median MAD-clipped)")

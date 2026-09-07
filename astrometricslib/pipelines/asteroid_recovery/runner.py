@@ -100,8 +100,10 @@ class AsteroidRecoveryPipelineAdapter(AnalysisPipeline):
             metadata, or when a candidate was confirmed as a mover but
             not matched to a known body.
         """
-        from astrometricslib.models.quality_summary import TargetSessionContribution
-        from astrometricslib.pipelines.shared.target_sessions import derive_target_sessions
+        from astrometricslib.pipelines.shared.target_sessions import (
+            build_target_session_breakdown,
+            derive_target_sessions,
+        )
 
         target = request.target
         metrics = outcome.payload["metrics"]
@@ -110,17 +112,10 @@ class AsteroidRecoveryPipelineAdapter(AnalysisPipeline):
         asteroid_recovery_sessions = derive_target_sessions(target.id, light_frames)
         # Per-session frame-exclusion identity isn't tracked by the
         # pipeline today (only the aggregate
-        # frames_excluded_missing_pointing_metadata count is), so
-        # frames_clipped is left at 0 here rather than fabricating a
-        # breakdown.
-        asteroid_recovery_session_breakdown = [
-            TargetSessionContribution(
-                session_id=session.id,
-                frames_contributed=len(session.frame_paths),
-                frames_clipped=0,
-            )
-            for session in asteroid_recovery_sessions
-        ]
+        # frames_excluded_missing_pointing_metadata count is), so no
+        # excluded_paths is passed here -- every session reports 0 frames
+        # clipped rather than fabricating a breakdown.
+        asteroid_recovery_session_breakdown = build_target_session_breakdown(asteroid_recovery_sessions)
 
         summary = AsteroidRecoveryQualitySummary(
             target_id=target.id,

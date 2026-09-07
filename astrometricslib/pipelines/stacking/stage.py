@@ -433,49 +433,30 @@ def _camera_names_match(first: str, second: str) -> bool:
     return "".join(first.split()).casefold() == "".join(second.split()).casefold()
 
 
-def _build_stack_quality_summary(  # ruff: ignore[missing-return-type-private-function]
+def _base_stack_quality_summary(  # ruff: ignore[missing-return-type-private-function]
     target,  # ruff: ignore[missing-type-function-argument]
     is_spectral: bool,
     frames_submitted: int,
     target_frames: list[Any],
     excluded_frames: list[Any],
     diagnostics: dict,
-    background_split: dict | None,
-    stacked_path: str | None,
 ):
-    """Gather diagnostic data into a final `StackQualitySummary`.
-
-    This checks the quality of the stack differently depending on the type
-    of image. For regular images, it compares the overall sharpness (FWHM)
-    of the final stack against the average sharpness of the original frames.
-    For spectroscopy images, it uses a special tracking analysis because
-    measuring the sharpness of stretched-out light spectrums doesn't work.
+    """Build the `StackQualitySummary` shell before any measured metrics.
 
     Returns
     -------
     summary : `StackQualitySummary`
-        A report card on how well the stacking went, with warnings if
-        something looks wrong.
+        Carries the target's session breakdown and the resolved
+        stacking parameters. Every measured metric (pixel fractions,
+        FWHM, registration) is still at its default.
     """
-    from astrometricslib.image_processing.quality_metrics import (
-        measure_image_fwhm,
-        measure_rejected_fraction,
-        measure_saturated_pixel_fraction,
-        parse_seq_file,
-    )
-    from astrometricslib.image_processing.saturation import is_saturation_significant
     from astrometricslib.models.quality_summary import (
-        ExcludedFrame,
         StackingPipelineQualityMetrics,
         StackQualitySummary,
     )
     from astrometricslib.pipelines.shared.target_sessions import (
         build_target_session_breakdown,
         derive_target_sessions,
-    )
-    from astrometricslib.pipelines.stacking.stack_quality import (
-        is_rejected_fraction_significant,
-        is_stacked_fwhm_degraded,
     )
 
     frames_stacked = len(target_frames) - len(diagnostics.get("corrupt_frames_skipped", []))
@@ -484,7 +465,7 @@ def _build_stack_quality_summary(  # ruff: ignore[missing-return-type-private-fu
     excluded_paths = {excluded_frame.path for excluded_frame in excluded_frames}
     target_session_breakdown = build_target_session_breakdown(target_sessions, excluded_paths)
 
-    summary = StackQualitySummary(
+    return StackQualitySummary(
         target_id=target.id,
         target_session_ids=[session.id for session in target_sessions],
         target_session_breakdown=target_session_breakdown,
@@ -508,175 +489,204 @@ def _build_stack_quality_summary(  # ruff: ignore[missing-return-type-private-fu
         ),
     )
 
-    if background_split:
-        summary.stacking_metrics.background_split_detected = True
-        summary.stacking_metrics.background_split_detail = (
-            f"{background_split['low_group_count']} frame(s) at background~"
-            f"{background_split['low_group_median']:.0f} vs {background_split['high_group_count']} "
-            f"frame(s) at ~{background_split['high_group_median']:.0f} (gap ratio "
-            f"{background_split['gap_ratio']:.1f})"
+
+def _measure_stacked_pixel_fractions(summary, stacked_path: str) -> None:  # ruff: ignore[missing-type-function-argument]
+    """Measure the stacked image's rejected and saturated pixel fractions.
+
+    Sets `summary.stacking_metrics`' pixel-fraction fields and their
+    threshold flags in place.
+    """
+    from astrometricslib.image_processing.quality_metrics import (
+        measure_rejected_fraction,
+        measure_saturated_pixel_fraction,
+    )
+    from astrometricslib.image_processing.saturation import is_saturation_significant
+    from astrometricslib.pipelines.stacking.stack_quality import is_rejected_fraction_significant
+
+    rejected_fraction = measure_rejected_fraction(stacked_path)
+    if rejected_fraction is not None:
+        summary.stacking_metrics.rejected_pixel_fraction = rejected_fraction
+        summary.stacking_metrics.rejected_fraction_flagged = is_rejected_fraction_significant(
+            rejected_fraction
         )
 
-    if stacked_path:
-        rejected_fraction = measure_rejected_fraction(stacked_path)
-        if rejected_fraction is not None:
-            summary.stacking_metrics.rejected_pixel_fraction = rejected_fraction
-            summary.stacking_metrics.rejected_fraction_flagged = is_rejected_fraction_significant(
-                rejected_fraction
+    saturated_fraction = measure_saturated_pixel_fraction(stacked_path)
+    if saturated_fraction is not None:
+        summary.stacking_metrics.saturated_pixel_fraction = saturated_fraction
+        summary.stacking_metrics.saturation_flagged = is_saturation_significant(saturated_fraction)
+
+
+def _update_frame_registration_facts(
+    summary,  # ruff: ignore[missing-type-function-argument]
+    stacked_path: str,
+    target_frames: list[Any],
+    diagnostics: dict,
+) -> None:
+    """Record Siril's per-frame registration facts, find the reference frame.
+
+    Per-frame registration facts (Siril's own findstar pass, computed
+    for free during registration) are recorded onto each `FrameRecord`
+    for later pipelines/runs to read, not used for any verdict here.
+    Frame order in the .seq file follows Siril's own symlink submission
+    order, which can differ from `target_frames`' order (corrupt/wrong-
+    camera frames get filtered during symlinking) --
+    `symlinked_light_paths` is the authoritative alignment reference,
+    same discipline the spectral registration check uses.
+
+    Also identifies the registration reference frame -- the one Siril
+    aligned every other frame to, i.e. the frame whose transform is the
+    identity (no shift of its own) -- and records it onto
+    `summary.stacking_metrics`.
+    """
+    from astrometricslib.image_processing.quality_metrics import parse_seq_file
+
+    seq_path = f"{stacked_path.rsplit('.', 1)[0]}_Registration.seq"
+    registration_frames = parse_seq_file(seq_path)
+    registration_frame_paths = diagnostics.get("symlinked_light_paths", [])
+
+    # Siril aligns every frame to one reference, so a poor
+    # reference fails the whole stack -- M 42 aborted with "Found
+    # 0 stars in reference" and nothing recorded which frame that
+    # was. The reference is the frame whose transform is the
+    # identity, i.e. the one with no shift of its own.
+    #
+    # Guarded the same way the pairing loop below is, and for
+    # the same reason: a registration_frame_paths/
+    # registration_frames length mismatch means the positional
+    # correspondence between the two lists cannot be trusted, so
+    # indexing into registration_frame_paths here would risk
+    # naming the wrong frame as the reference. Also require
+    # exactly one zero-shift frame -- a legacy `r_` sequence
+    # (already-aligned frames, every one recording an identity
+    # transform; see the preserved-sequence fix elsewhere in
+    # this file) has no single frame identifiable as "the"
+    # reference, and recording the first such frame would be
+    # fabricated rather than measured.
+    zero_shift_indices = [
+        index for index, facts in enumerate(registration_frames) if not facts["dx"] and not facts["dy"]
+    ]
+    reference_lists_align = len(registration_frame_paths) == len(registration_frames)
+    if len(zero_shift_indices) == 1 and reference_lists_align:
+        reference_index = zero_shift_indices[0]
+        summary.stacking_metrics.registration_reference_frame = registration_frame_paths[reference_index]
+        summary.stacking_metrics.registration_reference_star_count = registration_frames[reference_index][
+            "nb_stars"
+        ]
+
+    if len(registration_frame_paths) == len(registration_frames):
+        frame_by_path = {frame.path: frame for frame in target_frames}
+        for frame_path, registration_facts in zip(
+            registration_frame_paths, registration_frames, strict=False
+        ):
+            frame = frame_by_path.get(frame_path)
+            if frame is None:
+                continue
+            # Normally the first run's measurements win, so a
+            # target stacked twice (standard then spectral) does
+            # not have its facts clobbered by the second pass.
+            # The exception is a frame carrying shifts that are
+            # known to be degenerate: runs before the
+            # registration-sequence fix preserved the *registered*
+            # sequence, whose frames are already aligned and so
+            # recorded dx=dy=0 for every frame. A non-zero shift
+            # now available for that same frame is real data
+            # replacing a known-bad zero, so it is allowed
+            # through. A genuine reference frame also has
+            # dx=dy=0, but this run offers 0 for it too, so it is
+            # never rewritten.
+            has_existing_facts = frame.registration_fwhm_x_px is not None
+            stored_shift_is_degenerate = not frame.registration_dx_px and not frame.registration_dy_px
+            run_offers_real_shift = bool(registration_facts["dx"] or registration_facts["dy"])
+            if has_existing_facts and not (stored_shift_is_degenerate and run_offers_real_shift):
+                continue
+            frame.registration_fwhm_x_px = registration_facts["fwhm_x"]
+            frame.registration_fwhm_y_px = registration_facts["fwhm_y"]
+            frame.registration_roundness = registration_facts["roundness"]
+            frame.registration_rmse = registration_facts["rmse"]
+            frame.registration_star_count = registration_facts["nb_stars"]
+            frame.registration_dx_px = registration_facts["dx"]
+            frame.registration_dy_px = registration_facts["dy"]
+
+
+def _measure_fwhm_degradation(summary, stacked_path: str, target_frames: list[Any]) -> None:  # ruff: ignore[missing-type-function-argument]
+    """Compare the stacked image's sharpness against its input frames.
+
+    Measured with the same `measure_image_fwhm` function on both sides,
+    not Siril's own PSF-fit FWHM from the preserved .seq file -- those
+    two methods aren't on the same absolute scale (confirmed
+    empirically: Siril's fit reported ~2.6px median on a real M 13
+    session where `measure_image_fwhm` reported ~4.25px on the *same
+    raw input frames*), so comparing across methods produced a false
+    "degraded" flag on every stack rather than a real signal.
+
+    Sets `summary.stacking_metrics`' FWHM fields and the degradation
+    flag in place.
+    """
+    from astrometricslib.image_processing.quality_metrics import measure_image_fwhm
+    from astrometricslib.pipelines.stacking.stack_quality import is_stacked_fwhm_degraded
+
+    # Capped at 15 frames (matching FWHM_MEASUREMENT_STAR_COUNT's
+    # existing per-image star-count cap) since a median only needs a
+    # representative sample, unlike the background-split check which
+    # needs every frame to avoid missing a split.
+    input_fwhms = []
+    for frame in target_frames[:15]:
+        try:
+            fwhm = measure_image_fwhm(frame.path)
+            if fwhm is not None:
+                input_fwhms.append(fwhm)
+        except Exception as exc:
+            logger.debug("Skipping FWHM measurement for '%s': %s", frame.path, exc)
+            continue
+    if input_fwhms:
+        import statistics as _statistics
+
+        summary.stacking_metrics.median_input_fwhm_px = _statistics.median(input_fwhms)
+
+    stacked_fwhm = measure_image_fwhm(stacked_path)
+    if stacked_fwhm is not None:
+        summary.stacking_metrics.stacked_fwhm_px = stacked_fwhm
+        if summary.stacking_metrics.median_input_fwhm_px is not None:
+            summary.stacking_metrics.fwhm_degraded = is_stacked_fwhm_degraded(
+                stacked_fwhm, summary.stacking_metrics.median_input_fwhm_px
             )
 
-        saturated_fraction = measure_saturated_pixel_fraction(stacked_path)
-        if saturated_fraction is not None:
-            summary.stacking_metrics.saturated_pixel_fraction = saturated_fraction
-            summary.stacking_metrics.saturation_flagged = is_saturation_significant(saturated_fraction)
 
-        if not is_spectral and summary.quality_processing_applied:
-            # Per-frame registration facts (Siril's own findstar pass,
-            # computed for free during registration) -- these are
-            # distinct from the measure_image_fwhm-based comparison below
-            # (see that block's docstring for why the two aren't on the
-            # same scale) and are recorded as facts on FrameRecord for
-            # later pipelines/runs to read, not used for any verdict
-            # here. Frame order in the .seq file follows Siril's own
-            # symlink submission order, which can differ from
-            # target_frames' order (corrupt/wrong-camera frames get
-            # filtered during symlinking) -- symlinked_light_paths is the
-            # authoritative alignment reference, same discipline the
-            # spectral branch below already uses.
-            seq_path = f"{stacked_path.rsplit('.', 1)[0]}_Registration.seq"
-            registration_frames = parse_seq_file(seq_path)
-            registration_frame_paths = diagnostics.get("symlinked_light_paths", [])
+def _check_spectral_registration_quality(summary, stacked_path: str, diagnostics: dict) -> None:  # ruff: ignore[missing-type-function-argument]
+    """Flag frames with spectral zero-order-star tracking concerns.
 
-            # Siril aligns every frame to one reference, so a poor
-            # reference fails the whole stack -- M 42 aborted with "Found
-            # 0 stars in reference" and nothing recorded which frame that
-            # was. The reference is the frame whose transform is the
-            # identity, i.e. the one with no shift of its own.
-            #
-            # Guarded the same way the pairing loop below is, and for
-            # the same reason: a registration_frame_paths/
-            # registration_frames length mismatch means the positional
-            # correspondence between the two lists cannot be trusted, so
-            # indexing into registration_frame_paths here would risk
-            # naming the wrong frame as the reference. Also require
-            # exactly one zero-shift frame -- a legacy `r_` sequence
-            # (already-aligned frames, every one recording an identity
-            # transform; see the preserved-sequence fix elsewhere in
-            # this file) has no single frame identifiable as "the"
-            # reference, and recording the first such frame would be
-            # fabricated rather than measured.
-            zero_shift_indices = [
-                index
-                for index, facts in enumerate(registration_frames)
-                if not facts["dx"] and not facts["dy"]
-            ]
-            reference_lists_align = len(registration_frame_paths) == len(registration_frames)
-            if len(zero_shift_indices) == 1 and reference_lists_align:
-                reference_index = zero_shift_indices[0]
-                summary.stacking_metrics.registration_reference_frame = registration_frame_paths[
-                    reference_index
-                ]
-                summary.stacking_metrics.registration_reference_star_count = registration_frames[
-                    reference_index
-                ]["nb_stars"]
+    Checks matched star count, fit RMSE, and position/brightness
+    stability for the zero-order star -- not a whole-field FWHM
+    comparison -- see `registration_quality.py`'s module docstring for
+    why. Requires `frame_paths`, `seq_frames`, and `zero_order_stars`
+    to be index-aligned; all three are populated by
+    `siril_interface.py` during the same registration pass the real
+    stack already ran (`parse_seq_file` reads the preserved .seq file,
+    mirroring the standard-imaging FWHM check; `zero_order_stars` comes
+    from `diagnostics` since spectral .lst files aren't preserved as
+    files, only parsed in place before the scratch directory is
+    cleaned up).
 
-            if len(registration_frame_paths) == len(registration_frames):
-                frame_by_path = {frame.path: frame for frame in target_frames}
-                for frame_path, registration_facts in zip(
-                    registration_frame_paths, registration_frames, strict=False
-                ):
-                    frame = frame_by_path.get(frame_path)
-                    if frame is None:
-                        continue
-                    # Normally the first run's measurements win, so a
-                    # target stacked twice (standard then spectral) does
-                    # not have its facts clobbered by the second pass.
-                    # The exception is a frame carrying shifts that are
-                    # known to be degenerate: runs before the
-                    # registration-sequence fix preserved the *registered*
-                    # sequence, whose frames are already aligned and so
-                    # recorded dx=dy=0 for every frame. A non-zero shift
-                    # now available for that same frame is real data
-                    # replacing a known-bad zero, so it is allowed
-                    # through. A genuine reference frame also has
-                    # dx=dy=0, but this run offers 0 for it too, so it is
-                    # never rewritten.
-                    has_existing_facts = frame.registration_fwhm_x_px is not None
-                    stored_shift_is_degenerate = not frame.registration_dx_px and not frame.registration_dy_px
-                    run_offers_real_shift = bool(registration_facts["dx"] or registration_facts["dy"])
-                    if has_existing_facts and not (stored_shift_is_degenerate and run_offers_real_shift):
-                        continue
-                    frame.registration_fwhm_x_px = registration_facts["fwhm_x"]
-                    frame.registration_fwhm_y_px = registration_facts["fwhm_y"]
-                    frame.registration_roundness = registration_facts["roundness"]
-                    frame.registration_rmse = registration_facts["rmse"]
-                    frame.registration_star_count = registration_facts["nb_stars"]
-                    frame.registration_dx_px = registration_facts["dx"]
-                    frame.registration_dy_px = registration_facts["dy"]
+    Sets `summary.stacking_metrics.spectral_registration_flags` in place.
+    """
+    from astrometricslib.image_processing.quality_metrics import parse_seq_file
+    from astrometricslib.models.quality_summary import ExcludedFrame
+    from astrometricslib.pipelines.spectroscopy.registration_quality import (
+        evaluate_spectral_registration_quality,
+    )
 
-            # Measured with the same measure_image_fwhm function used on
-            # the stacked result below, not Siril's own PSF-fit FWHM from
-            # the preserved .seq file -- those two methods aren't on the
-            # same absolute scale (confirmed empirically: Siril's fit
-            # reported ~2.6px median on a real M 13 session where
-            # measure_image_fwhm reported ~4.25px on the *same raw input
-            # frames*), so comparing across methods produced a false
-            # "degraded" flag on every stack rather than a real signal.
-            # Capped at 15 frames (matching FWHM_MEASUREMENT_STAR_COUNT's
-            # existing per-image star-count cap) since a median only
-            # needs a representative sample, unlike the background-split
-            # check above which needs every frame to avoid missing a
-            # split.
-            input_fwhms = []
-            for frame in target_frames[:15]:
-                try:
-                    fwhm = measure_image_fwhm(frame.path)
-                    if fwhm is not None:
-                        input_fwhms.append(fwhm)
-                except Exception as exc:
-                    logger.debug("Skipping FWHM measurement for '%s': %s", frame.path, exc)
-                    continue
-            if input_fwhms:
-                import statistics as _statistics
+    seq_path = f"{stacked_path.rsplit('.', 1)[0]}_Registration.seq"
+    seq_frames = parse_seq_file(seq_path)
+    zero_order_stars = diagnostics.get("zero_order_stars", [])
+    frame_paths = diagnostics.get("symlinked_light_paths", [])
 
-                summary.stacking_metrics.median_input_fwhm_px = _statistics.median(input_fwhms)
+    if len(frame_paths) == len(seq_frames) == len(zero_order_stars) and frame_paths:
+        flagged = evaluate_spectral_registration_quality(frame_paths, seq_frames, zero_order_stars)
+        summary.stacking_metrics.spectral_registration_flags = [ExcludedFrame(**entry) for entry in flagged]
 
-            stacked_fwhm = measure_image_fwhm(stacked_path)
-            if stacked_fwhm is not None:
-                summary.stacking_metrics.stacked_fwhm_px = stacked_fwhm
-                if summary.stacking_metrics.median_input_fwhm_px is not None:
-                    summary.stacking_metrics.fwhm_degraded = is_stacked_fwhm_degraded(
-                        stacked_fwhm, summary.stacking_metrics.median_input_fwhm_px
-                    )
 
-        if is_spectral and summary.quality_processing_applied:
-            # Zero-order-star-tracking check (matched star count, fit
-            # RMSE, position/brightness stability), not a whole-field
-            # FWHM comparison -- see registration_quality.py's
-            # module docstring for why. Requires frame_paths, seq_frames,
-            # and zero_order_stars to be index-aligned; both are
-            # populated by siril_interface.py during the same
-            # registration pass the real stack already ran
-            # (parse_seq_file reads the preserved .seq file, mirroring
-            # the standard-imaging FWHM check above; zero_order_stars
-            # comes from self.last_run_diagnostics since spectral .lst
-            # files aren't preserved as files, only parsed in place
-            # before the scratch directory is cleaned up).
-            from astrometricslib.pipelines.spectroscopy.registration_quality import (
-                evaluate_spectral_registration_quality,
-            )
-
-            seq_path = f"{stacked_path.rsplit('.', 1)[0]}_Registration.seq"
-            seq_frames = parse_seq_file(seq_path)
-            zero_order_stars = diagnostics.get("zero_order_stars", [])
-            frame_paths = diagnostics.get("symlinked_light_paths", [])
-
-            if len(frame_paths) == len(seq_frames) == len(zero_order_stars) and frame_paths:
-                flagged = evaluate_spectral_registration_quality(frame_paths, seq_frames, zero_order_stars)
-                summary.stacking_metrics.spectral_registration_flags = [
-                    ExcludedFrame(**entry) for entry in flagged
-                ]
-
+def _finalize_stack_quality_flags(summary) -> None:  # ruff: ignore[missing-type-function-argument]
+    """Derive `summary.flagged` and `flag_reasons` from measured metrics."""
     metrics = summary.stacking_metrics
     flag_reasons = []
     if metrics.background_split_detected:
@@ -705,4 +715,54 @@ def _build_stack_quality_summary(  # ruff: ignore[missing-return-type-private-fu
 
     summary.flagged = bool(flag_reasons)
     summary.flag_reasons = flag_reasons
+
+
+def _build_stack_quality_summary(  # ruff: ignore[missing-return-type-private-function]
+    target,  # ruff: ignore[missing-type-function-argument]
+    is_spectral: bool,
+    frames_submitted: int,
+    target_frames: list[Any],
+    excluded_frames: list[Any],
+    diagnostics: dict,
+    background_split: dict | None,
+    stacked_path: str | None,
+):
+    """Gather diagnostic data into a final `StackQualitySummary`.
+
+    This checks the quality of the stack differently depending on the type
+    of image. For regular images, it compares the overall sharpness (FWHM)
+    of the final stack against the average sharpness of the original frames.
+    For spectroscopy images, it uses a special tracking analysis because
+    measuring the sharpness of stretched-out light spectrums doesn't work.
+
+    Returns
+    -------
+    summary : `StackQualitySummary`
+        A report card on how well the stacking went, with warnings if
+        something looks wrong.
+    """
+    summary = _base_stack_quality_summary(
+        target, is_spectral, frames_submitted, target_frames, excluded_frames, diagnostics
+    )
+
+    if background_split:
+        summary.stacking_metrics.background_split_detected = True
+        summary.stacking_metrics.background_split_detail = (
+            f"{background_split['low_group_count']} frame(s) at background~"
+            f"{background_split['low_group_median']:.0f} vs {background_split['high_group_count']} "
+            f"frame(s) at ~{background_split['high_group_median']:.0f} (gap ratio "
+            f"{background_split['gap_ratio']:.1f})"
+        )
+
+    if stacked_path:
+        _measure_stacked_pixel_fractions(summary, stacked_path)
+
+        if not is_spectral and summary.quality_processing_applied:
+            _update_frame_registration_facts(summary, stacked_path, target_frames, diagnostics)
+            _measure_fwhm_degradation(summary, stacked_path, target_frames)
+
+        if is_spectral and summary.quality_processing_applied:
+            _check_spectral_registration_quality(summary, stacked_path, diagnostics)
+
+    _finalize_stack_quality_flags(summary)
     return summary

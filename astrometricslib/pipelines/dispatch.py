@@ -586,8 +586,6 @@ def run_full_pipeline(
             catalog_access=astrometrics.catalog_access,
             max_workers=max_workers,
         )
-    if photometry_results.get("status") == "failed":
-        raise ValueError(f"Photometry analysis failed: {photometry_results.get('message')}")
     print(
         f"[{target.id}] Photometry Analysis complete. Stars found: {photometry_results.get('starsFound', 0)}"
     )

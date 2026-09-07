@@ -61,43 +61,38 @@ class PipelineRequest:
 
 
 @dataclass
-class InputScreening:
-    """What `screen_input` decided about whether there is anything to do.
+class Result:
+    """What one pipeline's science work produced -- or is about to.
+
+    The same type flows through every stage: `process_input` hands back
+    a `Result` before any science work has run, `run` hands back the
+    real one, and `validate_output`/`to_result_dict` read whichever one
+    they got. This is deliberate: when `process_input` decides there is
+    nothing to do (e.g. photometry finding no frames for the requested
+    filter), it returns an empty, `has_work=False` `Result` instead of a
+    separate early-exit shape -- `run` is skipped, but that empty
+    `Result` still goes through `validate_output`/`to_result_dict`
+    exactly like a real run's would, so the target still gets a real
+    (if empty) quality summary and the caller still gets the normal
+    result shape, with the reason recorded as a flag rather than a
+    one-off status/message pair.
+
+    Beyond that, this is a grab-bag by design, not a forced common
+    shape: the four pipelines produce genuinely different things -- a
+    solved WCS and detection context, a star list, light curves,
+    moving-object candidates -- and unifying that would just move the
+    four-way divergence into this class instead of removing it.
+    `payload` carries whatever a given pipeline's `run`, `validate_output`,
+    and `to_result_dict` need that does not fit `stellar_objects` /
+    `candidates` / `context`.
 
     Attributes
     ----------
-    can_proceed : `bool`
-        Whether `run` should be called at all. `False` for, e.g.,
-        photometry finding no frames for the requested filter --
-        `run` and `validate_output` are skipped entirely in that case.
-    early_result : `dict` or `None`
-        The result to return immediately when `can_proceed` is `False`.
-        Unused when `can_proceed` is `True`.
-    context : `dict`
-        Anything `screen_input` computed that `run` needs, so `run` does
-        not have to redo the same work -- photometry's already-derived
-        session list, for example.
-    """
-
-    can_proceed: bool = True
-    early_result: dict[str, Any] | None = None
-    context: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class RunOutcome:
-    """What one pipeline's science work produced.
-
-    A grab-bag by design, not a forced common shape: the four pipelines
-    produce genuinely different things -- a solved WCS and detection
-    context, a star list, light curves, moving-object candidates -- and
-    unifying that would just move the four-way divergence into this
-    class instead of removing it. `payload` carries whatever a given
-    pipeline's `validate_output` and `to_result_dict` need that does not
-    fit `stellar_objects` / `candidates` / `context`.
-
-    Attributes
-    ----------
+    has_work : `bool`
+        Whether there is real work for `run` to do. `True` unless
+        `process_input` decided there is nothing to process, in which
+        case `run` is skipped and this `Result` goes straight to
+        `validate_output`.
     stellar_objects : `list`
         Stars this run found and saved, for the three pipelines that
         deal in stars.
@@ -106,9 +101,13 @@ class RunOutcome:
     context : `Any`
         The astrometry `AnalysisContext`, for the two pipelines built on it.
     payload : `dict`
-        Everything else `validate_output` / `to_result_dict` need.
+        Everything else `run` / `validate_output` / `to_result_dict` need.
+        Also how `process_input` hands `run` anything it already
+        computed, so `run` does not have to redo the same work --
+        photometry's already-derived session list, for example.
     """
 
+    has_work: bool = True
     stellar_objects: list = field(default_factory=list)
     candidates: list = field(default_factory=list)
     context: Any = None
@@ -137,42 +136,46 @@ class AnalysisPipeline(ABC):
         """
 
     @abstractmethod
-    def screen_input(self, request: PipelineRequest) -> InputScreening:
-        """Check whether this run has anything to do.
+    def process_input(self, request: PipelineRequest) -> Result:
+        """Check the input and hand back a starting `Result`.
 
         Parameters
         ----------
         request : `PipelineRequest`
-            The run being screened.
+            The run being started.
 
         Returns
         -------
-        screening : `InputScreening`
-            Whether to proceed, and the result to return immediately if not.
+        result : `Result`
+            `has_work=False` when there is nothing for `run` to do --
+            `run` is skipped, and this empty `Result` goes straight to
+            `validate_output`. Otherwise `has_work=True`, with anything
+            already computed here (so `run` does not have to redo it)
+            in `payload`.
         """
         pass
 
     @abstractmethod
-    def run(self, request: PipelineRequest, screening: InputScreening) -> RunOutcome:
+    def run(self, request: PipelineRequest, result: Result) -> Result:
         """Do the pipeline's actual science work.
 
         Parameters
         ----------
         request : `PipelineRequest`
             The run being performed.
-        screening : `InputScreening`
-            The result of `screen_input`, already confirmed to allow
-            proceeding.
+        result : `Result`
+            What `process_input` returned; always `has_work=True` here,
+            since `run_pipeline` skips calling this method otherwise.
 
         Returns
         -------
-        outcome : `RunOutcome`
+        result : `Result`
             What this run produced.
         """
         pass
 
     @abstractmethod
-    def validate_output(self, request: PipelineRequest, outcome: RunOutcome) -> PipelineQualitySummaryBase:
+    def validate_output(self, request: PipelineRequest, result: Result) -> PipelineQualitySummaryBase:
         """Check the results and build this run's quality record.
 
         Does not assign the summary onto `request.target` -- that is
@@ -183,8 +186,9 @@ class AnalysisPipeline(ABC):
         ----------
         request : `PipelineRequest`
             The run being validated.
-        outcome : `RunOutcome`
-            What `run` produced.
+        result : `Result`
+            What `run` produced, or the empty `Result` from
+            `process_input` when there was no work to do.
 
         Returns
         -------
@@ -195,7 +199,7 @@ class AnalysisPipeline(ABC):
 
     @abstractmethod
     def to_result_dict(
-        self, request: PipelineRequest, outcome: RunOutcome, summary: PipelineQualitySummaryBase
+        self, request: PipelineRequest, result: Result, summary: PipelineQualitySummaryBase
     ) -> dict[str, Any]:
         """Build the dict this pipeline's callers still expect back.
 
@@ -203,21 +207,22 @@ class AnalysisPipeline(ABC):
         ----------
         request : `PipelineRequest`
             The run that was performed.
-        outcome : `RunOutcome`
-            What `run` produced.
+        result : `Result`
+            What `run` produced, or the empty `Result` from
+            `process_input` when there was no work to do.
         summary : `PipelineQualitySummaryBase`
             What `validate_output` built.
 
         Returns
         -------
-        result : `dict`
+        result_dict : `dict`
             The dict `analyze_target`'s caller receives.
         """
         pass
 
 
 def run_pipeline(adapter: AnalysisPipeline, request: PipelineRequest) -> dict[str, Any]:
-    """Run one pipeline through the full screen/run/validate/report cycle.
+    """Run one pipeline through the full input/main/output processing cycle.
 
     This is the one place that calls all four `AnalysisPipeline` methods
     in order, so no pipeline's caller has to know the sequence -- or,
@@ -233,15 +238,15 @@ def run_pipeline(adapter: AnalysisPipeline, request: PipelineRequest) -> dict[st
 
     Returns
     -------
-    result : `dict`
-        `screening.early_result`, unchanged, when the input screening
-        stopped the run; otherwise `adapter.to_result_dict(...)`.
+    result_dict : `dict`
+        `adapter.to_result_dict(...)`, built from either `run`'s
+        `Result` or, when `process_input` found nothing to do, its own
+        empty one.
     """
-    screening = adapter.screen_input(request)
-    if not screening.can_proceed:
-        return screening.early_result
+    result = adapter.process_input(request)
+    if result.has_work:
+        result = adapter.run(request, result)
 
-    outcome = adapter.run(request, screening)
-    summary = adapter.validate_output(request, outcome)
+    summary = adapter.validate_output(request, result)
     setattr(request.target, f"{adapter.pipeline_name}_quality_summary", summary)
-    return adapter.to_result_dict(request, outcome, summary)
+    return adapter.to_result_dict(request, result, summary)

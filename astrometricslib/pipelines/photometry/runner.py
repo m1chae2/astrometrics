@@ -15,9 +15,8 @@ from typing import Any
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.contract import (
     AnalysisPipeline,
-    InputScreening,
     PipelineRequest,
-    RunOutcome,
+    Result,
     run_pipeline,
 )
 from astrometricslib.pipelines.shared.star_recording import (
@@ -427,6 +426,55 @@ def _match_and_merge_across_sessions(
     return merged_stellar_objects, sessions_missing_wcs, match_count
 
 
+def _empty_photometry_result(no_work_reason: str) -> Result:
+    """Build the `has_work=False` `Result` for photometry's give-up case.
+
+    Shaped exactly like a real run that happened to process zero
+    sessions and find zero stars, so `run` can be skipped while
+    `validate_output`/`to_result_dict` still produce a normal (empty)
+    summary and result dict, with `no_work_reason` surfaced as a flag
+    rather than a one-off status/message pair.
+
+    Parameters
+    ----------
+    no_work_reason : `str`
+        Why there was nothing to do; recorded as a flag reason on the
+        quality summary `validate_output` builds from this `Result`.
+
+    Returns
+    -------
+    result : `Result`
+        `has_work=False`, with every key `run` would otherwise have
+        populated in `payload` set to its zero/empty value.
+    """
+    from astrometricslib.pipelines.shared.star_recording import StarIdentificationBreakdown
+
+    return Result(
+        has_work=False,
+        payload={
+            "star_id_breakdown": StarIdentificationBreakdown(
+                catalog_matched=0, position_only=0, unresolved=0
+            ),
+            "photometry_sessions": [],
+            "all_rejected_files": [],
+            "all_frame_ensemble_composition": [],
+            "session_empty_reasons": [],
+            "sessions_missing_wcs": [],
+            "cross_session_match_count": 0,
+            "long_term_candidate_count": 0,
+            "astrometry_identified_star_count": 0,
+            "sessions_with_reused_header_wcs": [],
+            "sessions_with_replaced_header_wcs": [],
+            "frames_processed": 0,
+            "candidates_formatted": [],
+            "long_term_candidates_formatted": [],
+            "image_paths": [],
+            "photometry_frames_without_timestamp": [],
+            "no_work_reason": no_work_reason,
+        },
+    )
+
+
 class PhotometryPipelineAdapter(AnalysisPipeline):
     """Adapts per-session `VariabilityAnalyzer` runs to the shared shape."""
 
@@ -441,21 +489,25 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         """
         return "photometry"
 
-    def screen_input(self, request: PipelineRequest) -> InputScreening:
+    def process_input(self, request: PipelineRequest) -> Result:
         """Check there are frames to use and sessions to assign them to.
 
-        Photometry is the one pipeline with a real screening failure
-        mode: a filter that matches nothing, or frames with no usable
-        capture timestamp to build a session from. Either stops the run
-        before any analysis work starts.
+        Photometry is the one pipeline with a real "nothing to do" case:
+        a filter that matches nothing, or frames with no usable capture
+        timestamp to build a session from. Either produces an empty,
+        `has_work=False` `Result` instead of running -- `validate_output`
+        and `to_result_dict` still run on it, same as a real run's
+        `Result`, so the target still gets a real (empty) quality
+        summary and the reason still surfaces, as a flag rather than a
+        one-off status/message pair.
 
         Returns
         -------
-        screening : `InputScreening`
-            `can_proceed=False` with the matching "failed" result dict
-            for either failure mode; otherwise `can_proceed=True` with
-            the filtered frames and derived sessions carried in
-            `context`, so `run` does not have to redo this work.
+        result : `Result`
+            `has_work=False` for either "nothing to do" case; otherwise
+            `has_work=True` with the filtered frames and derived
+            sessions carried in `payload`, so `run` does not have to
+            redo this work.
         """
         from astrometricslib.pipelines.shared.target_sessions import derive_target_sessions
 
@@ -485,15 +537,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                 photometry_frames.append(frame)
 
         if not image_paths:
-            return InputScreening(
-                can_proceed=False,
-                early_result={
-                    "status": "failed",
-                    "targetId": target.id,
-                    "analysisMode": "photometry",
-                    "message": f"No frames found for filter: {filter_type}",
-                },
-            )
+            return _empty_photometry_result(f"No frames found for filter: {filter_type}")
 
         # Photometry tracks stars via pixel-position re-centroiding
         # against a single reference frame per analysis run; that only
@@ -508,34 +552,24 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         photometry_sessions = derive_target_sessions(target.id, photometry_frames_with_timestamp)
 
         if not photometry_sessions:
-            return InputScreening(
-                can_proceed=False,
-                early_result={
-                    "status": "failed",
-                    "targetId": target.id,
-                    "analysisMode": "photometry",
-                    "message": (
-                        "No frames with a usable capture timestamp to assign a session "
-                        f"for filter: {filter_type}"
-                    ),
-                },
+            return _empty_photometry_result(
+                f"No frames with a usable capture timestamp to assign a session for filter: {filter_type}"
             )
 
-        return InputScreening(
-            can_proceed=True,
-            context={
+        return Result(
+            payload={
                 "image_paths": image_paths,
                 "photometry_frames_without_timestamp": photometry_frames_without_timestamp,
                 "photometry_sessions": photometry_sessions,
             },
         )
 
-    def run(self, request: PipelineRequest, screening: InputScreening) -> RunOutcome:
+    def run(self, request: PipelineRequest, result: Result) -> Result:
         """Run one `VariabilityAnalyzer` pass per session, then merge them.
 
         Returns
         -------
-        outcome : `RunOutcome`
+        result : `Result`
             `stellar_objects` is every saved star; `candidates` is the
             raw (pre-merge) list of stars flagged as variable in their
             own session. Everything `validate_output` and
@@ -546,9 +580,9 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         target = request.target
         catalog_access = request.catalog_access
         options = request.options
-        photometry_sessions = screening.context["photometry_sessions"]
-        image_paths = screening.context["image_paths"]
-        photometry_frames_without_timestamp = screening.context["photometry_frames_without_timestamp"]
+        photometry_sessions = result.payload["photometry_sessions"]
+        image_paths = result.payload["image_paths"]
+        photometry_frames_without_timestamp = result.payload["photometry_frames_without_timestamp"]
 
         per_session_results = []
         all_candidates = []
@@ -667,7 +701,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             all_rejected_files
         )
 
-        return RunOutcome(
+        return Result(
             stellar_objects=all_stellar_objects,
             candidates=all_candidates,
             payload={
@@ -690,7 +724,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             },
         )
 
-    def validate_output(self, request: PipelineRequest, outcome: RunOutcome) -> Any:
+    def validate_output(self, request: PipelineRequest, result: Result) -> Any:
         """Build the quality summary and every flag this run's data earns.
 
         Returns
@@ -698,8 +732,9 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         summary : `PhotometryQualitySummary`
             Flagged for a high global-outlier rejection rate, frames
             excluded for a missing timestamp, a session with zero stars
-            detected, or a session that could not be plate-solved for
-            cross-session matching -- any, all, or none of these.
+            detected, a session that could not be plate-solved for
+            cross-session matching, or (when `process_input` found
+            nothing to do) the reason why -- any, all, or none of these.
         """
         from astrometricslib.models.quality_summary import (
             ExcludedFrame,
@@ -712,7 +747,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         from astrometricslib.pipelines.shared.target_sessions import build_target_session_breakdown
 
         target = request.target
-        payload = outcome.payload
+        payload = result.payload
         photometry_sessions = payload["photometry_sessions"]
         all_rejected_files = payload["all_rejected_files"]
         photometry_frames_without_timestamp = payload["photometry_frames_without_timestamp"]
@@ -740,12 +775,12 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             target_session_ids=[session.id for session in photometry_sessions],
             target_session_breakdown=photometry_session_breakdown,
             photometry_metrics=PhotometryPipelineQualityMetrics(
-                stars_processed=len(outcome.stellar_objects),
-                stars_found=len(outcome.stellar_objects),
+                stars_processed=len(result.stellar_objects),
+                stars_found=len(result.stellar_objects),
                 frames_processed=frames_processed,
                 rejected_frames=rejected_frames,
                 frame_ensemble_composition=payload["all_frame_ensemble_composition"],
-                variable_candidate_count=len(outcome.candidates),
+                variable_candidate_count=len(result.candidates),
                 cross_session_match_count=payload["cross_session_match_count"],
                 sessions_missing_wcs=sessions_missing_wcs,
                 long_term_variable_candidate_count=payload["long_term_candidate_count"],
@@ -755,7 +790,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                 catalog_matched_star_count=star_id_breakdown.catalog_matched,
                 position_only_star_count=star_id_breakdown.position_only,
                 unresolved_star_count=star_id_breakdown.unresolved,
-                light_curve_scatter_rms_mag=median_light_curve_scatter_mag(outcome.stellar_objects),
+                light_curve_scatter_rms_mag=median_light_curve_scatter_mag(result.stellar_objects),
             ),
         )
         # The rejected frames are recorded in the metrics either way;
@@ -791,25 +826,29 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                 f"{len(sessions_missing_wcs)} session(s) could not be plate-solved for "
                 f"cross-session star matching: {', '.join(sessions_missing_wcs)}"
             )
+        no_work_reason = payload.get("no_work_reason")
+        if no_work_reason:
+            summary.flagged = True
+            summary.flag_reasons.append(no_work_reason)
         return summary
 
-    def to_result_dict(self, request: PipelineRequest, outcome: RunOutcome, summary: Any) -> dict[str, Any]:
+    def to_result_dict(self, request: PipelineRequest, result: Result, summary: Any) -> dict[str, Any]:
         """Build the result dict photometry's callers expect back.
 
         Returns
         -------
-        result : `dict`
+        result_dict : `dict`
             The completed shape carrying every brightness-tracking metric.
         """
-        payload = outcome.payload
+        payload = result.payload
         return {
             "status": "completed",
             "targetId": request.target.id,
             "totalImages": len(payload["image_paths"]),
             "analysisMode": "photometry",
-            "starsProcessed": len(outcome.stellar_objects),
+            "starsProcessed": len(result.stellar_objects),
             "spectraExtracted": 0,
-            "starsFound": len(outcome.stellar_objects),
+            "starsFound": len(result.stellar_objects),
             "framesProcessed": payload["frames_processed"],
             "rejectedCount": len(payload["all_rejected_files"]),
             "rejectedFiles": payload["all_rejected_files"],
@@ -832,7 +871,7 @@ def run_photometry_analysis(
     A thin wrapper kept at this name and signature for
     `pipelines.PIPELINE_RUNNERS` -- the actual work is
     `PhotometryPipelineAdapter`, run through the shared
-    screen/run/validate/report cycle in `run_pipeline`.
+    input/main/output processing cycle in `run_pipeline`.
 
     Parameters
     ----------

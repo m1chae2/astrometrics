@@ -55,7 +55,7 @@ def test_every_adapter_is_a_real_analysis_pipeline(adapter_class):  # ruff: igno
     """Verify each adapter actually implements every abstract method.
 
     `AnalysisPipeline` is an ABC; a subclass missing one of
-    `screen_input`/`run`/`validate_output`/`to_result_dict`/`pipeline_name`
+    `process_input`/`run`/`validate_output`/`to_result_dict`/`pipeline_name`
     cannot be instantiated at all. Constructing it is the check.
     """
     adapter = adapter_class()

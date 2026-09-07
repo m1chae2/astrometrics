@@ -15,9 +15,8 @@ from astrometricslib.models.quality_summary import (
 )
 from astrometricslib.pipelines.contract import (
     AnalysisPipeline,
-    InputScreening,
     PipelineRequest,
-    RunOutcome,
+    Result,
     run_pipeline,
 )
 from astrometricslib.pipelines.shared.star_recording import (
@@ -113,8 +112,8 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
         """
         return "astrometry"
 
-    def screen_input(self, request: PipelineRequest) -> InputScreening:
-        """Astrometry has no screening failure mode left to check.
+    def process_input(self, request: PipelineRequest) -> Result:
+        """Astrometry has no "nothing to do" case left to check.
 
         `analyze_target` already raises before dispatch if no image path
         can be resolved for this target, so by the time a request
@@ -122,17 +121,17 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
 
         Returns
         -------
-        screening : `InputScreening`
-            Always `can_proceed=True`.
+        result : `Result`
+            Always `has_work=True`.
         """
-        return InputScreening(can_proceed=True)
+        return Result()
 
-    def run(self, request: PipelineRequest, screening: InputScreening) -> RunOutcome:
+    def run(self, request: PipelineRequest, result: Result) -> Result:
         """Detect stars, solve the pointing if possible, and save both.
 
         Returns
         -------
-        outcome : `RunOutcome`
+        result : `Result`
             Carries the `AnalysisContext`, the saved stars, and the
             counters `validate_output` needs.
         """
@@ -188,7 +187,7 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
             already_dropped=True,
         )
 
-        return RunOutcome(
+        return Result(
             context=context,
             stellar_objects=context.stellar_objects,
             payload={
@@ -199,7 +198,7 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
             },
         )
 
-    def validate_output(self, request: PipelineRequest, outcome: RunOutcome) -> AstrometryQualitySummary:
+    def validate_output(self, request: PipelineRequest, result: Result) -> AstrometryQualitySummary:
         """Build the quality summary, flagging a failed solve attempt.
 
         Returns
@@ -207,21 +206,21 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
         summary : `AstrometryQualitySummary`
             Flagged with "plate solve failed" when no WCS was solved.
         """
-        star_id_breakdown = outcome.payload["star_id_breakdown"]
-        gaia_statistics = outcome.payload["gaia_statistics"]
+        star_id_breakdown = result.payload["star_id_breakdown"]
+        gaia_statistics = result.payload["gaia_statistics"]
 
         summary = AstrometryQualitySummary(
             target_id=request.target.id,
             astrometry_metrics=AstrometryPipelineQualityMetrics(
-                sources_detected=outcome.context.sources_detected,
-                solve_attempted=outcome.context.solve_attempted,
-                astrometric_residual_rms_arcsec=outcome.context.astrometric_residual_rms_arcsec,
-                plate_solve_succeeded=outcome.context.wcs is not None,
-                simbad_matched_count=outcome.payload["simbad_matched_count"],
+                sources_detected=result.context.sources_detected,
+                solve_attempted=result.context.solve_attempted,
+                astrometric_residual_rms_arcsec=result.context.astrometric_residual_rms_arcsec,
+                plate_solve_succeeded=result.context.wcs is not None,
+                simbad_matched_count=result.payload["simbad_matched_count"],
                 remote_catalog_queries_attempted=int(gaia_statistics["attempted"]),
                 remote_catalog_queries_failed=int(gaia_statistics["failed"]),
                 remote_catalog_circuit_breaker_tripped=bool(gaia_statistics["circuit_breaker_tripped"]),
-                plate_solve_attempts=outcome.payload["plate_solve_attempts"],
+                plate_solve_attempts=result.payload["plate_solve_attempts"],
                 catalog_matched_star_count=star_id_breakdown.catalog_matched,
                 position_only_star_count=star_id_breakdown.position_only,
                 unresolved_star_count=star_id_breakdown.unresolved,
@@ -233,20 +232,20 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
         return summary
 
     def to_result_dict(
-        self, request: PipelineRequest, outcome: RunOutcome, summary: AstrometryQualitySummary
+        self, request: PipelineRequest, result: Result, summary: AstrometryQualitySummary
     ) -> dict[str, Any]:
         """Build the result dict astrometry's callers expect back.
 
         Returns
         -------
-        result : `dict`
+        result_dict : `dict`
             Has ``"context"``, ``"stellar_objects"``, ``"wcs"``, and
             ``"image_stats"``.
         """
-        context = outcome.context
+        context = result.context
         return {
             "context": context,
-            "stellar_objects": outcome.stellar_objects,
+            "stellar_objects": result.stellar_objects,
             "wcs": context.wcs,
             "image_stats": context.image.get_stats() if hasattr(context.image, "get_stats") else {},
         }
@@ -265,7 +264,7 @@ def run_astrometry_analysis(
     A thin wrapper kept at this name and signature for
     `pipelines.PIPELINE_RUNNERS` -- the actual work is
     `AstrometryPipelineAdapter`, run through the shared
-    screen/run/validate/report cycle in `run_pipeline`.
+    input/main/output processing cycle in `run_pipeline`.
 
     Parameters
     ----------

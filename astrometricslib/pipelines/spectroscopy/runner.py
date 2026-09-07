@@ -16,9 +16,8 @@ from astrometricslib.models.quality_summary import (
 )
 from astrometricslib.pipelines.contract import (
     AnalysisPipeline,
-    InputScreening,
     PipelineRequest,
-    RunOutcome,
+    Result,
     run_pipeline,
 )
 from astrometricslib.pipelines.shared.star_recording import (
@@ -82,8 +81,8 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
         """
         return "spectroscopy"
 
-    def screen_input(self, request: PipelineRequest) -> InputScreening:
-        """Spectroscopy has no screening failure mode left to check.
+    def process_input(self, request: PipelineRequest) -> Result:
+        """Spectroscopy has no "nothing to do" case left to check.
 
         `analyze_target` already raises before dispatch if no image path
         can be resolved for this target, so by the time a request
@@ -91,17 +90,17 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
 
         Returns
         -------
-        screening : `InputScreening`
-            Always `can_proceed=True`.
+        result : `Result`
+            Always `has_work=True`.
         """
-        return InputScreening(can_proceed=True)
+        return Result()
 
-    def run(self, request: PipelineRequest, screening: InputScreening) -> RunOutcome:
+    def run(self, request: PipelineRequest, result: Result) -> Result:
         """Locate stars, register against any known field, and extract spectra.
 
         Returns
         -------
-        outcome : `RunOutcome`
+        result : `Result`
             Carries the `AnalysisContext`, the saved stars, and the
             `SpectroscopyPipeline` instance `validate_output` reads its
             saturation fractions from.
@@ -157,13 +156,13 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
             pipeline_name="spectroscopy",
         )
 
-        return RunOutcome(
+        return Result(
             context=context,
             stellar_objects=stellar_objects,
             payload={"star_id_breakdown": star_id_breakdown, "spectroscopy": spectroscopy},
         )
 
-    def validate_output(self, request: PipelineRequest, outcome: RunOutcome) -> SpectroscopyQualitySummary:
+    def validate_output(self, request: PipelineRequest, result: Result) -> SpectroscopyQualitySummary:
         """Build the quality summary, flagging any significant saturation.
 
         Returns
@@ -174,9 +173,9 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
         """
         from astrometricslib.image_processing.saturation import is_saturation_significant
 
-        stellar_objects = outcome.stellar_objects
-        star_id_breakdown = outcome.payload["star_id_breakdown"]
-        spectroscopy = outcome.payload["spectroscopy"]
+        stellar_objects = result.stellar_objects
+        star_id_breakdown = result.payload["star_id_breakdown"]
+        spectroscopy = result.payload["spectroscopy"]
 
         zero_order_fractions = spectroscopy.last_run_zero_order_saturation_fractions
         max_zero_order_fraction = max(zero_order_fractions) if zero_order_fractions else None
@@ -217,16 +216,16 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
         return summary
 
     def to_result_dict(
-        self, request: PipelineRequest, outcome: RunOutcome, summary: SpectroscopyQualitySummary
+        self, request: PipelineRequest, result: Result, summary: SpectroscopyQualitySummary
     ) -> dict[str, Any]:
         """Build the result dict spectroscopy's callers expect back.
 
         Returns
         -------
-        result : `dict`
+        result_dict : `dict`
             Has ``"context"`` and ``"stellar_objects"``.
         """
-        return {"context": outcome.context, "stellar_objects": outcome.stellar_objects}
+        return {"context": result.context, "stellar_objects": result.stellar_objects}
 
 
 def run_spectroscopy_analysis(
@@ -242,7 +241,7 @@ def run_spectroscopy_analysis(
     A thin wrapper kept at this name and signature for
     `pipelines.PIPELINE_RUNNERS` -- the actual work is
     `SpectroscopyPipelineAdapter`, run through the shared
-    screen/run/validate/report cycle in `run_pipeline`.
+    input/main/output processing cycle in `run_pipeline`.
 
     Parameters
     ----------

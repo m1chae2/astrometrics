@@ -264,7 +264,6 @@ def seed_local_gaia_catalog(
         failed, and how many new stars were added to the database.
     """
     from astrometricslib.drivers.catalog_store import summarize_catalog_coverage
-    from astrometricslib.pipelines.astrometry.star_identifier import StarIdentifier
 
     field_centers = derive_field_centers(targets)
     report: dict[str, Any] = {
@@ -280,56 +279,21 @@ def seed_local_gaia_catalog(
     sources_before = coverage_before["source_count"]
 
     for field_index, field_center in enumerate(field_centers):
-        right_ascension_degrees = field_center["right_ascension_deg"]
-        declination_degrees = field_center["declination_deg"]
-        field_result: dict[str, Any] = {
-            "right_ascension_deg": right_ascension_degrees,
-            "declination_deg": declination_degrees,
-            "target_ids": field_center["target_ids"],
-            "status": "failed",
-            "sources": 0,
-            "error": None,
-        }
-
-        for attempt_number in range(1, max_attempts + 1):
-            try:
-                cached_count = StarIdentifier._seed_gaia_cache_for_field(
-                    right_ascension_degrees,
-                    declination_degrees,
-                    radius_deg=radius_degrees,
-                    max_magnitude=magnitude_limit,
-                )
-                field_result["status"] = "seeded"
-                field_result["sources"] = int(cached_count or 0)
-                break
-            except Exception as seeding_error:
-                field_result["error"] = str(seeding_error)
-                if attempt_number < max_attempts:
-                    time.sleep(_RETRY_BACKOFF_BASE_SECONDS * attempt_number)
+        field_result = _seed_one_field(field_center, radius_degrees, magnitude_limit, max_attempts)
 
         if field_result["status"] == "seeded":
             report["fields_seeded"] += 1
             report["sources_cached"] += field_result["sources"]
         else:
             report["fields_failed"] += 1
-            logger.warning(
-                "Could not seed field at RA %.4f Dec %.4f: %s",
-                right_ascension_degrees,
-                declination_degrees,
-                field_result["error"],
-            )
 
-        report["results"].append(field_result)
-        if progress_callback is not None:
-            try:
-                progress_callback(field_result)
-            except Exception as callback_error:
-                logger.debug("Seeding progress callback raised: %s", callback_error)
-
-        # Skipped after the final field so the sweep does not end on a
-        # pause that buys nothing.
-        if request_delay_seconds > 0 and field_index < len(field_centers) - 1:
-            time.sleep(request_delay_seconds)
+        _report_field_progress(
+            report,
+            field_result,
+            progress_callback,
+            request_delay_seconds,
+            is_last_field=field_index == len(field_centers) - 1,
+        )
 
     coverage_after = summarize_catalog_coverage()
     report["coverage"] = coverage_after
@@ -340,3 +304,78 @@ def seed_local_gaia_catalog(
         report["fields_already_cached"] = report["fields_seeded"]
 
     return report
+
+
+def _seed_one_field(
+    field_center: dict[str, Any],
+    radius_degrees: float,
+    magnitude_limit: float,
+    max_attempts: int,
+) -> dict[str, Any]:
+    """Try to seed the Gaia cache for one field, retrying on failure.
+
+    Returns
+    -------
+    field_result : `dict`
+        The outcome for this field: its coordinates, target ids,
+        `status` ("seeded" or "failed"), source count, and any error.
+    """
+    from astrometricslib.pipelines.astrometry.star_identifier import StarIdentifier
+
+    right_ascension_degrees = field_center["right_ascension_deg"]
+    declination_degrees = field_center["declination_deg"]
+    field_result: dict[str, Any] = {
+        "right_ascension_deg": right_ascension_degrees,
+        "declination_deg": declination_degrees,
+        "target_ids": field_center["target_ids"],
+        "status": "failed",
+        "sources": 0,
+        "error": None,
+    }
+
+    for attempt_number in range(1, max_attempts + 1):
+        try:
+            cached_count = StarIdentifier._seed_gaia_cache_for_field(
+                right_ascension_degrees,
+                declination_degrees,
+                radius_deg=radius_degrees,
+                max_magnitude=magnitude_limit,
+            )
+            field_result["status"] = "seeded"
+            field_result["sources"] = int(cached_count or 0)
+            break
+        except Exception as seeding_error:
+            field_result["error"] = str(seeding_error)
+            if attempt_number < max_attempts:
+                time.sleep(_RETRY_BACKOFF_BASE_SECONDS * attempt_number)
+
+    if field_result["status"] != "seeded":
+        logger.warning(
+            "Could not seed field at RA %.4f Dec %.4f: %s",
+            right_ascension_degrees,
+            declination_degrees,
+            field_result["error"],
+        )
+
+    return field_result
+
+
+def _report_field_progress(
+    report: dict[str, Any],
+    field_result: dict[str, Any],
+    progress_callback: Callable[[dict[str, Any]], None] | None,
+    request_delay_seconds: float,
+    is_last_field: bool,
+) -> None:
+    """Record a field's result, notify the caller, and pace the next call."""
+    report["results"].append(field_result)
+    if progress_callback is not None:
+        try:
+            progress_callback(field_result)
+        except Exception as callback_error:
+            logger.debug("Seeding progress callback raised: %s", callback_error)
+
+    # Skipped after the final field so the sweep does not end on a
+    # pause that buys nothing.
+    if request_delay_seconds > 0 and not is_last_field:
+        time.sleep(request_delay_seconds)

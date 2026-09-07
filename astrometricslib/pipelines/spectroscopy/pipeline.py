@@ -30,6 +30,35 @@ from astrometricslib.utilities import SpectroscopyConfig
 logger = logging.getLogger(__name__)
 
 
+def _star_pixel_position(star: Any) -> tuple[bool, tuple[Any, Any]]:
+    """Read a star's raw `(x, y)` pixel position, whatever shape it is.
+
+    `target_stars` mixes three shapes depending on the caller: a plain
+    `(x, y)` tuple, a `StellarObject` (position under `.star_data`), or a
+    photutils source-detection row/dict -- each of the latter two falling
+    back between the `xcentroid`/`x_centroid` and `ycentroid`/`y_centroid`
+    key spellings. Either coordinate can come back `None` if the source
+    lacked one; callers decide whether that's fatal.
+
+    Returns
+    -------
+    is_stellar_obj : `bool`
+        Whether `star` is a `StellarObject` (has `.star_data`) -- callers
+        use this afterward to decide whether to enrich the object in place.
+    pos : `tuple`
+        The `(x, y)` position, either coordinate possibly `None`.
+    """
+    if isinstance(star, tuple):
+        return False, star
+    is_stellar_obj = hasattr(star, "star_data")
+    source = star.star_data if is_stellar_obj else star
+    pos = (
+        source.get("xcentroid", source.get("x_centroid")),
+        source.get("ycentroid", source.get("y_centroid")),
+    )
+    return is_stellar_obj, pos
+
+
 class SpectroscopyPipeline:
     """The master controller for processing spectra.
 
@@ -193,19 +222,7 @@ class SpectroscopyPipeline:
 
             best_star_pos = None
             for star in target_stars:
-                is_stellar_obj = hasattr(star, "star_data")
-                if isinstance(star, tuple):
-                    pos = star
-                elif is_stellar_obj:
-                    pos = (
-                        star.star_data.get("xcentroid", star.star_data.get("x_centroid")),
-                        star.star_data.get("ycentroid", star.star_data.get("y_centroid")),
-                    )
-                else:
-                    pos = (
-                        star.get("xcentroid", star.get("x_centroid")),
-                        star.get("ycentroid", star.get("y_centroid")),
-                    )
+                _, pos = _star_pixel_position(star)
 
                 if pos[0] is None or pos[1] is None:
                     continue
@@ -236,20 +253,7 @@ class SpectroscopyPipeline:
                         break
 
             if best_star_pos is None:
-                first_star = target_stars[0]
-                is_stellar_obj = hasattr(first_star, "star_data")
-                if isinstance(first_star, tuple):
-                    best_star_pos = first_star
-                elif is_stellar_obj:
-                    best_star_pos = (
-                        first_star.star_data.get("xcentroid", first_star.star_data.get("x_centroid")),
-                        first_star.star_data.get("ycentroid", first_star.star_data.get("y_centroid")),
-                    )
-                else:
-                    best_star_pos = (
-                        first_star.get("xcentroid", first_star.get("x_centroid")),
-                        first_star.get("ycentroid", first_star.get("y_centroid")),
-                    )
+                _, best_star_pos = _star_pixel_position(target_stars[0])
 
             if best_star_pos is not None:
                 global_angle = self.detect_dispersion_angle(image, best_star_pos)
@@ -262,19 +266,7 @@ class SpectroscopyPipeline:
         results = []
         for _i, star in enumerate(target_stars[:limit]):
             # Get position
-            is_stellar_obj = hasattr(star, "star_data")
-            if isinstance(star, tuple):
-                pos = star
-            elif is_stellar_obj:  # StellarObject
-                pos = (
-                    star.star_data.get("xcentroid", star.star_data.get("x_centroid")),
-                    star.star_data.get("ycentroid", star.star_data.get("y_centroid")),
-                )
-            else:  # Row/Dict from photutils
-                pos = (
-                    star.get("xcentroid", star.get("x_centroid")),
-                    star.get("ycentroid", star.get("y_centroid")),
-                )
+            is_stellar_obj, pos = _star_pixel_position(star)
 
             result = self._process_single_star(image, pos, auto_detect_angle=auto_detect_angle)
             if "error" not in result:
@@ -310,27 +302,13 @@ class SpectroscopyPipeline:
                         star.star_data["xcentroid"] = result["target_pos"][0]
                         star.star_data["ycentroid"] = result["target_pos"][1]
 
-                    # 1. Compute visual overlay rectangle geometry
-                    offset_px = self.instrument.zero_order_offset_px
-                    len_px = self.instrument.expected_length_px
-                    mid_dist = offset_px + len_px / 2.0
-                    aperture_px = 2 * self.config.extraction_radius + 1
-
-                    old_angle = self.instrument.config.dispersion_angle_degrees
-                    self.instrument.config.dispersion_angle_degrees = result["detected_angle"]
-                    vec = self.instrument.get_dispersion_vector()
-                    self.instrument.config.dispersion_angle_degrees = old_angle
-
-                    # Compute total rotated dispersion angle
-                    star.dispersion_angle = float(np.degrees(np.arctan2(vec[1], vec[0])))
-
-                    cx = result["target_pos"][0] + self.config.dispersion_offset_x
-                    cy = result["target_pos"][1] + self.config.dispersion_offset_y
-
-                    mid_x = cx + mid_dist * vec[0]
-                    mid_y = cy + mid_dist * vec[1]
-
-                    star.rectangle = (float(mid_x), float(mid_y), float(len_px), int(aperture_px))
+                    # Compute the visual overlay rectangle and total
+                    # rotated dispersion angle
+                    star.rectangle, star.dispersion_angle = self._dispersion_overlay_geometry(
+                        result["target_pos"],
+                        self.config.extraction_radius,
+                        dispersion_angle_degrees=result["detected_angle"],
+                    )
 
                 results.append(result)
 
@@ -468,6 +446,60 @@ class SpectroscopyPipeline:
             "trail_width_px": trail_width_px,
         }
 
+    def _dispersion_overlay_geometry(
+        self,
+        center: tuple[float, float],
+        extraction_radius: float,
+        dispersion_angle_degrees: float | None = None,
+    ) -> tuple[tuple[float, float, float, int], float]:
+        """Map a center point into its spectrum trace's overlay rectangle.
+
+        Both a processed star and a synthesized extended-target object
+        need the same overlay: a rectangle spanning the dispersion trace,
+        and the trace's rotated angle in image space.
+
+        Parameters
+        ----------
+        center : `tuple` [`float`, `float`]
+            The `(x, y)` pixel the trace is anchored to.
+        extraction_radius : `float`
+            The extraction aperture radius, in pixels.
+        dispersion_angle_degrees : `float`, optional
+            Overrides the instrument's current dispersion angle for this
+            one calculation (restored afterward). Used when a star's own
+            per-star auto-detected angle differs from whatever the
+            instrument is currently configured with; omit it to use the
+            instrument's angle as-is.
+
+        Returns
+        -------
+        rectangle : `tuple` [`float`, `float`, `float`, `int`]
+            `(mid_x, mid_y, length_px, aperture_px)` for the overlay box.
+        dispersion_angle_deg : `float`
+            The dispersion trace's angle in image space, in degrees.
+        """
+        offset_px = self.instrument.zero_order_offset_px
+        len_px = self.instrument.expected_length_px
+        mid_dist = offset_px + len_px / 2.0
+        aperture_px = 2 * extraction_radius + 1
+
+        if dispersion_angle_degrees is None:
+            vec = self.instrument.get_dispersion_vector()
+        else:
+            old_angle = self.instrument.config.dispersion_angle_degrees
+            self.instrument.config.dispersion_angle_degrees = dispersion_angle_degrees
+            vec = self.instrument.get_dispersion_vector()
+            self.instrument.config.dispersion_angle_degrees = old_angle
+
+        cx = center[0] + self.config.dispersion_offset_x
+        cy = center[1] + self.config.dispersion_offset_y
+        mid_x = cx + mid_dist * vec[0]
+        mid_y = cy + mid_dist * vec[1]
+
+        rectangle = (float(mid_x), float(mid_y), float(len_px), int(aperture_px))
+        dispersion_angle_deg = float(np.degrees(np.arctan2(vec[1], vec[0])))
+        return rectangle, dispersion_angle_deg
+
     def detect_dispersion_angle(self, image: AstrometricsImage, star_pos: tuple[float, float]) -> float:
         """Figure out exactly how much the camera is tilted.
 
@@ -559,28 +591,8 @@ class SpectroscopyPipeline:
             Custom stellar object mapped to the physical dispersion
             bounding box.
         """
-        # 1. Resolve physical dispersion vector from the instrument geometry
-        vec = self.instrument.get_dispersion_vector()
-        offset_px = self.instrument.zero_order_offset_px
-        len_px = self.instrument.expected_length_px
+        rectangle, dispersion_angle = self._dispersion_overlay_geometry(extraction_center, extraction_radius)
 
-        # 2. Midpoint of the spectral streak along the dispersion line:
-        # mid_dist = offset_px + len_px / 2.0
-        mid_dist = offset_px + len_px / 2.0
-
-        # 3. Apply fine-tuning offsets from configuration
-        cx = extraction_center[0] + self.config.dispersion_offset_x
-        cy = extraction_center[1] + self.config.dispersion_offset_y
-
-        # 4. Map the center coordinate of the dispersion rectangle
-        mid_x = cx + mid_dist * vec[0]
-        mid_y = cy + mid_dist * vec[1]
-
-        # 5. Bounding box aperture width matches full wide extraction
-        # area: (2 * radius + 1)
-        aperture_px = 2 * extraction_radius + 1
-
-        # 6. Instantiate and return a clean StellarObject model
         return StellarObject(
             id=f"{object_name.replace(' ', '_')}_Cluster",
             name=f"{object_name} ({otype})",
@@ -593,7 +605,7 @@ class SpectroscopyPipeline:
                 "ycentroid": float(extraction_center[1]),
                 "flux": 100000.0,
             },
-            rectangle=(float(mid_x), float(mid_y), float(len_px), int(aperture_px)),
-            dispersion_angle=float(np.degrees(np.arctan2(vec[1], vec[0]))),
+            rectangle=rectangle,
+            dispersion_angle=dispersion_angle,
             extraction_radius=int(extraction_radius),
         )

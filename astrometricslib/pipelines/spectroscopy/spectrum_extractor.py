@@ -467,24 +467,9 @@ class SpectrumExtractor:
         """
         data = image.data
         h, w = data.shape
-        x0, y0 = start_pos
 
         # 1. Centroid Anchor (21x21 subgrid around rough start position)
-        ix0, iy0 = round(x0), round(y0)
-        y_start = max(0, iy0 - 10)
-        y_end = min(h, iy0 + 11)
-        x_start = max(0, ix0 - 10)
-        x_end = min(w, ix0 + 11)
-
-        subgrid = data[y_start:y_end, x_start:x_end]
-        total_mass = np.sum(subgrid)
-
-        if total_mass > 0:
-            y_indices, x_indices = np.indices(subgrid.shape)
-            anchor_x = x_start + np.sum(subgrid * x_indices) / total_mass
-            anchor_y = y_start + np.sum(subgrid * y_indices) / total_mass
-        else:
-            anchor_x, anchor_y = x0, y0
+        anchor_x, anchor_y = self._compute_centroid_anchor(data, start_pos)
 
         # 2. Bounding Box & Profile Extraction with Dynamic Tilt Tracking
         profile = []
@@ -528,6 +513,36 @@ class SpectrumExtractor:
                     profile.append(0.0)
 
         return np.array(profile), anchor_x, anchor_y
+
+    def _compute_centroid_anchor(
+        self, data: np.ndarray, start_pos: tuple[float, float]
+    ) -> tuple[float, float]:
+        """Find the sub-pixel centroid of a star in a 21x21 pixel box.
+
+        Returns
+        -------
+        anchor_x, anchor_y : `float`
+            The sub-pixel zero-order anchor coordinates.
+        """
+        h, w = data.shape
+        x0, y0 = start_pos
+        ix0, iy0 = round(x0), round(y0)
+        y_start = max(0, iy0 - 10)
+        y_end = min(h, iy0 + 11)
+        x_start = max(0, ix0 - 10)
+        x_end = min(w, ix0 + 11)
+
+        subgrid = data[y_start:y_end, x_start:x_end]
+        total_mass = np.sum(subgrid)
+
+        if total_mass > 0:
+            y_indices, x_indices = np.indices(subgrid.shape)
+            anchor_x = x_start + np.sum(subgrid * x_indices) / total_mass
+            anchor_y = y_start + np.sum(subgrid * y_indices) / total_mass
+        else:
+            anchor_x, anchor_y = x0, y0
+
+        return anchor_x, anchor_y
 
     def extract_with_flare_mask_traced(
         self,
@@ -579,25 +594,53 @@ class SpectrumExtractor:
             How fat the spectrum was at each step.
         """
         data = image.data
-        h, w = data.shape
-        x0, y0 = start_pos
+        anchor_x, anchor_y = self._compute_centroid_anchor(data, start_pos)
 
-        ix0, iy0 = round(x0), round(y0)
-        y_start = max(0, iy0 - 10)
-        y_end = min(h, iy0 + 11)
-        x_start = max(0, ix0 - 10)
-        x_end = min(w, ix0 + 11)
+        steps, nominal_centers, perpendicular_vector = self._nominal_trace_centers(
+            anchor_x, anchor_y, flare_offset_pixels, max_offset_pixels, orientation, angle_degrees
+        )
 
-        subgrid = data[y_start:y_end, x_start:x_end]
-        total_mass = np.sum(subgrid)
+        raw_centers, raw_sigmas, smoothed_centerline, fallback_sigma = self._fit_trace_centerline(
+            data, nominal_centers, perpendicular_vector, radius, centerline_polynomial_degree
+        )
 
-        if total_mass > 0:
-            y_indices, x_indices = np.indices(subgrid.shape)
-            anchor_x = x_start + np.sum(subgrid * x_indices) / total_mass
-            anchor_y = y_start + np.sum(subgrid * y_indices) / total_mass
-        else:
-            anchor_x, anchor_y = x0, y0
+        profile, trail_width_px = self._build_traced_flare_profile(
+            data,
+            steps,
+            nominal_centers,
+            perpendicular_vector,
+            raw_centers,
+            raw_sigmas,
+            smoothed_centerline,
+            fallback_sigma,
+            orientation,
+            radius,
+        )
 
+        return profile, anchor_x, anchor_y, smoothed_centerline, trail_width_px
+
+    def _nominal_trace_centers(
+        self,
+        anchor_x: float,
+        anchor_y: float,
+        flare_offset_pixels: float,
+        max_offset_pixels: float,
+        orientation: str,
+        angle_degrees: float,
+    ) -> tuple[list[int], list[tuple[float, float]], tuple[float, float]]:
+        """Compute the straight-line trace steps and their nominal centers.
+
+        Returns
+        -------
+        steps : `list` [`int`]
+            The pixel coordinate along the dispersion axis for each
+            step.
+        nominal_centers : `list` [`tuple`]
+            The `(x, y)` position the trace would be at, ignoring any
+            curvature, at each step.
+        perpendicular_vector : `tuple` [`float`, `float`]
+            The unit vector pointing sideways across the dispersion axis.
+        """
         slope = -np.tan(np.radians(angle_degrees))
         is_horizontal = orientation == "horizontal"
 
@@ -615,6 +658,29 @@ class SpectrumExtractor:
             else:
                 nominal_centers.append((anchor_x + slope * (step - anchor_y), float(step)))
 
+        return steps, nominal_centers, perpendicular_vector
+
+    def _fit_trace_centerline(
+        self,
+        data: np.ndarray,
+        nominal_centers: list[tuple[float, float]],
+        perpendicular_vector: tuple[float, float],
+        radius: float,
+        centerline_polynomial_degree: int,
+    ) -> tuple[list[float | None], list[float | None], list[float], float]:
+        """Fit the true center and width at every nominal trace position.
+
+        Returns
+        -------
+        raw_centers, raw_sigmas : `list` [`float` or `None`]
+            The per-step fit results; `None` where the fit failed.
+        smoothed_centerline : `list` [`float`]
+            `raw_centers` with gaps filled by a polynomial fit.
+        fallback_sigma : `float`
+            The width to use where a step's own fit failed: the
+            median of the steps that did fit, or a fraction of
+            `radius` if none did.
+        """
         raw_centers: list[float | None] = []
         raw_sigmas: list[float | None] = []
         for center in nominal_centers:
@@ -630,6 +696,34 @@ class SpectrumExtractor:
         smoothed_centerline = fit_trail_centerline_polynomial(raw_centers, centerline_polynomial_degree)
         fitted_sigmas = [sigma for sigma in raw_sigmas if sigma is not None]
         fallback_sigma = float(np.median(fitted_sigmas)) if fitted_sigmas else float(radius) / 3.0
+
+        return raw_centers, raw_sigmas, smoothed_centerline, fallback_sigma
+
+    def _build_traced_flare_profile(
+        self,
+        data: np.ndarray,
+        steps: list[int],
+        nominal_centers: list[tuple[float, float]],
+        perpendicular_vector: tuple[float, float],
+        raw_centers: list[float | None],
+        raw_sigmas: list[float | None],
+        smoothed_centerline: list[float],
+        fallback_sigma: float,
+        orientation: str,
+        radius: float,
+    ) -> tuple[np.ndarray, list[float]]:
+        """Sum intensities along a traced trail, widening the box by sigma.
+
+        Returns
+        -------
+        profile : `numpy.ndarray`
+            The summed intensity at each step.
+        trail_width_px : `list` [`float`]
+            The aperture sigma used at each step (0.0 where the fit
+            failed).
+        """
+        h, w = data.shape
+        is_horizontal = orientation == "horizontal"
 
         profile = []
         trail_width_px: list[float] = []
@@ -668,4 +762,4 @@ class SpectrumExtractor:
             profile.append(val)
             trail_width_px.append(sigma)
 
-        return np.array(profile), anchor_x, anchor_y, smoothed_centerline, trail_width_px
+        return np.array(profile), trail_width_px

@@ -24,7 +24,6 @@ from astrometricslib.models.moving_object_config import (
     MovingObjectConfig,
     MovingObjectConfigLoader,
 )
-from astrometricslib.models.target import FrameRecord
 from astrometricslib.pipelines.asteroid_recovery.detection import MovingObjectDetector
 from astrometricslib.pipelines.asteroid_recovery.ephemeris import EphemerisCrossMatcher
 from astrometricslib.pipelines.asteroid_recovery.frame_wcs_composer import (
@@ -119,15 +118,15 @@ class AsteroidRecoveryPipeline:
         self.last_run_metrics: dict[str, int] = {}
 
     def process(
-        self, target_id: str, stacked_image_path: str, frames: list[FrameRecord]
+        self, target_id: str, stacked_image_path: str, frames: list[tuple[str, float]]
     ) -> list[AsteroidRecoveryCandidate]:
         """Run the whole asteroid-finding process on one set of photos.
 
         Takes plain data rather than a `Target` -- this class has no
-        dependency on `astrometricslib.models.target.Target` or any
-        other orchestration-layer concern, so it can be driven directly
-        by a caller that wants to assemble its own pipeline instead of
-        going through `AsteroidRecoveryPipelineAdapter`.
+        dependency on `astrometricslib.models.target.Target`, `FrameRecord`,
+        or any other orchestration-layer concern, so it can be driven
+        directly by a caller that wants to assemble its own pipeline
+        instead of going through `AsteroidRecoveryPipelineAdapter`.
 
         Parameters
         ----------
@@ -136,10 +135,10 @@ class AsteroidRecoveryPipeline:
         stacked_image_path : `str`
             Path to the target's finished stacked image, so we know
             exactly where it is in the sky. Must already exist.
-        frames : `list` [`FrameRecord`]
-            The target's frames to search for moving objects across.
-            Frames that are not `LIGHT` role, or have no capture
-            timestamp, are excluded automatically.
+        frames : `list` [`tuple` [`str`, `float`]]
+            Each frame's path and capture timestamp to search for moving
+            objects across. The caller is responsible for filtering to
+            `LIGHT`-role frames with a usable capture timestamp.
 
         Returns
         -------
@@ -196,7 +195,7 @@ class AsteroidRecoveryPipeline:
         return candidates
 
     def _detect_frame_sources(
-        self, frames: list[FrameRecord], stack_wcs: WCS
+        self, frames: list[tuple[str, float]], stack_wcs: WCS
     ) -> tuple[list[FrameDetection], int, int]:
         """Find all the dots in all the photos.
 
@@ -217,8 +216,7 @@ class AsteroidRecoveryPipeline:
         frames_with_wcs_estimate = 0
         frames_excluded_missing_pointing_metadata = 0
 
-        light_frames = [f for f in frames if f.role == "LIGHT" and f.timestamp is not None]
-        total_light = len(light_frames)
+        total_light = len(frames)
         if total_light == 0:
             return frame_detections, frames_with_wcs_estimate, frames_excluded_missing_pointing_metadata
 
@@ -228,13 +226,13 @@ class AsteroidRecoveryPipeline:
             futures = [
                 executor.submit(
                     _detect_sources_in_one_frame,
-                    frame.path,
-                    frame.timestamp,
+                    frame_path,
+                    frame_timestamp,
                     stack_wcs,
                     self.config.detection_fwhm_px,
                     self.config.detection_threshold_sigma,
                 )
-                for frame in light_frames
+                for frame_path, frame_timestamp in frames
             ]
             for future in as_completed(futures):
                 completed += 1

@@ -12,8 +12,8 @@ from typing import Any
 from astrometricslib.image_processing.image import AstrometricsImage
 from astrometricslib.pipelines.astrometry.star_identifier import StarIdentifier
 from astrometricslib.pipelines.shared.analysis_context import AnalysisContext, ExtendedSourceHint
+from astrometricslib.pipelines.shared.target_center_hint import resolve_center_hint
 from astrometricslib.utilities.config_loader import AppConfiguration
-from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
 
 logger = logging.getLogger(__name__)
 
@@ -160,15 +160,7 @@ class AstrometryPipeline:
         if target_ra is not None and target_dec is not None:
             try:
                 if isinstance(target_ra, str) and ("h" in target_ra or "°" in target_ra or " " in target_ra):
-                    resolved_ra_deg = parse_coordinate_string(str(target_ra), is_ra=True)
-                    resolved_dec_deg = parse_coordinate_string(str(target_dec), is_ra=False)
-                    # Sometimes an empty database field will default to
-                    # 0h 0m 0s. Exact zeros are ignored because they are
-                    # almost certainly a blank default, not an actual
-                    # pointing at the 0,0 coordinate.
-                    if resolved_ra_deg != 0.0 or resolved_dec_deg != 0.0:  # ruff: ignore[float-equality-comparison] -- 0h0m0s placeholder sentinel, not measured
-                        ra_hint = float(resolved_ra_deg)
-                        dec_hint = float(resolved_dec_deg)
+                    ra_hint, dec_hint = resolve_center_hint(target_ra, target_dec)
                 else:
                     if float(target_ra) != 0.0 or float(target_dec) != 0.0:  # ruff: ignore[float-equality-comparison] -- 0.0 placeholder sentinel, not measured
                         ra_hint = float(target_ra)

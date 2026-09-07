@@ -91,41 +91,35 @@ def _solve_session_wcs(session: Any, target: Target) -> Any | None:
         The map from pixel to sky position, or None if the solve
         failed.
     """
-    import warnings
-
-    from astropy.wcs import WCS, FITSFixedWarning
-
-    from astrometricslib.drivers.plate_solve_interface import PlateSolver
+    from astrometricslib.image_processing.image import AstrometricsImage
+    from astrometricslib.pipelines.astrometry.session_identification import resolve_frame_wcs
+    from astrometricslib.pipelines.astrometry.star_identifier import StarIdentifier
 
     reference_path = session.frame_paths[0]
     try:
         center_ra, center_dec = resolve_target_center_hint(target)
 
-        solver = PlateSolver()
-        header = solver.solve(
-            image_path=reference_path,
+        wcs, _reused_existing_wcs, _solve_attempted = resolve_frame_wcs(
+            AstrometricsImage(reference_path),
+            StarIdentifier(),
             center_ra=center_ra,
             center_dec=center_dec,
-            radius=2.0,
+            write_back=False,
             # A real M 81 solve with a center hint measured 2.27s; 30s
             # gives >10x margin while still failing fast (vs. the
-            # shared 300s default star_identifier.py uses for a real,
-            # possibly hint-less solve) when a session's reference
-            # frame isn't solvable -- this call is best-effort only,
-            # already tolerating a failed solve by skipping cross-
-            # session matching for that session (see docstring above).
+            # 300s default a real, possibly hint-less solve elsewhere
+            # uses) when a session's reference frame isn't solvable --
+            # this call is best-effort only, already tolerating a
+            # failed solve by skipping cross-session matching for
+            # that session (see docstring above).
             solve_timeout=30,
         )
-        if header is None:
+        if wcs is None:
             logger.warning(
                 f"Session {session.id} plate solve failed ({reference_path}); "
                 "skipping cross-session star matching for this session."
             )
-            return None
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", FITSFixedWarning)
-            return WCS(header, naxis=2)
+        return wcs
     except Exception as solve_error:
         logger.warning(
             f"Session {session.id} plate solve failed ({reference_path}); "

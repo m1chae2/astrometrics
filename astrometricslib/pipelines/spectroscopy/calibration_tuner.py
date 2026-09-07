@@ -19,7 +19,10 @@ from astrometricslib.pipelines.spectroscopy.optics_physics import (
     calculate_pixel_offset,
     calculate_wavelength,
 )
-from astrometricslib.pipelines.spectroscopy.pipeline import SpectroscopyPipeline
+from astrometricslib.pipelines.spectroscopy.pipeline import (
+    SpectroscopyPipeline,
+    _read_xy_source_position,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -159,15 +162,8 @@ class SpectroscopyCalibrationTuner:
         if not context.stellar_objects:
             raise ValueError("No stars detected in the calibration frame.")
         # The brightest source in a stacked calibration frame is our target
-        star = context.stellar_objects[0].star_data
-        if hasattr(star, "xcentroid"):
-            return (float(star.xcentroid), float(star.ycentroid))
-        if isinstance(star, dict):
-            return (
-                float(star.get("xcentroid", star.get("x_centroid"))),
-                float(star.get("ycentroid", star.get("y_centroid"))),
-            )
-        return (float(star["xcentroid"]), float(star["ycentroid"]))
+        star_x, star_y = _read_xy_source_position(context.stellar_objects[0].star_data)
+        return (float(star_x), float(star_y))
 
     @staticmethod
     def _extract_smoothed_spectrum(

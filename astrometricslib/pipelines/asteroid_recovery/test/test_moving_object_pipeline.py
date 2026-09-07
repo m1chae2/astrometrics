@@ -84,12 +84,27 @@ def _build_moving_target(tmp_path, include_radec=True):  # ruff: ignore[missing-
     return target
 
 
+def _light_frames(target):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    """Build the frame pairs `AsteroidRecoveryPipeline.process` expects.
+
+    Returns
+    -------
+    frames : `list` [`tuple` [`str`, `float`]]
+        Each light frame's `(path, timestamp)`.
+    """
+    return [
+        (frame.path, frame.timestamp)
+        for frame in target.frames
+        if frame.role == "LIGHT" and frame.timestamp is not None
+    ]
+
+
 def test_process_raises_when_target_has_no_stacked_image():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Test that we stop and complain if the target hasn't been stacked yet."""
     target = Target(id="NoStackTarget", frames=[])
     pipeline = AsteroidRecoveryPipeline(MovingObjectConfig())
     with pytest.raises(ValueError, match="stacked_image"):
-        pipeline.process(target.id, target.stacked_image, target.frames)
+        pipeline.process(target.id, target.stacked_image, _light_frames(target))
 
 
 def test_process_confirms_a_moving_source_with_no_ephemeris_match(tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
@@ -99,7 +114,7 @@ def test_process_confirms_a_moving_source_with_no_ephemeris_match(tmp_path, mock
     target = _build_moving_target(tmp_path)
     pipeline = AsteroidRecoveryPipeline(MovingObjectConfig())
 
-    candidates = pipeline.process(target.id, target.stacked_image, target.frames)
+    candidates = pipeline.process(target.id, target.stacked_image, _light_frames(target))
 
     assert len(candidates) == 1
     assert candidates[0].cascade_stage == CascadeStage.RATE_LINEARITY_CONFIRMED
@@ -127,7 +142,7 @@ def test_process_matches_a_moving_source_against_a_known_body(tmp_path, mocker):
     target = _build_moving_target(tmp_path)
     pipeline = AsteroidRecoveryPipeline(MovingObjectConfig())
 
-    candidates = pipeline.process(target.id, target.stacked_image, target.frames)
+    candidates = pipeline.process(target.id, target.stacked_image, _light_frames(target))
 
     assert len(candidates) == 1
     assert candidates[0].cascade_stage == CascadeStage.EPHEMERIS_MATCHED
@@ -143,7 +158,7 @@ def test_process_excludes_frames_missing_pointing_metadata(tmp_path, mocker):  #
     target = _build_moving_target(tmp_path, include_radec=False)
     pipeline = AsteroidRecoveryPipeline(MovingObjectConfig())
 
-    candidates = pipeline.process(target.id, target.stacked_image, target.frames)
+    candidates = pipeline.process(target.id, target.stacked_image, _light_frames(target))
 
     assert candidates == []
     assert pipeline.last_run_metrics["frames_with_wcs_estimate"] == 0

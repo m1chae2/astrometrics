@@ -68,6 +68,7 @@ def resolve_frame_wcs(
     sources: list[dict] | None = None,
     write_back: bool = True,
     ignore_existing_wcs: bool = False,
+    solve_timeout: int = 300,
 ) -> tuple[WCS | None, bool, bool]:
     """Figure out the sky map (WCS) for an image.
 
@@ -91,6 +92,8 @@ def resolve_frame_wcs(
         Whether the newly calculated map should be saved into the image file.
     ignore_existing_wcs : `bool`, optional
         If True, ignore any saved map and force it to calculate a new one.
+    solve_timeout : `int`, optional
+        The maximum time in seconds to let the solver run.
 
     Returns
     -------
@@ -127,7 +130,7 @@ def resolve_frame_wcs(
         scale_units="arcsecperpix",
         scale_lower=scale_lower,
         scale_upper=scale_upper,
-        solve_timeout=300,
+        solve_timeout=solve_timeout,
     )
     if header is None:
         logger.warning(f"Plate solve failed for {image.path}; no WCS available.")

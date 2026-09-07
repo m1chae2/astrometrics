@@ -1197,6 +1197,7 @@ class StarIdentifier:
             position = sky_positions.get(id(stellar_object))
             if position is None:
                 logger.warning(f"Star {stellar_object.name} missing centroid in star_data; skipping.")
+                unmatched_after_simbad.append(stellar_object)
                 continue
             ra, dec = position
 

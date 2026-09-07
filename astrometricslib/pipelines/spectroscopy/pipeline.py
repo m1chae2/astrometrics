@@ -30,15 +30,37 @@ from astrometricslib.utilities import SpectroscopyConfig
 logger = logging.getLogger(__name__)
 
 
+def _read_xy_source_position(source: Any) -> tuple[Any, Any]:
+    """Read an `(x, y)` pixel position off a source, whatever shape it is.
+
+    A source can be a photutils `SourceCatalog` row (attribute access), a
+    plain dict or a `StellarObject.star_data` dict (`.get` access), or a
+    bare subscriptable record -- falling back between the
+    `xcentroid`/`x_centroid` and `ycentroid`/`y_centroid` spellings
+    throughout. Either coordinate can come back `None` if the source
+    lacked one; callers decide whether that's fatal.
+
+    Returns
+    -------
+    pos : `tuple`
+        The `(x, y)` position, either coordinate possibly `None`.
+    """
+    if hasattr(source, "xcentroid"):
+        return source.xcentroid, source.ycentroid
+    if hasattr(source, "get"):
+        return (
+            source.get("xcentroid", source.get("x_centroid")),
+            source.get("ycentroid", source.get("y_centroid")),
+        )
+    return source["xcentroid"], source["ycentroid"]
+
+
 def _star_pixel_position(star: Any) -> tuple[bool, tuple[Any, Any]]:
     """Read a star's raw `(x, y)` pixel position, whatever shape it is.
 
     `target_stars` mixes three shapes depending on the caller: a plain
     `(x, y)` tuple, a `StellarObject` (position under `.star_data`), or a
-    photutils source-detection row/dict -- each of the latter two falling
-    back between the `xcentroid`/`x_centroid` and `ycentroid`/`y_centroid`
-    key spellings. Either coordinate can come back `None` if the source
-    lacked one; callers decide whether that's fatal.
+    photutils source-detection row/dict.
 
     Returns
     -------
@@ -52,11 +74,7 @@ def _star_pixel_position(star: Any) -> tuple[bool, tuple[Any, Any]]:
         return False, star
     is_stellar_obj = hasattr(star, "star_data")
     source = star.star_data if is_stellar_obj else star
-    pos = (
-        source.get("xcentroid", source.get("x_centroid")),
-        source.get("ycentroid", source.get("y_centroid")),
-    )
-    return is_stellar_obj, pos
+    return is_stellar_obj, _read_xy_source_position(source)
 
 
 class SpectroscopyPipeline:
@@ -374,14 +392,15 @@ class SpectroscopyPipeline:
 
         # 2. Check if ZWO ASI533MM Pro camera is used
         is_asi533 = self.config.camera.name == "ZWO ASI533MM Pro"
+        is_traced = self.config.extraction_method == "traced"
 
         if is_asi533:
             wavelengths, intensities, target_pos, trail_centerline_px, trail_width_px = (
-                self._extract_via_flare_mask(image, pos, detected_angle)
+                self._extract_via_flare_mask(image, pos, detected_angle, is_traced)
             )
         else:
             wavelengths, intensities, target_pos, trail_centerline_px, trail_width_px = (
-                self._extract_via_dispersion_line(image, pos)
+                self._extract_via_dispersion_line(image, pos, is_traced)
             )
 
         zero_order_saturated_pixel_fraction = self._measure_zero_order_saturation(image, target_pos)
@@ -398,7 +417,7 @@ class SpectroscopyPipeline:
         }
 
     def _extract_via_flare_mask(
-        self, image: AstrometricsImage, pos: tuple[float, float], detected_angle: float
+        self, image: AstrometricsImage, pos: tuple[float, float], detected_angle: float, is_traced: bool
     ) -> tuple[np.ndarray, np.ndarray, tuple[float, float], list | None, list | None]:
         """Extract a spectrum using the ZWO ASI533MM Pro flare-masking method.
 
@@ -413,7 +432,6 @@ class SpectroscopyPipeline:
             The traced extraction's per-column centerline and width, or
             both `None` when using the untraced extraction method.
         """
-        is_traced = self.config.extraction_method == "traced"
         # For ZWO ASI533MM Pro with flare masking, we use the custom method
         flare_offset_pixels = (
             self.config.dispersion_start_px if self.config.dispersion_start_px is not None else 120.0
@@ -456,7 +474,7 @@ class SpectroscopyPipeline:
         return wavelengths, intensities, (anchor_x, anchor_y), trail_centerline_px, trail_width_px
 
     def _extract_via_dispersion_line(
-        self, image: AstrometricsImage, pos: tuple[float, float]
+        self, image: AstrometricsImage, pos: tuple[float, float], is_traced: bool
     ) -> tuple[np.ndarray, np.ndarray, tuple[float, float], list | None, list | None]:
         """Extract a spectrum along the instrument's default dispersion line.
 
@@ -470,7 +488,6 @@ class SpectroscopyPipeline:
             The traced extraction's per-column centerline and width, or
             both `None` when using the untraced extraction method.
         """
-        is_traced = self.config.extraction_method == "traced"
         # Default line extraction workflow
         vector = self.instrument.get_dispersion_vector()
         offset_px = self.instrument.zero_order_offset_px

@@ -14,6 +14,7 @@ from astrometricslib.models.quality_summary import (
     SpectroscopyPipelineQualityMetrics,
     SpectroscopyQualitySummary,
 )
+from astrometricslib.models.target import Target
 from astrometricslib.pipelines.contract import (
     AnalysisPipeline,
     PipelineRequest,
@@ -26,23 +27,25 @@ from astrometricslib.pipelines.shared.star_recording import (
 )
 
 
-def _registration_reference_candidates(catalog_access: Any) -> list:
+def _registration_reference_candidates(target: Target, catalog_access: Any) -> list:
     """Collect the stars a spectral field can register its identity against.
 
     `identify_spectral_stars_via_registration` needs a reference set of
     stars with known identities and pixel positions to match a
-    spectroscopy image's blind detections against. That set is every
-    catalog-identified star on record, regardless of which target found
-    it: a SPEC target's own astrometry pass never produces
-    catalog-identified stars (astrometricslib refuses to mix SPEC and
-    standard frames on one target, and blind detection on a spectral
-    image has no WCS to identify against), so filtering to the SPEC
-    target's own id -- the natural first guess -- always comes back
-    empty. There is also no field recording which imaging target's
-    frames a given SPEC target's exposures were taken alongside, so
-    there is nothing narrower to filter to.
+    spectroscopy image's blind detections against. Prefer this target's
+    own catalog-identified stars -- a target with both standard and SPEC
+    frames ("mixed frames") gets its own astrometry pass run first, so
+    by the time spectroscopy runs, the catalog usually already has stars
+    tagged with this exact target's id.
 
-    This is safe against unrelated targets:
+    A SPEC-only target (no standard frames of its own) never produces
+    catalog-identified stars for its own id, and there is no field
+    recording which imaging target's frames its exposures were taken
+    alongside, so there is nothing narrower to filter to in that case --
+    fall back to every catalog-identified star on record, regardless of
+    which target found it.
+
+    That fallback is safe against unrelated targets:
     `identify_spectral_stars_via_registration` requires several points
     to agree on one consistent pixel offset (see `_MIN_CONTROL_POINTS`
     there) before accepting a match, so a field with no real geometric
@@ -51,20 +54,27 @@ def _registration_reference_candidates(catalog_access: Any) -> list:
 
     Parameters
     ----------
+    target : `Target`
+        The target running spectroscopy; scopes the preferred candidate
+        set to stars this target's own astrometry pass already found.
     catalog_access : `Any`
         Provides the read of `stellar_catalog`.
 
     Returns
     -------
     candidates : `list` [`StellarObject`]
-        Every catalog-identified, non-spectroscopy-derived star in the
-        catalog.
+        This target's own catalog-identified, non-spectroscopy-derived
+        stars if any exist, otherwise every such star in the catalog.
     """
-    return [
+    catalog_identified = [
         stellar_object
         for stellar_object in catalog_access.get("stellar_catalog", {})
         if stellar_object.is_catalog_identified and not stellar_object.id.endswith("::spectroscopy")
     ]
+    own_target_stars = [
+        stellar_object for stellar_object in catalog_identified if target.id in stellar_object.target_ids
+    ]
+    return own_target_stars if own_target_stars else catalog_identified
 
 
 class SpectroscopyPipelineAdapter(AnalysisPipeline):
@@ -138,7 +148,7 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
         # instances spectroscopy.process() mutates next, so it
         # doesn't matter that most of them won't end up with a
         # spectrum extracted.
-        reference_stellar_objects = _registration_reference_candidates(catalog_access)
+        reference_stellar_objects = _registration_reference_candidates(target, catalog_access)
         if reference_stellar_objects:
             from astrometricslib.pipelines.astrometry.spectral_star_registration import (
                 identify_spectral_stars_via_registration,

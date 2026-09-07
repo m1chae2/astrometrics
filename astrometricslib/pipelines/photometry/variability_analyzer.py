@@ -785,8 +785,7 @@ class VariabilityAnalyzer:
             for timestamp, fluxes in frame_flux_data.items()
         ]
         self._reject_outlier_frames(frame_flux_data)
-        if self._apply_frame_normalization():
-            self._reject_outlier_star_measurements()
+        self._apply_frame_normalization()
 
     def _score_reference_star_candidates(self) -> list[tuple]:
         """Score every star as a potential ensemble reference.
@@ -1171,54 +1170,54 @@ class VariabilityAnalyzer:
             star.light_curve.fluxes = new_fluxes
             star.light_curve.is_saturated = new_is_saturated if saturation_flags_aligned else []
             star.light_curve.airmasses = new_airmasses if airmasses_aligned else []
+            self._reject_outlier_measurements_for_star(star)
 
         return True
 
-    def _reject_outlier_star_measurements(self) -> None:
-        """Sigma-clip each star's own normalized light curve.
+    def _reject_outlier_measurements_for_star(self, star: StellarObject) -> None:
+        """Sigma-clip one star's own normalized light curve.
 
-        Run after frame-level normalization, this catches a star's own
-        measurement outliers (a cosmic ray, a bad centroid) that
-        global frame-level clipping wouldn't catch, since they're
-        specific to one star rather than one frame.
+        Run right after that star's frame-level normalization above,
+        this catches the star's own measurement outliers (a cosmic ray,
+        a bad centroid) that global frame-level clipping wouldn't catch,
+        since they're specific to one star rather than one frame.
         """
-        for star in self.stellar_objects:
-            if len(star.light_curve.fluxes_normalized) > 10:
-                flux_values = np.array(star.light_curve.fluxes_normalized)
+        if len(star.light_curve.fluxes_normalized) > 10:
+            flux_values = np.array(star.light_curve.fluxes_normalized)
 
-                # Same astropy sigma_clip/mad_std equivalence as the
-                # frame-level pass above, at the historical
-                # more-permissive per-star threshold |z| < 5.0, single
-                # pass (maxiters=1). The mad_std > 0 guard preserves
-                # the historical skip when MAD collapses to zero.
-                if mad_std(flux_values) > 0:
-                    clipped_fluxes = sigma_clip(
-                        flux_values, sigma=5.0, maxiters=1, cenfunc="median", stdfunc="mad_std"
-                    )
-                    valid_mask = ~clipped_fluxes.mask
+            # Same astropy sigma_clip/mad_std equivalence as the
+            # frame-level pass above, at the historical
+            # more-permissive per-star threshold |z| < 5.0, single
+            # pass (maxiters=1). The mad_std > 0 guard preserves
+            # the historical skip when MAD collapses to zero.
+            if mad_std(flux_values) > 0:
+                clipped_fluxes = sigma_clip(
+                    flux_values, sigma=5.0, maxiters=1, cenfunc="median", stdfunc="mad_std"
+                )
+                valid_mask = ~clipped_fluxes.mask
 
-                    if not np.all(valid_mask):
-                        star.light_curve.timestamps = [
-                            t for i, t in enumerate(star.light_curve.timestamps) if valid_mask[i]
-                        ]
-                        star.light_curve.fluxes = [
-                            f for i, f in enumerate(star.light_curve.fluxes) if valid_mask[i]
-                        ]
-                        star.light_curve.fluxes_normalized = [
-                            fn for i, fn in enumerate(star.light_curve.fluxes_normalized) if valid_mask[i]
-                        ]
-                        # Same reason as the rejected-frame filter above:
-                        # every per-frame array shares one index space.
-                        star.light_curve.is_saturated = [
-                            s
-                            for i, s in enumerate(star.light_curve.is_saturated)
-                            if i < len(valid_mask) and valid_mask[i]
-                        ]
-                        star.light_curve.airmasses = [
-                            a
-                            for i, a in enumerate(star.light_curve.airmasses)
-                            if i < len(valid_mask) and valid_mask[i]
-                        ]
+                if not np.all(valid_mask):
+                    star.light_curve.timestamps = [
+                        t for i, t in enumerate(star.light_curve.timestamps) if valid_mask[i]
+                    ]
+                    star.light_curve.fluxes = [
+                        f for i, f in enumerate(star.light_curve.fluxes) if valid_mask[i]
+                    ]
+                    star.light_curve.fluxes_normalized = [
+                        fn for i, fn in enumerate(star.light_curve.fluxes_normalized) if valid_mask[i]
+                    ]
+                    # Same reason as the rejected-frame filter above:
+                    # every per-frame array shares one index space.
+                    star.light_curve.is_saturated = [
+                        s
+                        for i, s in enumerate(star.light_curve.is_saturated)
+                        if i < len(valid_mask) and valid_mask[i]
+                    ]
+                    star.light_curve.airmasses = [
+                        a
+                        for i, a in enumerate(star.light_curve.airmasses)
+                        if i < len(valid_mask) and valid_mask[i]
+                    ]
 
     def identify_variable_stars(
         self, sigma_threshold: float = DEFAULT_VARIABILITY_SIGMA_THRESHOLD

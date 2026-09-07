@@ -68,7 +68,7 @@ class AsteroidRecoveryPipelineAdapter(AnalysisPipeline):
 
         target = request.target
         pipeline = AsteroidRecoveryPipeline()
-        all_candidates = pipeline.process(target)
+        all_candidates = pipeline.process(target.id, target.stacked_image, target.frames)
         metrics = pipeline.last_run_metrics
         # Record only candidates that survived the discrimination
         # cascade (or were matched to a known body) -- `process()`

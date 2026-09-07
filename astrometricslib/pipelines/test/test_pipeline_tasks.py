@@ -1017,11 +1017,11 @@ def test_match_and_merge_across_sessions_merges_matching_stars(mocker):  # ruff:
     )
 
     mocker.patch(
-        "astrometricslib.pipelines.photometry.runner._solve_session_wcs",
+        "astrometricslib.pipelines.photometry.batch._solve_session_wcs",
         side_effect=[wcs_a, wcs_b],
     )
 
-    from astrometricslib.pipelines.photometry.runner import _match_and_merge_across_sessions
+    from astrometricslib.pipelines.photometry.batch import _match_and_merge_across_sessions
 
     target = Target(id="MatchTestTarget")
     per_session_results = [
@@ -1069,9 +1069,9 @@ def test_match_and_merge_across_sessions_reuses_pre_resolved_wcs_without_re_solv
         ra_offset=100.0 + 10 * 0.0001 - 30 * 0.0001, dec_offset=20.0 + 10 * 0.0001 - 30 * 0.0001
     )
 
-    solve_spy = mocker.patch("astrometricslib.pipelines.photometry.runner._solve_session_wcs")
+    solve_spy = mocker.patch("astrometricslib.pipelines.photometry.batch._solve_session_wcs")
 
-    from astrometricslib.pipelines.photometry.runner import _match_and_merge_across_sessions
+    from astrometricslib.pipelines.photometry.batch import _match_and_merge_across_sessions
 
     target = Target(id="MatchTestTarget")
     per_session_results = [
@@ -1099,10 +1099,10 @@ def test_match_and_merge_across_sessions_falls_back_to_solving_when_session_abse
     wcs_a = _FakeLinearWcs(ra_offset=100.0, dec_offset=20.0)
 
     solve_spy = mocker.patch(
-        "astrometricslib.pipelines.photometry.runner._solve_session_wcs", return_value=wcs_a
+        "astrometricslib.pipelines.photometry.batch._solve_session_wcs", return_value=wcs_a
     )
 
-    from astrometricslib.pipelines.photometry.runner import _match_and_merge_across_sessions
+    from astrometricslib.pipelines.photometry.batch import _match_and_merge_across_sessions
 
     target = Target(id="MatchTestTarget")
     per_session_results = [(SimpleNamespace(stellar_objects=[star_a1]), [])]
@@ -1135,11 +1135,11 @@ def test_match_and_merge_across_sessions_avoids_double_assignment_when_ambiguous
     wcs_b = _FakeLinearWcs(ra_offset=100.0, dec_offset=20.0, scale_deg_per_px=0.0000003)
 
     mocker.patch(
-        "astrometricslib.pipelines.photometry.runner._solve_session_wcs",
+        "astrometricslib.pipelines.photometry.batch._solve_session_wcs",
         side_effect=[wcs_a, wcs_b],
     )
 
-    from astrometricslib.pipelines.photometry.runner import _match_and_merge_across_sessions
+    from astrometricslib.pipelines.photometry.batch import _match_and_merge_across_sessions
 
     target = Target(id="MatchTestTarget")
     per_session_results = [
@@ -1174,7 +1174,7 @@ def test_solve_session_wcs_failure_does_not_abort_other_sessions(mocker):  # ruf
     session_a = _make_test_session(0)
     session_b = _make_test_session(1)
 
-    from astrometricslib.pipelines.photometry.runner import _solve_session_wcs
+    from astrometricslib.pipelines.photometry.batch import _solve_session_wcs
 
     target = Target(id="MatchTestTarget")
 
@@ -1206,7 +1206,7 @@ def test_rescale_and_merge_light_curve_removes_inter_session_step_change():  # r
     from datetime import datetime, timedelta
 
     from astrometricslib.models.stellar_source import LightCurve
-    from astrometricslib.pipelines.photometry.runner import _rescale_and_merge_light_curve
+    from astrometricslib.pipelines.photometry.batch import _rescale_and_merge_light_curve
 
     t0 = datetime(2026, 1, 1)
     canonical = LightCurve(

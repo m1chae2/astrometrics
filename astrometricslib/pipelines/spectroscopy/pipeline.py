@@ -649,17 +649,22 @@ class SpectroscopyPipeline:
 
         try:
             if fit_axis == "y":
-                # Vertical: slope is dx/dy
+                # Vertical: slope is dx/dy. get_dispersion_vector()'s
+                # 90-degree base angle for "vertical" means a positive
+                # measured dx/dy slope must map to a *negative* angle
+                # to reproduce that same slope -- unlike the horizontal
+                # case below, this negation is required, not a bug.
                 slope, _ = np.polyfit(y_indices, x_indices, 1)
                 angle = -np.degrees(np.arctan(slope))
-                print(f"Auto-detected angle for star at {star_pos}: {angle:.2f} degrees")
-                return angle
             else:
-                # Horizontal: slope is dy/dx
+                # Horizontal: slope is dy/dx, and get_dispersion_vector()'s
+                # 0-degree base angle for "horizontal" means the angle
+                # must equal +arctan(slope) (no negation) to reproduce
+                # this same measured slope when fed back through it.
                 slope, _ = np.polyfit(x_indices, y_indices, 1)
-                angle = -np.degrees(np.arctan(slope))
-                print(f"Auto-detected angle for star at {star_pos}: {angle:.2f} degrees")
-                return angle
+                angle = np.degrees(np.arctan(slope))
+            logger.debug(f"Auto-detected angle for star at {star_pos}: {angle:.2f} degrees")
+            return angle
         except Exception:
             return 0.0
 

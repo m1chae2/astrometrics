@@ -13,6 +13,17 @@ camera had any real rotation. These tests catch that class of regression
 directly: an angle that isn't self-consistent with
 `get_dispersion_vector()` is a real, silent extraction-corrupting bug, not
 just a cosmetic one.
+
+A second, independent consumer of the same `detect_dispersion_angle()`
+value -- `extract_with_flare_mask[_traced]`'s per-column tilt tracking,
+used for the ZWO ASI533MM Pro flare-masking extraction path -- expects
+the *opposite* sign convention from `get_dispersion_vector()` for
+horizontal dispersion (the two already agree for vertical). Fixing the
+`get_dispersion_vector()` side alone silently broke this second consumer,
+so `_extract_via_flare_mask` applies a compensating sign flip for
+horizontal orientation before calling into the extractor; the tests below
+verify the actual end-to-end extracted signal follows the real trace
+rather than checking an intermediate angle value in isolation.
 """
 
 import numpy as np
@@ -145,3 +156,89 @@ def test_vertical_detected_angle_round_trips_through_dispersion_vector(true_slop
     implied_slope = vec[0] / vec[1]
 
     assert implied_slope == pytest.approx(true_slope, abs=0.05)
+
+
+def _build_pipeline_asi533(orientation: str) -> SpectroscopyPipeline:
+    """Build an ASI533-named `SpectroscopyPipeline` (flare-mask path).
+
+    Returns
+    -------
+    pipeline : `SpectroscopyPipeline`
+        The constructed pipeline.
+    """
+    camera = CameraConfig(
+        name="ZWO ASI533MM Pro",
+        pixel_size_um=3.76,
+        sensor_width_px=900,
+        sensor_height_px=900,
+        sensor_min_wavelength=350.0,
+        sensor_max_wavelength=900.0,
+    )
+    config = SpectroscopyConfig(
+        camera=camera,
+        grating_distance_mm=16.5,
+        dispersion_orientation=orientation,
+        dispersion_direction="positive",
+        dispersion_start_px=200.0,
+        extraction_method="fixed",
+    )
+    return SpectroscopyPipeline(config=config)
+
+
+def _build_tilted_trace_from_anchor(  # ruff: ignore[missing-return-type-private-function]
+    orientation: str, star_pos: tuple[float, float], offset_px: float, length_px: float, true_slope: float
+):
+    """Build a synthetic image whose trace runs straight through the star.
+
+    This is the physically correct model for a real optical tilt, and
+    what `extract_with_flare_mask`'s per-column dynamic centering
+    assumes when following the trace outward from the anchor.
+
+    Returns
+    -------
+    data : `np.ndarray`
+        The synthetic image array.
+    """
+    rng = np.random.default_rng(3)
+    data = 10.0 + rng.normal(0, 0.5, size=(900, 900))
+    x_star, y_star = star_pos
+    data[int(y_star), int(x_star)] = 500.0
+
+    if orientation == "horizontal":
+        for x in range(int(x_star + offset_px), int(x_star + offset_px + length_px)):
+            y = round(y_star + true_slope * (x - x_star))
+            if 5 <= y < data.shape[0] - 6:
+                data[y - 5 : y + 6, x] = 150.0 + rng.normal(0, 3, size=11)
+    else:
+        for y in range(int(y_star + offset_px), int(y_star + offset_px + length_px)):
+            x = round(x_star + true_slope * (y - y_star))
+            if 5 <= x < data.shape[1] - 6:
+                data[y, x - 5 : x + 6] = 150.0 + rng.normal(0, 3, size=11)
+    return data
+
+
+@pytest.mark.parametrize("orientation", ["horizontal", "vertical"])
+@pytest.mark.parametrize("true_slope", [0.03, -0.03, 0.06, -0.06])
+def test_flare_mask_extraction_follows_a_real_tilted_trace(orientation: str, true_slope: float) -> None:
+    """The ASI533 flare-mask path must extract the real trace, not noise.
+
+    With auto-detection enabled, the extracted intensities for a
+    tilted trace must sit well above the background level -- if the
+    sign convention feeding `extract_with_flare_mask[_traced]` were
+    wrong, the per-column window would walk away from the real trace
+    and this would silently return near-background noise instead.
+    """
+    pipeline = _build_pipeline_asi533(orientation)
+    star_pos = (400.0, 400.0)
+    offset_px = 200.0
+    length_px = 250.0
+    data = _build_tilted_trace_from_anchor(orientation, star_pos, offset_px, length_px, true_slope)
+    image = MockAstrometricsImage(data)
+
+    result = pipeline._process_single_star(image, star_pos, auto_detect_angle=True)
+    intensities = np.array(result["intensities"])
+
+    # Background-only columns sum to ~10 * 11 == 110; a correctly
+    # followed trace (peak ~150 over an 11px window) should average
+    # well above that.
+    assert intensities.mean() > 300.0

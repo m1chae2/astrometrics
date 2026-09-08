@@ -441,6 +441,17 @@ class SpectroscopyPipeline:
         # Apply fine-tuning offsets from config
         base_pos = (pos[0] + self.config.dispersion_offset_x, pos[1] + self.config.dispersion_offset_y)
 
+        # extract_with_flare_mask[_traced]'s per-column tilt tracking
+        # (slope = -tan(angle_degrees)) is the negation of what
+        # get_dispersion_vector() -- and therefore detect_dispersion_angle
+        # -- uses for horizontal dispersion (they already agree for
+        # vertical), so horizontal needs a sign flip here to actually
+        # follow the star's real measured tilt instead of walking away
+        # from it.
+        flare_mask_angle = (
+            -detected_angle if self.config.dispersion_orientation == "horizontal" else detected_angle
+        )
+
         trail_centerline_px: list | None = None
         trail_width_px: list | None = None
         if is_traced:
@@ -452,7 +463,7 @@ class SpectroscopyPipeline:
                     max_offset_pixels,
                     self.config.extraction_radius,
                     self.config.dispersion_orientation,
-                    angle_degrees=detected_angle,
+                    angle_degrees=flare_mask_angle,
                     centerline_polynomial_degree=self.config.centerline_polynomial_degree,
                 )
             )
@@ -464,7 +475,7 @@ class SpectroscopyPipeline:
                 max_offset_pixels,
                 self.config.extraction_radius,
                 self.config.dispersion_orientation,
-                angle_degrees=detected_angle,
+                angle_degrees=flare_mask_angle,
             )
 
         # Calibrate wavelengths relative to the zero-order anchor

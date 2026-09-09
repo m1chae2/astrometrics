@@ -67,6 +67,12 @@ dispersion_direction = positive
 dispersion_start_px = 334.4
 grating_lines_per_mm = 200
 dispersion_offset_x = 0.0
+# use_flare_mask_extraction / max_extraction_length_px are optional and
+# only needed if your sensor's own flare/astigmatism overlaps the
+# spectrum, or the usable area along the dispersion axis is smaller
+# than the physics-derived length.
+use_flare_mask_extraction = true
+max_extraction_length_px = 750.0
 
 [Observatory.Camera.ZWO ASI120MC-S]
 name = ZWO ASI120MC-S

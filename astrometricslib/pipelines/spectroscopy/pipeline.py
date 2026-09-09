@@ -390,11 +390,11 @@ class SpectroscopyPipeline:
             # Temporarily update instrument config for this extraction
             self.instrument.config.dispersion_angle_degrees = detected_angle
 
-        # 2. Check if ZWO ASI533MM Pro camera is used
-        is_asi533 = self.config.camera.name == "ZWO ASI533MM Pro"
+        # 2. Check whether this setup wants flare-masked extraction
+        use_flare_mask = self.config.use_flare_mask_extraction
         is_traced = self.config.extraction_method == "traced"
 
-        if is_asi533:
+        if use_flare_mask:
             wavelengths, intensities, target_pos, trail_centerline_px, trail_width_px = (
                 self._extract_via_flare_mask(image, pos, detected_angle, is_traced)
             )
@@ -419,7 +419,7 @@ class SpectroscopyPipeline:
     def _extract_via_flare_mask(
         self, image: AstrometricsImage, pos: tuple[float, float], detected_angle: float, is_traced: bool
     ) -> tuple[np.ndarray, np.ndarray, tuple[float, float], list | None, list | None]:
-        """Extract a spectrum using the ZWO ASI533MM Pro flare-masking method.
+        """Extract a spectrum using the flare-masking method.
 
         Returns
         -------
@@ -432,11 +432,14 @@ class SpectroscopyPipeline:
             The traced extraction's per-column centerline and width, or
             both `None` when using the untraced extraction method.
         """
-        # For ZWO ASI533MM Pro with flare masking, we use the custom method
         flare_offset_pixels = (
             self.config.dispersion_start_px if self.config.dispersion_start_px is not None else 120.0
         )
-        max_offset_pixels = 750.0
+        # The instrument's expected_length_px already reflects any
+        # configured max_extraction_length_px cap, so re-deriving the
+        # absolute offset from it here keeps this in sync with that cap
+        # instead of hardcoding a second copy of it.
+        max_offset_pixels = flare_offset_pixels + self.instrument.expected_length_px
 
         # Apply fine-tuning offsets from config
         base_pos = (pos[0] + self.config.dispersion_offset_x, pos[1] + self.config.dispersion_offset_y)

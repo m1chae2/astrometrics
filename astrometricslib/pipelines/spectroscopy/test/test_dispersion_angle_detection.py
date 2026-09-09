@@ -181,6 +181,7 @@ def _build_pipeline_asi533(orientation: str) -> SpectroscopyPipeline:
         dispersion_direction="positive",
         dispersion_start_px=200.0,
         extraction_method="fixed",
+        use_flare_mask_extraction=True,
     )
     return SpectroscopyPipeline(config=config)
 

@@ -87,6 +87,8 @@ def test_pipeline_integration_asi533_vertical():  # ruff: ignore[missing-return-
         dispersion_direction="positive",
         dispersion_start_px=380.0,
         extraction_radius=10,
+        use_flare_mask_extraction=True,
+        max_extraction_length_px=750.0,
     )
 
     pipeline = SpectroscopyPipeline(config=config)
@@ -139,6 +141,8 @@ def test_pipeline_integration_asi533_horizontal():  # ruff: ignore[missing-retur
         dispersion_direction="positive",
         dispersion_start_px=380.0,
         extraction_radius=10,
+        use_flare_mask_extraction=True,
+        max_extraction_length_px=750.0,
     )
 
     pipeline = SpectroscopyPipeline(config=config)

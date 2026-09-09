@@ -98,9 +98,12 @@ class SpectroscopyInstrument:
             else:
                 self.zero_order_offset_px = 0.0
 
-        # Adjust for flare masking when ZWO ASI533MM Pro camera is used
-        if c.camera.name == "ZWO ASI533MM Pro":
-            self.expected_length_px = 750.0 - self.zero_order_offset_px
+        # Cap the extraction length when the usable sensor area along
+        # the dispersion axis is smaller than the physics-derived length
+        # (e.g. the setup vignettes, or the calibrated region stops
+        # short of the sensor edge).
+        if c.max_extraction_length_px is not None:
+            self.expected_length_px = c.max_extraction_length_px - self.zero_order_offset_px
 
     def get_dispersion_vector(self) -> np.ndarray:
         """Get an arrow pointing exactly along the rainbow.

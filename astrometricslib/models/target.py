@@ -166,11 +166,11 @@ class Target(BaseModel):
     ra: str = Field(default="0h 0m 0s", alias="ra")
     dec: str = Field(default="0° 0′ 0′′", alias="dec")
     field_of_view: str = Field(default="0′", alias="fieldOfView")
-    main_camera: str = Field(default="ZWO ASI 533MM Pro", alias="mainCamera")
+    main_camera: str = Field(default="", alias="mainCamera")
     guide_camera: str = Field(default="", alias="guideCamera")
-    main_scope: str = Field(default="Apertura 75Q", alias="mainScope")
+    main_scope: str = Field(default="", alias="mainScope")
     guide_scope: str = Field(default="", alias="guideScope")
-    mount: str = Field(default="SW Star Adventurer GTi", alias="mount")
+    mount: str = Field(default="", alias="mount")
     processed_image: str = Field(default="", alias="processedImage")
     # The main, finished picture for this target. If multiple telescopes
     # were used, this points to the picture from the 'primary' telescope.

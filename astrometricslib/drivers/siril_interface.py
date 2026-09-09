@@ -691,8 +691,9 @@ class ImageProcessing:
             dict keyed by telescope/camera/iso/exposure/filter.
         camera_filter : `str`, optional
             Camera name to restrict light frames to. If `None`
-            (default), it is inferred from the first frame, falling
-            back to ``"ZWO ASI 533MM Pro"``.
+            (default), it is inferred from the first frame; if it
+            still can't be determined, no camera filtering is applied
+            and every frame is treated as a match.
         job_logger : `logging.Logger`, optional
             Logger to record progress to. If `None` (default), the
             module logger is used.
@@ -704,13 +705,9 @@ class ImageProcessing:
         """
         log = job_logger.info if job_logger else logger.info
 
-        if not camera_filter:
-            if isinstance(image_files, list) and len(image_files) > 0:
-                f = image_files[0]
-                camera_filter = f.get("camera") if isinstance(f, dict) else getattr(f, "camera", None)
-
-            if not camera_filter:
-                camera_filter = "ZWO ASI 533MM Pro"
+        if not camera_filter and isinstance(image_files, list) and len(image_files) > 0:
+            f = image_files[0]
+            camera_filter = f.get("camera") if isinstance(f, dict) else getattr(f, "camera", None)
 
         target_folder = os.path.join(self.workdir, id)
         for folder in ["biases", "darks", "flats", "lights", "process"]:
@@ -755,7 +752,8 @@ class ImageProcessing:
             candidate_light_paths = [
                 frame.get("path") if isinstance(frame, dict) else getattr(frame, "path", "")
                 for frame in image_files
-                if (frame.get("camera") if isinstance(frame, dict) else getattr(frame, "camera", "Unknown"))
+                if camera_filter is None
+                or (frame.get("camera") if isinstance(frame, dict) else getattr(frame, "camera", "Unknown"))
                 == camera_filter
             ]
             readable_light_paths = find_readable_paths(candidate_light_paths)
@@ -790,7 +788,7 @@ class ImageProcessing:
                 path = frame.get("path") if isinstance(frame, dict) else getattr(frame, "path", "")
                 cam = frame.get("camera") if isinstance(frame, dict) else getattr(frame, "camera", "Unknown")
 
-                if cam != camera_filter:
+                if camera_filter is not None and cam != camera_filter:
                     continue
 
                 if path not in readable_light_paths:
@@ -814,11 +812,12 @@ class ImageProcessing:
             matching_frames = [
                 f
                 for f in image_files
-                if (f.get("camera") if isinstance(f, dict) else getattr(f, "camera", "")) == camera_filter
+                if camera_filter is None
+                or (f.get("camera") if isinstance(f, dict) else getattr(f, "camera", "")) == camera_filter
             ]
             if matching_frames:
                 f = matching_frames[0]
-                tel = f.get("telescope") if isinstance(f, dict) else getattr(f, "telescope", "Apertura 75Q")
+                tel = f.get("telescope") if isinstance(f, dict) else getattr(f, "telescope", "Unknown")
                 cam = f.get("camera") if isinstance(f, dict) else getattr(f, "camera", camera_filter)
                 iso = f.get("iso") if isinstance(f, dict) else getattr(f, "iso", "800")
                 exp = f.get("exposure") if isinstance(f, dict) else getattr(f, "exposure", "0")
@@ -941,7 +940,7 @@ class ImageProcessing:
                 if not isinstance(tel_val, dict):
                     continue
                 for camera, cam_val in tel_val.items():
-                    if camera != camera_filter:
+                    if camera_filter is not None and camera != camera_filter:
                         continue
                     for iso, iso_val in cam_val.items():
                         if not isinstance(iso_val, dict):
@@ -1460,13 +1459,9 @@ class ImageProcessing:
         except Exception:
             library_dest = None
 
-        if not camera_filter:
-            if isinstance(image_files, list) and len(image_files) > 0:
-                f = image_files[0]
-                camera_filter = f.get("camera") if isinstance(f, dict) else getattr(f, "camera", None)
-
-            if not camera_filter:
-                camera_filter = "ZWO ASI 533MM Pro"
+        if not camera_filter and isinstance(image_files, list) and len(image_files) > 0:
+            f = image_files[0]
+            camera_filter = f.get("camera") if isinstance(f, dict) else getattr(f, "camera", None)
 
         target_folder = None
         res = None

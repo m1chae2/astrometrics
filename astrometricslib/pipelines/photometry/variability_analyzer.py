@@ -1346,15 +1346,29 @@ class VariabilityAnalyzer:
         if len(fluxes) < 5:
             return None
 
-        frequency, power = LombScargle(t_days, fluxes).autopower()
+        periodogram = LombScargle(t_days, fluxes)
+        frequency, power = periodogram.autopower()
         best_idx = int(np.argmax(power))
         best_period = float(1.0 / frequency[best_idx]) if frequency[best_idx] > 0 else 0.0
         best_power = float(power[best_idx])
 
+        try:
+            false_alarm_probability = float(
+                periodogram.false_alarm_probability(
+                    min(best_power, 1.0),
+                    method="baluev",
+                    minimum_frequency=float(frequency.min()),
+                    maximum_frequency=float(frequency.max()),
+                )
+            )
+        except Exception as false_alarm_error:
+            logger.debug("Could not compute a false-alarm probability: %s", false_alarm_error)
+            false_alarm_probability = 1.0
+
         result = PeriodogramResult(
             best_period_days=best_period,
             power=best_power,
-            false_alarm_probability=0.01 if best_power > 0.5 else 0.5,
+            false_alarm_probability=false_alarm_probability,
         )
         star.light_curve.periodogram = result
         return result

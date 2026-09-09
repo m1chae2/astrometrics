@@ -8,10 +8,12 @@ heavy lifting.
 """
 
 import logging
-import math
 import time
 from collections.abc import Callable
 from typing import Any
+
+import astropy.units as u
+from astropy.coordinates import SkyCoord
 
 logger = logging.getLogger(__name__)
 
@@ -116,9 +118,9 @@ def _angular_separation_degrees(
 ) -> float:
     """Calculate the distance between two points in the sky.
 
-    Complex spherical math (haversine) must be used instead of simple
-    subtraction because the sky is a globe. For example, near
-    the North Star, the lines of longitude are very close together.
+    Proper spherical math is needed instead of simple subtraction
+    because the sky is a globe. For example, near the North Star, the
+    lines of longitude are very close together.
 
     Parameters
     ----------
@@ -132,20 +134,9 @@ def _angular_separation_degrees(
     separation_degrees : `float`
         The distance between them in degrees.
     """
-    first_right_ascension_radians = math.radians(first_right_ascension)
-    second_right_ascension_radians = math.radians(second_right_ascension)
-    first_declination_radians = math.radians(first_declination)
-    second_declination_radians = math.radians(second_declination)
-
-    declination_difference = second_declination_radians - first_declination_radians
-    right_ascension_difference = second_right_ascension_radians - first_right_ascension_radians
-    haversine = (
-        math.sin(declination_difference / 2) ** 2
-        + math.cos(first_declination_radians)
-        * math.cos(second_declination_radians)
-        * math.sin(right_ascension_difference / 2) ** 2
-    )
-    return math.degrees(2 * math.asin(min(1.0, math.sqrt(haversine))))
+    first = SkyCoord(ra=first_right_ascension * u.deg, dec=first_declination * u.deg)
+    second = SkyCoord(ra=second_right_ascension * u.deg, dec=second_declination * u.deg)
+    return float(first.separation(second).degree)
 
 
 def derive_field_centers(

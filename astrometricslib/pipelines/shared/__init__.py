@@ -11,4 +11,10 @@ target catalog's create/read/update/delete (`target_records.py`), and
 turning a FITS file into a PNG for display (`image_conversions.py`,
 `image_scaling.py`). None of this runs an actual pipeline (stacking,
 astrometry, photometry, spectroscopy, asteroid recovery).
+
+`quality/` holds image-quality measurement (FWHM inputs, saturation,
+background level, per-target frame statistics) for the same reason:
+stacking, spectroscopy, and the API layer all need it, and it doesn't
+own an external resource the way a driver does -- it's pure
+measurement on already-loaded pixel data.
 """

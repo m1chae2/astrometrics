@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from astrometricslib.drivers.quality_metrics import (
+from astrometricslib.pipelines.shared.quality.quality_metrics import (
     measure_rejected_fraction,
     measure_saturated_pixel_fraction,
 )

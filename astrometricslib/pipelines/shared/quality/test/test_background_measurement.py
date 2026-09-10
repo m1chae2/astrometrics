@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from astrometricslib.drivers.background_measurement import (
+from astrometricslib.pipelines.shared.quality.background_measurement import (
     measure_frame_background_level,
     measure_frame_saturated_pixel_fraction,
 )

@@ -8,14 +8,13 @@ which ones to throw away.
 
 import logging
 import os
-import re
 
 import numpy as np
 from astropy.io import fits
 from astropy.stats import sigma_clipped_stats
 
 from astrometricslib.drivers.fits_access import collapse_to_2d
-from astrometricslib.drivers.saturation import compute_saturated_pixel_fraction
+from astrometricslib.pipelines.shared.quality.saturation import compute_saturated_pixel_fraction
 
 logger = logging.getLogger(__name__)
 
@@ -28,86 +27,6 @@ DEFAULT_SATURATION_ADU_THRESHOLD = 65000.0
 # (e.g. ZWO ASI533MM Pro). Non-linear compression begins above ~60,000 ADU at
 # Gain 0 / Offset 10 before hard clipping (Antonov 2026).
 DEFAULT_PHOTOMETRIC_LINEARITY_ADU_THRESHOLD = 60000.0
-
-
-_REGISTRATION_LINE_PATTERN = re.compile(r"^R(\d+) ")
-
-
-def parse_seq_file(seq_path: str) -> list[dict[str, float]]:
-    """Read the registration results file from Siril.
-
-    Siril creates a `.seq` file when it aligns images. This function reads
-    that file to get the quality measurements (like how blurry the stars are)
-    for each image.
-
-    Parameters
-    ----------
-    seq_path : `str`
-        The file path to the Siril `.seq` file.
-
-    Returns
-    -------
-    frames : `list` of `dict`
-        A list containing the quality measurements for each image. Returns
-        an empty list if the file doesn't exist.
-    """
-    frames = []
-    if not os.path.exists(seq_path):
-        return frames
-    with open(seq_path) as seq_file:
-        for line in seq_file:
-            if not _REGISTRATION_LINE_PATTERN.match(line):
-                continue
-            parts = line.split()
-            frames.append({
-                "fwhm_x": float(parts[1]),
-                "fwhm_y": float(parts[2]),
-                "roundness": float(parts[3]),
-                "rmse": float(parts[5]),
-                "nb_stars": int(parts[6]),
-                "dx": float(parts[10]),
-                "dy": float(parts[13]),
-            })
-    return frames
-
-
-def parse_zero_order_star(lst_path: str) -> dict[str, float] | None:
-    """Find information about the brightest star from a Siril list file.
-
-    Siril writes a `.lst` file with information about all the stars it found.
-    This function reads the file and returns information about the first
-    (brightest) star, which is often used for spectroscopy alignment.
-
-    Parameters
-    ----------
-    lst_path : `str`
-        The file path to the Siril `.lst` file.
-
-    Returns
-    -------
-    result : `dict` or `None`
-        The star's properties, or None if the file doesn't exist or is empty.
-    """
-    if not os.path.exists(lst_path):
-        return None
-    with open(lst_path) as lst_file:
-        for line in lst_file:
-            if line.startswith("#") or not line.strip():
-                continue
-            fields = line.split("\t")
-            background = float(fields[2])
-            amplitude = float(fields[3])
-            return {
-                "background": background,
-                "amplitude": amplitude,
-                "peak_to_background_ratio": amplitude / background if background else None,
-                "x": float(fields[5]),
-                "y": float(fields[6]),
-                "fwhm_x_px": float(fields[7]),
-                "fwhm_y_px": float(fields[8]),
-                "rmse": float(fields[12]),
-            }
-    return None
 
 
 def measure_frame_input_quality(path: str, include_fwhm: bool = False) -> dict[str, float | None]:

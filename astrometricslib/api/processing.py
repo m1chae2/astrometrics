@@ -84,7 +84,7 @@ class QualityDiagnostics:
             Mean rejected-pixel fraction over the rejmap, or `None` if
             the sibling rejmap file does not exist.
         """
-        from astrometricslib.drivers.quality_metrics import measure_rejected_fraction
+        from astrometricslib.pipelines.shared.quality.quality_metrics import measure_rejected_fraction
 
         return measure_rejected_fraction(stacked_path)
 
@@ -101,7 +101,7 @@ class QualityDiagnostics:
         frames : `list` of `dict`
             One dict per registered frame, in original submission order.
         """
-        from astrometricslib.drivers.quality_metrics import parse_seq_file
+        from astrometricslib.drivers.siril_output_parsing import parse_seq_file
 
         return parse_seq_file(seq_path)
 
@@ -119,7 +119,7 @@ class QualityDiagnostics:
             Stats for the brightest star, or `None` if the file does
             not exist or has no data rows.
         """
-        from astrometricslib.drivers.quality_metrics import parse_zero_order_star
+        from astrometricslib.drivers.siril_output_parsing import parse_zero_order_star
 
         return parse_zero_order_star(lst_path)
 

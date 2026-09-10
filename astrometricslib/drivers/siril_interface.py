@@ -1871,7 +1871,7 @@ class ImageProcessing:
             if is_spectral and seq and res:
                 import glob as _glob
 
-                from astrometricslib.drivers.quality_metrics import parse_zero_order_star
+                from astrometricslib.drivers.siril_output_parsing import parse_zero_order_star
 
                 lst_paths = sorted(
                     _glob.glob(os.path.join(target_folder, "process", "cache", f"{seq}*.lst")),

@@ -19,13 +19,13 @@ from photutils.aperture import CircularAnnulus, CircularAperture
 from photutils.centroids import centroid_com
 
 from astrometricslib.drivers.fits_access import collapse_to_2d
-from astrometricslib.drivers.saturation import (
-    compute_saturated_pixel_fraction,
-    is_saturation_significant,
-)
 from astrometricslib.models.quality_summary import FrameEnsembleComposition
 from astrometricslib.models.stellar_source import LightCurve, StellarObject
 from astrometricslib.pipelines.astrometry.source_detection import SourceDetector
+from astrometricslib.pipelines.shared.quality.saturation import (
+    compute_saturated_pixel_fraction,
+    is_saturation_significant,
+)
 
 logger = logging.getLogger(__name__)
 

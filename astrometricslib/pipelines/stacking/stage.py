@@ -178,7 +178,7 @@ def stack_frames(
 
     background_split = None
     if get_configuration().get_background_homogeneity_check_enabled():
-        from astrometricslib.drivers.background_measurement import (
+        from astrometricslib.pipelines.shared.quality.background_measurement import (
             measure_frame_background_level,
             measure_frame_saturated_pixel_fraction,
         )
@@ -496,11 +496,11 @@ def _measure_stacked_pixel_fractions(summary, stacked_path: str) -> None:  # ruf
     Sets `summary.stacking_metrics`' pixel-fraction fields and their
     threshold flags in place.
     """
-    from astrometricslib.drivers.quality_metrics import (
+    from astrometricslib.pipelines.shared.quality.quality_metrics import (
         measure_rejected_fraction,
         measure_saturated_pixel_fraction,
     )
-    from astrometricslib.drivers.saturation import is_saturation_significant
+    from astrometricslib.pipelines.shared.quality.saturation import is_saturation_significant
     from astrometricslib.pipelines.stacking.stack_quality import is_rejected_fraction_significant
 
     rejected_fraction = measure_rejected_fraction(stacked_path)
@@ -538,7 +538,7 @@ def _update_frame_registration_results(
     identity (no shift of its own) -- and records it onto
     `summary.stacking_metrics`.
     """
-    from astrometricslib.drivers.quality_metrics import parse_seq_file
+    from astrometricslib.drivers.siril_output_parsing import parse_seq_file
 
     seq_path = f"{stacked_path.rsplit('.', 1)[0]}_Registration.seq"
     registration_frames = parse_seq_file(seq_path)
@@ -669,7 +669,7 @@ def _check_spectral_registration_quality(summary, stacked_path: str, diagnostics
 
     Sets `summary.stacking_metrics.spectral_registration_flags` in place.
     """
-    from astrometricslib.drivers.quality_metrics import parse_seq_file
+    from astrometricslib.drivers.siril_output_parsing import parse_seq_file
     from astrometricslib.models.quality_summary import ExcludedFrame
     from astrometricslib.pipelines.spectroscopy.registration_quality import (
         evaluate_spectral_registration_quality,

@@ -320,7 +320,7 @@ class TargetCatalog:
         counts : `dict` [`str`, `int`]
             ``measured``/``skipped``/``failed`` frame counts.
         """
-        from astrometricslib.drivers import frame_statistics
+        from astrometricslib.pipelines.shared.quality import frame_statistics
 
         counts = frame_statistics.measure_frame_input_quality(
             target,
@@ -346,7 +346,7 @@ class TargetCatalog:
             across the whole catalog used it, sorted by count
             descending.
         """
-        from astrometricslib.drivers import frame_statistics
+        from astrometricslib.pipelines.shared.quality import frame_statistics
 
         return frame_statistics.list_camera_names(self.list())
 
@@ -377,7 +377,7 @@ class TargetCatalog:
             Grouped filter/exposure/dark-match statistics if
             `grouped` is `True`; otherwise flat raw frame counts.
         """
-        from astrometricslib.drivers import frame_statistics
+        from astrometricslib.pipelines.shared.quality import frame_statistics
 
         if not grouped:
             return frame_statistics.get_frame_stats(target)

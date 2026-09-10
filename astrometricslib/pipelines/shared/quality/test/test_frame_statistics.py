@@ -10,9 +10,9 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from astrometricslib.drivers import frame_statistics
-from astrometricslib.drivers.quality_metrics import measure_frame_input_quality
 from astrometricslib.models.target import FrameRecord, Target
+from astrometricslib.pipelines.shared.quality import frame_statistics
+from astrometricslib.pipelines.shared.quality.quality_metrics import measure_frame_input_quality
 
 
 def _write_frame(path, background=500.0, saturated_pixels=0, shape=(64, 64)):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]

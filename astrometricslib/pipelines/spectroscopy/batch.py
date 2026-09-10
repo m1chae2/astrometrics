@@ -390,11 +390,11 @@ def _attach_spectroscopy_quality_summary(
     """
     import statistics
 
-    from astrometricslib.drivers.saturation import is_saturation_significant
     from astrometricslib.models.quality_summary import (
         SpectroscopyPipelineQualityMetrics,
         SpectroscopyQualitySummary,
     )
+    from astrometricslib.pipelines.shared.quality.saturation import is_saturation_significant
     from astrometricslib.pipelines.shared.target_sessions import build_target_session_breakdown
 
     all_dispersion_angles = []

@@ -1,12 +1,12 @@
 """Measure star sharpness (FWHM) by detecting stars and fitting their profile.
 
 Lives alongside `source_detection.py` rather than in
-`drivers/quality_metrics.py` because measuring FWHM this way means
-finding stars first -- the same `SourceDetector` step astrometry uses
-before catalog matching. Anything
-that just wants "how sharp is this image" (stacking's quality grading,
-the API layer) imports this directly, the same way they'd import any
-other astrometry tool.
+`pipelines/shared/quality/quality_metrics.py` because measuring FWHM
+this way means finding stars first -- the same `SourceDetector` step
+astrometry uses before catalog matching. Anything that just wants "how
+sharp is this image" (stacking's quality grading, the API layer)
+imports this directly, the same way they'd import any other astrometry
+tool.
 """
 
 import logging

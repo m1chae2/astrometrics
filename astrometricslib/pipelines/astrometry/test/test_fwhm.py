@@ -1,7 +1,7 @@
 """Purpose: Unit tests for FWHM (star sharpness) measurement.
 
 Description: Verifies measure_image_fwhm against synthetic Gaussian
-stars with a known FWHM. Moved here from image_processing/quality_metrics.py
+stars with a known FWHM. Moved here from drivers/quality_metrics.py
 along with the function itself, since measuring FWHM this way means
 detecting stars first (the same SourceDetector step astrometry uses).
 """

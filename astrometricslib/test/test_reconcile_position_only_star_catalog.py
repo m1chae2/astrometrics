@@ -6,7 +6,7 @@ find-clusters -> apply -> delete flow end to end against a throwaway
 isolated catalog database -- never the real one.
 """
 
-from astrometricslib.data_access.catalog_access import CatalogAccess, StarPosition
+from astrometricslib.drivers.catalog_access import CatalogAccess, StarPosition
 from astrometricslib.models.stellar_source import LightCurve, StellarObject
 from astrometricslib.scripts.reconcile_position_only_star_catalog import (
     _is_empty_value,

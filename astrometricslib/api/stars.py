@@ -9,7 +9,7 @@ in the database.
 import logging
 from typing import Any
 
-from astrometricslib.data_access.catalog_access import AbstractCatalogAccess
+from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.utilities.config_loader import AppConfiguration
 
@@ -64,7 +64,7 @@ class StellarCatalog:
             config = get_configuration()
         self._config = config
         if catalog_access is None:
-            from astrometricslib.data_access.catalog_access import CatalogAccess
+            from astrometricslib.drivers.catalog_access import CatalogAccess
 
             catalog_access = CatalogAccess(config)
         self.catalog_access = catalog_access

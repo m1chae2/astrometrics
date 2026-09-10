@@ -15,7 +15,7 @@ from astropy.stats import SigmaClip, sigma_clipped_stats
 from photutils.background import Background2D, MedianBackground
 from photutils.detection import DAOStarFinder
 
-from astrometricslib.image_processing.fits_access import collapse_to_2d
+from astrometricslib.drivers.fits_access import collapse_to_2d
 
 logger = logging.getLogger(__name__)
 

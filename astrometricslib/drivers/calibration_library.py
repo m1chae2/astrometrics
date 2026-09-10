@@ -257,7 +257,7 @@ class CalibrationLibrary(BaseModel):
         if not image_file.lower().endswith((".fits", ".fit")):
             return
 
-        from astrometricslib.image_processing.filter_detection import get_filter_type
+        from astrometricslib.drivers.filter_detection import get_filter_type
 
         try:
             with fits.open(image_file) as hdu_list:

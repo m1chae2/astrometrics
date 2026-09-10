@@ -10,7 +10,7 @@ import numpy as np
 from astropy.io import fits
 from astropy.time import Time
 
-from astrometricslib.image_processing.image import AstrometricsImage
+from astrometricslib.drivers.image import AstrometricsImage
 
 
 def _make_deprecated_header_fits(path):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]

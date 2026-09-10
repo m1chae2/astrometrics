@@ -9,9 +9,9 @@ from typing import Any
 
 import numpy as np
 
-from astrometricslib.image_processing.image import AstrometricsImage
-from astrometricslib.image_processing.quality_metrics import DEFAULT_SATURATION_ADU_THRESHOLD
-from astrometricslib.image_processing.saturation import compute_saturated_pixel_fraction
+from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib.drivers.quality_metrics import DEFAULT_SATURATION_ADU_THRESHOLD
+from astrometricslib.drivers.saturation import compute_saturated_pixel_fraction
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.shared.analysis_context import AnalysisContext
 from astrometricslib.pipelines.spectroscopy.quantum_efficiency_correction import (

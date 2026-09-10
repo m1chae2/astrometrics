@@ -1,8 +1,9 @@
 """Measure star sharpness (FWHM) by detecting stars and fitting their profile.
 
-Lives alongside `source_detection.py` rather than in `image_processing`
-because measuring FWHM this way means finding stars first -- the same
-`SourceDetector` step astrometry uses before catalog matching. Anything
+Lives alongside `source_detection.py` rather than in
+`drivers/quality_metrics.py` because measuring FWHM this way means
+finding stars first -- the same `SourceDetector` step astrometry uses
+before catalog matching. Anything
 that just wants "how sharp is this image" (stacking's quality grading,
 the API layer) imports this directly, the same way they'd import any
 other astrometry tool.
@@ -14,7 +15,7 @@ import numpy as np
 from astropy.io import fits
 from astropy.stats import sigma_clipped_stats
 
-from astrometricslib.image_processing.fits_access import collapse_to_2d
+from astrometricslib.drivers.fits_access import collapse_to_2d
 from astrometricslib.pipelines.astrometry.source_detection import SourceDetector
 
 logger = logging.getLogger(__name__)

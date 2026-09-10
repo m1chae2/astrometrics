@@ -26,9 +26,9 @@ from astropy.coordinates import SkyCoord
 from astropy.wcs import WCS, FITSFixedWarning
 
 from astrometricslib.drivers import simbad_interface
+from astrometricslib.drivers.fits_access import collapse_to_2d
+from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.drivers.plate_solve_interface import PlateSolver
-from astrometricslib.image_processing.fits_access import collapse_to_2d
-from astrometricslib.image_processing.image import AstrometricsImage
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.astrometry.fwhm import measure_fwhm_from_data
 from astrometricslib.pipelines.astrometry.source_detection import SourceDetector

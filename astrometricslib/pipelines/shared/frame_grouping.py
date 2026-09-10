@@ -160,7 +160,7 @@ def add_frame(  # ruff: ignore[missing-return-type-undocumented-public-function]
         If adding this frame would mix spectral ('SPEC') and standard
         imaging frames on the same target.
     """
-    from astrometricslib.catalog_services.frame_scanning import create_frame_record_from_fits
+    from astrometricslib.pipelines.shared.frame_scanning import create_frame_record_from_fits
 
     record = create_frame_record_from_fits(path, camera)
     record.role = role

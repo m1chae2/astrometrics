@@ -13,8 +13,8 @@ from typing import Any
 
 from PIL import Image
 
-from astrometricslib.catalog_services.utilities.image_scaling import ImageScaler
-from astrometricslib.image_processing.image import AstrometricsImage
+from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib.pipelines.shared.image_scaling import ImageScaler
 from astrometricslib.utilities.exceptions import AstroLibError
 
 logger = logging.getLogger(__name__)

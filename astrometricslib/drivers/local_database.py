@@ -168,7 +168,7 @@ _database_verified = False
 # protect against.
 STELLAR_OBJECT_DATA_VERSION = 2
 # v1 -> v2: backfill the has_spectra/has_photometry columns
-# (astrometricslib.data_access.catalog_access._stellar_extra_columns) for rows
+# (astrometricslib.drivers.catalog_access._stellar_extra_columns) for rows
 # written before those columns existed, from the same hydrated object
 # this pass already builds -- see the UPDATE below.
 
@@ -312,7 +312,7 @@ def verify_and_upgrade_database(app_config=None) -> None:  # ruff: ignore[missin
                     # hydrated object -- these mirror StellarObject's
                     # own computed properties of the same name, kept in
                     # sync going forward by
-                    # data_access.catalog_access._stellar_extra_columns
+                    # drivers.catalog_access._stellar_extra_columns
                     # on every write through CatalogAccess.
                     cursor.execute(
                         "UPDATE stellar_objects SET data_json = ?, has_spectra = ?, has_photometry = ? "

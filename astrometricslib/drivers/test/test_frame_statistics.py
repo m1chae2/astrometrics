@@ -10,8 +10,8 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from astrometricslib.data_access import frame_statistics
-from astrometricslib.image_processing.quality_metrics import measure_frame_input_quality
+from astrometricslib.drivers import frame_statistics
+from astrometricslib.drivers.quality_metrics import measure_frame_input_quality
 from astrometricslib.models.target import FrameRecord, Target
 
 

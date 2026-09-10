@@ -7,7 +7,7 @@ whether there are enough to bother warning the user.
 import numpy as np
 import pytest
 
-from astrometricslib.image_processing.saturation import (
+from astrometricslib.drivers.saturation import (
     compute_saturated_pixel_fraction,
     is_saturation_significant,
 )

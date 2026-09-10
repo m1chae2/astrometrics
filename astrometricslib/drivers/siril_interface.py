@@ -323,7 +323,7 @@ def _frames_use_color_filter_array(frames_directory: str) -> bool:
     uses_color_filter_array : `bool`
         `True` only if a frame declares a ``BAYERPAT``.
     """
-    from astrometricslib.image_processing.fits_access import frame_uses_color_filter_array
+    from astrometricslib.drivers.fits_access import frame_uses_color_filter_array
 
     try:
         frame_names = sorted(os.listdir(frames_directory))
@@ -760,7 +760,7 @@ class ImageProcessing:
 
             # Applied after the readability filter so a corrupt frame
             # cannot skew which geometry looks dominant.
-            from astrometricslib.image_processing.fits_access import select_dominant_frame_dimensions
+            from astrometricslib.drivers.fits_access import select_dominant_frame_dimensions
 
             readable_light_paths, dominant_dimensions = select_dominant_frame_dimensions(
                 sorted(readable_light_paths)
@@ -1871,7 +1871,7 @@ class ImageProcessing:
             if is_spectral and seq and res:
                 import glob as _glob
 
-                from astrometricslib.image_processing.quality_metrics import parse_zero_order_star
+                from astrometricslib.drivers.quality_metrics import parse_zero_order_star
 
                 lst_paths = sorted(
                     _glob.glob(os.path.join(target_folder, "process", "cache", f"{seq}*.lst")),

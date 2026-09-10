@@ -11,8 +11,8 @@ import re
 from datetime import datetime
 from typing import Any
 
-from astrometricslib.image_processing.filter_detection import get_filter_type
-from astrometricslib.image_processing.image import AstrometricsImage
+from astrometricslib.drivers.filter_detection import get_filter_type
+from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.utilities.enums import FilterType
 

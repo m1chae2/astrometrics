@@ -148,10 +148,10 @@ def reindex_frames(
     total exposure time. If `refresh_headers` is True, it will also
     re-read the FITS header data for files already known.
     """
-    from astrometricslib.catalog_services import frame_scanning
+    from astrometricslib.pipelines.shared import frame_scanning
 
     if catalog_access is None:
-        from astrometricslib.data_access.catalog_access import CatalogAccess
+        from astrometricslib.drivers.catalog_access import CatalogAccess
 
         catalog_access = CatalogAccess()
 

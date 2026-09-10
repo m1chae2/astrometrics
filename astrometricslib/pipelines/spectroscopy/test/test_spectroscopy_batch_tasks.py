@@ -16,7 +16,7 @@ from astropy.io import fits
 from astropy.modeling.models import Gaussian2D
 from astropy.wcs import WCS
 
-from astrometricslib.data_access.catalog_access import CatalogAccess
+from astrometricslib.drivers.catalog_access import CatalogAccess
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.spectroscopy import batch

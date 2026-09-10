@@ -110,7 +110,7 @@ def test_list_object_summaries_reports_the_expected_fields(tmp_path):  # ruff: i
 
     Exercises StellarCatalog.list_object_summaries end-to-end through a
     real CatalogAccess -- has_spectra/has_photometry are real columns
-    populated by data_access.catalog_access._stellar_extra_columns at write
+    populated by drivers.catalog_access._stellar_extra_columns at write
     time (via StellarObject's own computed properties), not derived
     from the JSON at read time the way the code this superseded did.
     """
@@ -254,7 +254,7 @@ def test_list_object_summaries_matches_the_model_computed_properties(tmp_path): 
     """Verify the recorded columns agree with StellarObject's own properties.
 
     has_spectra/has_photometry are computed once at write time (see
-    data_access.catalog_access._stellar_extra_columns) by calling
+    drivers.catalog_access._stellar_extra_columns) by calling
     StellarObject's own computed properties directly, so there is no
     separate logic to drift out of sync with the model -- this checks
     that wiring, not a reimplementation of the model's rules.

@@ -214,7 +214,7 @@ def _process_single_spectroscopy_frame_worker_v2(
     }
     try:
         from astrometricslib import Astrometrics
-        from astrometricslib.image_processing.image import AstrometricsImage
+        from astrometricslib.drivers.image import AstrometricsImage
         from astrometricslib.pipelines.dispatch import merge_spectroscopy_stellar_object
 
         astrometrics = Astrometrics()
@@ -335,7 +335,7 @@ def process_spectroscopy_frames_by_session(
         The results for each session, pairing the session data with its
         star identification data.
     """
-    from astrometricslib.image_processing.image import AstrometricsImage
+    from astrometricslib.drivers.image import AstrometricsImage
     from astrometricslib.pipelines.astrometry.session_identification import (
         identify_session_stars,
     )
@@ -390,7 +390,7 @@ def _attach_spectroscopy_quality_summary(
     """
     import statistics
 
-    from astrometricslib.image_processing.saturation import is_saturation_significant
+    from astrometricslib.drivers.saturation import is_saturation_significant
     from astrometricslib.models.quality_summary import (
         SpectroscopyPipelineQualityMetrics,
         SpectroscopyQualitySummary,

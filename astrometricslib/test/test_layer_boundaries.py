@@ -15,8 +15,8 @@ So this file is a ratchet, not a one-time check. It walks every module in
 compares what it finds against `KNOWN_FITS_ACCESS_SITES` below. A new
 call site that is not on the list fails the build -- either the new code
 belongs in one of the modules that already own this rule
-(`image_processing/fits_access.py` is the current canonical home;
-`image_processing/image.py` and `catalog_services/frame_scanning.py` also
+(`drivers/fits_access.py` is the current canonical home;
+`drivers/image.py` and `pipelines/shared/frame_scanning.py` also
 handle it, each for their own reasons -- see `fits_access.py`'s docstring),
 or, if it genuinely needs to be its own site, it needs to be added to the
 list *and* reviewed for the HDU0/HDU1 rule at the same time. A second check
@@ -40,21 +40,21 @@ _RAW_FITS_ACCESS_METHODS = frozenset({"open", "getheader", "getdata", "writeto",
 # it is only correct alongside a review of the new call site for the
 # HDU0/HDU1 rule.
 KNOWN_FITS_ACCESS_SITES = frozenset({
-    "catalog_services/frame_scanning.py",
-    "catalog_services/image_conversions.py",
-    "data_access/background_measurement.py",
+    "drivers/background_measurement.py",
     "drivers/calibration_library.py",
+    "drivers/fits_access.py",
+    "drivers/image.py",
     "drivers/plate_solve_interface.py",
+    "drivers/quality_metrics.py",
     "drivers/siril_interface.py",
-    "image_processing/fits_access.py",
-    "image_processing/image.py",
-    "image_processing/quality_metrics.py",
     "pipelines/astrometry/catalog_seeding.py",
     "pipelines/astrometry/fwhm.py",
     "pipelines/astrometry/runner.py",
     "pipelines/astrometry/session_identification.py",
     "pipelines/asteroid_recovery/pipeline.py",
     "pipelines/photometry/variability_analyzer.py",
+    "pipelines/shared/frame_scanning.py",
+    "pipelines/shared/image_conversions.py",
     "scripts/backfill_focal_length.py",
     "scripts/spectral_registration_quality_analysis.py",
     "visualization/helpers.py",
@@ -110,8 +110,8 @@ def _find_raw_fits_access_sites() -> set[str]:
 def test_no_new_files_call_fits_directly():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verify no file outside the known list reads or writes FITS data raw.
 
-    New code should call through `catalog_services/frame_scanning.py` or
-    `image_processing/image.py`, which already apply the HDU0/HDU1 rule, rather
+    New code should call through `pipelines/shared/frame_scanning.py` or
+    `drivers/image.py`, which already apply the HDU0/HDU1 rule, rather
     than opening a FITS file directly.
     """
     found = _find_raw_fits_access_sites()
@@ -120,7 +120,7 @@ def test_no_new_files_call_fits_directly():  # ruff: ignore[missing-return-type-
     assert not new_sites, (
         f"New raw fits.* call site(s) found outside KNOWN_FITS_ACCESS_SITES: "
         f"{sorted(new_sites)}. Route the new code through "
-        f"image_processing/fits_access.py instead, or if it genuinely needs its own "
+        f"drivers/fits_access.py instead, or if it genuinely needs its own "
         f"call site, review it for the HDU0/HDU1 rule and add it to "
         f"KNOWN_FITS_ACCESS_SITES in this file."
     )

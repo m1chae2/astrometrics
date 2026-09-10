@@ -15,7 +15,7 @@ from astropy.io import fits
 from astropy.modeling.models import Gaussian2D
 
 from astrometricslib import Astrometrics
-from astrometricslib.data_access.catalog_access import CatalogAccess, StarPosition
+from astrometricslib.drivers.catalog_access import CatalogAccess, StarPosition
 from astrometricslib.models.moving_object import CascadeStage
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import FrameRecord, Target
@@ -424,7 +424,7 @@ def test_target_analyze_frame_spectroscopy(tmp_path, mocker):  # ruff: ignore[mi
         hdu.writeto(fit_path, overwrite=True)
 
         # Mock Pipelines
-        from astrometricslib.image_processing.image import AstrometricsImage
+        from astrometricslib.drivers.image import AstrometricsImage
         from astrometricslib.pipelines.shared.analysis_context import AnalysisContext
 
         img = AstrometricsImage(str(fit_path))
@@ -448,7 +448,7 @@ def test_target_analyze_frame_spectroscopy(tmp_path, mocker):  # ruff: ignore[mi
         assert len(target.frames) == 1
 
         # Verify recording
-        from astrometricslib.data_access.catalog_access import CatalogAccess
+        from astrometricslib.drivers.catalog_access import CatalogAccess
 
         loaded = CatalogAccess(config).get("stellar_catalog", {})
         assert len(loaded) == 1
@@ -481,7 +481,7 @@ def test_analyze_frame_spectroscopy_does_not_disturb_other_stars_indexed_columns
     config.update_config({"Image Library": {"path": str(tmp_path)}})
 
     try:
-        from astrometricslib.data_access.catalog_access import CatalogAccess
+        from astrometricslib.drivers.catalog_access import CatalogAccess
 
         catalog_access = CatalogAccess(config)
         other_star = StellarObject(id="Unrelated_Star", name="Unrelated_Star")
@@ -500,7 +500,7 @@ def test_analyze_frame_spectroscopy_does_not_disturb_other_stars_indexed_columns
         hdu.header["EXPTIME"] = 5.0
         hdu.writeto(fit_path, overwrite=True)
 
-        from astrometricslib.image_processing.image import AstrometricsImage
+        from astrometricslib.drivers.image import AstrometricsImage
         from astrometricslib.pipelines.shared.analysis_context import AnalysisContext
 
         img = AstrometricsImage(str(fit_path))

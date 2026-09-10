@@ -10,8 +10,8 @@ import numpy as np
 from astropy.io import fits
 from astropy.stats import sigma_clipped_stats
 
-from astrometricslib.image_processing.fits_access import collapse_to_2d
-from astrometricslib.image_processing.saturation import compute_saturated_pixel_fraction
+from astrometricslib.drivers.fits_access import collapse_to_2d
+from astrometricslib.drivers.saturation import compute_saturated_pixel_fraction
 
 # Just under the raw 16-bit unsigned max -- same convention as
 # quality_metrics.DEFAULT_SATURATION_ADU_THRESHOLD and

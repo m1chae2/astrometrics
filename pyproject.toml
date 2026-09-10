@@ -187,10 +187,8 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "datastore"]
 "astrometricslib.api".msg = "Internal. Import from the top-level `astrometricslib` namespace instead."
 "astrometricslib.models".msg = "Internal. Import from the top-level `astrometricslib` namespace instead."
 "astrometricslib.utilities".msg = "Internal. Import from the top-level `astrometricslib` namespace instead."
-"astrometricslib.image_processing".msg = "Internal. Use the facade on `Astrometrics` instead."
 "astrometricslib.pipelines".msg = "Internal. Use the facade on `Astrometrics` instead."
 "astrometricslib.drivers".msg = "Internal. Use the facade on `Astrometrics` instead."
-"astrometricslib.data_access".msg = "Internal. Use the facade on `Astrometrics` instead."
 
 [tool.ruff.lint.per-file-ignores]
 "**/test_*.py" = ["assert", "hardcoded-temp-file"] # S101/S108: assert is the pytest idiom; /tmp/... strings here are mock config defaults, never actually written to
@@ -210,7 +208,7 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "datastore"]
 "backend/services/infrastructure/remote_service.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "backend/services/infrastructure/system_status_service.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"]
 "wayfindinglib/drivers/stellarmate_interface.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
-"astrometricslib/data_access/test/test_target_records.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
+"astrometricslib/drivers/test/test_target_records.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "astrometricslib/test/test_scripts.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 # These stand in for a Siril process without needing Siril installed, using
 # `true`/`sleep` off PATH like any other list-form subprocess call in this

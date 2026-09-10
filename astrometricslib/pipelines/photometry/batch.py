@@ -51,7 +51,7 @@ def _run_variability_analysis_for_session(
     seed_stars = None
     identify_result = None
     if use_astrometry_seed and star_identifier is not None and target is not None:
-        from astrometricslib.image_processing.image import AstrometricsImage
+        from astrometricslib.drivers.image import AstrometricsImage
         from astrometricslib.pipelines.astrometry.session_identification import (
             identify_session_stars,
         )
@@ -91,7 +91,7 @@ def _solve_session_wcs(session: Any, target: Target) -> Any | None:
         The map from pixel to sky position, or None if the solve
         failed.
     """
-    from astrometricslib.image_processing.image import AstrometricsImage
+    from astrometricslib.drivers.image import AstrometricsImage
     from astrometricslib.pipelines.astrometry.session_identification import resolve_frame_wcs
     from astrometricslib.pipelines.astrometry.star_identifier import StarIdentifier
 

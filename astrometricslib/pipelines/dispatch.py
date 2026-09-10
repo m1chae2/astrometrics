@@ -122,7 +122,7 @@ def analyze_target(
         the right images needed to run it.
     """
     if catalog_access is None:
-        from astrometricslib.data_access.catalog_access import CatalogAccess
+        from astrometricslib.drivers.catalog_access import CatalogAccess
 
         catalog_access = CatalogAccess()
 
@@ -211,7 +211,7 @@ def get_header_information(target: Target, frame_path: str) -> list[dict[str, st
     if not is_valid:
         raise ValueError(f"Path {frame_path} does not belong to target {target.id}")
 
-    from astrometricslib.catalog_services import image_conversions
+    from astrometricslib.pipelines.shared import image_conversions
 
     return image_conversions.get_fits_header(frame_path)
 

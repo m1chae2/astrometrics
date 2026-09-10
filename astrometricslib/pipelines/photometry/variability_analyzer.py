@@ -18,8 +18,8 @@ from astropy.stats import mad_std, sigma_clip
 from photutils.aperture import CircularAnnulus, CircularAperture
 from photutils.centroids import centroid_com
 
-from astrometricslib.image_processing.fits_access import collapse_to_2d
-from astrometricslib.image_processing.saturation import (
+from astrometricslib.drivers.fits_access import collapse_to_2d
+from astrometricslib.drivers.saturation import (
     compute_saturated_pixel_fraction,
     is_saturation_significant,
 )

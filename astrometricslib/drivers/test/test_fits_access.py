@@ -10,7 +10,7 @@ header/data correctly rather than HDU0's near-empty one.
 import numpy as np
 from astropy.io import fits
 
-from astrometricslib.image_processing import fits_access
+from astrometricslib.drivers import fits_access
 
 
 def _write_two_hdu_frame(path, width, height, bayer_pattern=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]

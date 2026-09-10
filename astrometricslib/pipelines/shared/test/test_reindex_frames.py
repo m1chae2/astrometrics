@@ -9,9 +9,9 @@ reindex_frames directly.
 from unittest.mock import MagicMock
 
 from astrometricslib import Target
-from astrometricslib.catalog_services.target_records import reindex_frames
-from astrometricslib.data_access.catalog_access import CatalogAccess
+from astrometricslib.drivers.catalog_access import CatalogAccess
 from astrometricslib.models.target import FrameRecord
+from astrometricslib.pipelines.shared.target_records import reindex_frames
 
 
 def test_reindex_frames_skips_already_tracked_frames(tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
@@ -30,7 +30,7 @@ def test_reindex_frames_skips_already_tracked_frames(tmp_path, mocker):  # ruff:
     target = Target(id="TestTarget", frames=[FrameRecord(path=str(known_file))])
 
     mock_create_record = mocker.patch(
-        "astrometricslib.catalog_services.frame_scanning.create_frame_record_from_fits",
+        "astrometricslib.pipelines.shared.frame_scanning.create_frame_record_from_fits",
         side_effect=lambda path, camera=None: FrameRecord(path=path),
     )
 

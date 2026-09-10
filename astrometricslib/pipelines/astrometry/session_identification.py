@@ -14,7 +14,7 @@ from typing import Any
 from astropy.io import fits
 from astropy.wcs import WCS, FITSFixedWarning
 
-from astrometricslib.image_processing.image import AstrometricsImage
+from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.astrometry.star_identifier import StarIdentifier
 
@@ -295,7 +295,7 @@ def _detect_and_limit_session_sources(
     data = reference_image.data
     is_color_frame = data is not None and data.ndim == 3
     if is_color_frame:
-        from astrometricslib.image_processing.fits_access import collapse_to_2d
+        from astrometricslib.drivers.fits_access import collapse_to_2d
 
         data = collapse_to_2d(data)
 

@@ -25,7 +25,7 @@ def analyze_frame_spectroscopy(target: Target, path: str, limit: int = 10) -> tu
     if not any(f.path == path for f in target.frames):
         add_frame(target, path)
 
-    from astrometricslib.data_access.catalog_access import CatalogAccess
+    from astrometricslib.drivers.catalog_access import CatalogAccess
     from astrometricslib.pipelines.astrometry.pipeline import AstrometryPipeline
     from astrometricslib.pipelines.spectroscopy.pipeline import (
         SpectroscopyPipeline,

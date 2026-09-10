@@ -413,7 +413,7 @@ class CatalogAccess(AbstractCatalogAccess):
 
         elif dataset_type == "raw_frame" or dataset_type == "stacked_image":
             path = self.get_local_path(dataset_type, selector)
-            from astrometricslib.image_processing.image import AstrometricsImage
+            from astrometricslib.drivers.image import AstrometricsImage
 
             return AstrometricsImage(path)
         else:

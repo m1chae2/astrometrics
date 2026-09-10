@@ -14,7 +14,7 @@ import numpy as np
 from scipy.optimize import minimize
 from scipy.signal import find_peaks
 
-from astrometricslib.image_processing.image import AstrometricsImage
+from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.pipelines.spectroscopy.optics_physics import (
     calculate_pixel_offset,
     calculate_wavelength,

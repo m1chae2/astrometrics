@@ -145,8 +145,8 @@ class Astrometrics:
         from astrometricslib.api.stars import StellarCatalog
         from astrometricslib.api.targets import TargetCatalog
         from astrometricslib.api.visualization import Visualization
-        from astrometricslib.data_access.catalog_access import CatalogAccess
         from astrometricslib.drivers import local_database
+        from astrometricslib.drivers.catalog_access import CatalogAccess
         from astrometricslib.utilities.config_loader import get_configuration
 
         self.config = config or app_config or get_configuration()

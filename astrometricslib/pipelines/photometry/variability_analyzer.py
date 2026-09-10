@@ -23,9 +23,9 @@ from astrometricslib.image_processing.saturation import (
     compute_saturated_pixel_fraction,
     is_saturation_significant,
 )
-from astrometricslib.image_processing.source_detection import SourceDetector
 from astrometricslib.models.quality_summary import FrameEnsembleComposition
 from astrometricslib.models.stellar_source import LightCurve, StellarObject
+from astrometricslib.pipelines.astrometry.source_detection import SourceDetector
 
 logger = logging.getLogger(__name__)
 

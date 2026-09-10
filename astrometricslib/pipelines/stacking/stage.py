@@ -622,7 +622,7 @@ def _measure_fwhm_degradation(summary, stacked_path: str, target_frames: list[An
     Sets `summary.stacking_metrics`' FWHM fields and the degradation
     flag in place.
     """
-    from astrometricslib.image_processing.quality_metrics import measure_image_fwhm
+    from astrometricslib.pipelines.astrometry.fwhm import measure_image_fwhm
     from astrometricslib.pipelines.stacking.stack_quality import is_stacked_fwhm_degraded
 
     # Capped at 15 frames (matching FWHM_MEASUREMENT_STAR_COUNT's

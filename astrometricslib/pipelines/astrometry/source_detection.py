@@ -1,7 +1,10 @@
 """SourceDetector: The shared tool used to find stars in photos.
 
-This is used for basic target alignment, looking for asteroids, and
-finding the central star in spectroscopy.
+Finding the bright dots in a picture is the first step astrometry needs
+before it can match them to a star catalog, so that's where this lives.
+Photometry, asteroid recovery, and spectroscopy also need to find stars
+in a picture -- for their own reasons, with no catalog matching involved
+-- so they import this directly too.
 """
 
 import logging

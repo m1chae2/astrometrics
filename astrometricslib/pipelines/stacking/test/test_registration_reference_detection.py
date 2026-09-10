@@ -82,7 +82,7 @@ def _build_summary(  # ruff: ignore[missing-return-type-private-function]
             return_value=None,
         ),
         patch(
-            "astrometricslib.image_processing.quality_metrics.measure_image_fwhm",
+            "astrometricslib.pipelines.astrometry.fwhm.measure_image_fwhm",
             return_value=None,
         ),
     ):

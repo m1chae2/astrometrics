@@ -361,6 +361,6 @@ class StellarCatalog:
         sources : `list` [`dict`]
             Detected point sources, sorted by flux.
         """
-        from astrometricslib.image_processing.source_detection import SourceDetector
+        from astrometricslib.pipelines.astrometry.source_detection import SourceDetector
 
         return SourceDetector(threshold_sigma=threshold_sigma, fwhm=fwhm).detect(image_data)

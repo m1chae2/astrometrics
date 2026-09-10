@@ -65,7 +65,7 @@ class QualityDiagnostics:
             Median FWHM in pixels across the measured stars, or `None`
             if it could not be measured.
         """
-        from astrometricslib.image_processing.quality_metrics import measure_image_fwhm
+        from astrometricslib.pipelines.astrometry.fwhm import measure_image_fwhm
 
         return measure_image_fwhm(path)
 

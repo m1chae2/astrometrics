@@ -29,9 +29,9 @@ from astrometricslib.drivers import simbad_interface
 from astrometricslib.drivers.plate_solve_interface import PlateSolver
 from astrometricslib.image_processing.fits_access import collapse_to_2d
 from astrometricslib.image_processing.image import AstrometricsImage
-from astrometricslib.image_processing.quality_metrics import measure_fwhm_from_data
-from astrometricslib.image_processing.source_detection import SourceDetector
 from astrometricslib.models.stellar_source import StellarObject
+from astrometricslib.pipelines.astrometry.fwhm import measure_fwhm_from_data
+from astrometricslib.pipelines.astrometry.source_detection import SourceDetector
 from astrometricslib.utilities.config_loader import AppConfiguration
 from astrometricslib.utilities.exceptions import AstroLibError
 

@@ -18,7 +18,6 @@ from astropy.io import fits
 from astropy.wcs import WCS, FITSFixedWarning
 from astropy.wcs.utils import proj_plane_pixel_scales
 
-from astrometricslib.image_processing.source_detection import SourceDetector
 from astrometricslib.models.moving_object import AsteroidRecoveryCandidate, CascadeStage, FrameDetection
 from astrometricslib.models.moving_object_config import (
     MovingObjectConfig,
@@ -29,6 +28,7 @@ from astrometricslib.pipelines.asteroid_recovery.ephemeris import EphemerisCross
 from astrometricslib.pipelines.asteroid_recovery.frame_wcs_composer import (
     estimate_frame_wcs_from_mount_pointing,
 )
+from astrometricslib.pipelines.astrometry.source_detection import SourceDetector
 
 logger = logging.getLogger(__name__)
 

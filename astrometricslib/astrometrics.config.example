@@ -25,8 +25,9 @@ hζ = 3889
 hη = 3835
 
 [Observatory.Filters]
-owned = L, SPEC
-analyzable = L, SPEC
+# Filters this observatory's filter wheel is actually loaded with, as
+# FilterType member names (see astrometricslib/utilities/enums.py).
+available = NONE, L, SPEC
 
 [Observatory.Telescope]
 hostname = localhost

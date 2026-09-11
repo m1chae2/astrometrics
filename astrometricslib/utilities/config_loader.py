@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from .enums import FilterType
+
 _instance = None
 
 
@@ -407,6 +409,24 @@ class AppConfiguration:
         """
         models_str = self._get_with_fallback("Observatory.Camera", "Camera", "models")
         return [m.strip() for m in models_str.split(",")] if models_str else []
+
+    def get_available_filters(self) -> list[FilterType]:
+        """Return the optical filters installed at this observatory.
+
+        This is the static inventory of filters the filter wheel is
+        loaded with -- not its live position, which is queried directly
+        from the INDI device (see wayfindinglib's ``FilterWheelController``).
+
+        Returns
+        -------
+        filters : `list` [`FilterType`]
+            Configured filters, in the order listed under
+            ``[Observatory.Filters] available``.
+        """
+        filters_str = self.app_config.get("Observatory.Filters", "available", fallback="")
+        if not filters_str:
+            return []
+        return [FilterType[name.strip().upper()] for name in filters_str.split(",") if name.strip()]
 
     def get_all_config(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Return the entire configuration as a dictionary of sections.

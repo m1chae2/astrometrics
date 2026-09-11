@@ -60,6 +60,13 @@ name = ZWO ASI533MM Pro
 pixel_size_μm = 3.76
 sensor_width_px = 3008
 sensor_height_px = 3008
+# CALCULATED: grating_distance_mm, dispersion_start_px,
+# use_flare_mask_extraction, and max_extraction_length_px below are fitted
+# from a calibration frame by SpectroscopyCalibrationTuner.tune_calibration()
+# (astrometricslib/pipelines/spectroscopy/calibration_tuner.py) and
+# overwritten on every re-run -- don't hand-edit them, re-run calibration
+# instead. The values below are this camera's own last calibration result,
+# kept as a working starting point.
 grating_distance_mm = 16.49
 sensor_min_wavelength = 300
 sensor_max_wavelength = 1000
@@ -68,11 +75,12 @@ dispersion_direction = positive
 dispersion_start_px = 334.4
 grating_lines_per_mm = 200
 dispersion_offset_x = 0.0
-# use_flare_mask_extraction / max_extraction_length_px are optional and
-# only needed if your sensor's own flare/astigmatism overlaps the
-# spectrum, or the usable area along the dispersion axis is smaller
-# than the physics-derived length.
+# CALCULATED: true if the calibration frame showed the star's own
+# flare/astigmatism still saturating the pixels where extraction begins.
 use_flare_mask_extraction = true
+# CALCULATED: only present when the calibration frame showed the
+# physics-derived extraction length running past the usable sensor area;
+# absent means uncapped.
 max_extraction_length_px = 750.0
 
 [Observatory.Camera.ZWO ASI120MC-S]

@@ -52,7 +52,10 @@ class SpectroscopyConfig(BaseModel):
     grating_lines_per_mm : `float`
         Lines per mm of the grating filter, by default 100.0.
     grating_distance_mm : `float`
-        Current physical distance between grating and sensor.
+        Current physical distance between grating and sensor. Normally
+        fitted from a calibration frame by
+        ``SpectroscopyCalibrationTuner.tune_calibration()`` rather than
+        hand-set.
     dispersion_orientation : {"horizontal", "vertical"}
         Orientation of the dispersion axis, by default
         ``"horizontal"``.
@@ -60,7 +63,10 @@ class SpectroscopyConfig(BaseModel):
         Direction of increasing wavelength along the dispersion axis,
         by default ``"negative"``.
     dispersion_start_px : `float` or `None`
-        Manual zero-order offset override, by default `None`.
+        Manual zero-order offset override, by default `None`. Normally
+        fitted from a calibration frame by
+        ``SpectroscopyCalibrationTuner.tune_calibration()`` rather than
+        hand-set.
     dispersion_offset_x : `float`
         Fine-tuning horizontal offset of the dispersion box, by
         default 0.0.
@@ -89,16 +95,20 @@ class SpectroscopyConfig(BaseModel):
         star's own position, to avoid a bright flare/astigmatism
         overlapping the spectrum near zero order, by default `False`
         (extract along the instrument's default dispersion line
-        instead). Only worth enabling for a sensor/setup where that
-        flare actually reaches into the spectrum.
+        instead). Calculated from a calibration frame by
+        ``SpectroscopyCalibrationTuner.tune_calibration()``, which
+        checks whether the star's own light still saturates the pixels
+        where extraction would begin, rather than hand-set.
     max_extraction_length_px : `float` or `None`
         A hard cap, in pixels, on how far along the dispersion axis
         from the zero-order anchor extraction may reach, by default
-        `None` (uncapped, using the physics-derived length). Set this
-        when the usable sensor area along the dispersion axis is
-        smaller than the theoretical dispersion length -- for example
-        because the setup vignettes, or the calibrated/usable region
-        stops short of the sensor edge.
+        `None` (uncapped, using the physics-derived length). Calculated
+        from a calibration frame by
+        ``SpectroscopyCalibrationTuner.tune_calibration()``, which
+        checks whether the physics-derived extraction length would run
+        past the usable sensor area -- for example because the setup
+        vignettes, or the calibrated/usable region stops short of the
+        sensor edge -- rather than hand-set.
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -130,10 +140,18 @@ class SpectroscopyConfig(BaseModel):
         2, description="Polynomial degree for the traced-extraction trail centerline fit"
     )
     use_flare_mask_extraction: bool = Field(
-        False, description="Extract from an anchor offset past the star to avoid its own flare/astigmatism"
+        False,
+        description=(
+            "Extract from an anchor offset past the star to avoid its own flare/astigmatism "
+            "(calculated by SpectroscopyCalibrationTuner.tune_calibration())"
+        ),
     )
     max_extraction_length_px: float | None = Field(
-        None, description="Hard cap on extraction length along the dispersion axis, in pixels"
+        None,
+        description=(
+            "Hard cap on extraction length along the dispersion axis, in pixels "
+            "(calculated by SpectroscopyCalibrationTuner.tune_calibration())"
+        ),
     )
 
     def with_overrides(self, **kwargs) -> SpectroscopyConfig:  # ruff: ignore[missing-type-kwargs]

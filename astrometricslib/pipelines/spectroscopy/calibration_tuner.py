@@ -15,6 +15,8 @@ from scipy.optimize import minimize
 from scipy.signal import find_peaks
 
 from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib.pipelines.shared.quality.quality_metrics import DEFAULT_SATURATION_ADU_THRESHOLD
+from astrometricslib.pipelines.shared.quality.saturation import compute_saturated_pixel_fraction
 from astrometricslib.pipelines.spectroscopy.optics_physics import (
     calculate_pixel_offset,
     calculate_wavelength,
@@ -23,8 +25,14 @@ from astrometricslib.pipelines.spectroscopy.pipeline import (
     SpectroscopyPipeline,
     _read_xy_source_position,
 )
+from astrometricslib.pipelines.spectroscopy.spectroscopy_instrument import SpectroscopyInstrument
 
 logger = logging.getLogger(__name__)
+
+# If more than this fraction of the pixels at the theoretical dispersion
+# start are still saturated, the star's own flare/astigmatism is judged to
+# be bleeding into the spectrum, and flare-masked extraction is turned on.
+_FLARE_CONTAMINATION_FRACTION_THRESHOLD = 0.1
 
 
 class SpectroscopyCalibrationTuner:
@@ -118,8 +126,16 @@ class SpectroscopyCalibrationTuner:
             pixel_size_um=spec_pipeline.config.camera.pixel_size_um,
         )
 
+        use_flare_mask_extraction, max_extraction_length_px = self._detect_extraction_geometry_quirks(
+            image, spec_pipeline, star_pos, best_grating_distance_mm, best_x0
+        )
+
         tuned_grating_distance_mm, tuned_x0 = self._save_tuned_calibration(
-            camera_name, best_grating_distance_mm, best_x0
+            camera_name,
+            best_grating_distance_mm,
+            best_x0,
+            use_flare_mask_extraction,
+            max_extraction_length_px,
         )
 
         return self._build_calibration_summary(
@@ -132,7 +148,125 @@ class SpectroscopyCalibrationTuner:
             best_combo,
             target_wls,
             spec_pipeline,
+            use_flare_mask_extraction,
+            max_extraction_length_px,
         )
+
+    @staticmethod
+    def _detect_extraction_geometry_quirks(
+        image: AstrometricsImage,
+        spec_pipeline: SpectroscopyPipeline,
+        star_pos: tuple[float, float],
+        tuned_grating_distance_mm: float,
+        tuned_dispersion_start_px: float,
+    ) -> tuple[bool, float | None]:
+        """Derive flare-masking and extraction-length-cap needs from the frame.
+
+        Rebuilds the instrument model with the just-fitted grating
+        distance and dispersion start, then checks two things against
+        the actual calibration image: whether the star's own light
+        still saturates the pixels where extraction would begin (flare
+        contamination), and whether the physics-derived extraction
+        length would run past the image edge (needing a hard cap).
+
+        Returns
+        -------
+        use_flare_mask_extraction : `bool`
+            Whether the star's flare/astigmatism saturates the pixels
+            at the theoretical dispersion start.
+        max_extraction_length_px : `float` or `None`
+            The absolute pixel offset (from the star) at which
+            extraction must stop to stay within the image, or `None`
+            if the full physics-derived length already fits.
+        """
+        tuned_config = spec_pipeline.config.with_overrides(
+            grating_distance_mm=tuned_grating_distance_mm, dispersion_start_px=tuned_dispersion_start_px
+        )
+        tuned_instrument = SpectroscopyInstrument(tuned_config)
+
+        vector = tuned_instrument.get_dispersion_vector()
+        offset_px = tuned_instrument.zero_order_offset_px
+        length_px = tuned_instrument.expected_length_px
+        base_pos = (
+            star_pos[0] + tuned_config.dispersion_offset_x,
+            star_pos[1] + tuned_config.dispersion_offset_y,
+        )
+        extraction_start = (base_pos[0] + offset_px * vector[0], base_pos[1] + offset_px * vector[1])
+
+        use_flare_mask_extraction = SpectroscopyCalibrationTuner._detect_flare_contamination(
+            image, extraction_start, int(tuned_config.extraction_radius)
+        )
+        max_extraction_length_px = SpectroscopyCalibrationTuner._detect_max_extraction_length_px(
+            base_pos, vector, offset_px, length_px, image.data.shape
+        )
+
+        return use_flare_mask_extraction, max_extraction_length_px
+
+    @staticmethod
+    def _detect_flare_contamination(
+        image: AstrometricsImage, extraction_start: tuple[float, float], extraction_radius: int
+    ) -> bool:
+        """Check for star-flare saturation at the theoretical dispersion start.
+
+        Returns
+        -------
+        contaminated : `bool`
+            True if enough pixels at the extraction start are still
+            saturated by the star's own light to warrant flare-masked
+            extraction.
+        """
+        data = image.data
+        height, width = data.shape
+        x_center, y_center = round(extraction_start[0]), round(extraction_start[1])
+        y_start, y_end = max(0, y_center - extraction_radius), min(height, y_center + extraction_radius + 1)
+        x_start, x_end = max(0, x_center - extraction_radius), min(width, x_center + extraction_radius + 1)
+        cutout = np.asarray(data[y_start:y_end, x_start:x_end], dtype=float)
+        if cutout.size == 0:
+            return False
+        fraction = compute_saturated_pixel_fraction(cutout, DEFAULT_SATURATION_ADU_THRESHOLD)
+        return fraction > _FLARE_CONTAMINATION_FRACTION_THRESHOLD
+
+    @staticmethod
+    def _detect_max_extraction_length_px(
+        base_pos: tuple[float, float],
+        vector: np.ndarray,
+        offset_px: float,
+        length_px: float,
+        image_shape: tuple[int, int],
+    ) -> float | None:
+        """Cap the dispersion-axis extraction offset at the image edge.
+
+        Returns
+        -------
+        max_extraction_length_px : `float` or `None`
+            The absolute pixel offset (from the star) at which
+            extraction must stop to stay within the image, or `None`
+            if the full physics-derived length already fits within the
+            image bounds.
+        """
+        height, width = image_shape
+        theoretical_end_offset = offset_px + length_px
+
+        candidates = []
+        bx, by = base_pos
+        vx, vy = vector
+        if vx > 1e-9:
+            candidates.append((width - 1 - bx) / vx)
+        elif vx < -1e-9:
+            candidates.append((0 - bx) / vx)
+        if vy > 1e-9:
+            candidates.append((height - 1 - by) / vy)
+        elif vy < -1e-9:
+            candidates.append((0 - by) / vy)
+
+        if not candidates:
+            return None
+
+        available_end_offset = min(candidates)
+        if available_end_offset >= theoretical_end_offset or available_end_offset <= offset_px:
+            return None
+
+        return round(float(available_end_offset), 1)
 
     def _resolve_calibration_star_position(
         self, image_path: str, star_pos: tuple[float, float] | None
@@ -316,7 +450,12 @@ class SpectroscopyCalibrationTuner:
         return best_rms, best_grating_distance_mm, best_combo
 
     def _save_tuned_calibration(
-        self, camera_name: str, best_grating_distance_mm: float, best_x0: float
+        self,
+        camera_name: str,
+        best_grating_distance_mm: float,
+        best_x0: float,
+        use_flare_mask_extraction: bool,
+        max_extraction_length_px: float | None,
     ) -> tuple[float, float]:
         """Round the fitted parameters and save them to the camera's config.
 
@@ -329,16 +468,19 @@ class SpectroscopyCalibrationTuner:
         tuned_x0 = round(float(best_x0), 1)
 
         section_name = f"Observatory.Camera.{camera_name}"
-        new_params = {
-            section_name: {
-                "grating_distance_mm": str(tuned_grating_distance_mm),
-                "dispersion_start_px": str(tuned_x0),
-            }
+        section_params = {
+            "grating_distance_mm": str(tuned_grating_distance_mm),
+            "dispersion_start_px": str(tuned_x0),
+            "use_flare_mask_extraction": str(use_flare_mask_extraction).lower(),
         }
+        if max_extraction_length_px is not None:
+            section_params["max_extraction_length_px"] = str(max_extraction_length_px)
+        new_params = {section_name: section_params}
 
         logger.info(
-            f"Saving tuned parameters for {camera_name}: "
-            f"grating_distance = {tuned_grating_distance_mm} mm, start = {tuned_x0} px"
+            f"Saving tuned parameters for {camera_name}: grating_distance = {tuned_grating_distance_mm} mm, "
+            f"start = {tuned_x0} px, use_flare_mask_extraction = {use_flare_mask_extraction}, "
+            f"max_extraction_length_px = {max_extraction_length_px}"
         )
         self.config.update_config(new_params)
 
@@ -355,6 +497,8 @@ class SpectroscopyCalibrationTuner:
         best_combo: tuple[int, ...],
         target_wls: np.ndarray,
         spec_pipeline: SpectroscopyPipeline,
+        use_flare_mask_extraction: bool,
+        max_extraction_length_px: float | None,
     ) -> dict[str, Any]:
         """Build the final calibration report, including per-line deviations.
 
@@ -394,4 +538,6 @@ class SpectroscopyCalibrationTuner:
             "rms_error_nm": round(float(best_rms), 3),
             "detected_angle_degrees": round(detected_angle, 4),
             "detailed_calibration": detailed_calibration,
+            "use_flare_mask_extraction": use_flare_mask_extraction,
+            "max_extraction_length_px": max_extraction_length_px,
         }

@@ -136,11 +136,3 @@ enable_observatory = true
 enable_planetarium = true
 enable_astronomy = true
 enable_observation = false
-
-[Library]
-# Legacy section, read only as a fallback for configurations written before
-# [Image Library] existed. siril_executable is deliberately not repeated
-# here: get_siril_executable() always prefers [Processing.Siril], so a copy
-# in this section would never be read and would drift out of sync with the
-# one that is.
-path = libraryIndex

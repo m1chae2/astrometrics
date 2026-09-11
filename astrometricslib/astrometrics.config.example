@@ -116,10 +116,6 @@ cpulimit = 300
 # "flatpak run org.siril.Siril" -- those launch the GUI build, which
 # needs a display connection even for headless pipe-mode stacking.
 siril_executable = siril-cli
-rejection_sigma_low = 3.0
-rejection_sigma_high = 3.0
-filter_wfwhm_percentile =
-filter_round_percentile =
 # Blank by default, because the default apt install cannot use it:
 # weighting requires a Siril new enough to support `stack`'s -weight=
 # argument, and Ubuntu's package (1.2.1) is not, so stacking fails with
@@ -127,23 +123,6 @@ filter_round_percentile =
 # --siril-source=flatpak (see build/linux/install_ubuntu_deps.sh), set
 # this to wfwhm to weight each frame by its measured star sharpness.
 stack_weight =
-generate_rejmap = true
-rejection_sigma_mode = adaptive
-background_homogeneity_check_enabled = true
-auto_open_gui = false
-
-[Processing.AsteroidRecovery]
-detection_fwhm_px = 4.0
-detection_threshold_sigma = 5.0
-min_frames_for_persistence = 3
-pixel_match_tolerance_px = 1.5
-sky_match_tolerance_arcsec = 3.0
-rate_min_arcsec_per_hour = 1.0
-rate_max_arcsec_per_hour = 300.0
-rate_linearity_r_squared_min = 0.98
-ephemeris_cross_match_radius_arcsec = 10.0
-ephemeris_maximum_visual_magnitude = 16.0
-mpc_observatory_code = 500
 
 [Processing.Parallelism]
 target_workers = auto

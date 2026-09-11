@@ -127,6 +127,7 @@ class AppConfiguration:
                 "stack_weight": "",
                 "generate_rejmap": "true",
                 "background_homogeneity_check_enabled": "true",
+                "auto_open_gui": "false",
             },
             # 500; see get_maximum_identified_stars for why this isn't 0
             # (unlimited) despite that having been this setting's first

@@ -32,7 +32,7 @@ def _make_isolated_config(tmp_path) -> AppConfiguration:  # ruff: ignore[missing
     frames_path.mkdir(parents=True)
 
     config = AppConfiguration()
-    config.update_config({"Image Library": {"path": str(library_path), "frames_path": str(frames_path)}})
+    config.update_config({"Image Library": {"path": str(library_path)}})
     return config
 
 

@@ -95,7 +95,6 @@ class AppConfiguration:
         defaults = {
             "Image Library": {
                 "path": "./libraryIndex",
-                "frames_path": "./libraryIndex/frames",
             },
             "Observatory.Telescope": {
                 "hostname": "localhost",
@@ -563,20 +562,18 @@ class AppConfiguration:
     def get_frames_path(self) -> Path:
         """Return the absolute path to the frames directory.
 
+        Always a `"frames"` subfolder of the library path -- not
+        independently configurable, so the sandboxing check in
+        `mcp/tool_registry.py` only ever has one library root to reason
+        about.
+
         Returns
         -------
         frames_path : `Path`
-            Absolute path to the resolved frames directory.
+            Absolute path to the frames directory, nested under the
+            library path.
         """
-        try:
-            path_str = self.app_config.get("Image Library", "frames_path")
-            path = Path(path_str)
-            if not path.is_absolute():
-                return (self.get_project_root() / path).absolute()
-            return path.absolute()
-        except configparser.NoSectionError, configparser.NoOptionError, KeyError:
-            # Default to lib_path / frames
-            return self.get_library_path() / "frames"
+        return self.get_library_path() / "frames"
 
     def get_library_file_path(self, filename: str) -> Path:
         """Return the absolute path to a file within libraryIndex.

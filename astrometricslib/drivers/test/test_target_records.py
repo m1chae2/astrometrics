@@ -36,7 +36,7 @@ def _make_isolated_config(tmp_path) -> AppConfiguration:  # ruff: ignore[missing
     frames_path.mkdir(parents=True)
 
     config = AppConfiguration()
-    config.update_config({"Image Library": {"path": str(library_path), "frames_path": str(frames_path)}})
+    config.update_config({"Image Library": {"path": str(library_path)}})
     return config
 
 
@@ -211,8 +211,7 @@ def test_concurrent_processes_do_not_clobber_each_others_target_edits(tmp_path):
 
     config_path = tmp_path / "astrometrics.config"
     library_path = tmp_path / "library"
-    frames_path = library_path / "frames"
-    config_path.write_text(f"[Image Library]\npath = {library_path}\nframes_path = {frames_path}\n")
+    config_path.write_text(f"[Image Library]\npath = {library_path}\n")
 
     worker_script = tmp_path / "_concurrent_save_worker.py"
     worker_script.write_text(_SUBPROCESS_WORKER)

@@ -11,9 +11,9 @@
 # changes noted under [Processing.Siril].
 
 [Image Library]
+# EDIT ME: absolute path to your own library. Captured frames always
+# live in a "frames" subfolder underneath this path.
 path = ./libraryIndex
-# EDIT ME: absolute path to your own library of captured light frames.
-frames_path = ./libraryIndex/frames
 
 [Spectroscopy.Balmer Lines]
 hα = 6562
@@ -156,4 +156,3 @@ enable_observation = false
 # in this section would never be read and would drift out of sync with the
 # one that is.
 path = libraryIndex
-frames_path = libraryIndex/frames

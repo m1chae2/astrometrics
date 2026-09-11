@@ -67,8 +67,9 @@ class ProcessingConfig(BaseModel):
     path : `str`
         Library index storage path, by default ``"libraryIndex"``.
     frames_path : `str` or `None`
-        Filesystem path where captured frames are stored, by default
-        `None`.
+        Filesystem path where captured frames are stored -- always a
+        `"frames"` subfolder of `path`, not independently
+        configurable. Reported here for convenience, by default `None`.
     rejection_sigma_mode : `str`
         Rejection sigma selection mode, by default ``"adaptive"``.
     rejection_sigma_low : `float`

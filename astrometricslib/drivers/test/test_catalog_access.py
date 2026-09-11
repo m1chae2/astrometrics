@@ -156,9 +156,7 @@ def test_catalog_access_list_star_summaries_reads_the_stellar_catalog(tmp_path):
     (library_path / "targets").mkdir(parents=True)
     (library_path / "frames").mkdir(parents=True)
     config = AppConfiguration()
-    config.update_config({
-        "Image Library": {"path": str(library_path), "frames_path": str(library_path / "frames")}
-    })
+    config.update_config({"Image Library": {"path": str(library_path)}})
 
     catalog_access = CatalogAccess(config=config)
     in_field = StellarObject(id="InField", name="InField")
@@ -187,9 +185,7 @@ def test_catalog_access_list_position_only_stars_filters_by_prefix_and_target(tm
     (library_path / "targets").mkdir(parents=True)
     (library_path / "frames").mkdir(parents=True)
     config = AppConfiguration()
-    config.update_config({
-        "Image Library": {"path": str(library_path), "frames_path": str(library_path / "frames")}
-    })
+    config.update_config({"Image Library": {"path": str(library_path)}})
 
     catalog_access = CatalogAccess(config=config)
 
@@ -235,9 +231,7 @@ def test_disk_butler_stellar_catalog_has_a_target_id_index(tmp_path):  # ruff: i
     (library_path / "targets").mkdir(parents=True)
     (library_path / "frames").mkdir(parents=True)
     config = AppConfiguration()
-    config.update_config({
-        "Image Library": {"path": str(library_path), "frames_path": str(library_path / "frames")}
-    })
+    config.update_config({"Image Library": {"path": str(library_path)}})
 
     catalog_access = CatalogAccess(config=config)
     catalog_access.put([StellarObject(id="Polaris", name="Polaris")], "stellar_catalog", {})

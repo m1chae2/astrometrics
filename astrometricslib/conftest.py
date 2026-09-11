@@ -38,7 +38,6 @@ test_calibration_path.mkdir(parents=True, exist_ok=True)
 test_config_path = TEST_TEMP_DIR / "astrometrics.config"
 test_config_path.write_text(f"""[Image Library]
 path = {test_library_path}
-frames_path = {test_frames_path}
 """)
 os.environ["ASTROMETRICS_CONFIG"] = str(test_config_path)
 os.environ["ASTROMETRICS_CONFIG_PATH"] = str(test_config_path)

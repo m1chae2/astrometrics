@@ -1,25 +1,15 @@
 """Purpose: Regression tests for stellar-object catalog performance at scale.
 
-Description: Covers performance issues that appear when the catalog grows
-to hundreds of thousands of stellar objects:
-
-1. Database upgrades: Instead of rewriting every star in the database
-   every time the program starts (which takes a long time), the code now
-   checks the database version first and skips the rewrite if it's already
-   up to date.
-
-2. Catalog summaries: Instead of loading all the heavy data (like light
-   curves and spectra) for every single star just to show a simple list,
-   the code now reads only the specific summary columns it needs directly
-   from the database. This is much faster.
+Description: Covers a performance issue that appears when the catalog
+grows to hundreds of thousands of stellar objects: catalog summaries.
+Instead of loading all the heavy data (like light curves and spectra)
+for every single star just to show a simple list, the code now reads
+only the specific summary columns it needs directly from the database.
+This is much faster.
 """
-
-import json
-import sqlite3
 
 import pytest
 
-from astrometricslib.drivers import local_database
 from astrometricslib.utilities.config_loader import AppConfiguration
 
 
@@ -39,70 +29,6 @@ def _make_isolated_config(tmp_path) -> AppConfiguration:  # ruff: ignore[missing
     config = AppConfiguration()
     config.update_config({"Image Library": {"path": str(library_path)}})
     return config
-
-
-def _insert_raw_stellar_object(db_path, obj_id: str, data: dict) -> None:  # ruff: ignore[missing-type-function-argument]
-    """Insert one stellar_objects row directly, bypassing the ORM layer."""
-    conn = sqlite3.connect(db_path)
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS stellar_objects (
-            id TEXT PRIMARY KEY, target_id TEXT, name TEXT,
-            ra REAL, dec REAL, magnitude REAL, data_json TEXT
-        )
-        """
-    )
-    conn.execute(
-        "INSERT INTO stellar_objects (id, data_json) VALUES (?, ?)",
-        (obj_id, json.dumps(data)),
-    )
-    conn.commit()
-    conn.close()
-
-
-def test_verify_and_upgrade_skips_the_full_pass_once_already_current(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify a second call does not re-touch rows already at current version.
-
-    Simulates the cross-process case (a fresh backend restart) by
-    resetting the in-process _database_verified guard, which only ever
-    protected against repeat calls within one process and did nothing
-    for the actual reported problem: every fresh process paying the
-    full O(row count) cost.
-    """
-    config = _make_isolated_config(tmp_path)
-    db_path = str(tmp_path / "library" / "astrometrics.db")
-    _insert_raw_stellar_object(db_path, "Polaris", {"id": "Polaris", "ra": 37.95, "dec": 89.26})
-
-    # _database_verified is a module-level, per-process flag: an earlier
-    # test in the same run can leave it True, which would make this
-    # test's own first call a silent no-op against a completely
-    # different config/db_path and never set user_version at all.
-    monkeypatch.setattr(local_database, "_database_verified", False)
-    local_database.verify_and_upgrade_database(config)
-
-    conn = sqlite3.connect(db_path)
-    version_after_first_call = conn.execute("PRAGMA user_version").fetchone()[0]
-    conn.close()
-    assert version_after_first_call == local_database.STELLAR_OBJECT_DATA_VERSION
-
-    # Simulate a fresh process: the in-process guard resets, but the
-    # on-disk version marker records.
-    monkeypatch.setattr(local_database, "_database_verified", False)
-
-    conn = sqlite3.connect(db_path)
-    conn.execute("UPDATE stellar_objects SET data_json = 'not valid json' WHERE id = 'Polaris'")
-    conn.commit()
-    conn.close()
-
-    # If the pass ran again, it would choke on the deliberately-broken
-    # JSON above (or at least rewrite it); since the row is already at
-    # the current version, it must be left untouched.
-    local_database.verify_and_upgrade_database(config)
-
-    conn = sqlite3.connect(db_path)
-    row = conn.execute("SELECT data_json FROM stellar_objects WHERE id = 'Polaris'").fetchone()
-    conn.close()
-    assert row[0] == "not valid json"
 
 
 def test_list_object_summaries_reports_the_expected_fields(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]

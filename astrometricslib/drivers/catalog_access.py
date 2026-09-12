@@ -395,10 +395,10 @@ class CatalogAccess(AbstractCatalogAccess):
             If a data type it doesn't recognize is requested.
         """
         if dataset_type == "target_catalog":
-            # Goes through local_database.load_targets rather than
-            # self._generic.get_all so the one-time legacy JSON-shard
-            # migration it performs on first boot still runs; writes
-            # still go through the shared generic Butler below.
+            # Goes through local_database.load_targets, which owns the
+            # targets table's read path (id/name/ra/dec/data_json
+            # schema) directly; writes still go through the shared
+            # generic Butler below.
             from astrometricslib.drivers import local_database
 
             return local_database.load_targets(self.config)

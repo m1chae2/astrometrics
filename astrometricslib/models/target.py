@@ -99,11 +99,16 @@ class FrameRecord(BaseModel):
     def normalize_filter(cls, v: Any) -> Any:
         """Convert a filter name string into the official FilterType.
 
+        Also called directly (not just as a Pydantic validation hook)
+        to normalize caller-supplied filter-type strings -- see
+        `astrometricslib.pipelines.stacking.stage` and
+        `astrometricslib.pipelines.shared.frame_grouping`.
+
         Returns
         -------
-        normalized_value : `Any`
-            The official `FilterType` enum, or the original string if
-            it wasn't recognized.
+        normalized : `Any`
+            The matching `FilterType` if `v` is a recognized string,
+            otherwise `v` unchanged.
         """
         if isinstance(v, str):
             mapping = {

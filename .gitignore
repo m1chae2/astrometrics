@@ -10,9 +10,7 @@ coverage/
 *.db-wal
 # Runtime library indices: local observation data, not shipped seed data.
 # Built lazily on first write by the CREATE TABLE IF NOT EXISTS schemas in
-# each disk_interface, so a fresh clone builds its own; the separate
-# verify_and_upgrade_database() only migrates an index that already
-# exists, and no-ops when absent. The static bright-star catalog
+# each disk_interface, so a fresh clone builds its own. The static bright-star catalog
 # (wayfindinglib/drivers/catalog/bright_star_catalog.sqlite) is a bundled
 # data asset and stays tracked.
 # astrometrics_log.db mutates its own bytes on every Python import (logger

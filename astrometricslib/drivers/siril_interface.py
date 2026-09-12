@@ -688,10 +688,9 @@ class ImageProcessing:
         id : `str`
             Target identifier used to name the working folder.
         image_files : `Any`
-            Either a list of frame records (dict or FrameRecord-like
-            objects with ``path``/``camera``/``telescope``/``iso``/
-            ``exposure``/``filter`` attributes) or a legacy nested
-            dict keyed by telescope/camera/iso/exposure/filter.
+            A list of frame records (dict or FrameRecord-like objects
+            with ``path``/``camera``/``telescope``/``iso``/
+            ``exposure``/``filter`` attributes).
         camera_filter : `str`, optional
             Camera name to restrict light frames to. If `None`
             (default), it is inferred from the first frame; if it
@@ -936,75 +935,6 @@ class ImageProcessing:
                         log(f"Error symlinking flat {item}: {e}")
 
             return target_folder
-
-        # Handle Legacy 5-Level Structure
-        if isinstance(image_files, dict):
-            for telescope, tel_val in image_files.items():
-                if not isinstance(tel_val, dict):
-                    continue
-                for camera, cam_val in tel_val.items():
-                    if camera_filter is not None and camera != camera_filter:
-                        continue
-                    for iso, iso_val in cam_val.items():
-                        if not isinstance(iso_val, dict):
-                            continue
-                        for exptime, exp_val in iso_val.items():
-                            if not isinstance(exp_val, dict):
-                                continue
-                            for filt, filter_val in exp_val.items():
-                                file_list = []
-                                if isinstance(filter_val, list):
-                                    file_list = filter_val
-                                elif isinstance(filter_val, dict):
-                                    for date_files in filter_val.values():
-                                        if isinstance(date_files, list):
-                                            file_list.extend(date_files)
-
-                                for item in file_list:
-                                    path = item.get("path") if isinstance(item, dict) else item
-                                    try:
-                                        os.symlink(
-                                            path,
-                                            os.path.join(
-                                                target_folder, "lights", f"light_source_{light_idx:05d}.fits"
-                                            ),
-                                        )
-                                        light_idx += 1
-                                    except Exception as exc:
-                                        logger.debug("Failed to symlink light frame '%s': %s", path, exc)
-
-                                # Calibrations per group
-                                for item in library.get_dark_frames(camera=camera, iso=iso, exposure=exptime):
-                                    try:
-                                        os.symlink(
-                                            item,
-                                            os.path.join(target_folder, "darks", f"dark_{dark_idx:05d}.fits"),
-                                        )
-                                        dark_idx += 1
-                                    except Exception as exc:
-                                        logger.debug("Failed to symlink dark frame '%s': %s", item, exc)
-                                for item in library.get_bias_frames(camera=camera, iso=iso):
-                                    try:
-                                        os.symlink(
-                                            item,
-                                            os.path.join(
-                                                target_folder, "biases", f"bias_{bias_idx:05d}.fits"
-                                            ),
-                                        )
-                                        bias_idx += 1
-                                    except Exception as exc:
-                                        logger.debug("Failed to symlink bias frame '%s': %s", item, exc)
-                                for item in library.get_flat_frames(
-                                    telescope=telescope, camera=camera, filter_type=filt, iso=iso
-                                ):
-                                    try:
-                                        os.symlink(
-                                            item,
-                                            os.path.join(target_folder, "flats", f"flat_{flat_idx:05d}.fits"),
-                                        )
-                                        flat_idx += 1
-                                    except Exception as exc:
-                                        logger.debug("Failed to symlink flat frame '%s': %s", item, exc)
 
         return target_folder
 
@@ -1364,8 +1294,7 @@ class ImageProcessing:
             Target identifier used to name the working folder and
             log file.
         image_files : `Any`
-            Frame list or legacy nested dict, as accepted by
-            `build_directories`.
+            Frame list, as accepted by `build_directories`.
         output_file : `str`, optional
             Explicit output filename. If `None` (default), a name
             derived from ``id`` is used.

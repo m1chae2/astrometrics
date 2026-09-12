@@ -4,7 +4,6 @@ import configparser
 import logging
 import os
 from pathlib import Path
-from typing import Any
 
 from .enums import FilterType
 
@@ -67,8 +66,6 @@ class AppConfiguration:
             self.base_dir.parent.parent
             / "backend"
             / "astrometrics.config",  # Backend root folder (Repo/backend/astrometrics.config)
-            self.base_dir.parent.parent
-            / "astrometrics.config",  # Legacy Repository Root (Repo/astrometrics.config)
         ]
 
         for p in candidates:
@@ -166,22 +163,6 @@ class AppConfiguration:
             self._populate_defaults()
             self.save_configuration()
 
-    def _get_with_fallback(
-        self, section: str, legacy_section: str, key: str, fallback: Any | None = None
-    ) -> Any:
-        """Get a value from a primary section, falling back to a legacy one.
-
-        Returns
-        -------
-        value : `Any`
-            The resolved config value, or `fallback` if not found in
-            either section.
-        """
-        try:
-            return self.app_config.get(section, key)
-        except configparser.NoSectionError, configparser.NoOptionError:
-            return self.app_config.get(legacy_section, key, fallback=fallback)
-
     def get_siril_executable(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Retrieve the Siril executable path from the configuration.
 
@@ -190,12 +171,11 @@ class AppConfiguration:
         executable_path : `str` or `None`
             Path or command name for the Siril executable.
         """
-        # Special case: check Processing.Siril first, then Image Library,
-        # then Library
-        try:
-            return self.app_config.get("Processing.Siril", "siril_executable")
-        except configparser.NoSectionError, configparser.NoOptionError:
-            return self._get_with_fallback("Image Library", "Library", "siril_executable", fallback=None)
+        # Special case: check Processing.Siril first, then Image Library
+        val = self.app_config.get("Processing.Siril", "siril_executable", fallback=None)
+        if val is not None:
+            return val
+        return self.app_config.get("Image Library", "siril_executable", fallback=None)
 
     def get_stack_rejection_sigma_mode(self) -> str:
         """Return the configured stack-time pixel rejection sigma mode.
@@ -342,7 +322,7 @@ class AppConfiguration:
             The configured telescope hostname, defaulting to
             ``"localhost"``.
         """
-        return self._get_with_fallback("Observatory.Telescope", "Telescope", "hostname", fallback="localhost")
+        return self.app_config.get("Observatory.Telescope", "hostname", fallback="localhost")
 
     def get_indi_host(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Return the INDI server host, i.e. the telescope hostname.
@@ -362,7 +342,7 @@ class AppConfiguration:
         port : `int`
             The configured INDI server port.
         """
-        val = self._get_with_fallback("Observatory.Telescope", "Telescope", "indi_port", fallback="7624")
+        val = self.app_config.get("Observatory.Telescope", "indi_port", fallback="7624")
         return int(val)
 
     def get_camera_config(self, camera_name=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
@@ -378,23 +358,18 @@ class AppConfiguration:
         -------
         config : `dict`
             The matching section's key/value pairs, checked in order of
-            ``Observatory.Camera.<camera_name>``, ``Camera.<camera_name>``,
-            ``Observatory.Camera``, then ``Camera``. Returns an empty
-            dict if no camera name is resolved or no section matches.
+            ``Observatory.Camera.<camera_name>``, then
+            ``Observatory.Camera``. Returns an empty dict if no camera
+            name is resolved or no section matches.
         """
         if not camera_name:
             # Fallback to default primary camera
-            camera_name = self._get_with_fallback("Observatory.Camera", "Camera", "default_primary_camera")
+            camera_name = self.app_config.get("Observatory.Camera", "default_primary_camera", fallback=None)
             if not camera_name:
                 return {}
 
         # Try specific sections
-        for section in [
-            f"Observatory.Camera.{camera_name}",
-            f"Camera.{camera_name}",
-            "Observatory.Camera",
-            "Camera",
-        ]:
+        for section in [f"Observatory.Camera.{camera_name}", "Observatory.Camera"]:
             if section in self.app_config:
                 return dict(self.app_config[section])
 
@@ -408,7 +383,7 @@ class AppConfiguration:
         camera_names : `list` [`str`]
             Configured camera model names.
         """
-        models_str = self._get_with_fallback("Observatory.Camera", "Camera", "models")
+        models_str = self.app_config.get("Observatory.Camera", "models", fallback=None)
         return [m.strip() for m in models_str.split(",")] if models_str else []
 
     def get_available_filters(self) -> list[FilterType]:
@@ -463,7 +438,7 @@ class AppConfiguration:
         focal_length_mm : `float`
             The configured focal length, in millimeters.
         """
-        val = self._get_with_fallback("Observatory.Telescope", "Telescope", "focal_length_mm", fallback="0.0")
+        val = self.app_config.get("Observatory.Telescope", "focal_length_mm", fallback="0.0")
         return float(val)
 
     def get_primary_focal_length_mm(self) -> float | None:
@@ -503,9 +478,7 @@ class AppConfiguration:
             The configured ``default_primary_camera``, or `None` when
             unset.
         """
-        camera_name = self._get_with_fallback(
-            "Observatory.Camera", "Camera", "default_primary_camera", fallback=""
-        )
+        camera_name = self.app_config.get("Observatory.Camera", "default_primary_camera", fallback="")
         camera_name = (camera_name or "").strip()
         return camera_name or None
 
@@ -517,7 +490,7 @@ class AppConfiguration:
         focal_ratio : `float`
             The configured focal ratio.
         """
-        val = self._get_with_fallback("Observatory.Telescope", "Telescope", "focal_ratio", fallback="0.0")
+        val = self.app_config.get("Observatory.Telescope", "focal_ratio", fallback="0.0")
         return float(val)
 
     def get(self, *args, **kwargs):  # ruff: ignore[missing-type-args, missing-type-kwargs, missing-return-type-undocumented-public-function]
@@ -650,11 +623,8 @@ class AppConfiguration:
         remote_pictures_path : `str`
             Configured remote pictures path on the telescope host.
         """
-        return self._get_with_fallback(
-            "Observatory.Telescope",
-            "Telescope",
-            "remote_pictures_path",
-            fallback="/home/stellarmate/Pictures",
+        return self.app_config.get(
+            "Observatory.Telescope", "remote_pictures_path", fallback="/home/stellarmate/Pictures"
         )
 
     def get_allow_commands(self) -> bool:

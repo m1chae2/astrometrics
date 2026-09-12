@@ -456,12 +456,12 @@ def run_full_pipeline(
     _run_astrometry_stage(target, astrometrics)
 
     # 3. Photometry Analysis
-    analysis_concurrency = astrometrics.config.get_analysis_concurrency()
-    _run_photometry_stage(target, astrometrics, camera_frames, max_workers, analysis_concurrency)
+    max_concurrent_jobs = astrometrics.config.get_max_concurrent_jobs()
+    _run_photometry_stage(target, astrometrics, camera_frames, max_workers, max_concurrent_jobs)
 
     # 4. Spectroscopy Analysis (only when this target actually has a
     # SPEC stack)
-    _run_spectroscopy_stage(target, astrometrics, spectral_frames, analysis_concurrency)
+    _run_spectroscopy_stage(target, astrometrics, spectral_frames, max_concurrent_jobs)
 
     # Save this target's own record (safe under concurrent callers,
     # unlike a full-catalog resync)
@@ -676,7 +676,7 @@ def _run_photometry_stage(
     astrometrics: Any,
     camera_frames: list[FrameRecord],
     max_workers: int | None,
-    analysis_concurrency: int,
+    max_concurrent_jobs: int,
 ) -> dict[str, Any]:
     """Run photometry/variability analysis on the target's camera frames.
 
@@ -686,7 +686,7 @@ def _run_photometry_stage(
         The photometry pipeline's result dict.
     """
     print(f"[{target.id}] Running Photometry/Variability Analysis...")
-    with acquire_resource_slot(astrometrics.config, "analysis", analysis_concurrency):
+    with acquire_resource_slot(astrometrics.config, "job", max_concurrent_jobs):
         photometry_results = analyze_target(
             target,
             pipeline_type="photometry",
@@ -704,7 +704,7 @@ def _run_spectroscopy_stage(
     target: Target,
     astrometrics: Any,
     spectral_frames: list[FrameRecord],
-    analysis_concurrency: int,
+    max_concurrent_jobs: int,
 ) -> None:
     """Run spectroscopy analysis when the target has SPEC frames.
 
@@ -718,7 +718,7 @@ def _run_spectroscopy_stage(
         return
 
     print(f"[{target.id}] Running Spectroscopy Analysis...")
-    with acquire_resource_slot(astrometrics.config, "analysis", analysis_concurrency):
+    with acquire_resource_slot(astrometrics.config, "job", max_concurrent_jobs):
         spectroscopy_results = analyze_target(
             target, pipeline_type="spectroscopy", limit=10, catalog_access=astrometrics.catalog_access
         )

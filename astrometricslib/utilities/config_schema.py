@@ -117,23 +117,22 @@ class ParallelismConfig(BaseModel):
     target_workers : `str`
         Configured outer worker count for target processing, or
         ``"auto"``, by default ``"auto"``.
-    siril_concurrency : `int`
-        Maximum concurrent Siril processes, by default 2.
+    max_concurrent_jobs : `int`
+        Maximum concurrent heavy jobs (Siril stacking and
+        photometry/spectroscopy analysis share this one pool), by
+        default 2.
     photometry_workers : `str`
         Configured worker count for photometry processing, or
         ``"auto"``, by default ``"auto"``.
     worker_niceness : `int`
         POSIX ``nice`` value applied to spawned worker processes, by
         default 10.
-    analysis_concurrency : `int`
-        Maximum concurrent analysis processes, by default 2.
     """
 
     target_workers: str = "auto"
-    siril_concurrency: int = 2
+    max_concurrent_jobs: int = 2
     photometry_workers: str = "auto"
     worker_niceness: int = 10
-    analysis_concurrency: int = 2
 
 
 class AppConfigSchema(BaseModel):

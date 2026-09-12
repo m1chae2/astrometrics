@@ -126,10 +126,14 @@ stack_weight =
 
 [Processing.Parallelism]
 target_workers = auto
-siril_concurrency = 2
 photometry_workers = auto
 worker_niceness = 10
-analysis_concurrency = 2
+# Max concurrent heavy jobs, system-wide. Shared by Siril stacking and
+# photometry/spectroscopy analysis -- both draw on this one pool rather
+# than being tuned separately. See
+# astrometricslib/scripts/benchmark_siril_concurrency.py to measure the
+# best value for this machine.
+max_concurrent_jobs = 2
 
 [Frontend]
 enable_observatory = true

@@ -707,13 +707,19 @@ class AppConfiguration:
         """
         return self.get_value("Processing.Parallelism", "target_workers", fallback="auto")
 
-    def get_siril_concurrency(self) -> int:
-        """Return the max concurrent Siril stacking processes, system-wide.
+    def get_max_concurrent_jobs(self) -> int:
+        """Return the max concurrent heavy jobs allowed, system-wide.
+
+        Covers both Siril stacking and photometry/spectroscopy analysis
+        sessions, sharing one slot pool: they answer the same question
+        ("how many heavy background jobs at once") for a single-machine
+        deployment, so one setting throttles both rather than requiring
+        two independently-tuned resource pools.
 
         Returns
         -------
-        siril_concurrency : `int`
-            Maximum number of concurrent Siril stacking processes.
+        max_concurrent_jobs : `int`
+            Maximum number of concurrent heavy jobs.
         """
         # An environment override is honoured first so a value can reach
         # worker processes. Batch work runs across a ProcessPoolExecutor,
@@ -723,15 +729,15 @@ class AppConfiguration:
         # configured value at every setting: two Siril processes were
         # running during its "1 slot" measurement. The environment is
         # inherited by workers, so it does cross.
-        environment_override = os.environ.get("ASTROMETRICS_SIRIL_CONCURRENCY")
+        environment_override = os.environ.get("ASTROMETRICS_MAX_CONCURRENT_JOBS")
         if environment_override:
             try:
                 return max(1, int(environment_override))
             except ValueError:
                 logging.getLogger(__name__).warning(
-                    "Ignoring non-numeric ASTROMETRICS_SIRIL_CONCURRENCY=%r", environment_override
+                    "Ignoring non-numeric ASTROMETRICS_MAX_CONCURRENT_JOBS=%r", environment_override
                 )
-        return int(self.get_value("Processing.Parallelism", "siril_concurrency", fallback="2"))
+        return int(self.get_value("Processing.Parallelism", "max_concurrent_jobs", fallback="2"))
 
     def get_photometry_workers(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Return the photometry worker count per target, or "auto".
@@ -752,19 +758,6 @@ class AppConfiguration:
             OS niceness value for batch worker processes.
         """
         return int(self.get_value("Processing.Parallelism", "worker_niceness", fallback="10"))
-
-    def get_analysis_concurrency(self) -> int:
-        """Return the max concurrent process-pool-spawning analysis count.
-
-        Covers photometry or spectroscopy sessions, system-wide, across
-        the batch script and the backend combined.
-
-        Returns
-        -------
-        analysis_concurrency : `int`
-            Maximum number of concurrent analysis processes.
-        """
-        return int(self.get_value("Processing.Parallelism", "analysis_concurrency", fallback="2"))
 
     def get_schema(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Return a validated AppConfigSchema for the current configuration.
@@ -823,10 +816,9 @@ class AppConfiguration:
         # Build parallelism config
         parallelism = ParallelismConfig(
             target_workers=str(self.get_target_workers()),
-            siril_concurrency=self.get_siril_concurrency(),
+            max_concurrent_jobs=self.get_max_concurrent_jobs(),
             photometry_workers=str(self.get_photometry_workers()),
             worker_niceness=self.get_worker_niceness(),
-            analysis_concurrency=self.get_analysis_concurrency(),
         )
 
         return AppConfigSchema(

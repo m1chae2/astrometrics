@@ -245,7 +245,10 @@ def siril_process_lock(
     Siril is very demanding on the CPU. If too many instances are run at
     once, the computer will slow down and tasks will fail. This function
     limits how many Siril tasks can run concurrently based on the
-    `siril_concurrency` setting in the configuration file.
+    `max_concurrent_jobs` setting in the configuration file. That slot
+    pool is shared with photometry/spectroscopy analysis jobs (see
+    `AppConfiguration.get_max_concurrent_jobs`), so a running stack and
+    a running analysis compete for the same limit.
 
     It uses a file lock system so that all different parts of the program
     respect the same limit, and the lock is automatically released even
@@ -258,7 +261,7 @@ def siril_process_lock(
         run, so a stalled-looking job is explainable from its log.
     max_concurrent_runs : `int`, optional
         Slot count override, for benchmarking. Defaults to the
-        configured `siril_concurrency`.
+        configured `max_concurrent_jobs`.
 
     Yields
     ------
@@ -274,11 +277,11 @@ def siril_process_lock(
             from astrometricslib.utilities.config_loader import get_configuration
 
             configuration = get_configuration()
-            slot_count = configuration.get_siril_concurrency()
+            slot_count = configuration.get_max_concurrent_jobs()
         except Exception as configuration_error:
             # A missing configuration must not make Siril unrunnable;
             # one slot is the safe reading, matching the old behaviour.
-            logger.debug("Could not read siril_concurrency, using 1 slot: %s", configuration_error)
+            logger.debug("Could not read max_concurrent_jobs, using 1 slot: %s", configuration_error)
             slot_count = 1
     slot_count = max(1, int(slot_count))
 
@@ -290,7 +293,7 @@ def siril_process_lock(
         job_logger.info(waiting_message)
 
     wait_started_at = time.monotonic()
-    with acquire_resource_slot(configuration, "siril", slot_count):
+    with acquire_resource_slot(configuration, "job", slot_count):
         # Recorded whether or not the wait was long: the stacking
         # timeout adds this back to its budget, and a queue that exists
         # to protect the CPU must not convert into a cascade of
@@ -1477,7 +1480,7 @@ class ImageProcessing:
             # of a blind sleep -- see send_commands for why that races
             # on any non-trivial image. It is a local, handed to both
             # halves explicitly, rather than instance state:
-            # siril_concurrency allows several process_target calls to
+            # max_concurrent_jobs allows several process_target calls to
             # share one ImageProcessing instance, and each needs its own.
             status_queue: queue.Queue[str] = queue.Queue()
 

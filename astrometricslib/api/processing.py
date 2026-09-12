@@ -552,11 +552,12 @@ class ProcessingPipelines:
         return create_frame_record_from_fits(path, camera)
 
     def acquire_analysis_slot(self) -> AbstractContextManager:
-        """Limit how many analysis jobs can run at the same time.
+        """Limit how many heavy jobs can run at the same time.
 
         Processing images takes a lot of CPU power. This function ensures
         the computer is not overwhelmed by limiting how many jobs can run
-        simultaneously.
+        simultaneously. Shares its slot pool with stacking (see
+        `acquire_stacking_slot`) -- both draw on `max_concurrent_jobs`.
 
         Returns
         -------
@@ -566,14 +567,16 @@ class ProcessingPipelines:
         """
         from datastore.process_locks import acquire_resource_slot
 
-        return acquire_resource_slot(self._config, "analysis", self._config.get_analysis_concurrency())
+        return acquire_resource_slot(self._config, "job", self._config.get_max_concurrent_jobs())
 
     def acquire_stacking_slot(self) -> AbstractContextManager:
-        """Limit how many image stacking jobs can run at the same time.
+        """Limit how many heavy jobs can run at the same time.
 
         Stacking images uses massive amounts of RAM and CPU. This function
         ensures the computer is not crashed by limiting how many stacking
-        programs can run simultaneously.
+        programs can run simultaneously. Shares its slot pool with
+        analysis (see `acquire_analysis_slot`) -- both draw on
+        `max_concurrent_jobs`.
 
         Returns
         -------
@@ -583,4 +586,4 @@ class ProcessingPipelines:
         """
         from datastore.process_locks import acquire_resource_slot
 
-        return acquire_resource_slot(self._config, "siril", self._config.get_siril_concurrency())
+        return acquire_resource_slot(self._config, "job", self._config.get_max_concurrent_jobs())

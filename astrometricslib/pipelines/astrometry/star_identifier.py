@@ -24,14 +24,14 @@ import numpy as np
 from astropy import units as u
 from astropy.coordinates import SkyCoord
 from astropy.wcs import WCS, FITSFixedWarning
-from astroquery.simbad import Simbad
 
+from astrometricslib.drivers import simbad_interface
+from astrometricslib.drivers.fits_access import collapse_to_2d
+from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.drivers.plate_solve_interface import PlateSolver
-from astrometricslib.image_processing.fits_access import collapse_to_2d
-from astrometricslib.image_processing.image import AstrometricsImage
-from astrometricslib.image_processing.quality_metrics import measure_fwhm_from_data
-from astrometricslib.image_processing.source_detection import SourceDetector
 from astrometricslib.models.stellar_source import StellarObject
+from astrometricslib.pipelines.astrometry.fwhm import measure_fwhm_from_data
+from astrometricslib.pipelines.astrometry.source_detection import SourceDetector
 from astrometricslib.utilities.config_loader import AppConfiguration
 from astrometricslib.utilities.exceptions import AstroLibError
 
@@ -53,15 +53,10 @@ logger = logging.getLogger(__name__)
 # detections significantly.
 _COLOR_DETECTION_BIN_FACTOR = 2
 
-# astroquery's default is 1080s (18 min) -- a stalled/slow connection blocks
-# an entire analysis run for that long with no visible progress before
-# failing over to Gaia. 30s is generous for a single region query against a
-# responsive server and fails fast on a genuinely stuck connection instead.
-Simbad.timeout = 30
-
-# SIMBAD class-level state is not thread-safe. Use this lock to
-# protect configuration and queries.
-SIMBAD_LOCK = threading.Lock()
+# SIMBAD's client configuration, request timeout and thread lock live in
+# drivers/simbad_interface.py, alongside every other external-service
+# driver, rather than here: they describe how to talk to astroquery, not
+# how this pipeline identifies a star.
 
 # Gaia TAP service queries are also not thread-safe for the shared
 # Gaia singleton; serialise them with a dedicated lock.
@@ -605,39 +600,39 @@ class StarIdentifier:
             The list of known stars and their coordinates, or None if the
             download failed.
         """
-        with SIMBAD_LOCK:
-            # Calculate a reasonable radius based on image size (if
-            # WCS is available)
-            radius_deg = 0.2  # default 12 arcmin
-            if radius_deg_override is not None:
-                radius_deg = radius_deg_override
-            elif wcs and width and height:
-                try:
-                    from astropy.wcs.utils import proj_plane_pixel_scales
-
-                    pixel_scales = proj_plane_pixel_scales(wcs)  # in degrees
-                    fov_x = pixel_scales[0] * width
-                    fov_y = pixel_scales[1] * height
-                    radius_deg = max(fov_x, fov_y) / 2.0 * 1.1  # 10% buffer
-                    radius_deg = min(radius_deg, 1.0)  # Cap at 1 degree
-                except Exception as e:
-                    logger.warning(f"Failed to calculate FOV from WCS: {e}")
-
-            logger.info(
-                f"Querying SIMBAD bulk region at {ra_center:.4f}, {dec_center:.4f} "
-                f"with {radius_deg:.3f} degree radius..."
-            )
+        # Calculate a reasonable radius based on image size (if
+        # WCS is available)
+        radius_deg = 0.2  # default 12 arcmin
+        if radius_deg_override is not None:
+            radius_deg = radius_deg_override
+        elif wcs and width and height:
             try:
-                Simbad.reset_votable_fields()
-                Simbad.ROW_LIMIT = 5000  # Prevent massive result sets
-                # common names
-                Simbad.add_votable_fields("flux(V)", "sp_type", "ids", "ra(d)", "dec(d)", "otype")
+                from astropy.wcs.utils import proj_plane_pixel_scales
 
-                coord = SkyCoord(ra_center * u.deg, dec_center * u.deg)
-                result_table = Simbad.query_region(coord, radius=f"{radius_deg}d")
+                pixel_scales = proj_plane_pixel_scales(wcs)  # in degrees
+                fov_x = pixel_scales[0] * width
+                fov_y = pixel_scales[1] * height
+                radius_deg = max(fov_x, fov_y) / 2.0 * 1.1  # 10% buffer
+                radius_deg = min(radius_deg, 1.0)  # Cap at 1 degree
             except Exception as e:
-                logger.error(f"SIMBAD query failed: {e}")
-                return None, None
+                logger.warning(f"Failed to calculate FOV from WCS: {e}")
+
+        logger.info(
+            f"Querying SIMBAD bulk region at {ra_center:.4f}, {dec_center:.4f} "
+            f"with {radius_deg:.3f} degree radius..."
+        )
+        try:
+            coord = SkyCoord(ra_center * u.deg, dec_center * u.deg)
+            result_table = simbad_interface.query_region(
+                coord,
+                radius=f"{radius_deg}d",
+                # "ids" carries the common names used to label a star.
+                votable_fields=("flux(V)", "sp_type", "ids", "ra(d)", "dec(d)", "otype"),
+                row_limit=5000,  # Prevent massive result sets
+            )
+        except Exception as e:
+            logger.error(f"SIMBAD query failed: {e}")
+            return None, None
 
         if result_table is None or len(result_table) == 0:
             logger.info("No SIMBAD results for this region.")
@@ -822,17 +817,59 @@ class StarIdentifier:
             The list of stars and their coordinates, or None if the search
             failed.
         """
-        from astropy.table import Table
-        from astroquery.gaia import Gaia
-
-        from astrometricslib.drivers import catalog_store
         from astrometricslib.utilities.config_loader import get_configuration
 
         radius_deg = min(radius_deg, 1.0)
         config = get_configuration()
-        cache_db_path = catalog_store.get_catalog_cache_path(config)
 
-        # Check local cache first
+        cached = StarIdentifier._query_gaia_region_from_cache(config, ra_center, dec_center, radius_deg)
+        if cached is not None:
+            return cached
+
+        # We didn't find the stars in our local database. Like before, we
+        # only skip this next part (the internet download) if the connection
+        # safety switch has been tripped.
+        if _gaia_remote_queries_disabled():
+            logger.debug(
+                "Skipping remote Gaia query at %.4f, %.4f: circuit breaker open for this process.",
+                ra_center,
+                dec_center,
+            )
+            return None, None
+
+        result_table = StarIdentifier._download_gaia_region(ra_center, dec_center, radius_deg)
+
+        if result_table is None or len(result_table) == 0:
+            logger.info("No Gaia results for this region.")
+            return None, None
+
+        logger.info(f"  Found {len(result_table)} Gaia sources in field.")
+
+        StarIdentifier._cache_gaia_results(config, result_table)
+
+        gaia_coords = StarIdentifier._gaia_coords_from_table(result_table)
+        if gaia_coords is None:
+            return None, None
+
+        return result_table, gaia_coords
+
+    @staticmethod
+    def _query_gaia_region_from_cache(
+        config: Any, ra_center: float, dec_center: float, radius_deg: float
+    ) -> tuple[Any, SkyCoord] | None:
+        """Look for cached Gaia DR3 sources covering this region.
+
+        Returns
+        -------
+        result : `tuple` or `None`
+            `(result_table, gaia_coords)` if at least 5 cached sources
+            cover the search bounding box, otherwise `None`.
+        """
+        from astropy.table import Table
+
+        from astrometricslib.drivers import catalog_store
+
+        cache_db_path = catalog_store.get_catalog_cache_path(config)
         try:
             # Query existing cached sources within bounding box + radius
             min_ra = ra_center - (radius_deg / max(0.1, np.cos(np.radians(dec_center))))
@@ -861,16 +898,19 @@ class StarIdentifier:
         except Exception as e:
             logger.warning(f"Failed checking local Gaia SQLite cache: {e}")
 
-        # We didn't find the stars in our local database. Like before, we
-        # only skip this next part (the internet download) if the connection
-        # safety switch has been tripped.
-        if _gaia_remote_queries_disabled():
-            logger.debug(
-                "Skipping remote Gaia query at %.4f, %.4f: circuit breaker open for this process.",
-                ra_center,
-                dec_center,
-            )
-            return None, None
+        return None
+
+    @staticmethod
+    def _download_gaia_region(ra_center: float, dec_center: float, radius_deg: float) -> Any | None:
+        """Download Gaia DR3 sources for a region from the remote TAP server.
+
+        Returns
+        -------
+        result_table : `astropy.table.Table` or `None`
+            The downloaded sources, or `None` if the query timed out
+            or failed.
+        """
+        from astroquery.gaia import Gaia
 
         # If cache miss, auto-download from remote TAP server
         logger.info(
@@ -915,23 +955,23 @@ class StarIdentifier:
         except TimeoutError:
             logger.error("Gaia query timed out after 30s.")
             _record_gaia_failure("cone search timed out after 30s")
-            return None, None
+            return None
         except Exception as e:
             logger.error(f"Gaia query failed: {e}")
             _record_gaia_failure(f"cone search failed: {e}")
-            return None, None
+            return None
 
         # The service answered. An empty region is a legitimate answer, so
         # this counts as success and clears any accumulated failures.
         _record_gaia_success()
+        return result_table
 
-        if result_table is None or len(result_table) == 0:
-            logger.info("No Gaia results for this region.")
-            return None, None
+    @staticmethod
+    def _cache_gaia_results(config: Any, result_table: Any) -> None:
+        """Save downloaded Gaia DR3 sources to the local SQLite cache."""
+        from astrometricslib.drivers import catalog_store
 
-        logger.info(f"  Found {len(result_table)} Gaia sources in field.")
-
-        # Record downloaded sources to local SQLite cache
+        cache_db_path = catalog_store.get_catalog_cache_path(config)
         try:
             ra_col = next((c for c in ["ra", "RA", "ra_epoch2000"] if c in result_table.colnames), None)
             dec_col = next((c for c in ["dec", "DEC", "dec_epoch2000"] if c in result_table.colnames), None)
@@ -956,6 +996,16 @@ class StarIdentifier:
         except Exception as cache_err:
             logger.warning(f"Failed to cache Gaia sources locally: {cache_err}")
 
+    @staticmethod
+    def _gaia_coords_from_table(result_table: Any) -> SkyCoord | None:
+        """Build a `SkyCoord` from a Gaia result table's RA/Dec columns.
+
+        Returns
+        -------
+        gaia_coords : `SkyCoord` or `None`
+            `None` if the table has no recognisable RA/Dec columns, or
+            coordinate construction failed.
+        """
         try:
             ra_col = next(
                 (c for c in ["ra", "RA", "ra_epoch2000"] if c in result_table.colnames),
@@ -967,19 +1017,17 @@ class StarIdentifier:
             )
             if ra_col is None or dec_col is None:
                 logger.warning("Gaia result table missing ra/dec columns.")
-                return None, None
+                return None
 
             ra_vals = result_table[ra_col]
             dec_vals = result_table[dec_col]
-            gaia_coords = SkyCoord(
+            return SkyCoord(
                 ra=ra_vals * u.deg,
                 dec=dec_vals * u.deg,
             )
         except Exception as e:
             logger.error(f"Gaia SkyCoord creation failed: {e}")
-            return None, None
-
-        return result_table, gaia_coords
+            return None
 
     def identify_stars_with_wcs(
         self,
@@ -1027,16 +1075,55 @@ class StarIdentifier:
             logger.warning("Could not determine field center from WCS; skipping SIMBAD identification.")
             return stellar_objects
 
-        # ------------------------------------------------------------------
-        # Step 0: Convert every star's position from pixels (X/Y) to sky
-        # coordinates (RA/Dec) right at the beginning. This allows us to
-        # ask SIMBAD/Gaia only for the specific area where our stars are,
-        # rather than the entire picture. If the stars are only in one
-        # corner of the image, this makes the download much smaller and
-        # faster, and prevents the internet connection from timing out.
+        sky_positions, ra_center, dec_center, query_radius_deg = self._project_stars_to_sky(
+            stellar_objects, wcs, ra_center, dec_center
+        )
+
+        unmatched_after_simbad = self._match_stars_against_simbad(
+            stellar_objects, sky_positions, ra_center, dec_center, wcs, width, height, query_radius_deg
+        )
+
+        if not unmatched_after_simbad:
+            return stellar_objects
+
+        still_unmatched = self._match_stars_against_gaia(
+            unmatched_after_simbad, sky_positions, ra_center, dec_center, wcs, width, height, query_radius_deg
+        )
+
+        self._assign_field_ids(still_unmatched, sky_positions)
+
+        return stellar_objects
+
+    def _project_stars_to_sky(
+        self,
+        stellar_objects: list[StellarObject],
+        wcs: WCS,
+        ra_center: float,
+        dec_center: float,
+    ) -> tuple[dict[int, tuple[float, float]], float, float, float | None]:
+        """Project every star's pixel position to sky coordinates.
+
+        This allows us to ask SIMBAD/Gaia only for the specific area
+        where our stars are, rather than the entire picture. If the
+        stars are only in one corner of the image, this makes the
+        download much smaller and faster, and prevents the internet
+        connection from timing out.
+
+        Returns
+        -------
+        sky_positions : `dict`
+            Maps `id(stellar_object)` to its `(ra, dec)` in degrees,
+            for every star that could be projected.
+        ra_center, dec_center : `float`
+            The query center: the star field's bounding-box midpoint
+            if any star projected, otherwise `ra_center`/`dec_center`
+            unchanged.
+        query_radius_deg : `float` or `None`
+            The radius that covers every projected star, or `None` if
+            no star could be projected.
+        """
         # `sky_positions` stores the RA/Dec for every star we successfully
         # located.
-        # ------------------------------------------------------------------
         sky_positions: dict[int, tuple[float, float]] = {}  # id(obj) -> (ra, dec)
         for stellar_object in stellar_objects:
             star = stellar_object.star_data
@@ -1072,9 +1159,30 @@ class StarIdentifier:
             query_radius_deg = min(float(bbox_center.separation(star_coords).max().deg) + (15 / 3600), 1.0)
             ra_center, dec_center = bbox_center.ra.deg, bbox_center.dec.deg
 
-        # ------------------------------------------------------------------
-        # Step 1: SIMBAD bulk region query + per-star nearest-neighbour match
-        # ------------------------------------------------------------------
+        return sky_positions, ra_center, dec_center, query_radius_deg
+
+    def _match_stars_against_simbad(
+        self,
+        stellar_objects: list[StellarObject],
+        sky_positions: dict[int, tuple[float, float]],
+        ra_center: float,
+        dec_center: float,
+        wcs: WCS,
+        width: int,
+        height: int,
+        query_radius_deg: float | None,
+    ) -> list[StellarObject]:
+        """Match every detected star against a bulk SIMBAD region query.
+
+        A star within `CATALOG_MATCH_RADIUS_ARCSEC` of a SIMBAD entry
+        is identified from that match; every other star is left with
+        its sky position recorded and deferred to the Gaia fallback.
+
+        Returns
+        -------
+        unmatched_after_simbad : `list` [`StellarObject`]
+            The stars SIMBAD could not identify.
+        """
         result_table, simbad_coords = self._query_simbad_region(
             ra_center, dec_center, wcs, width, height, radius_deg_override=query_radius_deg
         )
@@ -1089,6 +1197,7 @@ class StarIdentifier:
             position = sky_positions.get(id(stellar_object))
             if position is None:
                 logger.warning(f"Star {stellar_object.name} missing centroid in star_data; skipping.")
+                unmatched_after_simbad.append(stellar_object)
                 continue
             ra, dec = position
 
@@ -1118,12 +1227,26 @@ class StarIdentifier:
             f"{len(unmatched_after_simbad)} deferred to Gaia DR3 fallback."
         )
 
-        if not unmatched_after_simbad:
-            return stellar_objects
+        return unmatched_after_simbad
 
-        # ------------------------------------------------------------------
-        # Step 2: Gaia DR3 bulk fallback for SIMBAD-unmatched stars
-        # ------------------------------------------------------------------
+    def _match_stars_against_gaia(
+        self,
+        unmatched_after_simbad: list[StellarObject],
+        sky_positions: dict[int, tuple[float, float]],
+        ra_center: float,
+        dec_center: float,
+        wcs: WCS,
+        width: int,
+        height: int,
+        query_radius_deg: float | None,
+    ) -> list[StellarObject]:
+        """Match stars SIMBAD couldn't identify against a bulk Gaia query.
+
+        Returns
+        -------
+        still_unmatched : `list` [`StellarObject`]
+            The stars neither catalog could identify.
+        """
         # Reuse the same star-position-bounded radius Step 1 used, so this
         # query covers only the actual detected field, not the full FOV.
         # Falls back to a field-of-view-derived radius on the rare path
@@ -1177,13 +1300,20 @@ class StarIdentifier:
             f"{len(still_unmatched)} will receive position-based IDs."
         )
 
-        # ------------------------------------------------------------------
-        # Step 3: Give a coordinate-based name to any star we couldn't find
-        # in the catalogs. Using the format FIELD_J{ra:.4f}{dec:+.4f} ensures
-        # that the same star will get the exact same name every time we run
-        # the program. It also makes it obvious that this isn't a famous star,
-        # so the user interface can easily hide them if desired.
-        # ------------------------------------------------------------------
+        return still_unmatched
+
+    def _assign_field_ids(
+        self,
+        still_unmatched: list[StellarObject],
+        sky_positions: dict[int, tuple[float, float]],
+    ) -> None:
+        """Give a coordinate-based name to every star no catalog matched.
+
+        Using the format FIELD_J{ra:.4f}{dec:+.4f} ensures that the
+        same star will get the exact same name every time we run the
+        program. It also makes it obvious that this isn't a famous
+        star, so the user interface can easily hide them if desired.
+        """
         for stellar_object in still_unmatched:
             ra, dec = sky_positions.get(id(stellar_object), (None, None))
             if ra is not None:
@@ -1196,8 +1326,6 @@ class StarIdentifier:
             # keep the Star_N placeholder id from
             # _build_stellar_objects_from_sources -- it is at least unique
             # and non-empty.
-
-        return stellar_objects
 
     def _identify_stars_with_simbad(  # ruff: ignore[missing-return-type-private-function]
         self,

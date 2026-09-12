@@ -116,6 +116,7 @@ class RPCHandlerRegistry:
         self.register("system:save_config", lambda config: (_save_config(config), True)[1])
         self.register("system:introspection", ("scripting_service", "get_introspection_tree"))
         self.register("system:cameras", ("config_service", "get_available_cameras"))
+        self.register("system:filters", ("config_service", "get_available_filters"))
         self.register("system:pulse", ("system_status_service", "get_pulse"))
         self.register("system:save", lambda: container.astrometrics.targets.save())
 

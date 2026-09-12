@@ -9,11 +9,12 @@ import logging
 import os
 import warnings
 from dataclasses import dataclass, field
+from typing import Any
 
 from astropy.io import fits
 from astropy.wcs import WCS, FITSFixedWarning
 
-from astrometricslib.image_processing.image import AstrometricsImage
+from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.astrometry.star_identifier import StarIdentifier
 
@@ -67,6 +68,7 @@ def resolve_frame_wcs(
     sources: list[dict] | None = None,
     write_back: bool = True,
     ignore_existing_wcs: bool = False,
+    solve_timeout: int = 300,
 ) -> tuple[WCS | None, bool, bool]:
     """Figure out the sky map (WCS) for an image.
 
@@ -90,6 +92,8 @@ def resolve_frame_wcs(
         Whether the newly calculated map should be saved into the image file.
     ignore_existing_wcs : `bool`, optional
         If True, ignore any saved map and force it to calculate a new one.
+    solve_timeout : `int`, optional
+        The maximum time in seconds to let the solver run.
 
     Returns
     -------
@@ -126,7 +130,7 @@ def resolve_frame_wcs(
         scale_units="arcsecperpix",
         scale_lower=scale_lower,
         scale_upper=scale_upper,
-        solve_timeout=300,
+        solve_timeout=solve_timeout,
     )
     if header is None:
         logger.warning(f"Plate solve failed for {image.path}; no WCS available.")
@@ -222,10 +226,76 @@ def identify_session_stars(
         A bundle containing the map data, the list of identified stars,
         and some stats about how well the process worked.
     """
+    data, unique_sources, sources_detected = _detect_and_limit_session_sources(
+        reference_image, star_identifier, max_detections
+    )
+
+    stellar_objects = star_identifier._build_stellar_objects_from_sources(unique_sources)
+
+    wcs, reused_existing_header_wcs, solve_attempted = resolve_frame_wcs(
+        reference_image,
+        star_identifier,
+        allow_solve=True,
+        center_ra=center_ra,
+        center_dec=center_dec,
+        sources=unique_sources,
+        write_back=write_back,
+    )
+
+    height, width = (data.shape[0], data.shape[1]) if data is not None else (0, 0)
+
+    if wcs is not None and stellar_objects:
+        star_identifier.identify_stars_with_wcs(stellar_objects, wcs, width, height)
+
+    wcs, stellar_objects, reused_existing_header_wcs, solve_attempted, header_wcs_replaced = (
+        _reverify_wcs_solution(
+            reference_image,
+            star_identifier,
+            unique_sources,
+            center_ra,
+            center_dec,
+            wcs,
+            stellar_objects,
+            reused_existing_header_wcs,
+            solve_attempted,
+            width,
+            height,
+            write_back,
+        )
+    )
+
+    simbad_matched_count = sum(1 for star in stellar_objects if star.spectral_type)
+
+    return SessionIdentificationResult(
+        wcs=wcs,
+        stellar_objects=stellar_objects,
+        reused_existing_header_wcs=reused_existing_header_wcs,
+        solve_attempted=solve_attempted,
+        plate_solve_succeeded=wcs is not None,
+        simbad_matched_count=simbad_matched_count,
+        sources_detected=sources_detected,
+        header_wcs_replaced_after_verification=header_wcs_replaced,
+    )
+
+
+def _detect_and_limit_session_sources(
+    reference_image: AstrometricsImage, star_identifier: StarIdentifier, max_detections: int | None
+) -> tuple[Any, list[dict], int]:
+    """Detect a reference frame's stars and cap how many will be identified.
+
+    Returns
+    -------
+    data : `numpy.ndarray` or `None`
+        The frame's pixel data, color-collapsed to 2-D if needed.
+    unique_sources : `list` [`dict`]
+        The detected sources, capped at the identification limit.
+    sources_detected : `int`
+        How many unique sources were detected before capping.
+    """
     data = reference_image.data
     is_color_frame = data is not None and data.ndim == 3
     if is_color_frame:
-        from astrometricslib.image_processing.fits_access import collapse_to_2d
+        from astrometricslib.drivers.fits_access import collapse_to_2d
 
         data = collapse_to_2d(data)
 
@@ -251,80 +321,87 @@ def identify_session_stars(
     if isinstance(identification_limit, int) and identification_limit > 0:
         unique_sources = unique_sources[:identification_limit]
 
-    stellar_objects = star_identifier._build_stellar_objects_from_sources(unique_sources)
+    return data, unique_sources, sources_detected
 
-    wcs, reused_existing_header_wcs, solve_attempted = resolve_frame_wcs(
+
+def _reverify_wcs_solution(
+    reference_image: AstrometricsImage,
+    star_identifier: StarIdentifier,
+    unique_sources: list[dict],
+    center_ra: float | None,
+    center_dec: float | None,
+    wcs: WCS | None,
+    stellar_objects: list[StellarObject],
+    reused_existing_header_wcs: bool,
+    solve_attempted: bool,
+    width: int,
+    height: int,
+    write_back: bool,
+) -> tuple[WCS | None, list[StellarObject], bool, bool, bool]:
+    """Re-solve a reused header WCS that turns out to be untrustworthy.
+
+    Returns
+    -------
+    wcs : `astropy.wcs.WCS` or `None`
+        The WCS to use going forward -- the fresh solve if it proved
+        better, otherwise unchanged.
+    stellar_objects : `list` [`StellarObject`]
+        The stars identified against `wcs`.
+    reused_existing_header_wcs : `bool`
+        Whether the returned WCS is still the reused header one.
+    solve_attempted : `bool`
+        Whether a fresh plate solve was attempted, folded in with the
+        caller's own `solve_attempted`.
+    header_wcs_replaced : `bool`
+        True if the reused header WCS was discarded in favor of a
+        fresh solve.
+    """
+    if not (reused_existing_header_wcs and _reused_wcs_looks_untrustworthy(stellar_objects)):
+        return wcs, stellar_objects, reused_existing_header_wcs, solve_attempted, False
+
+    matched_before = _catalog_matched_count(stellar_objects)
+    logger.warning(
+        f"Reused header WCS for {reference_image.path} identified only "
+        f"{matched_before}/{len(stellar_objects)} stars against a catalog; "
+        "discarding it and plate-solving this frame fresh."
+    )
+    # write_back=False: the header is only corrected below, once the
+    # fresh solve has actually proven better. Overwriting first would
+    # destroy the existing solution even when the re-solve turns out
+    # worse (or fails outright).
+    fresh_wcs, _, fresh_solve_attempted = resolve_frame_wcs(
         reference_image,
         star_identifier,
         allow_solve=True,
         center_ra=center_ra,
         center_dec=center_dec,
         sources=unique_sources,
-        write_back=write_back,
+        write_back=False,
+        ignore_existing_wcs=True,
     )
+    solve_attempted = solve_attempted or fresh_solve_attempted
 
-    height, width = (data.shape[0], data.shape[1]) if data is not None else (0, 0)
+    if fresh_wcs is None:
+        return wcs, stellar_objects, reused_existing_header_wcs, solve_attempted, False
 
-    if wcs is not None and stellar_objects:
-        star_identifier.identify_stars_with_wcs(stellar_objects, wcs, width, height)
+    # Identify onto *fresh* objects: the first pass already mutated
+    # the originals (ids, names, coordinates), so reusing them would
+    # compare a re-identified list against itself.
+    fresh_objects = star_identifier._build_stellar_objects_from_sources(unique_sources)
+    star_identifier.identify_stars_with_wcs(fresh_objects, fresh_wcs, width, height)
+    matched_after = _catalog_matched_count(fresh_objects)
 
-    header_wcs_replaced = False
-    if reused_existing_header_wcs and _reused_wcs_looks_untrustworthy(stellar_objects):
-        matched_before = _catalog_matched_count(stellar_objects)
-        logger.warning(
-            f"Reused header WCS for {reference_image.path} identified only "
-            f"{matched_before}/{len(stellar_objects)} stars against a catalog; "
-            "discarding it and plate-solving this frame fresh."
+    if matched_after <= matched_before:
+        logger.info(
+            f"Fresh plate solve for {reference_image.path} did not improve catalog "
+            f"matches ({matched_before} -> {matched_after}); keeping the header WCS."
         )
-        # write_back=False: the header is only corrected below, once the
-        # fresh solve has actually proven better. Overwriting first would
-        # destroy the existing solution even when the re-solve turns out
-        # worse (or fails outright).
-        fresh_wcs, _, fresh_solve_attempted = resolve_frame_wcs(
-            reference_image,
-            star_identifier,
-            allow_solve=True,
-            center_ra=center_ra,
-            center_dec=center_dec,
-            sources=unique_sources,
-            write_back=False,
-            ignore_existing_wcs=True,
-        )
-        solve_attempted = solve_attempted or fresh_solve_attempted
+        return wcs, stellar_objects, reused_existing_header_wcs, solve_attempted, False
 
-        if fresh_wcs is not None:
-            # Identify onto *fresh* objects: the first pass already mutated
-            # the originals (ids, names, coordinates), so reusing them would
-            # compare a re-identified list against itself.
-            fresh_objects = star_identifier._build_stellar_objects_from_sources(unique_sources)
-            star_identifier.identify_stars_with_wcs(fresh_objects, fresh_wcs, width, height)
-            matched_after = _catalog_matched_count(fresh_objects)
-
-            if matched_after > matched_before:
-                logger.info(
-                    f"Fresh plate solve for {reference_image.path} improved catalog matches "
-                    f"{matched_before} -> {matched_after}; using it instead of the header WCS."
-                )
-                wcs, stellar_objects = fresh_wcs, fresh_objects
-                reused_existing_header_wcs = False
-                header_wcs_replaced = True
-                if write_back:
-                    _write_wcs_to_header(reference_image.path, fresh_wcs)
-            else:
-                logger.info(
-                    f"Fresh plate solve for {reference_image.path} did not improve catalog "
-                    f"matches ({matched_before} -> {matched_after}); keeping the header WCS."
-                )
-
-    simbad_matched_count = sum(1 for star in stellar_objects if star.spectral_type)
-
-    return SessionIdentificationResult(
-        wcs=wcs,
-        stellar_objects=stellar_objects,
-        reused_existing_header_wcs=reused_existing_header_wcs,
-        solve_attempted=solve_attempted,
-        plate_solve_succeeded=wcs is not None,
-        simbad_matched_count=simbad_matched_count,
-        sources_detected=sources_detected,
-        header_wcs_replaced_after_verification=header_wcs_replaced,
+    logger.info(
+        f"Fresh plate solve for {reference_image.path} improved catalog matches "
+        f"{matched_before} -> {matched_after}; using it instead of the header WCS."
     )
+    if write_back:
+        _write_wcs_to_header(reference_image.path, fresh_wcs)
+    return fresh_wcs, fresh_objects, False, solve_attempted, True

@@ -99,11 +99,16 @@ class FrameRecord(BaseModel):
     def normalize_filter(cls, v: Any) -> Any:
         """Convert a filter name string into the official FilterType.
 
+        Also called directly (not just as a Pydantic validation hook)
+        to normalize caller-supplied filter-type strings -- see
+        `astrometricslib.pipelines.stacking.stage` and
+        `astrometricslib.pipelines.shared.frame_grouping`.
+
         Returns
         -------
-        normalized_value : `Any`
-            The official `FilterType` enum, or the original string if
-            it wasn't recognized.
+        normalized : `Any`
+            The matching `FilterType` if `v` is a recognized string,
+            otherwise `v` unchanged.
         """
         if isinstance(v, str):
             mapping = {
@@ -166,11 +171,11 @@ class Target(BaseModel):
     ra: str = Field(default="0h 0m 0s", alias="ra")
     dec: str = Field(default="0° 0′ 0′′", alias="dec")
     field_of_view: str = Field(default="0′", alias="fieldOfView")
-    main_camera: str = Field(default="ZWO ASI 533MM Pro", alias="mainCamera")
+    main_camera: str = Field(default="", alias="mainCamera")
     guide_camera: str = Field(default="", alias="guideCamera")
-    main_scope: str = Field(default="Apertura 75Q", alias="mainScope")
+    main_scope: str = Field(default="", alias="mainScope")
     guide_scope: str = Field(default="", alias="guideScope")
-    mount: str = Field(default="SW Star Adventurer GTi", alias="mount")
+    mount: str = Field(default="", alias="mount")
     processed_image: str = Field(default="", alias="processedImage")
     # The main, finished picture for this target. If multiple telescopes
     # were used, this points to the picture from the 'primary' telescope.

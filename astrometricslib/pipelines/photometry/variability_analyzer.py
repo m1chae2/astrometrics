@@ -18,14 +18,14 @@ from astropy.stats import mad_std, sigma_clip
 from photutils.aperture import CircularAnnulus, CircularAperture
 from photutils.centroids import centroid_com
 
-from astrometricslib.image_processing.fits_access import collapse_to_2d
-from astrometricslib.image_processing.saturation import (
+from astrometricslib.drivers.fits_access import collapse_to_2d
+from astrometricslib.models.quality_summary import FrameEnsembleComposition
+from astrometricslib.models.stellar_source import LightCurve, StellarObject
+from astrometricslib.pipelines.astrometry.source_detection import SourceDetector
+from astrometricslib.pipelines.shared.quality.saturation import (
     compute_saturated_pixel_fraction,
     is_saturation_significant,
 )
-from astrometricslib.image_processing.source_detection import SourceDetector
-from astrometricslib.models.quality_summary import FrameEnsembleComposition
-from astrometricslib.models.stellar_source import LightCurve, StellarObject
 
 logger = logging.getLogger(__name__)
 
@@ -764,28 +764,44 @@ class VariabilityAnalyzer:
         """Perform differential photometry using ensemble normalization.
 
         Identifies stable reference stars to calculate a per-frame
-        normalization factor.
+        normalization factor, applies it, and rejects statistical
+        outliers at both the frame level (a bad night) and the
+        individual-star level (a bad measurement).
         """
         if not self.stellar_objects:
             return
 
-        # 1. Find our group of stable reference stars. We want stars that are
-        # visible in almost every frame, don't get too bright (saturate), and
-        # are generally as bright as possible.
-        total_star_count = len(self.stellar_objects)
-        # Count distinct timestamps across the whole run, not the longest
-        # single light curve. Stars from different sessions carry
-        # different timestamp sets, so measuring coverage against one
-        # star's own frame count scores a star that only ever appears in
-        # half the run as fully covered -- which is what let a selected
-        # ensemble still trip the frame-coverage fallback below.
-        frame_count = len({
-            timestamp
-            for star in self.stellar_objects
-            if star.light_curve
-            for timestamp in star.light_curve.timestamps
-        })
+        candidates = self._score_reference_star_candidates()
+        selected, reference_ids = self._select_reference_ensemble(candidates)
+        frame_flux_data, frame_excluded_star_ids = self._build_frame_flux_ensemble(
+            candidates, selected, reference_ids
+        )
+        self.frame_ensemble_composition = [
+            FrameEnsembleComposition(
+                frame_path=self.timestamp_to_path.get(timestamp, "Unknown"),
+                ensemble_size=len(fluxes),
+                excluded_comparison_star_ids=frame_excluded_star_ids.get(timestamp, []),
+            )
+            for timestamp, fluxes in frame_flux_data.items()
+        ]
+        self._reject_outlier_frames(frame_flux_data)
+        self._apply_frame_normalization()
 
+    def _score_reference_star_candidates(self) -> list[tuple]:
+        """Score every star as a potential ensemble reference.
+
+        Ranks stars by how many frames they're usable in, how often
+        they're saturated, and how bright they are -- the three things
+        `_select_reference_ensemble` chooses between. We want stars that
+        are visible in almost every frame, don't get too bright
+        (saturate), and are generally as bright as possible.
+
+        Returns
+        -------
+        candidates : `list` of `tuple`
+            One `(star, coverage, saturated_fraction, flux, own_frames)`
+            entry per star with at least one usable measurement.
+        """
         candidates = []
         for star in self.stellar_objects:
             light_curve = star.light_curve
@@ -823,6 +839,27 @@ class VariabilityAnalyzer:
             own_frames = {timestamp for timestamp, _, _ in measurements}
             coverage = len(usable_timestamps) / len(own_frames) if own_frames else 0.0
             candidates.append((star, coverage, saturated_fraction, star.flux or 0.0, frozenset(own_frames)))
+        return candidates
+
+    def _select_reference_ensemble(self, candidates: list[tuple]) -> tuple[list[tuple], set]:
+        """Pick the reference stars used to normalize every frame.
+
+        Groups candidates by the exact set of frames they were measured
+        in -- normalization is per-frame, so a frame can only be
+        normalized by stars measured in it -- then picks the brightest,
+        least-saturated stars from each group. If too few stars meet the
+        strict coverage requirement, the requirement is relaxed in steps
+        rather than giving up, since an ensemble too small for a stable
+        median is worse than a slightly less strict one.
+
+        Returns
+        -------
+        selected : `list` of `tuple`
+            The chosen candidate entries.
+        reference_ids : `set`
+            The `id` of each selected star.
+        """
+        total_star_count = len(self.stellar_objects)
 
         # Group by the frame set a star belongs to. Normalization is
         # per-frame, so a frame can only be normalized by stars measured
@@ -887,32 +924,75 @@ class VariabilityAnalyzer:
                 f"  Normalization ensemble: no star of {total_star_count} met the coverage and "
                 "saturation requirements."
             )
+        return selected, reference_ids
 
-        # 2. Collect fluxes per timestamp for a candidate ensemble. A
-        # comparison star saturated in a given frame is excluded from
-        # that frame's median only -- it stays eligible in frames where
-        # it isn't saturated, so ensemble composition (and size) is
-        # tracked per frame rather than assumed constant across the run.
-        def _collect_frame_flux_data(candidate_ids: set) -> tuple[dict, dict]:
-            flux_data: dict = {}
-            excluded: dict = {}
-            for star in self.stellar_objects:
-                if star.id not in candidate_ids:
+    def _collect_ensemble_frame_fluxes(self, candidate_ids: set) -> tuple[dict, dict]:
+        """Collect each ensemble star's flux at every frame it's usable in.
+
+        A comparison star saturated in a given frame is excluded from
+        that frame's median only -- it stays eligible in frames where
+        it isn't saturated, so ensemble composition (and size) is
+        tracked per frame rather than assumed constant across the run.
+
+        Returns
+        -------
+        flux_data : `dict`
+            Maps each timestamp to the list of ensemble fluxes measured
+            there.
+        excluded : `dict`
+            Maps each timestamp to the ids of ensemble stars excluded
+            from it for being saturated there.
+        """
+        flux_data: dict = {}
+        excluded: dict = {}
+        for star in self.stellar_objects:
+            if star.id not in candidate_ids:
+                continue
+            for timestamp, flux, is_saturated in zip(
+                star.light_curve.timestamps,
+                star.light_curve.fluxes,
+                star.light_curve.is_saturated,
+                strict=False,
+            ):
+                if is_saturated:
+                    excluded.setdefault(timestamp, []).append(star.id)
                     continue
-                for timestamp, flux, is_saturated in zip(
-                    star.light_curve.timestamps,
-                    star.light_curve.fluxes,
-                    star.light_curve.is_saturated,
-                    strict=False,
-                ):
-                    if is_saturated:
-                        excluded.setdefault(timestamp, []).append(star.id)
-                        continue
-                    if flux > 0:
-                        flux_data.setdefault(timestamp, []).append(flux)
-            return flux_data, excluded
+                if flux > 0:
+                    flux_data.setdefault(timestamp, []).append(flux)
+        return flux_data, excluded
 
-        frame_flux_data, frame_excluded_star_ids = _collect_frame_flux_data(reference_ids)
+    def _build_frame_flux_ensemble(
+        self, candidates: list[tuple], selected: list[tuple], reference_ids: set
+    ) -> tuple[dict, dict]:
+        """Collect ensemble fluxes per frame, widening the ensemble if needed.
+
+        Selection promises each member covers most frames, so the
+        ensemble as a whole should span nearly all of them. When it
+        falls well short, the strict selection is progressively widened
+        -- first to every unsaturated star, then to every detected star
+        -- rather than proceeding with too few frames normalized.
+
+        Returns
+        -------
+        frame_flux_data : `dict`
+            Maps each timestamp to the ensemble fluxes measured there.
+        frame_excluded_star_ids : `dict`
+            Maps each timestamp to the ids of stars excluded from it.
+        """
+        # Count distinct timestamps across the whole run, not the longest
+        # single light curve. Stars from different sessions carry
+        # different timestamp sets, so measuring coverage against one
+        # star's own frame count scores a star that only ever appears in
+        # half the run as fully covered -- which is what let a selected
+        # ensemble still trip the frame-coverage fallback below.
+        frame_count = len({
+            timestamp
+            for star in self.stellar_objects
+            if star.light_curve
+            for timestamp in star.light_curve.timestamps
+        })
+
+        frame_flux_data, frame_excluded_star_ids = self._collect_ensemble_frame_fluxes(reference_ids)
 
         # Selection promises each member covers most frames, so the
         # ensemble as a whole should span nearly all of them. When it
@@ -951,30 +1031,30 @@ class VariabilityAnalyzer:
                 f"  Normalization ensemble only covered {len(frame_flux_data)}/{total_frame_count} "
                 f"frames; widening to {len(widened_ids)} unsaturated stars."
             )
-            reference_ids = widened_ids
-            frame_flux_data, frame_excluded_star_ids = _collect_frame_flux_data(reference_ids)
+            frame_flux_data, frame_excluded_star_ids = self._collect_ensemble_frame_fluxes(widened_ids)
 
             if len(frame_flux_data) < min_required_frames:
                 logger.warning(
                     f"  Still only {len(frame_flux_data)}/{total_frame_count} frames covered; "
                     "falling back to all detected stars with positive flux."
                 )
-                reference_ids = {s.id for s in self.stellar_objects}
-                frame_flux_data, frame_excluded_star_ids = _collect_frame_flux_data(reference_ids)
+                all_ids = {s.id for s in self.stellar_objects}
+                frame_flux_data, frame_excluded_star_ids = self._collect_ensemble_frame_fluxes(all_ids)
 
-        self.frame_ensemble_composition = [
-            FrameEnsembleComposition(
-                frame_path=self.timestamp_to_path.get(timestamp, "Unknown"),
-                ensemble_size=len(fluxes),
-                excluded_comparison_star_ids=frame_excluded_star_ids.get(timestamp, []),
-            )
-            for timestamp, fluxes in frame_flux_data.items()
-        ]
+        return frame_flux_data, frame_excluded_star_ids
 
-        # 3. Calculate Normalization Factor per Frame (Median of Ensemble)
+    def _reject_outlier_frames(self, frame_flux_data: dict) -> None:
+        """Compute each frame's normalization factor, rejecting outlier frames.
+
+        A frame whose ensemble median is a statistical outlier against
+        every other frame's is more likely a clouded-out or otherwise
+        bad frame than a real brightness signal, so it's rejected
+        outright (added to `self.rejected_files`) rather than
+        normalized. Sets `self.frame_reference_flux`.
+        """
         raw_normalization_factors = {t: np.median(fluxes) for t, fluxes in frame_flux_data.items() if fluxes}
 
-        # 3b. Statistical Outlier Rejection (Pass 1: More Aggressive MAD)
+        # Statistical Outlier Rejection (Pass 1: More Aggressive MAD)
         if len(raw_normalization_factors) > 10:
             factors_list = sorted(raw_normalization_factors.items())
             times = [f[0] for f in factors_list]
@@ -1009,7 +1089,21 @@ class VariabilityAnalyzer:
         else:
             self.frame_reference_flux = raw_normalization_factors
 
-        # 4. Apply Normalization to Valid Frames Only.
+    def _apply_frame_normalization(self) -> bool:
+        """Divide each star's flux by its frame's normalization factor.
+
+        Frames with no usable normalization factor are dropped from
+        that star's light curve entirely, since a flux with no
+        normalization is not comparable across the run.
+
+        Returns
+        -------
+        applied : `bool`
+            Whether normalization was actually applied. `False` if no
+            frame had a usable factor at all, in which case every
+            star's raw (unnormalized) light curve is left untouched
+            rather than destroying its measured photometry.
+        """
         # Safety net: if ensemble normalization couldn't establish a
         # usable per-frame factor for *any* frame (frame_reference_flux
         # empty), the loop below would previously wipe every star's raw
@@ -1025,7 +1119,7 @@ class VariabilityAnalyzer:
             )
             for star in self.stellar_objects:
                 star.light_curve.fluxes_normalized = list(star.light_curve.fluxes)
-            return
+            return False
 
         for star in self.stellar_objects:
             star.light_curve.fluxes_normalized = []
@@ -1076,44 +1170,54 @@ class VariabilityAnalyzer:
             star.light_curve.fluxes = new_fluxes
             star.light_curve.is_saturated = new_is_saturated if saturation_flags_aligned else []
             star.light_curve.airmasses = new_airmasses if airmasses_aligned else []
+            self._reject_outlier_measurements_for_star(star)
 
-            # --- Pass 3: Star-Level Sigma Clipping ---
-            if len(star.light_curve.fluxes_normalized) > 10:
-                flux_values = np.array(star.light_curve.fluxes_normalized)
+        return True
 
-                # Same astropy sigma_clip/mad_std equivalence as the
-                # frame-level pass above, at the historical
-                # more-permissive per-star threshold |z| < 5.0, single
-                # pass (maxiters=1). The mad_std > 0 guard preserves
-                # the historical skip when MAD collapses to zero.
-                if mad_std(flux_values) > 0:
-                    clipped_fluxes = sigma_clip(
-                        flux_values, sigma=5.0, maxiters=1, cenfunc="median", stdfunc="mad_std"
-                    )
-                    valid_mask = ~clipped_fluxes.mask
+    def _reject_outlier_measurements_for_star(self, star: StellarObject) -> None:
+        """Sigma-clip one star's own normalized light curve.
 
-                    if not np.all(valid_mask):
-                        star.light_curve.timestamps = [
-                            t for i, t in enumerate(star.light_curve.timestamps) if valid_mask[i]
-                        ]
-                        star.light_curve.fluxes = [
-                            f for i, f in enumerate(star.light_curve.fluxes) if valid_mask[i]
-                        ]
-                        star.light_curve.fluxes_normalized = [
-                            fn for i, fn in enumerate(star.light_curve.fluxes_normalized) if valid_mask[i]
-                        ]
-                        # Same reason as the rejected-frame filter above:
-                        # every per-frame array shares one index space.
-                        star.light_curve.is_saturated = [
-                            s
-                            for i, s in enumerate(star.light_curve.is_saturated)
-                            if i < len(valid_mask) and valid_mask[i]
-                        ]
-                        star.light_curve.airmasses = [
-                            a
-                            for i, a in enumerate(star.light_curve.airmasses)
-                            if i < len(valid_mask) and valid_mask[i]
-                        ]
+        Run right after that star's frame-level normalization above,
+        this catches the star's own measurement outliers (a cosmic ray,
+        a bad centroid) that global frame-level clipping wouldn't catch,
+        since they're specific to one star rather than one frame.
+        """
+        if len(star.light_curve.fluxes_normalized) > 10:
+            flux_values = np.array(star.light_curve.fluxes_normalized)
+
+            # Same astropy sigma_clip/mad_std equivalence as the
+            # frame-level pass above, at the historical
+            # more-permissive per-star threshold |z| < 5.0, single
+            # pass (maxiters=1). The mad_std > 0 guard preserves
+            # the historical skip when MAD collapses to zero.
+            if mad_std(flux_values) > 0:
+                clipped_fluxes = sigma_clip(
+                    flux_values, sigma=5.0, maxiters=1, cenfunc="median", stdfunc="mad_std"
+                )
+                valid_mask = ~clipped_fluxes.mask
+
+                if not np.all(valid_mask):
+                    star.light_curve.timestamps = [
+                        t for i, t in enumerate(star.light_curve.timestamps) if valid_mask[i]
+                    ]
+                    star.light_curve.fluxes = [
+                        f for i, f in enumerate(star.light_curve.fluxes) if valid_mask[i]
+                    ]
+                    star.light_curve.fluxes_normalized = [
+                        fn for i, fn in enumerate(star.light_curve.fluxes_normalized) if valid_mask[i]
+                    ]
+                    # Same reason as the rejected-frame filter above:
+                    # every per-frame array shares one index space.
+                    star.light_curve.is_saturated = [
+                        s
+                        for i, s in enumerate(star.light_curve.is_saturated)
+                        if i < len(valid_mask) and valid_mask[i]
+                    ]
+                    star.light_curve.airmasses = [
+                        a
+                        for i, a in enumerate(star.light_curve.airmasses)
+                        if i < len(valid_mask) and valid_mask[i]
+                    ]
 
     def identify_variable_stars(
         self, sigma_threshold: float = DEFAULT_VARIABILITY_SIGMA_THRESHOLD
@@ -1242,15 +1346,29 @@ class VariabilityAnalyzer:
         if len(fluxes) < 5:
             return None
 
-        frequency, power = LombScargle(t_days, fluxes).autopower()
+        periodogram = LombScargle(t_days, fluxes)
+        frequency, power = periodogram.autopower()
         best_idx = int(np.argmax(power))
         best_period = float(1.0 / frequency[best_idx]) if frequency[best_idx] > 0 else 0.0
         best_power = float(power[best_idx])
 
+        try:
+            false_alarm_probability = float(
+                periodogram.false_alarm_probability(
+                    min(best_power, 1.0),
+                    method="baluev",
+                    minimum_frequency=float(frequency.min()),
+                    maximum_frequency=float(frequency.max()),
+                )
+            )
+        except Exception as false_alarm_error:
+            logger.debug("Could not compute a false-alarm probability: %s", false_alarm_error)
+            false_alarm_probability = 1.0
+
         result = PeriodogramResult(
             best_period_days=best_period,
             power=best_power,
-            false_alarm_probability=0.01 if best_power > 0.5 else 0.5,
+            false_alarm_probability=false_alarm_probability,
         )
         star.light_curve.periodogram = result
         return result

@@ -8,6 +8,7 @@ the one place that logic lives, so every pipeline answers the question
 the same way.
 """
 
+import os
 from typing import Any
 
 from astrometricslib.models.target import FrameRecord
@@ -159,7 +160,7 @@ def add_frame(  # ruff: ignore[missing-return-type-undocumented-public-function]
         If adding this frame would mix spectral ('SPEC') and standard
         imaging frames on the same target.
     """
-    from astrometricslib.catalog_services.frame_scanning import create_frame_record_from_fits
+    from astrometricslib.pipelines.shared.frame_scanning import create_frame_record_from_fits
 
     record = create_frame_record_from_fits(path, camera)
     record.role = role
@@ -181,8 +182,13 @@ def add_frame(  # ruff: ignore[missing-return-type-undocumented-public-function]
             "Stacking mixed frame types is not permitted."
         )
 
+    # Compare resolved paths, not raw strings -- the same physical frame
+    # reachable via two different spellings (a relative vs. absolute
+    # path, a redundant "./", or a symlink) would otherwise be recorded
+    # twice.
+    real_path = os.path.realpath(path)
     for f in target.frames:
-        if f.path == path:
+        if os.path.realpath(f.path) == real_path:
             f.role = role
             if filter_type is not None:
                 f.filter = record.filter

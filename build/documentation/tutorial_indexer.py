@@ -2,9 +2,16 @@
 
 import json
 import logging
+import textwrap
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+# Matches this repo's other prose line-length convention (see pyproject.toml's
+# doc-line-too-long rule) purely so the wrapped width looks intentional, not
+# because MyST/CommonMark cares -- a paragraph is every consecutive run of
+# non-blank lines regardless of where each one happens to end.
+_PROSE_WRAP_WIDTH = 79
 
 
 def generate_tutorials_index(app):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
@@ -63,19 +70,26 @@ def generate_tutorials_index(app):  # ruff: ignore[missing-type-function-argumen
                     "link": doc_link,
                 })
 
+    intro_paragraph = (
+        "Welcome to **Learn Astrometrics**, an automatically discovered collection of "
+        "executable Jupyter Notebook tutorials (`.ipynb`) covering scientific image "
+        "processing, target catalog queries, photometry, spectroscopy, moving object "
+        "recovery, observation planning, and telescope control using `astrometricslib` "
+        "and `wayfindinglib`."
+    )
+    usage_paragraph = (
+        "Each tutorial is an executable Jupyter Notebook stored in the "
+        "`documentation/notebooks/` directory. You can open and run them interactively "
+        "in VS Code or JupyterLab, or click any card below to view the rendered "
+        "notebook in the browser."
+    )
+
     out = [
         "# Learn Astrometrics: Interactive Notebook Tutorials",
         "",
-        "Welcome to **Learn Astrometrics**, an automatically discovered collection of ",
-        "executable Jupyter Notebook tutorials (`.ipynb`) covering scientific image ",
-        "processing, target catalog queries, photometry, spectroscopy, moving object ",
-        "recovery, observation planning, and telescope control using `astrometricslib` ",
-        "and `wayfindinglib`.",
+        *textwrap.fill(intro_paragraph, width=_PROSE_WRAP_WIDTH).splitlines(),
         "",
-        "Each tutorial is an executable Jupyter Notebook stored in the ",
-        "`documentation/notebooks/` directory. You can open and run them interactively ",
-        "in VS Code or JupyterLab, or click any card below to view the rendered ",
-        "notebook in the browser.",
+        *textwrap.fill(usage_paragraph, width=_PROSE_WRAP_WIDTH).splitlines(),
         "",
         "---",
         "",

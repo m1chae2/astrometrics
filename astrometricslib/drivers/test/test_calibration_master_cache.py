@@ -32,6 +32,15 @@ def _make_processor(tmp_path):  # ruff: ignore[missing-type-function-argument, m
 def _stage_frames(target_folder, subdirectory, library_directory, count):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
     """Symlink `count` library frames into a staging subdirectory.
 
+    Skips writing a library frame that already has the expected content,
+    rather than rewriting it unconditionally: `_calibration_source_fingerprint`
+    hashes mtime truncated to whole seconds, so restaging the same
+    `library_directory` a second time (as the cache round-trip tests do,
+    modelling two runs against the same physical calibration frames) would
+    otherwise flakily invalidate the cache whenever the two calls happen to
+    straddle a wall-clock second boundary -- a real frame set that hasn't
+    changed doesn't get touched between runs either.
+
     Returns
     -------
     staging_directory : `str`
@@ -42,8 +51,16 @@ def _stage_frames(target_folder, subdirectory, library_directory, count):  # ruf
     os.makedirs(library_directory, exist_ok=True)
     for index in range(count):
         library_frame = os.path.join(library_directory, f"frame_{index}.fits")
+        content = f"library frame {index}"
+        already_current = False
+        if os.path.exists(library_frame):
+            with open(library_frame) as handle:
+                already_current = handle.read() == content
+        if already_current:
+            os.symlink(library_frame, os.path.join(staging, f"staged_{index:05d}.fits"))
+            continue
         with open(library_frame, "w") as handle:
-            handle.write(f"library frame {index}")
+            handle.write(content)
         os.symlink(library_frame, os.path.join(staging, f"staged_{index:05d}.fits"))
     return staging
 

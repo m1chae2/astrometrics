@@ -67,8 +67,9 @@ class ProcessingConfig(BaseModel):
     path : `str`
         Library index storage path, by default ``"libraryIndex"``.
     frames_path : `str` or `None`
-        Filesystem path where captured frames are stored, by default
-        `None`.
+        Filesystem path where captured frames are stored -- always a
+        `"frames"` subfolder of `path`, not independently
+        configurable. Reported here for convenience, by default `None`.
     rejection_sigma_mode : `str`
         Rejection sigma selection mode, by default ``"adaptive"``.
     rejection_sigma_low : `float`
@@ -80,7 +81,9 @@ class ProcessingConfig(BaseModel):
     filter_round_percentile : `str` or `None`
         Siril ``-filter-round`` percentile setting, by default `None`.
     stack_weight : `str` or `None`
-        Stack weighting strategy, by default ``"wfwhm"``.
+        Stack weighting strategy, by default `None` (unweighted). Siril's
+        ``-weight=`` argument is only available in releases newer than the
+        one Ubuntu's apt package ships.
     generate_rejmap : `bool`
         Whether to generate a rejection map alongside the stack, by
         default `True`.
@@ -97,7 +100,7 @@ class ProcessingConfig(BaseModel):
     rejection_sigma_high: float = 3.0
     filter_wfwhm_percentile: str | None = None
     filter_round_percentile: str | None = None
-    stack_weight: str | None = "wfwhm"
+    stack_weight: str | None = None
     generate_rejmap: bool = True
     background_homogeneity_check_enabled: bool = True
 
@@ -114,23 +117,22 @@ class ParallelismConfig(BaseModel):
     target_workers : `str`
         Configured outer worker count for target processing, or
         ``"auto"``, by default ``"auto"``.
-    siril_concurrency : `int`
-        Maximum concurrent Siril processes, by default 2.
+    max_concurrent_jobs : `int`
+        Maximum concurrent heavy jobs (Siril stacking and
+        photometry/spectroscopy analysis share this one pool), by
+        default 2.
     photometry_workers : `str`
         Configured worker count for photometry processing, or
         ``"auto"``, by default ``"auto"``.
     worker_niceness : `int`
         POSIX ``nice`` value applied to spawned worker processes, by
         default 10.
-    analysis_concurrency : `int`
-        Maximum concurrent analysis processes, by default 2.
     """
 
     target_workers: str = "auto"
-    siril_concurrency: int = 2
+    max_concurrent_jobs: int = 2
     photometry_workers: str = "auto"
     worker_niceness: int = 10
-    analysis_concurrency: int = 2
 
 
 class AppConfigSchema(BaseModel):

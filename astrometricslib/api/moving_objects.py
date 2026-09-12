@@ -67,7 +67,12 @@ class MovingObjectRecovery:
         ValueError
             If the target has no `stacked_image`.
         """  # ruff: ignore[docstring-extraneous-exception] -- genuinely propagated from self._pipeline.process
-        return self._pipeline.process(target)
+        light_frames = [
+            (frame.path, frame.timestamp)
+            for frame in target.frames
+            if frame.role == "LIGHT" and frame.timestamp is not None
+        ]
+        return self._pipeline.process(target.id, target.stacked_image, light_frames)
 
     @property
     def last_run_metrics(self) -> dict[str, int]:

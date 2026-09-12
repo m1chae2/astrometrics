@@ -107,6 +107,7 @@ export interface ActionRegistry {
     "system:save_config": { payload: { config: Record<string, Record<string, any>> }; response: boolean };
     "system:introspection": { payload: Record<string, never>; response: IntrospectionEndpoint[] };
     "system:cameras": { payload: Record<string, never>; response: string[] };
+    "system:filters": { payload: Record<string, never>; response: string[] };
     "system:pulse": { payload: Record<string, never>; response: SystemPulse };
     "system:frontend_log": { payload: { level: string; message: string; stack?: string; componentStack?: string }; response: void };
 

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 from astropy.wcs import WCS
 
-from astrometricslib.image_processing.image import AstrometricsImage
+from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.models.stellar_source import StellarObject
 
 

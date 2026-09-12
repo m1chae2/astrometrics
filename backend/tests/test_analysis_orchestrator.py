@@ -73,7 +73,7 @@ class TestRunSpectroscopyAnalysis:
         orchestrator = _make_orchestrator(astrometrics=astrometrics)
         orchestrator._target_service.get_targets.return_value = target
         orchestrator._config_service.get_photometry_workers.return_value = 1
-        orchestrator._config_service.get_analysis_concurrency.return_value = 1
+        orchestrator._config_service.get_max_concurrent_jobs.return_value = 1
         orchestrator._config_service.get_library_path.return_value = str(tmp_path)
 
         results = orchestrator._run_spectroscopy_analysis(

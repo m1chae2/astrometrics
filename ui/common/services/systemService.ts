@@ -125,6 +125,20 @@ export async function fetchAvailableCameras(): Promise<string[]> {
 }
 
 /**
+ * Fetches the filters this observatory's filter wheel is loaded with.
+ * @return List of filter names.
+ */
+export async function fetchAvailableFilters(): Promise<string[]> {
+    try {
+        const data = await callBackend("system:filters", {});
+        return Array.isArray(data) ? data : [];
+    } catch (err: unknown) {
+        console.error('Failed to fetch available filters', err);
+        return [];
+    }
+}
+
+/**
  * Fetches a lightweight status pulse of telescope and active background tasks.
  * @return Mapped SystemPulse.
  */

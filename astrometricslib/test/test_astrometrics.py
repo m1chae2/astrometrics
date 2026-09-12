@@ -10,9 +10,10 @@ from astrometricslib.utilities.config_loader import AppConfiguration
 
 
 def test_astrometrics_target_access(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify the interface retrieves targets from the target directory.
+    """Verify the interface retrieves targets created through the API.
 
-    Targets are created on disk if they do not already exist there.
+    Targets created via `TargetCatalog.create` must show up again on a
+    subsequent `TargetCatalog.list` call.
     """
     # Setup mock config
     config = AppConfiguration()
@@ -28,10 +29,7 @@ def test_astrometrics_target_access(tmp_path):  # ruff: ignore[missing-type-func
         # Verify initial state
         assert len(astrometrics.targets.list()) == 0
 
-        # Manually create a target file to verify astrometrics reading
-        target_json = library_path / "targets" / "Vega.json"
-        with open(target_json, "w") as f:
-            f.write('{"id": "Vega", "right_ascension": "05 00 00", "declination": "+45 00 00"}')
+        astrometrics.targets.create("Vega")
 
         targets = astrometrics.targets.list()
         assert len(targets) == 1

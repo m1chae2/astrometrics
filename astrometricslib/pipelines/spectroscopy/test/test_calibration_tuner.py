@@ -89,3 +89,8 @@ def test_spectroscopy_calibration_tuning():  # ruff: ignore[missing-return-type-
     # Verify that the config was updated with tuned values
     assert config.get_value(section_name, "grating_distance_mm") == str(res["fitted_grating_distance_mm"])
     assert config.get_value(section_name, "dispersion_start_px") == str(res["fitted_dispersion_start_px"])
+    assert isinstance(res["use_flare_mask_extraction"], bool)
+    assert (
+        config.get_value(section_name, "use_flare_mask_extraction")
+        == str(res["use_flare_mask_extraction"]).lower()
+    )

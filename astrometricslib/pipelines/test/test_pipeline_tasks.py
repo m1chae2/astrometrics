@@ -15,7 +15,7 @@ from astropy.io import fits
 from astropy.modeling.models import Gaussian2D
 
 from astrometricslib import Astrometrics
-from astrometricslib.data_access.catalog_access import CatalogAccess, StarPosition
+from astrometricslib.drivers.catalog_access import CatalogAccess, StarPosition
 from astrometricslib.models.moving_object import CascadeStage
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import FrameRecord, Target
@@ -424,7 +424,7 @@ def test_target_analyze_frame_spectroscopy(tmp_path, mocker):  # ruff: ignore[mi
         hdu.writeto(fit_path, overwrite=True)
 
         # Mock Pipelines
-        from astrometricslib.image_processing.image import AstrometricsImage
+        from astrometricslib.drivers.image import AstrometricsImage
         from astrometricslib.pipelines.shared.analysis_context import AnalysisContext
 
         img = AstrometricsImage(str(fit_path))
@@ -448,7 +448,7 @@ def test_target_analyze_frame_spectroscopy(tmp_path, mocker):  # ruff: ignore[mi
         assert len(target.frames) == 1
 
         # Verify recording
-        from astrometricslib.data_access.catalog_access import CatalogAccess
+        from astrometricslib.drivers.catalog_access import CatalogAccess
 
         loaded = CatalogAccess(config).get("stellar_catalog", {})
         assert len(loaded) == 1
@@ -481,7 +481,7 @@ def test_analyze_frame_spectroscopy_does_not_disturb_other_stars_indexed_columns
     config.update_config({"Image Library": {"path": str(tmp_path)}})
 
     try:
-        from astrometricslib.data_access.catalog_access import CatalogAccess
+        from astrometricslib.drivers.catalog_access import CatalogAccess
 
         catalog_access = CatalogAccess(config)
         other_star = StellarObject(id="Unrelated_Star", name="Unrelated_Star")
@@ -500,7 +500,7 @@ def test_analyze_frame_spectroscopy_does_not_disturb_other_stars_indexed_columns
         hdu.header["EXPTIME"] = 5.0
         hdu.writeto(fit_path, overwrite=True)
 
-        from astrometricslib.image_processing.image import AstrometricsImage
+        from astrometricslib.drivers.image import AstrometricsImage
         from astrometricslib.pipelines.shared.analysis_context import AnalysisContext
 
         img = AstrometricsImage(str(fit_path))
@@ -1017,11 +1017,11 @@ def test_match_and_merge_across_sessions_merges_matching_stars(mocker):  # ruff:
     )
 
     mocker.patch(
-        "astrometricslib.pipelines.photometry.runner._solve_session_wcs",
+        "astrometricslib.pipelines.photometry.batch._solve_session_wcs",
         side_effect=[wcs_a, wcs_b],
     )
 
-    from astrometricslib.pipelines.photometry.runner import _match_and_merge_across_sessions
+    from astrometricslib.pipelines.photometry.batch import _match_and_merge_across_sessions
 
     target = Target(id="MatchTestTarget")
     per_session_results = [
@@ -1069,9 +1069,9 @@ def test_match_and_merge_across_sessions_reuses_pre_resolved_wcs_without_re_solv
         ra_offset=100.0 + 10 * 0.0001 - 30 * 0.0001, dec_offset=20.0 + 10 * 0.0001 - 30 * 0.0001
     )
 
-    solve_spy = mocker.patch("astrometricslib.pipelines.photometry.runner._solve_session_wcs")
+    solve_spy = mocker.patch("astrometricslib.pipelines.photometry.batch._solve_session_wcs")
 
-    from astrometricslib.pipelines.photometry.runner import _match_and_merge_across_sessions
+    from astrometricslib.pipelines.photometry.batch import _match_and_merge_across_sessions
 
     target = Target(id="MatchTestTarget")
     per_session_results = [
@@ -1099,10 +1099,10 @@ def test_match_and_merge_across_sessions_falls_back_to_solving_when_session_abse
     wcs_a = _FakeLinearWcs(ra_offset=100.0, dec_offset=20.0)
 
     solve_spy = mocker.patch(
-        "astrometricslib.pipelines.photometry.runner._solve_session_wcs", return_value=wcs_a
+        "astrometricslib.pipelines.photometry.batch._solve_session_wcs", return_value=wcs_a
     )
 
-    from astrometricslib.pipelines.photometry.runner import _match_and_merge_across_sessions
+    from astrometricslib.pipelines.photometry.batch import _match_and_merge_across_sessions
 
     target = Target(id="MatchTestTarget")
     per_session_results = [(SimpleNamespace(stellar_objects=[star_a1]), [])]
@@ -1135,11 +1135,11 @@ def test_match_and_merge_across_sessions_avoids_double_assignment_when_ambiguous
     wcs_b = _FakeLinearWcs(ra_offset=100.0, dec_offset=20.0, scale_deg_per_px=0.0000003)
 
     mocker.patch(
-        "astrometricslib.pipelines.photometry.runner._solve_session_wcs",
+        "astrometricslib.pipelines.photometry.batch._solve_session_wcs",
         side_effect=[wcs_a, wcs_b],
     )
 
-    from astrometricslib.pipelines.photometry.runner import _match_and_merge_across_sessions
+    from astrometricslib.pipelines.photometry.batch import _match_and_merge_across_sessions
 
     target = Target(id="MatchTestTarget")
     per_session_results = [
@@ -1174,7 +1174,7 @@ def test_solve_session_wcs_failure_does_not_abort_other_sessions(mocker):  # ruf
     session_a = _make_test_session(0)
     session_b = _make_test_session(1)
 
-    from astrometricslib.pipelines.photometry.runner import _solve_session_wcs
+    from astrometricslib.pipelines.photometry.batch import _solve_session_wcs
 
     target = Target(id="MatchTestTarget")
 
@@ -1206,7 +1206,7 @@ def test_rescale_and_merge_light_curve_removes_inter_session_step_change():  # r
     from datetime import datetime, timedelta
 
     from astrometricslib.models.stellar_source import LightCurve
-    from astrometricslib.pipelines.photometry.runner import _rescale_and_merge_light_curve
+    from astrometricslib.pipelines.photometry.batch import _rescale_and_merge_light_curve
 
     t0 = datetime(2026, 1, 1)
     canonical = LightCurve(

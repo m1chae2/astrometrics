@@ -14,7 +14,7 @@ from astrometricslib.api.processing import CalibrationCatalog, ProcessingPipelin
 from astrometricslib.api.stars import StellarCatalog
 from astrometricslib.api.targets import TargetCatalog
 from astrometricslib.api.visualization import Visualization
-from astrometricslib.data_access.catalog_access import AbstractCatalogAccess, CatalogAccess
+from astrometricslib.drivers.catalog_access import AbstractCatalogAccess, CatalogAccess
 
 __all__ = [
     "AbstractCatalogAccess",

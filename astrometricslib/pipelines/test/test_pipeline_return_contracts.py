@@ -52,9 +52,6 @@ EXPECTED_RESULT_KEYS: dict[str, set[str]] = {
     },
 }
 
-# Both of photometry's give-up paths return this same short shape.
-PHOTOMETRY_REJECTION_KEYS: set[str] = {"status", "targetId", "analysisMode", "message"}
-
 
 def assert_result_keys(result: dict, mode: str) -> None:
     """Check a result dictionary has exactly the keys we promised.
@@ -73,10 +70,15 @@ def assert_result_keys(result: dict, mode: str) -> None:
     )
 
 
-def test_photometry_with_no_frames_for_the_filter_returns_the_rejection_shape():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify the "no frames for this filter" give-up path keeps its shape.
+def test_photometry_with_no_frames_for_the_filter_returns_completed_with_zero_counts():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify "nothing matched this filter" is a normal empty run.
 
-    This runs before any real work starts, so it needs no image files.
+    `process_input` produces an empty, `has_work=False` `Result` before
+    any real work starts, but that `Result` still flows through
+    `validate_output`/`to_result_dict` exactly like a real run's would --
+    so the target still gets a real (empty) quality summary, flagged
+    with the reason, and the caller gets the same result shape as any
+    other completed photometry run, just with every count at zero.
     """
     target = Target(id="NoMatchingFramesTarget")
 
@@ -84,11 +86,17 @@ def test_photometry_with_no_frames_for_the_filter_returns_the_rejection_shape():
         target, pipeline_type="photometry", filter_type="LUMINANCE", register_job=False
     )
 
-    assert set(result) == PHOTOMETRY_REJECTION_KEYS
-    assert result["status"] == "failed"
+    assert_result_keys(result, "photometry")
+    assert result["status"] == "completed"
     assert result["targetId"] == "NoMatchingFramesTarget"
     assert result["analysisMode"] == "photometry"
-    assert "No frames found for filter" in result["message"]
+    assert result["starsFound"] == 0
+    assert result["totalImages"] == 0
+
+    summary = target.photometry_quality_summary
+    assert summary is not None
+    assert summary.flagged
+    assert any("No frames found for filter" in reason for reason in summary.flag_reasons)
 
 
 def test_an_unknown_analysis_mode_is_rejected_by_name():  # ruff: ignore[missing-return-type-undocumented-public-function]

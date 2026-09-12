@@ -65,7 +65,7 @@ class QualityDiagnostics:
             Median FWHM in pixels across the measured stars, or `None`
             if it could not be measured.
         """
-        from astrometricslib.image_processing.quality_metrics import measure_image_fwhm
+        from astrometricslib.pipelines.astrometry.fwhm import measure_image_fwhm
 
         return measure_image_fwhm(path)
 
@@ -84,7 +84,7 @@ class QualityDiagnostics:
             Mean rejected-pixel fraction over the rejmap, or `None` if
             the sibling rejmap file does not exist.
         """
-        from astrometricslib.image_processing.quality_metrics import measure_rejected_fraction
+        from astrometricslib.pipelines.shared.quality.quality_metrics import measure_rejected_fraction
 
         return measure_rejected_fraction(stacked_path)
 
@@ -101,7 +101,7 @@ class QualityDiagnostics:
         frames : `list` of `dict`
             One dict per registered frame, in original submission order.
         """
-        from astrometricslib.image_processing.quality_metrics import parse_seq_file
+        from astrometricslib.drivers.siril_output_parsing import parse_seq_file
 
         return parse_seq_file(seq_path)
 
@@ -119,7 +119,7 @@ class QualityDiagnostics:
             Stats for the brightest star, or `None` if the file does
             not exist or has no data rows.
         """
-        from astrometricslib.image_processing.quality_metrics import parse_zero_order_star
+        from astrometricslib.drivers.siril_output_parsing import parse_zero_order_star
 
         return parse_zero_order_star(lst_path)
 
@@ -528,7 +528,7 @@ class ProcessingPipelines:
         frames_root_path : `str`
             Root directory to scan for FITS files.
         """
-        from astrometricslib.catalog_services.frame_scanning import scan_target_directory
+        from astrometricslib.pipelines.shared.frame_scanning import scan_target_directory
 
         scan_target_directory(target, frames_root_path)
 
@@ -547,16 +547,17 @@ class ProcessingPipelines:
         frame_record : `astrometricslib.models.target.FrameRecord`
             The frame record derived from the FITS header at `path`.
         """
-        from astrometricslib.catalog_services.frame_scanning import create_frame_record_from_fits
+        from astrometricslib.pipelines.shared.frame_scanning import create_frame_record_from_fits
 
         return create_frame_record_from_fits(path, camera)
 
     def acquire_analysis_slot(self) -> AbstractContextManager:
-        """Limit how many analysis jobs can run at the same time.
+        """Limit how many heavy jobs can run at the same time.
 
         Processing images takes a lot of CPU power. This function ensures
         the computer is not overwhelmed by limiting how many jobs can run
-        simultaneously.
+        simultaneously. Shares its slot pool with stacking (see
+        `acquire_stacking_slot`) -- both draw on `max_concurrent_jobs`.
 
         Returns
         -------
@@ -566,14 +567,16 @@ class ProcessingPipelines:
         """
         from datastore.process_locks import acquire_resource_slot
 
-        return acquire_resource_slot(self._config, "analysis", self._config.get_analysis_concurrency())
+        return acquire_resource_slot(self._config, "job", self._config.get_max_concurrent_jobs())
 
     def acquire_stacking_slot(self) -> AbstractContextManager:
-        """Limit how many image stacking jobs can run at the same time.
+        """Limit how many heavy jobs can run at the same time.
 
         Stacking images uses massive amounts of RAM and CPU. This function
         ensures the computer is not crashed by limiting how many stacking
-        programs can run simultaneously.
+        programs can run simultaneously. Shares its slot pool with
+        analysis (see `acquire_analysis_slot`) -- both draw on
+        `max_concurrent_jobs`.
 
         Returns
         -------
@@ -583,4 +586,4 @@ class ProcessingPipelines:
         """
         from datastore.process_locks import acquire_resource_slot
 
-        return acquire_resource_slot(self._config, "siril", self._config.get_siril_concurrency())
+        return acquire_resource_slot(self._config, "job", self._config.get_max_concurrent_jobs())

@@ -188,12 +188,6 @@ class CalibrationLibrary(BaseModel):
         iso_or_gain : `str`
             The resolved ISO/GAIN value as a string.
         """
-        # Nikon cameras frequently have inconsistent ISO headers;
-        # assume 800 as per user requirement.
-        instrume = str(header.get("INSTRUME", header.get("CAMERA", ""))).upper()
-        if "NIKON" in instrume:
-            return "800"
-
         iso = header.get("ISOSPEED")
         if iso is None:
             iso = header.get("GAIN")
@@ -210,10 +204,7 @@ class CalibrationLibrary(BaseModel):
             Normalized camera name.
         """
         c_head = header.get("INSTRUME", header.get("CAMERA", "Unknown"))
-        c_head = c_head.replace("ZWO CCD", "ZWO").replace("ASI533", "ASI 533")
-        if c_head == "Unknown":
-            return "ZWO ASI 533MM Pro"
-        return c_head
+        return c_head.replace("ZWO CCD", "ZWO").replace("ASI533", "ASI 533")
 
     def add_dark_frame(self, image_file):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
         """Add a dark frame to the library."""
@@ -261,12 +252,12 @@ class CalibrationLibrary(BaseModel):
         except Exception as e:
             logger.error(f"Error adding bias frame {image_file}: {e}")
 
-    def add_flat_frame(self, image_file, telescope="Apertura 75Q"):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def add_flat_frame(self, image_file, telescope="Unknown"):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
         """Add a flat frame to the library."""
         if not image_file.lower().endswith((".fits", ".fit")):
             return
 
-        from astrometricslib.image_processing.filter_detection import get_filter_type
+        from astrometricslib.drivers.filter_detection import get_filter_type
 
         try:
             with fits.open(image_file) as hdu_list:
@@ -296,8 +287,8 @@ class CalibrationLibrary(BaseModel):
         self,
         iso=None,  # ruff: ignore[missing-type-function-argument]
         exposure=None,  # ruff: ignore[missing-type-function-argument]
-        camera="ZWO ASI 533MM Pro",  # ruff: ignore[missing-type-function-argument]
-        telescope="Apertura 75Q",  # ruff: ignore[missing-type-function-argument]
+        camera=None,  # ruff: ignore[missing-type-function-argument]
+        telescope=None,  # ruff: ignore[missing-type-function-argument]
         filter_type=None,  # ruff: ignore[missing-type-function-argument]
     ):
         """Check whether dark, bias, and flat frames all exist.
@@ -311,11 +302,12 @@ class CalibrationLibrary(BaseModel):
             Exposure time to look up dark frames for, by default
             `None`.
         camera : `str`, optional
-            Camera name to look up frames for, by default
-            ``"ZWO ASI 533MM Pro"``.
+            Camera name to look up frames for. If `None` (default),
+            falls back to the library's only camera if it has just one.
         telescope : `str`, optional
-            Telescope name to look up flat frames for, by default
-            ``"Apertura 75Q"``.
+            Telescope name to look up flat frames for. If `None`
+            (default), falls back to the library's only telescope if
+            it has just one.
         filter_type : `Any`, optional
             Filter to look up flat frames for, by default `None`.
 
@@ -359,7 +351,7 @@ class CalibrationLibrary(BaseModel):
 
         return {}
 
-    def get_dark_frames(self, camera="ZWO ASI 533MM Pro", exposure=None, validate_paths=True, **kwargs):  # ruff: ignore[missing-type-function-argument, missing-type-kwargs, missing-return-type-undocumented-public-function]
+    def get_dark_frames(self, camera=None, exposure=None, validate_paths=True, **kwargs):  # ruff: ignore[missing-type-function-argument, missing-type-kwargs, missing-return-type-undocumented-public-function]
         """Retrieve dark frames for a camera and exposure.
 
         Returns
@@ -394,7 +386,7 @@ class CalibrationLibrary(BaseModel):
             return [f for f in frames if os.path.exists(f)]
         return frames
 
-    def get_bias_frames(self, camera="ZWO ASI 533MM Pro", validate_paths=True, **kwargs):  # ruff: ignore[missing-type-function-argument, missing-type-kwargs, missing-return-type-undocumented-public-function]
+    def get_bias_frames(self, camera=None, validate_paths=True, **kwargs):  # ruff: ignore[missing-type-function-argument, missing-type-kwargs, missing-return-type-undocumented-public-function]
         """Retrieve bias frames for a camera.
 
         Returns
@@ -418,8 +410,8 @@ class CalibrationLibrary(BaseModel):
 
     def get_flat_frames(  # ruff: ignore[missing-return-type-undocumented-public-function]
         self,
-        telescope="Apertura 75Q",  # ruff: ignore[missing-type-function-argument]
-        camera="ZWO ASI 533MM Pro",  # ruff: ignore[missing-type-function-argument]
+        telescope=None,  # ruff: ignore[missing-type-function-argument]
+        camera=None,  # ruff: ignore[missing-type-function-argument]
         filter_type=None,  # ruff: ignore[missing-type-function-argument]
         validate_paths=True,  # ruff: ignore[missing-type-function-argument]
         **kwargs,  # ruff: ignore[missing-type-kwargs]

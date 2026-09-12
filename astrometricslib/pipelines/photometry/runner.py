@@ -1,12 +1,10 @@
-"""Tracks star brightness over time to find variable stars.
+"""Adapts photometry's per-session runs to the shared pipeline shape.
 
-A target's images span many separately registered observing sessions, and
-brightness tracking only works within one session at a time (consistent
-framing and rotation), so this runs one `VariabilityAnalyzer` pass per
-session and then, when there is more than one session, matches each
-star's light curve across sessions by its sky position
-(`_match_and_merge_across_sessions`) so a star seen on two different
-nights ends up as one combined record instead of two unrelated ones.
+A target's images span many separately registered observing sessions,
+and brightness tracking only works within one session at a time
+(consistent framing and rotation); the actual per-session and
+cross-session mechanics live in `batch.py` -- this file is the thin
+`AnalysisPipeline` adapter that drives them.
 """
 
 import logging
@@ -15,16 +13,18 @@ from typing import Any
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.contract import (
     AnalysisPipeline,
-    InputScreening,
     PipelineRequest,
-    RunOutcome,
+    Result,
     run_pipeline,
+)
+from astrometricslib.pipelines.photometry.batch import (
+    _match_and_merge_across_sessions,
+    _run_variability_analysis_for_session,
 )
 from astrometricslib.pipelines.shared.star_recording import (
     merge_photometry_stellar_object,
     record_pipeline_stars,
 )
-from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
 
 logger = logging.getLogger(__name__)
 
@@ -41,406 +41,53 @@ MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG = 0.25
 MINIMUM_ENSEMBLE_REJECTION_COUNT_TO_FLAG = 5
 
 
-def _run_variability_analysis_for_session(
-    session: Any,
-    max_workers: int | None,
-    id_prefix: str,
-    target: Target | None = None,
-    star_identifier: Any = None,
-    use_astrometry_seed: bool = True,
-) -> tuple[Any, list[Any], Any | None]:
-    """Track star brightness over a single observing session.
+def _empty_photometry_result(no_work_reason: str) -> Result:
+    """Build the `has_work=False` `Result` for photometry's give-up case.
 
-    If `use_astrometry_seed` is turned on, this function tries to
-    figure out the sky coordinates (plate solve) of the reference image.
-    It then looks up the stars in SIMBAD/Gaia databases before tracking
-    their brightness. This known identity stays with the star.
-
-    Returns
-    -------
-    analyzer : VariabilityAnalyzer
-        The tool that ran the analysis.
-    candidates : list
-        Stars that might be changing brightness (variable stars).
-    identify_result : IdentifyStarsResult or None
-        The result of looking up the stars, if we tried to do it.
-        Useful for getting the sky coordinate map (WCS) later.
-    """
-    from astrometricslib.pipelines.photometry.variability_analyzer import (
-        VariabilityAnalyzer,
-    )
-
-    seed_stars = None
-    identify_result = None
-    if use_astrometry_seed and star_identifier is not None and target is not None:
-        from astrometricslib.image_processing.image import AstrometricsImage
-        from astrometricslib.pipelines.astrometry.session_identification import (
-            identify_session_stars,
-        )
-
-        center_ra = None
-        center_dec = None
-        try:
-            center_ra = parse_coordinate_string(str(target.ra), is_ra=True)
-            center_dec = parse_coordinate_string(str(target.dec), is_ra=False)
-        except Exception as exc:
-            # Blind solve (no center hint) if the target has no usable
-            # RA/Dec yet.
-            logger.debug("Falling back to blind solve, could not parse target RA/Dec: %s", exc)
-
-        reference_image = AstrometricsImage(session.frame_paths[0])
-        if reference_image.wcs is None and target and target.stacked_image:
-            stacked_img = AstrometricsImage(target.stacked_image)
-            swcs = stacked_img.wcs
-            if swcs is not None and (swcs.is_celestial or swcs.has_celestial):
-                reference_image.wcs = swcs
-
-        identify_result = identify_session_stars(
-            reference_image, star_identifier, center_ra=center_ra, center_dec=center_dec
-        )
-        seed_stars = identify_result.stellar_objects
-
-    analyzer = VariabilityAnalyzer()
-    analyzer.process(session.frame_paths, max_workers=max_workers, id_prefix=id_prefix, seed_stars=seed_stars)
-    analyzer.normalize_light_curves()
-    analyzer.detrend_light_curves_airmass()
-    candidates = analyzer.identify_variable_stars()
-    return analyzer, candidates, identify_result
-
-
-def _solve_session_wcs(session: Any, target: Target) -> Any | None:
-    """Plate-solve a session's reference frame to get its sky coordinates.
-
-    We need this when we want to match stars across different sessions,
-    but we haven't already looked up their identities in a database.
-    (For example, if we skipped the SIMBAD lookup step earlier).
-
-    Returns
-    -------
-    wcs : `astropy.wcs.WCS` or `None`
-        The map from pixel to sky position, or None if the solve
-        failed.
-    """
-    import warnings
-
-    from astropy.wcs import WCS, FITSFixedWarning
-
-    from astrometricslib.drivers.plate_solve_interface import PlateSolver
-
-    reference_path = session.frame_paths[0]
-    try:
-        center_ra = None
-        center_dec = None
-        try:
-            center_ra = parse_coordinate_string(str(target.ra), is_ra=True)
-            center_dec = parse_coordinate_string(str(target.dec), is_ra=False)
-        except Exception as exc:
-            # Blind solve (no center hint) if the target has no usable
-            # RA/Dec yet.
-            logger.debug("Falling back to blind solve, could not parse target RA/Dec: %s", exc)
-
-        solver = PlateSolver()
-        header = solver.solve(
-            image_path=reference_path,
-            center_ra=center_ra,
-            center_dec=center_dec,
-            radius=2.0,
-            # A real M 81 solve with a center hint measured 2.27s; 30s
-            # gives >10x margin while still failing fast (vs. the
-            # shared 300s default star_identifier.py uses for a real,
-            # possibly hint-less solve) when a session's reference
-            # frame isn't solvable -- this call is best-effort only,
-            # already tolerating a failed solve by skipping cross-
-            # session matching for that session (see docstring above).
-            solve_timeout=30,
-        )
-        if header is None:
-            logger.warning(
-                f"Session {session.id} plate solve failed ({reference_path}); "
-                "skipping cross-session star matching for this session."
-            )
-            return None
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", FITSFixedWarning)
-            return WCS(header, naxis=2)
-    except Exception as solve_error:
-        logger.warning(
-            f"Session {session.id} plate solve failed ({reference_path}); "
-            f"skipping cross-session star matching for this session: {solve_error}"
-        )
-        return None
-
-
-def _stars_to_sky(stellar_objects: list[Any], wcs: Any) -> list[Any]:
-    """Convert star pixel locations into real sky coordinates (RA/Dec).
-
-    Updates the input stars with their new right ascension and declination.
-
-    Returns
-    -------
-    stars_with_position : `list`
-        Only the stars that successfully got sky coordinates.
-    """
-    import numpy as np
-
-    x_positions = []
-    y_positions = []
-    stars_with_position = []
-    for star in stellar_objects:
-        star_data = star.star_data
-        if not isinstance(star_data, dict):
-            continue
-        x = star_data.get("xcentroid", star_data.get("x_centroid"))
-        y = star_data.get("ycentroid", star_data.get("y_centroid"))
-        if x is None or y is None:
-            continue
-        x_positions.append(x)
-        y_positions.append(y)
-        stars_with_position.append(star)
-
-    if not stars_with_position:
-        return []
-
-    ra_array, dec_array = wcs.wcs_pix2world(np.array(x_positions), np.array(y_positions), 0)
-    for star, ra, dec in zip(stars_with_position, ra_array, dec_array, strict=True):
-        star.right_ascension = float(ra)
-        star.declination = float(dec)
-
-    return stars_with_position
-
-
-def _positive_median_or_none(values: list[float]) -> float | None:
-    """Median of the positive values in `values`, or `None` if none exist.
-
-    Returns
-    -------
-    median : `float` or `None`
-        The median of the positive values, or `None` if none exist.
-    """
-    import numpy as np
-
-    array = np.array(values, dtype=float)
-    array = array[array > 0]
-    return float(np.median(array)) if array.size else None
-
-
-def _rescale_flux_segment(
-    values: list[float], own_median: float | None, target_median: float | None
-) -> list[float]:
-    """Rescale a flux segment so its own median matches `target_median`.
-
-    Returns
-    -------
-    rescaled : `list` [`float`]
-        `values` unchanged if either median is unavailable or non-positive;
-        otherwise each value scaled by `target_median / own_median`.
-    """
-    if not own_median or not target_median:
-        return list(values)
-    factor = target_median / own_median
-    return [float(value) * factor for value in values]
-
-
-def _rescale_and_merge_light_curve(canonical: Any, new: Any) -> Any:
-    """Merge a star's brightness data from two different nights.
-
-    inter-session zero-point offset. The incoming (`new`) segment's
-    `fluxes_normalized`/`fluxes_detrended` are each independently
-    rescaled so their own median matches the canonical curve's existing
-    median before concatenating, then the combined curve is sorted by
-    timestamp. `magnitudes` (always empty today) is carried over
-    untouched; `periodogram`/`transit_candidate` are single computed
-    results, not per-timestamp arrays, and are dropped rather than
-    carrying a stale single-session value forward on the merged curve.
-
-    Returns
-    -------
-    merged : `LightCurve`
-        A new `LightCurve` combining both segments, sorted by timestamp.
-    """
-    from astrometricslib.models.stellar_source import LightCurve
-
-    canonical_median = _positive_median_or_none(canonical.fluxes_normalized)
-    new_median = _positive_median_or_none(new.fluxes_normalized)
-    rescaled_new_normalized = _rescale_flux_segment(new.fluxes_normalized, new_median, canonical_median)
-
-    canonical_detrended_median = _positive_median_or_none(canonical.fluxes_detrended)
-    new_detrended_median = _positive_median_or_none(new.fluxes_detrended)
-    rescaled_new_detrended = _rescale_flux_segment(
-        new.fluxes_detrended, new_detrended_median, canonical_detrended_median
-    )
-
-    combined_timestamps = canonical.timestamps + new.timestamps
-    combined_fluxes = canonical.fluxes + new.fluxes
-    combined_fluxes_normalized = canonical.fluxes_normalized + rescaled_new_normalized
-    combined_fluxes_detrended = canonical.fluxes_detrended + rescaled_new_detrended
-    combined_airmasses = canonical.airmasses + new.airmasses
-    combined_is_saturated = canonical.is_saturated + new.is_saturated
-
-    sort_order = sorted(range(len(combined_timestamps)), key=lambda i: combined_timestamps[i])
-
-    def _reordered(values):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
-        return [values[i] for i in sort_order] if len(values) == len(sort_order) else list(values)
-
-    return LightCurve(
-        timestamps=_reordered(combined_timestamps),
-        fluxes=_reordered(combined_fluxes),
-        fluxes_normalized=_reordered(combined_fluxes_normalized),
-        fluxes_detrended=_reordered(combined_fluxes_detrended),
-        airmasses=_reordered(combined_airmasses),
-        is_saturated=_reordered(combined_is_saturated),
-        magnitudes=canonical.magnitudes,
-        periodogram=None,
-        transit_candidate=None,
-    )
-
-
-def _match_and_merge_across_sessions(
-    photometry_sessions: list[Any],
-    per_session_results: list[tuple[Any, list[Any]]],
-    target: Target,
-    tolerance_arcsec: float = 5.0,
-    session_wcs_map: dict[str, Any] | None = None,
-) -> tuple[list[Any], list[str], int]:
-    """Find the same real star in different sessions and combine its data.
-
-    This takes the sky coordinates for stars in each session and pairs
-    them up if they are very close to each other (under `tolerance_arcsec`).
-    If they match, their light curves are merged into a single star record.
-    If a star only appears once, or if we don't have sky coordinates for
-    that session, it stays as its own separate record.
+    Shaped exactly like a real run that happened to process zero
+    sessions and find zero stars, so `run` can be skipped while
+    `validate_output`/`to_result_dict` still produce a normal (empty)
+    summary and result dict, with `no_work_reason` surfaced as a flag
+    rather than a one-off status/message pair.
 
     Parameters
     ----------
-    photometry_sessions : list
-        The list of observing sessions, in chronological order.
-    per_session_results : list of tuples
-        The analysis tool and variable star candidates for each session.
-    target : Target
-        The target name and RA/Dec hint used to help the plate solver
-        figure out coordinates if they are missing.
-    tolerance_arcsec : float, optional
-        How close two stars must be in arcseconds to be considered the
-        same physical star (default is 5.0").
-    session_wcs_map : dict, optional
-        A map of session IDs to their known coordinate systems (WCS).
-        This stops us from having to run the plate solver twice for the
-        same image.
+    no_work_reason : `str`
+        Why there was nothing to do; recorded as a flag reason on the
+        quality summary `validate_output` builds from this `Result`.
 
     Returns
     -------
-    merged_stellar_objects : list
-        The final list of stars, with matching ones combined.
-    sessions_missing_wcs : list of str
-        Names of sessions where we couldn't figure out the coordinates.
-    match_count : int
-        The total number of times we merged a star into another one.
+    result : `Result`
+        `has_work=False`, with every key `run` would otherwise have
+        populated in `payload` set to its zero/empty value.
     """
-    from astropy import units as astropy_units
-    from astropy.coordinates import SkyCoord, search_around_sky
+    from astrometricslib.pipelines.shared.star_recording import StarIdentificationBreakdown
 
-    from astrometricslib.models.stellar_source import StellarSessionMatch
-
-    sessions_missing_wcs: list[str] = []
-    match_count = 0
-    # One (star, ra_deg, dec_deg) entry per distinct physical star found
-    # so far. Kept as plain floats rather than individual SkyCoord
-    # objects so a matching SkyCoord *array* can be built in one call
-    # per session below -- vectorized, KD-tree-backed matching instead
-    # of a per-pair Python loop, which does not scale to the thousands
-    # of stars a dense field like M 81 detects per session.
-    canonical_registry: list[tuple[Any, float, float]] = []
-    merged_stellar_objects: list[Any] = []
-
-    for session, (analyzer, _session_candidates) in zip(
-        photometry_sessions, per_session_results, strict=True
-    ):
-        if session_wcs_map is not None and session.id in session_wcs_map:
-            wcs = session_wcs_map[session.id]
-        else:
-            wcs = _solve_session_wcs(session, target)
-        if wcs is None:
-            sessions_missing_wcs.append(session.id)
-            merged_stellar_objects.extend(analyzer.stellar_objects)
-            continue
-
-        session_stars_with_sky = _stars_to_sky(analyzer.stellar_objects, wcs)
-        if not session_stars_with_sky:
-            sessions_missing_wcs.append(session.id)
-            merged_stellar_objects.extend(analyzer.stellar_objects)
-            continue
-
-        stars_with_sky_ids = {id(star) for star in session_stars_with_sky}
-        merged_stellar_objects.extend(
-            star for star in analyzer.stellar_objects if id(star) not in stars_with_sky_ids
-        )
-
-        if not canonical_registry:
-            for star in session_stars_with_sky:
-                canonical_registry.append((star, star.right_ascension, star.declination))
-                merged_stellar_objects.append(star)
-            continue
-
-        # Greedy nearest-first one-to-one assignment: find every
-        # (canonical, session_star) pair under tolerance via a KD-tree
-        # search (`search_around_sky`, not an O(canonical x session)
-        # pairwise Python loop -- that does not scale to a dense
-        # field's thousands of stars per session), then assign in
-        # ascending-separation order while both sides remain unclaimed.
-        # A naive "first canonical entry within tolerance wins" per-star
-        # loop can double-assign in a crowded field at this tolerance.
-        canonical_coords = SkyCoord(
-            ra=[entry[1] for entry in canonical_registry] * astropy_units.deg,
-            dec=[entry[2] for entry in canonical_registry] * astropy_units.deg,
-        )
-        session_coords = SkyCoord(
-            ra=[star.right_ascension for star in session_stars_with_sky] * astropy_units.deg,
-            dec=[star.declination for star in session_stars_with_sky] * astropy_units.deg,
-        )
-        search_result = search_around_sky(
-            canonical_coords, session_coords, tolerance_arcsec * astropy_units.arcsec
-        )
-        candidate_pairs = sorted(
-            zip(
-                search_result.angular_separation.arcsecond,
-                search_result.indices_to_first_set,
-                search_result.indices_to_second_set,
-                strict=False,
+    return Result(
+        has_work=False,
+        payload={
+            "star_id_breakdown": StarIdentificationBreakdown(
+                catalog_matched=0, position_only=0, unresolved=0
             ),
-            key=lambda pair: pair[0],
-        )
-
-        claimed_canonical_indices: set[int] = set()
-        claimed_session_star_indices: set[int] = set()
-        for separation_arcsec, canonical_index, session_star_index in candidate_pairs:
-            canonical_index = int(canonical_index)
-            session_star_index = int(session_star_index)
-            if (
-                canonical_index in claimed_canonical_indices
-                or session_star_index in claimed_session_star_indices
-            ):
-                continue
-            claimed_canonical_indices.add(canonical_index)
-            claimed_session_star_indices.add(session_star_index)
-
-            canonical_star, _canonical_ra, _canonical_dec = canonical_registry[canonical_index]
-            new_star = session_stars_with_sky[session_star_index]
-            canonical_star.light_curve = _rescale_and_merge_light_curve(
-                canonical_star.light_curve, new_star.light_curve
-            )
-            canonical_star.session_matches.append(
-                StellarSessionMatch(session_id=session.id, angular_separation_arcsec=float(separation_arcsec))
-            )
-            match_count += 1
-
-        for session_star_index, star in enumerate(session_stars_with_sky):
-            if session_star_index in claimed_session_star_indices:
-                continue
-            canonical_registry.append((star, star.right_ascension, star.declination))
-            merged_stellar_objects.append(star)
-
-    return merged_stellar_objects, sessions_missing_wcs, match_count
+            "photometry_sessions": [],
+            "all_rejected_files": [],
+            "all_frame_ensemble_composition": [],
+            "session_empty_reasons": [],
+            "sessions_missing_wcs": [],
+            "cross_session_match_count": 0,
+            "long_term_candidate_count": 0,
+            "astrometry_identified_star_count": 0,
+            "sessions_with_reused_header_wcs": [],
+            "sessions_with_replaced_header_wcs": [],
+            "frames_processed": 0,
+            "candidates_formatted": [],
+            "long_term_candidates_formatted": [],
+            "image_paths": [],
+            "photometry_frames_without_timestamp": [],
+            "no_work_reason": no_work_reason,
+        },
+    )
 
 
 class PhotometryPipelineAdapter(AnalysisPipeline):
@@ -457,21 +104,25 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         """
         return "photometry"
 
-    def screen_input(self, request: PipelineRequest) -> InputScreening:
+    def process_input(self, request: PipelineRequest) -> Result:
         """Check there are frames to use and sessions to assign them to.
 
-        Photometry is the one pipeline with a real screening failure
-        mode: a filter that matches nothing, or frames with no usable
-        capture timestamp to build a session from. Either stops the run
-        before any analysis work starts.
+        Photometry is the one pipeline with a real "nothing to do" case:
+        a filter that matches nothing, or frames with no usable capture
+        timestamp to build a session from. Either produces an empty,
+        `has_work=False` `Result` instead of running -- `validate_output`
+        and `to_result_dict` still run on it, same as a real run's
+        `Result`, so the target still gets a real (empty) quality
+        summary and the reason still surfaces, as a flag rather than a
+        one-off status/message pair.
 
         Returns
         -------
-        screening : `InputScreening`
-            `can_proceed=False` with the matching "failed" result dict
-            for either failure mode; otherwise `can_proceed=True` with
-            the filtered frames and derived sessions carried in
-            `context`, so `run` does not have to redo this work.
+        result : `Result`
+            `has_work=False` for either "nothing to do" case; otherwise
+            `has_work=True` with the filtered frames and derived
+            sessions carried in `payload`, so `run` does not have to
+            redo this work.
         """
         from astrometricslib.pipelines.shared.target_sessions import derive_target_sessions
 
@@ -501,15 +152,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                 photometry_frames.append(frame)
 
         if not image_paths:
-            return InputScreening(
-                can_proceed=False,
-                early_result={
-                    "status": "failed",
-                    "targetId": target.id,
-                    "analysisMode": "photometry",
-                    "message": f"No frames found for filter: {filter_type}",
-                },
-            )
+            return _empty_photometry_result(f"No frames found for filter: {filter_type}")
 
         # Photometry tracks stars via pixel-position re-centroiding
         # against a single reference frame per analysis run; that only
@@ -524,34 +167,24 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         photometry_sessions = derive_target_sessions(target.id, photometry_frames_with_timestamp)
 
         if not photometry_sessions:
-            return InputScreening(
-                can_proceed=False,
-                early_result={
-                    "status": "failed",
-                    "targetId": target.id,
-                    "analysisMode": "photometry",
-                    "message": (
-                        "No frames with a usable capture timestamp to assign a session "
-                        f"for filter: {filter_type}"
-                    ),
-                },
+            return _empty_photometry_result(
+                f"No frames with a usable capture timestamp to assign a session for filter: {filter_type}"
             )
 
-        return InputScreening(
-            can_proceed=True,
-            context={
+        return Result(
+            payload={
                 "image_paths": image_paths,
                 "photometry_frames_without_timestamp": photometry_frames_without_timestamp,
                 "photometry_sessions": photometry_sessions,
             },
         )
 
-    def run(self, request: PipelineRequest, screening: InputScreening) -> RunOutcome:
+    def run(self, request: PipelineRequest, result: Result) -> Result:
         """Run one `VariabilityAnalyzer` pass per session, then merge them.
 
         Returns
         -------
-        outcome : `RunOutcome`
+        result : `Result`
             `stellar_objects` is every saved star; `candidates` is the
             raw (pre-merge) list of stars flagged as variable in their
             own session. Everything `validate_output` and
@@ -562,9 +195,9 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         target = request.target
         catalog_access = request.catalog_access
         options = request.options
-        photometry_sessions = screening.context["photometry_sessions"]
-        image_paths = screening.context["image_paths"]
-        photometry_frames_without_timestamp = screening.context["photometry_frames_without_timestamp"]
+        photometry_sessions = result.payload["photometry_sessions"]
+        image_paths = result.payload["image_paths"]
+        photometry_frames_without_timestamp = result.payload["photometry_frames_without_timestamp"]
 
         per_session_results = []
         all_candidates = []
@@ -683,7 +316,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             all_rejected_files
         )
 
-        return RunOutcome(
+        return Result(
             stellar_objects=all_stellar_objects,
             candidates=all_candidates,
             payload={
@@ -706,7 +339,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             },
         )
 
-    def validate_output(self, request: PipelineRequest, outcome: RunOutcome) -> Any:
+    def validate_output(self, request: PipelineRequest, result: Result) -> Any:
         """Build the quality summary and every flag this run's data earns.
 
         Returns
@@ -714,21 +347,22 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         summary : `PhotometryQualitySummary`
             Flagged for a high global-outlier rejection rate, frames
             excluded for a missing timestamp, a session with zero stars
-            detected, or a session that could not be plate-solved for
-            cross-session matching -- any, all, or none of these.
+            detected, a session that could not be plate-solved for
+            cross-session matching, or (when `process_input` found
+            nothing to do) the reason why -- any, all, or none of these.
         """
         from astrometricslib.models.quality_summary import (
             ExcludedFrame,
             PhotometryPipelineQualityMetrics,
             PhotometryQualitySummary,
-            TargetSessionContribution,
         )
         from astrometricslib.pipelines.photometry.variability_analyzer import (
             median_light_curve_scatter_mag,
         )
+        from astrometricslib.pipelines.shared.target_sessions import build_target_session_breakdown
 
         target = request.target
-        payload = outcome.payload
+        payload = result.payload
         photometry_sessions = payload["photometry_sessions"]
         all_rejected_files = payload["all_rejected_files"]
         photometry_frames_without_timestamp = payload["photometry_frames_without_timestamp"]
@@ -738,14 +372,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         frames_processed = payload["frames_processed"]
 
         rejected_paths = set(all_rejected_files)
-        photometry_session_breakdown = [
-            TargetSessionContribution(
-                session_id=session.id,
-                frames_contributed=len(session.frame_paths),
-                frames_clipped=sum(1 for path in session.frame_paths if path in rejected_paths),
-            )
-            for session in photometry_sessions
-        ]
+        photometry_session_breakdown = build_target_session_breakdown(photometry_sessions, rejected_paths)
 
         rejected_frames = [
             ExcludedFrame(path=path, reason="global frame outlier (ensemble median MAD-clipped)")
@@ -763,12 +390,12 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             target_session_ids=[session.id for session in photometry_sessions],
             target_session_breakdown=photometry_session_breakdown,
             photometry_metrics=PhotometryPipelineQualityMetrics(
-                stars_processed=len(outcome.stellar_objects),
-                stars_found=len(outcome.stellar_objects),
+                stars_processed=len(result.stellar_objects),
+                stars_found=len(result.stellar_objects),
                 frames_processed=frames_processed,
                 rejected_frames=rejected_frames,
                 frame_ensemble_composition=payload["all_frame_ensemble_composition"],
-                variable_candidate_count=len(outcome.candidates),
+                variable_candidate_count=len(result.candidates),
                 cross_session_match_count=payload["cross_session_match_count"],
                 sessions_missing_wcs=sessions_missing_wcs,
                 long_term_variable_candidate_count=payload["long_term_candidate_count"],
@@ -778,7 +405,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                 catalog_matched_star_count=star_id_breakdown.catalog_matched,
                 position_only_star_count=star_id_breakdown.position_only,
                 unresolved_star_count=star_id_breakdown.unresolved,
-                light_curve_scatter_rms_mag=median_light_curve_scatter_mag(outcome.stellar_objects),
+                light_curve_scatter_rms_mag=median_light_curve_scatter_mag(result.stellar_objects),
             ),
         )
         # The rejected frames are recorded in the metrics either way;
@@ -814,25 +441,29 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                 f"{len(sessions_missing_wcs)} session(s) could not be plate-solved for "
                 f"cross-session star matching: {', '.join(sessions_missing_wcs)}"
             )
+        no_work_reason = payload.get("no_work_reason")
+        if no_work_reason:
+            summary.flagged = True
+            summary.flag_reasons.append(no_work_reason)
         return summary
 
-    def to_result_dict(self, request: PipelineRequest, outcome: RunOutcome, summary: Any) -> dict[str, Any]:
+    def to_result_dict(self, request: PipelineRequest, result: Result, summary: Any) -> dict[str, Any]:
         """Build the result dict photometry's callers expect back.
 
         Returns
         -------
-        result : `dict`
+        result_dict : `dict`
             The completed shape carrying every brightness-tracking metric.
         """
-        payload = outcome.payload
+        payload = result.payload
         return {
             "status": "completed",
             "targetId": request.target.id,
             "totalImages": len(payload["image_paths"]),
             "analysisMode": "photometry",
-            "starsProcessed": len(outcome.stellar_objects),
+            "starsProcessed": len(result.stellar_objects),
             "spectraExtracted": 0,
-            "starsFound": len(outcome.stellar_objects),
+            "starsFound": len(result.stellar_objects),
             "framesProcessed": payload["frames_processed"],
             "rejectedCount": len(payload["all_rejected_files"]),
             "rejectedFiles": payload["all_rejected_files"],
@@ -855,7 +486,7 @@ def run_photometry_analysis(
     A thin wrapper kept at this name and signature for
     `pipelines.PIPELINE_RUNNERS` -- the actual work is
     `PhotometryPipelineAdapter`, run through the shared
-    screen/run/validate/report cycle in `run_pipeline`.
+    input/main/output processing cycle in `run_pipeline`.
 
     Parameters
     ----------
@@ -874,9 +505,11 @@ def run_photometry_analysis(
     Returns
     -------
     result : `dict`
-        Either the "failed, no usable frames" shape (``status``,
-        ``targetId``, ``analysisMode``, ``message``) or the completed
-        shape carrying every brightness-tracking metric.
+        The completed shape carrying every brightness-tracking metric,
+        even when there was no usable data -- in that case every metric
+        is zero/empty and the reason surfaces as a flag in
+        `target.photometry_quality_summary.flag_reasons` rather than as
+        a distinct return shape.
     """
     request = PipelineRequest(
         target=target,

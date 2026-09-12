@@ -22,7 +22,7 @@ import logging
 import re
 from typing import NamedTuple
 
-from astrometricslib.data_access.catalog_access import POSITION_ONLY_STAR_ID_PREFIX
+from astrometricslib.drivers.catalog_access import POSITION_ONLY_STAR_ID_PREFIX
 
 logger = logging.getLogger(__name__)
 

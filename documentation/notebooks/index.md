@@ -8,8 +8,8 @@ and `wayfindinglib`.
 
 Each tutorial is an executable Jupyter Notebook stored in the
 `documentation/notebooks/` directory. You can open and run them interactively
-in VS Code or JupyterLab, or click any card below to view the rendered
-notebook in the browser.
+in VS Code or JupyterLab, or click any card below to view the rendered notebook
+in the browser.
 
 ---
 
@@ -78,7 +78,7 @@ In this tutorial, you will learn how to use the `astrometrics.visualization` reg
 :link: /notebooks/astrometrics/user_guide/09_end_to_end_pipeline_M13
 :link-type: doc
 
-In this User Guide Cookbook, you will learn how to process a single target (M 13) through all the available pipelines in a single workflow.
+In this User Guide Cookbook, you will learn how to process a single real dataset (M 13) through all the available pipelines in a single workflow.
 :::
 
 ::::

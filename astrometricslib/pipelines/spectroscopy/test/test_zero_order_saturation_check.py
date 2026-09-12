@@ -11,7 +11,7 @@ and photometry.
 import numpy as np
 import pytest
 
-from astrometricslib.image_processing.image import AstrometricsImage
+from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.pipelines.spectroscopy.pipeline import SpectroscopyPipeline
 from astrometricslib.utilities import CameraConfig, SpectroscopyConfig
 

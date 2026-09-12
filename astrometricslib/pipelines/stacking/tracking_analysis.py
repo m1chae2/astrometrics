@@ -279,13 +279,36 @@ def _dominant_period_seconds(times: list[float], values: list[float]) -> Periodi
     if len(times) < 8:
         return empty
 
-    # Detrend first: an uncorrected drift is a much larger signal than
-    # periodic error and would otherwise dominate every trial period.
-    # Lomb-Scargle subtracts a constant offset on its own, but it does not
-    # remove a slope, so this step still has to happen here.
+    residuals = _detrend_for_periodogram(times, values)
+    if residuals is None:
+        return empty
+
+    trial_periods = _periodic_error_trial_periods(times)
+    if trial_periods is None:
+        return empty
+
+    return _fit_dominant_period(times, residuals, trial_periods)
+
+
+def _detrend_for_periodogram(times: list[float], values: list[float]) -> list[float] | None:
+    """Remove a linear trend from a series before searching for a period.
+
+    Detrending matters here because an uncorrected drift is a much
+    larger signal than periodic error and would otherwise dominate
+    every trial period. Lomb-Scargle subtracts a constant offset on
+    its own, but it does not remove a slope, so this step still has
+    to happen here.
+
+    Returns
+    -------
+    residuals : `list` [`float`] or `None`
+        The detrended series, or `None` if no trend could be fit or
+        the residuals are perfectly flat (both make a periodogram
+        meaningless).
+    """
     slope_per_hour = _linear_trend_per_hour(times, values)
     if slope_per_hour is None:
-        return empty
+        return None
     mean_time = statistics.fmean(times)
     mean_value = statistics.fmean(values)
     # The slope term is centered on the mean time, not the first sample:
@@ -302,17 +325,42 @@ def _dominant_period_seconds(times: list[float], values: list[float]) -> Periodi
     # A perfectly flat series has no periodogram at all, and handing one
     # to Lomb-Scargle divides by zero.
     if sum(residual**2 for residual in residuals) <= 0:
-        return empty
+        return None
 
+    return residuals
+
+
+def _periodic_error_trial_periods(times: list[float]) -> np.ndarray | None:
+    """Build the grid of candidate periods to test the series against.
+
+    Returns
+    -------
+    trial_periods : `numpy.ndarray` or `None`
+        240 candidate periods spanning the searchable range, or `None`
+        if the series is too short to resolve any period in that range.
+    """
     span_seconds = times[-1] - times[0]
     if span_seconds <= 0:
-        return empty
+        return None
     # A period is only resolvable if the series covers it at least twice.
     longest_period = min(MAXIMUM_PERIODIC_ERROR_PERIOD_SECONDS, span_seconds / 2.0)
     if longest_period <= MINIMUM_PERIODIC_ERROR_PERIOD_SECONDS:
-        return empty
+        return None
 
-    trial_periods = np.linspace(MINIMUM_PERIODIC_ERROR_PERIOD_SECONDS, longest_period, 240)
+    return np.linspace(MINIMUM_PERIODIC_ERROR_PERIOD_SECONDS, longest_period, 240)
+
+
+def _fit_dominant_period(
+    times: list[float], residuals: list[float], trial_periods: np.ndarray
+) -> PeriodicErrorDetection:
+    """Run the Lomb-Scargle periodogram and report its strongest peak.
+
+    Returns
+    -------
+    detection : `PeriodicErrorDetection`
+        The best period found, how much of the motion it explains, and
+        how easily noise alone could have faked it.
+    """
     trial_frequencies = 1.0 / trial_periods
     periodogram = LombScargle(np.asarray(times, dtype=float), np.asarray(residuals, dtype=float))
     # The "standard" normalization is what makes the returned power
@@ -419,36 +467,14 @@ def _analyze_one_session(frames: list) -> dict[str, Any]:
     ]
     analysis["max_excursion_px"] = round(max(excursions), 2) if excursions else None
 
-    # Periodic error shows in the axis the worm drives; both are tested
-    # and the stronger reported.
-    detection_x = _dominant_period_seconds(times, shifts_x)
-    detection_y = _dominant_period_seconds(times, shifts_y)
-    detection, axis = (
-        (detection_x, "x") if detection_x.power_fraction >= detection_y.power_fraction else (detection_y, "y")
+    period_seconds, strength, false_alarm_probability, periodic_error_finding = _detect_periodic_error(
+        times, shifts_x, shifts_y
     )
-    period, power = detection.period_seconds, detection.power_fraction
-    if period is not None and power >= MINIMUM_PERIODIC_ERROR_POWER_FRACTION:
-        analysis["periodic_error_period_seconds"] = round(period)
-        analysis["periodic_error_strength"] = round(power, 3)
-        analysis["periodic_error_false_alarm_probability"] = detection.false_alarm_probability
-        # One session cannot confirm mechanical periodic error: a
-        # worm's period is a fixed constant, so a genuine detection
-        # must recur at the same period across sessions and targets.
-        # This is one session's strongest candidate period, not a
-        # verdict -- see _combine_session_analyses' cross-session check
-        # for the confirmed case.
-        false_alarm_note = (
-            f" Noise alone would fake a peak this strong with probability "
-            f"{detection.false_alarm_probability:.1e}."
-            if detection.false_alarm_probability is not None
-            else ""
-        )
-        analysis["findings"].append(
-            f"Periodic drift on the {axis} axis with a ~{period / 60:.1f} minute period "
-            f"explains {power:.0%} of this session's residual motion. A single session cannot "
-            "confirm mechanical periodic error; check whether this period recurs elsewhere."
-            f"{false_alarm_note}"
-        )
+    analysis["periodic_error_period_seconds"] = period_seconds
+    analysis["periodic_error_strength"] = strength
+    analysis["periodic_error_false_alarm_probability"] = false_alarm_probability
+    if periodic_error_finding is not None:
+        analysis["findings"].append(periodic_error_finding)
 
     for rate, axis_name in ((rate_x, "x"), (rate_y, "y")):
         if rate is not None and abs(rate) > 10.0:
@@ -457,15 +483,93 @@ def _analyze_one_session(frames: list) -> dict[str, Any]:
                 "consistent with polar misalignment or an uncorrected tracking rate."
             )
 
+    meridian_flips, excursion_findings = _detect_tracking_excursions(
+        frames, excursions, analysis["max_excursion_px"]
+    )
+    analysis["meridian_flips"] = meridian_flips
+    analysis["findings"].extend(excursion_findings)
+
+    if not analysis["findings"]:
+        analysis["findings"].append("No drift, periodic error, or excursion stands out.")
+    return analysis
+
+
+def _detect_periodic_error(
+    times: list[float], shifts_x: list[float], shifts_y: list[float]
+) -> tuple[int | None, float, float | None, str | None]:
+    """Test both axes for a repeating wobble and report the stronger one.
+
+    Periodic error shows in the axis the worm drives; both are tested
+    and the stronger reported.
+
+    Returns
+    -------
+    period_seconds : `int` or `None`
+        The rounded period, or `None` if nothing crossed the reporting
+        threshold.
+    strength : `float`
+        The rounded power fraction (0.0 if nothing was reported).
+    false_alarm_probability : `float` or `None`
+        The false-alarm probability for the reported detection, or
+        `None` if nothing was reported or it could not be computed.
+    finding : `str` or `None`
+        A human-readable finding describing the detection, or `None`
+        if nothing crossed the reporting threshold.
+    """
+    detection_x = _dominant_period_seconds(times, shifts_x)
+    detection_y = _dominant_period_seconds(times, shifts_y)
+    detection, axis = (
+        (detection_x, "x") if detection_x.power_fraction >= detection_y.power_fraction else (detection_y, "y")
+    )
+    period, power = detection.period_seconds, detection.power_fraction
+    if period is None or power < MINIMUM_PERIODIC_ERROR_POWER_FRACTION:
+        return None, 0.0, None, None
+
+    # One session cannot confirm mechanical periodic error: a
+    # worm's period is a fixed constant, so a genuine detection
+    # must recur at the same period across sessions and targets.
+    # This is one session's strongest candidate period, not a
+    # verdict -- see _combine_session_analyses' cross-session check
+    # for the confirmed case.
+    false_alarm_note = (
+        f" Noise alone would fake a peak this strong with probability "
+        f"{detection.false_alarm_probability:.1e}."
+        if detection.false_alarm_probability is not None
+        else ""
+    )
+    finding = (
+        f"Periodic drift on the {axis} axis with a ~{period / 60:.1f} minute period "
+        f"explains {power:.0%} of this session's residual motion. A single session cannot "
+        "confirm mechanical periodic error; check whether this period recurs elsewhere."
+        f"{false_alarm_note}"
+    )
+    return round(period), round(power, 3), detection.false_alarm_probability, finding
+
+
+def _detect_tracking_excursions(
+    frames: list, excursions: list[float], max_excursion_px: float | None
+) -> tuple[int, list[str]]:
+    """Flag meridian flips and any single frame that jumped abnormally far.
+
+    Returns
+    -------
+    meridian_flip_count : `int`
+        How many meridian flips happened during this session.
+    findings : `list` [`str`]
+        Human-readable findings: a meridian-flip note (if any occurred)
+        and an anomalous-jump note (if one frame jumped far more than
+        the rest, excluding flip boundaries).
+    """
+    findings: list[str] = []
+
     flip_indices = detect_meridian_flips(frames)
-    analysis["meridian_flips"] = len(flip_indices)
     if flip_indices:
-        analysis["findings"].append(
+        findings.append(
             f"{len(flip_indices)} meridian flip(s) during this session; the field shift across "
             "a flip is expected and is not a tracking fault."
         )
 
-    if analysis["max_excursion_px"] and excursions:
+    if max_excursion_px and excursions:
         median_excursion = statistics.median(excursions)
         # Excursions at a flip boundary are excluded before calling one
         # anomalous: a flip legitimately moves the field, so counting it
@@ -476,14 +580,12 @@ def _analyze_one_session(frames: list) -> dict[str, Any]:
         ]
         largest_natural = max(natural_excursions) if natural_excursions else 0.0
         if median_excursion > 0 and largest_natural > 10 * median_excursion:
-            analysis["findings"].append(
+            findings.append(
                 f"One frame jumped {largest_natural:.1f} px against a typical "
                 f"{median_excursion:.1f} px, suggesting a bump, wind gust, or cable snag."
             )
 
-    if not analysis["findings"]:
-        analysis["findings"].append("No drift, periodic error, or excursion stands out.")
-    return analysis
+    return len(flip_indices), findings
 
 
 def _combine_session_analyses(

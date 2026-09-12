@@ -52,7 +52,10 @@ class SpectroscopyConfig(BaseModel):
     grating_lines_per_mm : `float`
         Lines per mm of the grating filter, by default 100.0.
     grating_distance_mm : `float`
-        Current physical distance between grating and sensor.
+        Current physical distance between grating and sensor. Normally
+        fitted from a calibration frame by
+        ``SpectroscopyCalibrationTuner.tune_calibration()`` rather than
+        hand-set.
     dispersion_orientation : {"horizontal", "vertical"}
         Orientation of the dispersion axis, by default
         ``"horizontal"``.
@@ -60,7 +63,10 @@ class SpectroscopyConfig(BaseModel):
         Direction of increasing wavelength along the dispersion axis,
         by default ``"negative"``.
     dispersion_start_px : `float` or `None`
-        Manual zero-order offset override, by default `None`.
+        Manual zero-order offset override, by default `None`. Normally
+        fitted from a calibration frame by
+        ``SpectroscopyCalibrationTuner.tune_calibration()`` rather than
+        hand-set.
     dispersion_offset_x : `float`
         Fine-tuning horizontal offset of the dispersion box, by
         default 0.0.
@@ -84,6 +90,25 @@ class SpectroscopyConfig(BaseModel):
         Degree of the polynomial fit to the traced extraction's per-step
         raw centers, by default 2. Unused when extraction_method is
         "fixed".
+    use_flare_mask_extraction : `bool`
+        Whether to extract starting from an offset anchored past the
+        star's own position, to avoid a bright flare/astigmatism
+        overlapping the spectrum near zero order, by default `False`
+        (extract along the instrument's default dispersion line
+        instead). Calculated from a calibration frame by
+        ``SpectroscopyCalibrationTuner.tune_calibration()``, which
+        checks whether the star's own light still saturates the pixels
+        where extraction would begin, rather than hand-set.
+    max_extraction_length_px : `float` or `None`
+        A hard cap, in pixels, on how far along the dispersion axis
+        from the zero-order anchor extraction may reach, by default
+        `None` (uncapped, using the physics-derived length). Calculated
+        from a calibration frame by
+        ``SpectroscopyCalibrationTuner.tune_calibration()``, which
+        checks whether the physics-derived extraction length would run
+        past the usable sensor area -- for example because the setup
+        vignettes, or the calibrated/usable region stops short of the
+        sensor edge -- rather than hand-set.
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -113,6 +138,20 @@ class SpectroscopyConfig(BaseModel):
     )
     centerline_polynomial_degree: int = Field(
         2, description="Polynomial degree for the traced-extraction trail centerline fit"
+    )
+    use_flare_mask_extraction: bool = Field(
+        False,
+        description=(
+            "Extract from an anchor offset past the star to avoid its own flare/astigmatism "
+            "(calculated by SpectroscopyCalibrationTuner.tune_calibration())"
+        ),
+    )
+    max_extraction_length_px: float | None = Field(
+        None,
+        description=(
+            "Hard cap on extraction length along the dispersion axis, in pixels "
+            "(calculated by SpectroscopyCalibrationTuner.tune_calibration())"
+        ),
     )
 
     def with_overrides(self, **kwargs) -> SpectroscopyConfig:  # ruff: ignore[missing-type-kwargs]
@@ -196,6 +235,16 @@ class ConfigLoader:
                 app_config.get_value("Observatory.Camera", key, app_config.get_value("Camera", key, default))
             )
 
+        # Helper to get a boolean from legacy config (stored as text)
+        def get_bool(key, default=False):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+            val = cam_data.get(key)
+            if val is None:
+                generic = app_config.get_value("Camera", key, None)
+                val = app_config.get_value("Observatory.Camera", key, generic)
+            if val is None:
+                return default
+            return str(val).strip().lower() in ("1", "true", "yes", "on")
+
         camera = CameraConfig(
             name=camera_name or cam_data.get("name", "Unknown"),
             pixel_size_um=get_f("pixel_size_μm", 3.76),
@@ -220,4 +269,8 @@ class ConfigLoader:
             dispersion_angle_degrees=get_f("dispersion_angle_degrees", 0.0),
             expected_fwhm=get_f("expected_fwhm", 8.0),
             extraction_radius=int(get_f("extraction_radius", 10)),
+            use_flare_mask_extraction=get_bool("use_flare_mask_extraction", False),
+            max_extraction_length_px=(
+                get_f("max_extraction_length_px", None) if "max_extraction_length_px" in cam_data else None
+            ),
         )

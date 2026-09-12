@@ -9,11 +9,11 @@ from typing import Any
 
 import numpy as np
 
-from astrometricslib.image_processing.image import AstrometricsImage
-from astrometricslib.image_processing.quality_metrics import DEFAULT_SATURATION_ADU_THRESHOLD
-from astrometricslib.image_processing.saturation import compute_saturated_pixel_fraction
+from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.shared.analysis_context import AnalysisContext
+from astrometricslib.pipelines.shared.quality.quality_metrics import DEFAULT_SATURATION_ADU_THRESHOLD
+from astrometricslib.pipelines.shared.quality.saturation import compute_saturated_pixel_fraction
 from astrometricslib.pipelines.spectroscopy.quantum_efficiency_correction import (
     apply_quantum_efficiency_correction,
 )
@@ -28,6 +28,53 @@ from astrometricslib.pipelines.spectroscopy.spectrum_extractor import SpectrumEx
 from astrometricslib.utilities import SpectroscopyConfig
 
 logger = logging.getLogger(__name__)
+
+
+def _read_xy_source_position(source: Any) -> tuple[Any, Any]:
+    """Read an `(x, y)` pixel position off a source, whatever shape it is.
+
+    A source can be a photutils `SourceCatalog` row (attribute access), a
+    plain dict or a `StellarObject.star_data` dict (`.get` access), or a
+    bare subscriptable record -- falling back between the
+    `xcentroid`/`x_centroid` and `ycentroid`/`y_centroid` spellings
+    throughout. Either coordinate can come back `None` if the source
+    lacked one; callers decide whether that's fatal.
+
+    Returns
+    -------
+    pos : `tuple`
+        The `(x, y)` position, either coordinate possibly `None`.
+    """
+    if hasattr(source, "xcentroid"):
+        return source.xcentroid, source.ycentroid
+    if hasattr(source, "get"):
+        return (
+            source.get("xcentroid", source.get("x_centroid")),
+            source.get("ycentroid", source.get("y_centroid")),
+        )
+    return source["xcentroid"], source["ycentroid"]
+
+
+def _star_pixel_position(star: Any) -> tuple[bool, tuple[Any, Any]]:
+    """Read a star's raw `(x, y)` pixel position, whatever shape it is.
+
+    `target_stars` mixes three shapes depending on the caller: a plain
+    `(x, y)` tuple, a `StellarObject` (position under `.star_data`), or a
+    photutils source-detection row/dict.
+
+    Returns
+    -------
+    is_stellar_obj : `bool`
+        Whether `star` is a `StellarObject` (has `.star_data`) -- callers
+        use this afterward to decide whether to enrich the object in place.
+    pos : `tuple`
+        The `(x, y)` position, either coordinate possibly `None`.
+    """
+    if isinstance(star, tuple):
+        return False, star
+    is_stellar_obj = hasattr(star, "star_data")
+    source = star.star_data if is_stellar_obj else star
+    return is_stellar_obj, _read_xy_source_position(source)
 
 
 class SpectroscopyPipeline:
@@ -184,97 +231,86 @@ class SpectroscopyPipeline:
 
         # 2. Globally auto-detect dispersion angle once if requested
         if auto_detect_angle and target_stars:
-            global_angle = self.config.dispersion_angle_degrees
-            offset_px = self.instrument.zero_order_offset_px
-            length_px = self.instrument.expected_length_px
-            orient = self.config.dispersion_orientation
-            direc = self.config.dispersion_direction
-            h, w = image.data.shape
-
-            best_star_pos = None
-            for star in target_stars:
-                is_stellar_obj = hasattr(star, "star_data")
-                if isinstance(star, tuple):
-                    pos = star
-                elif is_stellar_obj:
-                    pos = (
-                        star.star_data.get("xcentroid", star.star_data.get("x_centroid")),
-                        star.star_data.get("ycentroid", star.star_data.get("y_centroid")),
-                    )
-                else:
-                    pos = (
-                        star.get("xcentroid", star.get("x_centroid")),
-                        star.get("ycentroid", star.get("y_centroid")),
-                    )
-
-                if pos[0] is None or pos[1] is None:
-                    continue
-
-                x_star, y_star = float(pos[0]), float(pos[1])
-
-                if orient == "vertical":
-                    if direc == "positive":
-                        y_start = y_star + offset_px
-                        y_end = y_start + length_px
-                    else:
-                        y_start = y_star - offset_px - length_px
-                        y_end = y_start + length_px
-
-                    if y_start >= 0 and y_end <= h and x_star - 20 >= 0 and x_star + 20 <= w:
-                        best_star_pos = (x_star, y_star)
-                        break
-                else:
-                    if direc == "positive":
-                        x_start = x_star + offset_px
-                        x_end = x_start + length_px
-                    else:
-                        x_start = x_star - offset_px - length_px
-                        x_end = x_start + length_px
-
-                    if x_start >= 0 and x_end <= w and y_star - 20 >= 0 and y_star + 20 <= h:
-                        best_star_pos = (x_star, y_star)
-                        break
-
-            if best_star_pos is None:
-                first_star = target_stars[0]
-                is_stellar_obj = hasattr(first_star, "star_data")
-                if isinstance(first_star, tuple):
-                    best_star_pos = first_star
-                elif is_stellar_obj:
-                    best_star_pos = (
-                        first_star.star_data.get("xcentroid", first_star.star_data.get("x_centroid")),
-                        first_star.star_data.get("ycentroid", first_star.star_data.get("y_centroid")),
-                    )
-                else:
-                    best_star_pos = (
-                        first_star.get("xcentroid", first_star.get("x_centroid")),
-                        first_star.get("ycentroid", first_star.get("y_centroid")),
-                    )
-
-            if best_star_pos is not None:
-                global_angle = self.detect_dispersion_angle(image, best_star_pos)
-                logger.info(f"Globally resolved grating dispersion angle: {global_angle:.2f} degrees")
-                self.config.dispersion_angle_degrees = global_angle
-                self.instrument.config.dispersion_angle_degrees = global_angle
-
+            self._resolve_global_dispersion_angle(image, target_stars)
             auto_detect_angle = False
 
+        return self._process_target_stars(image, target_stars, limit, auto_detect_angle)
+
+    def _resolve_global_dispersion_angle(self, image: AstrometricsImage, target_stars: list[Any]) -> None:
+        """Auto-detect the grating dispersion angle once for a whole batch.
+
+        Picks the first target star whose full dispersion box fits
+        inside the image (falling back to the first star if none do),
+        measures the angle from it, and updates `self.config` /
+        `self.instrument.config` in place so every star in this batch
+        uses the same angle.
+        """
+        global_angle = self.config.dispersion_angle_degrees
+        offset_px = self.instrument.zero_order_offset_px
+        length_px = self.instrument.expected_length_px
+        orient = self.config.dispersion_orientation
+        direc = self.config.dispersion_direction
+        h, w = image.data.shape
+
+        best_star_pos = None
+        for star in target_stars:
+            _, pos = _star_pixel_position(star)
+
+            if pos[0] is None or pos[1] is None:
+                continue
+
+            x_star, y_star = float(pos[0]), float(pos[1])
+
+            if orient == "vertical":
+                if direc == "positive":
+                    y_start = y_star + offset_px
+                    y_end = y_start + length_px
+                else:
+                    y_start = y_star - offset_px - length_px
+                    y_end = y_start + length_px
+
+                if y_start >= 0 and y_end <= h and x_star - 20 >= 0 and x_star + 20 <= w:
+                    best_star_pos = (x_star, y_star)
+                    break
+            else:
+                if direc == "positive":
+                    x_start = x_star + offset_px
+                    x_end = x_start + length_px
+                else:
+                    x_start = x_star - offset_px - length_px
+                    x_end = x_start + length_px
+
+                if x_start >= 0 and x_end <= w and y_star - 20 >= 0 and y_star + 20 <= h:
+                    best_star_pos = (x_star, y_star)
+                    break
+
+        if best_star_pos is None:
+            _, best_star_pos = _star_pixel_position(target_stars[0])
+
+        if best_star_pos is not None:
+            global_angle = self.detect_dispersion_angle(image, best_star_pos)
+            logger.info(f"Globally resolved grating dispersion angle: {global_angle:.2f} degrees")
+            self.config.dispersion_angle_degrees = global_angle
+            self.instrument.config.dispersion_angle_degrees = global_angle
+
+    def _process_target_stars(
+        self,
+        image: AstrometricsImage,
+        target_stars: list[Any],
+        limit: int,
+        auto_detect_angle: bool,
+    ) -> list[dict[str, Any]]:
+        """Run single-star extraction over a batch of target stars.
+
+        Returns
+        -------
+        results : `list` [`dict`]
+            One result dict per successfully processed star, each also
+            carrying its original `star_source` object.
+        """
         results = []
-        for _i, star in enumerate(target_stars[:limit]):
-            # Get position
-            is_stellar_obj = hasattr(star, "star_data")
-            if isinstance(star, tuple):
-                pos = star
-            elif is_stellar_obj:  # StellarObject
-                pos = (
-                    star.star_data.get("xcentroid", star.star_data.get("x_centroid")),
-                    star.star_data.get("ycentroid", star.star_data.get("y_centroid")),
-                )
-            else:  # Row/Dict from photutils
-                pos = (
-                    star.get("xcentroid", star.get("x_centroid")),
-                    star.get("ycentroid", star.get("y_centroid")),
-                )
+        for star in target_stars[:limit]:
+            is_stellar_obj, pos = _star_pixel_position(star)
 
             result = self._process_single_star(image, pos, auto_detect_angle=auto_detect_angle)
             if "error" not in result:
@@ -283,58 +319,48 @@ class SpectroscopyPipeline:
 
                 # If it's a StellarObject, enrich it with results
                 if is_stellar_obj:
-                    star.detected_angle = result["detected_angle"]
-                    star.spectrum_data_processed = {
-                        "wavelengths_angstrom": [float(w) * 10.0 for w in result["wavelengths"]],
-                        "intensities": result["intensities"],
-                    }
-
-                    # "Quantum Efficiency" (QE) corrects for the fact that
-                    # camera
-                    # sensors see some colors of light better than others.
-                    # If we know the camera's exact QE curve, we fix the data
-                    # here.
-                    # If we don't know the camera, we just skip this step.
-                    quantum_efficiency_curve = get_quantum_efficiency_curve(self.config.camera.name)
-                    if quantum_efficiency_curve is not None:
-                        star.spectrum_data_processed["quantum_efficiency_corrected_intensities"] = (
-                            apply_quantum_efficiency_correction(
-                                wavelength_nm=np.array(result["wavelengths"]),
-                                intensity=np.array(result["intensities"]),
-                                curve=quantum_efficiency_curve,
-                            ).tolist()
-                        )
-                    star.trail_centerline_px = result.get("trail_centerline_px")
-                    star.trail_width_px = result.get("trail_width_px")
-                    if isinstance(star.star_data, dict):
-                        star.star_data["xcentroid"] = result["target_pos"][0]
-                        star.star_data["ycentroid"] = result["target_pos"][1]
-
-                    # 1. Compute visual overlay rectangle geometry
-                    offset_px = self.instrument.zero_order_offset_px
-                    len_px = self.instrument.expected_length_px
-                    mid_dist = offset_px + len_px / 2.0
-                    aperture_px = 2 * self.config.extraction_radius + 1
-
-                    old_angle = self.instrument.config.dispersion_angle_degrees
-                    self.instrument.config.dispersion_angle_degrees = result["detected_angle"]
-                    vec = self.instrument.get_dispersion_vector()
-                    self.instrument.config.dispersion_angle_degrees = old_angle
-
-                    # Compute total rotated dispersion angle
-                    star.dispersion_angle = float(np.degrees(np.arctan2(vec[1], vec[0])))
-
-                    cx = result["target_pos"][0] + self.config.dispersion_offset_x
-                    cy = result["target_pos"][1] + self.config.dispersion_offset_y
-
-                    mid_x = cx + mid_dist * vec[0]
-                    mid_y = cy + mid_dist * vec[1]
-
-                    star.rectangle = (float(mid_x), float(mid_y), float(len_px), int(aperture_px))
+                    self._apply_result_to_stellar_object(star, result)
 
                 results.append(result)
 
         return results
+
+    def _apply_result_to_stellar_object(self, star: StellarObject, result: dict[str, Any]) -> None:
+        """Copy a single star's extraction result onto its `StellarObject`.
+
+        "Quantum Efficiency" (QE) corrects for the fact that camera
+        sensors see some colors of light better than others. If we
+        know the camera's exact QE curve, we fix the data here. If we
+        don't know the camera, we just skip this step.
+        """
+        star.detected_angle = result["detected_angle"]
+        star.spectrum_data_processed = {
+            "wavelengths_angstrom": [float(w) * 10.0 for w in result["wavelengths"]],
+            "intensities": result["intensities"],
+        }
+
+        quantum_efficiency_curve = get_quantum_efficiency_curve(self.config.camera.name)
+        if quantum_efficiency_curve is not None:
+            star.spectrum_data_processed["quantum_efficiency_corrected_intensities"] = (
+                apply_quantum_efficiency_correction(
+                    wavelength_nm=np.array(result["wavelengths"]),
+                    intensity=np.array(result["intensities"]),
+                    curve=quantum_efficiency_curve,
+                ).tolist()
+            )
+        star.trail_centerline_px = result.get("trail_centerline_px")
+        star.trail_width_px = result.get("trail_width_px")
+        if isinstance(star.star_data, dict):
+            star.star_data["xcentroid"] = result["target_pos"][0]
+            star.star_data["ycentroid"] = result["target_pos"][1]
+
+        # Compute the visual overlay rectangle and total rotated
+        # dispersion angle
+        star.rectangle, star.dispersion_angle = self._dispersion_overlay_geometry(
+            result["target_pos"],
+            self.config.extraction_radius,
+            dispersion_angle_degrees=result["detected_angle"],
+        )
 
     def _process_single_star(
         self, image: AstrometricsImage, pos: tuple[float, float], auto_detect_angle: bool = True
@@ -364,98 +390,20 @@ class SpectroscopyPipeline:
             # Temporarily update instrument config for this extraction
             self.instrument.config.dispersion_angle_degrees = detected_angle
 
-        # 2. Check if ZWO ASI533MM Pro camera is used
-        is_asi533 = self.config.camera.name == "ZWO ASI533MM Pro"
-
+        # 2. Check whether this setup wants flare-masked extraction
+        use_flare_mask = self.config.use_flare_mask_extraction
         is_traced = self.config.extraction_method == "traced"
-        trail_centerline_px: list | None = None
-        trail_width_px: list | None = None
 
-        if is_asi533:
-            # For ZWO ASI533MM Pro with flare masking, we use the custom method
-            flare_offset_pixels = (
-                self.config.dispersion_start_px if self.config.dispersion_start_px is not None else 120.0
+        if use_flare_mask:
+            wavelengths, intensities, target_pos, trail_centerline_px, trail_width_px = (
+                self._extract_via_flare_mask(image, pos, detected_angle, is_traced)
             )
-            max_offset_pixels = 750.0
-
-            # Apply fine-tuning offsets from config
-            base_pos = (pos[0] + self.config.dispersion_offset_x, pos[1] + self.config.dispersion_offset_y)
-
-            if is_traced:
-                spectrum_1d, anchor_x, anchor_y, trail_centerline_px, trail_width_px = (
-                    self.extractor.extract_with_flare_mask_traced(
-                        image,
-                        base_pos,
-                        flare_offset_pixels,
-                        max_offset_pixels,
-                        self.config.extraction_radius,
-                        self.config.dispersion_orientation,
-                        angle_degrees=detected_angle,
-                        centerline_polynomial_degree=self.config.centerline_polynomial_degree,
-                    )
-                )
-            else:
-                spectrum_1d, anchor_x, anchor_y = self.extractor.extract_with_flare_mask(
-                    image,
-                    base_pos,
-                    flare_offset_pixels,
-                    max_offset_pixels,
-                    self.config.extraction_radius,
-                    self.config.dispersion_orientation,
-                    angle_degrees=detected_angle,
-                )
-
-            # Calibrate wavelengths relative to the zero-order anchor
-            # starting from flare_offset_pixels
-            wavelengths, intensities = self.calibrator.calibrate(spectrum_1d, flare_offset_pixels)
-
-            target_pos = (anchor_x, anchor_y)
         else:
-            # Default line extraction workflow
-            vector = self.instrument.get_dispersion_vector()
-            offset_px = self.instrument.zero_order_offset_px
-            length = self.instrument.expected_length_px
+            wavelengths, intensities, target_pos, trail_centerline_px, trail_width_px = (
+                self._extract_via_dispersion_line(image, pos, is_traced)
+            )
 
-            # Apply fine-tuning offsets from config
-            base_pos = (pos[0] + self.config.dispersion_offset_x, pos[1] + self.config.dispersion_offset_y)
-
-            # Calculate actual extraction start (at the edge of the
-            # dispersion box)
-            extraction_start = (base_pos[0] + offset_px * vector[0], base_pos[1] + offset_px * vector[1])
-
-            # Extract only the dispersion region
-            if is_traced:
-                spectrum_1d, trail_centerline_px, trail_width_px = self.extractor.extract_line_traced(
-                    image,
-                    extraction_start,
-                    vector,
-                    length,
-                    centerline_polynomial_degree=self.config.centerline_polynomial_degree,
-                )
-            else:
-                spectrum_1d = self.extractor.extract_line(image, extraction_start, vector, length)
-
-            # 3. Calibrate
-            # We start from offset_px relative to zero order
-            wavelengths, intensities = self.calibrator.calibrate(spectrum_1d, offset_px)
-            target_pos = pos
-
-        # We need to make sure the center of the star isn't completely maxed
-        # out
-        # (saturated). If the center is just a flat white blob, we won't know
-        # exactly where the star is, which ruins the calibration for the
-        # spectrum.
-        # We check just the small box around the star for this problem.
-        aperture_radius = int(self.config.extraction_radius)
-        data = image.data
-        height, width = data.shape
-        x_center, y_center = round(target_pos[0]), round(target_pos[1])
-        y_start, y_end = max(0, y_center - aperture_radius), min(height, y_center + aperture_radius + 1)
-        x_start, x_end = max(0, x_center - aperture_radius), min(width, x_center + aperture_radius + 1)
-        zero_order_cutout = np.asarray(data[y_start:y_end, x_start:x_end], dtype=float)
-        zero_order_saturated_pixel_fraction = compute_saturated_pixel_fraction(
-            zero_order_cutout, DEFAULT_SATURATION_ADU_THRESHOLD
-        )
+        zero_order_saturated_pixel_fraction = self._measure_zero_order_saturation(image, target_pos)
 
         return {
             "wavelengths": wavelengths.tolist(),
@@ -467,6 +415,202 @@ class SpectroscopyPipeline:
             "trail_centerline_px": trail_centerline_px,
             "trail_width_px": trail_width_px,
         }
+
+    def _extract_via_flare_mask(
+        self, image: AstrometricsImage, pos: tuple[float, float], detected_angle: float, is_traced: bool
+    ) -> tuple[np.ndarray, np.ndarray, tuple[float, float], list | None, list | None]:
+        """Extract a spectrum using the flare-masking method.
+
+        Returns
+        -------
+        wavelengths, intensities : `numpy.ndarray`
+            The calibrated spectrum.
+        target_pos : `tuple` [`float`, `float`]
+            The zero-order anchor position the spectrum was calibrated
+            from.
+        trail_centerline_px, trail_width_px : `list` or `None`
+            The traced extraction's per-column centerline and width, or
+            both `None` when using the untraced extraction method.
+        """
+        flare_offset_pixels = (
+            self.config.dispersion_start_px if self.config.dispersion_start_px is not None else 120.0
+        )
+        # The instrument's expected_length_px already reflects any
+        # configured max_extraction_length_px cap, so re-deriving the
+        # absolute offset from it here keeps this in sync with that cap
+        # instead of hardcoding a second copy of it.
+        max_offset_pixels = flare_offset_pixels + self.instrument.expected_length_px
+
+        # Apply fine-tuning offsets from config
+        base_pos = (pos[0] + self.config.dispersion_offset_x, pos[1] + self.config.dispersion_offset_y)
+
+        # extract_with_flare_mask[_traced]'s per-column tilt tracking
+        # (slope = -tan(angle_degrees)) is the negation of what
+        # get_dispersion_vector() -- and therefore detect_dispersion_angle
+        # -- uses for horizontal dispersion (they already agree for
+        # vertical), so horizontal needs a sign flip here to actually
+        # follow the star's real measured tilt instead of walking away
+        # from it.
+        flare_mask_angle = (
+            -detected_angle if self.config.dispersion_orientation == "horizontal" else detected_angle
+        )
+
+        trail_centerline_px: list | None = None
+        trail_width_px: list | None = None
+        if is_traced:
+            spectrum_1d, anchor_x, anchor_y, trail_centerline_px, trail_width_px = (
+                self.extractor.extract_with_flare_mask_traced(
+                    image,
+                    base_pos,
+                    flare_offset_pixels,
+                    max_offset_pixels,
+                    self.config.extraction_radius,
+                    self.config.dispersion_orientation,
+                    angle_degrees=flare_mask_angle,
+                    centerline_polynomial_degree=self.config.centerline_polynomial_degree,
+                )
+            )
+        else:
+            spectrum_1d, anchor_x, anchor_y = self.extractor.extract_with_flare_mask(
+                image,
+                base_pos,
+                flare_offset_pixels,
+                max_offset_pixels,
+                self.config.extraction_radius,
+                self.config.dispersion_orientation,
+                angle_degrees=flare_mask_angle,
+            )
+
+        # Calibrate wavelengths relative to the zero-order anchor
+        # starting from flare_offset_pixels
+        wavelengths, intensities = self.calibrator.calibrate(spectrum_1d, flare_offset_pixels)
+
+        return wavelengths, intensities, (anchor_x, anchor_y), trail_centerline_px, trail_width_px
+
+    def _extract_via_dispersion_line(
+        self, image: AstrometricsImage, pos: tuple[float, float], is_traced: bool
+    ) -> tuple[np.ndarray, np.ndarray, tuple[float, float], list | None, list | None]:
+        """Extract a spectrum along the instrument's default dispersion line.
+
+        Returns
+        -------
+        wavelengths, intensities : `numpy.ndarray`
+            The calibrated spectrum.
+        target_pos : `tuple` [`float`, `float`]
+            The star's own position (unchanged from `pos`).
+        trail_centerline_px, trail_width_px : `list` or `None`
+            The traced extraction's per-column centerline and width, or
+            both `None` when using the untraced extraction method.
+        """
+        # Default line extraction workflow
+        vector = self.instrument.get_dispersion_vector()
+        offset_px = self.instrument.zero_order_offset_px
+        length = self.instrument.expected_length_px
+
+        # Apply fine-tuning offsets from config
+        base_pos = (pos[0] + self.config.dispersion_offset_x, pos[1] + self.config.dispersion_offset_y)
+
+        # Calculate actual extraction start (at the edge of the
+        # dispersion box)
+        extraction_start = (base_pos[0] + offset_px * vector[0], base_pos[1] + offset_px * vector[1])
+
+        trail_centerline_px: list | None = None
+        trail_width_px: list | None = None
+        # Extract only the dispersion region
+        if is_traced:
+            spectrum_1d, trail_centerline_px, trail_width_px = self.extractor.extract_line_traced(
+                image,
+                extraction_start,
+                vector,
+                length,
+                centerline_polynomial_degree=self.config.centerline_polynomial_degree,
+            )
+        else:
+            spectrum_1d = self.extractor.extract_line(image, extraction_start, vector, length)
+
+        # We start from offset_px relative to zero order
+        wavelengths, intensities = self.calibrator.calibrate(spectrum_1d, offset_px)
+
+        return wavelengths, intensities, pos, trail_centerline_px, trail_width_px
+
+    def _measure_zero_order_saturation(
+        self, image: AstrometricsImage, target_pos: tuple[float, float]
+    ) -> float:
+        """Measure what fraction of the star's center is saturated (maxed out).
+
+        We need to make sure the center of the star isn't completely
+        maxed out (saturated). If the center is just a flat white
+        blob, we won't know exactly where the star is, which ruins
+        the calibration for the spectrum. We check just the small box
+        around the star for this problem.
+
+        Returns
+        -------
+        zero_order_saturated_pixel_fraction : `float`
+            The fraction of pixels in that box that are saturated.
+        """
+        aperture_radius = int(self.config.extraction_radius)
+        data = image.data
+        height, width = data.shape
+        x_center, y_center = round(target_pos[0]), round(target_pos[1])
+        y_start, y_end = max(0, y_center - aperture_radius), min(height, y_center + aperture_radius + 1)
+        x_start, x_end = max(0, x_center - aperture_radius), min(width, x_center + aperture_radius + 1)
+        zero_order_cutout = np.asarray(data[y_start:y_end, x_start:x_end], dtype=float)
+        return compute_saturated_pixel_fraction(zero_order_cutout, DEFAULT_SATURATION_ADU_THRESHOLD)
+
+    def _dispersion_overlay_geometry(
+        self,
+        center: tuple[float, float],
+        extraction_radius: float,
+        dispersion_angle_degrees: float | None = None,
+    ) -> tuple[tuple[float, float, float, int], float]:
+        """Map a center point into its spectrum trace's overlay rectangle.
+
+        Both a processed star and a synthesized extended-target object
+        need the same overlay: a rectangle spanning the dispersion trace,
+        and the trace's rotated angle in image space.
+
+        Parameters
+        ----------
+        center : `tuple` [`float`, `float`]
+            The `(x, y)` pixel the trace is anchored to.
+        extraction_radius : `float`
+            The extraction aperture radius, in pixels.
+        dispersion_angle_degrees : `float`, optional
+            Overrides the instrument's current dispersion angle for this
+            one calculation (restored afterward). Used when a star's own
+            per-star auto-detected angle differs from whatever the
+            instrument is currently configured with; omit it to use the
+            instrument's angle as-is.
+
+        Returns
+        -------
+        rectangle : `tuple` [`float`, `float`, `float`, `int`]
+            `(mid_x, mid_y, length_px, aperture_px)` for the overlay box.
+        dispersion_angle_deg : `float`
+            The dispersion trace's angle in image space, in degrees.
+        """
+        offset_px = self.instrument.zero_order_offset_px
+        len_px = self.instrument.expected_length_px
+        mid_dist = offset_px + len_px / 2.0
+        aperture_px = 2 * extraction_radius + 1
+
+        if dispersion_angle_degrees is None:
+            vec = self.instrument.get_dispersion_vector()
+        else:
+            old_angle = self.instrument.config.dispersion_angle_degrees
+            self.instrument.config.dispersion_angle_degrees = dispersion_angle_degrees
+            vec = self.instrument.get_dispersion_vector()
+            self.instrument.config.dispersion_angle_degrees = old_angle
+
+        cx = center[0] + self.config.dispersion_offset_x
+        cy = center[1] + self.config.dispersion_offset_y
+        mid_x = cx + mid_dist * vec[0]
+        mid_y = cy + mid_dist * vec[1]
+
+        rectangle = (float(mid_x), float(mid_y), float(len_px), int(aperture_px))
+        dispersion_angle_deg = float(np.degrees(np.arctan2(vec[1], vec[0])))
+        return rectangle, dispersion_angle_deg
 
     def detect_dispersion_angle(self, image: AstrometricsImage, star_pos: tuple[float, float]) -> float:
         """Figure out exactly how much the camera is tilted.
@@ -519,17 +663,22 @@ class SpectroscopyPipeline:
 
         try:
             if fit_axis == "y":
-                # Vertical: slope is dx/dy
+                # Vertical: slope is dx/dy. get_dispersion_vector()'s
+                # 90-degree base angle for "vertical" means a positive
+                # measured dx/dy slope must map to a *negative* angle
+                # to reproduce that same slope -- unlike the horizontal
+                # case below, this negation is required, not a bug.
                 slope, _ = np.polyfit(y_indices, x_indices, 1)
                 angle = -np.degrees(np.arctan(slope))
-                print(f"Auto-detected angle for star at {star_pos}: {angle:.2f} degrees")
-                return angle
             else:
-                # Horizontal: slope is dy/dx
+                # Horizontal: slope is dy/dx, and get_dispersion_vector()'s
+                # 0-degree base angle for "horizontal" means the angle
+                # must equal +arctan(slope) (no negation) to reproduce
+                # this same measured slope when fed back through it.
                 slope, _ = np.polyfit(x_indices, y_indices, 1)
-                angle = -np.degrees(np.arctan(slope))
-                print(f"Auto-detected angle for star at {star_pos}: {angle:.2f} degrees")
-                return angle
+                angle = np.degrees(np.arctan(slope))
+            logger.debug(f"Auto-detected angle for star at {star_pos}: {angle:.2f} degrees")
+            return angle
         except Exception:
             return 0.0
 
@@ -559,28 +708,8 @@ class SpectroscopyPipeline:
             Custom stellar object mapped to the physical dispersion
             bounding box.
         """
-        # 1. Resolve physical dispersion vector from the instrument geometry
-        vec = self.instrument.get_dispersion_vector()
-        offset_px = self.instrument.zero_order_offset_px
-        len_px = self.instrument.expected_length_px
+        rectangle, dispersion_angle = self._dispersion_overlay_geometry(extraction_center, extraction_radius)
 
-        # 2. Midpoint of the spectral streak along the dispersion line:
-        # mid_dist = offset_px + len_px / 2.0
-        mid_dist = offset_px + len_px / 2.0
-
-        # 3. Apply fine-tuning offsets from configuration
-        cx = extraction_center[0] + self.config.dispersion_offset_x
-        cy = extraction_center[1] + self.config.dispersion_offset_y
-
-        # 4. Map the center coordinate of the dispersion rectangle
-        mid_x = cx + mid_dist * vec[0]
-        mid_y = cy + mid_dist * vec[1]
-
-        # 5. Bounding box aperture width matches full wide extraction
-        # area: (2 * radius + 1)
-        aperture_px = 2 * extraction_radius + 1
-
-        # 6. Instantiate and return a clean StellarObject model
         return StellarObject(
             id=f"{object_name.replace(' ', '_')}_Cluster",
             name=f"{object_name} ({otype})",
@@ -593,7 +722,7 @@ class SpectroscopyPipeline:
                 "ycentroid": float(extraction_center[1]),
                 "flux": 100000.0,
             },
-            rectangle=(float(mid_x), float(mid_y), float(len_px), int(aperture_px)),
-            dispersion_angle=float(np.degrees(np.arctan2(vec[1], vec[0]))),
+            rectangle=rectangle,
+            dispersion_angle=dispersion_angle,
             extraction_radius=int(extraction_radius),
         )

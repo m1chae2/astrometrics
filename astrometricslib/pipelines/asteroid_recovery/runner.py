@@ -17,9 +17,8 @@ from astrometricslib.models.quality_summary import (
 )
 from astrometricslib.pipelines.contract import (
     AnalysisPipeline,
-    InputScreening,
     PipelineRequest,
-    RunOutcome,
+    Result,
     run_pipeline,
 )
 
@@ -38,8 +37,8 @@ class AsteroidRecoveryPipelineAdapter(AnalysisPipeline):
         """
         return "asteroid_recovery"
 
-    def screen_input(self, request: PipelineRequest) -> InputScreening:
-        """Asteroid recovery has no screening failure mode to check.
+    def process_input(self, request: PipelineRequest) -> Result:
+        """Asteroid recovery has no "nothing to do" case to check.
 
         `AsteroidRecoveryPipeline.process` already tolerates a target
         with no usable frames -- it just reports zero candidates -- so
@@ -47,17 +46,17 @@ class AsteroidRecoveryPipelineAdapter(AnalysisPipeline):
 
         Returns
         -------
-        screening : `InputScreening`
-            Always `can_proceed=True`.
+        result : `Result`
+            Always `has_work=True`.
         """
-        return InputScreening(can_proceed=True)
+        return Result()
 
-    def run(self, request: PipelineRequest, screening: InputScreening) -> RunOutcome:
+    def run(self, request: PipelineRequest, result: Result) -> Result:
         """Search for moving objects and keep only the surviving candidates.
 
         Returns
         -------
-        outcome : `RunOutcome`
+        result : `Result`
             `candidates` is the surviving subset, already written onto
             `request.target.asteroid_candidates` -- this pipeline's one
             genuine output side effect, since its result has no catalog
@@ -69,7 +68,12 @@ class AsteroidRecoveryPipelineAdapter(AnalysisPipeline):
 
         target = request.target
         pipeline = AsteroidRecoveryPipeline()
-        all_candidates = pipeline.process(target)
+        light_frames = [
+            (frame.path, frame.timestamp)
+            for frame in target.frames
+            if frame.role == "LIGHT" and frame.timestamp is not None
+        ]
+        all_candidates = pipeline.process(target.id, target.stacked_image, light_frames)
         metrics = pipeline.last_run_metrics
         # Record only candidates that survived the discrimination
         # cascade (or were matched to a known body) -- `process()`
@@ -86,11 +90,9 @@ class AsteroidRecoveryPipelineAdapter(AnalysisPipeline):
             in (CascadeStage.RATE_LINEARITY_CONFIRMED, CascadeStage.EPHEMERIS_MATCHED)
         ]
 
-        return RunOutcome(candidates=target.asteroid_candidates, payload={"metrics": metrics})
+        return Result(candidates=target.asteroid_candidates, payload={"metrics": metrics})
 
-    def validate_output(
-        self, request: PipelineRequest, outcome: RunOutcome
-    ) -> AsteroidRecoveryQualitySummary:
+    def validate_output(self, request: PipelineRequest, result: Result) -> AsteroidRecoveryQualitySummary:
         """Build the quality summary and flag anything worth a look.
 
         Returns
@@ -100,27 +102,22 @@ class AsteroidRecoveryPipelineAdapter(AnalysisPipeline):
             metadata, or when a candidate was confirmed as a mover but
             not matched to a known body.
         """
-        from astrometricslib.models.quality_summary import TargetSessionContribution
-        from astrometricslib.pipelines.shared.target_sessions import derive_target_sessions
+        from astrometricslib.pipelines.shared.target_sessions import (
+            build_target_session_breakdown,
+            derive_target_sessions,
+        )
 
         target = request.target
-        metrics = outcome.payload["metrics"]
+        metrics = result.payload["metrics"]
 
         light_frames = [frame for frame in target.frames if frame.role == "LIGHT"]
         asteroid_recovery_sessions = derive_target_sessions(target.id, light_frames)
         # Per-session frame-exclusion identity isn't tracked by the
         # pipeline today (only the aggregate
-        # frames_excluded_missing_pointing_metadata count is), so
-        # frames_clipped is left at 0 here rather than fabricating a
-        # breakdown.
-        asteroid_recovery_session_breakdown = [
-            TargetSessionContribution(
-                session_id=session.id,
-                frames_contributed=len(session.frame_paths),
-                frames_clipped=0,
-            )
-            for session in asteroid_recovery_sessions
-        ]
+        # frames_excluded_missing_pointing_metadata count is), so no
+        # excluded_paths is passed here -- every session reports 0 frames
+        # clipped rather than fabricating a breakdown.
+        asteroid_recovery_session_breakdown = build_target_session_breakdown(asteroid_recovery_sessions)
 
         summary = AsteroidRecoveryQualitySummary(
             target_id=target.id,
@@ -136,7 +133,7 @@ class AsteroidRecoveryPipelineAdapter(AnalysisPipeline):
             )
         candidates_awaiting_recovery = sum(
             1
-            for candidate in outcome.candidates
+            for candidate in result.candidates
             if candidate.cascade_stage == CascadeStage.RATE_LINEARITY_CONFIRMED
         )
         if candidates_awaiting_recovery > 0:
@@ -148,18 +145,18 @@ class AsteroidRecoveryPipelineAdapter(AnalysisPipeline):
         return summary
 
     def to_result_dict(
-        self, request: PipelineRequest, outcome: RunOutcome, summary: AsteroidRecoveryQualitySummary
+        self, request: PipelineRequest, result: Result, summary: AsteroidRecoveryQualitySummary
     ) -> dict[str, Any]:
         """Build the result dict asteroid recovery's callers expect back.
 
         Returns
         -------
-        result : `dict`
+        result_dict : `dict`
             Has ``"status"``, ``"targetId"``, ``"analysisMode"``,
             candidate counts at each stage of the discrimination
             cascade, and ``"candidates"`` (the surviving candidates).
         """
-        metrics = outcome.payload["metrics"]
+        metrics = result.payload["metrics"]
         return {
             "status": "completed",
             "targetId": request.target.id,
@@ -167,7 +164,7 @@ class AsteroidRecoveryPipelineAdapter(AnalysisPipeline):
             "candidatesDetected": metrics.get("candidates_detected", 0),
             "candidatesRateLinearityConfirmed": metrics.get("candidates_rate_linearity_confirmed", 0),
             "candidatesEphemerisMatched": metrics.get("candidates_ephemeris_matched", 0),
-            "candidates": outcome.candidates,
+            "candidates": result.candidates,
         }
 
 
@@ -184,7 +181,7 @@ def run_asteroid_recovery_analysis(
     A thin wrapper kept at this name and signature for
     `pipelines.PIPELINE_RUNNERS` -- the actual work is
     `AsteroidRecoveryPipelineAdapter`, run through the shared
-    screen/run/validate/report cycle in `run_pipeline`.
+    input/main/output processing cycle in `run_pipeline`.
 
     Parameters
     ----------

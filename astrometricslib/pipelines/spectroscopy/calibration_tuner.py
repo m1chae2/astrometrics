@@ -18,6 +18,7 @@ from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.pipelines.shared.quality.quality_metrics import DEFAULT_SATURATION_ADU_THRESHOLD
 from astrometricslib.pipelines.shared.quality.saturation import compute_saturated_pixel_fraction
 from astrometricslib.pipelines.spectroscopy.optics_physics import (
+    BALMER_SERIES_NM,
     calculate_pixel_offset,
     calculate_wavelength,
 )
@@ -108,9 +109,13 @@ class SpectroscopyCalibrationTuner:
         dips = self._detect_absorption_dips(smoothed)
         logger.info(f"Detected {len(dips)} candidate absorption dips at indices: {dips}")
 
-        # We know Vega (the target) should have dark lines at exactly
-        # 410.17 nm, 434.05 nm, and 486.13 nm (the Hydrogen Balmer series).
-        target_wls = np.array([410.17, 434.05, 486.13])
+        # We know Vega (the target) should have dark lines at exactly the
+        # Hydrogen Balmer series wavelengths.
+        target_wls = np.array([
+            BALMER_SERIES_NM["H-delta"],
+            BALMER_SERIES_NM["H-gamma"],
+            BALMER_SERIES_NM["H-beta"],
+        ])
         current_start_px = float(spec_pipeline.instrument.zero_order_offset_px)
 
         best_rms, best_grating_distance_mm, best_combo = self._fit_grating_distance(

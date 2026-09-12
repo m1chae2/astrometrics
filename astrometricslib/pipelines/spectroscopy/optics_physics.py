@@ -59,6 +59,18 @@ import numpy as np
 # Type alias to support both float scalars and NumPy float arrays
 Numeric = float | np.ndarray
 
+# Hydrogen Balmer series rest wavelengths, in nanometers. Fixed physical
+# constants (not configuration): used both to fit the grating distance
+# against a reference star's spectrum (calibration_tuner.py) and to draw
+# reference lines on a rendered spectrum plot (spectrum_overlay.py). A
+# single shared copy keeps those two consumers from drifting apart.
+BALMER_SERIES_NM: dict[str, float] = {
+    "H-alpha": 656.28,
+    "H-beta": 486.13,
+    "H-gamma": 434.05,
+    "H-delta": 410.17,
+}
+
 
 def calculate_wavelength(
     pixel_offset_px: Numeric, grating_distance_mm: float, lines_per_mm: float, pixel_size_um: float

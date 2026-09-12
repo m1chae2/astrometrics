@@ -15,15 +15,6 @@
 # live in a "frames" subfolder underneath this path.
 path = ./libraryIndex
 
-[Spectroscopy.Balmer Lines]
-hα = 6562
-hβ = 4861
-hɣ = 4340
-hδ = 4101
-hε = 3970
-hζ = 3889
-hη = 3835
-
 [Observatory.Filters]
 # Filters this observatory's filter wheel is actually loaded with, as
 # FilterType member names (see astrometricslib/utilities/enums.py).

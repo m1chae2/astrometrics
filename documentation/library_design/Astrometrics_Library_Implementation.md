@@ -11,7 +11,7 @@ The library is organized into five layers across five specialized scientific pip
 | Layer | Stacking | Astrometry | Photometry | Spectroscopy | Asteroid Rec. | Shared by All |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **1. Public API**<br>*(calls L2)* | `run_stacking` | `run_astrometry` | `run_photometry` | `run_spectroscopy` | `recover_asteroids` | **Astrometrics facade**<br>`api/`<br>`mcp/` |
-| **2. Public Helpers**<br>*(calls L3)* | `stack_and_solve`<br>*(pre-stage)* | `analyze_target`<br>*(runner)* | `analyze_target`<br>*(runner)* | `analyze_target`<br>*(runner)* | `analyze_target`<br>*(runner)* | **orchestration/**<br>`dispatch`<br>`contract`<br>`runners` |
+| **2. Public Helpers**<br>*(calls L3)* | `stack_and_solve`<br>*(pre-stage)* | `analyze_target`<br>*(runner)* | `analyze_target`<br>*(runner)* | `analyze_target`<br>*(runner)* | `analyze_target`<br>*(runner)* | **orchestration/**<br>`dispatch`<br>`full_target_pipeline`<br>`pipeline_base`<br>`runners` |
 | **3. Pipelines**<br>*(calls L4)* | **stacking/**<br>`stage`<br>`stack_quality` | **astrometry/**<br>`star_identifier`<br>`catalog_seeding`<br>`spectral_star_reg` | **photometry/**<br>`variability_anal.`<br>`ensemble normal.` | **spectroscopy/**<br>`spectrum_extract`<br>`optics_physics`<br>`calibration_tuner` | **asteroid_recovery/**<br>`detection`<br>`ephemeris` | **image_processing/**<br>**pipelines/shared/**<br>`frame_grouping`<br>`star_recording` |
 | **4. Driver Access**<br>*(exposed via L1)* | *(handed one by dispatch)* | `catalog_access` | `catalog_access` | `catalog_access` | *(skips L4/L5)* | **driver_access/**<br>`catalog_access`<br>`frame_scanning` |
 | **5. Drivers**<br>*(edge)* | `siril_interface` | `plate_solve_store` | `plate_solve_iface` | *(reaches through astrometry)* | *(none)* | **drivers/**<br>`logger`<br>`local_db` |
@@ -23,7 +23,7 @@ The library is organized into five layers across five specialized scientific pip
 
 ### Stacking
 *Located in:* `astrometricslib/pipelines/stacking/`
-- **Dispatch and orchestration:** `astrometricslib/pipelines/dispatch.py` and `astrometricslib/api/batch.py`
+- **Dispatch and orchestration:** `astrometricslib/pipelines/dispatch.py` (routes one analysis request by name), `astrometricslib/pipelines/full_target_pipeline.py` (runs a target's full stack-solve-photometry-spectroscopy sequence), and `astrometricslib/api/batch.py` (runs many targets through that sequence in parallel)
 - **Sub-exposure quality evaluation:** `frame_homogeneity.py` and `background_homogeneity.py`
 - **Raw frame quality & statistics:** `astrometricslib/data_access/frame_statistics.py`
 - **Pixel rejection and integration:** `astrometricslib/utilities/rejection_thresholds.py`, `astrometricslib/utilities/stack_filter_floor.py`, and `stage.py`

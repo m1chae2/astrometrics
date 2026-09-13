@@ -143,7 +143,7 @@ def test_queue_time_does_not_consume_the_stacking_budget(monkeypatch):  # ruff: 
     class _Target:
         id = "NGC 1499"
 
-    result = dispatch._stack_frames_with_timeout(_Target(), [], timeout_seconds=0)
+    result = dispatch.stack_frames_with_timeout(_Target(), [], timeout_seconds=0)
 
     assert result == "/stacked/output.fits"
 
@@ -164,7 +164,7 @@ def test_a_genuinely_hung_stack_is_still_abandoned(monkeypatch):  # ruff: ignore
         id = "HungTarget"
 
     try:
-        result = dispatch._stack_frames_with_timeout(_Target(), [], timeout_seconds=1)
+        result = dispatch.stack_frames_with_timeout(_Target(), [], timeout_seconds=1)
 
         assert result is None
     finally:

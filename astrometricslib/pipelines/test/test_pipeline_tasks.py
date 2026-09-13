@@ -1,4 +1,4 @@
-"""Purpose: Unit tests for analyze_target/stack_and_solve and Target workflow.
+"""Purpose: Unit tests for analyze_target/stacking and Target workflow.
 
 Description: Verifies analyze_target, stack_frames's homogeneous frame
 validation, and the add_frame/analyze_frame_spectroscopy helpers that
@@ -19,7 +19,7 @@ from astrometricslib.drivers.catalog_access import CatalogAccess, StarPosition
 from astrometricslib.models.moving_object import CascadeStage
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import FrameRecord, Target
-from astrometricslib.pipelines import analysis_router, stack_and_solve
+from astrometricslib.pipelines import analysis_router
 from astrometricslib.pipelines.shared.frame_grouping import add_frame
 from astrometricslib.pipelines.shared.star_recording import (
     StarIdentificationBreakdown,
@@ -27,6 +27,7 @@ from astrometricslib.pipelines.shared.star_recording import (
     _reconcile_position_only_star_ids,
 )
 from astrometricslib.pipelines.spectroscopy.frame_analysis import analyze_frame_spectroscopy
+from astrometricslib.pipelines.stacking import stage as stacking_stage
 from astrometricslib.pipelines.test.test_pipeline_result_keys import (
     assert_result_keys,
 )
@@ -313,8 +314,8 @@ def test_target_analyze_target(tmp_path: Any) -> None:
         config.update_config({"Image Library": {"path": original_path}})
 
 
-def test_target_stack_and_solve_homogeneous_validation() -> None:
-    """Verifies that stack_and_solve.
+def test_target_stack_frames_homogeneous_validation() -> None:
+    """Verifies that stacking.
 
     validates that only homogeneous frame types are stacked,.
     and raises a ValueError if frames are mixed or missing.
@@ -322,7 +323,7 @@ def test_target_stack_and_solve_homogeneous_validation() -> None:
     # 1. Test empty frames
     target = Target(id="EmptyTarget")
     with pytest.raises(ValueError, match=r"Target has no frames available to stack\."):
-        stack_and_solve.stack_and_solve(target)
+        stacking_stage.stack_frames(target)
 
     # 2. Test mixed frames (SPEC + standard LIGHT)
     target_mixed = Target(
@@ -335,7 +336,7 @@ def test_target_stack_and_solve_homogeneous_validation() -> None:
     with pytest.raises(
         ValueError, match=r"Target contains a mixed set of spectral.*and standard imaging frames"
     ):
-        stack_and_solve.stack_and_solve(target_mixed)
+        stacking_stage.stack_frames(target_mixed)
 
     # 3. Test homogeneous frames (no mixed-frame error, though it might
     # fail later due to missing file/Siril execution)
@@ -349,7 +350,7 @@ def test_target_stack_and_solve_homogeneous_validation() -> None:
 
     # It should pass the homogeneous check and return None due to
     # dummy paths and unconfigured Siril driver
-    result = stack_and_solve.stack_and_solve(target_homog)
+    result = stacking_stage.stack_frames(target_homog)
     assert result is None
 
 

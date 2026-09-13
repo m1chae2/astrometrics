@@ -118,9 +118,10 @@ def test_a_failing_run_records_a_failed_job_and_still_raises(isolated_job_loggin
 def test_register_job_false_records_nothing(isolated_job_logging, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify the opt-out really opts out.
 
-    `stack_and_solve` relies on this when it calls `analyze_target`
-    itself: without it, one user action would produce two unrelated
-    "started" rows in the job list.
+    The backend's analysis orchestrator relies on this: it already
+    tracks its own job for a UI-triggered run, so without this opt-out
+    `analyze_target` would register a second, redundant job for the
+    same run.
     """
     monkeypatch.setattr(
         analysis_router, "_run_analysis_pipeline_match", lambda *args, **kwargs: {"status": "ok"}

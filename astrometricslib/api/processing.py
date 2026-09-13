@@ -337,16 +337,14 @@ class ProcessingPipelines:
         filter_round: str | None = None,
         stack_weight: str | None = None,
         output_file: str | None = None,
-        solve: bool = False,
         log_file: str | None = None,
         generate_rejmap: bool | None = None,
     ) -> str | None:
-        """Stack multiple images into one clean image, optionally solving it.
+        """Stack multiple images into one clean image.
 
         Stacking combines many faint, noisy images into one clear image.
-        If `solve` is True, it will also 'plate-solve' the final image,
-        meaning it will calculate exactly where in the sky the camera was
-        pointing by matching the stars in the image to a known database.
+        To also plate-solve the result, call `run_astrometry` afterward
+        with the same target.
 
         Parameters
         ----------
@@ -366,10 +364,7 @@ class ProcessingPipelines:
         stack_weight : `str`, optional
             Per-frame stacking weight expression.
         output_file : `str`, optional
-            Output path override; ignored when `solve` is `True`.
-        solve : `bool`, optional
-            If `True`, also plate-solve the resulting stack. Defaults
-            to `False`.
+            Output path override.
         log_file : `str`, optional
             Path to write the Siril process log to.
         generate_rejmap : `bool`, optional
@@ -382,21 +377,6 @@ class ProcessingPipelines:
             The path to the stacked output file, or `None` if
             stacking did not produce an output.
         """
-        if solve:
-            from astrometricslib.pipelines.stack_and_solve import stack_and_solve
-
-            return stack_and_solve(
-                target,
-                log_file=log_file,
-                frames_to_stack=frames_to_stack,
-                filter_type=filter_type,
-                rejection_sigma=rejection_sigma,
-                filter_wfwhm=filter_wfwhm,
-                filter_round=filter_round,
-                stack_weight=stack_weight,
-                generate_rejmap=generate_rejmap,
-            )
-
         from astrometricslib.pipelines.stacking import stage as stacking_tasks
 
         return stacking_tasks.stack_frames(

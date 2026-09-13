@@ -1,22 +1,18 @@
-"""Stacks a target's frames, then chains an astrometry solve onto them.
+"""Runs Siril stacking as a tracked job, with a hard timeout.
 
-`stack_and_solve` runs the Siril stacking tool and, when the result is
-a standard (non-spectral) stack, immediately follows it with an
-astrometry plate-solve -- one call for what would otherwise be two
-separate steps. `stack_frames_with_timeout` wraps that call with a
-time limit, since the underlying Siril process can occasionally hang.
+`stack_frames_with_timeout` is the only way stacking gets called in this
+codebase: it registers the run as a job (so it shows up in the UI's job
+tracker the same way analysis runs do), then runs Siril in the
+background and abandons it if it takes too long, since the underlying
+process can occasionally hang.
 """
 
-import logging
 import threading
 import time
 from typing import Any
 
 from astrometricslib.drivers.job_logging import registered_job
 from astrometricslib.models.target import FrameRecord, Target
-from astrometricslib.pipelines.analysis_router import analyze_target
-
-logger = logging.getLogger(__name__)
 
 # Maximum allowed time for an external stacking task to run.
 # The timeout grows with the number of frames (N) because adding more
@@ -61,30 +57,8 @@ def compute_stacking_timeout_seconds(frame_count: int) -> int:
     return int(max(STACKING_TIMEOUT_SECONDS, scaled_timeout))
 
 
-def stack_and_solve(
-    target: Target,
-    log_file: str | None = None,
-    frames_to_stack: list[FrameRecord] | None = None,
-    filter_type: Any | None = None,
-    rejection_sigma: tuple[float, float] | None = None,
-    filter_wfwhm: str | None = None,
-    filter_round: str | None = None,
-    stack_weight: str | None = None,
-    generate_rejmap: bool | None = None,
-    register_job: bool = True,
-) -> str | None:
-    """Run the Siril stacking tool to combine the target's images.
-
-    You can optionally provide a specific list of frames or a filter
-    type. You can also override settings like the star roundness limit
-    or rejection sigma. If you leave these blank, it uses the defaults.
-
-    Parameters
-    ----------
-    register_job : bool, optional
-        Set to True (default) if you want this run to automatically
-        show up in the user interface's job tracker. Set to False if
-        you are calling this from a tool that already tracks its own jobs.
+def _stack_with_job_tracking(target: Target, frames_to_stack: list[FrameRecord]) -> str | None:
+    """Run Siril stacking, registered as a job the UI can track.
 
     Returns
     -------
@@ -92,10 +66,8 @@ def stack_and_solve(
         The path to the final combined image file, or None if it failed.
     """
     with registered_job(
-        enabled=register_job,
         job_type="stacking",
         target_id=target.id,
-        log_file=log_file,
         completed_message=f"[{target.id}] Stacking completed successfully.",
         failed_message=f"[{target.id}] Stacking failed.",
     ) as job:
@@ -103,58 +75,7 @@ def stack_and_solve(
 
         from astrometricslib.pipelines.stacking import stage as stacking_tasks
 
-        stacked_path = stacking_tasks.stack_frames(
-            target,
-            log_file,
-            frames_to_stack,
-            filter_type,
-            rejection_sigma=rejection_sigma,
-            filter_wfwhm=filter_wfwhm,
-            filter_round=filter_round,
-            stack_weight=stack_weight,
-            generate_rejmap=generate_rejmap,
-        )
-        # analyze_target(pipeline_type="astrometry") plate-solves
-        # target.stacked_image
-        # specifically (see analyze_target's path-resolution logic) -- it has
-        # no notion of a spectral stack, so only run it when this call just
-        # produced a *standard* stack. Checking which of
-        # stacked_image/stacked_spectral_target now equals stacked_path
-        # tells us which one stacking_tasks.stack_frames just set,
-        # without needing a separate return value for it. analyze_target
-        # builds and assigns target.astrometry_quality_summary itself
-        # (including flagging a failed-but-attempted solve) -- the only
-        # case it can't cover is a hard solver error, which raises before
-        # analyze_target gets to build the summary at all, so that's
-        # handled here instead.
-        if stacked_path and stacked_path == target.stacked_image:
-            try:
-                # register_job=False: this stacking run already registered
-                # its own job above, and analyze_target's docstring is
-                # explicit about why a nested call must suppress its own
-                # registration -- otherwise one stack_and_solve(solve=True)
-                # call produces two ownerless "started" rows in the UI job
-                # manager ("stacking" and "analysis") for what the caller
-                # sees as a single action.
-                analyze_target(target, pipeline_type="astrometry", register_job=False)
-            except Exception as stacking_error:
-                logger.warning(f"Astrometry plate solving failed after stacking: {stacking_error}")
-                from astrometricslib.models.quality_summary import (
-                    AstrometryPipelineQualityMetrics,
-                    AstrometryQualitySummary,
-                )
-
-                target.astrometry_quality_summary = AstrometryQualitySummary(
-                    target_id=target.id,
-                    flagged=True,
-                    flag_reasons=["plate solve failed"],
-                    astrometry_metrics=AstrometryPipelineQualityMetrics(
-                        sources_detected=0,
-                        solve_attempted=False,
-                        plate_solve_succeeded=False,
-                        simbad_matched_count=0,
-                    ),
-                )
+        stacked_path = stacking_tasks.stack_frames(target, frames_to_stack=frames_to_stack)
         # Stacking can finish without raising and still produce no
         # image, so the outcome is decided here rather than left to the
         # context manager's "no exception means success" default.
@@ -203,7 +124,7 @@ def stack_frames_with_timeout(
 
     def _run_stacking() -> None:
         try:
-            outcome["path"] = stack_and_solve(target, frames_to_stack=frames_to_stack)
+            outcome["path"] = _stack_with_job_tracking(target, frames_to_stack)
         except Exception as stacking_error:
             outcome["error"] = stacking_error
 

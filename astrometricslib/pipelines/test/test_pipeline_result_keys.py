@@ -121,8 +121,6 @@ def test_every_analysis_mode_has_a_recorded_key_set():  # ruff: ignore[missing-r
     the table above, so a new mode cannot ship without its result keys
     written down.
     """
-    from astrometricslib.pipelines import PIPELINE_RUNNERS
-
-    assert set(PIPELINE_RUNNERS) == set(EXPECTED_RESULT_KEYS), (
+    assert set(dispatch.PIPELINE_RUNNERS) == set(EXPECTED_RESULT_KEYS), (
         "PIPELINE_RUNNERS and this table disagree about which analysis modes exist."
     )

@@ -1,11 +1,20 @@
 """Routes a single analysis request to the right pipeline, by name.
 
 `analyze_target` looks up the mode the caller asked for ("astrometry",
-"spectroscopy", "photometry", or "asteroid_recovery") and calls the
-matching pipeline runner -- this is a plain dispatch table, the same
-pattern `pipelines/__init__.py`'s `PIPELINE_RUNNERS` names directly.
-Also holds `stack_and_solve`, which runs stacking and then chains an
-astrometry plate-solve onto the result as one job.
+"spectroscopy", "photometry", or "asteroid_recovery") in
+`PIPELINE_RUNNERS` and calls whichever runner it finds -- adding a
+fifth analysis mode means adding a module under `pipelines/` and one
+entry to this dict; nothing else here needs to change. Also holds
+`stack_and_solve`, which runs stacking and then chains an astrometry
+plate-solve onto the result as one job.
+
+Every runner takes the same five arguments (``target``, ``frames``,
+``filter_type``, ``catalog_access``, ``path``, plus ``**kwargs``) even
+though most of them ignore some of it -- astrometry and spectroscopy
+never look at ``frames``/``filter_type``, and asteroid recovery does not
+even use ``catalog_access``. One shared signature is what lets this dict
+dispatch on name alone, instead of every call site needing to know which
+pipeline wants which subset of arguments.
 
 The full, start-to-finish sequence for one target (stack, solve,
 photometry, spectroscopy, save) is a separate, bigger job and lives in
@@ -19,6 +28,9 @@ from typing import Any
 
 from astrometricslib.drivers.job_logging import registered_job
 from astrometricslib.models.target import FrameRecord, Target
+from astrometricslib.pipelines.asteroid_recovery.runner import run_asteroid_recovery_analysis
+from astrometricslib.pipelines.astrometry.runner import run_astrometry_analysis
+from astrometricslib.pipelines.photometry.runner import run_photometry_analysis
 from astrometricslib.pipelines.shared.star_recording import (
     StarIdentificationBreakdown,
     _drop_unresolved_stars,
@@ -27,6 +39,14 @@ from astrometricslib.pipelines.shared.star_recording import (
     merge_photometry_stellar_object,
     merge_spectroscopy_stellar_object,
 )
+from astrometricslib.pipelines.spectroscopy.runner import run_spectroscopy_analysis
+
+PIPELINE_RUNNERS = {
+    "astrometry": run_astrometry_analysis,
+    "spectroscopy": run_spectroscopy_analysis,
+    "photometry": run_photometry_analysis,
+    "asteroid_recovery": run_asteroid_recovery_analysis,
+}
 
 # Re-exported so external callers and tests that import these by their
 # dispatch path keep working -- this module used to define them
@@ -171,8 +191,6 @@ def _run_analysis_pipeline_match(
     path,  # ruff: ignore[missing-type-function-argument]
     **kwargs,  # ruff: ignore[missing-type-kwargs]
 ) -> dict[str, Any]:
-    from astrometricslib.pipelines import PIPELINE_RUNNERS
-
     runner = PIPELINE_RUNNERS.get(pipeline_type)
     if runner is None:
         raise ValueError(f"Unknown analysis type: {pipeline_type}")

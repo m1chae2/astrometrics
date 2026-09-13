@@ -262,7 +262,7 @@ def run_astrometry_analysis(
     """Detect stars in one image and, if possible, solve its pointing.
 
     A thin wrapper kept at this name and signature for
-    `pipelines.PIPELINE_RUNNERS` -- the actual work is
+    `dispatch.PIPELINE_RUNNERS` -- the actual work is
     `AstrometryPipelineAdapter`, run through the shared
     input/main/output processing cycle in `run_pipeline`.
 

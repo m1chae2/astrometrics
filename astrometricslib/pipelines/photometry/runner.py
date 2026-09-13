@@ -484,7 +484,7 @@ def run_photometry_analysis(
     """Track star brightness across a target's images, session by session.
 
     A thin wrapper kept at this name and signature for
-    `pipelines.PIPELINE_RUNNERS` -- the actual work is
+    `dispatch.PIPELINE_RUNNERS` -- the actual work is
     `PhotometryPipelineAdapter`, run through the shared
     input/main/output processing cycle in `run_pipeline`.
 

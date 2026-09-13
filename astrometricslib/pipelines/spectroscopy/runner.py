@@ -249,7 +249,7 @@ def run_spectroscopy_analysis(
     """Detect stars in a spectral image and extract each one's spectrum.
 
     A thin wrapper kept at this name and signature for
-    `pipelines.PIPELINE_RUNNERS` -- the actual work is
+    `dispatch.PIPELINE_RUNNERS` -- the actual work is
     `SpectroscopyPipelineAdapter`, run through the shared
     input/main/output processing cycle in `run_pipeline`.
 

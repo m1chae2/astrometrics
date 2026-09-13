@@ -179,7 +179,7 @@ def run_asteroid_recovery_analysis(
     """Search a target's light frames for moving objects.
 
     A thin wrapper kept at this name and signature for
-    `pipelines.PIPELINE_RUNNERS` -- the actual work is
+    `dispatch.PIPELINE_RUNNERS` -- the actual work is
     `AsteroidRecoveryPipelineAdapter`, run through the shared
     input/main/output processing cycle in `run_pipeline`.
 

@@ -58,8 +58,9 @@ _COLOR_DETECTION_BIN_FACTOR = 2
 # driver, rather than here: they describe how to talk to astroquery, not
 # how this pipeline identifies a star.
 
-# Gaia TAP service queries are also not thread-safe for the shared
-# Gaia singleton; serialise them with a dedicated lock.
+# Gaia TAP service queries also aren't safe to run at the same time
+# from multiple threads, since every query shares one connection
+# object; force them to run one at a time with a dedicated lock.
 GAIA_LOCK = threading.Lock()
 
 # --- Gaia Connection Safety Switch ------------------------------------------

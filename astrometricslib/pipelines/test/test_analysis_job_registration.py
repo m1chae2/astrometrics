@@ -78,9 +78,7 @@ def _package_logger_handler_count() -> int:
 
 def test_a_successful_run_records_a_completed_job(isolated_job_logging, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify a job row is written and ends up marked completed."""
-    monkeypatch.setattr(
-        tasks, "_run_analysis_pipeline_match", lambda *args, **kwargs: {"status": "ok"}
-    )
+    monkeypatch.setattr(tasks, "_run_analysis_pipeline_match", lambda *args, **kwargs: {"status": "ok"})
     target = Target(id="JobSuccessTarget")
 
     result = tasks.analyze_target(target, pipeline_type="astrometry", path="unused.fits")
@@ -123,9 +121,7 @@ def test_register_job_false_records_nothing(isolated_job_logging, monkeypatch): 
     `analyze_target` would register a second, redundant job for the
     same run.
     """
-    monkeypatch.setattr(
-        tasks, "_run_analysis_pipeline_match", lambda *args, **kwargs: {"status": "ok"}
-    )
+    monkeypatch.setattr(tasks, "_run_analysis_pipeline_match", lambda *args, **kwargs: {"status": "ok"})
     target = Target(id="NoJobTarget")
 
     tasks.analyze_target(target, pipeline_type="astrometry", path="unused.fits", register_job=False)
@@ -140,14 +136,10 @@ def test_log_handlers_are_detached_after_a_successful_run(isolated_job_logging, 
     "astrometricslib" logger. If they are not removed, this job's log
     file and database rows keep receiving every later job's messages.
     """
-    monkeypatch.setattr(
-        tasks, "_run_analysis_pipeline_match", lambda *args, **kwargs: {"status": "ok"}
-    )
+    monkeypatch.setattr(tasks, "_run_analysis_pipeline_match", lambda *args, **kwargs: {"status": "ok"})
     handlers_before = _package_logger_handler_count()
 
-    tasks.analyze_target(
-        Target(id="HandlerCleanupTarget"), pipeline_type="astrometry", path="unused.fits"
-    )
+    tasks.analyze_target(Target(id="HandlerCleanupTarget"), pipeline_type="astrometry", path="unused.fits")
 
     assert _package_logger_handler_count() == handlers_before
 
@@ -197,9 +189,7 @@ def test_the_per_job_logger_is_left_clean(isolated_job_logging, monkeypatch):  #
 
     monkeypatch.setattr(tasks, "_run_analysis_pipeline_match", _capture)
 
-    tasks.analyze_target(
-        Target(id="JobLoggerCleanupTarget"), pipeline_type="astrometry", path="unused.fits"
-    )
+    tasks.analyze_target(Target(id="JobLoggerCleanupTarget"), pipeline_type="astrometry", path="unused.fits")
 
     assert captured_job_ids, "no per-job logger was created, so this test proves nothing"
     leftover = {
@@ -226,9 +216,7 @@ def test_a_broken_logs_database_does_not_stop_the_analysis(isolated_job_logging,
         raise OSError("logs database unavailable")
 
     monkeypatch.setattr(logger_interface_module, "LoggerInterface", _unopenable)
-    monkeypatch.setattr(
-        tasks, "_run_analysis_pipeline_match", lambda *args, **kwargs: {"status": "ok"}
-    )
+    monkeypatch.setattr(tasks, "_run_analysis_pipeline_match", lambda *args, **kwargs: {"status": "ok"})
 
     result = tasks.analyze_target(
         Target(id="BrokenLogDbTarget"), pipeline_type="astrometry", path="unused.fits"

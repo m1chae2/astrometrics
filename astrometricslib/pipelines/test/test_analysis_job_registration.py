@@ -17,7 +17,7 @@ import logging
 import pytest
 
 from astrometricslib.models.target import Target
-from astrometricslib.pipelines import analysis_router
+from astrometricslib.pipelines import orchestration
 from astrometricslib.utilities import config_loader
 from astrometricslib.utilities.config_loader import AppConfiguration
 
@@ -79,11 +79,11 @@ def _package_logger_handler_count() -> int:
 def test_a_successful_run_records_a_completed_job(isolated_job_logging, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify a job row is written and ends up marked completed."""
     monkeypatch.setattr(
-        analysis_router, "_run_analysis_pipeline_match", lambda *args, **kwargs: {"status": "ok"}
+        orchestration, "_run_analysis_pipeline_match", lambda *args, **kwargs: {"status": "ok"}
     )
     target = Target(id="JobSuccessTarget")
 
-    result = analysis_router.analyze_target(target, pipeline_type="astrometry", path="unused.fits")
+    result = orchestration.analyze_target(target, pipeline_type="astrometry", path="unused.fits")
 
     assert result == {"status": "ok"}
     jobs = _read_jobs(isolated_job_logging, "JobSuccessTarget")
@@ -103,11 +103,11 @@ def test_a_failing_run_records_a_failed_job_and_still_raises(isolated_job_loggin
     def _explode(*args: object, **kwargs: object) -> object:
         raise RuntimeError("pipeline blew up")
 
-    monkeypatch.setattr(analysis_router, "_run_analysis_pipeline_match", _explode)
+    monkeypatch.setattr(orchestration, "_run_analysis_pipeline_match", _explode)
     target = Target(id="JobFailureTarget")
 
     with pytest.raises(RuntimeError, match="pipeline blew up"):
-        analysis_router.analyze_target(target, pipeline_type="astrometry", path="unused.fits")
+        orchestration.analyze_target(target, pipeline_type="astrometry", path="unused.fits")
 
     jobs = _read_jobs(isolated_job_logging, "JobFailureTarget")
     assert len(jobs) == 1
@@ -124,11 +124,11 @@ def test_register_job_false_records_nothing(isolated_job_logging, monkeypatch): 
     same run.
     """
     monkeypatch.setattr(
-        analysis_router, "_run_analysis_pipeline_match", lambda *args, **kwargs: {"status": "ok"}
+        orchestration, "_run_analysis_pipeline_match", lambda *args, **kwargs: {"status": "ok"}
     )
     target = Target(id="NoJobTarget")
 
-    analysis_router.analyze_target(target, pipeline_type="astrometry", path="unused.fits", register_job=False)
+    orchestration.analyze_target(target, pipeline_type="astrometry", path="unused.fits", register_job=False)
 
     assert _read_jobs(isolated_job_logging, "NoJobTarget") == []
 
@@ -141,11 +141,11 @@ def test_log_handlers_are_detached_after_a_successful_run(isolated_job_logging, 
     file and database rows keep receiving every later job's messages.
     """
     monkeypatch.setattr(
-        analysis_router, "_run_analysis_pipeline_match", lambda *args, **kwargs: {"status": "ok"}
+        orchestration, "_run_analysis_pipeline_match", lambda *args, **kwargs: {"status": "ok"}
     )
     handlers_before = _package_logger_handler_count()
 
-    analysis_router.analyze_target(
+    orchestration.analyze_target(
         Target(id="HandlerCleanupTarget"), pipeline_type="astrometry", path="unused.fits"
     )
 
@@ -158,11 +158,11 @@ def test_log_handlers_are_detached_even_when_the_run_fails(isolated_job_logging,
     def _explode(*args: object, **kwargs: object) -> object:
         raise RuntimeError("pipeline blew up")
 
-    monkeypatch.setattr(analysis_router, "_run_analysis_pipeline_match", _explode)
+    monkeypatch.setattr(orchestration, "_run_analysis_pipeline_match", _explode)
     handlers_before = _package_logger_handler_count()
 
     with pytest.raises(RuntimeError):
-        analysis_router.analyze_target(
+        orchestration.analyze_target(
             Target(id="HandlerCleanupOnFailureTarget"),
             pipeline_type="astrometry",
             path="unused.fits",
@@ -195,9 +195,9 @@ def test_the_per_job_logger_is_left_clean(isolated_job_logging, monkeypatch):  #
         )
         return {"status": "ok"}
 
-    monkeypatch.setattr(analysis_router, "_run_analysis_pipeline_match", _capture)
+    monkeypatch.setattr(orchestration, "_run_analysis_pipeline_match", _capture)
 
-    analysis_router.analyze_target(
+    orchestration.analyze_target(
         Target(id="JobLoggerCleanupTarget"), pipeline_type="astrometry", path="unused.fits"
     )
 
@@ -227,10 +227,10 @@ def test_a_broken_logs_database_does_not_stop_the_analysis(isolated_job_logging,
 
     monkeypatch.setattr(logger_interface_module, "LoggerInterface", _unopenable)
     monkeypatch.setattr(
-        analysis_router, "_run_analysis_pipeline_match", lambda *args, **kwargs: {"status": "ok"}
+        orchestration, "_run_analysis_pipeline_match", lambda *args, **kwargs: {"status": "ok"}
     )
 
-    result = analysis_router.analyze_target(
+    result = orchestration.analyze_target(
         Target(id="BrokenLogDbTarget"), pipeline_type="astrometry", path="unused.fits"
     )
 
@@ -246,13 +246,13 @@ def test_a_missing_image_path_fails_the_job_before_running_anything(isolated_job
     """
     called = []
     monkeypatch.setattr(
-        analysis_router,
+        orchestration,
         "_run_analysis_pipeline_match",
         lambda *args, **kwargs: called.append(1) or {"status": "ok"},
     )
 
     with pytest.raises(ValueError, match="No frames or stacked image available"):
-        analysis_router.analyze_target(Target(id="NoImageTarget"), pipeline_type="astrometry")
+        orchestration.analyze_target(Target(id="NoImageTarget"), pipeline_type="astrometry")
 
     assert called == []
     jobs = _read_jobs(isolated_job_logging, "NoImageTarget")

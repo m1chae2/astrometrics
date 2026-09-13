@@ -5,7 +5,7 @@ Astrometrics high-level interface.
 """
 
 from astrometricslib import Astrometrics
-from astrometricslib.pipelines.analysis_router import analyze_target
+from astrometricslib.pipelines.orchestration import analyze_target
 from astrometricslib.utilities.config_loader import AppConfiguration
 
 

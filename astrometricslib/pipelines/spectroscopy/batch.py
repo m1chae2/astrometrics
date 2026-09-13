@@ -41,7 +41,7 @@ def _process_single_spectroscopy_frame_worker(path: str, target_id: str) -> dict
     """
     from astrometricslib import Astrometrics
     from astrometricslib.models.target import FrameRecord
-    from astrometricslib.pipelines.analysis_router import analyze_target
+    from astrometricslib.pipelines.orchestration import analyze_target
 
     result = {"status": "failed", "error": None, "stars_processed": 0}
     try:
@@ -124,7 +124,7 @@ def _fallback_independent_frame_analysis(astrometrics: Any, target_id: str, path
         The same `result` dictionary that was passed in, updated with
         success/failure details.
     """
-    from astrometricslib.pipelines.analysis_router import analyze_target
+    from astrometricslib.pipelines.orchestration import analyze_target
 
     target = astrometrics.targets.get(target_id)
     if target is None:

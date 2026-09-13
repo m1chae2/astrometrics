@@ -410,7 +410,7 @@ class ProcessingPipelines:
         result : `dict[str, Any]`
             Astrometry results and status fields.
         """
-        from astrometricslib.pipelines.analysis_router import analyze_target
+        from astrometricslib.pipelines.orchestration import analyze_target
 
         return analyze_target(target, pipeline_type="astrometry", **kwargs)
 
@@ -432,7 +432,7 @@ class ProcessingPipelines:
         result : `dict[str, Any]`
             Photometry results and status fields.
         """
-        from astrometricslib.pipelines.analysis_router import analyze_target
+        from astrometricslib.pipelines.orchestration import analyze_target
 
         return analyze_target(target, pipeline_type="photometry", **kwargs)
 
@@ -454,7 +454,7 @@ class ProcessingPipelines:
         result : `dict[str, Any]`
             Spectroscopy results and status fields.
         """
-        from astrometricslib.pipelines.analysis_router import analyze_target
+        from astrometricslib.pipelines.orchestration import analyze_target
 
         return analyze_target(target, pipeline_type="spectroscopy", **kwargs)
 

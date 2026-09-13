@@ -39,12 +39,10 @@ from astrometricslib.pipelines.asteroid_recovery.runner import run_asteroid_reco
 from astrometricslib.pipelines.astrometry.runner import run_astrometry_analysis
 from astrometricslib.pipelines.photometry.runner import run_photometry_analysis
 from astrometricslib.pipelines.shared.frame_grouping import (
-    frame_configuration_key,
-    frames_missing_focal_length,
-    select_frames_for_camera,
+    select_frames_for_processing,
+    split_standard_and_spectral_frames,
 )
 from astrometricslib.pipelines.spectroscopy.runner import run_spectroscopy_analysis
-from astrometricslib.utilities.enums import FilterType
 from datastore.process_locks import acquire_resource_slot
 
 # -- Stacking, as a tracked job with a hard timeout --------------------
@@ -349,11 +347,11 @@ def run_full_pipeline(
     print(f"STARTING BATCH PROCESSING FOR TARGET: {target.id}")
     print("==========================================")
 
-    camera_frames = _select_frames_for_processing(target, camera_name, focal_length_mm)
+    camera_frames = select_frames_for_processing(target, camera_name, focal_length_mm)
     if camera_frames is None:
         return {}
 
-    standard_frames, spectral_frames = _split_standard_and_spectral_frames(target, camera_frames)
+    standard_frames, spectral_frames = split_standard_and_spectral_frames(target, camera_frames)
     stack_outputs = _stack_camera_frames(target, camera_name, standard_frames, spectral_frames)
 
     # 2. Astrometry Analysis
@@ -373,101 +371,6 @@ def run_full_pipeline(
     print(f"[{target.id}] Processing completed and metadata saved successfully.")
 
     return stack_outputs
-
-
-def _select_frames_for_processing(
-    target: Target, camera_name: str, focal_length_mm: float | None
-) -> list[FrameRecord] | None:
-    """Narrow a target's frames down to one camera and (optionally) one optic.
-
-    Frames of different focal length image at different scales -- this
-    library's 300mm and 405mm optics differ by 1.35x -- so a stack
-    blending them has no single pixel scale, cannot be plate solved
-    accurately, and produces fluxes that are not comparable between
-    frames. Seven targets were being stacked that way, NGC 7023 worst
-    at 424 frames of one optic mixed with 111 of the other.
-
-    Returns
-    -------
-    camera_frames : `list` [`FrameRecord`] or `None`
-        The matching frames, or `None` if there are none to process
-        (already logged, so the caller should stop with no work done).
-    """
-    # Restrict all processing to frames captured with the requested
-    # camera; every other camera's frames on this target are excluded.
-    camera_frames = select_frames_for_camera(target, camera_name)
-
-    if focal_length_mm is not None:
-        requested_key_suffix = f"@{round(float(focal_length_mm))}mm"
-        selected_frames = [
-            frame
-            for frame in camera_frames
-            if (frame_configuration_key(frame) or "").endswith(requested_key_suffix)
-        ]
-        if not selected_frames:
-            print(
-                f"[{target.id}] No frames at {focal_length_mm:g}mm for camera '{camera_name}'. "
-                "Skipping all processing steps."
-            )
-            return None
-        unassignable = frames_missing_focal_length(target, camera_name)
-        if unassignable:
-            # Never dropped silently: a frame with no FOCALLEN cannot be
-            # grouped, and on this library that is 602 frames. See
-            # scripts/backfill_focal_length.
-            print(
-                f"[{target.id}] {len(unassignable)} frame(s) excluded: no FOCALLEN recorded, "
-                "so their optic is unknown."
-            )
-        camera_frames = selected_frames
-
-    if not camera_frames:
-        print(
-            f"[{target.id}] No frames matching camera '{camera_name}' found for this target. "
-            "Skipping all processing steps."
-        )
-        return None
-
-    return camera_frames
-
-
-def _split_standard_and_spectral_frames(
-    target: Target, camera_frames: list[FrameRecord]
-) -> tuple[list[FrameRecord], list[FrameRecord]]:
-    """Split a target's camera frames into standard and spectral groups.
-
-    Excludes derived frames (already-stacked images, starless/starmask
-    products) before classifying what's left by filter.
-
-    Returns
-    -------
-    standard_frames, spectral_frames : `list` [`FrameRecord`]
-        The non-SPEC and SPEC frames, respectively.
-    """
-    print(f"[{target.id}] Stacking frames...")
-    target_frames = [
-        frame
-        for frame in camera_frames
-        if not any(k in frame.path.lower() for k in ("_stacked", "starless", "starmask"))
-    ]
-
-    # Check if there is a mixed set of spectral and standard frames.
-    # If so, run standard stacking on standard frames, and spectral
-    # stacking on spectral frames.
-    standard_frames = []
-    spectral_frames = []
-    for frame in target_frames:
-        is_spectral = (
-            frame.filter == FilterType.SPEC
-            or getattr(frame.filter, "name", None) == "SPEC"
-            or str(frame.filter).upper() in ("SPEC", "STAR ANALYZER 200")
-        )
-        if is_spectral:
-            spectral_frames.append(frame)
-        else:
-            standard_frames.append(frame)
-
-    return standard_frames, spectral_frames
 
 
 def _stack_camera_frames(

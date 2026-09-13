@@ -22,7 +22,7 @@ from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines import dispatch
 from astrometricslib.pipelines.shared.frame_grouping import add_frame
 from astrometricslib.pipelines.spectroscopy.frame_analysis import analyze_frame_spectroscopy
-from astrometricslib.pipelines.test.test_pipeline_return_contracts import (
+from astrometricslib.pipelines.test.test_pipeline_result_keys import (
     assert_result_keys,
 )
 from astrometricslib.utilities.config_loader import AppConfiguration

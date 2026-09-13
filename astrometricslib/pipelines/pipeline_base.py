@@ -131,7 +131,7 @@ class AnalysisPipeline(ABC):
         """The name this pipeline records itself under.
 
         Must match the `pipeline_name` literal on the matching
-        `*QualitySummary` class -- `test_pipeline_contract_conformance.py`
+        `*QualitySummary` class -- `test_analysis_pipeline_conformance.py`
         checks this, so the two cannot silently drift apart.
         """
 

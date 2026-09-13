@@ -15,7 +15,7 @@ from astrometricslib.models.quality_summary import (
     AsteroidRecoveryPipelineQualityMetrics,
     AsteroidRecoveryQualitySummary,
 )
-from astrometricslib.pipelines.contract import (
+from astrometricslib.pipelines.pipeline_base import (
     AnalysisPipeline,
     PipelineRequest,
     Result,

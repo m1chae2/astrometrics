@@ -55,7 +55,7 @@ DEFAULT_DEDUPLICATION_SEPARATION_DEGREES = DEFAULT_FIELD_RADIUS_DEGREES / 2
 # concurrency.
 DEFAULT_REQUEST_DELAY_SECONDS = 2.0
 
-# Matches the retry shape `plate_solver._call_with_transient_retry`
+# Matches the retry pattern `plate_solver._call_with_transient_retry`
 # already uses for the same class of problem (a transient remote
 # failure), so both remote services behave the same way under a blip.
 DEFAULT_MAX_ATTEMPTS = 3

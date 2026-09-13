@@ -13,7 +13,7 @@ from astrometricslib.models.quality_summary import (
     AstrometryPipelineQualityMetrics,
     AstrometryQualitySummary,
 )
-from astrometricslib.pipelines.contract import (
+from astrometricslib.pipelines.pipeline_base import (
     AnalysisPipeline,
     PipelineRequest,
     Result,
@@ -99,7 +99,7 @@ def _write_solved_wcs_to_fits_header(path: str | None, context: Any) -> None:
 
 
 class AstrometryPipelineAdapter(AnalysisPipeline):
-    """Adapts `AstrometryPipeline` to the shared `AnalysisPipeline` shape."""
+    """Adapts `AstrometryPipeline` to the shared `AnalysisPipeline`."""
 
     @property
     def pipeline_name(self) -> str:

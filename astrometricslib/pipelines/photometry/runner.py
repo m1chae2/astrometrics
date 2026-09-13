@@ -1,4 +1,4 @@
-"""Adapts photometry's per-session runs to the shared pipeline shape.
+"""Adapts photometry's per-session runs to the shared pipeline base.
 
 A target's images span many separately registered observing sessions,
 and brightness tracking only works within one session at a time
@@ -11,15 +11,15 @@ import logging
 from typing import Any
 
 from astrometricslib.models.target import Target
-from astrometricslib.pipelines.contract import (
+from astrometricslib.pipelines.photometry.batch import (
+    _match_and_merge_across_sessions,
+    _run_variability_analysis_for_session,
+)
+from astrometricslib.pipelines.pipeline_base import (
     AnalysisPipeline,
     PipelineRequest,
     Result,
     run_pipeline,
-)
-from astrometricslib.pipelines.photometry.batch import (
-    _match_and_merge_across_sessions,
-    _run_variability_analysis_for_session,
 )
 from astrometricslib.pipelines.shared.star_recording import (
     merge_photometry_stellar_object,
@@ -44,7 +44,7 @@ MINIMUM_ENSEMBLE_REJECTION_COUNT_TO_FLAG = 5
 def _empty_photometry_result(no_work_reason: str) -> Result:
     """Build the `has_work=False` `Result` for photometry's give-up case.
 
-    Shaped exactly like a real run that happened to process zero
+    Structured exactly like a real run that happened to process zero
     sessions and find zero stars, so `run` can be skipped while
     `validate_output`/`to_result_dict` still produce a normal (empty)
     summary and result dict, with `no_work_reason` surfaced as a flag
@@ -91,7 +91,7 @@ def _empty_photometry_result(no_work_reason: str) -> Result:
 
 
 class PhotometryPipelineAdapter(AnalysisPipeline):
-    """Adapts per-session `VariabilityAnalyzer` runs to the shared shape."""
+    """Adapts per-session `VariabilityAnalyzer` runs to `AnalysisPipeline`."""
 
     @property
     def pipeline_name(self) -> str:
@@ -453,7 +453,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         Returns
         -------
         result_dict : `dict`
-            The completed shape carrying every brightness-tracking metric.
+            The completed dict carrying every brightness-tracking metric.
         """
         payload = result.payload
         return {
@@ -505,11 +505,11 @@ def run_photometry_analysis(
     Returns
     -------
     result : `dict`
-        The completed shape carrying every brightness-tracking metric,
+        The completed dict carrying every brightness-tracking metric,
         even when there was no usable data -- in that case every metric
         is zero/empty and the reason surfaces as a flag in
         `target.photometry_quality_summary.flag_reasons` rather than as
-        a distinct return shape.
+        a differently-structured return value.
     """
     request = PipelineRequest(
         target=target,

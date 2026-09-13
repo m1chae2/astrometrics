@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 def _read_xy_source_position(source: Any) -> tuple[Any, Any]:
-    """Read an `(x, y)` pixel position off a source, whatever shape it is.
+    """Read an `(x, y)` pixel position off a source, whatever form it's in.
 
     A source can be a photutils `SourceCatalog` row (attribute access), a
     plain dict or a `StellarObject.star_data` dict (`.get` access), or a
@@ -56,9 +56,9 @@ def _read_xy_source_position(source: Any) -> tuple[Any, Any]:
 
 
 def _star_pixel_position(star: Any) -> tuple[bool, tuple[Any, Any]]:
-    """Read a star's raw `(x, y)` pixel position, whatever shape it is.
+    """Read a star's raw `(x, y)` pixel position, whatever form it's in.
 
-    `target_stars` mixes three shapes depending on the caller: a plain
+    `target_stars` mixes three forms depending on the caller: a plain
     `(x, y)` tuple, a `StellarObject` (position under `.star_data`), or a
     photutils source-detection row/dict.
 

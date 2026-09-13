@@ -1,4 +1,4 @@
-"""Checks that every pipeline adapter actually conforms to its contract.
+"""Checks that adapters really follow the AnalysisPipeline blueprint.
 
 Adding `AnalysisPipeline` costs nothing if nothing checks that a class
 implementing it is honest about which pipeline it is. This file is what
@@ -20,8 +20,8 @@ from astrometricslib.models.quality_summary import (
 )
 from astrometricslib.pipelines.asteroid_recovery.runner import AsteroidRecoveryPipelineAdapter
 from astrometricslib.pipelines.astrometry.runner import AstrometryPipelineAdapter
-from astrometricslib.pipelines.contract import AnalysisPipeline
 from astrometricslib.pipelines.photometry.runner import PhotometryPipelineAdapter
+from astrometricslib.pipelines.pipeline_base import AnalysisPipeline
 from astrometricslib.pipelines.spectroscopy.runner import SpectroscopyPipelineAdapter
 
 # Every adapter, paired with the *QualitySummary class run_pipeline sets

@@ -15,7 +15,7 @@ from astrometricslib.models.quality_summary import (
     SpectroscopyQualitySummary,
 )
 from astrometricslib.models.target import Target
-from astrometricslib.pipelines.contract import (
+from astrometricslib.pipelines.pipeline_base import (
     AnalysisPipeline,
     PipelineRequest,
     Result,
@@ -78,7 +78,7 @@ def _registration_reference_candidates(target: Target, catalog_access: Any) -> l
 
 
 class SpectroscopyPipelineAdapter(AnalysisPipeline):
-    """Adapts `SpectroscopyPipeline` to the shared `AnalysisPipeline` shape."""
+    """Adapts `SpectroscopyPipeline` to the shared `AnalysisPipeline`."""
 
     @property
     def pipeline_name(self) -> str:

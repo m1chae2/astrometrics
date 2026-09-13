@@ -1,4 +1,4 @@
-"""Locks the exact shape of the dictionaries each analysis returns.
+"""Locks the exact set of keys each analysis's returned dictionary has.
 
 These dictionaries are not internal. Their keys travel out through the
 backend and land in TypeScript, in `ui/common/types/backendTypes.ts`, so
@@ -77,8 +77,8 @@ def test_photometry_with_no_frames_for_the_filter_returns_completed_with_zero_co
     any real work starts, but that `Result` still flows through
     `validate_output`/`to_result_dict` exactly like a real run's would --
     so the target still gets a real (empty) quality summary, flagged
-    with the reason, and the caller gets the same result shape as any
-    other completed photometry run, just with every count at zero.
+    with the reason, and the caller gets the same set of result keys as
+    any other completed photometry run, just with every count at zero.
     """
     target = Target(id="NoMatchingFramesTarget")
 
@@ -118,8 +118,8 @@ def test_every_analysis_mode_has_a_recorded_key_set():  # ruff: ignore[missing-r
     """Verify this file covers every mode the dispatcher accepts.
 
     If someone adds a fifth analysis mode, this fails and points them at
-    the table above, so a new mode cannot ship without its shape written
-    down.
+    the table above, so a new mode cannot ship without its result keys
+    written down.
     """
     from astrometricslib.pipelines import PIPELINE_RUNNERS
 

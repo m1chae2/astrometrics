@@ -143,21 +143,21 @@ extend-exclude = [
 
 [tool.ruff.lint]
 select = [
-    "E",   # pycodestyle errors
-    "W",   # pycodestyle warnings
-    "F",   # pyflakes
-    "I",   # isort
-    "B",   # flake8-bugbear
-    "UP",  # pyupgrade
-    "C4",  # flake8-comprehensions
-    "RUF", # ruff-specific rules
-    "N",   # pep8-naming (naming conventions)
-    "D",   # pydocstyle (numpydoc-style docstrings, LSST DM convention)
-    "doc-line-too-long", # pycodestyle: docstring/comment line-too-long (LSST DM 79-char limit)
-    "DOC", # pydoclint: docstring content must match the actual signature/behavior (preview)
-    "TID", # flake8-tidy-imports: banned-api enforces the astrometricslib public-API boundary
-    "S",   # flake8-bandit: security (subprocess use, hardcoded credentials, weak hashing, etc.)
-    "ANN", # flake8-annotations: type annotations must be present, so pyrefly actually checks the function
+    "E",   # pycodestyle: flags broken formatting -- spacing, indentation, line length -- so code looks the same everywhere.
+    "W",   # pycodestyle: the same kind of formatting slip as "E", flagged as a warning rather than a hard error.
+    "F",   # pyflakes: catches real bugs -- unused imports, unused variables, names that were never defined.
+    "I",   # isort: keeps imports sorted and grouped the same way everywhere, so reordering them doesn't clutter every diff.
+    "B",   # flake8-bugbear: catches Python mistakes that look fine but usually aren't, like a mutable default argument.
+    "UP",  # pyupgrade: flags old syntax that has a cleaner modern equivalent, so the code keeps pace with the Python version it targets.
+    "C4",  # flake8-comprehensions: flags comprehensions written the long way and suggests the simpler, more readable form.
+    "RUF", # Ruff's own extra checks, for mistakes the tools above don't cover.
+    "N",   # pep8-naming: enforces naming conventions -- classes in PascalCase, functions/variables in snake_case -- so a name's casing alone says what kind of thing it is.
+    "D",   # pydocstyle: requires every public function and class to have a docstring, written in the numpydoc format this project follows.
+    "doc-line-too-long", # pycodestyle: keeps docstring/comment lines from running past 79 characters, so long explanations stay readable without side-scrolling.
+    "DOC", # pydoclint: checks a docstring's claims (parameters, return value, exceptions raised) against what the function actually does, so docs can't silently drift out of sync with the code.
+    "TID", # flake8-tidy-imports: blocks importing astrometricslib's internal subpackages directly, so everyone goes through the one supported top-level `astrometricslib` import.
+    "S",   # flake8-bandit: flags common security mistakes -- unsafe subprocess calls, hardcoded passwords, weak hashes like MD5 -- before they ship.
+    "ANN", # flake8-annotations: requires type hints on functions, since a function with no type hints is invisible to the type checker (pyrefly).
 ]
 ignore = [
     "ambiguous-unicode-character-string", # astronomical notation (', degree/prime/double-prime, x) is intentional

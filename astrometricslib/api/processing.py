@@ -383,7 +383,7 @@ class ProcessingPipelines:
             stacking did not produce an output.
         """
         if solve:
-            from astrometricslib.pipelines.dispatch import stack_and_solve
+            from astrometricslib.pipelines.stack_and_solve import stack_and_solve
 
             return stack_and_solve(
                 target,
@@ -430,7 +430,7 @@ class ProcessingPipelines:
         result : `dict[str, Any]`
             Astrometry results and status fields.
         """
-        from astrometricslib.pipelines.dispatch import analyze_target
+        from astrometricslib.pipelines.analysis_router import analyze_target
 
         return analyze_target(target, pipeline_type="astrometry", **kwargs)
 
@@ -452,7 +452,7 @@ class ProcessingPipelines:
         result : `dict[str, Any]`
             Photometry results and status fields.
         """
-        from astrometricslib.pipelines.dispatch import analyze_target
+        from astrometricslib.pipelines.analysis_router import analyze_target
 
         return analyze_target(target, pipeline_type="photometry", **kwargs)
 
@@ -474,7 +474,7 @@ class ProcessingPipelines:
         result : `dict[str, Any]`
             Spectroscopy results and status fields.
         """
-        from astrometricslib.pipelines.dispatch import analyze_target
+        from astrometricslib.pipelines.analysis_router import analyze_target
 
         return analyze_target(target, pipeline_type="spectroscopy", **kwargs)
 

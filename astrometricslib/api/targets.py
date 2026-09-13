@@ -232,11 +232,20 @@ class TargetCatalog:
         -------
         header_cards : `list[dict[str, str]]`
             The FITS primary header's card entries for `path`.
+
+        Raises
+        ------
+        ValueError
+            If `target` is given and `path` doesn't belong to it.
         """
         if target is not None:
-            from astrometricslib.pipelines.dispatch import get_header_information
-
-            return get_header_information(target, path)
+            belongs_to_target = any(f.path == path for f in target.frames) or path in (
+                target.processed_image,
+                target.stacked_image,
+                target.stacked_spectral_target,
+            )
+            if not belongs_to_target:
+                raise ValueError(f"Path {path} does not belong to target {target.id}")
 
         from astrometricslib.pipelines.shared import image_conversions
 

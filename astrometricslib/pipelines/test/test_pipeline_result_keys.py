@@ -19,7 +19,7 @@ so there is only ever one copy to update on a deliberate change.
 import pytest
 
 from astrometricslib.models.target import Target
-from astrometricslib.pipelines import dispatch
+from astrometricslib.pipelines import analysis_router
 
 # The exact keys each analysis mode returns. A deliberate change here
 # should be a deliberate edit to this table, reviewed on its own.
@@ -82,7 +82,7 @@ def test_photometry_with_no_frames_for_the_filter_returns_completed_with_zero_co
     """
     target = Target(id="NoMatchingFramesTarget")
 
-    result = dispatch.analyze_target(
+    result = analysis_router.analyze_target(
         target, pipeline_type="photometry", filter_type="LUMINANCE", register_job=False
     )
 
@@ -106,7 +106,7 @@ def test_an_unknown_analysis_mode_is_rejected_by_name():  # ruff: ignore[missing
     lookup has to fail the same way the `match` did.
     """
     with pytest.raises(ValueError, match="Unknown analysis type: not_a_real_mode"):
-        dispatch.analyze_target(
+        analysis_router.analyze_target(
             Target(id="UnknownModeTarget"),
             pipeline_type="not_a_real_mode",
             path="unused.fits",
@@ -121,6 +121,6 @@ def test_every_analysis_mode_has_a_recorded_key_set():  # ruff: ignore[missing-r
     the table above, so a new mode cannot ship without its result keys
     written down.
     """
-    assert set(dispatch.PIPELINE_RUNNERS) == set(EXPECTED_RESULT_KEYS), (
+    assert set(analysis_router.PIPELINE_RUNNERS) == set(EXPECTED_RESULT_KEYS), (
         "PIPELINE_RUNNERS and this table disagree about which analysis modes exist."
     )

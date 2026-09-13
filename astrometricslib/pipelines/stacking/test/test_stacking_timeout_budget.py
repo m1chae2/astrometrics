@@ -12,8 +12,8 @@ import time
 import pytest
 
 from astrometricslib.drivers import siril_interface
-from astrometricslib.pipelines import dispatch
-from astrometricslib.pipelines.dispatch import (
+from astrometricslib.pipelines import stack_and_solve
+from astrometricslib.pipelines.stack_and_solve import (
     STACKING_TIMEOUT_SECONDS,
     compute_stacking_timeout_seconds,
 )
@@ -133,7 +133,7 @@ def test_queue_time_does_not_consume_the_stacking_budget(monkeypatch):  # ruff: 
         time.sleep(stack_duration_seconds)
         return "/stacked/output.fits"
 
-    monkeypatch.setattr(dispatch, "stack_and_solve", _slow_stack)
+    monkeypatch.setattr(stack_and_solve, "stack_and_solve", _slow_stack)
     # The stack outlives its nominal budget, but every second of the
     # overrun is attributable to queueing, so it must still be allowed
     # to finish.
@@ -143,7 +143,7 @@ def test_queue_time_does_not_consume_the_stacking_budget(monkeypatch):  # ruff: 
     class _Target:
         id = "NGC 1499"
 
-    result = dispatch.stack_frames_with_timeout(_Target(), [], timeout_seconds=0)
+    result = stack_and_solve.stack_frames_with_timeout(_Target(), [], timeout_seconds=0)
 
     assert result == "/stacked/output.fits"
 
@@ -156,7 +156,7 @@ def test_a_genuinely_hung_stack_is_still_abandoned(monkeypatch):  # ruff: ignore
         release_hung_stack.wait(30)
         return "/never/reached.fits"
 
-    monkeypatch.setattr(dispatch, "stack_and_solve", _hung_stack)
+    monkeypatch.setattr(stack_and_solve, "stack_and_solve", _hung_stack)
     monkeypatch.setattr(siril_interface, "get_siril_lock_wait_seconds", lambda: 0.0)
     monkeypatch.setattr(siril_interface, "reset_siril_lock_wait_seconds", lambda: None)
 
@@ -164,7 +164,7 @@ def test_a_genuinely_hung_stack_is_still_abandoned(monkeypatch):  # ruff: ignore
         id = "HungTarget"
 
     try:
-        result = dispatch.stack_frames_with_timeout(_Target(), [], timeout_seconds=1)
+        result = stack_and_solve.stack_frames_with_timeout(_Target(), [], timeout_seconds=1)
 
         assert result is None
     finally:

@@ -14,12 +14,13 @@ import os
 from typing import Any
 
 from astrometricslib.models.target import FrameRecord, Target
-from astrometricslib.pipelines.dispatch import analyze_target, stack_frames_with_timeout
+from astrometricslib.pipelines.analysis_router import analyze_target
 from astrometricslib.pipelines.shared.frame_grouping import (
     frame_configuration_key,
     frames_missing_focal_length,
     select_frames_for_camera,
 )
+from astrometricslib.pipelines.stack_and_solve import stack_frames_with_timeout
 from astrometricslib.utilities.enums import FilterType
 from datastore.process_locks import acquire_resource_slot
 

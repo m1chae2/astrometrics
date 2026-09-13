@@ -12,6 +12,7 @@ import numpy as np
 
 from astrometricslib.drivers.image import AstrometricsImage
 
+from .interaction_handler import InteractionHandler
 from .layers import ImageOverlay, PhotometryOverlay, SpectrumOverlay, StarOverlay
 from .star_field_visualization import _AnalysisView
 from .visualization_config import VisualizationConfig
@@ -486,6 +487,59 @@ def _load_target_stars(target: Any, stars: Any, limit: int) -> tuple[list, list,
     return astrometry_stars, spectral_stars, spectral_by_id
 
 
+def _find_star_index(astrometry_stars: list, x: float, y: float, config: VisualizationConfig) -> int | None:
+    """Locate the star nearest a clicked point, within the marker radius.
+
+    Parameters
+    ----------
+    astrometry_stars : `list`
+        Stars to search, in the same order as their drawn patches.
+    x : `float`
+        Click x coordinate, in the same data space as each star's
+        `star_data` centroid.
+    y : `float`
+        Click y coordinate, in the same data space as each star's
+        `star_data` centroid.
+    config : `VisualizationConfig`
+        Supplies the hit-test radius (`fixed_radius`), matching the
+        radius `StarOverlay` actually draws the marker at.
+
+    Returns
+    -------
+    int | None
+        Index of the nearest star within range, or `None`.
+    """
+    for i, obj in enumerate(astrometry_stars):
+        star_data = getattr(obj, "star_data", {})
+        star_x = star_data.get("xcentroid", star_data.get("x_centroid"))
+        star_y = star_data.get("ycentroid", star_data.get("y_centroid"))
+        if star_x is None or star_y is None:
+            continue
+        if (x - star_x) ** 2 + (y - star_y) ** 2 <= config.fixed_radius**2:
+            return i
+    return None
+
+
+def _highlight_active_star(star_patches: list, index: int, config: VisualizationConfig) -> None:
+    """Recolor star patches so only the one at `index` reads as active.
+
+    Parameters
+    ----------
+    star_patches : `list`
+        The Circle patches drawn by `StarOverlay.render`, one per star.
+    index : `int`
+        Index of the star to mark active.
+    config : `VisualizationConfig`
+        Supplies the active/inactive marker colors.
+    """
+    for i, patch in enumerate(star_patches):
+        if patch is None:
+            continue
+        is_active = i == index
+        patch.set_edgecolor(config.active_color if is_active else config.inactive_color)
+        patch.set_linewidth(3 if is_active else 2)
+
+
 def _wire_star_click_selection(
     fig: plt.Figure,
     ax_astrometry: plt.Axes,
@@ -499,9 +553,11 @@ def _wire_star_click_selection(
     Every interactive target-level plot in this module (photometry,
     spectroscopy, the combined dashboard) needs the same thing: click
     near a star, highlight it, and re-render whatever side panel(s)
-    show that star's data. This is that shared wiring, parameterized
-    by `on_select` for the one part that's actually different --
-    what to re-render.
+    show that star's data. Rather than hand-roll that a fourth time,
+    this reuses `InteractionHandler`, the same event-dispatch class
+    `_AnalysisView` already relies on for the spectroscopy/photometry
+    analysis views -- passed `None` for its spectrum axis, since these
+    callers have no crosshair-sync panel for it to route clicks to.
 
     Parameters
     ----------
@@ -519,45 +575,21 @@ def _wire_star_click_selection(
         Called with the newly active star's index, after its marker
         is highlighted, so the caller can re-render its own panel(s).
     """
+    interaction = InteractionHandler(fig, ax_astrometry, None, config)
+    interaction.on_find_star = lambda x, y: _find_star_index(astrometry_stars, x, y, config)
 
-    def find_star_at(x: float, y: float) -> int | None:
-        """Locate star index matching click coordinates.
-
-        Returns
-        -------
-        int | None
-            Index of star or None.
-        """
-        for i, obj in enumerate(astrometry_stars):
-            star_data = getattr(obj, "star_data", {})
-            star_x = star_data.get("xcentroid", star_data.get("x_centroid"))
-            star_y = star_data.get("ycentroid", star_data.get("y_centroid"))
-            if star_x is None or star_y is None:
-                continue
-            if (x - star_x) ** 2 + (y - star_y) ** 2 <= config.fixed_radius**2:
-                return i
-        return None
-
-    def update_selection(index: int) -> None:
-        """Update selected star highlight and re-render dependent panel(s)."""
-        for i, patch in enumerate(star_patches):
-            if patch is None:
-                continue
-            is_active = i == index
-            patch.set_edgecolor(config.active_color if is_active else config.inactive_color)
-            patch.set_linewidth(3 if is_active else 2)
+    def _on_star_select(index: int) -> None:
+        _highlight_active_star(star_patches, index, config)
         on_select(index)
         fig.canvas.draw_idle()
 
-    def on_click(event: Any) -> None:
-        """Handle click event on star field."""
-        if event.inaxes is not ax_astrometry or event.xdata is None or event.ydata is None:
-            return
-        idx = find_star_at(event.xdata, event.ydata)
-        if idx is not None:
-            update_selection(idx)
-
-    fig.canvas.mpl_connect("button_press_event", on_click)
+    interaction.on_star_select = _on_star_select
+    interaction.connect_events()
+    # matplotlib's callback registry only weak-references a bound
+    # method, so with nothing else holding `interaction` alive, it
+    # (and its click handling) would silently be garbage-collected
+    # the moment this function returns.
+    fig._star_click_interaction = interaction
 
 
 def plot_astrometry(

@@ -1,12 +1,12 @@
-"""The shared shape every analysis pipeline follows.
+"""The same four steps every analysis pipeline follows.
 
 Astrometry, spectroscopy, photometry, and asteroid recovery are four very
 different pieces of science -- different inputs, different algorithms,
-different output shapes -- but the architecture doc describes all four
-the same way: check the input, do the work, check the output, hand back
-a result. `AnalysisPipeline` names that shape directly in the code
-instead of leaving it as something four similarly-organized functions
-merely happen to share.
+results that look nothing alike -- but the architecture doc describes
+all four the same way: check the input, do the work, check the output,
+hand back a result. `AnalysisPipeline` names that pattern directly in
+the code instead of leaving it as something four similarly-organized
+functions merely happen to share.
 
 This interface is imposed, not discovered: the four existing algorithm
 classes (`AstrometryPipeline`, `SpectroscopyPipeline`, `VariabilityAnalyzer`,
@@ -70,15 +70,15 @@ class Result:
     they got. This is deliberate: when `process_input` decides there is
     nothing to do (e.g. photometry finding no frames for the requested
     filter), it returns an empty, `has_work=False` `Result` instead of a
-    separate early-exit shape -- `run` is skipped, but that empty
+    separate early-exit type -- `run` is skipped, but that empty
     `Result` still goes through `validate_output`/`to_result_dict`
     exactly like a real run's would, so the target still gets a real
     (if empty) quality summary and the caller still gets the normal
-    result shape, with the reason recorded as a flag rather than a
+    result structure, with the reason recorded as a flag rather than a
     one-off status/message pair.
 
     Beyond that, this is a grab-bag by design, not a forced common
-    shape: the four pipelines produce genuinely different things -- a
+    structure: the four pipelines produce genuinely different things -- a
     solved WCS and detection context, a star list, light curves,
     moving-object candidates -- and unifying that would just move the
     four-way divergence into this class instead of removing it.
@@ -120,7 +120,7 @@ class AnalysisPipeline(ABC):
     Every pipeline the architecture doc describes goes through the same
     four steps: check the input, do the work, check the output, and hand
     back a result. Naming each step means a pipeline's "wart" -- the
-    exact shape of dict it hands back to its caller, a different shape
+    exact structure of the dict it hands back to its caller, different
     for each of the four pipelines -- is visible as `to_result_dict`
     instead of hidden inside a hundred-line function.
     """

@@ -52,7 +52,6 @@ from astrometricslib.models.stellar_source import (
 from astrometricslib.models.target import (
     FitsHeaderEntry,
     FrameRecord,
-    MosaicInfo,
     RenderedImage,
     Target,
 )
@@ -216,7 +215,6 @@ __all__ = [
     "JobHandle",
     "LightCurve",
     "LoggerInterface",
-    "MosaicInfo",
     "MovingObjectConfig",
     "MovingObjectRecovery",
     "PlotData",

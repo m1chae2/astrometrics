@@ -18,7 +18,6 @@ from astrometricslib.models.quality_summary import (
     PhotometryQualitySummary,
     SpectroscopyQualitySummary,
     StackQualitySummary,
-    TrackingQualitySummary,
 )
 from astrometricslib.utilities.enums import FilterType
 
@@ -29,7 +28,6 @@ __all__ = [
     "FitsHeaderEntry",
     "FrameRecord",
     "ImageType",
-    "MosaicInfo",
     "RenderedImage",
     "Target",
 ]
@@ -60,10 +58,18 @@ class FrameRecord(BaseModel):
     # taken.
     # These are read from the image file to help figure out why a picture
     # might be blurry or noisy later on.
+    # Which side of the mount the telescope was pointing from. Telescopes
+    # on this type of mount have to flip to the other side partway
+    # through the night, which can shift the picture.
     pier_side: str | None = Field(default=None, alias="pierSide")
+    # How much of Earth's atmosphere the starlight passed through.
+    # 1.0 means straight overhead; higher numbers mean closer to the
+    # horizon, where more air blurs and dims the picture.
     airmass: float | None = Field(default=None, alias="airmass")
     altitude_degrees: float | None = Field(default=None, alias="altitudeDegrees")
     azimuth_degrees: float | None = Field(default=None, alias="azimuthDegrees")
+    # How much sky each pixel covers, in arcseconds. A smaller number
+    # means a more zoomed-in picture.
     pixel_scale_arcsec: float | None = Field(default=None, alias="pixelScaleArcsec")
     # The focal length (zoom level) of the telescope, in millimeters.
     # This must be recorded per-picture because a user might photograph the
@@ -80,7 +86,11 @@ class FrameRecord(BaseModel):
     # They stay None until that pipeline runs.
     registration_fwhm_x_px: float | None = Field(default=None, alias="registrationFwhmXPx")
     registration_fwhm_y_px: float | None = Field(default=None, alias="registrationFwhmYPx")
+    # How round the stars look after alignment (1.0 is a perfect circle).
+    # A lower number can mean the telescope drifted during the photo.
     registration_roundness: float | None = Field(default=None, alias="registrationRoundness")
+    # How far off, on average, the alignment was when lining this
+    # picture up with the others, in pixels. Lower is better.
     registration_rmse: float | None = Field(default=None, alias="registrationRmse")
     registration_star_count: int | None = Field(default=None, alias="registrationStarCount")
     registration_dx_px: float | None = Field(default=None, alias="registrationDxPx")
@@ -97,17 +107,18 @@ class FrameRecord(BaseModel):
     @field_validator("filter", mode="before")
     @classmethod
     def normalize_filter(cls, v: Any) -> Any:
-        """Convert a filter name string into the official FilterType.
+        """Turn a filter name typed as text into the official FilterType.
 
-        Also called directly (not just as a Pydantic validation hook)
-        to normalize caller-supplied filter-type strings -- see
+        This runs automatically whenever a `FrameRecord` is created, but
+        other code also calls it directly to clean up a filter name it
+        got from somewhere else -- see
         `astrometricslib.pipelines.stacking.stage` and
         `astrometricslib.pipelines.shared.frame_grouping`.
 
         Returns
         -------
         normalized : `Any`
-            The matching `FilterType` if `v` is a recognized string,
+            The matching `FilterType` if `v` is a name it recognizes,
             otherwise `v` unchanged.
         """
         if isinstance(v, str):
@@ -126,17 +137,6 @@ class FrameRecord(BaseModel):
             norm = v.upper()
             return mapping.get(norm, v)
         return v
-
-
-class MosaicInfo(BaseModel):
-    """Details about a multi-panel picture (mosaic) created for this target."""
-
-    model_config = ConfigDict(populate_by_name=True, validate_assignment=True)
-
-    group_id: str = Field(description="UUID for the mosaic group", alias="groupId")
-    name: str = Field(description="Name of the mosaic configuration", alias="name")
-    created_at: float = Field(description="Timestamp of creation", alias="createdAt")
-    panels: list[str] = Field(default_factory=list, alias="panels")
 
 
 class StackConfigurationResult(BaseModel):
@@ -172,10 +172,7 @@ class Target(BaseModel):
     dec: str = Field(default="0° 0′ 0′′", alias="dec")
     field_of_view: str = Field(default="0′", alias="fieldOfView")
     main_camera: str = Field(default="", alias="mainCamera")
-    guide_camera: str = Field(default="", alias="guideCamera")
     main_scope: str = Field(default="", alias="mainScope")
-    guide_scope: str = Field(default="", alias="guideScope")
-    mount: str = Field(default="", alias="mount")
     processed_image: str = Field(default="", alias="processedImage")
     # The main, finished picture for this target. If multiple telescopes
     # were used, this points to the picture from the 'primary' telescope.
@@ -205,17 +202,9 @@ class Target(BaseModel):
     asteroid_recovery_quality_summary: AsteroidRecoveryQualitySummary | None = Field(
         default=None, alias="asteroidRecoveryQualitySummary"
     )
-    tracking_quality_summary: TrackingQualitySummary | None = Field(
-        default=None, alias="trackingQualitySummary"
-    )
     exposure_sec: float = Field(default=0, alias="exposureTime")
     number_of_stars: int = Field(default=0, alias="numberOfStars")
     frames: list[FrameRecord] = Field(default_factory=list, alias="frames")
-
-    # Mosaic Fields
-    mosaic_groups: list[MosaicInfo] = Field(default_factory=list, alias="mosaicGroups")
-    parent_group_id: str | None = Field(default=None, alias="parentGroupId")
-    panel_name: str = Field(default="", alias="panelName")
 
     def serialize(self) -> dict[str, Any]:
         """Package the target's data into a basic dictionary format.
@@ -231,27 +220,6 @@ class Target(BaseModel):
         if "stackedImage" not in data and hasattr(self, "stacked_image"):
             data["stackedImage"] = self.stacked_image
         return data
-
-    def deserialize(self, object_info: dict[str, Any]) -> None:
-        """Load values from a dictionary back into this target object."""
-        if not isinstance(object_info, dict):
-            return
-        # Build mapping from alias to field name
-        alias_to_field = {}
-        for name, field in self.model_fields.items():
-            if field.alias:
-                alias_to_field[field.alias] = name
-
-        for property_id, value in object_info.items():
-            field_name = alias_to_field.get(property_id, property_id)
-            if hasattr(self, field_name) and value:
-                if field_name == "image_type" and isinstance(value, str):
-                    try:
-                        setattr(self, field_name, ImageType(value))
-                    except ValueError:
-                        setattr(self, field_name, value)
-                else:
-                    setattr(self, field_name, value)
 
     def recalculate_total_exposure(self) -> float:
         """Add up the exposure times of all the individual frames.

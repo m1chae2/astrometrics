@@ -93,9 +93,6 @@ def _detect_sources_in_one_frame(
                 pixel_y=float(pixel_y),
                 right_ascension_deg=float(sky_position[0]),
                 declination_deg=float(sky_position[1]),
-                flux=float(source.get("flux", 0.0) or 0.0),
-                sharpness=float(source.get("sharpness", 0.0) or 0.0),
-                photutils_roundness1=float(source.get("roundness1", 0.0) or 0.0),
             )
         )
     return "ok", detections

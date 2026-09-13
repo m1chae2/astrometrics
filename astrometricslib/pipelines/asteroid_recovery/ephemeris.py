@@ -19,11 +19,6 @@ from astrometricslib.models.moving_object_config import MovingObjectConfig
 
 logger = logging.getLogger(__name__)
 
-# The database uses the number '-1' to mean "this asteroid doesn't have an
-# official number yet." We change this to 'None' so it doesn't get confused
-# with a real asteroid number.
-_SKYBOT_UNASSIGNED_MPC_NUMBER = -1
-
 
 class EphemerisCrossMatcher:
     """Checks the SkyBoT database to see if we found a known asteroid.
@@ -126,21 +121,8 @@ class EphemerisCrossMatcher:
         if closest_row is None:
             return None
 
-        mpc_number = int(closest_row["Number"])
         return EphemerisMatch(
             designation=str(closest_row["Name"]),
-            mpc_number=None if mpc_number == _SKYBOT_UNASSIGNED_MPC_NUMBER else mpc_number,
-            predicted_visual_magnitude=float(closest_row["V"]) if "V" in closest_row.colnames else None,
-            predicted_right_ascension_rate_arcsec_per_hour=(
-                float(u.Quantity(closest_row["RA_rate"]).to(u.arcsec / u.hour).value)
-                if "RA_rate" in closest_row.colnames
-                else None
-            ),
-            predicted_declination_rate_arcsec_per_hour=(
-                float(u.Quantity(closest_row["DEC_rate"]).to(u.arcsec / u.hour).value)
-                if "DEC_rate" in closest_row.colnames
-                else None
-            ),
             angular_separation_arcsec=float(closest_separation_arcsec),
         )
 

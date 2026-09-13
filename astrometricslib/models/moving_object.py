@@ -21,9 +21,6 @@ class FrameDetection(BaseModel):
     pixel_y: float = Field(alias="pixelY")
     right_ascension_deg: float = Field(alias="rightAscensionDeg")
     declination_deg: float = Field(alias="declinationDeg")
-    flux: float = Field(alias="flux")
-    sharpness: float = Field(alias="sharpness")
-    photutils_roundness1: float = Field(alias="photutilsRoundness1")
 
 
 class MovingObjectTrack(BaseModel):
@@ -34,6 +31,9 @@ class MovingObjectTrack(BaseModel):
     right_ascension_rate_arcsec_per_hour: float = Field(alias="rightAscensionRateArcsecPerHour")
     declination_rate_arcsec_per_hour: float = Field(alias="declinationRateArcsecPerHour")
     total_rate_arcsec_per_hour: float = Field(alias="totalRateArcsecPerHour")
+    # How well a straight line fits the object's positions over time,
+    # from 0 (no fit at all) to 1 (a perfect straight line). A real
+    # asteroid should fit close to 1.
     linear_fit_r_squared: float = Field(alias="linearFitRSquared")
     fit_start_timestamp: float = Field(alias="fitStartTimestamp")
     fit_end_timestamp: float = Field(alias="fitEndTimestamp")
@@ -47,8 +47,6 @@ class CascadeStage(StrEnum):
     (e.g., it was just a dead pixel).
     """
 
-    MORPHOLOGY_DETECTED = "morphology_detected"
-    PERSISTENCE_CONFIRMED = "persistence_confirmed"
     REFERENCE_FRAME_CONFIRMED = "reference_frame_confirmed"
     RATE_LINEARITY_CONFIRMED = "rate_linearity_confirmed"
     EPHEMERIS_MATCHED = "ephemeris_matched"
@@ -67,16 +65,10 @@ class EphemerisMatch(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    provider: str = Field(default="skybot", alias="provider")
     designation: str = Field(alias="designation")
-    mpc_number: int | None = Field(default=None, alias="mpcNumber")
-    predicted_visual_magnitude: float | None = Field(default=None, alias="predictedVisualMagnitude")
-    predicted_right_ascension_rate_arcsec_per_hour: float | None = Field(
-        default=None, alias="predictedRightAscensionRateArcsecPerHour"
-    )
-    predicted_declination_rate_arcsec_per_hour: float | None = Field(
-        default=None, alias="predictedDeclinationRateArcsecPerHour"
-    )
+    # How far apart, in arcseconds, the object we found appears from the
+    # known asteroid's predicted position. A smaller number is a
+    # closer, more confident match.
     angular_separation_arcsec: float = Field(alias="angularSeparationArcsec")
 
 

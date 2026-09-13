@@ -4,7 +4,7 @@
 anything outside it is supposed to use. The UI backend imports from
 `astrometricslib` directly at 35 call sites and never reaches into a
 submodule, and the Sphinx documentation only ever documents this
-top-level namespace -- so the 47 names listed in `__all__` are, in a
+top-level namespace -- so the 46 names listed in `__all__` are, in a
 very real sense, the entire contract this library makes with the rest
 of the repository.
 
@@ -56,7 +56,6 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "JobHandle",
     "LightCurve",
     "LoggerInterface",
-    "MosaicInfo",
     "MovingObjectConfig",
     "MovingObjectRecovery",
     "PlotData",

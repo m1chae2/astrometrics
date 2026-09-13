@@ -5,13 +5,10 @@ measure how their brightness changes over time, and analyze their light
 spectrums.
 """
 
-import logging
 from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
-
-logger = logging.getLogger(__name__)
 
 # Declares this module's own public surface. Without it, sphinx-automodapi
 # documents every imported name too, which is what produced the
@@ -33,24 +30,42 @@ __all__ = [
 
 
 class PeriodogramResult(BaseModel):
-    """The result of searching a star's brightness for repeating cycles."""
+    """The result of searching a star's brightness for repeating cycles.
+
+    A "periodogram" tests many possible repeat lengths (periods) against
+    a star's brightness history and reports which one fits best -- the
+    way you might try different guesses for a song's beat until one
+    lines up.
+    """
 
     model_config = ConfigDict(populate_by_name=True)
 
     best_period_days: float = Field(default=0.0, alias="bestPeriodDays")
+    # How strong/clear the best repeating pattern is. Higher means the
+    # star more clearly brightens and dims on a regular schedule.
     power: float = Field(default=0.0, alias="power")
+    # The chance this pattern is just random noise instead of a real
+    # repeating cycle. Lower is more trustworthy.
     false_alarm_probability: float = Field(default=1.0, alias="falseAlarmProbability")
 
 
 class ExoplanetTransitCandidate(BaseModel):
-    """Data for when a star dims, possibly because a planet passed in front."""
+    """Data for when a star dims, possibly because a planet passed in front.
+
+    This "transit" pattern -- a brief, repeating dip in brightness -- is
+    one of the main ways astronomers find planets around other stars.
+    """
 
     model_config = ConfigDict(populate_by_name=True)
 
     period_days: float = Field(default=0.0, alias="periodDays")
     transit_depth_mag: float = Field(default=0.0, alias="transitDepthMag")
     transit_duration_hours: float = Field(default=0.0, alias="transitDurationHours")
+    # The exact time of the middle of one transit, used as a reference
+    # point for predicting when the next ones will happen.
     epoch_t0: float = Field(default=0.0, alias="epochT0")
+    # Signal-to-noise ratio: how clearly the dip stands out from normal
+    # measurement noise. Higher means a more convincing detection.
     transit_snr: float = Field(default=0.0, alias="transitSnr")
 
 
@@ -62,6 +77,9 @@ class LightCurve(BaseModel):
     timestamps: list[datetime] = Field(default_factory=list, alias="timestamps")
     fluxes: list[float] = Field(default_factory=list, alias="fluxes")
     fluxes_normalized: list[float] = Field(default_factory=list, alias="fluxesNormalized")
+    # Brightness values with any slow, gradual drift removed (like from
+    # clouds or the star slowly rising and setting), leaving just the
+    # short-term ups and downs.
     fluxes_detrended: list[float] = Field(default_factory=list, alias="fluxesDetrended")
     airmasses: list[float] = Field(default_factory=list, alias="airmasses")
     magnitudes: list[float] = Field(default_factory=list, alias="magnitudes")
@@ -100,28 +118,58 @@ class StellarObject(BaseModel):
 
     id: str = Field(default="", alias="id")
     name: str = Field(default="", alias="name")
+    # Where the star is in the sky (right ascension is like longitude,
+    # declination is like latitude, but for the sky instead of Earth).
     right_ascension: Any = Field(default="", alias="ra")
     declination: Any = Field(default="", alias="dec")
+    # How much light the star gives off (a raw brightness reading).
     flux: Any = Field(default="", alias="flux")
+    # The star's brightness on the standard astronomical scale, where
+    # LOWER numbers mean a BRIGHTER star (the opposite of most scales).
     magnitude: Any = Field(default="", alias="magnitude")
+    # spectral_type and stellar_spectral_type are normally kept equal --
+    # both hold the star's classification (like "G2V" for a Sun-like
+    # star). The one exception is a synthetic entry used to represent a
+    # star cluster, where stellar_spectral_type is set to the fixed
+    # label "Cluster" while spectral_type keeps the more general object
+    # type from the catalog it came from.
     spectral_type: str = Field(default="", alias="spectralType")
     light_curve: LightCurve | None = Field(default_factory=LightCurve, alias="lightCurve")
     spectra_history: list[SpectralObservation] = Field(default_factory=list, alias="spectraHistory")
     spectrum_data: list[Any] = Field(default_factory=list, alias="spectrumData")
+    # The star's raw pixel position and shape info from source detection
+    # (e.g. its centroid coordinates), used to relocate it in later
+    # pictures.
     star_data: Any = Field(default_factory=list, alias="starData")
     data: list[Any] = Field(default_factory=list, alias="data")
     spectrum_data_processed: dict[str, Any] | None = Field(default=None, alias="spectrumDataProcessed")
-    rect: Any | None = Field(default=None, alias="rect")
+    # The pixel box drawn around the star's spectrum trail in the
+    # picture, used to redraw that box later without redetecting it.
     rectangle: Any | None = Field(default=None, alias="rectangle")
+    # The raw tilt angle measured straight off the detected trail, before
+    # any cleanup. dispersion_angle below is the value actually used
+    # downstream.
     detected_angle: float | None = Field(default=None, alias="detectedAngle")
+    # The angle, in degrees, that this star's spectrum "rainbow" streak
+    # is tilted at (see SpectroscopyPipelineQualityMetrics for more on
+    # this streak, called the "trail").
     dispersion_angle: float | None = Field(default=None, alias="dispersionAngle")
+    # The pixel coordinates running down the middle of that trail, and
+    # how wide the trail is at each point.
     trail_centerline_px: list[float] | None = Field(default=None, alias="trailCenterlinePx")
     trail_width_px: list[float] | None = Field(default=None, alias="trailWidthPx")
+    # See the comment on spectral_type above -- this is normally the
+    # same value, kept as a separate field for the cluster-entry case.
     stellar_spectral_type: str = Field(default="", alias="stellarSpectralType")
-    camera: str | None = Field(default=None, alias="camera")
     target_ids: list[str] = Field(default_factory=list, alias="targetIds")
+    # How many pixels out from the star's center to gather light from
+    # when measuring its spectrum.
     extraction_radius: int | None = Field(default=None, alias="extractionRadius")
     mean_flux: float | None = Field(default=None, alias="meanFlux")
+    # How spread out this star's brightness measurements are relative to
+    # their average -- a standard way to compare "noisiness" between
+    # stars of different brightness. Higher can mean the star is
+    # actually variable, or just noisily measured.
     coefficient_of_variation: float | None = Field(default=None, alias="coefficientOfVariation")
     variability_score: float | None = Field(default=None, alias="variabilityScore")
     session_matches: list[StellarSessionMatch] = Field(default_factory=list, alias="sessionMatches")
@@ -224,24 +272,6 @@ class StellarObject(BaseModel):
         }
         return data
 
-    def deserialize(self, object_info: dict[str, Any]) -> None:
-        """Load values from a dictionary back into this star object."""
-        if not isinstance(object_info, dict):
-            return
-
-        for key, val in object_info.items():
-            try:
-                if val is None:
-                    continue
-                if isinstance(val, (str, bytes)) and len(val) == 0:
-                    continue
-                if isinstance(val, (list, dict)) and len(val) == 0:
-                    continue
-                setattr(self, key, val)
-            except Exception as exc:
-                logger.debug("Skipping round-trip field '%s': %s", key, exc)
-                continue
-
 
 class VariableCandidate(BaseModel):
     """A star that might be changing brightness over time."""
@@ -250,7 +280,12 @@ class VariableCandidate(BaseModel):
 
     id: str = Field(alias="id")
     mean_flux: float = Field(..., alias="meanFlux", ge=0.0)
+    # How spread out this star's brightness measurements are relative to
+    # their average. A higher number is one sign the star might really
+    # be variable.
     coefficient_of_variation: float = Field(..., alias="coefficientOfVariation", ge=0.0)
+    # How confident the code is that this star is truly variable, from
+    # 0 (not confident) to 1 (very confident).
     score: float = Field(..., ge=0.0, le=1.0, alias="score")
     ra: float = Field(..., ge=0.0, le=360.0, alias="ra")
     dec: float = Field(..., ge=-90.0, le=90.0, alias="dec")
@@ -276,23 +311,6 @@ class AnalysisResult(BaseModel):
     error: str | None = Field(default=None, alias="error")
     message: str | None = Field(default=None, alias="message")
 
-    @property
-    def summary(self) -> str:
-        """A readable text summary of the job's results."""
-        rejected_cnt = len(self.rejected_files) if self.rejected_files else self.rejected_count
-        lines = [
-            f"Analysis Target: {self.target_id}",
-            f"Status: {self.status.upper()}",
-            f"Mode: {self.analysis_mode}",
-            f"Total Images: {self.total_images}",
-            f"Frames Processed: {self.frames_processed}",
-            f"Rejected Files: {rejected_cnt}",
-            f"Stars Found: {self.stars_found}",
-            f"Stars Processed: {self.stars_processed}",
-            f"Variable Star Candidates: {len(self.variable_candidates) if self.variable_candidates else 0}",
-        ]
-        return "\n".join(lines)
-
 
 class PlotData(BaseModel):
     """Holds the X and Y coordinates needed to draw a spectrum graph."""
@@ -301,26 +319,6 @@ class PlotData(BaseModel):
 
     wavelengths: list[float] = Field(default_factory=list, alias="wavelengths")
     intensities: list[float] = Field(default_factory=list, alias="intensities")
-
-    def validate_lengths(self) -> PlotData:
-        """Make sure there is the same number of X and Y values.
-
-        Returns
-        -------
-        self : `PlotData`
-            This same object, once the lengths are confirmed to match.
-
-        Raises
-        ------
-        ValueError
-            If the list of wavelengths doesn't match the list of intensities.
-        """
-        if len(self.wavelengths) != len(self.intensities):
-            raise ValueError(
-                f"Wavelength array size ({len(self.wavelengths)}) must exactly match "
-                f"intensity array size ({len(self.intensities)})."
-            )
-        return self
 
 
 class FileItem(BaseModel):
@@ -346,6 +344,9 @@ class GroupedFrameStat(BaseModel):
     iso: str = Field(alias="iso")
     exposure: str = Field(alias="exposure")
     count: int = Field(..., gt=0, alias="count")
+    # Whether matching "dark" calibration frames are available -- these
+    # are pictures taken with the lens capped, used to subtract out the
+    # camera sensor's own background noise.
     darks: str | None = Field(default=None, alias="darks")
     camera: str | None = Field(default=None, alias="camera")
 

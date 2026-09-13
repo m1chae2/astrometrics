@@ -128,8 +128,7 @@ def create_mosaic_targets(
     """Generate target records for each mosaic panel, linked to the parent.
 
     Creates one Target per panel in `panels`, positioned at that
-    panel's coordinates and tagged with the shared mosaic group id,
-    then appends a MosaicInfo record to the parent target.
+    panel's coordinates.
 
     Returns
     -------
@@ -142,16 +141,13 @@ def create_mosaic_targets(
         If ``parent_target_id`` does not resolve to an existing
         target.
     """
-    from astrometricslib import Astrometrics, MosaicInfo, Target
+    from astrometricslib import Astrometrics, Target
 
     astrometrics = Astrometrics(planner._config)
     parent = astrometrics.targets.get(parent_target_id)
     if not parent:
         raise ValueError(f"Parent target {parent_target_id} not found")
 
-    group_id = str(uuid.uuid4())
-    group_name = f"{grid_config.get('rows')}x{grid_config.get('cols')} Mosaic"
-    panel_target_ids = []
     plan_items = []
 
     for p in panels:
@@ -162,15 +158,12 @@ def create_mosaic_targets(
             commonName=new_name,
             ra=p["ra_str"],
             dec=p["dec_str"],
-            parentGroupId=group_id,
-            panelName=p["panel_id"],
         )
         new_target.main_camera = parent.main_camera
         new_target.main_scope = parent.main_scope
         new_target.field_of_view = parent.field_of_view
 
         astrometrics.targets.add(new_target)
-        panel_target_ids.append(new_name)
 
         plan_items.append({
             "id": str(uuid.uuid4()),
@@ -184,9 +177,6 @@ def create_mosaic_targets(
             "name": p["panel_id"],
         })
 
-    parent.mosaic_groups.append(
-        MosaicInfo(group_id=group_id, name=group_name, created_at=time.time(), panels=panel_target_ids)
-    )
     astrometrics.targets.save()
     return plan_items
 

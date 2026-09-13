@@ -1,11 +1,10 @@
 """Data structures for tracking the quality and results of the pipelines.
 
 This module defines classes that record how well a processing job (like
-stacking
-images or finding asteroids) performed. It includes a common base class for
-information every pipeline shares (like which target was processed), and
-specific
-classes for each pipeline's unique metrics (like how many stars were found).
+stacking images or finding asteroids) performed. It includes a common
+base class for information every pipeline shares (like which target was
+processed), and specific classes for each pipeline's unique metrics
+(like how many stars were found).
 """
 
 from datetime import UTC, datetime
@@ -32,11 +31,12 @@ class TargetSessionContribution(BaseModel):
 class StarIdentificationMetrics(BaseModel):
     """How many of the stars found in an image could be named.
 
-    Some pipelines look up each star's position against a known catalog.
-    A star can end up in one of three buckets: matched to a known name,
-    already know, seen but with no matching catalog entry, or not
-    resolved at all. Astrometry, photometry, and spectroscopy all record
-    this the same way, so it lives here once instead of three times.
+    Some pipelines look up each star's position against a known catalog
+    (a database of stars and their real positions). Each star ends up in
+    one of three buckets: matched to a known name, seen but with no
+    matching catalog entry, or not resolved at all. Astrometry,
+    photometry, and spectroscopy all record this the same way, so it
+    lives here once instead of three times.
     """
 
     catalog_matched_star_count: int = 0
@@ -56,7 +56,13 @@ class PipelineQualitySummaryBase(BaseModel):
     target_id: str
     target_session_ids: list[str] = Field(default_factory=list)
     target_session_breakdown: list[TargetSessionContribution] = Field(default_factory=list)
+    # The name of an earlier pipeline this one builds on, if any (for
+    # example, astrometry runs after stacking, so its reports point back
+    # to "stacking").
     upstream_quality_summary_reference: str | None = None
+    # The actual settings used for this run, after filling in any
+    # defaults -- kept so a confusing result can later be traced back to
+    # exactly what was configured.
     resolved_parameters: dict[str, Any] = Field(default_factory=dict)
     quality_processing_applied: bool = True
     flagged: bool = False
@@ -138,20 +144,30 @@ ASTROMETRY_PIPELINE_VERSION = "1.2.0"
 class AstrometryPipelineQualityMetrics(StarIdentificationMetrics):
     """Measurements recorded when figuring out where an image is pointing.
 
-    This tracks how many stars were found and whether the image's coordinates
-    could be successfully calculated (plate solving).
+    This tracks how many stars were found and whether the image's
+    coordinates could be successfully calculated ("plate solving" --
+    matching the stars in the picture to a star map to figure out
+    exactly where the telescope was pointed).
     """
 
     sources_detected: int
     solve_attempted: bool
     plate_solve_succeeded: bool
+    # SIMBAD and Gaia are online databases of stars and their real
+    # positions, used to double-check what's in the picture.
     simbad_matched_count: int
+    # How far off, on average, the calculated coordinates were from the
+    # true star positions, in arcseconds ("RMS" is a standard way to
+    # average errors so they don't cancel out). Lower is better.
     astrometric_residual_rms_arcsec: float | None = None
 
     # Tracks whether there were connection issues when trying to look up
     # star names in online databases (like SIMBAD or Gaia).
     remote_catalog_queries_attempted: int = 0
     remote_catalog_queries_failed: int = 0
+    # True if too many of those lookups failed in a row, so the code
+    # stopped trying for a while instead of repeatedly waiting on a
+    # database that seems to be down.
     remote_catalog_circuit_breaker_tripped: bool = False
     # The number of times coordinate calculation was attempted for this image.
     plate_solve_attempts: int = 0
@@ -176,7 +192,12 @@ PHOTOMETRY_PIPELINE_VERSION = "1.1.0"
 
 
 class FrameEnsembleComposition(BaseModel):
-    """Tracks which known stars were the brightness reference used."""
+    """Tracks which comparison stars a picture's brightness was measured with.
+
+    To tell if a star got brighter or dimmer, its light is compared
+    against a group of other, steady stars in the same picture (called
+    the "ensemble"). This records which stars were in that group.
+    """
 
     frame_path: str
     ensemble_size: int
@@ -196,14 +217,21 @@ class PhotometryPipelineQualityMetrics(StarIdentificationMetrics):
     rejected_frames: list[ExcludedFrame] = Field(default_factory=list)
     frame_ensemble_composition: list[FrameEnsembleComposition] = Field(default_factory=list)
     variable_candidate_count: int
+    # How steady a star's measured brightness was, night to night, for
+    # stars that turned out NOT to be variable ("RMS" averages the
+    # ups and downs into one number). A high number here means the
+    # measurements themselves are noisy, not that the star is
+    # actually changing.
     light_curve_scatter_rms_mag: float | None = None
     cross_session_match_count: int = 0
+    # "WCS" (World Coordinate System) is the map, stored in a picture's
+    # file, from its pixels to real sky coordinates. These three lists
+    # track sessions where that map was missing, already correct and
+    # reused as-is, or wrong and had to be recalculated.
     sessions_missing_wcs: list[str] = Field(default_factory=list)
     long_term_variable_candidate_count: int = 0
     astrometry_identified_star_count: int = 0
     sessions_with_reused_header_wcs: list[str] = Field(default_factory=list)
-    # Lists observing sessions where the image coordinates saved in the file
-    # were bad and had to be recalculated from scratch.
     sessions_with_replaced_header_wcs: list[str] = Field(default_factory=list)
 
 
@@ -227,16 +255,22 @@ SPECTROSCOPY_PIPELINE_VERSION = "1.1.0"
 class SpectroscopyPipelineQualityMetrics(StarIdentificationMetrics):
     """Measurements recorded when analyzing a star's light spectrum.
 
-    This tracks details about the spectral lines, like how wide they are
-    and whether any parts of the spectrum were too bright (saturated).
+    A spectroscope splits a star's light into a rainbow-like streak (the
+    "trail") so its colors can be measured. This class tracks details
+    about that streak, like how wide it is and whether any part of it
+    was too bright (saturated).
     """
 
+    # The "zero order" is the star's plain, undispersed image that shows
+    # up alongside the rainbow streak -- it's much brighter, so it's
+    # checked separately for overexposure.
     zero_order_saturated_pixel_fraction: float | None = None
     zero_order_saturation_flagged: bool = False
+    # The angle, in degrees, that the rainbow streak is tilted at in
+    # the picture.
     dispersion_angle_deg: float | None = None
     trail_width_profile_available: bool = False
     median_trail_width_px: float | None = None
-    wavelength_calibration_rms_nm: float | None = None
 
 
 class SpectroscopyQualitySummary(PipelineQualitySummaryBase):
@@ -246,63 +280,6 @@ class SpectroscopyQualitySummary(PipelineQualitySummaryBase):
     pipeline_version: str = SPECTROSCOPY_PIPELINE_VERSION
     upstream_quality_summary_reference: str | None = "stacking"
     spectroscopy_metrics: SpectroscopyPipelineQualityMetrics
-
-
-# ---------------------------------------------------------------------------
-# Tracking
-# ---------------------------------------------------------------------------
-
-# Bumped whenever TrackingPipelineQualityMetrics's shape changes
-# meaningfully.
-TRACKING_PIPELINE_VERSION = "1.1.0"
-
-
-class TrackingPipelineQualityMetrics(BaseModel):
-    """Measurements that describe how well the telescope tracked the sky.
-
-    This looks for problems with the telescope mount (like drifting) or
-    changes in the sky conditions (like the background getting brighter).
-    It records the worst-case values across all observing sessions.
-    """
-
-    sessions_found: int
-    sessions_analyzed: int
-    usable_frames: int
-    span_hours: float | None = None
-
-    drift_rate_x_px_per_hour: float | None = None
-    drift_rate_y_px_per_hour: float | None = None
-    max_excursion_px: float | None = None
-    meridian_flips: int = 0
-
-    # Records if the telescope had a repeating tracking error (like a
-    # gear wobbling every 60 seconds).
-    periodic_error_period_seconds: int | None = None
-    periodic_error_strength: float = 0.0
-    # The chance random noise would fake a peak as strong as
-    # `periodic_error_strength`. Recorded so the reporting cut can
-    # eventually move onto it -- see the note beside
-    # `MAXIMUM_PERIODIC_ERROR_FALSE_ALARM_PROBABILITY` in
-    # `pipelines/stacking/tracking_analysis.py` for why it does not gate
-    # anything yet.
-    periodic_error_false_alarm_probability: float | None = None
-    periodic_error_corroborated: bool = False
-
-    trailed_frame_count: int = 0
-    median_fwhm_px: float | None = None
-    fwhm_spread_px: float | None = None
-    median_roundness: float | None = None
-    median_background: float | None = None
-    background_spread: float | None = None
-
-
-class TrackingQualitySummary(PipelineQualitySummaryBase):
-    """The final saved report for a telescope tracking analysis job."""
-
-    pipeline_name: str = "tracking"
-    pipeline_version: str = TRACKING_PIPELINE_VERSION
-    upstream_quality_summary_reference: str | None = "stacking"
-    tracking_metrics: TrackingPipelineQualityMetrics
 
 
 # ---------------------------------------------------------------------------
@@ -322,13 +299,21 @@ class AsteroidRecoveryPipelineQualityMetrics(BaseModel):
     known asteroid?).
     """
 
+    # "WCS" (World Coordinate System) is the map from a picture's pixels
+    # to real sky coordinates. A frame needs one before it can be
+    # searched for moving objects.
     frames_with_wcs_estimate: int
     frames_excluded_missing_pointing_metadata: int
     candidates_detected: int
     candidates_persistence_confirmed: int
+    # How many candidates moved at a steady speed in a straight line
+    # across the pictures, the way a real asteroid would (as opposed to
+    # a camera glitch or a cosmic ray hit).
     candidates_rate_linearity_confirmed: int
+    # How many candidates were matched to a real, already-known asteroid
+    # by checking a database of predicted asteroid positions
+    # ("ephemeris" means a table of where something will be over time).
     candidates_ephemeris_matched: int
-    trajectory_fit_residual_rms_arcsec: float | None = None
 
 
 class AsteroidRecoveryQualitySummary(PipelineQualitySummaryBase):

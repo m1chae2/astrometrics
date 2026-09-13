@@ -70,19 +70,6 @@ export interface FrameRecord {
 }
 
 /**
- * Details about a multi-panel picture (mosaic) created for this target.
- */
-export interface MosaicInfo {
-  /** UUID for the mosaic group */
-  groupId: string;
-  /** Name of the mosaic configuration */
-  name: string;
-  /** Timestamp of creation */
-  createdAt: number;
-  panels?: string[];
-}
-
-/**
  * Represents the current status and telemetry of the telescope.
  *
  * Uses aliases to provide camelCase names for the frontend.
@@ -132,10 +119,7 @@ export interface TargetObject {
   dec?: string;
   fieldOfView?: string;
   mainCamera?: string;
-  guideCamera?: string;
   mainScope?: string;
-  guideScope?: string;
-  mount?: string;
   processedImage?: string;
   stackedImage?: string;
   stacksByConfiguration?: Record<string, StackConfigurationResult>;
@@ -147,13 +131,9 @@ export interface TargetObject {
   spectroscopyQualitySummary?: SpectroscopyQualitySummary | null;
   asteroidCandidates?: AsteroidRecoveryCandidate[];
   asteroidRecoveryQualitySummary?: AsteroidRecoveryQualitySummary | null;
-  trackingQualitySummary?: TrackingQualitySummary | null;
   exposureTime?: number;
   numberOfStars?: number;
   frames?: FrameRecord[];
-  mosaicGroups?: MosaicInfo[];
-  parentGroupId?: string | null;
-  panelName?: string;
   /** Flexible index to accommodate additional data from the backend. */
   [key: string]: any;
 }
@@ -219,14 +199,12 @@ export interface Spectrum {
   starData?: any;
   data?: any[];
   spectrumDataProcessed?: Record<string, any> | null;
-  rect?: any | null;
   rectangle?: any | null;
   detectedAngle?: number | null;
   dispersionAngle?: number | null;
   trailCenterlinePx?: number[] | null;
   trailWidthPx?: number[] | null;
   stellarSpectralType?: string;
-  camera?: string | null;
   targetIds?: string[];
   extractionRadius?: number | null;
   meanFlux?: number | null;
@@ -260,6 +238,11 @@ export interface SpectralObservation {
 
 /**
  * The result of searching a star's brightness for repeating cycles.
+ *
+ * A "periodogram" tests many possible repeat lengths (periods) against
+ * a star's brightness history and reports which one fits best -- the
+ * way you might try different guesses for a song's beat until one
+ * lines up.
  */
 export interface PeriodogramResult {
   bestPeriodDays?: number;
@@ -269,6 +252,9 @@ export interface PeriodogramResult {
 
 /**
  * Data for when a star dims, possibly because a planet passed in front.
+ *
+ * This "transit" pattern -- a brief, repeating dip in brightness -- is
+ * one of the main ways astronomers find planets around other stars.
  */
 export interface ExoplanetTransitCandidate {
   periodDays?: number;
@@ -657,8 +643,10 @@ export interface StackQualitySummary {
 /**
  * Measurements recorded when figuring out where an image is pointing.
  *
- * This tracks how many stars were found and whether the image's coordinates
- * could be successfully calculated (plate solving).
+ * This tracks how many stars were found and whether the image's
+ * coordinates could be successfully calculated ("plate solving" --
+ * matching the stars in the picture to a star map to figure out
+ * exactly where the telescope was pointed).
  */
 export interface AstrometryPipelineQualityMetrics {
   catalog_matched_star_count?: number;
@@ -694,7 +682,11 @@ export interface AstrometryQualitySummary {
 }
 
 /**
- * Tracks which known stars were the brightness reference used.
+ * Tracks which comparison stars a picture's brightness was measured with.
+ *
+ * To tell if a star got brighter or dimmer, its light is compared
+ * against a group of other, steady stars in the same picture (called
+ * the "ensemble"). This records which stars were in that group.
  */
 export interface FrameEnsembleComposition {
   frame_path: string;
@@ -748,8 +740,10 @@ export interface PhotometryQualitySummary {
 /**
  * Measurements recorded when analyzing a star's light spectrum.
  *
- * This tracks details about the spectral lines, like how wide they are
- * and whether any parts of the spectrum were too bright (saturated).
+ * A spectroscope splits a star's light into a rainbow-like streak (the
+ * "trail") so its colors can be measured. This class tracks details
+ * about that streak, like how wide it is and whether any part of it
+ * was too bright (saturated).
  */
 export interface SpectroscopyPipelineQualityMetrics {
   catalog_matched_star_count?: number;
@@ -760,7 +754,6 @@ export interface SpectroscopyPipelineQualityMetrics {
   dispersion_angle_deg?: number | null;
   trail_width_profile_available?: boolean;
   median_trail_width_px?: number | null;
-  wavelength_calibration_rms_nm?: number | null;
 }
 
 /**
@@ -782,52 +775,6 @@ export interface SpectroscopyQualitySummary {
 }
 
 /**
- * Measurements that describe how well the telescope tracked the sky.
- *
- * This looks for problems with the telescope mount (like drifting) or
- * changes in the sky conditions (like the background getting brighter).
- * It records the worst-case values across all observing sessions.
- */
-export interface TrackingPipelineQualityMetrics {
-  sessions_found: number;
-  sessions_analyzed: number;
-  usable_frames: number;
-  span_hours?: number | null;
-  drift_rate_x_px_per_hour?: number | null;
-  drift_rate_y_px_per_hour?: number | null;
-  max_excursion_px?: number | null;
-  meridian_flips?: number;
-  periodic_error_period_seconds?: number | null;
-  periodic_error_strength?: number;
-  periodic_error_false_alarm_probability?: number | null;
-  periodic_error_corroborated?: boolean;
-  trailed_frame_count?: number;
-  median_fwhm_px?: number | null;
-  fwhm_spread_px?: number | null;
-  median_roundness?: number | null;
-  median_background?: number | null;
-  background_spread?: number | null;
-}
-
-/**
- * The final saved report for a telescope tracking analysis job.
- */
-export interface TrackingQualitySummary {
-  pipeline_name?: string;
-  pipeline_version?: string;
-  target_id: string;
-  target_session_ids?: string[];
-  target_session_breakdown?: TargetSessionContribution[];
-  upstream_quality_summary_reference?: string | null;
-  resolved_parameters?: Record<string, any>;
-  quality_processing_applied?: boolean;
-  flagged?: boolean;
-  flag_reasons?: string[];
-  created_at?: string;
-  tracking_metrics: TrackingPipelineQualityMetrics;
-}
-
-/**
  * A dot of light in one picture, which might be an asteroid.
  */
 export interface FrameDetection {
@@ -837,9 +784,6 @@ export interface FrameDetection {
   pixelY: number;
   rightAscensionDeg: number;
   declinationDeg: number;
-  flux: number;
-  sharpness: number;
-  photutilsRoundness1: number;
 }
 
 /**
@@ -862,8 +806,6 @@ export interface MovingObjectTrack {
  * (e.g., it was just a dead pixel).
  */
 export enum CascadeStage {
-  MORPHOLOGY_DETECTED = "morphology_detected",
-  PERSISTENCE_CONFIRMED = "persistence_confirmed",
   REFERENCE_FRAME_CONFIRMED = "reference_frame_confirmed",
   RATE_LINEARITY_CONFIRMED = "rate_linearity_confirmed",
   EPHEMERIS_MATCHED = "ephemeris_matched",
@@ -880,12 +822,7 @@ export enum CascadeStage {
  * (like SkyBoT) that predict where known asteroids should be.
  */
 export interface EphemerisMatch {
-  provider?: string;
   designation: string;
-  mpcNumber?: number | null;
-  predictedVisualMagnitude?: number | null;
-  predictedRightAscensionRateArcsecPerHour?: number | null;
-  predictedDeclinationRateArcsecPerHour?: number | null;
   angularSeparationArcsec: number;
 }
 
@@ -918,7 +855,6 @@ export interface AsteroidRecoveryPipelineQualityMetrics {
   candidates_persistence_confirmed: number;
   candidates_rate_linearity_confirmed: number;
   candidates_ephemeris_matched: number;
-  trajectory_fit_residual_rms_arcsec?: number | null;
 }
 
 /**

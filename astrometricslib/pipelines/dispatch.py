@@ -449,9 +449,6 @@ def run_full_pipeline(
     standard_frames, spectral_frames = _split_standard_and_spectral_frames(target, camera_frames)
     stack_outputs = _stack_camera_frames(target, camera_name, standard_frames, spectral_frames)
 
-    # 1b. Tracking Analysis.
-    _run_tracking_analysis_stage(target)
-
     # 2. Astrometry Analysis
     _run_astrometry_stage(target, astrometrics)
 
@@ -627,22 +624,6 @@ def _stack_camera_frames(
         )
 
     return stack_outputs
-
-
-def _run_tracking_analysis_stage(target: Target) -> None:
-    """Build and attach the target's tracking-quality summary, best-effort.
-
-    Read-only over the registration data stacking just wrote, so it
-    belongs right after stacking and before any pipeline that could
-    fail and end this run early -- rig-quality findings are worth
-    having even if astrometry or photometry later fails on this target.
-    """
-    from astrometricslib.pipelines.stacking.tracking_analysis import build_tracking_quality_summary
-
-    try:
-        target.tracking_quality_summary = build_tracking_quality_summary(target)
-    except Exception as tracking_error:
-        logger.warning(f"[{target.id}] Tracking analysis failed: {tracking_error}")
 
 
 def _run_astrometry_stage(target: Target, astrometrics: Any) -> dict[str, Any]:

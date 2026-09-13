@@ -30,7 +30,6 @@ Astrometrics Library (`astrometricslib`)
    :skip: ImageProcessing
    :skip: LightCurve
    :skip: LoggerInterface
-   :skip: MosaicInfo
    :skip: MovingObjectConfig
    :skip: PlotData
    :skip: ProcessingJob

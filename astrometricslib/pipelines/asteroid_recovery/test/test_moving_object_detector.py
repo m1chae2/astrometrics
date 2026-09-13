@@ -40,9 +40,6 @@ def _make_detection(
         pixel_y=pixel_y,
         right_ascension_deg=right_ascension_deg,
         declination_deg=declination_deg,
-        flux=500.0,
-        sharpness=0.5,
-        photutils_roundness1=0.1,
     )
 
 

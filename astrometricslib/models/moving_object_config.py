@@ -14,41 +14,37 @@ class MovingObjectConfig(BaseModel):
     Attributes
     ----------
     detection_fwhm_px : `float`
-        How wide (in pixels) a star or asteroid is expected to be, by default
-        4.0.
+        How wide (in pixels) a star or asteroid is expected to be, by
+        default 4.0.
     detection_threshold_sigma : `float`
-        How much brighter than the background noise an object must be to get
-        noticed, by default 5.0.
+        How much brighter than the background noise an object must be
+        to get noticed, by default 5.0.
     min_frames_for_persistence : `int`
-        How many pictures in a row the object must be seen in before it is
-        trust it's real, by default 3.
+        How many pictures in a row the object must be seen in before
+        it's trusted as real, by default 3.
     pixel_match_tolerance_px : `float`
         If an object moves less than this many pixels, it's assumed to
         be a dead camera pixel, by default 1.5.
     sky_match_tolerance_arcsec : `float`
-        If an object moves less than this much across the sky, it's assumed
-        it's
-        just a normal star, by default 3.0.
+        If an object moves less than this much across the sky, it's
+        assumed to just be a normal star, by default 3.0.
     rate_min_arcsec_per_hour : `float`
-        The slowest an object can move and still be considered an asteroid, by
-        default 1.0.
+        The slowest an object can move and still be considered an
+        asteroid, by default 1.0.
     rate_max_arcsec_per_hour : `float`
         The fastest an object can move. Anything faster is probably a
         satellite, by default 300.0.
     rate_linearity_r_squared_min : `float`
-        How perfectly straight the object's path must be (1.0 is perfectly
-        straight), by default 0.98.
+        How perfectly straight the object's path must be (1.0 is
+        perfectly straight), by default 0.98.
     ephemeris_cross_match_radius_arcsec : `float`
         How close the object must be to a known asteroid's predicted
-        position
-        to count as a match, by default 10.0.
-    ephemeris_maximum_visual_magnitude : `float`
-        The faintest known asteroids to bother checking against, by default
-        16.0.
+        position to count as a match, by default 10.0.
     mpc_observatory_code : `str`
-        The official code for where the telescope is located. "500" means
-        the
-        center of the Earth, by default "500".
+        The official code for where the telescope is located, assigned
+        by the Minor Planet Center (the organization that tracks
+        asteroids). "500" means the center of the Earth, by default
+        "500".
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -62,23 +58,7 @@ class MovingObjectConfig(BaseModel):
     rate_max_arcsec_per_hour: float = Field(default=300.0, alias="rateMaxArcsecPerHour")
     rate_linearity_r_squared_min: float = Field(default=0.98, alias="rateLinearityRSquaredMin")
     ephemeris_cross_match_radius_arcsec: float = Field(default=10.0, alias="ephemerisCrossMatchRadiusArcsec")
-    ephemeris_maximum_visual_magnitude: float = Field(default=16.0, alias="ephemerisMaximumVisualMagnitude")
     mpc_observatory_code: str = Field(default="500", alias="mpcObservatoryCode")
-
-    def with_overrides(self, **kwargs) -> MovingObjectConfig:  # ruff: ignore[missing-type-kwargs]
-        """Make a copy of these settings, changing specific values if needed.
-
-        Parameters
-        ----------
-        **kwargs
-            The setting names and their new values.
-
-        Returns
-        -------
-        overridden_config : `MovingObjectConfig`
-            A new settings object with your changes applied.
-        """
-        return self.model_copy(update=kwargs)
 
 
 class MovingObjectConfigLoader:
@@ -138,9 +118,6 @@ class MovingObjectConfigLoader:
             ),
             ephemeris_cross_match_radius_arcsec=float(
                 _get_val("ephemeris_cross_match_radius_arcsec", defaults.ephemeris_cross_match_radius_arcsec)
-            ),
-            ephemeris_maximum_visual_magnitude=float(
-                _get_val("ephemeris_maximum_visual_magnitude", defaults.ephemeris_maximum_visual_magnitude)
             ),
             mpc_observatory_code=str(_get_val("mpc_observatory_code", defaults.mpc_observatory_code)),
         )

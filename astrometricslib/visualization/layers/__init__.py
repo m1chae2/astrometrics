@@ -6,6 +6,7 @@ from .photometry_overlay import PhotometryOverlay
 from .spectrum_overlay import SpectrumOverlay
 from .star_overlay import StarOverlay
 from .star_selection_overlay import StarSelectionOverlay
+from .track_overlay import TrackOverlay
 
 __all__ = [
     "DispersionOverlay",
@@ -14,4 +15,5 @@ __all__ = [
     "SpectrumOverlay",
     "StarOverlay",
     "StarSelectionOverlay",
+    "TrackOverlay",
 ]

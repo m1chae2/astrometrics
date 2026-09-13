@@ -7,8 +7,11 @@ error checking, and layout generation.
 from unittest.mock import MagicMock
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pytest
+from astropy.io import fits
 
+from astrometricslib.models.moving_object import AsteroidDetectionCandidate, CascadeStage, FrameDetection
 from astrometricslib.visualization.helpers import (
     plot_stellar_analyses,
     plot_stellar_analysis,
@@ -237,3 +240,66 @@ def test_plot_stellar_analysis_raises_on_empty_star():  # ruff: ignore[missing-r
 
     with pytest.raises(ValueError, match="neither light_curve nor spectrum"):
         plot_stellar_analysis(mock_star)
+
+
+def test_plot_target_dashboard_draws_asteroid_candidates_on_the_star_field(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify a target's asteroid_candidates are drawn on the astrometry panel.
+
+    Uses a real stacked-image FITS file (with a real WCS) rather than
+    the monkeypatched `AstrometricsImage` the layout-cases test uses,
+    since drawing a candidate's track requires projecting its RA/Dec
+    through that WCS.
+    """
+    stack_path = tmp_path / "stack.fits"
+    header = fits.Header()
+    header["CTYPE1"] = "RA---TAN"
+    header["CTYPE2"] = "DEC--TAN"
+    header["CRVAL1"] = 150.0
+    header["CRVAL2"] = 30.0
+    header["CRPIX1"] = 32.0
+    header["CRPIX2"] = 32.0
+    header["CD1_1"] = -0.0005
+    header["CD1_2"] = 0.0
+    header["CD2_1"] = 0.0
+    header["CD2_2"] = 0.0005
+    header["CUNIT1"] = "deg"
+    header["CUNIT2"] = "deg"
+    fits.PrimaryHDU(np.zeros((64, 64), dtype=np.float32), header=header).writeto(stack_path, overwrite=True)
+
+    candidate = AsteroidDetectionCandidate(
+        id="candidate-1",
+        target_id="M 13",
+        frame_detections=[
+            FrameDetection(
+                frame_path="/fake/frame0.fits",
+                timestamp=0.0,
+                pixel_x=5.0,
+                pixel_y=5.0,
+                right_ascension_deg=150.0,
+                declination_deg=30.0,
+            ),
+        ],
+        cascade_stage=CascadeStage.RATE_LINEARITY_CONFIRMED,
+    )
+
+    mock_target = MagicMock()
+    mock_target.id = "M 13"
+    mock_target.stacked_image = str(stack_path)
+    mock_target.asteroid_candidates = [candidate]
+
+    star_catalog_bare = MagicMock()
+    star_catalog_bare.id = "Gaia DR3 88888"
+    star_catalog_bare.target_ids = ["M 13"]
+    star_catalog_bare.dispersion_angle = None
+    star_catalog_bare.magnitude = 12.0
+    star_catalog_bare.star_data = {"xcentroid": 20.0, "ycentroid": 20.0}
+    star_catalog_bare.light_curve = None
+
+    mock_astrometrics = MagicMock()
+    mock_astrometrics.stars.list_objects.return_value = [star_catalog_bare]
+
+    fig = plot_target_dashboard(mock_target, mock_astrometrics.stars)
+
+    (ax_astrometry,) = fig.axes
+    assert len(ax_astrometry.lines) == 1
+    plt.close(fig)

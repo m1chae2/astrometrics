@@ -528,6 +528,55 @@ def plot_astrometry(
     return fig
 
 
+def plot_asteroid_detection(target: Any, figsize: tuple[int, int] = (10, 10)) -> plt.Figure:
+    """Render a target's detected moving-object candidates on its star field.
+
+    Each candidate's detections come from the raw light frames, not
+    the stacked image being displayed here, so they carry no usable
+    pixel coordinates of their own -- this projects their RA/Dec into
+    the stack's own WCS before drawing.
+
+    Parameters
+    ----------
+    target : `Target`
+        Target object. Must already have a `stacked_image`.
+    figsize : `tuple[int, int]`, optional
+        Figure dimensions, default `(10, 10)`.
+
+    Returns
+    -------
+    fig : `plt.Figure`
+        Matplotlib figure instance.
+
+    Raises
+    ------
+    ValueError
+        If the target has no `stacked_image`.
+    """
+    from .layers import TrackOverlay
+
+    if not getattr(target, "stacked_image", None):
+        raise ValueError(f"Target {getattr(target, 'id', 'unknown')!r} has no stacked_image.")
+
+    config = VisualizationConfig()
+    plt.style.use("dark_background")
+
+    fig, ax = plt.subplots(figsize=figsize)
+    image_layer = ImageOverlay(ax, config)
+
+    stacked_image = AstrometricsImage(target.stacked_image)
+    image_layer.render(
+        stacked_image.data,
+        config.default_percentile,
+        title=f"{target.id} - Asteroid Detection Candidates",
+    )
+    if stacked_image.wcs is not None:
+        candidates = getattr(target, "asteroid_candidates", None) or []
+        TrackOverlay(ax, config).render(candidates, stacked_image.wcs)
+
+    return fig
+
+
 def plot_target_photometry(
     target: Any,
     stars: Any,
@@ -821,12 +870,19 @@ def plot_target_dashboard(
     photometry_layer = PhotometryOverlay(ax_photometry, fig, config) if ax_photometry is not None else None
     spectrum_layer = SpectrumOverlay(ax_spectrum, fig, config) if ax_spectrum is not None else None
 
+    stacked_image = AstrometricsImage(target.stacked_image)
     image_layer.render(
-        AstrometricsImage(target.stacked_image).data,
+        stacked_image.data,
         config.default_percentile,
         title=f"{target.id} - Astrometry Solved Star Field",
     )
     star_patches = star_layer.render(astrometry_stars, active_index=active_index)
+
+    asteroid_candidates = getattr(target, "asteroid_candidates", None)
+    if isinstance(asteroid_candidates, list) and asteroid_candidates and stacked_image.wcs is not None:
+        from .layers import TrackOverlay
+
+        TrackOverlay(ax_astrometry, config).render(asteroid_candidates, stacked_image.wcs)
 
     def render_side_panels(index: int) -> None:
         """Render active side panels for star at given index."""

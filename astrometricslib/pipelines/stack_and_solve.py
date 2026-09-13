@@ -66,6 +66,7 @@ def _stack_with_job_tracking(target: Target, frames_to_stack: list[FrameRecord])
         The path to the final combined image file, or None if it failed.
     """
     with registered_job(
+        enabled=True,
         job_type="stacking",
         target_id=target.id,
         completed_message=f"[{target.id}] Stacking completed successfully.",

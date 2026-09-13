@@ -15,8 +15,10 @@ from importlib.metadata import version as _distribution_version
 from typing import TYPE_CHECKING, Any
 
 try:
-    # Single source of truth is pyproject.toml; both libraries ship from the
-    # same `astrometrics` distribution, so neither carries its own literal.
+    # The version number is only written down once, in pyproject.toml.
+    # astrometricslib and wayfindinglib are installed together as one
+    # package named "astrometrics", so both read that same version number
+    # here instead of each hard-coding their own copy of it.
     __version__ = _distribution_version("astrometrics")
 except PackageNotFoundError:  # running from a source tree without an install
     __version__ = "0.0.0+unknown"
@@ -150,8 +152,8 @@ class Astrometrics:
         self.config = config or app_config or get_configuration()
         self.catalog_access = catalog_access or CatalogAccess(self.config)
 
-        # Hydrate the stellar object registry via catalog_access; target state
-        # is owned by TargetCatalog itself (see its docstring).
+        # Load the known stars from storage here; a target's own data is
+        # loaded separately, since TargetCatalog owns that (see its docstring).
         self.stellar_objects: list[StellarObject] = self.catalog_access.get("stellar_catalog", {}) or []
 
         self.targets = TargetCatalog(self.config, self.catalog_access)

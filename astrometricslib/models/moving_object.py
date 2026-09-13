@@ -72,7 +72,7 @@ class EphemerisMatch(BaseModel):
     angular_separation_arcsec: float = Field(alias="angularSeparationArcsec")
 
 
-class AsteroidRecoveryCandidate(BaseModel):
+class AsteroidDetectionCandidate(BaseModel):
     """A potential asteroid tracked across several pictures.
 
     It holds all the individual detections, its calculated path, and

@@ -8,11 +8,11 @@ Due to the internal nature of these modules, they are deliberately hidden from t
 
 The library is organized into five layers across five specialized scientific pipelines and a shared orchestration spine. The "Ratchet Rule" strictly forbids any layer from importing from a layer above it.
 
-| Layer | Stacking | Astrometry | Photometry | Spectroscopy | Asteroid Rec. | Shared by All |
+| Layer | Stacking | Astrometry | Photometry | Spectroscopy | Asteroid Det. | Shared by All |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **1. Public API**<br>*(calls L2)* | `run_stacking` | `run_astrometry` | `run_photometry` | `run_spectroscopy` | `recover_asteroids` | **Astrometrics facade**<br>`api/`<br>`mcp/` |
+| **1. Public API**<br>*(calls L2)* | `run_stacking` | `run_astrometry` | `run_photometry` | `run_spectroscopy` | `detect_asteroids` | **Astrometrics facade**<br>`api/`<br>`mcp/` |
 | **2. Public Helpers**<br>*(calls L3)* | `stack_frames_with_timeout`<br>*(pre-stage)* | `analyze_target`<br>*(runner)* | `analyze_target`<br>*(runner)* | `analyze_target`<br>*(runner)* | `analyze_target`<br>*(runner)* | **pipelines/**<br>`tasks`<br>`pipeline_base`<br>`runners` |
-| **3. Pipelines**<br>*(calls L4)* | **stacking/**<br>`stage`<br>`stack_quality` | **astrometry/**<br>`star_identifier`<br>`catalog_seeding`<br>`spectral_star_reg` | **photometry/**<br>`variability_anal.`<br>`ensemble normal.` | **spectroscopy/**<br>`spectrum_extract`<br>`optics_physics`<br>`calibration_tuner` | **asteroid_recovery/**<br>`detection`<br>`ephemeris` | **image_processing/**<br>**pipelines/shared/**<br>`frame_grouping`<br>`star_recording` |
+| **3. Pipelines**<br>*(calls L4)* | **stacking/**<br>`stage`<br>`stack_quality` | **astrometry/**<br>`star_identifier`<br>`catalog_seeding`<br>`spectral_star_reg` | **photometry/**<br>`variability_anal.`<br>`ensemble normal.` | **spectroscopy/**<br>`spectrum_extract`<br>`optics_physics`<br>`calibration_tuner` | **asteroid_detection/**<br>`detection`<br>`ephemeris` | **image_processing/**<br>**pipelines/shared/**<br>`frame_grouping`<br>`star_recording` |
 | **4. Driver Access**<br>*(exposed via L1)* | *(handed one by stack_frames_with_timeout)* | `catalog_access` | `catalog_access` | `catalog_access` | *(skips L4/L5)* | **driver_access/**<br>`catalog_access`<br>`frame_scanning` |
 | **5. Drivers**<br>*(edge)* | `siril_interface` | `plate_solve_store` | `plate_solve_iface` | *(reaches through astrometry)* | *(none)* | **drivers/**<br>`logger`<br>`local_db` |
 | **Outside** | Siril (headless) | astrometry.net<br>Gaia, SIMBAD | astrometry.net | *(via astrometry)* | IMCCE SkyBoT | FITS on disk<br>SQLite |
@@ -49,8 +49,8 @@ The library is organized into five layers across five specialized scientific pip
 - **Star alignment and registration:** `registration_quality.py`
 - **Per-frame and per-session batch processing:** `frame_analysis.py` and `batch.py`
 
-### Asteroid Recovery (Moving Object Detection)
-*Located in:* `astrometricslib/pipelines/asteroid_recovery/`
+### Asteroid Detection (Moving Objects)
+*Located in:* `astrometricslib/pipelines/asteroid_detection/`
 - **Blink analysis and tracking:** `detection.py` and `pipeline.py`
 - **Ephemeris calculation:** `ephemeris.py` and `frame_wcs_composer.py`
 

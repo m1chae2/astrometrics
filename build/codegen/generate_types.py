@@ -17,15 +17,15 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../.
 
 from astrometricslib import FilterType
 from astrometricslib.models.moving_object import (
-    AsteroidRecoveryCandidate,
+    AsteroidDetectionCandidate,
     CascadeStage,
     EphemerisMatch,
     FrameDetection,
     MovingObjectTrack,
 )
 from astrometricslib.models.quality_summary import (
-    AsteroidRecoveryPipelineQualityMetrics,
-    AsteroidRecoveryQualitySummary,
+    AsteroidDetectionPipelineQualityMetrics,
+    AsteroidDetectionQualitySummary,
     AstrometryPipelineQualityMetrics,
     AstrometryQualitySummary,
     ExcludedFrame,
@@ -298,9 +298,11 @@ def main() -> None:
         generate_interface(MovingObjectTrack, "MovingObjectTrack"),
         generate_enum(CascadeStage, "CascadeStage"),
         generate_interface(EphemerisMatch, "EphemerisMatch"),
-        generate_interface(AsteroidRecoveryCandidate, "AsteroidRecoveryCandidate"),
-        generate_interface(AsteroidRecoveryPipelineQualityMetrics, "AsteroidRecoveryPipelineQualityMetrics"),
-        generate_interface(AsteroidRecoveryQualitySummary, "AsteroidRecoveryQualitySummary"),
+        generate_interface(AsteroidDetectionCandidate, "AsteroidDetectionCandidate"),
+        generate_interface(
+            AsteroidDetectionPipelineQualityMetrics, "AsteroidDetectionPipelineQualityMetrics"
+        ),
+        generate_interface(AsteroidDetectionQualitySummary, "AsteroidDetectionQualitySummary"),
         generate_interface(WeatherSample, "WeatherSample"),
         generate_interface(ObservationSession, "ObservationSession"),
     ]

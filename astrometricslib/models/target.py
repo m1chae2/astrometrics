@@ -11,9 +11,9 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from astrometricslib.models.moving_object import AsteroidRecoveryCandidate
+from astrometricslib.models.moving_object import AsteroidDetectionCandidate
 from astrometricslib.models.quality_summary import (
-    AsteroidRecoveryQualitySummary,
+    AsteroidDetectionQualitySummary,
     AstrometryQualitySummary,
     PhotometryQualitySummary,
     SpectroscopyQualitySummary,
@@ -196,11 +196,11 @@ class Target(BaseModel):
     spectroscopy_quality_summary: SpectroscopyQualitySummary | None = Field(
         default=None, alias="spectroscopyQualitySummary"
     )
-    asteroid_candidates: list[AsteroidRecoveryCandidate] = Field(
+    asteroid_candidates: list[AsteroidDetectionCandidate] = Field(
         default_factory=list, alias="asteroidCandidates"
     )
-    asteroid_recovery_quality_summary: AsteroidRecoveryQualitySummary | None = Field(
-        default=None, alias="asteroidRecoveryQualitySummary"
+    asteroid_detection_quality_summary: AsteroidDetectionQualitySummary | None = Field(
+        default=None, alias="asteroidDetectionQualitySummary"
     )
     exposure_sec: float = Field(default=0, alias="exposureTime")
     number_of_stars: int = Field(default=0, alias="numberOfStars")

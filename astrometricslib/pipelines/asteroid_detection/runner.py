@@ -1,6 +1,6 @@
 """Searches a target's images for moving objects (asteroids).
 
-Runs `AsteroidRecoveryPipeline`, which returns every candidate it found --
+Runs `AsteroidDetectionPipeline`, which returns every candidate it found --
 including the ones it eventually rejected, so their rejection reasons can
 still be summarized -- and keeps only the candidates that survived far
 enough to be worth a look. Unlike the other three pipelines, this one has
@@ -12,8 +12,8 @@ from typing import Any
 
 from astrometricslib.models.moving_object import CascadeStage
 from astrometricslib.models.quality_summary import (
-    AsteroidRecoveryPipelineQualityMetrics,
-    AsteroidRecoveryQualitySummary,
+    AsteroidDetectionPipelineQualityMetrics,
+    AsteroidDetectionQualitySummary,
 )
 from astrometricslib.pipelines.pipeline_base import (
     AnalysisPipeline,
@@ -23,8 +23,8 @@ from astrometricslib.pipelines.pipeline_base import (
 )
 
 
-class AsteroidRecoveryPipelineAdapter(AnalysisPipeline):
-    """Adapts `AsteroidRecoveryPipeline` to the shared `AnalysisPipeline`."""
+class AsteroidDetectionPipelineAdapter(AnalysisPipeline):
+    """Adapts `AsteroidDetectionPipeline` to the shared `AnalysisPipeline`."""
 
     @property
     def pipeline_name(self) -> str:
@@ -33,14 +33,14 @@ class AsteroidRecoveryPipelineAdapter(AnalysisPipeline):
         Returns
         -------
         pipeline_name : `str`
-            Always ``"asteroid_recovery"``.
+            Always ``"asteroid_detection"``.
         """
-        return "asteroid_recovery"
+        return "asteroid_detection"
 
     def process_input(self, request: PipelineRequest) -> Result:
-        """Asteroid recovery has no "nothing to do" case to check.
+        """Asteroid detection has no "nothing to do" case to check.
 
-        `AsteroidRecoveryPipeline.process` already tolerates a target
+        `AsteroidDetectionPipeline.process` already tolerates a target
         with no usable frames -- it just reports zero candidates -- so
         there is no "nothing to do" case to catch before running it.
 
@@ -62,12 +62,12 @@ class AsteroidRecoveryPipelineAdapter(AnalysisPipeline):
             genuine output side effect, since its result has no catalog
             counterpart to record through the catalog_access.
         """
-        from astrometricslib.pipelines.asteroid_recovery.pipeline import (
-            AsteroidRecoveryPipeline,
+        from astrometricslib.pipelines.asteroid_detection.pipeline import (
+            AsteroidDetectionPipeline,
         )
 
         target = request.target
-        pipeline = AsteroidRecoveryPipeline()
+        pipeline = AsteroidDetectionPipeline()
         light_frames = [
             (frame.path, frame.timestamp)
             for frame in target.frames
@@ -92,12 +92,12 @@ class AsteroidRecoveryPipelineAdapter(AnalysisPipeline):
 
         return Result(candidates=target.asteroid_candidates, payload={"metrics": metrics})
 
-    def validate_output(self, request: PipelineRequest, result: Result) -> AsteroidRecoveryQualitySummary:
+    def validate_output(self, request: PipelineRequest, result: Result) -> AsteroidDetectionQualitySummary:
         """Build the quality summary and flag anything worth a look.
 
         Returns
         -------
-        summary : `AsteroidRecoveryQualitySummary`
+        summary : `AsteroidDetectionQualitySummary`
             Flagged when frames were excluded for missing pointing
             metadata, or when a candidate was confirmed as a mover but
             not matched to a known body.
@@ -111,19 +111,19 @@ class AsteroidRecoveryPipelineAdapter(AnalysisPipeline):
         metrics = result.payload["metrics"]
 
         light_frames = [frame for frame in target.frames if frame.role == "LIGHT"]
-        asteroid_recovery_sessions = derive_target_sessions(target.id, light_frames)
+        asteroid_detection_sessions = derive_target_sessions(target.id, light_frames)
         # Per-session frame-exclusion identity isn't tracked by the
         # pipeline today (only the aggregate
         # frames_excluded_missing_pointing_metadata count is), so no
         # excluded_paths is passed here -- every session reports 0 frames
         # clipped rather than fabricating a breakdown.
-        asteroid_recovery_session_breakdown = build_target_session_breakdown(asteroid_recovery_sessions)
+        asteroid_detection_session_breakdown = build_target_session_breakdown(asteroid_detection_sessions)
 
-        summary = AsteroidRecoveryQualitySummary(
+        summary = AsteroidDetectionQualitySummary(
             target_id=target.id,
-            target_session_ids=[session.id for session in asteroid_recovery_sessions],
-            target_session_breakdown=asteroid_recovery_session_breakdown,
-            asteroid_recovery_metrics=AsteroidRecoveryPipelineQualityMetrics(**metrics),
+            target_session_ids=[session.id for session in asteroid_detection_sessions],
+            target_session_breakdown=asteroid_detection_session_breakdown,
+            asteroid_detection_metrics=AsteroidDetectionPipelineQualityMetrics(**metrics),
         )
         if metrics.get("frames_excluded_missing_pointing_metadata", 0) > 0:
             summary.flagged = True
@@ -145,9 +145,9 @@ class AsteroidRecoveryPipelineAdapter(AnalysisPipeline):
         return summary
 
     def to_result_dict(
-        self, request: PipelineRequest, result: Result, summary: AsteroidRecoveryQualitySummary
+        self, request: PipelineRequest, result: Result, summary: AsteroidDetectionQualitySummary
     ) -> dict[str, Any]:
-        """Build the result dict asteroid recovery's callers expect back.
+        """Build the result dict asteroid detection's callers expect back.
 
         Returns
         -------
@@ -160,7 +160,7 @@ class AsteroidRecoveryPipelineAdapter(AnalysisPipeline):
         return {
             "status": "completed",
             "targetId": request.target.id,
-            "analysisMode": "asteroid_recovery",
+            "analysisMode": "asteroid_detection",
             "candidatesDetected": metrics.get("candidates_detected", 0),
             "candidatesRateLinearityConfirmed": metrics.get("candidates_rate_linearity_confirmed", 0),
             "candidatesEphemerisMatched": metrics.get("candidates_ephemeris_matched", 0),
@@ -168,26 +168,26 @@ class AsteroidRecoveryPipelineAdapter(AnalysisPipeline):
         }
 
 
-def run_asteroid_recovery_analysis(
+def run_asteroid_detection_analysis(
     target,  # ruff: ignore[missing-type-function-argument]
-    frames,  # ruff: ignore[missing-type-function-argument] -- unused; asteroid recovery reads target.frames itself
-    filter_type,  # ruff: ignore[missing-type-function-argument] -- unused; asteroid recovery has no filter concept
+    frames,  # ruff: ignore[missing-type-function-argument] -- unused; asteroid detection reads target.frames itself
+    filter_type,  # ruff: ignore[missing-type-function-argument] -- unused; asteroid detection has no filter concept
     catalog_access,  # ruff: ignore[missing-type-function-argument] -- unused; candidates record on the target record, not via the catalog_access
-    path,  # ruff: ignore[missing-type-function-argument] -- unused; asteroid recovery reads target.frames itself
+    path,  # ruff: ignore[missing-type-function-argument] -- unused; asteroid detection reads target.frames itself
     **kwargs,  # ruff: ignore[missing-type-kwargs] -- unused
 ) -> dict[str, Any]:
     """Search a target's light frames for moving objects.
 
     A thin wrapper kept at this name and signature for
     `dispatch.PIPELINE_RUNNERS` -- the actual work is
-    `AsteroidRecoveryPipelineAdapter`, run through the shared
+    `AsteroidDetectionPipelineAdapter`, run through the shared
     input/main/output processing cycle in `run_pipeline`.
 
     Parameters
     ----------
     target : `Target`
         The target to search. Its `asteroid_candidates` and
-        `asteroid_recovery_quality_summary` are set by this call.
+        `asteroid_detection_quality_summary` are set by this call.
     frames : `Any`
         Unused. Present so every pipeline runner shares one call signature.
     filter_type : `Any`
@@ -213,4 +213,4 @@ def run_asteroid_recovery_analysis(
         path=path,
         options=kwargs,
     )
-    return run_pipeline(AsteroidRecoveryPipelineAdapter(), request)
+    return run_pipeline(AsteroidDetectionPipelineAdapter(), request)

@@ -530,7 +530,7 @@ def test_analyze_frame_spectroscopy_does_not_disturb_other_stars_indexed_columns
         config_loader._instance = original_instance
 
 
-def _write_asteroid_recovery_frame_fits(path, star_pixel_xy, extra_source_pixel_xy_list=()):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _write_asteroid_detection_frame_fits(path, star_pixel_xy, extra_source_pixel_xy_list=()):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
     """Write a synthetic light frame FITS file with Gaussian source(s).
 
     `extra_source_pixel_xy_list` adds further one-off point sources to
@@ -549,7 +549,7 @@ def _write_asteroid_recovery_frame_fits(path, star_pixel_xy, extra_source_pixel_
     fits.PrimaryHDU(data.astype(np.float32), header=header).writeto(path, overwrite=True)
 
 
-def _write_asteroid_recovery_stack_fits(path):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _write_asteroid_detection_stack_fits(path):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
     """Write a synthetic stack FITS file with a real TAN WCS header."""
     header = fits.Header()
     header["NAXIS1"] = 64
@@ -569,8 +569,8 @@ def _write_asteroid_recovery_stack_fits(path):  # ruff: ignore[missing-type-func
     fits.PrimaryHDU(np.zeros((64, 64), dtype=np.float32), header=header).writeto(path, overwrite=True)
 
 
-def test_target_analyze_target_asteroid_recovery(tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify analyze_target wires the asteroid recovery pipeline.
+def test_target_analyze_target_asteroid_detection(tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify analyze_target wires the asteroid detection pipeline.
 
     Candidates are populated on the Target, and the quality summary
     reflects the pipeline's own metrics and session provenance.
@@ -582,34 +582,34 @@ def test_target_analyze_target_asteroid_recovery(tmp_path, mocker):  # ruff: ign
     frames = []
     for index, (star_pixel, timestamp) in enumerate(zip(star_pixel_positions, timestamps, strict=False)):
         frame_path = tmp_path / f"frame{index}.fits"
-        _write_asteroid_recovery_frame_fits(frame_path, star_pixel)
+        _write_asteroid_detection_frame_fits(frame_path, star_pixel)
         frames.append(FrameRecord(path=str(frame_path), timestamp=timestamp))
 
     stack_path = tmp_path / "stack.fits"
-    _write_asteroid_recovery_stack_fits(stack_path)
+    _write_asteroid_detection_stack_fits(stack_path)
 
-    target = Target(id="AsteroidRecoveryTestTarget", frames=frames)
+    target = Target(id="AsteroidDetectionTestTarget", frames=frames)
     target.stacked_image = str(stack_path)
 
-    result = tasks.analyze_target(target, pipeline_type="asteroid_recovery")
+    result = tasks.analyze_target(target, pipeline_type="asteroid_detection")
 
-    assert_result_keys(result, "asteroid_recovery")
+    assert_result_keys(result, "asteroid_detection")
     assert result["status"] == "completed"
     assert len(target.asteroid_candidates) == 1
     assert target.asteroid_candidates[0].cascade_stage == CascadeStage.RATE_LINEARITY_CONFIRMED
 
-    summary = target.asteroid_recovery_quality_summary
+    summary = target.asteroid_detection_quality_summary
     assert summary is not None
     assert summary.upstream_quality_summary_reference == "astrometry"
-    assert summary.asteroid_recovery_metrics.frames_with_wcs_estimate == 4
-    assert summary.asteroid_recovery_metrics.candidates_rate_linearity_confirmed == 1
+    assert summary.asteroid_detection_metrics.frames_with_wcs_estimate == 4
+    assert summary.asteroid_detection_metrics.candidates_rate_linearity_confirmed == 1
     assert len(summary.target_session_breakdown) == 1
     assert summary.target_session_breakdown[0].frames_contributed == 4
     assert summary.flagged is True
     assert "not matched to a known body" in summary.flag_reasons[0]
 
 
-def test_target_analyze_target_asteroid_recovery_drops_rejected_candidates(tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_target_analyze_target_asteroid_detection_drops_rejected_candidates(tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify only surviving candidates are recorded onto the target.
 
     A cosmic-ray-like point source appearing in a single frame only
@@ -628,18 +628,18 @@ def test_target_analyze_target_asteroid_recovery_drops_rejected_candidates(tmp_p
     for index, (star_pixel, timestamp) in enumerate(zip(star_pixel_positions, timestamps, strict=False)):
         frame_path = tmp_path / f"frame{index}.fits"
         extra_sources = [(50.0, 10.0)] if index == 0 else []
-        _write_asteroid_recovery_frame_fits(frame_path, star_pixel, extra_sources)
+        _write_asteroid_detection_frame_fits(frame_path, star_pixel, extra_sources)
         frames.append(FrameRecord(path=str(frame_path), timestamp=timestamp))
 
     stack_path = tmp_path / "stack.fits"
-    _write_asteroid_recovery_stack_fits(stack_path)
+    _write_asteroid_detection_stack_fits(stack_path)
 
-    target = Target(id="AsteroidRecoveryMixedTestTarget", frames=frames)
+    target = Target(id="AsteroidDetectionMixedTestTarget", frames=frames)
     target.stacked_image = str(stack_path)
 
-    result = tasks.analyze_target(target, pipeline_type="asteroid_recovery")
+    result = tasks.analyze_target(target, pipeline_type="asteroid_detection")
 
-    assert_result_keys(result, "asteroid_recovery")
+    assert_result_keys(result, "asteroid_detection")
     assert result["status"] == "completed"
     # Only the confirmed track is recorded -- the single-frame cosmic
     # ray is dropped, not carried onto the target.
@@ -649,9 +649,9 @@ def test_target_analyze_target_asteroid_recovery_drops_rejected_candidates(tmp_p
     # But the pipeline's own metrics still account for both candidates
     # it evaluated, proving the drop happens at recording time, not
     # inside the discrimination cascade itself.
-    summary = target.asteroid_recovery_quality_summary
-    assert summary.asteroid_recovery_metrics.candidates_detected == 2
-    assert summary.asteroid_recovery_metrics.candidates_rate_linearity_confirmed == 1
+    summary = target.asteroid_detection_quality_summary
+    assert summary.asteroid_detection_metrics.candidates_detected == 2
+    assert summary.asteroid_detection_metrics.candidates_rate_linearity_confirmed == 1
     assert result["candidates"] == target.asteroid_candidates
 
 

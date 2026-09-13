@@ -38,7 +38,7 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "AbstractCatalogAccess",
     "AnalysisResult",
     "AppConfiguration",
-    "AsteroidRecoveryCandidate",
+    "AsteroidDetectionCandidate",
     "Astrometrics",
     "AstrometryPipeline",
     "AstrometryPipelineQualityMetrics",

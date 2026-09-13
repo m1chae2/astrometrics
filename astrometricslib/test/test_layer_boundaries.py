@@ -49,7 +49,7 @@ KNOWN_FITS_ACCESS_SITES = frozenset({
     "pipelines/astrometry/fwhm.py",
     "pipelines/astrometry/runner.py",
     "pipelines/astrometry/session_identification.py",
-    "pipelines/asteroid_recovery/pipeline.py",
+    "pipelines/asteroid_detection/pipeline.py",
     "pipelines/photometry/variability_analyzer.py",
     "pipelines/shared/frame_scanning.py",
     "pipelines/shared/image_conversions.py",

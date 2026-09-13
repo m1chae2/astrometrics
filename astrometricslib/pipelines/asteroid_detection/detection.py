@@ -18,7 +18,7 @@ from collections import defaultdict
 import numpy as np
 
 from astrometricslib.models.moving_object import (
-    AsteroidRecoveryCandidate,
+    AsteroidDetectionCandidate,
     CascadeStage,
     FrameDetection,
     MovingObjectTrack,
@@ -127,7 +127,7 @@ class MovingObjectDetector:
 
     def detect_candidates(
         self, target_id: str, frame_detections: list[FrameDetection]
-    ) -> list[AsteroidRecoveryCandidate]:
+    ) -> list[AsteroidDetectionCandidate]:
         """Connect the dots between frames and run all the tests.
 
         Parameters
@@ -139,7 +139,7 @@ class MovingObjectDetector:
 
         Returns
         -------
-        candidates : `list` [`AsteroidRecoveryCandidate`]
+        candidates : `list` [`AsteroidDetectionCandidate`]
             The list of possible moving objects we found. Even if a dot
             failed a test (like it didn't move fast enough), we still include
             it in this list with a note explaining why it failed.
@@ -154,7 +154,7 @@ class MovingObjectDetector:
             candidates.append(self._evaluate_chain(target_id, chain))
         return candidates
 
-    def _evaluate_chain(self, target_id: str, chain: list[FrameDetection]) -> AsteroidRecoveryCandidate:
+    def _evaluate_chain(self, target_id: str, chain: list[FrameDetection]) -> AsteroidDetectionCandidate:
         """Run one connected path of dots through our three main tests.
 
         Parameters
@@ -167,13 +167,13 @@ class MovingObjectDetector:
 
         Returns
         -------
-        candidate : `AsteroidRecoveryCandidate`
+        candidate : `AsteroidDetectionCandidate`
             The final result of the tests.
         """
         candidate_id = str(uuid.uuid4())
 
         if len(chain) < self.config.min_frames_for_persistence:
-            return AsteroidRecoveryCandidate(
+            return AsteroidDetectionCandidate(
                 id=candidate_id,
                 target_id=target_id,
                 frame_detections=chain,
@@ -182,7 +182,7 @@ class MovingObjectDetector:
 
         reference_frame_stage = self._evaluate_reference_frame_test(chain)
         if reference_frame_stage != CascadeStage.REFERENCE_FRAME_CONFIRMED:
-            return AsteroidRecoveryCandidate(
+            return AsteroidDetectionCandidate(
                 id=candidate_id,
                 target_id=target_id,
                 frame_detections=chain,
@@ -190,7 +190,7 @@ class MovingObjectDetector:
             )
 
         track, rate_linearity_stage = self._fit_rate_linearity(chain)
-        return AsteroidRecoveryCandidate(
+        return AsteroidDetectionCandidate(
             id=candidate_id,
             target_id=target_id,
             frame_detections=chain,

@@ -129,8 +129,8 @@ export interface TargetObject {
   astrometryQualitySummary?: AstrometryQualitySummary | null;
   photometryQualitySummary?: PhotometryQualitySummary | null;
   spectroscopyQualitySummary?: SpectroscopyQualitySummary | null;
-  asteroidCandidates?: AsteroidRecoveryCandidate[];
-  asteroidRecoveryQualitySummary?: AsteroidRecoveryQualitySummary | null;
+  asteroidCandidates?: AsteroidDetectionCandidate[];
+  asteroidDetectionQualitySummary?: AsteroidDetectionQualitySummary | null;
   exposureTime?: number;
   numberOfStars?: number;
   frames?: FrameRecord[];
@@ -832,7 +832,7 @@ export interface EphemerisMatch {
  * It holds all the individual detections, its calculated path, and
  * whether it matched any known asteroids.
  */
-export interface AsteroidRecoveryCandidate {
+export interface AsteroidDetectionCandidate {
   id: string;
   targetId: string;
   frameDetections?: FrameDetection[];
@@ -848,7 +848,7 @@ export interface AsteroidRecoveryCandidate {
  * successive check (e.g., did it move in a straight line? did it match a
  * known asteroid?).
  */
-export interface AsteroidRecoveryPipelineQualityMetrics {
+export interface AsteroidDetectionPipelineQualityMetrics {
   frames_with_wcs_estimate: number;
   frames_excluded_missing_pointing_metadata: number;
   candidates_detected: number;
@@ -860,7 +860,7 @@ export interface AsteroidRecoveryPipelineQualityMetrics {
 /**
  * The final saved report for an asteroid-hunting job.
  */
-export interface AsteroidRecoveryQualitySummary {
+export interface AsteroidDetectionQualitySummary {
   pipeline_name?: string;
   pipeline_version?: string;
   target_id: string;
@@ -872,7 +872,7 @@ export interface AsteroidRecoveryQualitySummary {
   flagged?: boolean;
   flag_reasons?: string[];
   created_at?: string;
-  asteroid_recovery_metrics: AsteroidRecoveryPipelineQualityMetrics;
+  asteroid_detection_metrics: AsteroidDetectionPipelineQualityMetrics;
 }
 
 /**

@@ -7,21 +7,21 @@ an internet connection.
 import astropy.units as u
 from astropy.table import QTable
 
-from astrometricslib.models.moving_object import AsteroidRecoveryCandidate, CascadeStage, FrameDetection
+from astrometricslib.models.moving_object import AsteroidDetectionCandidate, CascadeStage, FrameDetection
 from astrometricslib.models.moving_object_config import MovingObjectConfig
-from astrometricslib.pipelines.asteroid_recovery.ephemeris import EphemerisCrossMatcher
+from astrometricslib.pipelines.asteroid_detection.ephemeris import EphemerisCrossMatcher
 
 
 def _make_candidate(
     cascade_stage,  # ruff: ignore[missing-type-function-argument]
     right_ascension_deg=150.0,  # ruff: ignore[missing-type-function-argument]
     declination_deg=30.0,  # ruff: ignore[missing-type-function-argument]
-) -> AsteroidRecoveryCandidate:
+) -> AsteroidDetectionCandidate:
     """Create a fake moving object with one dot at a specific place.
 
     Returns
     -------
-    AsteroidRecoveryCandidate
+    AsteroidDetectionCandidate
         Our fake moving object.
     """
     detection = FrameDetection(
@@ -32,7 +32,7 @@ def _make_candidate(
         right_ascension_deg=right_ascension_deg,
         declination_deg=declination_deg,
     )
-    return AsteroidRecoveryCandidate(
+    return AsteroidDetectionCandidate(
         id="candidate-1", target_id="TestTarget", frame_detections=[detection], cascade_stage=cascade_stage
     )
 

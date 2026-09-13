@@ -6,7 +6,7 @@ Three layers, smallest first:
   it shows up in the UI's job tracker), abandoning it if it takes too
   long, since the underlying process can occasionally hang.
 - `analyze_target` picks which single analysis pipeline runs, by name
-  ("astrometry", "spectroscopy", "photometry", or "asteroid_recovery"),
+  ("astrometry", "spectroscopy", "photometry", or "asteroid_detection"),
   via `PIPELINE_RUNNERS` -- adding a fifth mode means adding a module
   under `pipelines/` and one entry to that dict; nothing else here
   needs to change.
@@ -35,7 +35,7 @@ from typing import Any
 
 from astrometricslib.drivers.job_logging import registered_job
 from astrometricslib.models.target import FrameRecord, Target
-from astrometricslib.pipelines.asteroid_recovery.runner import run_asteroid_recovery_analysis
+from astrometricslib.pipelines.asteroid_detection.runner import run_asteroid_detection_analysis
 from astrometricslib.pipelines.astrometry.runner import run_astrometry_analysis
 from astrometricslib.pipelines.photometry.runner import run_photometry_analysis
 from astrometricslib.pipelines.shared.frame_grouping import (
@@ -212,7 +212,7 @@ PIPELINE_RUNNERS = {
     "astrometry": run_astrometry_analysis,
     "spectroscopy": run_spectroscopy_analysis,
     "photometry": run_photometry_analysis,
-    "asteroid_recovery": run_asteroid_recovery_analysis,
+    "asteroid_detection": run_asteroid_detection_analysis,
 }
 
 
@@ -230,7 +230,7 @@ def analyze_target(
 
     You can ask it to run "astrometry" (finding star positions),
     "spectroscopy" (light spectrum), "photometry" (brightness changes),
-    or "asteroid_recovery" (finding moving rocks).
+    or "asteroid_detection" (finding moving rocks).
 
     Parameters
     ----------

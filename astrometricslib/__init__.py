@@ -33,7 +33,7 @@ from astrometricslib.api.processing import (
     registered_job,
 )
 from astrometricslib.api.targets import classify_and_sort_fits_files, derive_target_sessions
-from astrometricslib.models.moving_object import AsteroidRecoveryCandidate
+from astrometricslib.models.moving_object import AsteroidDetectionCandidate
 from astrometricslib.models.moving_object_config import MovingObjectConfig
 from astrometricslib.models.quality_summary import (
     AstrometryPipelineQualityMetrics,
@@ -199,7 +199,7 @@ __all__ = [
     "AbstractCatalogAccess",
     "AnalysisResult",
     "AppConfiguration",
-    "AsteroidRecoveryCandidate",
+    "AsteroidDetectionCandidate",
     "Astrometrics",
     "AstrometryPipeline",
     "AstrometryPipelineQualityMetrics",

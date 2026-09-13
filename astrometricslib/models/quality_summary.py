@@ -283,15 +283,15 @@ class SpectroscopyQualitySummary(PipelineQualitySummaryBase):
 
 
 # ---------------------------------------------------------------------------
-# Asteroid recovery
+# Asteroid detection
 # ---------------------------------------------------------------------------
 
-# Bumped whenever AsteroidRecoveryPipelineQualityMetrics's shape
+# Bumped whenever AsteroidDetectionPipelineQualityMetrics's shape
 # changes meaningfully.
-ASTEROID_RECOVERY_PIPELINE_VERSION = "1.0.0"
+ASTEROID_DETECTION_PIPELINE_VERSION = "1.0.0"
 
 
-class AsteroidRecoveryPipelineQualityMetrics(BaseModel):
+class AsteroidDetectionPipelineQualityMetrics(BaseModel):
     """Measurements for the process that searches for moving asteroids.
 
     This tracks how many candidates were found and how many passed each
@@ -316,10 +316,10 @@ class AsteroidRecoveryPipelineQualityMetrics(BaseModel):
     candidates_ephemeris_matched: int
 
 
-class AsteroidRecoveryQualitySummary(PipelineQualitySummaryBase):
+class AsteroidDetectionQualitySummary(PipelineQualitySummaryBase):
     """The final saved report for an asteroid-hunting job."""
 
-    pipeline_name: str = "asteroid_recovery"
-    pipeline_version: str = ASTEROID_RECOVERY_PIPELINE_VERSION
+    pipeline_name: str = "asteroid_detection"
+    pipeline_version: str = ASTEROID_DETECTION_PIPELINE_VERSION
     upstream_quality_summary_reference: str | None = "astrometry"
-    asteroid_recovery_metrics: AsteroidRecoveryPipelineQualityMetrics
+    asteroid_detection_metrics: AsteroidDetectionPipelineQualityMetrics

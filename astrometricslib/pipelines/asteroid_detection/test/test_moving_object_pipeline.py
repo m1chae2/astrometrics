@@ -14,8 +14,8 @@ from astropy.table import QTable
 from astrometricslib.models.moving_object import CascadeStage
 from astrometricslib.models.moving_object_config import MovingObjectConfig
 from astrometricslib.models.target import FrameRecord, Target
-from astrometricslib.pipelines.asteroid_recovery.pipeline import (
-    AsteroidRecoveryPipeline,
+from astrometricslib.pipelines.asteroid_detection.pipeline import (
+    AsteroidDetectionPipeline,
 )
 
 _STAR_PIXEL_POSITIONS = [(20.0, 20.0), (25.0, 23.0), (30.0, 26.0), (35.0, 29.0)]
@@ -85,7 +85,7 @@ def _build_moving_target(tmp_path, include_radec=True):  # ruff: ignore[missing-
 
 
 def _light_frames(target):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
-    """Build the frame pairs `AsteroidRecoveryPipeline.process` expects.
+    """Build the frame pairs `AsteroidDetectionPipeline.process` expects.
 
     Returns
     -------
@@ -102,7 +102,7 @@ def _light_frames(target):  # ruff: ignore[missing-type-function-argument, missi
 def test_process_raises_when_target_has_no_stacked_image():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Test that we stop and complain if the target hasn't been stacked yet."""
     target = Target(id="NoStackTarget", frames=[])
-    pipeline = AsteroidRecoveryPipeline(MovingObjectConfig())
+    pipeline = AsteroidDetectionPipeline(MovingObjectConfig())
     with pytest.raises(ValueError, match="stacked_image"):
         pipeline.process(target.id, target.stacked_image, _light_frames(target))
 
@@ -112,7 +112,7 @@ def test_process_confirms_a_moving_source_with_no_ephemeris_match(tmp_path, mock
     mocker.patch("astroquery.imcce.Skybot.cone_search", return_value=None)
 
     target = _build_moving_target(tmp_path)
-    pipeline = AsteroidRecoveryPipeline(MovingObjectConfig())
+    pipeline = AsteroidDetectionPipeline(MovingObjectConfig())
 
     candidates = pipeline.process(target.id, target.stacked_image, _light_frames(target))
 
@@ -140,7 +140,7 @@ def test_process_matches_a_moving_source_against_a_known_body(tmp_path, mocker):
     mocker.patch("astroquery.imcce.Skybot.cone_search", return_value=field_table)
 
     target = _build_moving_target(tmp_path)
-    pipeline = AsteroidRecoveryPipeline(MovingObjectConfig())
+    pipeline = AsteroidDetectionPipeline(MovingObjectConfig())
 
     candidates = pipeline.process(target.id, target.stacked_image, _light_frames(target))
 
@@ -156,7 +156,7 @@ def test_process_excludes_frames_missing_pointing_metadata(tmp_path, mocker):  #
     mocker.patch("astroquery.imcce.Skybot.cone_search", return_value=None)
 
     target = _build_moving_target(tmp_path, include_radec=False)
-    pipeline = AsteroidRecoveryPipeline(MovingObjectConfig())
+    pipeline = AsteroidDetectionPipeline(MovingObjectConfig())
 
     candidates = pipeline.process(target.id, target.stacked_image, _light_frames(target))
 

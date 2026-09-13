@@ -41,7 +41,7 @@ EXPECTED_RESULT_KEYS: dict[str, set[str]] = {
         "longTermVariableCandidates",
         "crossSessionMatchCount",
     },
-    "asteroid_recovery": {
+    "asteroid_detection": {
         "status",
         "targetId",
         "analysisMode",

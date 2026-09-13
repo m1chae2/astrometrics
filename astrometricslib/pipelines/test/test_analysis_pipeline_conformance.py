@@ -13,12 +13,12 @@ before a caller notices a summary is missing where it should be.
 import pytest
 
 from astrometricslib.models.quality_summary import (
-    AsteroidRecoveryQualitySummary,
+    AsteroidDetectionQualitySummary,
     AstrometryQualitySummary,
     PhotometryQualitySummary,
     SpectroscopyQualitySummary,
 )
-from astrometricslib.pipelines.asteroid_recovery.runner import AsteroidRecoveryPipelineAdapter
+from astrometricslib.pipelines.asteroid_detection.runner import AsteroidDetectionPipelineAdapter
 from astrometricslib.pipelines.astrometry.runner import AstrometryPipelineAdapter
 from astrometricslib.pipelines.photometry.runner import PhotometryPipelineAdapter
 from astrometricslib.pipelines.pipeline_base import AnalysisPipeline
@@ -30,7 +30,7 @@ _ADAPTER_AND_SUMMARY_PAIRS = [
     (AstrometryPipelineAdapter, AstrometryQualitySummary),
     (SpectroscopyPipelineAdapter, SpectroscopyQualitySummary),
     (PhotometryPipelineAdapter, PhotometryQualitySummary),
-    (AsteroidRecoveryPipelineAdapter, AsteroidRecoveryQualitySummary),
+    (AsteroidDetectionPipelineAdapter, AsteroidDetectionQualitySummary),
 ]
 
 

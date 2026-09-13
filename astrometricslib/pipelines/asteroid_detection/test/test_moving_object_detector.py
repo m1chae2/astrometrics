@@ -11,7 +11,7 @@ import pytest
 
 from astrometricslib.models.moving_object import CascadeStage, FrameDetection
 from astrometricslib.models.moving_object_config import MovingObjectConfig
-from astrometricslib.pipelines.asteroid_recovery.detection import (
+from astrometricslib.pipelines.asteroid_detection.detection import (
     MovingObjectDetector,
     _fit_linear_rate_arcsec_per_hour,
     _tangent_plane_offset_arcsec,

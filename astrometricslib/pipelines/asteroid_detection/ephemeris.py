@@ -14,7 +14,7 @@ from astropy.coordinates import SkyCoord
 from astropy.table import Table
 from astropy.time import Time
 
-from astrometricslib.models.moving_object import AsteroidRecoveryCandidate, CascadeStage, EphemerisMatch
+from astrometricslib.models.moving_object import AsteroidDetectionCandidate, CascadeStage, EphemerisMatch
 from astrometricslib.models.moving_object_config import MovingObjectConfig
 
 logger = logging.getLogger(__name__)
@@ -79,13 +79,13 @@ class EphemerisCrossMatcher:
         return field_table
 
     def match_candidate(
-        self, candidate: AsteroidRecoveryCandidate, field_table: Table | None
+        self, candidate: AsteroidDetectionCandidate, field_table: Table | None
     ) -> EphemerisMatch | None:
         """Check if one of our moving objects matches a known asteroid.
 
         Parameters
         ----------
-        candidate : `AsteroidRecoveryCandidate`
+        candidate : `AsteroidDetectionCandidate`
             The moving object we found.
         field_table : `astropy.table.Table` or `None`
             The list of known asteroids from the database.
@@ -128,12 +128,12 @@ class EphemerisCrossMatcher:
 
     def cross_match_candidates(
         self,
-        candidates: list[AsteroidRecoveryCandidate],
+        candidates: list[AsteroidDetectionCandidate],
         center_right_ascension_deg: float,
         center_declination_deg: float,
         epoch_unix: float,
         radius_deg: float,
-    ) -> list[AsteroidRecoveryCandidate]:
+    ) -> list[AsteroidDetectionCandidate]:
         """Check every found moving object against the known asteroid database.
 
         Instead of asking the database about every single object one by one
@@ -142,7 +142,7 @@ class EphemerisCrossMatcher:
 
         Parameters
         ----------
-        candidates : `list` [`AsteroidRecoveryCandidate`]
+        candidates : `list` [`AsteroidDetectionCandidate`]
             The list of possible moving objects we found. We only check the
             ones that passed all the previous tests.
         center_right_ascension_deg : `float`
@@ -156,7 +156,7 @@ class EphemerisCrossMatcher:
 
         Returns
         -------
-        candidates : `list` [`AsteroidRecoveryCandidate`]
+        candidates : `list` [`AsteroidDetectionCandidate`]
             The original list. If a match was found, we add the asteroid's
             name and update its status to 'EPHEMERIS_MATCHED'. If no match
             was found, we leave it alone (meaning we might have discovered

@@ -408,7 +408,7 @@ The validation campaign processed eight target observing sessions across all fiv
 7. **NGC 2403 Session (Stacking, Astrometry & Moving Objects):** Wide-field galaxy sequence ($N = 70$ light exposures, 13,740s total integration).
 8. **NGC 1893 Session (Stacking & Astrometry):** Open cluster broadband field ($N = 49$ light exposures, 7,800s total integration).
 
-All sessions were processed through the 4-layer architecture of `astrometricslib`, executing master reduction, dynamic Chauvenet outlier rejection, WCS plate solving, ensemble differential photometry, spectral trace extraction, transient motion tracking, and post-processing quality verification (`StackQualitySummary`, `AstrometryQualitySummary`, `PhotometryQualitySummary`, `SpectroscopyQualitySummary`, `AsteroidRecoveryQualitySummary`).
+All sessions were processed through the 4-layer architecture of `astrometricslib`, executing master reduction, dynamic Chauvenet outlier rejection, WCS plate solving, ensemble differential photometry, spectral trace extraction, transient motion tracking, and post-processing quality verification (`StackQualitySummary`, `AstrometryQualitySummary`, `PhotometryQualitySummary`, `SpectroscopyQualitySummary`, `AsteroidDetectionQualitySummary`).
 
 ### 8.2 Empirical Results Across All Five Pipelines
 

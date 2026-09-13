@@ -1,6 +1,6 @@
 """The same four steps every analysis pipeline follows.
 
-Astrometry, spectroscopy, photometry, and asteroid recovery are four very
+Astrometry, spectroscopy, photometry, and asteroid detection are four very
 different pieces of science -- different inputs, different algorithms,
 results that look nothing alike -- but the architecture doc describes
 all four the same way: check the input, do the work, check the output,
@@ -10,7 +10,7 @@ functions merely happen to share.
 
 This interface is imposed, not discovered: the four existing algorithm
 classes (`AstrometryPipeline`, `SpectroscopyPipeline`, `VariabilityAnalyzer`,
-`AsteroidRecoveryPipeline`) are not touched by it. Each
+`AsteroidDetectionPipeline`) are not touched by it. Each
 `pipelines/<domain>.py` module instead gets an *adapter* class that owns
 one of those algorithm instances and reshapes its calls to fit this
 interface -- adding the interface costs zero changes to code that

@@ -5,11 +5,11 @@ searching through a series of images to find things that move (like asteroids)
 against the fixed background stars.
 """
 
-from astrometricslib.models.moving_object import AsteroidRecoveryCandidate
+from astrometricslib.models.moving_object import AsteroidDetectionCandidate
 from astrometricslib.models.moving_object_config import MovingObjectConfig
 from astrometricslib.models.target import Target
-from astrometricslib.pipelines.asteroid_recovery.pipeline import (
-    AsteroidRecoveryPipeline,
+from astrometricslib.pipelines.asteroid_detection.pipeline import (
+    AsteroidDetectionPipeline,
 )
 
 __all__ = ["MovingObjectRecovery"]
@@ -41,9 +41,9 @@ class MovingObjectRecovery:
             run needs it.
         """
         self._config = config
-        self._pipeline = AsteroidRecoveryPipeline(config=config)
+        self._pipeline = AsteroidDetectionPipeline(config=config)
 
-    def recover_asteroids(self, target: Target) -> list[AsteroidRecoveryCandidate]:
+    def detect_asteroids(self, target: Target) -> list[AsteroidDetectionCandidate]:
         """Run the full search for asteroids on a specific target.
 
         This runs several algorithms to find dots of light that move in a
@@ -58,7 +58,7 @@ class MovingObjectRecovery:
 
         Returns
         -------
-        candidates : `list` [`AsteroidRecoveryCandidate`]
+        candidates : `list` [`AsteroidDetectionCandidate`]
             Every candidate the discrimination cascade produced,
             including rejected ones.
 

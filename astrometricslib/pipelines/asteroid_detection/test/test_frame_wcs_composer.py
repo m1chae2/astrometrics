@@ -9,7 +9,7 @@ import pytest
 from astropy.io import fits
 from astropy.wcs import WCS
 
-from astrometricslib.pipelines.asteroid_recovery.frame_wcs_composer import (
+from astrometricslib.pipelines.asteroid_detection.frame_wcs_composer import (
     estimate_frame_wcs_from_mount_pointing,
 )
 

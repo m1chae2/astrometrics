@@ -15,7 +15,7 @@ Astrometrics Library (`astrometricslib`)
    :skip: AbstractCatalogAccess
    :skip: AnalysisResult
    :skip: AppConfiguration
-   :skip: AsteroidRecoveryCandidate
+   :skip: AsteroidDetectionCandidate
    :skip: AstrometryPipeline
    :skip: AstrometryPipelineQualityMetrics
    :skip: AstrometryQualitySummary

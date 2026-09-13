@@ -18,14 +18,14 @@ from astropy.io import fits
 from astropy.wcs import WCS, FITSFixedWarning
 from astropy.wcs.utils import proj_plane_pixel_scales
 
-from astrometricslib.models.moving_object import AsteroidRecoveryCandidate, CascadeStage, FrameDetection
+from astrometricslib.models.moving_object import AsteroidDetectionCandidate, CascadeStage, FrameDetection
 from astrometricslib.models.moving_object_config import (
     MovingObjectConfig,
     MovingObjectConfigLoader,
 )
-from astrometricslib.pipelines.asteroid_recovery.detection import MovingObjectDetector
-from astrometricslib.pipelines.asteroid_recovery.ephemeris import EphemerisCrossMatcher
-from astrometricslib.pipelines.asteroid_recovery.frame_wcs_composer import (
+from astrometricslib.pipelines.asteroid_detection.detection import MovingObjectDetector
+from astrometricslib.pipelines.asteroid_detection.ephemeris import EphemerisCrossMatcher
+from astrometricslib.pipelines.asteroid_detection.frame_wcs_composer import (
     estimate_frame_wcs_from_mount_pointing,
 )
 from astrometricslib.pipelines.astrometry.source_detection import SourceDetector
@@ -66,7 +66,7 @@ def _detect_sources_in_one_frame(
             frame_header = hdul[0].header
             frame_data = hdul[0].data
     except Exception as read_error:
-        logger.warning(f"Failed to read frame '{frame_path}' for asteroid recovery: {read_error}")
+        logger.warning(f"Failed to read frame '{frame_path}' for asteroid detection: {read_error}")
         return "read_failed", []
     if frame_data is None:
         return "read_failed", []
@@ -98,7 +98,7 @@ def _detect_sources_in_one_frame(
     return "ok", detections
 
 
-class AsteroidRecoveryPipeline:
+class AsteroidDetectionPipeline:
     """The main factory line for finding asteroids in our photos.
 
     Parameters
@@ -116,14 +116,14 @@ class AsteroidRecoveryPipeline:
 
     def process(
         self, target_id: str, stacked_image_path: str, frames: list[tuple[str, float]]
-    ) -> list[AsteroidRecoveryCandidate]:
+    ) -> list[AsteroidDetectionCandidate]:
         """Run the whole asteroid-finding process on one set of photos.
 
         Takes plain data rather than a `Target` -- this class has no
         dependency on `astrometricslib.models.target.Target`, `FrameRecord`,
         or any other orchestration-layer concern, so it can be driven
         directly by a caller that wants to assemble its own pipeline
-        instead of going through `AsteroidRecoveryPipelineAdapter`.
+        instead of going through `AsteroidDetectionPipelineAdapter`.
 
         Parameters
         ----------
@@ -139,7 +139,7 @@ class AsteroidRecoveryPipeline:
 
         Returns
         -------
-        candidates : `list` [`AsteroidRecoveryCandidate`]
+        candidates : `list` [`AsteroidDetectionCandidate`]
             The list of moving objects we found.
 
         Raises
@@ -162,13 +162,13 @@ class AsteroidRecoveryPipeline:
         )
 
         print(
-            f"  [Asteroid Recovery] Detected {len(frame_detections)} total point sources "
+            f"  [Asteroid Detection] Detected {len(frame_detections)} total point sources "
             f"across {frames_with_wcs_estimate} frames."
         )
-        print("  [Asteroid Recovery] Running spatial-temporal track persistence chaining...")
+        print("  [Asteroid Detection] Running spatial-temporal track persistence chaining...")
         detector = MovingObjectDetector(self.config)
         candidates = detector.detect_candidates(target_id, frame_detections)
-        print(f"  [Asteroid Recovery] Chaining completed: {len(candidates)} track candidates generated.")
+        print(f"  [Asteroid Detection] Chaining completed: {len(candidates)} track candidates generated.")
 
         candidates = self._cross_match_ephemeris(candidates, frame_detections, stack_wcs, stack_header)
 
@@ -235,7 +235,8 @@ class AsteroidRecoveryPipeline:
                 completed += 1
                 if completed % 5 == 0 or completed == total_light:
                     print(
-                        f"  [Asteroid Recovery] Scanned {completed}/{total_light} frames for point sources..."
+                        f"  [Asteroid Detection] Scanned {completed}/{total_light} "
+                        "frames for point sources..."
                     )
                 status, detections = future.result()
                 if status == "read_failed":
@@ -250,11 +251,11 @@ class AsteroidRecoveryPipeline:
 
     def _cross_match_ephemeris(
         self,
-        candidates: list[AsteroidRecoveryCandidate],
+        candidates: list[AsteroidDetectionCandidate],
         frame_detections: list[FrameDetection],
         stack_wcs: WCS,
         stack_header: fits.Header,
-    ) -> list[AsteroidRecoveryCandidate]:
+    ) -> list[AsteroidDetectionCandidate]:
         """Check our final list of moving objects against the database.
 
         We only do this if we actually found something that looks like a real
@@ -262,7 +263,7 @@ class AsteroidRecoveryPipeline:
 
         Returns
         -------
-        candidates : `list[AsteroidRecoveryCandidate]`
+        candidates : `list[AsteroidDetectionCandidate]`
             The same list of objects, but with database match info added if we
             found any.
         """

@@ -19,7 +19,7 @@ from astrometricslib.drivers.catalog_access import CatalogAccess, StarPosition
 from astrometricslib.models.moving_object import CascadeStage
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import FrameRecord, Target
-from astrometricslib.pipelines import orchestration
+from astrometricslib.pipelines import tasks
 from astrometricslib.pipelines.shared.frame_grouping import add_frame
 from astrometricslib.pipelines.shared.star_recording import (
     StarIdentificationBreakdown,
@@ -307,7 +307,7 @@ def test_target_analyze_target(tmp_path: Any) -> None:
         target = astrometrics.targets.create("Vega")
         from astrometricslib import FrameRecord
 
-        results = orchestration.analyze_target(target, frames=[FrameRecord(path=image_path)])
+        results = tasks.analyze_target(target, frames=[FrameRecord(path=image_path)])
         assert "stellar_objects" in results
         assert "wcs" in results
     finally:
@@ -591,7 +591,7 @@ def test_target_analyze_target_asteroid_recovery(tmp_path, mocker):  # ruff: ign
     target = Target(id="AsteroidRecoveryTestTarget", frames=frames)
     target.stacked_image = str(stack_path)
 
-    result = orchestration.analyze_target(target, pipeline_type="asteroid_recovery")
+    result = tasks.analyze_target(target, pipeline_type="asteroid_recovery")
 
     assert_result_keys(result, "asteroid_recovery")
     assert result["status"] == "completed"
@@ -637,7 +637,7 @@ def test_target_analyze_target_asteroid_recovery_drops_rejected_candidates(tmp_p
     target = Target(id="AsteroidRecoveryMixedTestTarget", frames=frames)
     target.stacked_image = str(stack_path)
 
-    result = orchestration.analyze_target(target, pipeline_type="asteroid_recovery")
+    result = tasks.analyze_target(target, pipeline_type="asteroid_recovery")
 
     assert_result_keys(result, "asteroid_recovery")
     assert result["status"] == "completed"
@@ -769,7 +769,7 @@ def test_target_analyze_target_photometry_runs_each_session_independently(tmp_pa
 
     target = Target(id="PhotometrySessionSplitTestTarget", frames=frames)
 
-    result = orchestration.analyze_target(
+    result = tasks.analyze_target(
         target, pipeline_type="photometry", catalog_access=catalog_access, use_astrometry_seed=True
     )
 
@@ -861,7 +861,7 @@ def test_target_analyze_target_photometry_with_astrometry_seed_uses_identified_s
 
     target = Target(id="PhotometryAstrometrySeedTestTarget", frames=frames)
 
-    result = orchestration.analyze_target(
+    result = tasks.analyze_target(
         target, pipeline_type="photometry", catalog_access=catalog_access, use_astrometry_seed=True
     )
 
@@ -910,7 +910,7 @@ def test_target_analyze_target_photometry_without_astrometry_seed_persists_nothi
 
     target = Target(id="PhotometryNoSeedTestTarget", frames=frames)
 
-    result = orchestration.analyze_target(
+    result = tasks.analyze_target(
         target, pipeline_type="photometry", catalog_access=catalog_access, use_astrometry_seed=False
     )
 

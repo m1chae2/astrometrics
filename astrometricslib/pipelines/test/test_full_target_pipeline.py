@@ -1,6 +1,6 @@
 """Regression tests for run_full_pipeline's stage sequencing.
 
-`stack_and_solve` (now folded into `orchestration.py`) used to run its
+`stack_and_solve` (now folded into `tasks.py`) used to run its
 own astrometry pass internally right after a successful standard
 stack, in addition to `run_full_pipeline`'s own, separate
 `_run_astrometry_stage` call immediately afterward -- silently
@@ -15,7 +15,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from astrometricslib.models.target import FrameRecord, Target
-from astrometricslib.pipelines import orchestration
+from astrometricslib.pipelines import tasks
 from astrometricslib.pipelines.stacking import stage as stacking_stage
 
 
@@ -92,12 +92,12 @@ def test_run_full_pipeline_runs_astrometry_and_photometry_exactly_once(monkeypat
             return {"starsFound": 0}
         raise AssertionError(f"Unexpected pipeline_type for this target: {pipeline_type}")
 
-    monkeypatch.setattr(orchestration, "_run_analysis_pipeline_match", _fake_run_analysis_pipeline_match)
+    monkeypatch.setattr(tasks, "_run_analysis_pipeline_match", _fake_run_analysis_pipeline_match)
 
     catalog_access = _StubCatalogAccess()
     astrometrics = SimpleNamespace(catalog_access=catalog_access, config=_StubConfig(tmp_path))
 
-    stack_outputs = orchestration.run_full_pipeline(target, astrometrics, camera_name="TestCam")
+    stack_outputs = tasks.run_full_pipeline(target, astrometrics, camera_name="TestCam")
 
     assert stack_outputs == {"standard": stacked_path}
     assert pipeline_type_calls.count("astrometry") == 1

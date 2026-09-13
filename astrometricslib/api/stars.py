@@ -23,13 +23,13 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 # Bounds StellarCatalog.list_object_summaries's "browse everything, no
-# target filter" case: without a cap, a UI listing polling that RPC
-# hydrates and transmits the whole catalog's summaries every request --
-# at 270,450 rows, real network and JSON-parse cost even after
-# list_star_summaries already skipped loading full StellarObjects. A
-# caller wanting the true, unbounded catalog for scripting should use
-# list_objects() instead; this cap only applies to the summary path
-# documented for UI catalog-browsing callers.
+# target filter" case: without a cap, a screen that checks in on this
+# repeatedly ends up building and sending the whole catalog's summaries
+# every single time -- at 270,450 rows, real network and JSON-parsing
+# cost even after list_star_summaries already skipped loading full
+# StellarObjects. A caller wanting the true, unbounded catalog for
+# scripting should use list_objects() instead; this cap only applies to
+# the summary path documented for UI catalog-browsing callers.
 DEFAULT_UNFILTERED_SUMMARY_LIMIT = 5000
 
 
@@ -55,8 +55,8 @@ class StellarCatalog:
             Application configuration. Loaded from the application
             configuration when omitted.
         catalog_access : `AbstractCatalogAccess`, optional
-            Storage backend for the stellar catalog. A `CatalogAccess`
-            over `config` is constructed when omitted.
+            The database tool used to save and load the stellar catalog.
+            A `CatalogAccess` over `config` is constructed when omitted.
         """
         if config is None:
             from astrometricslib.utilities.config_loader import get_configuration

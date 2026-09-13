@@ -22,7 +22,7 @@ __all__ = [
 
 
 class TargetCatalog:
-    """CRUD operations for the target catalog, plus object management.
+    """Create, read, update, and delete targets, plus manage their frames.
 
     This class acts as the primary interface for managing observation
     targets. A target represents a physical region of the sky and
@@ -35,22 +35,22 @@ class TargetCatalog:
         """Initialize with configuration settings and a database manager.
 
         This setup keeps the list of targets and tracked changes right here
-        in memory, which prevents confusing circular dependencies when
-        saving data to disk later.
+        in memory, so nothing gets confused about which data is the real
+        version when it comes time to save to disk later.
 
         Parameters
         ----------
         config : `AppConfiguration`
             Application configuration.
         catalog_access : `AbstractCatalogAccess`
-            Storage backend for the target catalog.
+            The database tool used to save and load the target catalog.
         """
         self._config = config
         self.catalog_access = catalog_access
         self._targets: list = catalog_access.get("target_catalog", {}) or []
         self._touched_target_ids: set = set()
 
-    # -- CRUD ------------------------------------------------------------
+    # -- Create, read, update, delete -------------------------------------
 
     def list(self) -> builtins.list[Target]:
         """Return every Target object from the in-memory catalog.
@@ -104,7 +104,7 @@ class TargetCatalog:
         return target_records.create_target(self, target_id)
 
     def add(self, target: Target) -> None:
-        """Append an existing Target domain object to the catalog.
+        """Append an existing Target object to the catalog.
 
         Parameters
         ----------
@@ -139,7 +139,7 @@ class TargetCatalog:
 
         target_records.save_targets(self)
 
-    # -- Object management (target-scoped, not CRUD) ----------------------
+    # -- Actions on a single target's frames -------------------------------
 
     def add_frame(
         self,
@@ -202,7 +202,7 @@ class TargetCatalog:
             files, so fields added to `FrameRecord` after a frame was
             indexed stay `None` until this runs. Defaults to `False`.
         catalog_access : `AbstractCatalogAccess`, optional
-            Storage backend override; defaults to this catalog's own.
+            Database tool to use instead of this catalog's own.
         """
         from astrometricslib.pipelines.shared.target_records import reindex_frames
 

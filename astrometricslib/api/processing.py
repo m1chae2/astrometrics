@@ -500,7 +500,7 @@ class ProcessingPipelines:
             Maximum concurrent worker count; defaults to the
             configured spectroscopy concurrency.
         on_item_complete : `Callable`, optional
-            Callback invoked after each session finishes.
+            A function to run after each session finishes.
 
         Returns
         -------

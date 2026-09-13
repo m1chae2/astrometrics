@@ -4,6 +4,7 @@ Description: Contains functions for rendering star fields, light curves,
 spectra, and multi-panel target dashboards.
 """
 
+from collections.abc import Callable
 from typing import Any
 
 import matplotlib.pyplot as plt
@@ -485,6 +486,80 @@ def _load_target_stars(target: Any, stars: Any, limit: int) -> tuple[list, list,
     return astrometry_stars, spectral_stars, spectral_by_id
 
 
+def _wire_star_click_selection(
+    fig: plt.Figure,
+    ax_astrometry: plt.Axes,
+    astrometry_stars: list,
+    star_patches: list,
+    config: VisualizationConfig,
+    on_select: Callable[[int], None],
+) -> None:
+    """Wire click-to-select behavior onto an interactive star field axis.
+
+    Every interactive target-level plot in this module (photometry,
+    spectroscopy, the combined dashboard) needs the same thing: click
+    near a star, highlight it, and re-render whatever side panel(s)
+    show that star's data. This is that shared wiring, parameterized
+    by `on_select` for the one part that's actually different --
+    what to re-render.
+
+    Parameters
+    ----------
+    fig : `plt.Figure`
+        The figure whose canvas receives the click event.
+    ax_astrometry : `plt.Axes`
+        The axis showing the star field; clicks outside it are ignored.
+    astrometry_stars : `list`
+        Stars in the same order as `star_patches`.
+    star_patches : `list`
+        The Circle patches drawn by `StarOverlay.render`, one per star.
+    config : `VisualizationConfig`
+        Color configuration for active/inactive star markers.
+    on_select : `Callable[[int], None]`
+        Called with the newly active star's index, after its marker
+        is highlighted, so the caller can re-render its own panel(s).
+    """
+
+    def find_star_at(x: float, y: float) -> int | None:
+        """Locate star index matching click coordinates.
+
+        Returns
+        -------
+        int | None
+            Index of star or None.
+        """
+        for i, obj in enumerate(astrometry_stars):
+            star_data = getattr(obj, "star_data", {})
+            star_x = star_data.get("xcentroid", star_data.get("x_centroid"))
+            star_y = star_data.get("ycentroid", star_data.get("y_centroid"))
+            if star_x is None or star_y is None:
+                continue
+            if (x - star_x) ** 2 + (y - star_y) ** 2 <= config.fixed_radius**2:
+                return i
+        return None
+
+    def update_selection(index: int) -> None:
+        """Update selected star highlight and re-render dependent panel(s)."""
+        for i, patch in enumerate(star_patches):
+            if patch is None:
+                continue
+            is_active = i == index
+            patch.set_edgecolor(config.active_color if is_active else config.inactive_color)
+            patch.set_linewidth(3 if is_active else 2)
+        on_select(index)
+        fig.canvas.draw_idle()
+
+    def on_click(event: Any) -> None:
+        """Handle click event on star field."""
+        if event.inaxes is not ax_astrometry or event.xdata is None or event.ydata is None:
+            return
+        idx = find_star_at(event.xdata, event.ydata)
+        if idx is not None:
+            update_selection(idx)
+
+    fig.canvas.mpl_connect("button_press_event", on_click)
+
+
 def plot_astrometry(
     target: Any,
     stars: Any,
@@ -641,44 +716,9 @@ def plot_target_photometry(
             is_variable_candidate=getattr(star, "is_variable_candidate", False),
         )
 
-    def update_selection(index: int) -> None:
-        """Update selected star highlight and re-render panel."""
-        for i, patch in enumerate(star_patches):
-            if patch is None:
-                continue
-            is_active = i == index
-            patch.set_edgecolor(config.active_color if is_active else config.inactive_color)
-            patch.set_linewidth(3 if is_active else 2)
-        render_photometry_panel(index)
-        fig.canvas.draw_idle()
-
-    def find_star_at(x: float, y: float) -> int | None:
-        """Locate star index matching click coordinates.
-
-        Returns
-        -------
-        int | None
-            Index of star or None.
-        """
-        for i, obj in enumerate(astrometry_stars):
-            star_data = getattr(obj, "star_data", {})
-            star_x = star_data.get("xcentroid", star_data.get("x_centroid"))
-            star_y = star_data.get("ycentroid", star_data.get("y_centroid"))
-            if star_x is None or star_y is None:
-                continue
-            if (x - star_x) ** 2 + (y - star_y) ** 2 <= config.fixed_radius**2:
-                return i
-        return None
-
-    def on_click(event: Any) -> None:
-        """Handle click event on star field."""
-        if event.inaxes is not ax_astrometry or event.xdata is None or event.ydata is None:
-            return
-        idx = find_star_at(event.xdata, event.ydata)
-        if idx is not None:
-            update_selection(idx)
-
-    fig.canvas.mpl_connect("button_press_event", on_click)
+    _wire_star_click_selection(
+        fig, ax_astrometry, astrometry_stars, star_patches, config, render_photometry_panel
+    )
     render_photometry_panel(0)
     return fig
 
@@ -750,44 +790,9 @@ def plot_target_spectroscopy(
             )
             ax_spectrum.set_title("Spectrum Not Available")
 
-    def update_selection(index: int) -> None:
-        """Update selected star highlight and re-render panel."""
-        for i, patch in enumerate(star_patches):
-            if patch is None:
-                continue
-            is_active = i == index
-            patch.set_edgecolor(config.active_color if is_active else config.inactive_color)
-            patch.set_linewidth(3 if is_active else 2)
-        render_spectrum_panel(index)
-        fig.canvas.draw_idle()
-
-    def find_star_at(x: float, y: float) -> int | None:
-        """Locate star index matching click coordinates.
-
-        Returns
-        -------
-        int | None
-            Index of star or None.
-        """
-        for i, obj in enumerate(astrometry_stars):
-            star_data = getattr(obj, "star_data", {})
-            star_x = star_data.get("xcentroid", star_data.get("x_centroid"))
-            star_y = star_data.get("ycentroid", star_data.get("y_centroid"))
-            if star_x is None or star_y is None:
-                continue
-            if (x - star_x) ** 2 + (y - star_y) ** 2 <= config.fixed_radius**2:
-                return i
-        return None
-
-    def on_click(event: Any) -> None:
-        """Handle click event on star field."""
-        if event.inaxes is not ax_astrometry or event.xdata is None or event.ydata is None:
-            return
-        idx = find_star_at(event.xdata, event.ydata)
-        if idx is not None:
-            update_selection(idx)
-
-    fig.canvas.mpl_connect("button_press_event", on_click)
+    _wire_star_click_selection(
+        fig, ax_astrometry, astrometry_stars, star_patches, config, render_spectrum_panel
+    )
     render_spectrum_panel(0)
     return fig
 
@@ -927,43 +932,6 @@ def plot_target_dashboard(
                 )
                 ax_spectrum.set_title("Spectrum Not Available")
 
-    def update_selection(index: int) -> None:
-        """Update selected star highlight and re-render side panels."""
-        for i, patch in enumerate(star_patches):
-            if patch is None:
-                continue
-            is_active = i == index
-            patch.set_edgecolor(config.active_color if is_active else config.inactive_color)
-            patch.set_linewidth(3 if is_active else 2)
-        render_side_panels(index)
-        fig.canvas.draw_idle()
-
-    def find_star_at(x: float, y: float) -> int | None:
-        """Locate star index matching click coordinates.
-
-        Returns
-        -------
-        int | None
-            Index of star or None.
-        """
-        for i, obj in enumerate(astrometry_stars):
-            star_data = getattr(obj, "star_data", {})
-            star_x = star_data.get("xcentroid", star_data.get("x_centroid"))
-            star_y = star_data.get("ycentroid", star_data.get("y_centroid"))
-            if star_x is None or star_y is None:
-                continue
-            if (x - star_x) ** 2 + (y - star_y) ** 2 <= config.fixed_radius**2:
-                return i
-        return None
-
-    def on_click(event: Any) -> None:
-        """Handle click event on star field."""
-        if event.inaxes is not ax_astrometry or event.xdata is None or event.ydata is None:
-            return
-        idx = find_star_at(event.xdata, event.ydata)
-        if idx is not None:
-            update_selection(idx)
-
-    fig.canvas.mpl_connect("button_press_event", on_click)
+    _wire_star_click_selection(fig, ax_astrometry, astrometry_stars, star_patches, config, render_side_panels)
     render_side_panels(active_index)
     return fig

@@ -1,8 +1,8 @@
-"""Layer-4 infrastructure for astrometricslib.
+"""Small, shared helper code used throughout astrometricslib.
 
-Config, calibration bookkeeping, and shared utility helpers. Internal
--- import public symbols from the top-level `astrometricslib`
-namespace instead.
+Application settings, calibration record-keeping, and other small
+utility functions used by the rest of the library. Internal -- import
+public symbols from the top-level `astrometricslib` package instead.
 """
 
 from .enums import FilterType

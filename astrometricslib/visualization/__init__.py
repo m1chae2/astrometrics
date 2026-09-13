@@ -1,4 +1,4 @@
-"""Purpose: Visualization subpackage for interactive rendering tools."""
+"""Purpose: Draws interactive charts and images from astronomical data."""
 
 from .helpers import (
     plot_fits_star_field,

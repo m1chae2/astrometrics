@@ -1,4 +1,4 @@
-"""Layer exports for astrometricslib.visualization.layers."""
+"""The overlays (stars, a spectrum, etc.) drawn on top of a plotted image."""
 
 from .dispersion_overlay import DispersionOverlay
 from .image_overlay import ImageOverlay

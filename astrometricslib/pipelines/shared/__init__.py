@@ -15,6 +15,6 @@ astrometry, photometry, spectroscopy, asteroid recovery).
 `quality/` holds image-quality measurement (FWHM inputs, saturation,
 background level, per-target frame statistics) for the same reason:
 stacking, spectroscopy, and the API layer all need it, and it doesn't
-own an external resource the way a driver does -- it's pure
-measurement on already-loaded pixel data.
+own an external resource (a subprocess, a database file) the way a
+driver does -- it's pure measurement on already-loaded pixel data.
 """

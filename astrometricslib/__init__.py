@@ -71,7 +71,7 @@ if TYPE_CHECKING:
     from astrometricslib.pipelines.astrometry.pipeline import AstrometryPipeline
     from astrometricslib.pipelines.astrometry.star_identifier import StarIdentifier
 
-_LAZY_EXPORTS = {
+_DEFERRED_EXPORTS = {
     "AstrometryPipeline": "astrometricslib.pipelines.astrometry.pipeline",
     "StarIdentifier": "astrometricslib.pipelines.astrometry.star_identifier",
     "CalibrationCatalog": "astrometricslib.api.processing",
@@ -105,7 +105,7 @@ def __getattr__(name: str) -> Any:
     AttributeError
         If the tool name is not recognized.
     """
-    module_name = _LAZY_EXPORTS.get(name)
+    module_name = _DEFERRED_EXPORTS.get(name)
     if module_name is None:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     import importlib

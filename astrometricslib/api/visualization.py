@@ -275,3 +275,22 @@ class Visualization:
         from astrometricslib.visualization.helpers import plot_target_spectroscopy
 
         return plot_target_spectroscopy(target, self._astrometrics.stars, limit=limit, figsize=figsize)
+
+    def plot_asteroid_detection(self, target: Target, figsize: tuple[int, int] = (10, 10)) -> Figure:
+        """Render a target's stacked image with detected asteroid tracks.
+
+        Parameters
+        ----------
+        target : `Target`
+            The target to render.
+        figsize : `tuple` [`int`, `int`], optional
+            Matplotlib figure size, in inches. Defaults to ``(10, 10)``.
+
+        Returns
+        -------
+        fig : `matplotlib.figure.Figure`
+            Matplotlib figure instance.
+        """
+        from astrometricslib.visualization.helpers import plot_asteroid_detection
+
+        return plot_asteroid_detection(target, figsize=figsize)

@@ -18,6 +18,8 @@ The rest of this document is organized as follows. Section 2 introduces the four
 
 The system organizes astronomical observations around four data models, following the target-centric approach used by large professional sky-survey projects [3]. These four models cover everything the pipelines need to track: sky positions, brightness measurements, light curves, spectra, and quality checks, all connected to a single target.
 
+Every image referenced below is stored as a FITS file — the standard file format for astronomical data, playing the same role for telescopes that JPEG or PNG plays for ordinary photos. A FITS file bundles the raw pixel data together with a header: a block of metadata recording things like exposure time, filter, and (once solved) sky position.
+
 ### 2.1 Information Types
 
 1. **Observation Target:** A specific region of sky, such as M 81 or Vega. It connects every raw image, calibration frame, solved sky position, stacked image, detected star, and moving object found for that target.
@@ -35,6 +37,10 @@ Table 1 summarizes the four data models: what each one covers, what data it stor
 | **Stellar Object** | Individual stars & catalogs | Coordinates $(\alpha, \delta)$, magnitude $V$, light curves $\hat{F}(t)$, 1D spectra $F(\lambda)$ | Tracks one star's brightness history, spectrum, and variability |
 | **Moving Object Candidate** | Solar-system objects passing through | Detection chain $(x_i, y_i, t_i)$, motion rates $(\dot{\alpha}, \dot{\delta})$, ephemeris match | Records an asteroid's motion path and any catalog match |
 | **Pipeline Quality Record** | Health of each pipeline run | Frame survivor counts $N$, rejection cutoff $\sigma(N)$, FWHM ratio, fit-confidence scores | Tracks whether a pipeline run succeeded, and how well |
+
+:::{note}
+**Theory.** A star's magnitude ($V$) is its brightness on an inverted, logarithmic scale: lower numbers mean brighter stars, and each step of 5 magnitudes corresponds to a 100x change in brightness. This scale dates back to how ancient astronomers ranked stars by eye, and stuck around; it is not used directly by any equation in this document, but appears in Table 1 because it is the conventional unit for a star's catalog brightness.
+:::
 
 ### 2.2 Data Model Progression Across Pipelines
 
@@ -127,7 +133,7 @@ The stacking pipeline checks its own work in two rounds: before stacking (screen
 
 #### 3.4.1 Before Stacking: Screening Raw Photos
 * **Focus & Tracking Checks:** Measures each raw photo's star sharpness (FWHM — Full Width at Half Maximum, essentially how wide a star's blur looks) and shape (roundness), and ranks photos accordingly. FWHM is converted from pixels into arcseconds (a unit of angle in the sky; there are 3,600 arcseconds in one degree) using the camera's pixel scale, so the same cutoff works regardless of camera. The softest-focus fraction of photos is excluded, and the cutoff loosens automatically if too few frames would otherwise survive.
-* **Hardware Context:** Image quality problems are cross-checked against the telescope's own reported state. Airmass, altitude, and azimuth (how low the target is in the sky, and which direction it's in) separate normal atmospheric degradation — like a target sinking toward the horizon — from an actual mount problem. Focuser position and sensor temperature let the pipeline detect focus drift and improve automatic temperature-compensation settings over time.
+* **Hardware Context:** Image quality problems are cross-checked against the telescope's own reported state. Airmass (how much atmosphere the target's light has to pass through, which grows quickly as a target sinks toward the horizon), along with altitude and azimuth (how high the target is in the sky, and which direction it's in), separate normal atmospheric degradation from an actual mount problem. Focuser position and sensor temperature let the pipeline detect focus drift and improve automatic temperature-compensation settings over time.
 * **Cloud & Sky Brightness Checks:** Tracks the background sky brightness and the fraction of overexposed (saturated) pixels before alignment. Exposures with a sudden brightness spike or drop — passing clouds, stray light — are excluded.
 * **Calibration Frame Checks:** Confirms that the bias, dark, and flat frames actually match the camera's specifications before they're used to calibrate the light frames.
 

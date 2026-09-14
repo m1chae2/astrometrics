@@ -211,6 +211,7 @@ def _process_single_spectroscopy_frame_worker_v2(
         "dispersion_angles": [],
         "trail_widths": [],
         "zero_order_saturation_fractions": [],
+        "spectral_classification_concerns": [],
     }
     try:
         from astrometricslib import Astrometrics
@@ -275,6 +276,12 @@ def _process_single_spectroscopy_frame_worker_v2(
             for res in extraction_results
             if "zero_order_saturated_pixel_fraction" in res
         ]
+
+        from astrometricslib.pipelines.spectroscopy.spectral_classifier import (
+            build_spectral_classification_concerns,
+        )
+
+        result["spectral_classification_concerns"] = build_spectral_classification_concerns(stellar_objects)
         result["status"] = "success"
     except Exception as processing_error:
         result["error"] = str(processing_error)
@@ -400,10 +407,21 @@ def _attach_spectroscopy_quality_summary(
     all_dispersion_angles = []
     all_trail_widths = []
     all_zero_order_fractions = []
+    all_spectral_classification_concerns = []
     for frame_result in summary.results.values():
         all_dispersion_angles.extend(frame_result.get("dispersion_angles") or [])
         all_trail_widths.extend(frame_result.get("trail_widths") or [])
         all_zero_order_fractions.extend(frame_result.get("zero_order_saturation_fractions") or [])
+        all_spectral_classification_concerns.extend(
+            frame_result.get("spectral_classification_concerns") or []
+        )
+
+    low_confidence_count = sum(
+        1 for concern in all_spectral_classification_concerns if "low_confidence" in concern["reason"]
+    )
+    ambiguous_count = sum(
+        1 for concern in all_spectral_classification_concerns if "ambiguous" in concern["reason"]
+    )
 
     max_zero_order_fraction = max(all_zero_order_fractions) if all_zero_order_fractions else None
     zero_order_flagged = (
@@ -430,10 +448,18 @@ def _attach_spectroscopy_quality_summary(
             dispersion_angle_deg=all_dispersion_angles[0] if all_dispersion_angles else None,
             trail_width_profile_available=trail_width_profile_available,
             median_trail_width_px=median_trail_width_px,
+            low_confidence_classification_count=low_confidence_count,
+            ambiguous_classification_count=ambiguous_count,
+            flagged_spectral_classifications=all_spectral_classification_concerns,
         ),
     )
     if zero_order_flagged:
         target.spectroscopy_quality_summary.flagged = True
         target.spectroscopy_quality_summary.flag_reasons.append(
             "zero-order saturated in at least one processed star"
+        )
+    if all_spectral_classification_concerns:
+        target.spectroscopy_quality_summary.flagged = True
+        target.spectroscopy_quality_summary.flag_reasons.append(
+            f"spectral classification uncertain for {len(all_spectral_classification_concerns)} star(s)"
         )

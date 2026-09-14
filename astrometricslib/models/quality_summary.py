@@ -249,7 +249,25 @@ class PhotometryQualitySummary(PipelineQualitySummaryBase):
 
 # Bumped whenever SpectroscopyPipelineQualityMetrics's shape changes
 # meaningfully.
-SPECTROSCOPY_PIPELINE_VERSION = "1.1.0"
+SPECTROSCOPY_PIPELINE_VERSION = "1.2.0"
+
+
+class SpectralClassificationConcern(BaseModel):
+    """One star whose self-determined spectral type shouldn't be trusted as-is.
+
+    Names exactly which stars a spectroscopy run's own classification is
+    shaky for, and why, rather than only reporting how many -- so a user
+    building a personal catalog from self-determined types knows which
+    entries to double-check instead of taking every one at face value.
+    """
+
+    star_id: str
+    # "low_confidence", "ambiguous", or both joined by a comma -- see
+    # spectral_classifier.is_classification_low_confidence and
+    # .is_classification_ambiguous for what each means.
+    reason: str
+    spectral_type: str
+    confidence: float | None = None
 
 
 class SpectroscopyPipelineQualityMetrics(StarIdentificationMetrics):
@@ -271,6 +289,11 @@ class SpectroscopyPipelineQualityMetrics(StarIdentificationMetrics):
     dispersion_angle_deg: float | None = None
     trail_width_profile_available: bool = False
     median_trail_width_px: float | None = None
+    # How many classified stars had a winning correlation too weak to
+    # trust, or a top-two-type near-tie -- see SpectralClassificationConcern.
+    low_confidence_classification_count: int = 0
+    ambiguous_classification_count: int = 0
+    flagged_spectral_classifications: list[SpectralClassificationConcern] = Field(default_factory=list)
 
 
 class SpectroscopyQualitySummary(PipelineQualitySummaryBase):

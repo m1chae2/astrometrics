@@ -420,6 +420,64 @@ class TestAttachSpectroscopyQualitySummary:
         assert target.spectroscopy_quality_summary.flagged is True
         assert "zero-order saturated" in target.spectroscopy_quality_summary.flag_reasons[0]
 
+    def test_flags_target_when_spectral_classification_uncertain(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        """Verify per-frame classification concerns aggregate and flag."""
+        target = Target(id="ClassificationConcernTestTarget")
+
+        summary = parallel_batch.BatchRunSummary(
+            succeeded=["a.fits", "b.fits"],
+            failed=[],
+            results={
+                "a.fits": {
+                    "status": "success",
+                    "stars_processed": 1,
+                    "dispersion_angles": [10.0],
+                    "trail_widths": [],
+                    "zero_order_saturation_fractions": [0.0],
+                    "spectral_classification_concerns": [
+                        {
+                            "star_id": "HD 150579::spectroscopy",
+                            "reason": "low_confidence",
+                            "spectral_type": "O5V",
+                            "confidence": 0.33,
+                        }
+                    ],
+                },
+                "b.fits": {
+                    "status": "success",
+                    "stars_processed": 1,
+                    "dispersion_angles": [],
+                    "trail_widths": [],
+                    "zero_order_saturation_fractions": [0.0],
+                    "spectral_classification_concerns": [
+                        {
+                            "star_id": "HD 150998::spectroscopy",
+                            "reason": "ambiguous",
+                            "spectral_type": "K5V",
+                            "confidence": 0.93,
+                        }
+                    ],
+                },
+            },
+        )
+        session = _make_session("Target:2026-01-01:800:0", ["a.fits", "b.fits"])
+        session_results = [(session, SimpleNamespace())]
+
+        batch._attach_spectroscopy_quality_summary(target, summary, session_results)
+
+        metrics = target.spectroscopy_quality_summary.spectroscopy_metrics
+        assert metrics.low_confidence_classification_count == 1
+        assert metrics.ambiguous_classification_count == 1
+        assert {c.star_id for c in metrics.flagged_spectral_classifications} == {
+            "HD 150579::spectroscopy",
+            "HD 150998::spectroscopy",
+        }
+        assert target.spectroscopy_quality_summary.flagged is True
+        assert any(
+            "spectral classification uncertain" in reason
+            for reason in target.spectroscopy_quality_summary.flag_reasons
+        )
+
     def test_frames_clipped_counts_failed_paths_per_session(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Verify frames_clipped only counts that session's own failures."""
         target = Target(id="ClippedFramesTestTarget")

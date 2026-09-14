@@ -182,6 +182,9 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
             significantly saturated.
         """
         from astrometricslib.pipelines.shared.quality.saturation import is_saturation_significant
+        from astrometricslib.pipelines.spectroscopy.spectral_classifier import (
+            build_spectral_classification_concerns,
+        )
 
         stellar_objects = result.stellar_objects
         star_id_breakdown = result.payload["star_id_breakdown"]
@@ -207,6 +210,14 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
         trail_width_profile_available = bool(all_trail_widths)
         median_trail_width_px = statistics.median(all_trail_widths) if trail_width_profile_available else None
 
+        flagged_spectral_classifications = build_spectral_classification_concerns(stellar_objects)
+        low_confidence_count = sum(
+            1 for concern in flagged_spectral_classifications if "low_confidence" in concern["reason"]
+        )
+        ambiguous_count = sum(
+            1 for concern in flagged_spectral_classifications if "ambiguous" in concern["reason"]
+        )
+
         summary = SpectroscopyQualitySummary(
             target_id=request.target.id,
             spectroscopy_metrics=SpectroscopyPipelineQualityMetrics(
@@ -218,11 +229,19 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
                 catalog_matched_star_count=star_id_breakdown.catalog_matched,
                 position_only_star_count=star_id_breakdown.position_only,
                 unresolved_star_count=star_id_breakdown.unresolved,
+                low_confidence_classification_count=low_confidence_count,
+                ambiguous_classification_count=ambiguous_count,
+                flagged_spectral_classifications=flagged_spectral_classifications,
             ),
         )
         if zero_order_flagged:
             summary.flagged = True
             summary.flag_reasons.append("zero-order saturated in at least one processed star")
+        if flagged_spectral_classifications:
+            summary.flagged = True
+            summary.flag_reasons.append(
+                f"spectral classification uncertain for {len(flagged_spectral_classifications)} star(s)"
+            )
         return summary
 
     def to_result_dict(

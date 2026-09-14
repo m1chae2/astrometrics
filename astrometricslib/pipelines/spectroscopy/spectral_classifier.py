@@ -11,9 +11,14 @@ looking the star up.
 """
 
 import csv
+from collections.abc import Iterable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from astrometricslib.models.stellar_source import StellarObject
 
 _TEMPLATE_DIR = Path(__file__).parent / "data"
 
@@ -49,6 +54,17 @@ _MINIMUM_OVERLAP_ANGSTROM = 500.0
 # so a small temperature is needed for the ranking to separate them at
 # all instead of spreading probability almost evenly across every type.
 _RANKING_SOFTMAX_TEMPERATURE = 0.02
+
+# Below this winning correlation, the "best" match still doesn't
+# resemble the observed spectrum closely enough to trust on its own
+# (a guess, like _MINIMUM_OVERLAP_POINTS above -- may need tuning
+# against more real data).
+LOW_CONFIDENCE_THRESHOLD = 0.5
+
+# When the top two ranked types' probabilities are closer than this,
+# the classifier can't meaningfully tell them apart, and reporting only
+# the winner would hide a near-tie.
+AMBIGUOUS_PROBABILITY_MARGIN = 0.15
 
 _reference_cache: dict[str, tuple[np.ndarray, np.ndarray]] = {}
 
@@ -218,3 +234,72 @@ def classify_spectral_type(wavelength_angstrom: np.ndarray, intensity: np.ndarra
         "correlation_by_type": correlation_by_type,
         "ranked_types": _rank_by_probability(correlation_by_type),
     }
+
+
+def is_classification_low_confidence(
+    confidence: float | None, threshold: float = LOW_CONFIDENCE_THRESHOLD
+) -> bool:
+    """Decide if a classification's winning correlation is too weak to trust.
+
+    Returns
+    -------
+    is_low_confidence : `bool`
+        `True` if there was a classification and its confidence fell
+        below `threshold`. `False` for an unclassified star (`None`) --
+        that is a separate "nothing to compare" case, not a shaky match.
+    """
+    return confidence is not None and confidence < threshold
+
+
+def is_classification_ambiguous(
+    ranked_types: list[dict[str, object]], margin_threshold: float = AMBIGUOUS_PROBABILITY_MARGIN
+) -> bool:
+    """Decide if the top two candidate types are too close to call.
+
+    Returns
+    -------
+    is_ambiguous : `bool`
+        `True` if there are at least two ranked candidates and the top
+        two probabilities are closer than `margin_threshold`.
+    """
+    if len(ranked_types) < 2:
+        return False
+    top, runner_up = ranked_types[0], ranked_types[1]
+    return (top["probability"] - runner_up["probability"]) < margin_threshold
+
+
+def build_spectral_classification_concerns(
+    stellar_objects: Iterable[StellarObject],
+) -> list[dict[str, object]]:
+    """Flag classified stars whose spectral type shouldn't be trusted as-is.
+
+    Skips stars that were never classified in the first place (an empty
+    or ``"Unknown"`` `self_determined_spectral_type`) -- there's nothing
+    to doubt about a type that was never guessed.
+
+    Returns
+    -------
+    concerns : `list` [`dict`]
+        One entry per flagged star, with ``"star_id"``, ``"reason"``
+        (``"low_confidence"``, ``"ambiguous"``, or both joined by a
+        comma), ``"spectral_type"``, and ``"confidence"``.
+    """
+    concerns: list[dict[str, object]] = []
+    for star in stellar_objects:
+        if star.self_determined_spectral_type in ("", "Unknown"):
+            continue
+
+        reasons = []
+        if is_classification_low_confidence(star.self_determined_spectral_type_confidence):
+            reasons.append("low_confidence")
+        if is_classification_ambiguous(star.self_determined_spectral_type_candidates):
+            reasons.append("ambiguous")
+
+        if reasons:
+            concerns.append({
+                "star_id": star.id,
+                "reason": ",".join(reasons),
+                "spectral_type": star.self_determined_spectral_type,
+                "confidence": star.self_determined_spectral_type_confidence,
+            })
+    return concerns

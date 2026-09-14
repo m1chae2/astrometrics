@@ -39,6 +39,8 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v7
+        with:
+          lfs: true
 
       - name: Setup Python Environment
         uses: ./.github/actions/setup-python-env

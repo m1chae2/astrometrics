@@ -1,6 +1,6 @@
 # Astrometrics Library Implementation Overview
 
-While the theoretical algorithms and data flow are covered in the [Astrometrics Library Architecture](./Astrometrics_Library_Architecture.md) document, this map serves as a direct index to the Python source code where those algorithms are physically implemented.
+While the theoretical algorithms and data flow are covered in `Astrometrics_Library_Architecture.md`, this map serves as a direct index to the Python source code where those algorithms are physically implemented.
 
 Due to the internal nature of these modules, they are deliberately hidden from the public API Reference. Developers wishing to review or modify the core algorithms should refer to the following directories within `astrometricslib/`. The layout is layered, bottom to top: `models/`/`utilities/` hold data shapes and configuration with no dependency on anything else in the library; `image_processing/` holds pixel-level primitives (FITS access, source detection, saturation checks); `drivers/` wraps every external tool (Siril, Astrometry.net, the SQLite catalog cache, calibration-frame storage); `data_access/` reads and writes the target/frame/stellar-object database; `catalog_services/` is where the public API reaches directly for plain reads and writes that are not an analysis run -- scanning a folder for FITS files, target CRUD, converting a FITS file to a PNG; `pipelines/` holds the five analysis columns plus the dispatcher and cross-column shared code; `api/` is the public gate everything above calls through.
 
@@ -103,7 +103,7 @@ wayfindinglib, rather than executing SQL itself:
 
 ## Empirical Validation Campaign — Implementation Notes
 
-The [Astrometrics Library Architecture](./Astrometrics_Library_Architecture.md) document's Empirical Validation section (§8) describes, in plain terms, the results of an 8-session validation campaign against real telescope data and the bugs it surfaced. This section maps those findings to the actual code, for developers who need to trace a finding back to its source.
+`Astrometrics_Library_Architecture.md`'s Empirical Validation section (§8) describes, in plain terms, the results of an 8-session validation campaign against real telescope data and the bugs it surfaced. This section maps those findings to the actual code, for developers who need to trace a finding back to its source.
 
 - **Validation scripts:** The 8 sessions were driven through the public API via the scripts in `documentation/notebooks/astrometrics/target_stacking_and_analysis/scripts/`.
 - **Finding 6 (cross-session photometry tracking bug):** `analyze_target(pipeline_type="photometry")` was running `VariabilityAnalyzer` across a target's entire frame history in one pass, using a single reference frame from whichever session came first. The fix scopes each `VariabilityAnalyzer` run to one `TargetSession` at a time.

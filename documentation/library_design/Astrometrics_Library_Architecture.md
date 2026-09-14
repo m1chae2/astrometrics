@@ -2,17 +2,15 @@
 
 *Version 2.4 · 2026-09-14 · Status: current*
 
-## Overview
+## Abstract
 
-This document explains the math and algorithms behind the Astrometrics image-processing pipelines: the physics, the equations, and the reasoning behind five pipelines — stacking, astrometry, photometry, spectroscopy, and moving object detection.
-
-Every pipeline organizes its data around one shared idea, the Observation Target. Each pipeline also checks its own work twice: once before processing starts, to reject bad input, and once after it finishes, to catch bad output.
+This document explains the physics, algorithms, and design decisions behind the Astrometrics image-processing pipelines — stacking, astrometry, photometry, spectroscopy, and moving object detection — for engineers and astronomers who want to understand how the system processes an observation, not just how to call it. Every pipeline organizes its data around one shared idea, the Observation Target, and each pipeline checks its own work twice: once before processing starts, to reject bad input, and once after it finishes, to catch bad output. For a map from these ideas to the actual code, see `Astrometrics_Library_Implementation.md`.
 
 ## 1. Introduction
 
-Using one shared data model lets several astronomy pipelines work together on the same target without stepping on each other's data. The ideas in this document apply the same way whether a pipeline is run from a script or through the interactive graphical tools, because both paths call the exact same underlying code. Anything you can do by clicking through the interface, you can also automate as a script.
+**Statement of need.** Five separate image-processing pipelines working on the same telescope data need a shared way to describe a target, or each pipeline ends up re-deriving the same sky position, frame list, and quality state on its own, with no way to reuse another pipeline's results (a solved sky position, a calibrated stack). Using one shared data model lets several astronomy pipelines work together on the same target without stepping on each other's data. The ideas in this document apply the same way whether a pipeline is run from a script or through the interactive graphical tools, because both paths call the exact same underlying code. Anything you can do by clicking through the interface, you can also automate as a script.
 
-A complete, code-level reference for every public class and method is generated automatically from the source code's own documentation; see the Sphinx {doc}`API Reference </api/astrometricslib>`. For a map connecting the ideas in this document to the actual Python files that implement them, see the [Astrometrics Library Implementation](./Astrometrics_Library_Implementation.md).
+A complete, code-level reference for every public class and method is generated automatically from the source code's own documentation; see the Sphinx {doc}`API Reference </api/astrometricslib>`. For a map connecting the ideas in this document to the actual Python files that implement them, see `Astrometrics_Library_Implementation.md`.
 
 The rest of this document is organized as follows. Section 2 introduces the four data models every pipeline shares. Sections 3 through 7 walk through the five pipelines in turn: Stacking, Astrometry, Photometry, Spectroscopy, and Moving Object Detection. Section 8 reports results from testing the pipelines on real telescope data, and Section 9 concludes.
 
@@ -227,7 +225,7 @@ $$
 C_v = \frac{\sigma_{\hat{F}}}{\langle \hat{F} \rangle} \tag{6}
 $$
 
-   * *Decision rule:* A star is flagged as a variable-star candidate if its $C_v$ is unusually high compared to the other stars measured in the same field, rather than compared to one fixed number used for every field.
+   * *Decision rule:* A star is flagged as a variable-star candidate if its $C_v$ is unusually high compared to the other stars measured in the same field, rather than compared to one fixed number used for every field, following the same field-relative approach long-running variable-star observing networks use to flag candidates for follow-up [2].
 3. **Matching the Same Star Across Sessions:** Since tracking (concept 1) only works within one session, the pipeline needs another way to recognize "this is the same star" across sessions taken weeks or months apart. It does that using each star's sky position: every session's tracked stars are placed on the same sky-coordinate map and matched against stars already found in earlier sessions, so all the individual sessions' measurements of one physical star get combined into a single, continuous light curve.
 4. **Identifying Stars by Catalog Name (optional):** Each session's reference frame can optionally be run through the same star-catalog matching used by the astrometry pipeline (Section 4). When the frame's own WCS is already known (from an earlier solve), this step reuses it instead of solving again. Doing this gives every star a real catalog name instead of a made-up label for that run, and also improves the cross-session matching described in concept 3.
 
@@ -347,7 +345,7 @@ Table 7 lays out the moving object detection pipeline step by step.
 | Step | Pipeline Phase | Inputs & Outputs | Description |
 |---|---|---|---|
 | 1 | Single-Frame Detection | **In:** Unstacked, plate-solved frames<br>**Out:** Raw point-source positions $(x_i, y_i)$ | Detect point sources on each individual exposure. |
-| 2 | Filtering Non-Movers | **In:** Chained candidate detections<br>**Out:** Likely-moving candidate list | Discard chains whose position barely changes, in pixels or sky coordinates, to isolate real moving candidates. |
+| 2 | Filtering Non-Movers | **In:** Chained candidate detections<br>**Out:** Likely moving candidate list | Discard chains whose position barely changes, in pixels or sky coordinates, to isolate real moving candidates. |
 | 3 | Persistence Linkage | **In:** Candidate list across timestamps $t_m$<br>**Out:** Multi-frame detection chains | Keep only chains detected across $M \ge 3$ consecutive frames, to reject cosmic ray hits. |
 | 4 | Straight-Line Fitting | **In:** Multi-frame detection chains<br>**Out:** Velocity $(\dot{\alpha}, \dot{\delta})$ & per-axis $R^2$ | Fit a straight-line path via Eq. (9) on each axis, and reject tracks that don't fit a line well. |
 | 5 | Catalog Cross-Match | **In:** Motion paths & SkyBoT database<br>**Out:** Asteroid matches & Recovery Record | Check each motion path against known solar-system object positions to confirm its identity. |
@@ -383,9 +381,9 @@ All eight sessions were processed through the full pipeline sequence described i
 
 ### 8.2 Empirical Results Across All Five Pipelines
 
-Table 9 summarizes the results.
+Table 8 summarizes the results.
 
-**Table 9.** Multi-pipeline empirical validation metrics across ZWO ASI 533MM Pro observing sessions.
+**Table 8.** Multi-pipeline empirical validation metrics across ZWO ASI 533MM Pro observing sessions.
 
 | Subsystem | Target Session | Key Metric Tested | Measured Value | Standard / Floor | Verdict |
 |---|---|---|---|---|---|
@@ -404,7 +402,7 @@ Table 9 summarizes the results.
 
 1. **Sharpness Ratio Catches What Rejection Rate Misses:** In the NGC 2403 session, small alignment jitter between frames blurred the stars. Only $0.85\%$ of pixels were rejected as outliers — low enough that a simple "how many pixels got thrown out" check would have missed the problem entirely. But the whole-image sharpness ratio hit the $R_{\text{FWHM}} = 1.20$ warning threshold and correctly flagged it. This confirms that measuring overall star sharpness catches session-level quality problems that pixel-rejection counts alone would miss.
 2. **Wavelength Calibration Precision:** Fitting the grating equation to the Vega spectrum achieved a residual error of $\text{RMS}_{\Delta \lambda} = 0.42\text{ nm}$ across the Balmer hydrogen lines used for calibration, comfortably inside the $\le 1.0\text{ nm}$ precision needed for reliable brightness-vs-wavelength analysis.
-3. **Ensemble Photometry Stability:** On the 3-hour NGC 2244 sequence, comparing each star's brightness against a group of similarly-bright field stars — specifically, the stars ranked 100th to 300th brightest — suppressed atmospheric brightness fluctuations down to a noise floor of $\sigma_m \le 0.012\text{ mag}$ for non-variable stars.
+3. **Ensemble Photometry Stability:** On the 3-hour NGC 2244 sequence, comparing each star's brightness against a group of similarly bright field stars — specifically, the stars ranked 100th to 300th brightest — suppressed atmospheric brightness fluctuations down to a noise floor of $\sigma_m \le 0.012\text{ mag}$ for non-variable stars.
 4. **Moving-Object Filtering Works as Designed:** Tracking across unstacked exposures successfully eliminated single-frame cosmic rays and stationary hot pixels, using the $M \ge 3$ persistence requirement and the $R^2 \ge 0.98$ straight-line fit requirement.
 5. **A Faster Way to Match Nearby Stars:** Before comparing angular distances between stars, the pipeline now first narrows the search to only the stars that could plausibly be close together on the sky, using a quick bounding-box check. On a dense field like M 81 (150,000 detected sources across 46 frames), this eliminated 99.9% of star pairs that were never going to be close enough to match anyway, cutting the total run time for this step from over 20 minutes down to a few seconds — a 50 to 100 times speedup — while producing exactly the same matches every time as the slower, exhaustive approach.
 6. **A Real Bug in Cross-Session Photometry:** As the M 81 target's data grew to 8 observing sessions, testing found that its brightness-tracking step was, incorrectly, tracking stars across the *entire* observation history in one pass, using a single reference frame from whichever session happened to come first. Since a star's exact pixel position is only stable within one observing session, this corrupted almost all of the affected stars' measurements: 85–94% of frames read exactly zero brightness for a given star, across every brightness range. The resulting noise measurements disproportionately mislabeled the stars in the brightest fifth of the field (a quintile) as variable — 75% of that group flagged, versus only 3–10% in the other four-fifths — which is backwards from what should happen, since noise normally affects faint stars the most. A single-session comparison target (NGC 2903) showed none of this problem. The fix was to scope each brightness-tracking run to one observing session at a time (Section 5.2). Re-tested against the same real M 81 data, incorrect "brightest star" flagging dropped from 75% down to 14%, and the remaining variability correctly shifted to the faintest fifth of stars (46%, closely matching NGC 2903's own baseline of 47%) — the expected pattern once the bug was fixed. The number of distinct stars found also rose from 1,353 (one shared reference frame for all 8 sessions) to 11,392 (each of the 8 sessions using its own reference frame, counted separately rather than merged — see Finding 7).
@@ -424,6 +422,12 @@ This document presented a single, unified design for amateur astronomy image pro
 
 ---
 
+## Acknowledgments
+
+This design builds on several open-source tools and public services rather than reimplementing their work: Siril for frame stacking and registration; Astropy [6] and its affiliated packages photutils and specutils for FITS handling, source detection, aperture photometry, and spectral data structures; Astrometry.net [7] for blind plate solving; the SIMBAD astronomical database [8] for star identification; and SkyBoT [9] for solar-system ephemeris cross-matching.
+
+---
+
 ## References
 
 [1] <a id="ref-1"></a>M. Perryman, *The Making of History's Greatest Map of the Stars*. Berlin: Springer, 2012.
@@ -431,3 +435,7 @@ This document presented a single, unified design for amateur astronomy image pro
 [3] <a id="ref-3"></a>Vera C. Rubin Observatory Data Management Team, "Data Management Architecture," Rubin Observatory LSE-61, 2023.
 [4] <a id="ref-4"></a>W. Chauvenet, *A Manual of Spherical and Practical Astronomy*. Philadelphia, PA: J. B. Lippincott & Co., 1863.
 [5] <a id="ref-5"></a>J. R. Taylor, *An Introduction to Error Analysis*. Sausalito, CA: University Science Books, 1997.
+[6] <a id="ref-6"></a>Astropy Collaboration et al., "The Astropy Project: Sustaining and Growing a Community-Oriented Open-Source Project and the Latest Major Release (v5.0)," *Astrophys. J.*, vol. 935, no. 2, p. 167, 2022.
+[7] <a id="ref-7"></a>D. Lang, D. W. Hogg, K. Mierle, M. Blanton, and S. Roweis, "Astrometry.net: Blind Astrometric Calibration of Arbitrary Astronomical Images," *Astron. J.*, vol. 139, no. 5, pp. 1782–1800, 2010.
+[8] <a id="ref-8"></a>M. Wenger et al., "The SIMBAD Astronomical Database," *Astron. Astrophys. Suppl. Ser.*, vol. 143, no. 1, pp. 9–22, 2000.
+[9] <a id="ref-9"></a>J. Berthier, F. Vachier, W. Thuillot, et al., "SkyBoT, a New VO Service to Identify Solar System Objects," in *Astronomical Data Analysis Software and Systems XV*, ASP Conf. Ser., vol. 351, p. 367, 2006.

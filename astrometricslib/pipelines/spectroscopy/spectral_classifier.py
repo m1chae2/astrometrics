@@ -56,7 +56,10 @@ def _load_reference_template(spectral_type: str) -> tuple[np.ndarray, np.ndarray
         The reference star's wavelength grid and its flux, normalized to
         1.0 at 5556 A per the source library's convention.
     """
-    path = _TEMPLATE_DIR / f"{spectral_type.lower()}.csv"
+    # .txt, not .csv: this repo's .gitattributes routes *.csv through Git
+    # LFS, and CI's checkout doesn't fetch LFS content, so these tiny
+    # bundled tables need to stay plain blobs.
+    path = _TEMPLATE_DIR / f"{spectral_type.lower()}.txt"
     wavelengths = []
     fluxes = []
     with path.open(newline="") as f:

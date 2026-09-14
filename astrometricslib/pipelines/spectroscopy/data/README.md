@@ -13,7 +13,7 @@ Pickles, A.J. 1998, "A Stellar Spectral Flux Library: 1150-25000 A",
 
 ## Processing
 
-Each file here (`<type>.csv`, e.g. `g0v.csv`) is derived from the matching
+Each file here (`<type>.txt`, e.g. `g0v.txt`) is derived from the matching
 original `<type>.dat.gz` in the source catalog:
 
 1. Parsed the original fixed-width columns (wavelength in Angstroms, the
@@ -23,6 +23,10 @@ original `<type>.dat.gz` in the source catalog:
    the Balmer series and the overall continuum shape.
 3. Kept only wavelength and flux; the original per-source-catalog component
    columns and standard-deviation column aren't needed for classification.
+
+Stored as plain comma-separated `.txt`, not `.csv`: this repo's
+`.gitattributes` routes `*.csv` through Git LFS, and CI's checkout doesn't
+fetch LFS content, so these small bundled tables need to stay plain blobs.
 
 Flux stays normalized to 1.0 at 5556 A, per the source library's own
 convention -- `spectral_classifier.py` re-normalizes both sides to a common

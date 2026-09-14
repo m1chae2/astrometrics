@@ -2,7 +2,15 @@
 
 While the theoretical algorithms and data flow are covered in `Astrometrics_Library_Architecture.md`, this map serves as a direct index to the Python source code where those algorithms are physically implemented.
 
-Due to the internal nature of these modules, they are deliberately hidden from the public API Reference. Developers wishing to review or modify the core algorithms should refer to the following directories within `astrometricslib/`. The layout is layered, bottom to top: `models/`/`utilities/` hold data shapes and configuration with no dependency on anything else in the library; `image_processing/` holds pixel-level primitives (FITS access, source detection, saturation checks); `drivers/` wraps every external tool (Siril, Astrometry.net, the SQLite catalog cache, calibration-frame storage); `data_access/` reads and writes the target/frame/stellar-object database; `catalog_services/` is where the public API reaches directly for plain reads and writes that are not an analysis run -- scanning a folder for FITS files, target CRUD, converting a FITS file to a PNG; `pipelines/` holds the five analysis columns plus the dispatcher and cross-column shared code; `api/` is the public gate everything above calls through.
+Due to the internal nature of these modules, they are deliberately hidden from the public API Reference. Developers wishing to review or modify the core algorithms should refer to the following directories within `astrometricslib/`. The layout is layered, bottom to top:
+
+- `models/` / `utilities/`: data shapes and configuration, with no dependency on anything else in the library.
+- `image_processing/`: pixel-level primitives (FITS access, source detection, saturation checks).
+- `drivers/`: wraps every external tool (Siril, Astrometry.net, the SQLite catalog cache, calibration-frame storage).
+- `data_access/`: reads and writes the target/frame/stellar-object database.
+- `catalog_services/`: where the public API reaches directly for plain reads and writes that are not an analysis run — scanning a folder for FITS files, target CRUD, converting a FITS file to a PNG.
+- `pipelines/`: the five analysis columns, plus the dispatcher and cross-column shared code.
+- `api/`: the public gate everything above calls through.
 
 ## Implementation Matrix
 
@@ -94,8 +102,8 @@ running a pipeline:
 - **Frame statistics:** `frame_statistics.py`
 - **Background level measurement:** `background_measurement.py`
 
-`catalog_access.py` records through a generic, keyed-record SQLite store shared with
-wayfindinglib, rather than executing SQL itself:
+`catalog_access.py` doesn't execute SQL itself. It records through a generic,
+keyed-record SQLite store shared with wayfindinglib:
 *Located in:* `datastore/`
 - **Generic keyed-model storage (get/put/exists/merge, one table per dataset type):** `butler.py`
 - **SQLite connection setup and JSON encoding:** `local_database.py`
@@ -103,17 +111,17 @@ wayfindinglib, rather than executing SQL itself:
 
 ## Empirical Validation Campaign — Implementation Notes
 
-`Astrometrics_Library_Architecture.md`'s Empirical Validation section (§8) describes, in plain terms, the results of an 8-session validation campaign against real telescope data and the bugs it surfaced. This section maps those findings to the actual code, for developers who need to trace a finding back to its source.
+`Astrometrics_Library_Architecture.md`'s Empirical Validation section (§8) describes an 8-session validation campaign against real telescope data, in plain terms. It also covers the bugs that campaign surfaced. This section maps those findings back to the actual code, for developers who need to trace a finding to its source.
 
 - **Validation scripts:** The 8 sessions were driven through the public API via the scripts in `documentation/notebooks/astrometrics/target_stacking_and_analysis/scripts/`.
-- **Finding 6 (cross-session photometry tracking bug):** `analyze_target(pipeline_type="photometry")` was running `VariabilityAnalyzer` across a target's entire frame history in one pass, using a single reference frame from whichever session came first. The fix scopes each `VariabilityAnalyzer` run to one `TargetSession` at a time.
+- **Finding 6 (cross-session photometry tracking bug):** `analyze_target(pipeline_type="photometry")` was running `VariabilityAnalyzer` across a target's entire frame history in one pass. It used a single reference frame from whichever session came first. The fix scopes each `VariabilityAnalyzer` run to one `TargetSession` at a time.
 - **Finding 7 (cross-session star identity matching):**
   - The matching itself is implemented per Architecture §5.2 (concept 3).
-  - An unconditional per-star SIMBAD query was being triggered by routing through the shared `AstrometryPipeline` entry point (the same one "astrometry"/"spectroscopy" use), when only the already-solved WCS was actually needed. Fixed by calling `PlateSolver` directly instead.
-  - An initial pairwise `SkyCoord.separation()` loop (comparing every star to every other star) did not scale past a few hundred stars per session; replaced with a KD-tree-backed `search_around_sky` call.
+  - An unconditional per-star SIMBAD query was being triggered by routing through the shared `AstrometryPipeline` entry point — the same one "astrometry"/"spectroscopy" use — when only the already-solved WCS was actually needed. This was fixed by calling `PlateSolver` directly instead.
+  - An initial pairwise `SkyCoord.separation()` loop (comparing every star to every other star) did not scale past a few hundred stars per session. It was replaced with a KD-tree-backed `search_around_sky` call.
   - Repeatability was verified by checking that two consecutive runs produced a byte-for-byte identical `stellar_catalog` row set.
-  - The one session excluded from matching (a light frame that actually referenced `M 13/M_13_Stacked.fits`, a different target's stack, due to a pre-existing library data-labeling error) was correctly isolated via `sessions_missing_wcs`, without affecting the other 7 sessions.
-- **Finding 5 (star/track linkage speedup):** An RA/Dec bounding-box pre-filter, applied before computing angular separations, cut the pairwise search from $O(N \times M)$ to $O(N \log M)$ on M 81's ~150,000 detected sources across 46 frames.
+  - One session was excluded from matching: a light frame in it actually referenced `M 13/M_13_Stacked.fits`, a different target's stack, due to a pre-existing library data-labeling error. This was correctly isolated via `sessions_missing_wcs`, without affecting the other 7 sessions.
+- **Finding 5 (star/track linkage speedup):** An RA/Dec bounding-box pre-filter, applied before computing angular separations, cut the pairwise search from $O(N \times M)$ to $O(N \log M)$. Tested on M 81's ~150,000 detected sources across 46 frames.
 
 ## Batch Processing & Maintenance Scripts
 

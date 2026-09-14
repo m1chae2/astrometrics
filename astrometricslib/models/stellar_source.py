@@ -171,6 +171,20 @@ class StellarObject(BaseModel):
     self_determined_spectral_type_confidence: float | None = Field(
         default=None, alias="selfDeterminedSpectralTypeConfidence"
     )
+    # Every reference type compared, most probable first -- each entry has
+    # "spectral_type", "probability" (sums to 1 across the list, but is a
+    # heuristic ranking rather than a calibrated probability), and
+    # "correlation". Lets a caller see close calls, not just the winner.
+    self_determined_spectral_type_candidates: list[dict[str, Any]] = Field(
+        default_factory=list, alias="selfDeterminedSpectralTypeCandidates"
+    )
+    # Named absorption features (Balmer series, Ca II H&K, etc.) found in
+    # this star's own spectrum, most confident first -- see
+    # spectral_feature_detector.detect_named_features for what "confidence"
+    # means here.
+    self_determined_spectral_features: list[dict[str, Any]] = Field(
+        default_factory=list, alias="selfDeterminedSpectralFeatures"
+    )
     target_ids: list[str] = Field(default_factory=list, alias="targetIds")
     # How many pixels out from the star's center to gather light from
     # when measuring its spectrum.

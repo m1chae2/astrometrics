@@ -43,6 +43,12 @@ _MINIMUM_OVERLAP_POINTS = 20
 # Reference and observed spectra must share at least this much real
 # wavelength range (in Angstroms) before they're compared at all.
 _MINIMUM_OVERLAP_ANGSTROM = 500.0
+# Softmax temperature (in correlation-coefficient units) used to turn
+# correlations into a probability-like ranking. Correlations for the
+# right type are typically 0.99+ while wrong types land around 0.85-0.98,
+# so a small temperature is needed for the ranking to separate them at
+# all instead of spreading probability almost evenly across every type.
+_RANKING_SOFTMAX_TEMPERATURE = 0.02
 
 _reference_cache: dict[str, tuple[np.ndarray, np.ndarray]] = {}
 
@@ -102,6 +108,40 @@ def _continuum_normalize(flux: np.ndarray) -> np.ndarray:
     return flux / median
 
 
+def _rank_by_probability(correlation_by_type: dict[str, float]) -> list[dict[str, object]]:
+    """Turn correlation scores into a sorted, probability-like ranking.
+
+    This is a heuristic ranking, not a calibrated statistical probability:
+    it applies a softmax to the correlation coefficients so the reported
+    weights are non-negative and sum to 1, which makes close calls between
+    types visible without claiming more rigor than a shape-matching score
+    supports.
+
+    Returns
+    -------
+    ranked_types : `list` [`dict`]
+        Every compared type, most probable first. Each entry has
+        ``"spectral_type"``, ``"probability"`` (sums to 1 across the
+        list), and ``"correlation"`` (the underlying Pearson coefficient).
+    """
+    if not correlation_by_type:
+        return []
+
+    types = list(correlation_by_type.keys())
+    correlations = np.array([correlation_by_type[t] for t in types])
+    scaled = correlations / _RANKING_SOFTMAX_TEMPERATURE
+    scaled -= scaled.max()
+    weights = np.exp(scaled)
+    probabilities = weights / weights.sum()
+
+    ranked = [
+        {"spectral_type": t, "probability": float(p), "correlation": float(c)}
+        for t, p, c in zip(types, probabilities, correlations, strict=True)
+    ]
+    ranked.sort(key=lambda entry: entry["probability"], reverse=True)
+    return ranked
+
+
 def classify_spectral_type(wavelength_angstrom: np.ndarray, intensity: np.ndarray) -> dict[str, object]:
     """Guess a star's broad spectral type by matching it to a reference.
 
@@ -128,6 +168,8 @@ def classify_spectral_type(wavelength_angstrom: np.ndarray, intensity: np.ndarra
         higher is a better match), or `None` when unknown.
         ``"correlation_by_type"``: every reference type's correlation
         coefficient, for inspecting close calls yourself.
+        ``"ranked_types"``: every compared type as a probability-ranked
+        list (see `_rank_by_probability`), most probable first.
     """
     wavelength_angstrom = np.asarray(wavelength_angstrom, dtype=float)
     intensity = np.asarray(intensity, dtype=float)
@@ -136,7 +178,7 @@ def classify_spectral_type(wavelength_angstrom: np.ndarray, intensity: np.ndarra
     intensity = intensity[valid]
 
     if len(wavelength_angstrom) < _MINIMUM_OVERLAP_POINTS:
-        return {"spectral_type": "Unknown", "confidence": None, "correlation_by_type": {}}
+        return {"spectral_type": "Unknown", "confidence": None, "correlation_by_type": {}, "ranked_types": []}
 
     order = np.argsort(wavelength_angstrom)
     wavelength_angstrom = wavelength_angstrom[order]
@@ -167,11 +209,12 @@ def classify_spectral_type(wavelength_angstrom: np.ndarray, intensity: np.ndarra
         correlation_by_type[spectral_type] = float(np.corrcoef(observed_norm, template_norm)[0, 1])
 
     if not correlation_by_type:
-        return {"spectral_type": "Unknown", "confidence": None, "correlation_by_type": {}}
+        return {"spectral_type": "Unknown", "confidence": None, "correlation_by_type": {}, "ranked_types": []}
 
     best_type = max(correlation_by_type, key=correlation_by_type.get)
     return {
         "spectral_type": best_type,
         "confidence": correlation_by_type[best_type],
         "correlation_by_type": correlation_by_type,
+        "ranked_types": _rank_by_probability(correlation_by_type),
     }

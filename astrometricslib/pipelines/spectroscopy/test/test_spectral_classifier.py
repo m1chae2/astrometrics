@@ -43,6 +43,23 @@ def test_a_template_matched_against_itself_wins_with_high_confidence():  # ruff:
     assert result["confidence"] > 0.99
 
 
+def test_ranked_types_puts_the_winner_first_and_sums_to_one():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify the probability-ranked list agrees with the single best match."""
+    templates = _get_reference_templates()
+    wavelength, flux = templates["K0V"]
+
+    result = classify_spectral_type(wavelength, flux)
+
+    assert result["ranked_types"], "expected at least one ranked candidate"
+    assert result["ranked_types"][0]["spectral_type"] == result["spectral_type"]
+    assert result["ranked_types"][0]["probability"] == max(
+        entry["probability"] for entry in result["ranked_types"]
+    )
+    probabilities = [entry["probability"] for entry in result["ranked_types"]]
+    assert probabilities == sorted(probabilities, reverse=True)
+    assert abs(sum(probabilities) - 1.0) < 1e-9
+
+
 def test_a_hot_blue_star_is_not_confused_for_a_cool_red_one():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verify a clear hot/cool pair lands on the right side of the sequence."""
     templates = _get_reference_templates()
@@ -66,6 +83,7 @@ def test_too_few_points_returns_unknown_without_crashing():  # ruff: ignore[miss
     assert result["spectral_type"] == "Unknown"
     assert result["confidence"] is None
     assert result["correlation_by_type"] == {}
+    assert result["ranked_types"] == []
 
 
 def test_a_flat_spectrum_returns_unknown_without_crashing():  # ruff: ignore[missing-return-type-undocumented-public-function]
@@ -77,3 +95,4 @@ def test_a_flat_spectrum_returns_unknown_without_crashing():  # ruff: ignore[mis
 
     assert result["spectral_type"] == "Unknown"
     assert result["confidence"] is None
+    assert result["ranked_types"] == []

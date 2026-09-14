@@ -21,6 +21,7 @@ from astrometricslib.pipelines.spectroscopy.quantum_efficiency_curves import (
     get_quantum_efficiency_curve,
 )
 from astrometricslib.pipelines.spectroscopy.spectral_classifier import classify_spectral_type
+from astrometricslib.pipelines.spectroscopy.spectral_feature_detector import detect_named_features
 from astrometricslib.pipelines.spectroscopy.spectroscopy_instrument import (
     SpectroscopyInstrument,
 )
@@ -356,12 +357,18 @@ class SpectroscopyPipeline:
         classification_intensities = star.spectrum_data_processed.get(
             "quantum_efficiency_corrected_intensities", result["intensities"]
         )
+        classification_wavelengths = np.array(star.spectrum_data_processed["wavelengths_angstrom"])
         classification = classify_spectral_type(
-            wavelength_angstrom=np.array(star.spectrum_data_processed["wavelengths_angstrom"]),
+            wavelength_angstrom=classification_wavelengths,
             intensity=np.array(classification_intensities),
         )
         star.self_determined_spectral_type = classification["spectral_type"]
         star.self_determined_spectral_type_confidence = classification["confidence"]
+        star.self_determined_spectral_type_candidates = classification["ranked_types"]
+        star.self_determined_spectral_features = detect_named_features(
+            wavelength_angstrom=classification_wavelengths,
+            intensity=np.array(classification_intensities),
+        )
 
         star.trail_centerline_px = result.get("trail_centerline_px")
         star.trail_width_px = result.get("trail_width_px")

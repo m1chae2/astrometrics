@@ -101,6 +101,20 @@ wayfindinglib, rather than executing SQL itself:
 - **SQLite connection setup and JSON encoding:** `local_database.py`
 - **Cross-process file locking for shared hardware/storage resources:** `process_locks.py`
 
+## Empirical Validation Campaign — Implementation Notes
+
+The [Astrometrics Library Architecture](./Astrometrics_Library_Architecture.md) document's Empirical Validation section (§8) describes, in plain terms, the results of an 8-session validation campaign against real telescope data and the bugs it surfaced. This section maps those findings to the actual code, for developers who need to trace a finding back to its source.
+
+- **Validation scripts:** The 8 sessions were driven through the public API via the scripts in `documentation/notebooks/astrometrics/target_stacking_and_analysis/scripts/`.
+- **Finding 6 (cross-session photometry tracking bug):** `analyze_target(pipeline_type="photometry")` was running `VariabilityAnalyzer` across a target's entire frame history in one pass, using a single reference frame from whichever session came first. The fix scopes each `VariabilityAnalyzer` run to one `TargetSession` at a time.
+- **Finding 7 (cross-session star identity matching):**
+  - The matching itself is implemented per Architecture §5.2 (concept 3).
+  - An unconditional per-star SIMBAD query was being triggered by routing through the shared `AstrometryPipeline` entry point (the same one "astrometry"/"spectroscopy" use), when only the already-solved WCS was actually needed. Fixed by calling `PlateSolver` directly instead.
+  - An initial pairwise `SkyCoord.separation()` loop (comparing every star to every other star) did not scale past a few hundred stars per session; replaced with a KD-tree-backed `search_around_sky` call.
+  - Repeatability was verified by checking that two consecutive runs produced a byte-for-byte identical `stellar_catalog` row set.
+  - The one session excluded from matching (a light frame that actually referenced `M 13/M_13_Stacked.fits`, a different target's stack, due to a pre-existing library data-labeling error) was correctly isolated via `sessions_missing_wcs`, without affecting the other 7 sessions.
+- **Finding 5 (star/track linkage speedup):** An RA/Dec bounding-box pre-filter, applied before computing angular separations, cut the pairwise search from $O(N \times M)$ to $O(N \log M)$ on M 81's ~150,000 detected sources across 46 frames.
+
 ## Batch Processing & Maintenance Scripts
 
 *Located in:* `astrometricslib/scripts/`

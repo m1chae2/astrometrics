@@ -53,7 +53,7 @@ def test_apply_result_to_stellar_object_sets_a_self_determined_spectral_type(): 
     assert star.self_determined_spectral_type_confidence > 0.99
     assert star.self_determined_spectral_type_candidates
     assert star.self_determined_spectral_type_candidates[0]["spectral_type"] == "G0V"
-    assert isinstance(star.self_determined_spectral_features, list)
+    assert isinstance(star.probable_spectral_features, list)
 
 
 def test_apply_result_to_stellar_object_handles_unclassifiable_data():  # ruff: ignore[missing-return-type-undocumented-public-function]
@@ -74,4 +74,4 @@ def test_apply_result_to_stellar_object_handles_unclassifiable_data():  # ruff: 
     assert star.self_determined_spectral_type == "Unknown"
     assert star.self_determined_spectral_type_confidence is None
     assert star.self_determined_spectral_type_candidates == []
-    assert star.self_determined_spectral_features == []
+    assert star.probable_spectral_features == []

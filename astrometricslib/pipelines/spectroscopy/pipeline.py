@@ -365,7 +365,7 @@ class SpectroscopyPipeline:
         star.self_determined_spectral_type = classification["spectral_type"]
         star.self_determined_spectral_type_confidence = classification["confidence"]
         star.self_determined_spectral_type_candidates = classification["ranked_types"]
-        star.self_determined_spectral_features = detect_named_features(
+        star.probable_spectral_features = detect_named_features(
             wavelength_angstrom=classification_wavelengths,
             intensity=np.array(classification_intensities),
         )

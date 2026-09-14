@@ -182,8 +182,8 @@ class StellarObject(BaseModel):
     # this star's own spectrum, most confident first -- see
     # spectral_feature_detector.detect_named_features for what "confidence"
     # means here.
-    self_determined_spectral_features: list[dict[str, Any]] = Field(
-        default_factory=list, alias="selfDeterminedSpectralFeatures"
+    probable_spectral_features: list[dict[str, Any]] = Field(
+        default_factory=list, alias="probableSpectralFeatures"
     )
     target_ids: list[str] = Field(default_factory=list, alias="targetIds")
     # How many pixels out from the star's center to gather light from

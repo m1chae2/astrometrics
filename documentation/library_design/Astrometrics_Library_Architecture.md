@@ -171,14 +171,14 @@ Plate solving connects pixel coordinates $(x,y)$ to sky coordinates $(\alpha, \d
 
 1. **Star Centroiding:** Fits a 2D Gaussian to each detected star to pin down its center $(x_i, y_i)$ more precisely than just picking the brightest pixel.
 2. **Quad-Star Matching:** Groups nearby stars into four-star shapes ("quads") whose relative side lengths are invariant under rotation, reflection, and scaling. These shapes are compared against a pre-built star index to identify which patch of sky the image shows, even if the telescope was pointed somewhere unexpected — continuing a long tradition of cataloging the sky this way [1]. Once the field is identified, the matched stars are cross-checked against the SIMBAD star catalog to attach real star names and IDs to the sources found in the image.
-3. **Fitting the Distortion Map:** Converts pixel offsets from the image center $(x-x_0, y-y_0)$ into sky-coordinate offsets $(\xi, \eta)$, using a transformation matrix $CD_{i,j}$ plus a correction for lens/mirror distortion, called a Simple Imaging Polynomial (SIP):
+3. **Fitting the Distortion Map:** Converts pixel offsets from the image center $(x-x_0, y-y_0)$ into sky-coordinate offsets $(\xi, \eta)$, using four coefficients $CD_{i,j}$ plus a correction for lens/mirror distortion, called a Simple Imaging Polynomial (SIP):
 
 $$
-\begin{pmatrix} \xi \\ \eta \end{pmatrix} = \begin{pmatrix} CD_{1,1} & CD_{1,2} \\ CD_{2,1} & CD_{2,2} \end{pmatrix} \begin{pmatrix} x - x_0 \\ y - y_0 \end{pmatrix} + f_{\text{SIP}}(x, y) \tag{4}
+\xi = CD_{1,1}(x - x_0) + CD_{1,2}(y - y_0) + f_{\text{SIP},\xi}(x, y), \qquad \eta = CD_{2,1}(x - x_0) + CD_{2,2}(y - y_0) + f_{\text{SIP},\eta}(x, y) \tag{4}
 $$
 
    * *What each piece means:*
-     * $CD_{i,j}$: the matrix that handles the image's rotation, scale, and any left-right flip.
+     * $CD_{i,j}$: the four coefficients that together handle the image's rotation, scale, and any left-right flip.
      * $f_{\text{SIP}}(x, y)$: extra polynomial terms that correct for lens or mirror distortion, more noticeable toward the edges of a wide field of view.
 
 ### 4.3 Pipeline Theory of Operations

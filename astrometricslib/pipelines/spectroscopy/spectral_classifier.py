@@ -26,21 +26,47 @@ _TEMPLATE_DIR = Path(__file__).parent / "data"
 # Pickles (1998) stellar flux library (Pickles, A.J. 1998, PASP, 110, 863).
 # Each covers 3500-8000 A at 5 A sampling, normalized to 1.0 at 5556 A --
 # enough range to capture the Balmer lines and the overall continuum slope
-# a low-resolution slitless grism can actually resolve.
+# a low-resolution slitless grism can actually resolve. This is the full
+# non-metallicity-variant main-sequence ladder the library offers (every
+# single- or double-subtype rung from O5V to M6V), not just a coarse
+# sample -- a denser ladder means a star between two rungs has a closer
+# template to land on, instead of being forced into a near-tie between
+# two rungs five subtypes apart.
 REFERENCE_SPECTRAL_TYPES: tuple[str, ...] = (
     "O5V",
+    "O9V",
     "B0V",
+    "B1V",
+    "B3V",
     "B8V",
+    "B9V",
     "A0V",
+    "A2V",
+    "A3V",
     "A5V",
+    "A7V",
     "F0V",
+    "F2V",
     "F5V",
+    "F6V",
+    "F8V",
     "G0V",
+    "G2V",
     "G5V",
+    "G8V",
     "K0V",
+    "K2V",
+    "K3V",
+    "K4V",
     "K5V",
+    "K7V",
     "M0V",
+    "M1V",
+    "M2V",
+    "M3V",
+    "M4V",
     "M5V",
+    "M6V",
 )
 
 # Below this many overlapping points, a correlation is too noisy to trust.

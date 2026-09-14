@@ -1,8 +1,8 @@
 # Reference spectra for spectral classification
 
-Thirteen main-sequence reference spectra used by `spectral_classifier.py` to
-guess a star's broad spectral type by comparing an observed spectrum's shape
-against these known ones.
+Thirty-four main-sequence reference spectra used by `spectral_classifier.py`
+to guess a star's broad spectral type by comparing an observed spectrum's
+shape against these known ones.
 
 ## Source
 
@@ -35,8 +35,22 @@ observed spectrum's own calibration.
 
 ## Coverage
 
-O5V, B0V, B8V, A0V, A5V, F0V, F5V, G0V, G5V, K0V, K5V, M0V, M5V -- a
-representative main-sequence ladder from hottest to coolest. The full
-Pickles library has 131 spectra covering more subtypes and luminosity
-classes; this subset was chosen to keep the bundled data small while still
-spanning the full O-B-A-F-G-K-M sequence.
+O5V, O9V, B0V, B1V, B3V, B8V, B9V, A0V, A2V, A3V, A5V, A7V, F0V, F2V, F5V,
+F6V, F8V, G0V, G2V, G5V, G8V, K0V, K2V, K3V, K4V, K5V, K7V, M0V, M1V, M2V,
+M3V, M4V, M5V, M6V -- every single- or double-subtype rung the Pickles
+library offers for solar-abundance dwarfs, hottest to coolest. This is
+denser than an early version of this set that only sampled every ~5
+subtypes: a star whose true type falls between two coarse rungs (e.g.
+between K5V and M0V) used to be a near-toss-up between two templates each
+some distance away, showing up as an `is_classification_ambiguous` flag
+in the quality summary. With every rung present, that same star usually
+has one clearly-closer template to land on.
+
+The full Pickles library also has metal-weak/metal-rich variants of
+several F-K dwarf types (e.g. `wg5v.dat`, `rk0v.dat`) and giant/supergiant
+luminosity classes; those aren't bundled here; two library types are also
+skipped that already fall on the seams of the standard rungs above
+(`b57v.dat`, a merged B5-7V spectrum, and `m2p5v.dat`, halfway between M2V
+and M3V). None of that adds resolving power for this classifier's actual
+job -- placing an unknown dwarf star on the O-B-A-F-G-K-M sequence -- and
+would just mean more reference correlations to compute per star.

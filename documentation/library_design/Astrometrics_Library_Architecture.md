@@ -4,7 +4,7 @@
 
 ## Abstract
 
-This document explains how the Astrometrics image-processing system works and why it's built the way it is. It covers five pipelines: stacking, astrometry, photometry, spectroscopy, and moving object detection. Every pipeline organizes its data around one shared idea, called the Observation Target. Each pipeline also checks its own work twice: once before it starts, to catch bad input, and once after it finishes, to catch bad output. For a map from these ideas to the actual code, see `Astrometrics_Library_Implementation.md`.
+This document explains how the Astrometrics image-processing system works and why it's built the way it is. It covers five pipelines: stacking, astrometry, photometry, spectroscopy, and moving object detection. Every pipeline organizes its data around one shared idea, called the Observation Target. Each pipeline also checks its own work twice: once before it starts, to catch bad input, and once after it finishes, to catch bad output. For a map from these ideas to the actual code, see [Astrometrics_Library_Implementation.md](./Astrometrics_Library_Implementation.md).
 
 ## 1. Introduction
 
@@ -12,7 +12,7 @@ Five separate image-processing pipelines work on the same telescope data. Withou
 
 The ideas in this document apply the same way whether a pipeline runs from a script or through the interactive graphical tools, because both paths call the exact same underlying code. Anything you can do by clicking through the interface, you can also automate as a script.
 
-A complete, code-level reference for every public class and method is generated automatically from the source code's own documentation. See the Sphinx {doc}`API Reference </api/astrometricslib>`. For a map connecting these ideas to the actual Python files that implement them, see `Astrometrics_Library_Implementation.md`.
+A complete, code-level reference for every public class and method is generated automatically from the source code's own documentation. See the Sphinx {doc}`API Reference </api/astrometricslib>`. For a map connecting these ideas to the actual Python files that implement them, see [Astrometrics_Library_Implementation.md](./Astrometrics_Library_Implementation.md).
 
 The rest of this document is organized as follows. Section 2 introduces the four data models every pipeline shares. Sections 3 through 7 walk through the five pipelines in turn: Stacking, Astrometry, Photometry, Spectroscopy, and Moving Object Detection. Section 8 reports results from testing the pipelines on real telescope data. Section 9 concludes.
 

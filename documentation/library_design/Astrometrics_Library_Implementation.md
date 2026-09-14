@@ -1,6 +1,6 @@
 # Astrometrics Library Implementation Overview
 
-While the theoretical algorithms and data flow are covered in `Astrometrics_Library_Architecture.md`, this map serves as a direct index to the Python source code where those algorithms are physically implemented.
+While the theoretical algorithms and data flow are covered in [Astrometrics_Library_Architecture.md](./Astrometrics_Library_Architecture.md), this map serves as a direct index to the Python source code where those algorithms are physically implemented.
 
 Due to the internal nature of these modules, they are deliberately hidden from the public API Reference: they aren't meant to be imported directly, since `api/` is the one supported entry point. Developers wishing to review or modify the core algorithms should refer to the following directories within `astrometricslib/`. The layout is layered, bottom to top:
 
@@ -102,7 +102,7 @@ keyed-record SQLite store shared with wayfindinglib:
 
 ## Empirical Validation Campaign — Implementation Notes
 
-`Astrometrics_Library_Architecture.md`'s Empirical Validation section (§8) describes an 8-session validation campaign against real telescope data, in plain terms. It also covers the bugs that campaign surfaced. This section maps those findings back to the actual code, for developers who need to trace a finding to its source.
+[Astrometrics_Library_Architecture.md](./Astrometrics_Library_Architecture.md)'s Empirical Validation section (§8) describes an 8-session validation campaign against real telescope data, in plain terms. It also covers the bugs that campaign surfaced. This section maps those findings back to the actual code, for developers who need to trace a finding to its source.
 
 - **Validation scripts:** The 8 sessions were driven through the public API via the scripts in `documentation/notebooks/astrometrics/target_stacking_and_analysis/scripts/`.
 - **Finding 6 (cross-session photometry tracking bug):** `analyze_target(pipeline_type="photometry")` was running `VariabilityAnalyzer` across a target's entire frame history in one pass. It used a single reference frame from whichever session came first. The fix scopes each `VariabilityAnalyzer` run to one `TargetSession` at a time.

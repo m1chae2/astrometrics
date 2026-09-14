@@ -20,6 +20,7 @@ from astrometricslib.pipelines.spectroscopy.quantum_efficiency_correction import
 from astrometricslib.pipelines.spectroscopy.quantum_efficiency_curves import (
     get_quantum_efficiency_curve,
 )
+from astrometricslib.pipelines.spectroscopy.spectral_classifier import classify_spectral_type
 from astrometricslib.pipelines.spectroscopy.spectroscopy_instrument import (
     SpectroscopyInstrument,
 )
@@ -348,6 +349,20 @@ class SpectroscopyPipeline:
                     curve=quantum_efficiency_curve,
                 ).tolist()
             )
+
+        # Classify against the QE-corrected spectrum when available -- it
+        # better reflects the star's true color than raw sensor counts --
+        # falling back to the raw intensities otherwise.
+        classification_intensities = star.spectrum_data_processed.get(
+            "quantum_efficiency_corrected_intensities", result["intensities"]
+        )
+        classification = classify_spectral_type(
+            wavelength_angstrom=np.array(star.spectrum_data_processed["wavelengths_angstrom"]),
+            intensity=np.array(classification_intensities),
+        )
+        star.self_determined_spectral_type = classification["spectral_type"]
+        star.self_determined_spectral_type_confidence = classification["confidence"]
+
         star.trail_centerline_px = result.get("trail_centerline_px")
         star.trail_width_px = result.get("trail_width_px")
         if isinstance(star.star_data, dict):

@@ -1,0 +1,174 @@
+"""Guesses a star's broad spectral type by matching its spectrum to references.
+
+A slitless grism can't resolve spectral lines finely enough to derive a
+star's physical properties from first principles, and it can't tell you
+a catalog name either. What it can do is compare the overall shape of an
+observed spectrum -- continuum slope, Balmer line strength -- against a
+library of known reference stars and report which one it most resembles.
+That's enough to place a star in its broad O/B/A/F/G/K/M class, using the
+same technique real low-resolution spectroscopy tools use, without ever
+looking the star up.
+"""
+
+import csv
+from pathlib import Path
+
+import numpy as np
+
+_TEMPLATE_DIR = Path(__file__).parent / "data"
+
+# The reference spectral types this classifier ships with, drawn from the
+# Pickles (1998) stellar flux library (Pickles, A.J. 1998, PASP, 110, 863).
+# Each covers 3500-8000 A at 5 A sampling, normalized to 1.0 at 5556 A --
+# enough range to capture the Balmer lines and the overall continuum slope
+# a low-resolution slitless grism can actually resolve.
+REFERENCE_SPECTRAL_TYPES: tuple[str, ...] = (
+    "O5V",
+    "B0V",
+    "B8V",
+    "A0V",
+    "A5V",
+    "F0V",
+    "F5V",
+    "G0V",
+    "G5V",
+    "K0V",
+    "K5V",
+    "M0V",
+    "M5V",
+)
+
+# Below this many overlapping points, a correlation is too noisy to trust.
+_MINIMUM_OVERLAP_POINTS = 20
+# Reference and observed spectra must share at least this much real
+# wavelength range (in Angstroms) before they're compared at all.
+_MINIMUM_OVERLAP_ANGSTROM = 500.0
+
+_reference_cache: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+
+
+def _load_reference_template(spectral_type: str) -> tuple[np.ndarray, np.ndarray]:
+    """Read one bundled reference spectrum from disk.
+
+    Returns
+    -------
+    wavelength_angstrom, normalized_flux : `tuple` [`np.ndarray`, `np.ndarray`]
+        The reference star's wavelength grid and its flux, normalized to
+        1.0 at 5556 A per the source library's convention.
+    """
+    path = _TEMPLATE_DIR / f"{spectral_type.lower()}.csv"
+    wavelengths = []
+    fluxes = []
+    with path.open(newline="") as f:
+        for row in csv.DictReader(f):
+            wavelengths.append(float(row["wavelength_angstrom"]))
+            fluxes.append(float(row["normalized_flux"]))
+    return np.array(wavelengths), np.array(fluxes)
+
+
+def _get_reference_templates() -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    """Load and cache every bundled reference spectrum.
+
+    Returns
+    -------
+    templates : `dict`
+        Spectral type label mapped to its `(wavelength_angstrom,
+        normalized_flux)` arrays.
+    """
+    if not _reference_cache:
+        for spectral_type in REFERENCE_SPECTRAL_TYPES:
+            _reference_cache[spectral_type] = _load_reference_template(spectral_type)
+    return _reference_cache
+
+
+def _continuum_normalize(flux: np.ndarray) -> np.ndarray:
+    """Rescale a flux array onto a common brightness scale for comparison.
+
+    Observed intensities are in arbitrary sensor counts, while the
+    reference library is flux-calibrated -- dividing both by their own
+    median puts them on the same footing before comparing shapes.
+
+    Returns
+    -------
+    normalized_flux : `np.ndarray`
+        The input scaled so its median is 1.0.
+    """
+    median = np.median(flux)
+    if median <= 0:
+        return flux
+    return flux / median
+
+
+def classify_spectral_type(wavelength_angstrom: np.ndarray, intensity: np.ndarray) -> dict[str, object]:
+    """Guess a star's broad spectral type by matching it to a reference.
+
+    Resamples the observed spectrum onto each bundled reference star's
+    wavelength grid, continuum-normalizes both, and scores the match with
+    a Pearson correlation coefficient. The reference type with the
+    highest correlation wins.
+
+    Parameters
+    ----------
+    wavelength_angstrom : `np.ndarray`
+        The observed spectrum's wavelength grid, in Angstroms.
+    intensity : `np.ndarray`
+        The observed spectrum's brightness at each wavelength, in
+        whatever units extraction produced -- arbitrary sensor counts
+        are fine, see `_continuum_normalize`.
+
+    Returns
+    -------
+    result : `dict`
+        ``"spectral_type"``: the best-matching reference label, or
+        ``"Unknown"`` if there wasn't enough usable data to compare.
+        ``"confidence"``: the winning correlation coefficient (-1 to 1;
+        higher is a better match), or `None` when unknown.
+        ``"correlation_by_type"``: every reference type's correlation
+        coefficient, for inspecting close calls yourself.
+    """
+    wavelength_angstrom = np.asarray(wavelength_angstrom, dtype=float)
+    intensity = np.asarray(intensity, dtype=float)
+    valid = np.isfinite(wavelength_angstrom) & np.isfinite(intensity)
+    wavelength_angstrom = wavelength_angstrom[valid]
+    intensity = intensity[valid]
+
+    if len(wavelength_angstrom) < _MINIMUM_OVERLAP_POINTS:
+        return {"spectral_type": "Unknown", "confidence": None, "correlation_by_type": {}}
+
+    order = np.argsort(wavelength_angstrom)
+    wavelength_angstrom = wavelength_angstrom[order]
+    intensity = intensity[order]
+
+    correlation_by_type: dict[str, float] = {}
+    for spectral_type, (template_wavelength, template_flux) in _get_reference_templates().items():
+        overlap_min = max(wavelength_angstrom.min(), template_wavelength.min())
+        overlap_max = min(wavelength_angstrom.max(), template_wavelength.max())
+        if overlap_max - overlap_min < _MINIMUM_OVERLAP_ANGSTROM:
+            continue
+
+        common_grid = template_wavelength[
+            (template_wavelength >= overlap_min) & (template_wavelength <= overlap_max)
+        ]
+        if len(common_grid) < _MINIMUM_OVERLAP_POINTS:
+            continue
+
+        observed_on_grid = np.interp(common_grid, wavelength_angstrom, intensity)
+        template_on_grid = np.interp(common_grid, template_wavelength, template_flux)
+
+        observed_norm = _continuum_normalize(observed_on_grid)
+        template_norm = _continuum_normalize(template_on_grid)
+
+        if np.std(observed_norm) == 0 or np.std(template_norm) == 0:
+            continue
+
+        correlation_by_type[spectral_type] = float(np.corrcoef(observed_norm, template_norm)[0, 1])
+
+    if not correlation_by_type:
+        return {"spectral_type": "Unknown", "confidence": None, "correlation_by_type": {}}
+
+    best_type = max(correlation_by_type, key=correlation_by_type.get)
+    return {
+        "spectral_type": best_type,
+        "confidence": correlation_by_type[best_type],
+        "correlation_by_type": correlation_by_type,
+    }

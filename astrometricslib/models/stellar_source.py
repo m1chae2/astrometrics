@@ -161,6 +161,16 @@ class StellarObject(BaseModel):
     # See the comment on spectral_type above -- this is normally the
     # same value, kept as a separate field for the cluster-entry case.
     stellar_spectral_type: str = Field(default="", alias="stellarSpectralType")
+    # A spectral type guessed from this star's own extracted spectrum,
+    # via template matching against a reference library -- independent
+    # of spectral_type, which comes from a catalog lookup. "Unknown" when
+    # no spectrum has been classified yet.
+    self_determined_spectral_type: str = Field(default="", alias="selfDeterminedSpectralType")
+    # How well the winning template matched (a Pearson correlation
+    # coefficient, -1 to 1); None until self_determined_spectral_type is set.
+    self_determined_spectral_type_confidence: float | None = Field(
+        default=None, alias="selfDeterminedSpectralTypeConfidence"
+    )
     target_ids: list[str] = Field(default_factory=list, alias="targetIds")
     # How many pixels out from the star's center to gather light from
     # when measuring its spectrum.
@@ -238,7 +248,7 @@ class StellarObject(BaseModel):
                     wls = [row[0] for row in self.data]
                     flux = [row[1] for row in self.data]
                     return normalize(wls, flux)
-                except IndexError, TypeError, AttributeError:
+                except (IndexError, TypeError, AttributeError):  # fmt: skip
                     pass
 
         if (

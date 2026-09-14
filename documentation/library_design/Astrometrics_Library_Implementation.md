@@ -2,52 +2,51 @@
 
 While the theoretical algorithms and data flow are covered in `Astrometrics_Library_Architecture.md`, this map serves as a direct index to the Python source code where those algorithms are physically implemented.
 
-Due to the internal nature of these modules, they are deliberately hidden from the public API Reference. Developers wishing to review or modify the core algorithms should refer to the following directories within `astrometricslib/`. The layout is layered, bottom to top:
+Due to the internal nature of these modules, they are deliberately hidden from the public API Reference: they aren't meant to be imported directly, since `api/` is the one supported entry point. Developers wishing to review or modify the core algorithms should refer to the following directories within `astrometricslib/`. The layout is layered, bottom to top:
 
 - `models/` / `utilities/`: data shapes and configuration, with no dependency on anything else in the library.
-- `image_processing/`: pixel-level primitives (FITS access, source detection, saturation checks).
-- `drivers/`: wraps every external tool (Siril, Astrometry.net, the SQLite catalog cache, calibration-frame storage).
-- `data_access/`: reads and writes the target/frame/stellar-object database.
-- `catalog_services/`: where the public API reaches directly for plain reads and writes that are not an analysis run — scanning a folder for FITS files, target CRUD, converting a FITS file to a PNG.
-- `pipelines/`: the five analysis columns, plus the dispatcher and cross-column shared code.
+- `drivers/`: wraps every external tool (Siril, Astrometry.net, SIMBAD) plus foundational, pipeline-agnostic primitives — FITS file access, the shared image container, and the SQLite-backed catalog and calibration stores.
+- `pipelines/shared/`: code every stellar or moving-object pipeline reuses — frame scanning and grouping, target-record CRUD, image format conversion, and frame-quality/statistics primitives.
+- `pipelines/`: the five analysis pipelines themselves, plus the dispatcher (`tasks.py`) that ties them together.
 - `api/`: the public gate everything above calls through.
 
 ## Implementation Matrix
 
-The library is organized into five layers across five specialized scientific pipelines and a shared orchestration spine. The "Ratchet Rule" strictly forbids any layer from importing from a layer above it.
+The library is organized into five layers across five specialized scientific pipelines and a shared orchestration spine. The "Ratchet Rule" strictly forbids any layer from importing from a layer above it. This keeps the dependency graph one-directional: a lower layer never has to know a higher layer exists, so it can be tested, reused, or replaced without touching anything above it.
+
+Table columns are the five pipelines plus a column for code shared across all of them; rows are the layers, numbered 1 (public-facing) down to 5 (closest to disk, network, or an external program). Each cell lists the key module(s) that pipeline uses at that layer, and the annotation under each layer number says which layer it's allowed to call into.
 
 | Layer | Stacking | Astrometry | Photometry | Spectroscopy | Asteroid Det. | Shared by All |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **1. Public API**<br>*(calls L2)* | `run_stacking` | `run_astrometry` | `run_photometry` | `run_spectroscopy` | `detect_asteroids` | **Astrometrics facade**<br>`api/`<br>`mcp/` |
 | **2. Public Helpers**<br>*(calls L3)* | `stack_frames_with_timeout`<br>*(pre-stage)* | `analyze_target`<br>*(runner)* | `analyze_target`<br>*(runner)* | `analyze_target`<br>*(runner)* | `analyze_target`<br>*(runner)* | **pipelines/**<br>`tasks`<br>`pipeline_base`<br>`runners` |
-| **3. Pipelines**<br>*(calls L4)* | **stacking/**<br>`stage`<br>`stack_quality` | **astrometry/**<br>`star_identifier`<br>`catalog_seeding`<br>`spectral_star_reg` | **photometry/**<br>`variability_anal.`<br>`ensemble normal.` | **spectroscopy/**<br>`spectrum_extract`<br>`optics_physics`<br>`calibration_tuner` | **asteroid_detection/**<br>`detection`<br>`ephemeris` | **image_processing/**<br>**pipelines/shared/**<br>`frame_grouping`<br>`star_recording` |
-| **4. Driver Access**<br>*(exposed via L1)* | *(handed one by stack_frames_with_timeout)* | `catalog_access` | `catalog_access` | `catalog_access` | *(skips L4/L5)* | **driver_access/**<br>`catalog_access`<br>`frame_scanning` |
-| **5. Drivers**<br>*(edge)* | `siril_interface` | `plate_solve_store` | `plate_solve_iface` | *(reaches through astrometry)* | *(none)* | **drivers/**<br>`logger`<br>`local_db` |
+| **3. Pipelines**<br>*(calls L4)* | **stacking/**<br>`stage`<br>`stack_quality` | **astrometry/**<br>`star_identifier`<br>`catalog_seeding`<br>`spectral_star_reg` | **photometry/**<br>`variability_anal.`<br>`ensemble normal.` | **spectroscopy/**<br>`spectrum_extract`<br>`optics_physics`<br>`calibration_tuner` | **asteroid_detection/**<br>`detection`<br>`ephemeris` | **pipelines/shared/**<br>`frame_grouping`<br>`star_recording` |
+| **4. Driver Access**<br>*(exposed via L1)* | *(handed one by stack_frames_with_timeout)* | `catalog_access` | `catalog_access` | `catalog_access` | *(skips L4/L5)* | **drivers/**<br>`catalog_access`<br>`fits_access` |
+| **5. Drivers**<br>*(edge)* | `siril_interface` | `plate_solve_interface` | *(reaches through astrometry)* | *(reaches through astrometry)* | *(none)* | **drivers/**<br>`job_logging`<br>`local_database` |
 | **Outside** | Siril (headless) | astrometry.net<br>Gaia, SIMBAD | astrometry.net | *(via astrometry)* | IMCCE SkyBoT | FITS on disk<br>SQLite |
 
 > [!NOTE]
 > **Shared Vocabulary:** Modules like `models/`, `enums.py`, `exceptions.py`, and `config_schema.py` contain pure data structures. They perform no I/O, contain no behavior, and import nothing from any layer. They may be safely imported by any module in the system.
+
 ## Core Processing Pipelines
 
 ### Stacking
 *Located in:* `astrometricslib/pipelines/stacking/`
 - **Dispatch and orchestration:** `astrometricslib/pipelines/tasks.py` (runs Siril stacking as a tracked job with a hard timeout, picks which analysis pipeline runs by name, and runs a target's full stack-solve-photometry-spectroscopy sequence) and `astrometricslib/api/batch.py` (runs many targets through that sequence in parallel)
 - **Sub-exposure quality evaluation:** `frame_homogeneity.py` and `background_homogeneity.py`
-- **Raw frame quality & statistics:** `astrometricslib/data_access/frame_statistics.py`
 - **Pixel rejection and integration:** `astrometricslib/utilities/rejection_thresholds.py`, `astrometricslib/utilities/stack_filter_floor.py`, and `stage.py`
 - **Frame-count-adaptive filtering:** `stack_quality.py`
 
 ### Astrometry
 *Located in:* `astrometricslib/pipelines/astrometry/`
 - **Plate solving:** `astrometricslib/drivers/plate_solve_interface.py`
-- **Star detection and centroiding:** `star_identifier.py`
+- **Star detection and centroiding:** `star_identifier.py` and `source_detection.py`
 - **Coordinate transformations (WCS) and pipeline orchestration:** `pipeline.py`
 - **Local Gaia catalog cache:** `astrometricslib/drivers/catalog_store.py`
 
 ### Photometry
 *Located in:* `astrometricslib/pipelines/photometry/`
-- **Aperture photometry:** `variability_analyzer.py`
-- **Light curve generation:** `variability_analyzer.py`
+- **Aperture photometry and light curve generation:** `variability_analyzer.py`
 
 ### Spectroscopy
 *Located in:* `astrometricslib/pipelines/spectroscopy/`
@@ -63,47 +62,39 @@ The library is organized into five layers across five specialized scientific pip
 - **Ephemeris calculation:** `ephemeris.py` and `frame_wcs_composer.py`
 
 ### Shared Pipeline Code
-*Located in:* `astrometricslib/pipelines/shared/`
+*Located in:* `astrometricslib/pipelines/shared/`, unless noted otherwise. This is where the plain, non-analysis reads and writes the public API calls directly — scanning a folder for FITS files, target CRUD, converting a FITS file to a PNG — live alongside the frame-quality primitives every stellar pipeline shares.
 - **Frame selection and grouping by camera/optic:** `frame_grouping.py`
-- **Star recording shared by all three stellar pipelines:** `star_recording.py`
-- **Observing-session grouping:** `target_sessions.py`
-- **Per-image analysis state:** `analysis_context.py`
-
-### Pixel-Level Primitives
-*Located in:* `astrometricslib/image_processing/`
-- **FITS HDU0/HDU1 access:** `fits_access.py`
-- **The `AstrometricsImage` data container:** `image.py`
-- **Source detection:** `source_detection.py`
-- **Saturation checks:** `saturation.py`
-- **Image quality & hardware telemetry:** `quality_metrics.py`
-- **Filter-type detection from FITS headers:** `filter_detection.py`
-
-### Catalog Services
-*Located in:* `astrometricslib/catalog_services/`
-The plain, non-analysis reads and writes the public API calls directly, without
-running a pipeline:
 - **Filesystem frame scanning:** `frame_scanning.py`
 - **Target catalog CRUD:** `target_records.py`
 - **Image format conversion for display:** `image_conversions.py`
-- **Image scaling math shared by `image_conversions.py` and the visualization overlay:** `utilities/image_scaling.py`
+- **Image scaling math shared by `image_conversions.py` and the visualization overlay:** `image_scaling.py`
+- **Star recording shared by all three stellar pipelines:** `star_recording.py`
+- **Observing-session grouping:** `target_sessions.py`
+- **Per-image analysis state:** `analysis_context.py`
+- **Saturation checks and image/hardware quality telemetry:** `quality/saturation.py` and `quality/quality_metrics.py`
+- **Frame statistics and background level measurement:** `quality/frame_statistics.py` and `quality/background_measurement.py`
 
-### External-Tool Drivers
+### Pixel-Level & FITS Primitives
 *Located in:* `astrometricslib/drivers/`
-- **Siril stacking/registration:** `siril_interface.py`
+- **FITS HDU0/HDU1 access:** `fits_access.py`
+- **The `AstrometricsImage` data container:** `image.py`
+- **Filter-type detection from FITS headers:** `filter_detection.py`
+
+### Drivers
+*Located in:* `astrometricslib/drivers/`. Wraps every external tool the pipelines depend on, plus the database access layer everything above it reaches through.
+- **Siril stacking/registration:** `siril_interface.py` and `siril_output_parsing.py`
 - **Astrometry.net plate solving:** `plate_solve_interface.py`
 - **Local Gaia catalog cache:** `catalog_store.py`
+- **SIMBAD star lookups:** `simbad_interface.py`
 - **Calibration frame library (darks/bias/flats):** `calibration_library.py`
 - **One-time startup migration and schema backfill for the target/stellar catalogs:** `local_database.py`
 - **Job logging:** `job_logging.py` and `logger_interface.py`
-
-### Database Access
-*Located in:* `astrometricslib/data_access/`
 - **Target/stellar-catalog repository (`CatalogAccess`), the front door every other layer reaches for the database through:** `catalog_access.py`
-- **Frame statistics:** `frame_statistics.py`
-- **Background level measurement:** `background_measurement.py`
 
 `catalog_access.py` doesn't execute SQL itself. It records through a generic,
 keyed-record SQLite store shared with wayfindinglib:
+
+### Shared Storage Backend
 *Located in:* `datastore/`
 - **Generic keyed-model storage (get/put/exists/merge, one table per dataset type):** `butler.py`
 - **SQLite connection setup and JSON encoding:** `local_database.py`

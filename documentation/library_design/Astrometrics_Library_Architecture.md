@@ -1,24 +1,24 @@
 # Astrometrics Library: Architecture and Design
 
-*Version 2.4 · 2026-09-14 · Status: current*
+*Version 2.5 · 2026-09-14 · Status: current*
 
 ## Abstract
 
-This document explains the physics, algorithms, and design decisions behind the Astrometrics image-processing pipelines — stacking, astrometry, photometry, spectroscopy, and moving object detection — for engineers and astronomers who want to understand how the system processes an observation, not just how to call it. Every pipeline organizes its data around one shared idea, the Observation Target, and each pipeline checks its own work twice: once before processing starts, to reject bad input, and once after it finishes, to catch bad output. For a map from these ideas to the actual code, see `Astrometrics_Library_Implementation.md`.
+This document explains the physics, algorithms, and design decisions behind the Astrometrics image-processing pipelines: stacking, astrometry, photometry, spectroscopy, and moving object detection. It is written for engineers and astronomers who want to understand how the system processes an observation, not just how to call it. Every pipeline organizes its data around one shared idea, the Observation Target. Each pipeline also checks its own work twice: once before processing starts, to reject bad input, and once after it finishes, to catch bad output. For a map from these ideas to the actual code, see `Astrometrics_Library_Implementation.md`.
 
 ## 1. Introduction
 
-**Statement of need.** Five separate image-processing pipelines working on the same telescope data need a shared way to describe a target, or each pipeline ends up re-deriving the same sky position, frame list, and quality state on its own, with no way to reuse another pipeline's results (a solved sky position, a calibrated stack). Using one shared data model lets several astronomy pipelines work together on the same target without stepping on each other's data. The ideas in this document apply the same way whether a pipeline is run from a script or through the interactive graphical tools, because both paths call the exact same underlying code. Anything you can do by clicking through the interface, you can also automate as a script.
+**Statement of need.** Five separate image-processing pipelines work on the same telescope data. Without a shared way to describe a target, each pipeline would re-derive the same sky position, frame list, and quality state on its own, unable to reuse another pipeline's results (a solved sky position, a calibrated stack). One shared data model lets the pipelines work together on the same target without stepping on each other's data. The ideas in this document apply equally whether a pipeline runs from a script or through the interactive graphical tools: both paths call the exact same underlying code. Anything you can do by clicking through the interface, you can also automate as a script.
 
-A complete, code-level reference for every public class and method is generated automatically from the source code's own documentation; see the Sphinx {doc}`API Reference </api/astrometricslib>`. For a map connecting the ideas in this document to the actual Python files that implement them, see `Astrometrics_Library_Implementation.md`.
+A complete, code-level reference for every public class and method is generated automatically from the source code's own documentation. See the Sphinx {doc}`API Reference </api/astrometricslib>`. For a map connecting these ideas to the actual Python files that implement them, see `Astrometrics_Library_Implementation.md`.
 
-The rest of this document is organized as follows. Section 2 introduces the four data models every pipeline shares. Sections 3 through 7 walk through the five pipelines in turn: Stacking, Astrometry, Photometry, Spectroscopy, and Moving Object Detection. Section 8 reports results from testing the pipelines on real telescope data, and Section 9 concludes.
+The rest of this document is organized as follows. Section 2 introduces the four data models every pipeline shares. Sections 3 through 7 walk through the five pipelines in turn: Stacking, Astrometry, Photometry, Spectroscopy, and Moving Object Detection. Section 8 reports results from testing the pipelines on real telescope data. Section 9 concludes.
 
 ## 2. Observational Data Models
 
-The system organizes astronomical observations around four data models, following the target-centric approach used by large professional sky-survey projects [3]. These four models cover everything the pipelines need to track: sky positions, brightness measurements, light curves, spectra, and quality checks, all connected to a single target.
+The system organizes astronomical observations around four data models. This follows the target-centric approach used by large professional sky-survey projects [3]. These four models cover everything the pipelines need to track: sky positions, brightness measurements, light curves, spectra, and quality checks — all connected to a single target.
 
-Every image referenced below is stored as a FITS file — the standard file format for astronomical data, playing the same role for telescopes that JPEG or PNG plays for ordinary photos. A FITS file bundles the raw pixel data together with a header: a block of metadata recording things like exposure time, filter, and (once solved) sky position.
+Every image referenced below is stored as a FITS file, the standard file format for astronomical data. It plays the same role for telescopes that JPEG or PNG plays for ordinary photos. A FITS file bundles the raw pixel data together with a header: a block of metadata recording things like exposure time, filter, and (once solved) sky position.
 
 ### 2.1 Information Types
 
@@ -69,7 +69,7 @@ The stacking pipeline combines many individual exposures into one high-quality i
 
 ### 3.2 Major Concepts and Governing Equations
 
-Every raw exposure from the camera contains two kinds of unwanted signal: noise added by the camera's electronics and heat (additive), and a scaling error introduced by the optics, where some parts of the image come out dimmer than others for reasons that have nothing to do with the sky (multiplicative). Before frames are aligned and combined, each raw exposure $I_{\text{raw}}$ is corrected using three calibration images:
+Every raw exposure from the camera contains two kinds of unwanted signal. The first is noise added by the camera's electronics and heat — an *additive* error. The second is a scaling error introduced by the optics, where some parts of the image come out dimmer than others for reasons that have nothing to do with the sky — a *multiplicative* error. Before frames are aligned and combined, each raw exposure $I_{\text{raw}}$ is corrected using three calibration images:
 
 * **Master Bias ($M_{\text{bias}}$):** An average of many zero-length, closed-shutter exposures. It isolates the fixed voltage offset the camera's electronics add to every pixel, regardless of exposure time.
 * **Master Dark ($M_{\text{dark}}$):** An average of closed-shutter exposures taken with the same exposure time, gain, and sensor temperature as the light frames. It measures the extra signal ("dark current") produced by heat inside the sensor over time, plus any permanently defective ("hot") pixels.
@@ -84,13 +84,13 @@ These two categories of error are corrected differently:
   * *Vignetting and dust shadows:* obstructions in the optical path (lens edges, dust on the sensor glass) that dim parts of the image.
   * *Pixel sensitivity differences:* tiny manufacturing differences in how efficiently each pixel converts light into signal.
 
-Combining these corrections gives the true, calibrated brightness $I_{\text{calibrated}}$: subtract the additive errors, then divide out the (normalized) multiplicative ones:
+Combining these corrections gives the true, calibrated brightness $I_{\text{calibrated}}$. First subtract the additive errors. Then divide out the (normalized) multiplicative ones:
 
 $$
 I_{\text{calibrated}} = \frac{I_{\text{raw}} - M_{\text{dark}}}{\left(M_{\text{flat}} - M_{\text{bias}}\right) / \langle M_{\text{flat}} - M_{\text{bias}} \rangle} \tag{1}
 $$
 
-After calibration, the pipeline averages $N$ exposures together to raise the signal-to-noise ratio. When averaging, any pixel far enough from the group's median value is thrown out as an outlier (a satellite trail, a cosmic ray hit, a plane). Rather than using one fixed cutoff for every stack (such as always rejecting anything past $3\sigma$), the pipeline adjusts the cutoff based on how many frames $N$ are being combined, using a formula called Chauvenet's criterion [4], [5]:
+After calibration, the pipeline averages $N$ exposures together to raise the signal-to-noise ratio. When averaging, any pixel far enough from the group's median value is thrown out as an outlier (a satellite trail, a cosmic ray hit, a plane). Rather than using one fixed cutoff for every stack — always rejecting anything past $3\sigma$, say — the pipeline adjusts the cutoff based on how many frames $N$ are being combined. It does this with a formula called Chauvenet's criterion [4], [5]:
 
 $$
 \sigma(N) = \sqrt{2}\,\mathrm{erfc}^{-1}\!\left(\frac{1}{2N}\right) \tag{2}
@@ -101,10 +101,10 @@ In words:
 * **$N$:** how many light exposures are being combined.
 * **$\mathrm{erfc}^{-1}$ (inverse complementary error function):** a standard statistics function. Here it finds the cutoff at which we'd expect fewer than half a false alarm — fewer than 0.5 pixels wrongly rejected purely by chance — across all $N$ frames.
 
-In short: the more frames being combined, the more chances there are for one of them to look like an outlier by pure random chance, so Equation (2) loosens the cutoff as $N$ grows. This avoids two failure modes that one fixed threshold runs into:
+In short: the more frames being combined, the more chances there are for one of them to look like an outlier by pure random chance. So Equation (2) loosens the cutoff as $N$ grows. This avoids two failure modes that one fixed threshold runs into:
 
-* **Small stacks ($N < 20$):** A fixed $3\sigma$ cutoff is too loose and misses real artifacts, because with few frames there's more random variation to hide behind. Chauvenet's criterion tightens the cutoff instead (about $1.96\sigma$ at $N = 10$).
-* **Deep stacks ($N > 100$):** A fixed $3\sigma$ cutoff becomes too strict and starts clipping real, bright star centers, mistaking ordinary photon noise for outliers. Chauvenet's criterion loosens the cutoff instead (about $2.81\sigma$ at $N = 100$) so real star brightness survives without any manual tuning.
+* **Small stacks ($N < 20$):** A fixed $3\sigma$ cutoff is too loose and misses real artifacts. With few frames, there's more random variation to hide behind. Chauvenet's criterion tightens the cutoff instead (about $1.96\sigma$ at $N = 10$).
+* **Deep stacks ($N > 100$):** A fixed $3\sigma$ cutoff becomes too strict. It starts clipping real, bright star centers, mistaking ordinary photon noise for outliers. Chauvenet's criterion loosens the cutoff instead (about $2.81\sigma$ at $N = 100$) so real star brightness survives without any manual tuning.
 
 ### 3.3 Pipeline Theory of Operations
 
@@ -115,7 +115,7 @@ Combining frames means three things happen together: calibrating each frame, ali
 3. **One quality check, two alignment modes:** The same frame-quality check applies to both ordinary (broadband) images and spectroscopic images. But spectroscopic images are only allowed to shift position (not rotate or stretch) when aligning, so the axis the spectrum is spread out along doesn't get distorted relative to the reference star. Ordinary images use full alignment (shifting, rotating, and stretching as needed) to make stars as sharp as possible.
 4. **Keep different optical setups separate:** Frames taken with different focal lengths or cameras get stacked separately, never mixed together. Mixing them would break the assumption that one pixel always corresponds to the same patch of sky, and would corrupt sharpness measurements.
 
-Before rejecting outliers, the pipeline also checks that enough frames survived the earlier quality filtering — too few frames left would make the outlier statistics meaningless. Table 3 lays out the stacking pipeline step by step.
+Before rejecting outliers, the pipeline also checks that enough frames survived the earlier quality filtering. Too few frames left would make the outlier statistics meaningless. Table 3 lays out the stacking pipeline step by step.
 
 **Table 3.** Stacking pipeline execution sequence and operations.
 
@@ -132,8 +132,8 @@ Before rejecting outliers, the pipeline also checks that enough frames survived 
 The stacking pipeline checks its own work in two rounds: before stacking (screening out bad raw photos) and after stacking (checking the final image).
 
 #### 3.4.1 Before Stacking: Screening Raw Photos
-* **Focus & Tracking Checks:** Measures each raw photo's star sharpness (FWHM — Full Width at Half Maximum, essentially how wide a star's blur looks) and shape (roundness), and ranks photos accordingly. FWHM is converted from pixels into arcseconds (a unit of angle in the sky; there are 3,600 arcseconds in one degree) using the camera's pixel scale, so the same cutoff works regardless of camera. The softest-focus fraction of photos is excluded, and the cutoff loosens automatically if too few frames would otherwise survive.
-* **Hardware Context:** Image quality problems are cross-checked against the telescope's own reported state. Airmass (how much atmosphere the target's light has to pass through, which grows quickly as a target sinks toward the horizon), along with altitude and azimuth (how high the target is in the sky, and which direction it's in), separate normal atmospheric degradation from an actual mount problem. Focuser position and sensor temperature let the pipeline detect focus drift and improve automatic temperature-compensation settings over time.
+* **Focus & Tracking Checks:** Measures each raw photo's star sharpness (FWHM — Full Width at Half Maximum, essentially how wide a star's blur looks) and shape (roundness), then ranks photos accordingly. FWHM is converted from pixels into arcseconds — a unit of angle in the sky; there are 3,600 arcseconds in one degree — using the camera's pixel scale, so the same cutoff works regardless of camera. The softest-focus fraction of photos is excluded. The cutoff loosens automatically if too few frames would otherwise survive.
+* **Hardware Context:** Image quality problems are cross-checked against the telescope's own reported state. Airmass measures how much atmosphere the target's light has to pass through, and it grows quickly as a target sinks toward the horizon. Altitude and azimuth record how high the target is in the sky and which direction it's in. Together, these three separate normal atmospheric degradation from an actual mount problem. Focuser position and sensor temperature let the pipeline detect focus drift and improve automatic temperature-compensation settings over time.
 * **Cloud & Sky Brightness Checks:** Tracks the background sky brightness and the fraction of overexposed (saturated) pixels before alignment. Exposures with a sudden brightness spike or drop — passing clouds, stray light — are excluded.
 * **Calibration Frame Checks:** Confirms that the bias, dark, and flat frames actually match the camera's specifications before they're used to calibrate the light frames.
 
@@ -150,13 +150,13 @@ $$
    * *What it means:* A value near $1.0$ means the frames lined up almost perfectly. A value above $1.2$ is a warning sign that small misalignments between frames blurred the final image.
 3. **Background Consistency Across Frames:** Before stacking, compares each surviving frame's background sky brightness to the rest of the sequence, flagging any frame with an unusual gap — a sign of light pollution or passing sky glow that earlier checks missed.
 4. **Processing Time Tracking:** Tracks how long stacking took and whether it hit a timeout, building up a baseline over time that helps tune how many stacking jobs can safely run at once.
-5. **Mount Tracking Analysis:** Measures how far stars shifted from frame to frame, in arcseconds, to gauge how well the telescope mount tracked the sky. The pipeline knows which side of the telescope's pier the mount was on at each moment and uses that to exclude the expected jump from a meridian flip (a routine, automatic mount repositioning), so only real tracking problems — a snagged cable, wind, or polar-alignment drift — show up as errors.
+5. **Mount Tracking Analysis:** Measures how far stars shifted from frame to frame, in arcseconds, to gauge how well the telescope mount tracked the sky. The pipeline knows which side of the telescope's pier the mount was on at each moment. It uses that to exclude the expected jump from a meridian flip — a routine, automatic mount repositioning. That way, only real tracking problems (a snagged cable, wind, or polar-alignment drift) show up as errors.
 
 ---
 
 ## 4. Astrometric Calibration Pipeline
 
-The astrometry pipeline figures out exactly where a stacked image is pointed, matching camera pixels to real sky coordinates (Right Ascension $\alpha$ and Declination $\delta$ — the sky's version of longitude and latitude). This is often called "plate solving," a term left over from the days of photographic plates. The result is a World Coordinate System (WCS): a mathematical formula that converts any pixel position in the image into a real sky position, and back.
+The astrometry pipeline figures out exactly where a stacked image is pointed. It matches camera pixels to real sky coordinates: Right Ascension $\alpha$ and Declination $\delta$, the sky's version of longitude and latitude. This is often called "plate solving," a term left over from the days of photographic plates. The result is a World Coordinate System (WCS): a mathematical formula that converts any pixel position in the image into a real sky position, and back.
 
 ### 4.1 Purpose & Interfaces
 
@@ -168,7 +168,7 @@ The astrometry pipeline figures out exactly where a stacked image is pointed, ma
 Plate solving connects pixel coordinates $(x,y)$ to sky coordinates $(\alpha, \delta)$ in three steps:
 
 1. **Star Centroiding:** Fits a 2D Gaussian bell-curve shape to each detected star to pin down its center $(x_i, y_i)$ more precisely than just picking the brightest pixel.
-2. **Quad-Star Matching:** Groups nearby stars into four-star shapes ("quads") whose relative side lengths stay the same no matter how the image is rotated, flipped, or scaled. These shapes are compared against a pre-built star index to identify which patch of sky the image shows, even if the telescope was pointed somewhere unexpected — continuing a long tradition of cataloging the sky this way [1]. Once the field is identified, the matched stars are cross-checked against the SIMBAD star catalog to attach real star names and IDs to the sources found in the image.
+2. **Quad-Star Matching:** Groups nearby stars into four-star shapes ("quads") whose relative side lengths stay the same no matter how the image is rotated, flipped, or scaled. These shapes are compared against a pre-built star index to identify which patch of sky the image shows, even if the telescope was pointed somewhere unexpected. This continues a long tradition of cataloging the sky this way [1]. Once the field is identified, the matched stars are cross-checked against the SIMBAD star catalog to attach real star names and IDs to the sources found in the image.
 3. **Fitting the Distortion Map:** Converts pixel offsets from the image center $(x-x_0, y-y_0)$ into sky-coordinate offsets $(\xi, \eta)$, using a transformation matrix $CD_{i,j}$ plus a correction for lens/mirror distortion, called a Simple Imaging Polynomial (SIP):
 
 $$
@@ -202,7 +202,7 @@ Table 4 lays out the astrometry pipeline step by step.
 
 #### 4.4.2 After Solving: Checking the Result
 * **Solve Success Flag:** Whether the solver found a WCS at all; if not, the pipeline stops for that target.
-* **Network Health Tracking:** Tracks how often lookups to remote star catalogs succeed, fail, or get temporarily paused after repeated failures. This distinguishes a genuinely sparse star field from a network problem, and helps tune how long the pipeline should wait before giving up on a lookup.
+* **Network Health Tracking:** Tracks how often lookups to remote star catalogs succeed, fail, or get temporarily paused after repeated failures. This distinguishes a genuinely sparse star field from a network problem. It also helps tune how long the pipeline should wait before giving up on a lookup.
 * **SIMBAD Match Count:** How many detected stars were successfully matched to a real catalog entry — a rough measure of how trustworthy the solution is.
 
 ---
@@ -218,7 +218,7 @@ The photometry pipeline tracks how a star's brightness changes across a sequence
 
 ### 5.2 Major Concepts and Governing Equations
 
-1. **Tracking a Star Frame to Frame:** The pipeline finds each star's position once, from the solved, WCS-aligned stack. On every individual frame after that, it re-locates that same star by finding its brightness-weighted center, then shifts every other star's expected position by that same offset, rather than recalculating sky coordinates from scratch on every frame. This shortcut only works within one observing session, because framing and pointing only stay consistent while the telescope isn't repositioned between sessions; the pipeline therefore tracks stars session by session, not across a target's entire observation history.
+1. **Tracking a Star Frame to Frame:** The pipeline finds each star's position once, from the solved, WCS-aligned stack. On every later frame, it re-locates that same star by finding its brightness-weighted center. It then shifts every other star's expected position by that same offset, rather than recalculating sky coordinates from scratch on every frame. This shortcut only works within one observing session, because framing and pointing only stay consistent while the telescope isn't repositioned. The pipeline therefore tracks stars session by session, not across a target's entire observation history.
 2. **Ensemble Differential Photometry:** To cancel out the effect of passing clouds or changing atmospheric clarity, each star's raw brightness $F_i(t)$ is divided by the median brightness of a group ("ensemble") of $K$ other, well-behaved comparison stars in the same field:
 
 $$
@@ -231,9 +231,9 @@ $$
 C_v = \frac{\sigma_{\hat{F}}}{\langle \hat{F} \rangle} \tag{6}
 $$
 
-   * *Decision rule:* A star is flagged as a variable-star candidate if its $C_v$ is unusually high compared to the other stars measured in the same field, rather than compared to one fixed number used for every field, following the same field-relative approach long-running variable-star observing networks use to flag candidates for follow-up [2].
-3. **Matching the Same Star Across Sessions:** Since tracking (concept 1) only works within one session, the pipeline needs another way to recognize "this is the same star" across sessions taken weeks or months apart. It does that using each star's sky position: every session's tracked stars are placed on the same sky-coordinate map and matched against stars already found in earlier sessions, so all the individual sessions' measurements of one physical star get combined into a single, continuous light curve.
-4. **Identifying Stars by Catalog Name (optional):** Each session's reference frame can optionally be run through the same star-catalog matching used by the astrometry pipeline (Section 4). When the frame's own WCS is already known (from an earlier solve), this step reuses it instead of solving again. Doing this gives every star a real catalog name instead of a made-up label for that run, and also improves the cross-session matching described in concept 3.
+   * *Decision rule:* A star is flagged as a variable-star candidate if its $C_v$ is unusually high compared to the other stars measured in the same field — not compared to one fixed number used for every field. This mirrors the field-relative approach long-running variable-star observing networks use to flag candidates for follow-up [2].
+3. **Matching the Same Star Across Sessions:** Since tracking (concept 1) only works within one session, the pipeline needs another way to recognize "this is the same star" across sessions taken weeks or months apart. It does that using each star's sky position. Every session's tracked stars are placed on the same sky-coordinate map and matched against stars already found in earlier sessions. That way, all of a physical star's measurements across sessions combine into a single, continuous light curve.
+4. **Identifying Stars by Catalog Name (optional):** Each session's reference frame can optionally be run through the same star-catalog matching used by the astrometry pipeline (Section 4). When the frame's own WCS is already known (from an earlier solve), this step reuses it instead of solving again. Doing this gives every star a real catalog name instead of a made-up label for that run. It also improves the cross-session matching described in concept 3.
 
 ### 5.3 Pipeline Theory of Operations
 
@@ -253,8 +253,8 @@ Table 5 lays out the photometry pipeline step by step.
 ### 5.4 Quality Metrics and Photometric Validation
 
 #### 5.4.1 Before Measuring: Screening the Input
-* **Saturation Ceiling:** Any star whose brightest pixel is close to the sensor's maximum value is excluded from the comparison ensemble for that frame, since an overexposed star's brightness reading can't be trusted.
-* **Alignment Confidence Floor:** Re-locating the reference star must succeed on a minimum number of stars per frame; if too few are found, the pipeline assumes no shift happened rather than guessing at a shift it isn't confident about.
+* **Saturation Ceiling:** Any star whose brightest pixel is close to the sensor's maximum value is excluded from the comparison ensemble for that frame. An overexposed star's brightness reading can't be trusted.
+* **Alignment Confidence Floor:** Re-locating the reference star must succeed on a minimum number of stars per frame. If too few are found, the pipeline assumes no shift happened, rather than guessing at a shift it isn't confident about.
 
 #### 5.4.2 After Measuring: Checking the Light Curve
 * **Ensemble Outlier Rejection:** Frames whose comparison-ensemble brightness looks unusual compared to the rest of the sequence are excluded before being folded into the light curve.
@@ -264,7 +264,7 @@ Table 5 lays out the photometry pipeline step by step.
 
 ## 6. Stellar Spectroscopy Pipeline
 
-The spectroscopy pipeline processes images taken through a grism — a lens-like attachment that spreads a star's light out into a rainbow (a spectrum) without needing a narrow slit — to extract, calibrate, and analyze that spectrum for stars and other targets.
+The spectroscopy pipeline extracts, calibrates, and analyzes a star's spectrum from images taken through a grism. A grism is a lens-like attachment that spreads a star's light out into a rainbow (a spectrum) without needing a narrow slit.
 
 ### 6.1 Purpose & Interfaces
 
@@ -282,7 +282,7 @@ $$
 
    The local sky background is subtracted only while pinpointing the spectrum's exact position on each column (by fitting a small Gaussian), not from the final extracted brightness $F(x)$ itself.
    * *Point sources vs. extended objects:* The width of the extraction aperture is wider for extended objects like nebulae or comets (about 60 pixels) than for point-like stars (about 10 pixels).
-3. **Converting Pixels to Wavelength:** Converts the pixel distance $x$ from the zero-order center into a wavelength $\lambda$, using the physical grating equation and fitting one unknown, the distance $L$ between the grating and the sensor:
+3. **Converting Pixels to Wavelength:** Converts the pixel distance $x$ from the zero-order center into a wavelength $\lambda$, using the physical grating equation. The equation has one unknown: the distance $L$ between the grating and the sensor.
 
 $$
 \lambda(x) = d\,\sin\!\left(\arctan\frac{x_{\text{mm}}}{L}\right) \tag{8}
@@ -291,7 +291,7 @@ $$
    Here $d$ is the spacing between grooves on the grating, and $x_{\text{mm}}$ is the pixel distance converted into physical millimeters using the sensor's pixel size.
    * *Reference lines:* The distance $L$ is calibrated using known hydrogen absorption/emission lines from the Balmer series ($\mathrm{H}\beta = 4861.3\text{ Å}, \mathrm{H}\gamma = 4340.5\text{ Å}, \mathrm{H}\delta = 4101.7\text{ Å}$), since their true wavelengths are already known precisely.
 4. **Correcting for Sensor Color Sensitivity:** Cameras aren't equally sensitive to every color of light. The extracted raw brightness is divided by the sensor's own QE curve to correct for this: $F_{\text{cal}}(\lambda) = F(x(\lambda)) / \text{QE}(\lambda)$.
-5. **An Alternative Path for Unstacked Frames:** Alongside the single-stacked-image approach above, there's a second path that works directly on a target's raw, unstacked frames, grouped into observing sessions the same way the photometry pipeline does (Section 5.2, concept 1). Each session's stars are identified once against a real star catalog — reusing an existing WCS from that session's own files when one is available, as in Section 4 — and every frame in that session then extracts a spectrum for those same, already-identified stars. This gives each spectrum a stable, real star identity shared across the whole session, instead of every frame producing its own disconnected, unidentified detection.
+5. **An Alternative Path for Unstacked Frames:** Alongside the single-stacked-image approach above, there's a second path that works directly on a target's raw, unstacked frames, grouped into observing sessions the same way the photometry pipeline does (Section 5.2, concept 1). Each session's stars are identified once against a real star catalog. When an existing WCS is already available from that session's own files (Section 4), this step reuses it instead of solving again. Every frame in that session then extracts a spectrum for those same, already-identified stars. This gives each spectrum a stable, real star identity shared across the whole session, instead of every frame producing its own disconnected, unidentified detection.
 
 ### 6.3 Pipeline Theory of Operations
 
@@ -328,10 +328,10 @@ The moving object detection pipeline finds, tracks, and identifies solar-system 
 
 ### 7.2 Major Concepts and Governing Equations
 
-Stacking averages moving objects away — they land in a different spot in every frame, so stacking blurs them into nothing. Detection has to work on individual, unstacked photos instead, in five steps:
+Stacking averages moving objects away. They land in a different spot in every frame, so stacking blurs them into nothing. Detection has to work on individual, unstacked photos instead, in five steps:
 
 1. **Single-Frame Detection:** Finds every bright point source in each raw exposure.
-2. **Filtering Out Obvious Non-Movers:** Chains raw detections together across frames and throws out any chain whose position barely changes, either in pixels (a stuck "hot" pixel that's always in the same spot) or in sky coordinates (a normal, stationary star that an earlier step missed). This filtering works without needing to check against any external star catalog.
+2. **Filtering Out Obvious Non-Movers:** Chains raw detections together across frames. It throws out any chain whose position barely changes — either in pixels (a stuck "hot" pixel that's always in the same spot) or in sky coordinates (a normal, stationary star that an earlier step missed). This filtering works without needing to check against any external star catalog.
 3. **Persistence Filtering:** Only keeps chains that show up in at least $M \ge 3$ consecutive photos, which rules out one-off cosmic ray hits.
 4. **Fitting a Straight-Line Path:** For each surviving chain, fits how its position drifts in Right Ascension ($\Delta\alpha_m\cos\delta$) and Declination ($\Delta\delta_m$) against time $t_m$, using ordinary least-squares regression (the standard "best-fit line" method):
 
@@ -340,7 +340,7 @@ $$
 $$
 
    How well each fit matches a straight line is measured with the coefficient of determination, $R^2$ (a standard statistic between 0 and 1, where 1 means a perfect straight line). A track is rejected if its weaker-fitting axis (RA or Dec) falls below a minimum $R^2$.
-5. **Checking Against Known Objects:** Compares each straight-line motion path against SkyBoT, an online database that predicts where known solar-system objects should be at a given time (an ephemeris), by checking a small circular patch of sky around the candidate's predicted position (a "cone search"). A match confirms the object's identity; no match may mean a new discovery.
+5. **Checking Against Known Objects:** Compares each straight-line motion path against SkyBoT, an online database that predicts where known solar-system objects should be at a given time (an ephemeris). It does this by checking a small circular patch of sky around the candidate's predicted position — a "cone search." A match confirms the object's identity. No match may mean a new discovery.
 
 ### 7.3 Pipeline Theory of Operations
 
@@ -378,12 +378,12 @@ Eight observing sessions were processed through all five pipelines:
 2. **M 13 Session (Spectroscopy & Stacking):** A dense star cluster grism field ($N = 86$ light exposures, 2520s total exposure time).
 3. **Alcor Session (Spectroscopy):** A multi-frame grism sequence ($N = 138$ light exposures, 1080s total exposure time).
 4. **NGC 2244 Session (Photometry):** An open star cluster time-series sequence ($N = 29$ light exposures, 10,800s total exposure time).
-5. **M 81 Session (Photometry & Stacking):** A deep spiral-galaxy sequence, originally $N = 46$ light exposures (7,230s total exposure time) at the time of the stacking/astrometry results below. Since then, ongoing observation grew the same target's data to $N = 258$ light exposures across 8 separate observing sessions (2023-05 through 2026-05). That growth in the *number of sessions*, not just the number of frames, is what exposed the photometry cross-session tracking problem covered in Finding 6 (Section 8.3); it's a separate result from the single-session stacking/astrometry numbers below.
+5. **M 81 Session (Photometry & Stacking):** A deep spiral-galaxy sequence, originally $N = 46$ light exposures (7,230s total exposure time) at the time of the stacking/astrometry results below. Since then, ongoing observation grew the same target's data to $N = 258$ light exposures across 8 separate observing sessions (2023-05 through 2026-05). That growth in the *number of sessions*, not just the number of frames, is what exposed the photometry cross-session tracking problem covered in Finding 6 (Section 8.3). It's a separate result from the single-session stacking/astrometry numbers below.
 6. **NGC 2903 Session (Photometry):** A deep galaxy field time series ($N = 36$ light exposures, 14,400s total exposure time).
 7. **NGC 2403 Session (Stacking, Astrometry & Moving Objects):** A wide-field galaxy sequence ($N = 70$ light exposures, 13,740s total exposure time).
 8. **NGC 1893 Session (Stacking & Astrometry):** An open cluster field ($N = 49$ light exposures, 7,800s total exposure time).
 
-All eight sessions were processed through the full pipeline sequence described in Sections 3–7 — calibration and outlier rejection, sky-position solving, brightness comparison, spectrum extraction, and moving-object tracking — followed by each pipeline's own after-the-fact quality check (Sections 3.4.2, 4.4.2, 5.4.2, 6.4.2, and the asteroid-detection equivalent).
+All eight sessions were processed through the full pipeline sequence described in Sections 3–7: calibration and outlier rejection, sky-position solving, brightness comparison, spectrum extraction, and moving-object tracking. Each session then went through its pipeline's own after-the-fact quality check (Sections 3.4.2, 4.4.2, 5.4.2, 6.4.2, and the asteroid-detection equivalent).
 
 ### 8.2 Empirical Results Across All Five Pipelines
 
@@ -406,13 +406,13 @@ Table 8 summarizes the results.
 
 ### 8.3 Key Empirical Findings
 
-1. **Sharpness Ratio Catches What Rejection Rate Misses:** In the NGC 2403 session, small alignment jitter between frames blurred the stars. Only $0.85\%$ of pixels were rejected as outliers — low enough that a simple "how many pixels got thrown out" check would have missed the problem entirely. But the whole-image sharpness ratio hit the $R_{\text{FWHM}} = 1.20$ warning threshold and correctly flagged it. This confirms that measuring overall star sharpness catches session-level quality problems that pixel-rejection counts alone would miss.
+1. **Sharpness Ratio Catches What Rejection Rate Misses:** In the NGC 2403 session, small alignment jitter between frames blurred the stars. Only $0.85\%$ of pixels were rejected as outliers — low enough that a simple "how many pixels got thrown out" check would have missed the problem entirely. But the whole-image sharpness ratio hit the $R_{\text{FWHM}} = 1.20$ warning threshold, and correctly flagged it. This confirms that measuring overall star sharpness catches session-level quality problems that pixel-rejection counts alone miss.
 2. **Wavelength Calibration Precision:** Fitting the grating equation to the Vega spectrum achieved a residual error of $\text{RMS}_{\Delta \lambda} = 0.42\text{ nm}$ across the Balmer hydrogen lines used for calibration, comfortably inside the $\le 1.0\text{ nm}$ precision needed for reliable brightness-vs-wavelength analysis.
-3. **Ensemble Photometry Stability:** On the 3-hour NGC 2244 sequence, comparing each star's brightness against a group of similarly bright field stars — specifically, the stars ranked 100th to 300th brightest — suppressed atmospheric brightness fluctuations down to a noise floor of $\sigma_m \le 0.012\text{ mag}$ for non-variable stars.
+3. **Ensemble Photometry Stability:** On the 3-hour NGC 2244 sequence, each star's brightness was compared against a group of similarly bright field stars — specifically, the stars ranked 100th to 300th brightest. This suppressed atmospheric brightness fluctuations down to a noise floor of $\sigma_m \le 0.012\text{ mag}$ for non-variable stars.
 4. **Moving-Object Filtering Works as Designed:** Tracking across unstacked exposures successfully eliminated single-frame cosmic rays and stationary hot pixels, using the $M \ge 3$ persistence requirement and the $R^2 \ge 0.98$ straight-line fit requirement.
-5. **A Faster Way to Match Nearby Stars:** Before comparing angular distances between stars, the pipeline now first narrows the search to only the stars that could plausibly be close together on the sky, using a quick bounding-box check. On a dense field like M 81 (150,000 detected sources across 46 frames), this eliminated 99.9% of star pairs that were never going to be close enough to match anyway, cutting the total run time for this step from over 20 minutes down to a few seconds — a 50 to 100 times speedup — while producing exactly the same matches every time as the slower, exhaustive approach.
-6. **A Real Bug in Cross-Session Photometry:** As the M 81 target's data grew to 8 observing sessions, testing found that its brightness-tracking step was, incorrectly, tracking stars across the *entire* observation history in one pass, using a single reference frame from whichever session happened to come first. Since a star's exact pixel position is only stable within one observing session, this corrupted almost all of the affected stars' measurements: 85–94% of frames read exactly zero brightness for a given star, across every brightness range. The resulting noise measurements disproportionately mislabeled the stars in the brightest fifth of the field (a quintile) as variable — 75% of that group flagged, versus only 3–10% in the other four-fifths — which is backwards from what should happen, since noise normally affects faint stars the most. A single-session comparison target (NGC 2903) showed none of this problem. The fix was to scope each brightness-tracking run to one observing session at a time (Section 5.2). Re-tested against the same real M 81 data, incorrect "brightest star" flagging dropped from 75% down to 14%, and the remaining variability correctly shifted to the faintest fifth of stars (46%, closely matching NGC 2903's own baseline of 47%) — the expected pattern once the bug was fixed. The number of distinct stars found also rose from 1,353 (one shared reference frame for all 8 sessions) to 11,392 (each of the 8 sessions using its own reference frame, counted separately rather than merged — see Finding 7).
-7. **Matching the Same Star Across Sessions:** Fixing Finding 6 made each session's measurements correct on their own, but left every session's stars as unrelated entries with no way to combine them into one continuous light curve per star. Implementing the cross-session star-matching described in Section 5.2 (concept 3), and testing it against the same real 8-session M 81 data, combined the previous 11,392 separate entries down to 8,422 (2,970 successful merges of the same star seen in different sessions). Running the exact same match twice in a row produced identical results both times, confirming it's fully repeatable. Testing at this real-world scale (thousands of stars per session) surfaced two problems that smaller test data hadn't: first, identifying stars by catalog name was accidentally also triggering a live lookup to an online star catalog for every single star on every successful run, adding a lot of unnecessary network delay for a step that only actually needed the already-solved sky position; that lookup was removed once it was no longer needed. Second, an early version of the cross-session matching compared every star to every other star one pair at a time, which doesn't scale — on the real M 81 data, this took over 45 minutes without finishing, and had to be replaced with a much faster, position-indexed search that solved an equivalent test case in 0.17 seconds. Separately, one of M 81's 8 sessions turned out to reference a different target's stacked image altogether, due to a pre-existing data-labeling mistake in the library, unrelated to the matching logic itself — and this pipeline correctly excluded just that one session from the results, confirming that one bad session doesn't spoil the other seven (Section 5.3, item 4).
+5. **A Faster Way to Match Nearby Stars:** Before comparing angular distances between stars, the pipeline now first narrows the search to only the stars that could plausibly be close together on the sky, using a quick bounding-box check. On a dense field like M 81 (150,000 detected sources across 46 frames), this eliminated 99.9% of star pairs that were never going to be close enough to match anyway. It cut the total run time for this step from over 20 minutes down to a few seconds — a 50 to 100 times speedup. And it produced exactly the same matches every time as the slower, exhaustive approach.
+6. **A Real Bug in Cross-Session Photometry:** As the M 81 target's data grew to 8 observing sessions, testing found a bug: its brightness-tracking step was tracking stars across the *entire* observation history in one pass, using a single reference frame from whichever session happened to come first. A star's exact pixel position is only stable within one observing session, so this corrupted almost all of the affected stars' measurements. 85–94% of frames read exactly zero brightness for a given star, across every brightness range. The resulting noise measurements disproportionately mislabeled the stars in the brightest fifth of the field (a quintile) as variable: 75% of that group got flagged, versus only 3–10% in the other four-fifths. That's backwards from what should happen, since noise normally affects faint stars the most. A single-session comparison target (NGC 2903) showed none of this problem. The fix scopes each brightness-tracking run to one observing session at a time (Section 5.2). Re-tested against the same real M 81 data, incorrect "brightest star" flagging dropped from 75% down to 14%. The remaining variability correctly shifted to the faintest fifth of stars (46%, closely matching NGC 2903's own baseline of 47%) — the expected pattern once the bug was fixed. The number of distinct stars found also rose, from 1,353 (one shared reference frame for all 8 sessions) to 11,392 (each of the 8 sessions using its own reference frame, counted separately rather than merged — see Finding 7).
+7. **Matching the Same Star Across Sessions:** Fixing Finding 6 made each session's measurements correct on their own. But it left every session's stars as unrelated entries, with no way to combine them into one continuous light curve per star. The cross-session star-matching described in Section 5.2 (concept 3) was implemented and tested against the same real 8-session M 81 data. It combined the previous 11,392 separate entries down to 8,422 — 2,970 successful merges of the same star seen in different sessions. Running the exact same match twice in a row produced identical results both times, confirming it's fully repeatable. Testing at this real-world scale (thousands of stars per session) surfaced two problems that smaller test data hadn't. First, identifying stars by catalog name was accidentally also triggering a live lookup to an online star catalog for every single star on every successful run. That added a lot of unnecessary network delay for a step that only actually needed the already-solved sky position, so the lookup was removed once it was no longer needed. Second, an early version of the cross-session matching compared every star to every other star one pair at a time, which doesn't scale: on the real M 81 data, this took over 45 minutes without finishing. It was replaced with a much faster, position-indexed search that solved an equivalent test case in 0.17 seconds. Separately, one of M 81's 8 sessions turned out to reference a different target's stacked image altogether, due to a pre-existing data-labeling mistake in the library unrelated to the matching logic itself. This pipeline correctly excluded just that one session from the results, confirming that one bad session doesn't spoil the other seven (Section 5.3, item 4).
 
 ### 8.4 Future Recommended Target Additions
 
@@ -430,7 +430,7 @@ This document presented a single, unified design for amateur astronomy image pro
 
 ## Acknowledgments
 
-This design builds on several open-source tools and public services rather than reimplementing their work: Siril for frame stacking and registration; Astropy [6] and its affiliated packages photutils and specutils for FITS handling, source detection, aperture photometry, and spectral data structures; Astrometry.net [7] for blind plate solving; the SIMBAD astronomical database [8] for star identification; and SkyBoT [9] for solar-system ephemeris cross-matching.
+This design builds on several open-source tools and public services rather than reimplementing their work. Siril handles frame stacking and registration. Astropy [6] and its affiliated packages photutils and specutils handle FITS handling, source detection, aperture photometry, and spectral data structures. Astrometry.net [7] provides blind plate solving. The SIMBAD astronomical database [8] provides star identification. SkyBoT [9] provides solar-system ephemeris cross-matching.
 
 ---
 

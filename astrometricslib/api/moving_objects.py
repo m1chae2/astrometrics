@@ -5,6 +5,7 @@ searching through a series of images to find things that move (like asteroids)
 against the fixed background stars.
 """
 
+from astrometricslib.drivers.job_logging import registered_job
 from astrometricslib.models.moving_object import AsteroidDetectionCandidate
 from astrometricslib.models.moving_object_config import MovingObjectConfig
 from astrometricslib.models.target import Target
@@ -72,7 +73,14 @@ class MovingObjectRecovery:
             for frame in target.frames
             if frame.role == "LIGHT" and frame.timestamp is not None
         ]
-        return self._pipeline.process(target.id, target.stacked_image, light_frames)
+        with registered_job(
+            enabled=True,
+            job_type="asteroid_detection",
+            target_id=target.id,
+            completed_message=f"[{target.id}] Asteroid detection completed successfully.",
+            failed_message=f"[{target.id}] Asteroid detection failed.",
+        ):
+            return self._pipeline.process(target.id, target.stacked_image, light_frames)
 
     @property
     def last_run_metrics(self) -> dict[str, int]:

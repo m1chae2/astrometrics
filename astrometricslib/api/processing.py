@@ -379,18 +379,31 @@ class ProcessingPipelines:
         """
         from astrometricslib.pipelines.stacking import stage as stacking_tasks
 
-        return stacking_tasks.stack_frames(
-            target,
+        with registered_job(
+            enabled=True,
+            job_type="stacking",
+            target_id=target.id,
             log_file=log_file,
-            frames_to_stack=frames_to_stack,
-            filter_type=filter_type,
-            rejection_sigma=rejection_sigma,
-            filter_wfwhm=filter_wfwhm,
-            filter_round=filter_round,
-            stack_weight=stack_weight,
-            generate_rejmap=generate_rejmap,
-            output_file=output_file,
-        )
+            completed_message=f"[{target.id}] Stacking completed successfully.",
+            failed_message=f"[{target.id}] Stacking failed.",
+        ) as job:
+            stacked_path = stacking_tasks.stack_frames(
+                target,
+                log_file=log_file,
+                frames_to_stack=frames_to_stack,
+                filter_type=filter_type,
+                rejection_sigma=rejection_sigma,
+                filter_wfwhm=filter_wfwhm,
+                filter_round=filter_round,
+                stack_weight=stack_weight,
+                generate_rejmap=generate_rejmap,
+                output_file=output_file,
+            )
+            # Stacking can finish without raising and still produce no
+            # image, so the outcome is decided here rather than left to
+            # the context manager's "no exception means success" default.
+            job.mark("completed" if stacked_path else "failed", 100)
+            return stacked_path
 
     def run_astrometry(self, target: Target, **kwargs: Any) -> dict[str, Any]:
         """Run astrometric plate-solving and catalog cross-matching.

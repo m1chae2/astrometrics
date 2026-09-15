@@ -376,11 +376,9 @@ def merge_spectroscopy_stellar_object(existing_stellar_object, updated_stellar_o
     existing_stellar_object.magnitude = updated_stellar_object.magnitude
     existing_stellar_object.is_catalog_identified = updated_stellar_object.is_catalog_identified
     existing_stellar_object.star_data = updated_stellar_object.star_data
-    existing_stellar_object.detected_angle = updated_stellar_object.detected_angle
-    existing_stellar_object.dispersion_angle = updated_stellar_object.dispersion_angle
-    existing_stellar_object.trail_centerline_px = updated_stellar_object.trail_centerline_px
-    existing_stellar_object.trail_width_px = updated_stellar_object.trail_width_px
-    existing_stellar_object.rectangle = updated_stellar_object.rectangle
+    # Carries the trail geometry (rectangle, dispersion_angle, etc.)
+    # along for free -- it lives on SpectroscopyResult now, so a full
+    # replace here covers it without copying each field separately.
     existing_stellar_object.spectroscopy = updated_stellar_object.spectroscopy
     existing_stellar_object.spectra_history = merge_spectra_history(
         existing_stellar_object.spectra_history, updated_stellar_object.spectra_history
@@ -401,10 +399,21 @@ def merge_photometry_stellar_object(existing_stellar_object, updated_stellar_obj
     """
     if existing_stellar_object is None:
         return updated_stellar_object
-    existing_stellar_object.photometry = updated_stellar_object.photometry
-    if getattr(updated_stellar_object, "mean_flux", None) is not None:
-        existing_stellar_object.mean_flux = updated_stellar_object.mean_flux
-        existing_stellar_object.coefficient_of_variation = updated_stellar_object.coefficient_of_variation
+    updated_photometry = updated_stellar_object.photometry
+    existing_photometry = existing_stellar_object.photometry
+    # A repeat run that couldn't recompute mean_flux/coefficient_of_variation
+    # this time (too few usable flux points this session) keeps the
+    # star's last known values instead of wiping them to None; every
+    # other photometry field still comes fully from this run.
+    if (
+        updated_photometry is not None
+        and updated_photometry.mean_flux is None
+        and existing_photometry is not None
+        and existing_photometry.mean_flux is not None
+    ):
+        updated_photometry.mean_flux = existing_photometry.mean_flux
+        updated_photometry.coefficient_of_variation = existing_photometry.coefficient_of_variation
+    existing_stellar_object.photometry = updated_photometry
     # Cross-session matching (see _match_and_merge_across_sessions)
     # recomputes both fresh each run, so a full replace keeps a repeat
     # run's result authoritative rather than accumulating stale matches.

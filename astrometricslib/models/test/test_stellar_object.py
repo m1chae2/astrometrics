@@ -10,12 +10,12 @@ that they stay in lockstep by construction.
 
 import pytest
 
-from astrometricslib.models.stellar_source import StellarObject, VariableCandidate
+from astrometricslib.models.stellar_source import PhotometryResult, StellarObject, VariableCandidate
 
 
 def test_variability_score_tracks_coefficient_of_variation():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verify variability_score is always coefficient_of_variation * 100."""
-    star = StellarObject(id="TestStar", coefficient_of_variation=0.075)
+    star = StellarObject(id="TestStar", photometry=PhotometryResult(coefficient_of_variation=0.075))
 
     assert star.variability_score == pytest.approx(7.5)
 
@@ -24,7 +24,7 @@ def test_variability_score_is_none_before_any_variability_is_measured():  # ruff
     """Verify a star with no coefficient_of_variation yet reports None."""
     star = StellarObject(id="TestStar")
 
-    assert star.coefficient_of_variation is None
+    assert star.photometry.coefficient_of_variation is None
     assert star.variability_score is None
 
 

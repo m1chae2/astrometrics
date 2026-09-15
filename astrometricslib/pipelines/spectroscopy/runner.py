@@ -198,13 +198,15 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
             else False
         )
         dispersion_angles = [
-            obj.dispersion_angle for obj in stellar_objects if obj.dispersion_angle is not None
+            obj.spectroscopy.dispersion_angle
+            for obj in stellar_objects
+            if obj.spectroscopy and obj.spectroscopy.dispersion_angle is not None
         ]
         all_trail_widths = [
             width
             for obj in stellar_objects
-            if obj.trail_width_px
-            for width in obj.trail_width_px
+            if obj.spectroscopy and obj.spectroscopy.trail_width_px
+            for width in obj.spectroscopy.trail_width_px
             if width > 0.0  # 0.0 marks a per-position fixed-box fallback, not a real fit
         ]
         trail_width_profile_available = bool(all_trail_widths)

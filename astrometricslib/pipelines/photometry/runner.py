@@ -264,8 +264,8 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         candidates_formatted = [
             VariableCandidate(
                 id=star.id,
-                meanFlux=star.mean_flux,
-                coefficientOfVariation=star.coefficient_of_variation,
+                meanFlux=star.photometry.mean_flux,
+                coefficientOfVariation=star.photometry.coefficient_of_variation,
                 ra=float(star.right_ascension) if star.right_ascension else 0.0,
                 dec=float(star.declination) if star.declination else 0.0,
             )
@@ -294,8 +294,8 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         long_term_candidates_formatted = [
             VariableCandidate(
                 id=star.id,
-                meanFlux=star.mean_flux,
-                coefficientOfVariation=star.coefficient_of_variation,
+                meanFlux=star.photometry.mean_flux,
+                coefficientOfVariation=star.photometry.coefficient_of_variation,
                 ra=float(star.right_ascension) if star.right_ascension else 0.0,
                 dec=float(star.declination) if star.declination else 0.0,
             )

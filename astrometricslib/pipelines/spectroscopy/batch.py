@@ -262,13 +262,15 @@ def _process_single_spectroscopy_frame_worker_v2(
 
         result["stars_processed"] = len(stellar_objects)
         result["dispersion_angles"] = [
-            obj.dispersion_angle for obj in stellar_objects if obj.dispersion_angle is not None
+            obj.spectroscopy.dispersion_angle
+            for obj in stellar_objects
+            if obj.spectroscopy and obj.spectroscopy.dispersion_angle is not None
         ]
         result["trail_widths"] = [
             width
             for obj in stellar_objects
-            if obj.trail_width_px
-            for width in obj.trail_width_px
+            if obj.spectroscopy and obj.spectroscopy.trail_width_px
+            for width in obj.spectroscopy.trail_width_px
             if width > 0.0  # 0.0 marks a per-position fixed-box fallback, not a real fit
         ]
         result["zero_order_saturation_fractions"] = [

@@ -4,8 +4,6 @@ Description: Combines 2D star fields and 1D analysis visualization layers
 into interactive 2-panel views.
 """
 
-from typing import Any
-
 import matplotlib.pyplot as plt
 
 from astrometricslib.models.stellar_source import StellarObject
@@ -21,22 +19,8 @@ from .layers import (
     StarOverlay,
     StarSelectionOverlay,
 )
+from .spectroscopy_field_access import get_spectroscopy_field as _get_spectroscopy_field
 from .visualization_config import VisualizationConfig
-
-
-def _get_spectroscopy_field(obj: Any, field_name: str, default: Any = None) -> Any:
-    """Read one spectroscopy-result field off a `StellarObject` or dict.
-
-    Returns
-    -------
-    value : `Any`
-        The field's value, or `default` if there's no spectroscopy
-        result at all.
-    """
-    if hasattr(obj, "star_data"):
-        spectroscopy = getattr(obj, "spectroscopy", None)
-        return getattr(spectroscopy, field_name, default) if spectroscopy is not None else default
-    return (obj.get("spectroscopy") or {}).get(field_name, default)
 
 
 class _AnalysisView:
@@ -244,8 +228,8 @@ class _AnalysisView:
                 return i
 
             if self.mode == "spectroscopy":
-                rect = getattr(obj, "rectangle", None) if is_obj else obj.get("rectangle")
-                angle = getattr(obj, "dispersion_angle", 0.0) if is_obj else obj.get("dispersion_angle", 0.0)
+                rect = _get_spectroscopy_field(obj, "rectangle")
+                angle = _get_spectroscopy_field(obj, "dispersion_angle", 0.0)
                 if rect is not None and hit_test_rectangle(event_x, event_y, rect, angle):
                     return i
         return None
@@ -257,12 +241,8 @@ class _AnalysisView:
         obj = self.stellar_objects[self.active_star_index]
         if self.mode != "spectroscopy":
             return
-        rect = getattr(obj, "rectangle", None) if hasattr(obj, "star_data") else obj.get("rectangle")
-        angle = (
-            getattr(obj, "dispersion_angle", 0.0)
-            if hasattr(obj, "star_data")
-            else obj.get("dispersion_angle", 0.0)
-        )
+        rect = _get_spectroscopy_field(obj, "rectangle")
+        angle = _get_spectroscopy_field(obj, "dispersion_angle", 0.0)
         if rect is None:
             return
 

@@ -488,7 +488,7 @@ def _load_target_stars(target: Any, stars: Any, limit: int) -> tuple[list, list,
             obj
             for obj in all_objects
             if target_id in getattr(obj, "target_ids", [])
-            and getattr(obj, "dispersion_angle", None) is None
+            and getattr(obj.spectroscopy, "dispersion_angle", None) is None
             and not getattr(obj, "id", "").startswith("Star_")
         ),
         key=_magnitude_sort_key,
@@ -500,7 +500,8 @@ def _load_target_stars(target: Any, stars: Any, limit: int) -> tuple[list, list,
     spectral_stars = [
         obj
         for obj in all_objects
-        if target_id in getattr(obj, "target_ids", []) and getattr(obj, "dispersion_angle", None) is not None
+        if target_id in getattr(obj, "target_ids", [])
+        and getattr(obj.spectroscopy, "dispersion_angle", None) is not None
     ]
     spectral_by_id = {getattr(star, "id", ""): star for star in spectral_stars}
 

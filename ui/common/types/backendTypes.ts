@@ -199,16 +199,8 @@ export interface Spectrum {
   starData?: any;
   data?: any[];
   spectroscopy?: SpectroscopyResult | null;
-  rectangle?: any | null;
-  detectedAngle?: number | null;
-  dispersionAngle?: number | null;
-  trailCenterlinePx?: number[] | null;
-  trailWidthPx?: number[] | null;
   stellarSpectralType?: string;
   targetIds?: string[];
-  extractionRadius?: number | null;
-  meanFlux?: number | null;
-  coefficientOfVariation?: number | null;
   sessionMatches?: StellarSessionMatch[];
   isCatalogIdentified?: boolean;
   /** Flexible index to accommodate additional data from the backend. */
@@ -251,6 +243,12 @@ export interface SpectroscopyResult {
   selfDeterminedSpectralTypeConfidence?: number | null;
   selfDeterminedSpectralTypeCandidates?: Record<string, any>[];
   probableSpectralFeatures?: Record<string, any>[];
+  rectangle?: any | null;
+  detectedAngle?: number | null;
+  dispersionAngle?: number | null;
+  trailCenterlinePx?: number[] | null;
+  trailWidthPx?: number[] | null;
+  extractionRadius?: number | null;
 }
 
 /**
@@ -299,6 +297,8 @@ export interface PhotometryResult {
   isSaturated?: boolean[];
   periodogram?: PeriodogramResult | null;
   transitCandidate?: TransitCandidate | null;
+  meanFlux?: number | null;
+  coefficientOfVariation?: number | null;
 }
 
 /**

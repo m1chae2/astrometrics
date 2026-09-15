@@ -32,8 +32,9 @@ def _reference_star(star_id: str, x: float, y: float) -> StellarObject:
 def _spectral_star(star_id: str, x: float, y: float) -> StellarObject:
     star = StellarObject(id=star_id, name=star_id)
     star.star_data = {"xcentroid": x, "ycentroid": y}
-    star.dispersion_angle = 1.5
-    star.spectroscopy = SpectroscopyResult(wavelengths_angstrom=[4000.0], intensities=[1.0])
+    star.spectroscopy = SpectroscopyResult(
+        wavelengths_angstrom=[4000.0], intensities=[1.0], dispersion_angle=1.5
+    )
     return star
 
 
@@ -72,8 +73,10 @@ def test_identify_spectral_stars_via_registration_matches_rotated_translated_fie
         assert spectral_star.name == reference_star.name
         assert spectral_star.is_catalog_identified is True
         # Spectroscopy-owned fields must survive identification untouched.
-        assert spectral_star.dispersion_angle == pytest.approx(1.5)
-        expected_spectrum = SpectroscopyResult(wavelengths_angstrom=[4000.0], intensities=[1.0])
+        assert spectral_star.spectroscopy.dispersion_angle == pytest.approx(1.5)
+        expected_spectrum = SpectroscopyResult(
+            wavelengths_angstrom=[4000.0], intensities=[1.0], dispersion_angle=1.5
+        )
         assert spectral_star.spectroscopy == expected_spectrum
 
 

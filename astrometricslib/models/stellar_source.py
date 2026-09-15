@@ -95,6 +95,15 @@ class PhotometryResult(BaseModel):
     is_saturated: list[bool] = Field(default_factory=list, alias="isSaturated")
     periodogram: PeriodogramResult | None = Field(default=None, alias="periodogram")
     transit_candidate: TransitCandidate | None = Field(default=None, alias="transitCandidate")
+    mean_flux: float | None = Field(default=None, alias="meanFlux")
+    # How spread out this star's brightness measurements are relative to
+    # their average -- a standard way to compare "noisiness" between
+    # stars of different brightness. Higher can mean the star is
+    # actually variable, or just noisily measured. The single stored
+    # source of truth for this star's variability; StellarObject's own
+    # variability_score below is just this same number on a different
+    # scale, computed rather than stored so the two can never drift apart.
+    coefficient_of_variation: float | None = Field(default=None, alias="coefficientOfVariation")
 
 
 class StellarSessionMatch(BaseModel):
@@ -162,6 +171,24 @@ class SpectroscopyResult(BaseModel):
     probable_spectral_features: list[dict[str, Any]] = Field(
         default_factory=list, alias="probableSpectralFeatures"
     )
+    # The pixel box drawn around the star's spectrum trail in the
+    # picture, used to redraw that box later without redetecting it.
+    rectangle: Any | None = Field(default=None, alias="rectangle")
+    # The raw tilt angle measured straight off the detected trail, before
+    # any cleanup. dispersion_angle below is the value actually used
+    # downstream.
+    detected_angle: float | None = Field(default=None, alias="detectedAngle")
+    # The angle, in degrees, that this star's spectrum "rainbow" streak
+    # is tilted at (see SpectroscopyPipelineQualityMetrics for more on
+    # this streak, called the "trail").
+    dispersion_angle: float | None = Field(default=None, alias="dispersionAngle")
+    # The pixel coordinates running down the middle of that trail, and
+    # how wide the trail is at each point.
+    trail_centerline_px: list[float] | None = Field(default=None, alias="trailCenterlinePx")
+    trail_width_px: list[float] | None = Field(default=None, alias="trailWidthPx")
+    # How many pixels out from the star's center to gather light from
+    # when measuring its spectrum.
+    extraction_radius: int | None = Field(default=None, alias="extractionRadius")
 
 
 class StellarObject(BaseModel):
@@ -203,37 +230,10 @@ class StellarObject(BaseModel):
     # nested result per domain, instead of that domain's fields loose
     # on the star.
     spectroscopy: SpectroscopyResult | None = Field(default_factory=SpectroscopyResult, alias="spectroscopy")
-    # The pixel box drawn around the star's spectrum trail in the
-    # picture, used to redraw that box later without redetecting it.
-    rectangle: Any | None = Field(default=None, alias="rectangle")
-    # The raw tilt angle measured straight off the detected trail, before
-    # any cleanup. dispersion_angle below is the value actually used
-    # downstream.
-    detected_angle: float | None = Field(default=None, alias="detectedAngle")
-    # The angle, in degrees, that this star's spectrum "rainbow" streak
-    # is tilted at (see SpectroscopyPipelineQualityMetrics for more on
-    # this streak, called the "trail").
-    dispersion_angle: float | None = Field(default=None, alias="dispersionAngle")
-    # The pixel coordinates running down the middle of that trail, and
-    # how wide the trail is at each point.
-    trail_centerline_px: list[float] | None = Field(default=None, alias="trailCenterlinePx")
-    trail_width_px: list[float] | None = Field(default=None, alias="trailWidthPx")
     # See the comment on spectral_type above -- this is normally the
     # same value, kept as a separate field for the cluster-entry case.
     stellar_spectral_type: str = Field(default="", alias="stellarSpectralType")
     target_ids: list[str] = Field(default_factory=list, alias="targetIds")
-    # How many pixels out from the star's center to gather light from
-    # when measuring its spectrum.
-    extraction_radius: int | None = Field(default=None, alias="extractionRadius")
-    mean_flux: float | None = Field(default=None, alias="meanFlux")
-    # How spread out this star's brightness measurements are relative to
-    # their average -- a standard way to compare "noisiness" between
-    # stars of different brightness. Higher can mean the star is
-    # actually variable, or just noisily measured. The single stored
-    # source of truth for this star's variability; variability_score
-    # below is just this same number on a different scale, computed
-    # rather than stored so the two can never drift apart.
-    coefficient_of_variation: float | None = Field(default=None, alias="coefficientOfVariation")
     session_matches: list[StellarSessionMatch] = Field(default_factory=list, alias="sessionMatches")
     is_catalog_identified: bool = Field(default=False, alias="isCatalogIdentified")
 
@@ -245,10 +245,11 @@ class StellarObject(BaseModel):
         Returns
         -------
         variability_score : `float` or `None`
-            `coefficient_of_variation` multiplied by 100, or `None`
-            before any variability has been measured for this star.
+            `photometry.coefficient_of_variation` multiplied by 100, or
+            `None` before any variability has been measured for this star.
         """
-        return self.coefficient_of_variation * 100.0 if self.coefficient_of_variation is not None else None
+        cv = self.photometry.coefficient_of_variation if self.photometry else None
+        return cv * 100.0 if cv is not None else None
 
     @computed_field(alias="hasSpectra")
     @property
@@ -355,7 +356,7 @@ class VariableCandidate(BaseModel):
     # How spread out this star's brightness measurements are relative to
     # their average. A higher number is one sign the star might really
     # be variable. The single stored source of truth here too -- see
-    # StellarObject.coefficient_of_variation.
+    # PhotometryResult.coefficient_of_variation.
     coefficient_of_variation: float = Field(..., alias="coefficientOfVariation", ge=0.0)
     ra: float = Field(..., ge=0.0, le=360.0, alias="ra")
     dec: float = Field(..., ge=-90.0, le=90.0, alias="dec")

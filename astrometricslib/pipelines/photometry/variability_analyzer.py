@@ -344,8 +344,8 @@ def _compute_star_coefficients_of_variation(stellar_objects: list[StellarObject]
             mean_flux, std_flux = np.mean(fluxes), np.std(fluxes)
             if mean_flux > 0:
                 cv = float(std_flux / mean_flux)
-                star.mean_flux = float(mean_flux)
-                star.coefficient_of_variation = cv
+                star.photometry.mean_flux = float(mean_flux)
+                star.photometry.coefficient_of_variation = cv
                 cv_list.append(cv)
 
         if getattr(star, "star_data", None) and isinstance(star.star_data, dict):
@@ -464,7 +464,7 @@ def _flag_variable_stars_by_adaptive_cutoff(
     adaptive_cutoff = _adaptive_cv_cutoff(cv_list, sigma_threshold)
 
     for star in stellar_objects:
-        cv = getattr(star, "coefficient_of_variation", None)
+        cv = getattr(star.photometry, "coefficient_of_variation", None)
         if cv is None:
             continue
 

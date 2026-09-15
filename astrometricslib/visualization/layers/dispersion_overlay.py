@@ -6,6 +6,7 @@ For slitless grism frames.
 from matplotlib.patches import Rectangle
 
 from astrometricslib.visualization.geometry import get_rotated_rectangle_bottom_left
+from astrometricslib.visualization.spectroscopy_field_access import get_spectroscopy_field
 
 
 class DispersionOverlay:
@@ -46,9 +47,8 @@ class DispersionOverlay:
         target_list = stellar_objects[:limit] if limit is not None else stellar_objects
 
         for i, obj in enumerate(target_list):
-            is_obj = hasattr(obj, "star_data")
-            angle = getattr(obj, "dispersion_angle", 0.0) if is_obj else obj.get("dispersion_angle", 0.0)
-            rect_info = getattr(obj, "rectangle", None) if is_obj else obj.get("rectangle")
+            angle = get_spectroscopy_field(obj, "dispersion_angle", 0.0)
+            rect_info = get_spectroscopy_field(obj, "rectangle")
 
             if rect_info is not None:
                 is_active = i == active_index

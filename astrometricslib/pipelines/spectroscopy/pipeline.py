@@ -169,7 +169,7 @@ class SpectroscopyPipeline:
         # we process it automatically using a wider measuring area.
         if context.extended_target:
             try:
-                ext_radius = getattr(context.extended_target, "extraction_radius", 60)
+                ext_radius = getattr(context.extended_target.spectroscopy, "extraction_radius", 60)
                 if ext_radius is None:
                     ext_radius = 60
 
@@ -338,7 +338,6 @@ class SpectroscopyPipeline:
         know the camera's exact QE curve, we fix the data here. If we
         don't know the camera, we just skip this step.
         """
-        star.detected_angle = result["detected_angle"]
         wavelengths_angstrom = [float(w) * 10.0 for w in result["wavelengths"]]
         intensities = result["intensities"]
 
@@ -369,6 +368,14 @@ class SpectroscopyPipeline:
             intensity=np.array(classification_intensities),
         )
 
+        # Compute the visual overlay rectangle and total rotated
+        # dispersion angle
+        rectangle, dispersion_angle = self._dispersion_overlay_geometry(
+            result["target_pos"],
+            self.config.extraction_radius,
+            dispersion_angle_degrees=result["detected_angle"],
+        )
+
         star.spectroscopy = SpectroscopyResult(
             wavelengths_angstrom=wavelengths_angstrom,
             intensities=intensities,
@@ -377,6 +384,11 @@ class SpectroscopyPipeline:
             self_determined_spectral_type_confidence=classification["confidence"],
             self_determined_spectral_type_candidates=classification["ranked_types"],
             probable_spectral_features=probable_spectral_features,
+            rectangle=rectangle,
+            detected_angle=result["detected_angle"],
+            dispersion_angle=dispersion_angle,
+            trail_centerline_px=result.get("trail_centerline_px"),
+            trail_width_px=result.get("trail_width_px"),
         )
 
         # Records this extraction as one more epoch in the star's own
@@ -397,19 +409,9 @@ class SpectroscopyPipeline:
             )
         ]
 
-        star.trail_centerline_px = result.get("trail_centerline_px")
-        star.trail_width_px = result.get("trail_width_px")
         if isinstance(star.star_data, dict):
             star.star_data["xcentroid"] = result["target_pos"][0]
             star.star_data["ycentroid"] = result["target_pos"][1]
-
-        # Compute the visual overlay rectangle and total rotated
-        # dispersion angle
-        star.rectangle, star.dispersion_angle = self._dispersion_overlay_geometry(
-            result["target_pos"],
-            self.config.extraction_radius,
-            dispersion_angle_degrees=result["detected_angle"],
-        )
 
     def _process_single_star(
         self, image: AstrometricsImage, pos: tuple[float, float], auto_detect_angle: bool = True
@@ -771,7 +773,9 @@ class SpectroscopyPipeline:
                 "ycentroid": float(extraction_center[1]),
                 "flux": 100000.0,
             },
-            rectangle=rectangle,
-            dispersion_angle=dispersion_angle,
-            extraction_radius=int(extraction_radius),
+            spectroscopy=SpectroscopyResult(
+                rectangle=rectangle,
+                dispersion_angle=dispersion_angle,
+                extraction_radius=int(extraction_radius),
+            ),
         )

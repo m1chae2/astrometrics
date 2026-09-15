@@ -111,7 +111,7 @@ def test_plot_target_dashboard_raises_on_no_catalog_stars():  # ruff: ignore[mis
     mock_star_synthetic = MagicMock()
     mock_star_synthetic.id = "Star_1"
     mock_star_synthetic.target_ids = ["M 13"]
-    mock_star_synthetic.dispersion_angle = None
+    mock_star_synthetic.spectroscopy.dispersion_angle = None
 
     mock_astrometrics = MagicMock()
     mock_astrometrics.stars.list_objects.return_value = [mock_star_synthetic]
@@ -141,7 +141,7 @@ def test_plot_target_dashboard_dynamic_layout_cases(monkeypatch):  # ruff: ignor
     star_catalog = MagicMock()
     star_catalog.id = "Gaia DR3 12345"
     star_catalog.target_ids = ["M 13"]
-    star_catalog.dispersion_angle = None
+    star_catalog.spectroscopy.dispersion_angle = None
     star_catalog.magnitude = 10.5
     star_catalog.name = "Gaia 12345"
     star_catalog.star_data = {"xcentroid": 100.0, "ycentroid": 100.0}
@@ -155,12 +155,12 @@ def test_plot_target_dashboard_dynamic_layout_cases(monkeypatch):  # ruff: ignor
     star_spectral = MagicMock()
     star_spectral.id = "Gaia DR3 12345::spectroscopy"
     star_spectral.target_ids = ["M 13"]
-    star_spectral.dispersion_angle = 45.0
     star_spectral.name = "Gaia 12345 Spec"
     star_spectral.stellar_spectral_type = "G2V"
     star_spectral.spectroscopy = SpectroscopyResult(
         wavelengths_angstrom=[4000.0, 5000.0],
         intensities=[10.0, 20.0],
+        dispersion_angle=45.0,
     )
 
     mock_astrometrics = MagicMock()
@@ -175,7 +175,7 @@ def test_plot_target_dashboard_dynamic_layout_cases(monkeypatch):  # ruff: ignor
     star_catalog_no_spec = MagicMock()
     star_catalog_no_spec.id = "Gaia DR3 99999"
     star_catalog_no_spec.target_ids = ["M 13"]
-    star_catalog_no_spec.dispersion_angle = None
+    star_catalog_no_spec.spectroscopy.dispersion_angle = None
     star_catalog_no_spec.magnitude = 11.0
     star_catalog_no_spec.star_data = {"xcentroid": 50.0, "ycentroid": 50.0}
     star_catalog_no_spec.photometry = mock_light_curve
@@ -189,7 +189,7 @@ def test_plot_target_dashboard_dynamic_layout_cases(monkeypatch):  # ruff: ignor
     star_catalog_bare = MagicMock()
     star_catalog_bare.id = "Gaia DR3 88888"
     star_catalog_bare.target_ids = ["M 13"]
-    star_catalog_bare.dispersion_angle = None
+    star_catalog_bare.spectroscopy.dispersion_angle = None
     star_catalog_bare.magnitude = 12.0
     star_catalog_bare.star_data = {"xcentroid": 20.0, "ycentroid": 20.0}
     star_catalog_bare.photometry = None
@@ -291,7 +291,7 @@ def test_plot_target_dashboard_draws_asteroid_candidates_on_the_star_field(tmp_p
     star_catalog_bare = MagicMock()
     star_catalog_bare.id = "Gaia DR3 88888"
     star_catalog_bare.target_ids = ["M 13"]
-    star_catalog_bare.dispersion_angle = None
+    star_catalog_bare.spectroscopy.dispersion_angle = None
     star_catalog_bare.magnitude = 12.0
     star_catalog_bare.star_data = {"xcentroid": 20.0, "ycentroid": 20.0}
     star_catalog_bare.photometry = None

@@ -56,7 +56,7 @@ def test_identify_variable_stars_uses_detrended_flux_when_present():  # ruff: ig
 
     analyzer.identify_variable_stars()
 
-    assert star.coefficient_of_variation == pytest.approx(0.0)
+    assert star.photometry.coefficient_of_variation == pytest.approx(0.0)
 
 
 def test_identify_variable_stars_adaptive_cutoff_is_not_capped_at_ten_percent():  # ruff: ignore[missing-return-type-undocumented-public-function]

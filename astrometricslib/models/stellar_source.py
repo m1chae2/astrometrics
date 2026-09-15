@@ -219,12 +219,10 @@ class StellarObject(BaseModel):
     # of that domain's fields loose on the star.
     photometry: PhotometryResult | None = Field(default_factory=PhotometryResult, alias="photometry")
     spectra_history: list[SpectralObservation] = Field(default_factory=list, alias="spectraHistory")
-    spectrum_data: list[Any] = Field(default_factory=list, alias="spectrumData")
     # The star's raw pixel position and shape info from source detection
     # (e.g. its centroid coordinates), used to relocate it in later
     # pictures.
     star_data: Any = Field(default_factory=list, alias="starData")
-    data: list[Any] = Field(default_factory=list, alias="data")
     # This star's own extracted spectrum and what it suggests about the
     # star -- see SpectroscopyResult. Mirrors photometry above: one
     # nested result per domain, instead of that domain's fields loose
@@ -258,8 +256,6 @@ class StellarObject(BaseModel):
         return bool(
             (self.spectroscopy and self.spectroscopy.wavelengths_angstrom)
             or (self.spectra_history and len(self.spectra_history) > 0)
-            or (self.spectrum_data and len(self.spectrum_data) > 0)
-            or (self.data and len(self.data) > 0)
         )
 
     @computed_field(alias="hasPhotometry")
@@ -302,30 +298,6 @@ class StellarObject(BaseModel):
 
         if self.spectroscopy and self.spectroscopy.wavelengths_angstrom and self.spectroscopy.intensities:
             return normalize(self.spectroscopy.wavelengths_angstrom, self.spectroscopy.intensities)
-
-        if self.data and isinstance(self.data, list):
-            if len(self.data) == 2 and isinstance(self.data[0], list):
-                return normalize(self.data[0], self.data[1])
-            if len(self.data) > 2 and isinstance(self.data[0], (list, tuple)):
-                try:
-                    wls = [row[0] for row in self.data]
-                    flux = [row[1] for row in self.data]
-                    return normalize(wls, flux)
-                except (IndexError, TypeError, AttributeError):  # fmt: skip
-                    pass
-
-        if (
-            self.data
-            and isinstance(self.data, list)
-            and len(self.data) > 0
-            and not isinstance(self.data[0], (list, tuple))
-        ):
-            return normalize(list(range(len(self.data))), self.data)
-
-        if self.spectrum_data and len(self.spectrum_data) > 0:
-            if isinstance(self.spectrum_data[0], (list, tuple)):
-                return normalize(self.spectrum_data[0], self.spectrum_data[1])
-            return normalize(list(range(len(self.spectrum_data))), self.spectrum_data)
 
         return {"wavelengths": [], "intensities": []}
 

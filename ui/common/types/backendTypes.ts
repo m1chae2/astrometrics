@@ -195,9 +195,7 @@ export interface Spectrum {
   spectralType?: string;
   photometry?: PhotometryResult | null;
   spectraHistory?: SpectralObservation[];
-  spectrumData?: any[];
   starData?: any;
-  data?: any[];
   spectroscopy?: SpectroscopyResult | null;
   stellarSpectralType?: string;
   targetIds?: string[];

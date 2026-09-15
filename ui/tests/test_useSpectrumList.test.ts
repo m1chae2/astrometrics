@@ -49,8 +49,8 @@ describe('useSpectrumList Filtering Suite', () => {
             },
             {
                 id: 'star-3',
-                label: 'Star 3 (Neither Flag but has spectrumData)',
-                spectrumData: [[5000, 5010], [1.0, 0.9]],
+                label: 'Star 3 (Neither Flag but has spectroscopy data)',
+                spectroscopy: { wavelengthsAngstrom: [5000, 5010], intensities: [1.0, 0.9] },
             },
             {
                 id: 'star-4',

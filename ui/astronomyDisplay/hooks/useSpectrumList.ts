@@ -137,8 +137,6 @@ export const useSpectrumList = (
             !!s.hasSpectra ||
             !!s.has_spectra ||
             (Array.isArray(s.spectraHistory) && s.spectraHistory.length > 0) ||
-            (Array.isArray(s.spectrumData) && s.spectrumData.length > 0) ||
-            (Array.isArray(s.data) && s.data.length > 0) ||
             !!(s.spectroscopy && s.spectroscopy.wavelengthsAngstrom && s.spectroscopy.wavelengthsAngstrom.length > 0)
         );
     }, []);

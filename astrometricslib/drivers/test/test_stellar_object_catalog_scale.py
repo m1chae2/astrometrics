@@ -41,13 +41,13 @@ def test_list_object_summaries_reports_the_expected_fields(tmp_path):  # ruff: i
     from the JSON at read time the way the code this superseded did.
     """
     from astrometricslib.api.stars import StellarCatalog
-    from astrometricslib.models.stellar_source import StellarObject
+    from astrometricslib.models.stellar_source import SpectroscopyResult, StellarObject
 
     config = _make_isolated_config(tmp_path)
     catalog = StellarCatalog(config=config)
 
     vega = StellarObject(id="Vega", name="Vega", target_ids=["Lyra Field"], ra=279.2347, dec=38.7837)
-    vega.spectrum_data_processed = {"wavelengths_angstrom": [5000], "intensities": [1.0]}
+    vega.spectroscopy = SpectroscopyResult(wavelengths_angstrom=[5000], intensities=[1.0])
     betelgeuse = StellarObject(id="Betelgeuse", name="Betelgeuse", target_ids=["Orion Field"])
     betelgeuse.light_curve = {"timestamps": ["2026-01-01T00:00:00Z"], "magnitudes": [0.5]}
     empty_star = StellarObject(id="EmptyStar", name="EmptyStar", target_ids=[])
@@ -186,13 +186,13 @@ def test_list_object_summaries_matches_the_model_computed_properties(tmp_path): 
     that wiring, not a reimplementation of the model's rules.
     """
     from astrometricslib.api.stars import StellarCatalog
-    from astrometricslib.models.stellar_source import StellarObject
+    from astrometricslib.models.stellar_source import SpectroscopyResult, StellarObject
 
     config = _make_isolated_config(tmp_path)
     catalog = StellarCatalog(config=config)
 
     vega = StellarObject(id="Vega", name="Vega", target_ids=["Lyra Field"])
-    vega.spectrum_data_processed = {"wavelengths_angstrom": [5000], "intensities": [1.0]}
+    vega.spectroscopy = SpectroscopyResult(wavelengths_angstrom=[5000], intensities=[1.0])
     vega.light_curve = {"timestamps": ["2026-01-01T00:00:00Z"], "fluxes": [1.0]}
     catalog.catalog_access.put([vega], "stellar_catalog", {})
 

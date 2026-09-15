@@ -266,7 +266,6 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                 id=star.id,
                 meanFlux=star.mean_flux,
                 coefficientOfVariation=star.coefficient_of_variation,
-                score=min(1.0, star.variability_score / 100.0),
                 ra=float(star.right_ascension) if star.right_ascension else 0.0,
                 dec=float(star.declination) if star.declination else 0.0,
             )
@@ -297,7 +296,6 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                 id=star.id,
                 meanFlux=star.mean_flux,
                 coefficientOfVariation=star.coefficient_of_variation,
-                score=min(1.0, star.variability_score / 100.0),
                 ra=float(star.right_ascension) if star.right_ascension else 0.0,
                 dec=float(star.declination) if star.declination else 0.0,
             )

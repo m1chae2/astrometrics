@@ -4,6 +4,8 @@ Description: Combines 2D star fields and 1D analysis visualization layers
 into interactive 2-panel views.
 """
 
+from typing import Any
+
 import matplotlib.pyplot as plt
 
 from astrometricslib.models.stellar_source import StellarObject
@@ -20,6 +22,21 @@ from .layers import (
     StarSelectionOverlay,
 )
 from .visualization_config import VisualizationConfig
+
+
+def _get_spectroscopy_field(obj: Any, field_name: str, default: Any = None) -> Any:
+    """Read one spectroscopy-result field off a `StellarObject` or dict.
+
+    Returns
+    -------
+    value : `Any`
+        The field's value, or `default` if there's no spectroscopy
+        result at all.
+    """
+    if hasattr(obj, "star_data"):
+        spectroscopy = getattr(obj, "spectroscopy", None)
+        return getattr(spectroscopy, field_name, default) if spectroscopy is not None else default
+    return (obj.get("spectroscopy") or {}).get(field_name, default)
 
 
 class _AnalysisView:
@@ -113,8 +130,7 @@ class _AnalysisView:
         if add_buttons and self.mode == "spectroscopy":
             self.renderer_spectrum.add_balmer_toggle()
             has_qe = any(
-                getattr(obj, "spectrum_data_processed", None)
-                and "quantum_efficiency_corrected_intensities" in obj.spectrum_data_processed
+                _get_spectroscopy_field(obj, "quantum_efficiency_corrected_intensities")
                 for obj in self.stellar_objects
             )
             if has_qe:
@@ -135,14 +151,15 @@ class _AnalysisView:
             return
         obj = self.stellar_objects[self.active_star_index]
         if self.mode == "spectroscopy":
-            data = getattr(obj, "spectrum_data_processed", None) or {}
             self.renderer_spectrum.render_spectrum(
                 self.active_star_index,
                 getattr(obj, "name", ""),
                 getattr(obj, "stellar_spectral_type", ""),
-                data.get("wavelengths_angstrom"),
-                data.get("intensities"),
-                quantum_efficiency_corrected_intensities=data.get("quantum_efficiency_corrected_intensities"),
+                _get_spectroscopy_field(obj, "wavelengths_angstrom"),
+                _get_spectroscopy_field(obj, "intensities"),
+                quantum_efficiency_corrected_intensities=_get_spectroscopy_field(
+                    obj, "quantum_efficiency_corrected_intensities"
+                ),
             )
         else:
             light_curve = getattr(obj, "light_curve", None)
@@ -268,12 +285,7 @@ class _AnalysisView:
         pt_x = x0 + xr
         pt_y = y0 + yr
 
-        data = (
-            getattr(obj, "spectrum_data_processed", {})
-            if hasattr(obj, "star_data")
-            else obj.get("spectrum_data_processed", {})
-        )
-        wavelengths = data.get("wavelengths_angstrom")
+        wavelengths = _get_spectroscopy_field(obj, "wavelengths_angstrom")
         if wavelengths is not None and len(wavelengths) > 0:
             rel_x = map_point_to_relative_x(pt_x, pt_y, rect, angle)
             idx = max(0, min(int(rel_x), len(wavelengths) - 1))

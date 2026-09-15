@@ -12,7 +12,7 @@ a loud error.
 
 import numpy as np
 
-from astrometricslib.models.stellar_source import StellarObject
+from astrometricslib.models.stellar_source import SpectroscopyResult, StellarObject
 from astrometricslib.pipelines.spectroscopy.spectral_classifier import (
     REFERENCE_SPECTRAL_TYPES,
     _get_reference_templates,
@@ -145,33 +145,41 @@ def test_is_classification_ambiguous_handles_fewer_than_two_candidates():  # ruf
 
 def test_build_spectral_classification_concerns_flags_low_confidence_and_ambiguous():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verify concerns are built only for classified, shaky stars."""
-    unclassified = StellarObject(id="Unclassified", self_determined_spectral_type="Unknown")
+    unclassified = StellarObject(
+        id="Unclassified", spectroscopy=SpectroscopyResult(self_determined_spectral_type="Unknown")
+    )
     low_confidence = StellarObject(
         id="LowConfidenceStar",
-        self_determined_spectral_type="O5V",
-        self_determined_spectral_type_confidence=0.33,
-        self_determined_spectral_type_candidates=[
-            {"spectral_type": "O5V", "probability": 0.65, "correlation": 0.33},
-            {"spectral_type": "B0V", "probability": 0.34, "correlation": 0.32},
-        ],
+        spectroscopy=SpectroscopyResult(
+            self_determined_spectral_type="O5V",
+            self_determined_spectral_type_confidence=0.33,
+            self_determined_spectral_type_candidates=[
+                {"spectral_type": "O5V", "probability": 0.65, "correlation": 0.33},
+                {"spectral_type": "B0V", "probability": 0.34, "correlation": 0.32},
+            ],
+        ),
     )
     ambiguous = StellarObject(
         id="AmbiguousStar",
-        self_determined_spectral_type="K5V",
-        self_determined_spectral_type_confidence=0.93,
-        self_determined_spectral_type_candidates=[
-            {"spectral_type": "K5V", "probability": 0.51, "correlation": 0.93},
-            {"spectral_type": "M0V", "probability": 0.49, "correlation": 0.93},
-        ],
+        spectroscopy=SpectroscopyResult(
+            self_determined_spectral_type="K5V",
+            self_determined_spectral_type_confidence=0.93,
+            self_determined_spectral_type_candidates=[
+                {"spectral_type": "K5V", "probability": 0.51, "correlation": 0.93},
+                {"spectral_type": "M0V", "probability": 0.49, "correlation": 0.93},
+            ],
+        ),
     )
     confident = StellarObject(
         id="ConfidentStar",
-        self_determined_spectral_type="M5V",
-        self_determined_spectral_type_confidence=0.87,
-        self_determined_spectral_type_candidates=[
-            {"spectral_type": "M5V", "probability": 0.98, "correlation": 0.87},
-            {"spectral_type": "M0V", "probability": 0.02, "correlation": 0.71},
-        ],
+        spectroscopy=SpectroscopyResult(
+            self_determined_spectral_type="M5V",
+            self_determined_spectral_type_confidence=0.87,
+            self_determined_spectral_type_candidates=[
+                {"spectral_type": "M5V", "probability": 0.98, "correlation": 0.87},
+                {"spectral_type": "M0V", "probability": 0.02, "correlation": 0.71},
+            ],
+        ),
     )
 
     concerns = build_spectral_classification_concerns([unclassified, low_confidence, ambiguous, confident])

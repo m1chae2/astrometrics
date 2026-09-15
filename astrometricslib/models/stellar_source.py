@@ -120,6 +120,50 @@ class SpectralObservation(BaseModel):
     intensities: list[float] = Field(default_factory=list, alias="intensities")
 
 
+class SpectroscopyResult(BaseModel):
+    """A star's own extracted spectrum, and what it suggests about the star.
+
+    Bundles spectroscopy's results the same way `LightCurve` bundles
+    photometry's: the processed measurement itself alongside what was
+    derived from it, in one place on `StellarObject`, instead of as
+    several same-topic fields scattered directly on the star.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    wavelengths_angstrom: list[float] = Field(default_factory=list, alias="wavelengthsAngstrom")
+    intensities: list[float] = Field(default_factory=list, alias="intensities")
+    # Only set for a camera with a known quantum-efficiency curve on
+    # file -- see quantum_efficiency_correction.py.
+    quantum_efficiency_corrected_intensities: list[float] | None = Field(
+        default=None, alias="quantumEfficiencyCorrectedIntensities"
+    )
+    # A spectral type guessed from this star's own extracted spectrum,
+    # via template matching against a reference library -- independent
+    # of StellarObject.spectral_type, which comes from a catalog
+    # lookup. "Unknown" when no spectrum has been classified yet.
+    self_determined_spectral_type: str = Field(default="", alias="selfDeterminedSpectralType")
+    # How well the winning template matched (a Pearson correlation
+    # coefficient, -1 to 1); None until self_determined_spectral_type is set.
+    self_determined_spectral_type_confidence: float | None = Field(
+        default=None, alias="selfDeterminedSpectralTypeConfidence"
+    )
+    # Every reference type compared, most probable first -- each entry has
+    # "spectral_type", "probability" (sums to 1 across the list, but is a
+    # heuristic ranking rather than a calibrated probability), and
+    # "correlation". Lets a caller see close calls, not just the winner.
+    self_determined_spectral_type_candidates: list[dict[str, Any]] = Field(
+        default_factory=list, alias="selfDeterminedSpectralTypeCandidates"
+    )
+    # Named absorption features (Balmer series, Ca II H&K, etc.) found in
+    # this star's own spectrum, most confident first -- see
+    # spectral_feature_detector.detect_named_features for what "confidence"
+    # means here.
+    probable_spectral_features: list[dict[str, Any]] = Field(
+        default_factory=list, alias="probableSpectralFeatures"
+    )
+
+
 class StellarObject(BaseModel):
     """The main record for an individual star found in an image."""
 
@@ -151,7 +195,11 @@ class StellarObject(BaseModel):
     # pictures.
     star_data: Any = Field(default_factory=list, alias="starData")
     data: list[Any] = Field(default_factory=list, alias="data")
-    spectrum_data_processed: dict[str, Any] | None = Field(default=None, alias="spectrumDataProcessed")
+    # This star's own extracted spectrum and what it suggests about the
+    # star -- see SpectroscopyResult. Mirrors light_curve above: one
+    # nested result per domain, instead of that domain's fields loose
+    # on the star.
+    spectroscopy: SpectroscopyResult | None = Field(default_factory=SpectroscopyResult, alias="spectroscopy")
     # The pixel box drawn around the star's spectrum trail in the
     # picture, used to redraw that box later without redetecting it.
     rectangle: Any | None = Field(default=None, alias="rectangle")
@@ -170,30 +218,6 @@ class StellarObject(BaseModel):
     # See the comment on spectral_type above -- this is normally the
     # same value, kept as a separate field for the cluster-entry case.
     stellar_spectral_type: str = Field(default="", alias="stellarSpectralType")
-    # A spectral type guessed from this star's own extracted spectrum,
-    # via template matching against a reference library -- independent
-    # of spectral_type, which comes from a catalog lookup. "Unknown" when
-    # no spectrum has been classified yet.
-    self_determined_spectral_type: str = Field(default="", alias="selfDeterminedSpectralType")
-    # How well the winning template matched (a Pearson correlation
-    # coefficient, -1 to 1); None until self_determined_spectral_type is set.
-    self_determined_spectral_type_confidence: float | None = Field(
-        default=None, alias="selfDeterminedSpectralTypeConfidence"
-    )
-    # Every reference type compared, most probable first -- each entry has
-    # "spectral_type", "probability" (sums to 1 across the list, but is a
-    # heuristic ranking rather than a calibrated probability), and
-    # "correlation". Lets a caller see close calls, not just the winner.
-    self_determined_spectral_type_candidates: list[dict[str, Any]] = Field(
-        default_factory=list, alias="selfDeterminedSpectralTypeCandidates"
-    )
-    # Named absorption features (Balmer series, Ca II H&K, etc.) found in
-    # this star's own spectrum, most confident first -- see
-    # spectral_feature_detector.detect_named_features for what "confidence"
-    # means here.
-    probable_spectral_features: list[dict[str, Any]] = Field(
-        default_factory=list, alias="probableSpectralFeatures"
-    )
     target_ids: list[str] = Field(default_factory=list, alias="targetIds")
     # How many pixels out from the star's center to gather light from
     # when measuring its spectrum.
@@ -202,18 +226,33 @@ class StellarObject(BaseModel):
     # How spread out this star's brightness measurements are relative to
     # their average -- a standard way to compare "noisiness" between
     # stars of different brightness. Higher can mean the star is
-    # actually variable, or just noisily measured.
+    # actually variable, or just noisily measured. The single stored
+    # source of truth for this star's variability; variability_score
+    # below is just this same number on a different scale, computed
+    # rather than stored so the two can never drift apart.
     coefficient_of_variation: float | None = Field(default=None, alias="coefficientOfVariation")
-    variability_score: float | None = Field(default=None, alias="variabilityScore")
     session_matches: list[StellarSessionMatch] = Field(default_factory=list, alias="sessionMatches")
     is_catalog_identified: bool = Field(default=False, alias="isCatalogIdentified")
+
+    @computed_field(alias="variabilityScore")
+    @property
+    def variability_score(self) -> float | None:
+        """How much this star's brightness jumps around, on a display scale.
+
+        Returns
+        -------
+        variability_score : `float` or `None`
+            `coefficient_of_variation` multiplied by 100, or `None`
+            before any variability has been measured for this star.
+        """
+        return self.coefficient_of_variation * 100.0 if self.coefficient_of_variation is not None else None
 
     @computed_field(alias="hasSpectra")
     @property
     def has_spectra(self) -> bool:
         """Check if this star's light spectrum has been measured."""
         return bool(
-            self.spectrum_data_processed
+            (self.spectroscopy and self.spectroscopy.wavelengths_angstrom)
             or (self.spectra_history and len(self.spectra_history) > 0)
             or (self.spectrum_data and len(self.spectrum_data) > 0)
             or (self.data and len(self.data) > 0)
@@ -257,11 +296,8 @@ class StellarObject(BaseModel):
             latest = self.spectra_history[-1]
             return normalize(latest.wavelengths, latest.intensities)
 
-        if self.spectrum_data_processed and isinstance(self.spectrum_data_processed, dict):
-            wls = self.spectrum_data_processed.get("wavelengths_angstrom")
-            flux = self.spectrum_data_processed.get("intensities")
-            if wls and flux:
-                return normalize(wls, flux)
+        if self.spectroscopy and self.spectroscopy.wavelengths_angstrom and self.spectroscopy.intensities:
+            return normalize(self.spectroscopy.wavelengths_angstrom, self.spectroscopy.intensities)
 
         if self.data and isinstance(self.data, list):
             if len(self.data) == 2 and isinstance(self.data[0], list):
@@ -315,13 +351,24 @@ class VariableCandidate(BaseModel):
     mean_flux: float = Field(..., alias="meanFlux", ge=0.0)
     # How spread out this star's brightness measurements are relative to
     # their average. A higher number is one sign the star might really
-    # be variable.
+    # be variable. The single stored source of truth here too -- see
+    # StellarObject.coefficient_of_variation.
     coefficient_of_variation: float = Field(..., alias="coefficientOfVariation", ge=0.0)
-    # How confident the code is that this star is truly variable, from
-    # 0 (not confident) to 1 (very confident).
-    score: float = Field(..., ge=0.0, le=1.0, alias="score")
     ra: float = Field(..., ge=0.0, le=360.0, alias="ra")
     dec: float = Field(..., ge=-90.0, le=90.0, alias="dec")
+
+    @computed_field(alias="score")
+    @property
+    def score(self) -> float:
+        """How confident the code is that this star is truly variable.
+
+        Returns
+        -------
+        score : `float`
+            `coefficient_of_variation`, capped at 1.0 so it reads as a
+            0 (not confident) to 1 (very confident) score.
+        """
+        return min(1.0, self.coefficient_of_variation)
 
 
 class AnalysisResult(BaseModel):

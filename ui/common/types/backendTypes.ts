@@ -198,22 +198,17 @@ export interface Spectrum {
   spectrumData?: any[];
   starData?: any;
   data?: any[];
-  spectrumDataProcessed?: Record<string, any> | null;
+  spectroscopy?: SpectroscopyResult | null;
   rectangle?: any | null;
   detectedAngle?: number | null;
   dispersionAngle?: number | null;
   trailCenterlinePx?: number[] | null;
   trailWidthPx?: number[] | null;
   stellarSpectralType?: string;
-  selfDeterminedSpectralType?: string;
-  selfDeterminedSpectralTypeConfidence?: number | null;
-  selfDeterminedSpectralTypeCandidates?: Record<string, any>[];
-  probableSpectralFeatures?: Record<string, any>[];
   targetIds?: string[];
   extractionRadius?: number | null;
   meanFlux?: number | null;
   coefficientOfVariation?: number | null;
-  variabilityScore?: number | null;
   sessionMatches?: StellarSessionMatch[];
   isCatalogIdentified?: boolean;
   /** Flexible index to accommodate additional data from the backend. */
@@ -238,6 +233,24 @@ export interface SpectralObservation {
   timestamp: string;
   wavelengths?: number[];
   intensities?: number[];
+}
+
+/**
+ * A star's own extracted spectrum, and what it suggests about the star.
+ *
+ * Bundles spectroscopy's results the same way `LightCurve` bundles
+ * photometry's: the processed measurement itself alongside what was
+ * derived from it, in one place on `StellarObject`, instead of as
+ * several same-topic fields scattered directly on the star.
+ */
+export interface SpectroscopyResult {
+  wavelengthsAngstrom?: number[];
+  intensities?: number[];
+  quantumEfficiencyCorrectedIntensities?: number[] | null;
+  selfDeterminedSpectralType?: string;
+  selfDeterminedSpectralTypeConfidence?: number | null;
+  selfDeterminedSpectralTypeCandidates?: Record<string, any>[];
+  probableSpectralFeatures?: Record<string, any>[];
 }
 
 /**
@@ -447,7 +460,6 @@ export interface VariableCandidate {
   id: string;
   meanFlux: number;
   coefficientOfVariation: number;
-  score: number;
   ra: number;
   dec: number;
 }

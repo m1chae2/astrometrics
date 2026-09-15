@@ -17,7 +17,7 @@ from astropy.modeling.models import Gaussian2D
 from astrometricslib import Astrometrics
 from astrometricslib.drivers.catalog_access import CatalogAccess, StarPosition
 from astrometricslib.models.moving_object import CascadeStage
-from astrometricslib.models.stellar_source import StellarObject
+from astrometricslib.models.stellar_source import SpectroscopyResult, StellarObject
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines import tasks
 from astrometricslib.pipelines.shared.frame_grouping import add_frame
@@ -489,10 +489,10 @@ def test_analyze_frame_spectroscopy_does_not_disturb_other_stars_indexed_columns
 
         catalog_access = CatalogAccess(config)
         other_star = StellarObject(id="Unrelated_Star", name="Unrelated_Star")
-        other_star.spectrum_data_processed = {
-            "wavelengths_angstrom": [4000.0, 5000.0],
-            "intensities": [1.0, 2.0],
-        }
+        other_star.spectroscopy = SpectroscopyResult(
+            wavelengths_angstrom=[4000.0, 5000.0],
+            intensities=[1.0, 2.0],
+        )
         assert other_star.has_spectra
         catalog_access.put([other_star], "stellar_catalog", {})
 

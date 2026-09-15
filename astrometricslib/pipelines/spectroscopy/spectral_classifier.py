@@ -312,20 +312,21 @@ def build_spectral_classification_concerns(
     """
     concerns: list[dict[str, object]] = []
     for star in stellar_objects:
-        if star.self_determined_spectral_type in ("", "Unknown"):
+        spectroscopy = star.spectroscopy
+        if spectroscopy is None or spectroscopy.self_determined_spectral_type in ("", "Unknown"):
             continue
 
         reasons = []
-        if is_classification_low_confidence(star.self_determined_spectral_type_confidence):
+        if is_classification_low_confidence(spectroscopy.self_determined_spectral_type_confidence):
             reasons.append("low_confidence")
-        if is_classification_ambiguous(star.self_determined_spectral_type_candidates):
+        if is_classification_ambiguous(spectroscopy.self_determined_spectral_type_candidates):
             reasons.append("ambiguous")
 
         if reasons:
             concerns.append({
                 "star_id": star.id,
                 "reason": ",".join(reasons),
-                "spectral_type": star.self_determined_spectral_type,
-                "confidence": star.self_determined_spectral_type_confidence,
+                "spectral_type": spectroscopy.self_determined_spectral_type,
+                "confidence": spectroscopy.self_determined_spectral_type_confidence,
             })
     return concerns

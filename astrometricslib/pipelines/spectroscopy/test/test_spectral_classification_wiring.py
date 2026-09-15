@@ -49,11 +49,11 @@ def test_apply_result_to_stellar_object_sets_a_self_determined_spectral_type(): 
 
     pipeline._apply_result_to_stellar_object(star, result)
 
-    assert star.self_determined_spectral_type == "G0V"
-    assert star.self_determined_spectral_type_confidence > 0.99
-    assert star.self_determined_spectral_type_candidates
-    assert star.self_determined_spectral_type_candidates[0]["spectral_type"] == "G0V"
-    assert isinstance(star.probable_spectral_features, list)
+    assert star.spectroscopy.self_determined_spectral_type == "G0V"
+    assert star.spectroscopy.self_determined_spectral_type_confidence > 0.99
+    assert star.spectroscopy.self_determined_spectral_type_candidates
+    assert star.spectroscopy.self_determined_spectral_type_candidates[0]["spectral_type"] == "G0V"
+    assert isinstance(star.spectroscopy.probable_spectral_features, list)
 
 
 def test_apply_result_to_stellar_object_handles_unclassifiable_data():  # ruff: ignore[missing-return-type-undocumented-public-function]
@@ -71,7 +71,7 @@ def test_apply_result_to_stellar_object_handles_unclassifiable_data():  # ruff: 
 
     pipeline._apply_result_to_stellar_object(star, result)
 
-    assert star.self_determined_spectral_type == "Unknown"
-    assert star.self_determined_spectral_type_confidence is None
-    assert star.self_determined_spectral_type_candidates == []
-    assert star.probable_spectral_features == []
+    assert star.spectroscopy.self_determined_spectral_type == "Unknown"
+    assert star.spectroscopy.self_determined_spectral_type_confidence is None
+    assert star.spectroscopy.self_determined_spectral_type_candidates == []
+    assert star.spectroscopy.probable_spectral_features == []

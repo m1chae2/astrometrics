@@ -358,7 +358,7 @@ def merge_spectroscopy_stellar_object(existing_stellar_object, updated_stellar_o
     existing_stellar_object.trail_centerline_px = updated_stellar_object.trail_centerline_px
     existing_stellar_object.trail_width_px = updated_stellar_object.trail_width_px
     existing_stellar_object.rectangle = updated_stellar_object.rectangle
-    existing_stellar_object.spectrum_data_processed = updated_stellar_object.spectrum_data_processed
+    existing_stellar_object.spectroscopy = updated_stellar_object.spectroscopy
     return existing_stellar_object
 
 
@@ -379,7 +379,6 @@ def merge_photometry_stellar_object(existing_stellar_object, updated_stellar_obj
     if getattr(updated_stellar_object, "mean_flux", None) is not None:
         existing_stellar_object.mean_flux = updated_stellar_object.mean_flux
         existing_stellar_object.coefficient_of_variation = updated_stellar_object.coefficient_of_variation
-        existing_stellar_object.variability_score = updated_stellar_object.variability_score
     # Cross-session matching (see _match_and_merge_across_sessions)
     # recomputes both fresh each run, so a full replace keeps a repeat
     # run's result authoritative rather than accumulating stale matches.

@@ -12,6 +12,7 @@ import pytest
 from astropy.io import fits
 
 from astrometricslib.models.moving_object import AsteroidDetectionCandidate, CascadeStage, FrameDetection
+from astrometricslib.models.stellar_source import SpectroscopyResult
 from astrometricslib.visualization.helpers import (
     plot_stellar_analyses,
     plot_stellar_analysis,
@@ -61,11 +62,11 @@ def test_plot_stellar_spectroscopy_renders_spectrum():  # ruff: ignore[missing-r
     mock_star = MagicMock()
     mock_star.name = "Test Star Spectrum"
     mock_star.stellar_spectral_type = "G2V"
-    mock_star.spectrum_data_processed = {
-        "wavelengths_angstrom": [4000.0, 5000.0, 6000.0],
-        "intensities": [10.0, 25.0, 15.0],
-        "quantum_efficiency_corrected_intensities": [12.0, 28.0, 17.0],
-    }
+    mock_star.spectroscopy = SpectroscopyResult(
+        wavelengths_angstrom=[4000.0, 5000.0, 6000.0],
+        intensities=[10.0, 25.0, 15.0],
+        quantum_efficiency_corrected_intensities=[12.0, 28.0, 17.0],
+    )
 
     fig = plot_stellar_spectroscopy(mock_star)
     assert isinstance(fig, plt.Figure)
@@ -78,7 +79,7 @@ def test_plot_stellar_spectroscopy_raises_on_missing_spectrum():  # ruff: ignore
     Tests error handling for missing spectrum data.
     """
     mock_star = MagicMock()
-    mock_star.spectrum_data_processed = None
+    mock_star.spectroscopy = None
 
     with pytest.raises(ValueError, match="no processed spectrum data"):
         plot_stellar_spectroscopy(mock_star)
@@ -157,10 +158,10 @@ def test_plot_target_dashboard_dynamic_layout_cases(monkeypatch):  # ruff: ignor
     star_spectral.dispersion_angle = 45.0
     star_spectral.name = "Gaia 12345 Spec"
     star_spectral.stellar_spectral_type = "G2V"
-    star_spectral.spectrum_data_processed = {
-        "wavelengths_angstrom": [4000.0, 5000.0],
-        "intensities": [10.0, 20.0],
-    }
+    star_spectral.spectroscopy = SpectroscopyResult(
+        wavelengths_angstrom=[4000.0, 5000.0],
+        intensities=[10.0, 20.0],
+    )
 
     mock_astrometrics = MagicMock()
     mock_astrometrics.stars.list_objects.return_value = [star_catalog, star_spectral]
@@ -213,10 +214,10 @@ def test_plot_stellar_analysis_renders_both_panels():  # ruff: ignore[missing-re
     mock_star.name = "Combined Star"
     mock_star.light_curve = mock_light_curve
     mock_star.stellar_spectral_type = "K0V"
-    mock_star.spectrum_data_processed = {
-        "wavelengths_angstrom": [4500.0, 5500.0],
-        "intensities": [15.0, 25.0],
-    }
+    mock_star.spectroscopy = SpectroscopyResult(
+        wavelengths_angstrom=[4500.0, 5500.0],
+        intensities=[15.0, 25.0],
+    )
 
     fig = plot_stellar_analysis(mock_star)
     assert isinstance(fig, plt.Figure)
@@ -236,7 +237,7 @@ def test_plot_stellar_analysis_raises_on_empty_star():  # ruff: ignore[missing-r
     """
     mock_star = MagicMock()
     mock_star.light_curve = None
-    mock_star.spectrum_data_processed = None
+    mock_star.spectroscopy = None
 
     with pytest.raises(ValueError, match="neither light_curve nor spectrum"):
         plot_stellar_analysis(mock_star)

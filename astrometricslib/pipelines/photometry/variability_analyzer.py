@@ -346,7 +346,6 @@ def _compute_star_coefficients_of_variation(stellar_objects: list[StellarObject]
                 cv = float(std_flux / mean_flux)
                 star.mean_flux = float(mean_flux)
                 star.coefficient_of_variation = cv
-                star.variability_score = float(cv * 100.0)
                 cv_list.append(cv)
 
         if getattr(star, "star_data", None) and isinstance(star.star_data, dict):

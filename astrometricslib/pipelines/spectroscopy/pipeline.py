@@ -10,7 +10,7 @@ from typing import Any
 import numpy as np
 
 from astrometricslib.drivers.image import AstrometricsImage
-from astrometricslib.models.stellar_source import StellarObject
+from astrometricslib.models.stellar_source import SpectroscopyResult, StellarObject
 from astrometricslib.pipelines.shared.analysis_context import AnalysisContext
 from astrometricslib.pipelines.shared.quality.quality_metrics import DEFAULT_SATURATION_ADU_THRESHOLD
 from astrometricslib.pipelines.shared.quality.saturation import compute_saturated_pixel_fraction
@@ -336,38 +336,44 @@ class SpectroscopyPipeline:
         don't know the camera, we just skip this step.
         """
         star.detected_angle = result["detected_angle"]
-        star.spectrum_data_processed = {
-            "wavelengths_angstrom": [float(w) * 10.0 for w in result["wavelengths"]],
-            "intensities": result["intensities"],
-        }
+        wavelengths_angstrom = [float(w) * 10.0 for w in result["wavelengths"]]
+        intensities = result["intensities"]
 
+        quantum_efficiency_corrected_intensities = None
         quantum_efficiency_curve = get_quantum_efficiency_curve(self.config.camera.name)
         if quantum_efficiency_curve is not None:
-            star.spectrum_data_processed["quantum_efficiency_corrected_intensities"] = (
-                apply_quantum_efficiency_correction(
-                    wavelength_nm=np.array(result["wavelengths"]),
-                    intensity=np.array(result["intensities"]),
-                    curve=quantum_efficiency_curve,
-                ).tolist()
-            )
+            quantum_efficiency_corrected_intensities = apply_quantum_efficiency_correction(
+                wavelength_nm=np.array(result["wavelengths"]),
+                intensity=np.array(result["intensities"]),
+                curve=quantum_efficiency_curve,
+            ).tolist()
 
         # Classify against the QE-corrected spectrum when available -- it
         # better reflects the star's true color than raw sensor counts --
         # falling back to the raw intensities otherwise.
-        classification_intensities = star.spectrum_data_processed.get(
-            "quantum_efficiency_corrected_intensities", result["intensities"]
+        classification_intensities = (
+            quantum_efficiency_corrected_intensities
+            if quantum_efficiency_corrected_intensities is not None
+            else intensities
         )
-        classification_wavelengths = np.array(star.spectrum_data_processed["wavelengths_angstrom"])
+        classification_wavelengths = np.array(wavelengths_angstrom)
         classification = classify_spectral_type(
             wavelength_angstrom=classification_wavelengths,
             intensity=np.array(classification_intensities),
         )
-        star.self_determined_spectral_type = classification["spectral_type"]
-        star.self_determined_spectral_type_confidence = classification["confidence"]
-        star.self_determined_spectral_type_candidates = classification["ranked_types"]
-        star.probable_spectral_features = detect_named_features(
+        probable_spectral_features = detect_named_features(
             wavelength_angstrom=classification_wavelengths,
             intensity=np.array(classification_intensities),
+        )
+
+        star.spectroscopy = SpectroscopyResult(
+            wavelengths_angstrom=wavelengths_angstrom,
+            intensities=intensities,
+            quantum_efficiency_corrected_intensities=quantum_efficiency_corrected_intensities,
+            self_determined_spectral_type=classification["spectral_type"],
+            self_determined_spectral_type_confidence=classification["confidence"],
+            self_determined_spectral_type_candidates=classification["ranked_types"],
+            probable_spectral_features=probable_spectral_features,
         )
 
         star.trail_centerline_px = result.get("trail_centerline_px")

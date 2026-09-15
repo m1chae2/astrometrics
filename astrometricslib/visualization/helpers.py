@@ -18,6 +18,32 @@ from .star_field_visualization import _AnalysisView
 from .visualization_config import VisualizationConfig
 
 
+def _extract_spectrum_data(star: Any) -> dict[str, Any]:
+    """Pull a star's raw spectrum values out of whatever shape `star` is.
+
+    Accepts a real `StellarObject` (reads its `spectroscopy` result), a
+    dict shaped like one (a nested `"spectroscopy"` key), or a bare
+    dict that already IS the spectrum data.
+
+    Returns
+    -------
+    spectrum_data : `dict`
+        With `"wavelengths_angstrom"`, `"intensities"`, and
+        `"quantum_efficiency_corrected_intensities"` if any were
+        found, or empty if this star has no spectrum yet.
+    """
+    spectroscopy = getattr(star, "spectroscopy", None)
+    if spectroscopy is not None and spectroscopy.wavelengths_angstrom:
+        return {
+            "wavelengths_angstrom": spectroscopy.wavelengths_angstrom,
+            "intensities": spectroscopy.intensities,
+            "quantum_efficiency_corrected_intensities": spectroscopy.quantum_efficiency_corrected_intensities,
+        }
+    if isinstance(star, dict):
+        return star.get("spectroscopy") or star
+    return {}
+
+
 def plot_fits_star_field(  # ruff: ignore[missing-return-type-undocumented-public-function]
     image_data: np.ndarray | None = None,
     stellar_objects: list | None = None,
@@ -321,9 +347,9 @@ def plot_stellar_spectroscopy(
     ValueError
         If the star has no processed spectrum data.
     """
-    spectrum_data = getattr(star, "spectrum_data_processed", None) or (star if isinstance(star, dict) else {})
-    wavelengths = spectrum_data.get("wavelengths_angstrom") if isinstance(spectrum_data, dict) else None
-    intensities = spectrum_data.get("intensities") if isinstance(spectrum_data, dict) else None
+    spectrum_data = _extract_spectrum_data(star)
+    wavelengths = spectrum_data.get("wavelengths_angstrom")
+    intensities = spectrum_data.get("intensities")
 
     if wavelengths is None or intensities is None:
         raise ValueError("Provided stellar object has no processed spectrum data.")
@@ -381,14 +407,8 @@ def plot_stellar_analysis(
     has_photo = getattr(star, "light_curve", None) is not None
 
     target_spec_star = spectral_star or star
-    spec_data = getattr(target_spec_star, "spectrum_data_processed", None) or (
-        target_spec_star if isinstance(target_spec_star, dict) else {}
-    )
-    has_spec = (
-        isinstance(spec_data, dict)
-        and spec_data.get("wavelengths_angstrom") is not None
-        and spec_data.get("intensities") is not None
-    )
+    spec_data = _extract_spectrum_data(target_spec_star)
+    has_spec = spec_data.get("wavelengths_angstrom") is not None and spec_data.get("intensities") is not None
 
     if not has_photo and not has_spec:
         raise ValueError("Provided stellar object has neither light_curve nor spectrum data.")
@@ -806,7 +826,7 @@ def plot_target_spectroscopy(
         star = astrometry_stars[index]
         spectral_star = spectral_by_id.get(f"{getattr(star, 'id', '')}::spectroscopy")
         if spectral_star is not None:
-            data = getattr(spectral_star, "spectrum_data_processed", None) or {}
+            data = _extract_spectrum_data(spectral_star)
             spectrum_layer.render_spectrum(
                 index,
                 getattr(spectral_star, "name", ""),
@@ -946,7 +966,7 @@ def plot_target_dashboard(
         if spectrum_layer is not None:
             spectral_star = spectral_by_id.get(f"{getattr(star, 'id', '')}::spectroscopy")
             if spectral_star is not None:
-                data = getattr(spectral_star, "spectrum_data_processed", None) or {}
+                data = _extract_spectrum_data(spectral_star)
                 spectrum_layer.render_spectrum(
                     index,
                     getattr(spectral_star, "name", ""),

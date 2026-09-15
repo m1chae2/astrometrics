@@ -57,7 +57,7 @@ def analyze_frame_spectroscopy(target: Target, path: str, limit: int = 10) -> tu
         for target_id in updated.target_ids:
             if target_id not in existing.target_ids:
                 existing.target_ids.append(target_id)
-        existing.spectrum_data_processed = updated.spectrum_data_processed
+        existing.spectroscopy = updated.spectroscopy
         return existing
 
     CatalogAccess(config).merge_and_record("stellar_catalog", stellar_objects, _merge_frame_star)

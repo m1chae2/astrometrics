@@ -168,13 +168,13 @@ class ImageProcessingService(BaseBackgroundService):
                             f"Rehydrating metadata for {len(image_files)} paths using "
                             f"Target {target_id} frames list"
                         )
-                        path_map = {f.path: f.model_dump() for f in target.frames}
+                        path_map = {f.path: f.model_dump(by_alias=True) for f in target.frames}
                         rehydrated = [path_map[p] for p in image_files if p in path_map]
                         if rehydrated:
                             image_files = rehydrated
                     elif hasattr(first, "model_dump"):
                         # Already models, convert to dicts for processors
-                        image_files = [f.model_dump() for f in image_files]
+                        image_files = [f.model_dump(by_alias=True) for f in image_files]
             except Exception as e:
                 logging.warning(f"Failed to rehydrate metadata for target {target_id}: {e}")
 

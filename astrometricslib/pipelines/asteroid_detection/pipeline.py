@@ -78,6 +78,13 @@ def _detect_sources_in_one_frame(
     source_detector = SourceDetector(fwhm=fwhm, threshold_sigma=threshold_sigma)
     sources = source_detector.detect(np.asarray(frame_data, dtype=float))
 
+    # A typical brightness level for this one picture, from every dot
+    # found in it. Stamped onto every detection below so a later step
+    # can divide a dot's own brightness by this number and cancel out
+    # this picture's own sky conditions (see FrameDetection).
+    brightness_values = [float(source["flux"]) for source in sources if source.get("flux") is not None]
+    picture_brightness_level = float(np.median(brightness_values)) if brightness_values else None
+
     detections = []
     for source in sources:
         pixel_x = source.get("xcentroid", source.get("x_centroid"))
@@ -85,6 +92,7 @@ def _detect_sources_in_one_frame(
         if pixel_x is None or pixel_y is None:
             continue
         sky_position = frame_wcs.wcs_pix2world([[float(pixel_x), float(pixel_y)]], 1)[0]
+        source_flux = source.get("flux")
         detections.append(
             FrameDetection(
                 frame_path=frame_path,
@@ -93,6 +101,8 @@ def _detect_sources_in_one_frame(
                 pixel_y=float(pixel_y),
                 right_ascension_deg=float(sky_position[0]),
                 declination_deg=float(sky_position[1]),
+                brightness=float(source_flux) if source_flux is not None else None,
+                picture_brightness_level=picture_brightness_level,
             )
         )
     return "ok", detections

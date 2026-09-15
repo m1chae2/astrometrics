@@ -124,6 +124,11 @@ def test_process_confirms_a_moving_source_with_no_ephemeris_match(tmp_path, mock
     assert pipeline.last_run_metrics["frames_excluded_missing_pointing_metadata"] == 0
     assert pipeline.last_run_metrics["candidates_rate_linearity_confirmed"] == 1
     assert pipeline.last_run_metrics["candidates_ephemeris_matched"] == 0
+    for detection in candidates[0].frame_detections:
+        assert detection.brightness is not None
+        assert detection.brightness > 0
+        assert detection.picture_brightness_level is not None
+        assert detection.picture_brightness_level > 0
 
 
 def test_process_matches_a_moving_source_against_a_known_body(tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]

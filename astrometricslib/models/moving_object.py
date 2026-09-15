@@ -21,6 +21,18 @@ class FrameDetection(BaseModel):
     pixel_y: float = Field(alias="pixelY")
     right_ascension_deg: float = Field(alias="rightAscensionDeg")
     declination_deg: float = Field(alias="declinationDeg")
+    # How bright this dot looked in this one picture (astronomers call
+    # this "flux"). `None` if brightness wasn't measured. On its own
+    # this isn't enough to notice a rotating asteroid's brightness
+    # rising and falling -- passing clouds or haze changing between
+    # pictures would look the same. See picture_brightness_level below.
+    brightness: float | None = Field(default=None, alias="brightness")
+    # A typical brightness level for this picture, found by looking at
+    # every dot detected in it (not just this one). Dividing this dot's
+    # own brightness by this number cancels out sky changes (clouds,
+    # haze, moonlight) from one picture to the next, so what's left is
+    # mostly just this object's own brightness changing.
+    picture_brightness_level: float | None = Field(default=None, alias="pictureBrightnessLevel")
 
 
 class MovingObjectTrack(BaseModel):

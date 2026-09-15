@@ -811,6 +811,8 @@ export interface FrameDetection {
   pixelY: number;
   rightAscensionDeg: number;
   declinationDeg: number;
+  brightness?: number | null;
+  pictureBrightnessLevel?: number | null;
 }
 
 /**

@@ -28,7 +28,7 @@ class _Star:
     """A stellar-object stand-in carrying only a light curve."""
 
     def __init__(self, light_curve):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
-        self.light_curve = light_curve
+        self.photometry = light_curve
 
 
 def test_a_perfectly_flat_star_scatters_at_zero():  # ruff: ignore[missing-return-type-undocumented-public-function]

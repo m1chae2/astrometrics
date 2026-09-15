@@ -960,14 +960,14 @@ def _make_matching_test_star(star_id: str, pixel_x: float, pixel_y: float) -> St
     """
     from datetime import datetime, timedelta
 
-    from astrometricslib.models.stellar_source import LightCurve
+    from astrometricslib.models.stellar_source import PhotometryResult
 
     t0 = datetime(2026, 1, 1)
     timestamps = [t0 + timedelta(minutes=5 * i) for i in range(5)]
     fluxes = [100.0, 101.0, 99.0, 100.0, 102.0]
     star = StellarObject(id=star_id)
     star.star_data = {"xcentroid": pixel_x, "ycentroid": pixel_y}
-    star.light_curve = LightCurve(
+    star.photometry = PhotometryResult(
         timestamps=timestamps,
         fluxes=fluxes,
         fluxes_normalized=fluxes,
@@ -1050,7 +1050,7 @@ def test_match_and_merge_across_sessions_merges_matching_stars(mocker):  # ruff:
     merged_star = merged_by_id[star_a1.id]
     assert len(merged_star.session_matches) == 1
     assert merged_star.session_matches[0].session_id == session_b.id
-    assert len(merged_star.light_curve.timestamps) == 10  # 5 from each session
+    assert len(merged_star.photometry.timestamps) == 10  # 5 from each session
 
 
 def test_match_and_merge_across_sessions_reuses_pre_resolved_wcs_without_re_solving(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
@@ -1161,7 +1161,7 @@ def test_match_and_merge_across_sessions_avoids_double_assignment_when_ambiguous
 
     merged_star_a1 = next(star for star in merged if star.id == star_a1.id)
     assert len(merged_star_a1.session_matches) == 1
-    assert len(merged_star_a1.light_curve.timestamps) == 10  # merged with star_b1, not star_b2
+    assert len(merged_star_a1.photometry.timestamps) == 10  # merged with star_b1, not star_b2
 
     assert any(star.id == star_b2.id for star in merged)
 
@@ -1209,11 +1209,11 @@ def test_rescale_and_merge_light_curve_removes_inter_session_step_change():  # r
     """
     from datetime import datetime, timedelta
 
-    from astrometricslib.models.stellar_source import LightCurve
+    from astrometricslib.models.stellar_source import PhotometryResult
     from astrometricslib.pipelines.photometry.batch import _rescale_and_merge_light_curve
 
     t0 = datetime(2026, 1, 1)
-    canonical = LightCurve(
+    canonical = PhotometryResult(
         timestamps=[t0 + timedelta(minutes=i) for i in range(5)],
         fluxes=[100.0] * 5,
         fluxes_normalized=[1.0, 1.01, 0.99, 1.0, 1.02],
@@ -1223,7 +1223,7 @@ def test_rescale_and_merge_light_curve_removes_inter_session_step_change():  # r
     )
     # A different session, same star, but its own ensemble normalization
     # scales it to roughly 5x the canonical segment's level.
-    new_segment = LightCurve(
+    new_segment = PhotometryResult(
         timestamps=[t0 + timedelta(days=10, minutes=i) for i in range(5)],
         fluxes=[500.0] * 5,
         fluxes_normalized=[5.0, 5.05, 4.95, 5.0, 5.1],

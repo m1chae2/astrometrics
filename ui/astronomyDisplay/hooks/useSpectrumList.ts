@@ -139,7 +139,7 @@ export const useSpectrumList = (
             (Array.isArray(s.spectraHistory) && s.spectraHistory.length > 0) ||
             (Array.isArray(s.spectrumData) && s.spectrumData.length > 0) ||
             (Array.isArray(s.data) && s.data.length > 0) ||
-            !!s.spectrumDataProcessed
+            !!(s.spectroscopy && s.spectroscopy.wavelengthsAngstrom && s.spectroscopy.wavelengthsAngstrom.length > 0)
         );
     }, []);
 
@@ -148,10 +148,10 @@ export const useSpectrumList = (
         return (
             !!s.hasPhotometry ||
             !!s.has_photometry ||
-            (!!s.lightCurve &&
-                ((Array.isArray(s.lightCurve.timestamps) && s.lightCurve.timestamps.length > 0) ||
-                 (Array.isArray(s.lightCurve.magnitudes) && s.lightCurve.magnitudes.length > 0) ||
-                 (Array.isArray(s.lightCurve.fluxes) && s.lightCurve.fluxes.length > 0)))
+            (!!s.photometry &&
+                ((Array.isArray(s.photometry.timestamps) && s.photometry.timestamps.length > 0) ||
+                 (Array.isArray(s.photometry.magnitudes) && s.photometry.magnitudes.length > 0) ||
+                 (Array.isArray(s.photometry.fluxes) && s.photometry.fluxes.length > 0)))
         );
     }, []);
 

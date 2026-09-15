@@ -49,7 +49,7 @@ def test_list_object_summaries_reports_the_expected_fields(tmp_path):  # ruff: i
     vega = StellarObject(id="Vega", name="Vega", target_ids=["Lyra Field"], ra=279.2347, dec=38.7837)
     vega.spectroscopy = SpectroscopyResult(wavelengths_angstrom=[5000], intensities=[1.0])
     betelgeuse = StellarObject(id="Betelgeuse", name="Betelgeuse", target_ids=["Orion Field"])
-    betelgeuse.light_curve = {"timestamps": ["2026-01-01T00:00:00Z"], "magnitudes": [0.5]}
+    betelgeuse.photometry = {"timestamps": ["2026-01-01T00:00:00Z"], "magnitudes": [0.5]}
     empty_star = StellarObject(id="EmptyStar", name="EmptyStar", target_ids=[])
     catalog.catalog_access.put([vega, betelgeuse, empty_star], "stellar_catalog", {})
 
@@ -193,7 +193,7 @@ def test_list_object_summaries_matches_the_model_computed_properties(tmp_path): 
 
     vega = StellarObject(id="Vega", name="Vega", target_ids=["Lyra Field"])
     vega.spectroscopy = SpectroscopyResult(wavelengths_angstrom=[5000], intensities=[1.0])
-    vega.light_curve = {"timestamps": ["2026-01-01T00:00:00Z"], "fluxes": [1.0]}
+    vega.photometry = {"timestamps": ["2026-01-01T00:00:00Z"], "fluxes": [1.0]}
     catalog.catalog_access.put([vega], "stellar_catalog", {})
 
     (summary,) = catalog.list_object_summaries()

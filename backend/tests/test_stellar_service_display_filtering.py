@@ -88,7 +88,7 @@ def test_stellar_object_has_spectra_and_has_photometry_computed_fields():  # ruf
     )
     star_with_photometry = StellarObject(
         id="Betelgeuse",
-        light_curve={"timestamps": ["2026-01-01T00:00:00Z"], "magnitudes": [0.5]},
+        photometry={"timestamps": ["2026-01-01T00:00:00Z"], "magnitudes": [0.5]},
     )
     star_empty = StellarObject(id="EmptyStar")
 

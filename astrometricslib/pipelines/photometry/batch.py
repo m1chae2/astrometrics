@@ -212,10 +212,10 @@ def _rescale_and_merge_light_curve(canonical: Any, new: Any) -> Any:
 
     Returns
     -------
-    merged : `LightCurve`
-        A new `LightCurve` combining both segments, sorted by timestamp.
+    merged : `PhotometryResult`
+        A new `PhotometryResult` combining both segments, sorted by timestamp.
     """
-    from astrometricslib.models.stellar_source import LightCurve
+    from astrometricslib.models.stellar_source import PhotometryResult
 
     canonical_median = _positive_median_or_none(canonical.fluxes_normalized)
     new_median = _positive_median_or_none(new.fluxes_normalized)
@@ -239,7 +239,7 @@ def _rescale_and_merge_light_curve(canonical: Any, new: Any) -> Any:
     def _reordered(values):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
         return [values[i] for i in sort_order] if len(values) == len(sort_order) else list(values)
 
-    return LightCurve(
+    return PhotometryResult(
         timestamps=_reordered(combined_timestamps),
         fluxes=_reordered(combined_fluxes),
         fluxes_normalized=_reordered(combined_fluxes_normalized),
@@ -382,8 +382,8 @@ def _match_and_merge_across_sessions(
 
             canonical_star, _canonical_ra, _canonical_dec = canonical_registry[canonical_index]
             new_star = session_stars_with_sky[session_star_index]
-            canonical_star.light_curve = _rescale_and_merge_light_curve(
-                canonical_star.light_curve, new_star.light_curve
+            canonical_star.photometry = _rescale_and_merge_light_curve(
+                canonical_star.photometry, new_star.photometry
             )
             canonical_star.session_matches.append(
                 StellarSessionMatch(session_id=session.id, angular_separation_arcsec=float(separation_arcsec))

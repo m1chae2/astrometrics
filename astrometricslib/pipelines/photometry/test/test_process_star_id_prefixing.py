@@ -81,8 +81,8 @@ def test_process_seeded_stars_keep_their_real_identity(tmp_path):  # ruff: ignor
     assert tracked.spectral_type == "A0Va"
     # Flux was actually measured at the seeded position, not left unset
     assert tracked.flux > 0
-    assert tracked.light_curve is not None
-    assert tracked.light_curve.fluxes == [tracked.flux]
+    assert tracked.photometry is not None
+    assert tracked.photometry.fluxes == [tracked.flux]
 
 
 def test_process_seeded_stars_skip_entries_missing_a_centroid(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]

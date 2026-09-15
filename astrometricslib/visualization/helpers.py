@@ -239,9 +239,9 @@ def plot_photometry_analysis(
     lc_objects = [
         obj
         for obj in raw_objects
-        if getattr(obj, "light_curve", None) is not None
-        and getattr(obj.light_curve, "timestamps", None)
-        and len(obj.light_curve.timestamps) > 0
+        if getattr(obj, "photometry", None) is not None
+        and getattr(obj.photometry, "timestamps", None)
+        and len(obj.photometry.timestamps) > 0
     ]
     stellar_objects = lc_objects if lc_objects else raw_objects
 
@@ -277,7 +277,7 @@ def plot_stellar_photometry(
     Parameters
     ----------
     star : `Any`
-        Stellar object containing a `.light_curve` attribute.
+        Stellar object containing a `.photometry` attribute.
     ax : `plt.Axes`, optional
         Existing Matplotlib axis to render into. Creates figure if `None`.
     figsize : `tuple[int, int]`, optional
@@ -291,11 +291,11 @@ def plot_stellar_photometry(
     Raises
     ------
     ValueError
-        If the star has no light_curve attribute or data.
+        If the star has no photometry attribute or data.
     """
-    light_curve = getattr(star, "light_curve", None)
-    if light_curve is None:
-        raise ValueError("Provided stellar object has no light_curve attribute or data.")
+    photometry = getattr(star, "photometry", None)
+    if photometry is None:
+        raise ValueError("Provided stellar object has no photometry attribute or data.")
 
     if ax is None:
         plt.style.use("dark_background")
@@ -306,8 +306,8 @@ def plot_stellar_photometry(
     config = VisualizationConfig()
     photometry_layer = PhotometryOverlay(ax, fig, config)
 
-    timestamps = getattr(light_curve, "timestamps", None)
-    fluxes = getattr(light_curve, "fluxes_detrended", None) or getattr(light_curve, "fluxes_normalized", None)
+    timestamps = getattr(photometry, "timestamps", None)
+    fluxes = getattr(photometry, "fluxes_detrended", None) or getattr(photometry, "fluxes_normalized", None)
     star_name = getattr(star, "name", "Star")
     is_var = getattr(star, "is_variable_candidate", False)
 
@@ -404,14 +404,14 @@ def plot_stellar_analysis(
     ValueError
         If neither light curve nor spectrum data is available.
     """
-    has_photo = getattr(star, "light_curve", None) is not None
+    has_photo = getattr(star, "photometry", None) is not None
 
     target_spec_star = spectral_star or star
     spec_data = _extract_spectrum_data(target_spec_star)
     has_spec = spec_data.get("wavelengths_angstrom") is not None and spec_data.get("intensities") is not None
 
     if not has_photo and not has_spec:
-        raise ValueError("Provided stellar object has neither light_curve nor spectrum data.")
+        raise ValueError("Provided stellar object has neither photometry nor spectrum data.")
 
     if has_photo and has_spec:
         plt.style.use("dark_background")
@@ -753,11 +753,11 @@ def plot_target_photometry(
     def render_photometry_panel(index: int) -> None:
         """Render photometry panel for star at given index."""
         star = astrometry_stars[index]
-        light_curve = getattr(star, "light_curve", None)
-        timestamps = light_curve.timestamps if light_curve else None
+        photometry = getattr(star, "photometry", None)
+        timestamps = photometry.timestamps if photometry else None
         flux = (
-            (light_curve.fluxes_detrended if light_curve.fluxes_detrended else light_curve.fluxes_normalized)
-            if light_curve
+            (photometry.fluxes_detrended if photometry.fluxes_detrended else photometry.fluxes_normalized)
+            if photometry
             else None
         )
         photometry_layer.render_light_curve(
@@ -878,7 +878,7 @@ def plot_target_dashboard(
     """
     astrometry_stars, spectral_stars, spectral_by_id = _load_target_stars(target, stars, limit)
 
-    has_photometry = any(getattr(s, "light_curve", None) is not None for s in astrometry_stars)
+    has_photometry = any(getattr(s, "photometry", None) is not None for s in astrometry_stars)
     has_spectroscopy = len(spectral_stars) > 0
 
     active_index = 0
@@ -946,14 +946,14 @@ def plot_target_dashboard(
         star = astrometry_stars[index]
 
         if photometry_layer is not None:
-            light_curve = getattr(star, "light_curve", None)
-            timestamps = light_curve.timestamps if light_curve else None
+            photometry = getattr(star, "photometry", None)
+            timestamps = photometry.timestamps if photometry else None
             flux = None
-            if light_curve:
+            if photometry:
                 flux = (
-                    light_curve.fluxes_detrended
-                    if light_curve.fluxes_detrended
-                    else light_curve.fluxes_normalized
+                    photometry.fluxes_detrended
+                    if photometry.fluxes_detrended
+                    else photometry.fluxes_normalized
                 )
             photometry_layer.render_light_curve(
                 index,

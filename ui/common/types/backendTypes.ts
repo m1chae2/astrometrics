@@ -193,7 +193,7 @@ export interface Spectrum {
   flux?: any;
   magnitude?: any;
   spectralType?: string;
-  lightCurve?: LightCurve | null;
+  photometry?: PhotometryResult | null;
   spectraHistory?: SpectralObservation[];
   spectrumData?: any[];
   starData?: any;
@@ -238,7 +238,7 @@ export interface SpectralObservation {
 /**
  * A star's own extracted spectrum, and what it suggests about the star.
  *
- * Bundles spectroscopy's results the same way `LightCurve` bundles
+ * Bundles spectroscopy's results the same way `PhotometryResult` bundles
  * photometry's: the processed measurement itself alongside what was
  * derived from it, in one place on `StellarObject`, instead of as
  * several same-topic fields scattered directly on the star.
@@ -287,9 +287,9 @@ export interface TransitCandidate {
 }
 
 /**
- * A record of how a star's brightness changes over time.
+ * A record of how a star's brightness changes over time: a light curve.
  */
-export interface LightCurve {
+export interface PhotometryResult {
   timestamps?: string[];
   fluxes?: number[];
   fluxesNormalized?: number[];

@@ -17,8 +17,8 @@ __all__ = [
     "AnalysisResult",
     "FileItem",
     "GroupedFrameStat",
-    "LightCurve",
     "PeriodogramResult",
+    "PhotometryResult",
     "PlotData",
     "SpectralObservation",
     "StellarObject",
@@ -78,8 +78,8 @@ class TransitCandidate(BaseModel):
     transit_confidence: float = Field(default=0.0, alias="transitConfidence")
 
 
-class LightCurve(BaseModel):
-    """A record of how a star's brightness changes over time."""
+class PhotometryResult(BaseModel):
+    """A record of how a star's brightness changes over time: a light curve."""
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -123,7 +123,7 @@ class SpectralObservation(BaseModel):
 class SpectroscopyResult(BaseModel):
     """A star's own extracted spectrum, and what it suggests about the star.
 
-    Bundles spectroscopy's results the same way `LightCurve` bundles
+    Bundles spectroscopy's results the same way `PhotometryResult` bundles
     photometry's: the processed measurement itself alongside what was
     derived from it, in one place on `StellarObject`, instead of as
     several same-topic fields scattered directly on the star.
@@ -187,7 +187,10 @@ class StellarObject(BaseModel):
     # label "Cluster" while spectral_type keeps the more general object
     # type from the catalog it came from.
     spectral_type: str = Field(default="", alias="spectralType")
-    light_curve: LightCurve | None = Field(default_factory=LightCurve, alias="lightCurve")
+    # This star's brightness measured over time -- see PhotometryResult.
+    # Mirrors spectroscopy below: one nested result per domain, instead
+    # of that domain's fields loose on the star.
+    photometry: PhotometryResult | None = Field(default_factory=PhotometryResult, alias="photometry")
     spectra_history: list[SpectralObservation] = Field(default_factory=list, alias="spectraHistory")
     spectrum_data: list[Any] = Field(default_factory=list, alias="spectrumData")
     # The star's raw pixel position and shape info from source detection
@@ -196,7 +199,7 @@ class StellarObject(BaseModel):
     star_data: Any = Field(default_factory=list, alias="starData")
     data: list[Any] = Field(default_factory=list, alias="data")
     # This star's own extracted spectrum and what it suggests about the
-    # star -- see SpectroscopyResult. Mirrors light_curve above: one
+    # star -- see SpectroscopyResult. Mirrors photometry above: one
     # nested result per domain, instead of that domain's fields loose
     # on the star.
     spectroscopy: SpectroscopyResult | None = Field(default_factory=SpectroscopyResult, alias="spectroscopy")
@@ -263,11 +266,11 @@ class StellarObject(BaseModel):
     def has_photometry(self) -> bool:
         """Check if this star's brightness has been tracked over time."""
         return bool(
-            self.light_curve
+            self.photometry
             and (
-                (self.light_curve.timestamps and len(self.light_curve.timestamps) > 0)
-                or (self.light_curve.magnitudes and len(self.light_curve.magnitudes) > 0)
-                or (self.light_curve.fluxes and len(self.light_curve.fluxes) > 0)
+                (self.photometry.timestamps and len(self.photometry.timestamps) > 0)
+                or (self.photometry.magnitudes and len(self.photometry.magnitudes) > 0)
+                or (self.photometry.fluxes and len(self.photometry.fluxes) > 0)
             )
         )
 

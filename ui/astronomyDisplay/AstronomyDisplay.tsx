@@ -68,8 +68,8 @@ export const AstronomyDisplay: React.FC = () => {
   // REQ: AST-1.3: The display SHALL present a timeline for time-series data.
   const availableTimestamps = useMemo(() => {
     const times = new Set<string>();
-    if (astronomyData?.lightCurve?.timestamps) {
-      astronomyData.lightCurve.timestamps.forEach(t => times.add(t));
+    if (astronomyData?.photometry?.timestamps) {
+      astronomyData.photometry.timestamps.forEach(t => times.add(t));
     }
     if (astronomyData?.spectraHistory) {
       astronomyData.spectraHistory.forEach(s => times.add(s.timestamp));

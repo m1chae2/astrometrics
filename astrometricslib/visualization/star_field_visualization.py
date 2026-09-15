@@ -162,15 +162,11 @@ class _AnalysisView:
                 ),
             )
         else:
-            light_curve = getattr(obj, "light_curve", None)
-            timestamps = light_curve.timestamps if light_curve else None
+            photometry = getattr(obj, "photometry", None)
+            timestamps = photometry.timestamps if photometry else None
             flux = (
-                (
-                    light_curve.fluxes_detrended
-                    if light_curve.fluxes_detrended
-                    else light_curve.fluxes_normalized
-                )
-                if light_curve
+                (photometry.fluxes_detrended if photometry.fluxes_detrended else photometry.fluxes_normalized)
+                if photometry
                 else None
             )
             is_var = getattr(obj, "is_variable_candidate", False)

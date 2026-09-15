@@ -20,7 +20,7 @@ from photutils.centroids import centroid_com
 
 from astrometricslib.drivers.fits_access import collapse_to_2d
 from astrometricslib.models.quality_summary import FrameEnsembleComposition
-from astrometricslib.models.stellar_source import LightCurve, StellarObject
+from astrometricslib.models.stellar_source import PhotometryResult, StellarObject
 from astrometricslib.pipelines.astrometry.source_detection import SourceDetector
 from astrometricslib.pipelines.shared.quality.saturation import (
     compute_saturated_pixel_fraction,
@@ -333,9 +333,9 @@ def _compute_star_coefficients_of_variation(stellar_objects: list[StellarObject]
     cv_list = []
     for star in stellar_objects:
         raw_fluxes = (
-            star.light_curve.fluxes_detrended
-            if star.light_curve.fluxes_detrended
-            else star.light_curve.fluxes_normalized
+            star.photometry.fluxes_detrended
+            if star.photometry.fluxes_detrended
+            else star.photometry.fluxes_normalized
         )
         fluxes = np.array(raw_fluxes)
         fluxes = fluxes[fluxes > 0]
@@ -390,7 +390,7 @@ def median_light_curve_scatter_mag(stellar_objects: list[StellarObject]) -> floa
     """
     scatters: list[float] = []
     for star in stellar_objects:
-        light_curve = getattr(star, "light_curve", None)
+        light_curve = getattr(star, "photometry", None)
         if light_curve is None:
             continue
         fluxes = light_curve.fluxes_detrended or light_curve.fluxes_normalized or light_curve.fluxes or []
@@ -508,7 +508,7 @@ class VariabilityAnalyzer:
 
     def __init__(self, config=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
         self.config = config
-        self.light_curves: dict[str, LightCurve] = {}
+        self.light_curves: dict[str, PhotometryResult] = {}
         self.stellar_objects: list[StellarObject] = []
         self.frame_reference_flux = {}
         self.timestamp_to_path = {}
@@ -652,7 +652,7 @@ class VariabilityAnalyzer:
                     seed_stars_without_signal += 1
                     continue
                 seed_star.flux = flux
-                seed_star.light_curve = LightCurve(
+                seed_star.photometry = PhotometryResult(
                     timestamps=[reference_timestamp],
                     fluxes=[flux],
                     is_saturated=[is_saturated],
@@ -679,7 +679,7 @@ class VariabilityAnalyzer:
                 flux, is_saturated = self._measure_flux_numpy(reference_data, x_ref, y_ref)
                 flux = flux / reference_exposure_seconds
                 new_star.flux = flux
-                new_star.light_curve = LightCurve(
+                new_star.photometry = PhotometryResult(
                     timestamps=[reference_timestamp],
                     fluxes=[flux],
                     is_saturated=[is_saturated],
@@ -736,10 +736,10 @@ class VariabilityAnalyzer:
                 for star_id, (flux, is_saturated) in fluxes_dict.items():
                     if star_id in stellar_object_map:
                         star = stellar_object_map[star_id]
-                        star.light_curve.timestamps.append(timestamp)
-                        star.light_curve.fluxes.append(float(flux))
-                        star.light_curve.is_saturated.append(is_saturated)
-                        star.light_curve.airmasses.append(float(airmass))
+                        star.photometry.timestamps.append(timestamp)
+                        star.photometry.fluxes.append(float(flux))
+                        star.photometry.is_saturated.append(is_saturated)
+                        star.photometry.airmasses.append(float(airmass))
 
             logger.info("Parallel processing complete.")
 
@@ -803,7 +803,7 @@ class VariabilityAnalyzer:
         """
         candidates = []
         for star in self.stellar_objects:
-            light_curve = star.light_curve
+            light_curve = star.photometry
             if not light_curve or not light_curve.fluxes:
                 continue
             # We bundle the timestamp, brightness, and saturation flag
@@ -948,9 +948,9 @@ class VariabilityAnalyzer:
             if star.id not in candidate_ids:
                 continue
             for timestamp, flux, is_saturated in zip(
-                star.light_curve.timestamps,
-                star.light_curve.fluxes,
-                star.light_curve.is_saturated,
+                star.photometry.timestamps,
+                star.photometry.fluxes,
+                star.photometry.is_saturated,
                 strict=False,
             ):
                 if is_saturated:
@@ -987,8 +987,8 @@ class VariabilityAnalyzer:
         frame_count = len({
             timestamp
             for star in self.stellar_objects
-            if star.light_curve
-            for timestamp in star.light_curve.timestamps
+            if star.photometry
+            for timestamp in star.photometry.timestamps
         })
 
         frame_flux_data, frame_excluded_star_ids = self._collect_ensemble_frame_fluxes(reference_ids)
@@ -1012,7 +1012,7 @@ class VariabilityAnalyzer:
         # later.
         # Before we give up, we will lower our standards and try using almost
         # any visible star as a reference point.
-        total_frame_count = len({t for star in self.stellar_objects for t in star.light_curve.timestamps})
+        total_frame_count = len({t for star in self.stellar_objects for t in star.photometry.timestamps})
         min_required_frames = max(1, int(total_frame_count * 0.5)) if total_frame_count else 0
         if total_frame_count and len(frame_flux_data) < min_required_frames:
             # Widen in two steps rather than straight to everything. The
@@ -1117,11 +1117,11 @@ class VariabilityAnalyzer:
                 "leaving raw (unnormalized) light curves intact."
             )
             for star in self.stellar_objects:
-                star.light_curve.fluxes_normalized = list(star.light_curve.fluxes)
+                star.photometry.fluxes_normalized = list(star.photometry.fluxes)
             return False
 
         for star in self.stellar_objects:
-            star.light_curve.fluxes_normalized = []
+            star.photometry.fluxes_normalized = []
             new_timestamps = []
             new_fluxes = []
             # is_saturated and airmasses are per-frame too, so they have
@@ -1145,18 +1145,18 @@ class VariabilityAnalyzer:
             # but nothing tolerates a silently mispaired one.
             new_is_saturated = []
             new_airmasses = []
-            saturation_flags = star.light_curve.is_saturated or []
-            airmasses = star.light_curve.airmasses or []
-            saturation_flags_aligned = len(saturation_flags) == len(star.light_curve.timestamps)
-            airmasses_aligned = len(airmasses) == len(star.light_curve.timestamps)
+            saturation_flags = star.photometry.is_saturated or []
+            airmasses = star.photometry.airmasses or []
+            saturation_flags_aligned = len(saturation_flags) == len(star.photometry.timestamps)
+            airmasses_aligned = len(airmasses) == len(star.photometry.timestamps)
 
             for index, (timestamp, flux) in enumerate(
-                zip(star.light_curve.timestamps, star.light_curve.fluxes, strict=False)
+                zip(star.photometry.timestamps, star.photometry.fluxes, strict=False)
             ):
                 if timestamp in self.frame_reference_flux:
                     norm_factor = self.frame_reference_flux[timestamp]
                     if norm_factor > 0:
-                        star.light_curve.fluxes_normalized.append(flux / norm_factor)
+                        star.photometry.fluxes_normalized.append(flux / norm_factor)
                         new_timestamps.append(timestamp)
                         new_fluxes.append(flux)
                         if saturation_flags_aligned:
@@ -1165,10 +1165,10 @@ class VariabilityAnalyzer:
                             new_airmasses.append(airmasses[index])
 
             # Update the original light curve data to exclude rejected frames
-            star.light_curve.timestamps = new_timestamps
-            star.light_curve.fluxes = new_fluxes
-            star.light_curve.is_saturated = new_is_saturated if saturation_flags_aligned else []
-            star.light_curve.airmasses = new_airmasses if airmasses_aligned else []
+            star.photometry.timestamps = new_timestamps
+            star.photometry.fluxes = new_fluxes
+            star.photometry.is_saturated = new_is_saturated if saturation_flags_aligned else []
+            star.photometry.airmasses = new_airmasses if airmasses_aligned else []
             self._reject_outlier_measurements_for_star(star)
 
         return True
@@ -1181,8 +1181,8 @@ class VariabilityAnalyzer:
         a bad centroid) that global frame-level clipping wouldn't catch,
         since they're specific to one star rather than one frame.
         """
-        if len(star.light_curve.fluxes_normalized) > 10:
-            flux_values = np.array(star.light_curve.fluxes_normalized)
+        if len(star.photometry.fluxes_normalized) > 10:
+            flux_values = np.array(star.photometry.fluxes_normalized)
 
             # Same astropy sigma_clip/mad_std equivalence as the
             # frame-level pass above, at the historical
@@ -1196,25 +1196,25 @@ class VariabilityAnalyzer:
                 valid_mask = ~clipped_fluxes.mask
 
                 if not np.all(valid_mask):
-                    star.light_curve.timestamps = [
-                        t for i, t in enumerate(star.light_curve.timestamps) if valid_mask[i]
+                    star.photometry.timestamps = [
+                        t for i, t in enumerate(star.photometry.timestamps) if valid_mask[i]
                     ]
-                    star.light_curve.fluxes = [
-                        f for i, f in enumerate(star.light_curve.fluxes) if valid_mask[i]
+                    star.photometry.fluxes = [
+                        f for i, f in enumerate(star.photometry.fluxes) if valid_mask[i]
                     ]
-                    star.light_curve.fluxes_normalized = [
-                        fn for i, fn in enumerate(star.light_curve.fluxes_normalized) if valid_mask[i]
+                    star.photometry.fluxes_normalized = [
+                        fn for i, fn in enumerate(star.photometry.fluxes_normalized) if valid_mask[i]
                     ]
                     # Same reason as the rejected-frame filter above:
                     # every per-frame array shares one index space.
-                    star.light_curve.is_saturated = [
+                    star.photometry.is_saturated = [
                         s
-                        for i, s in enumerate(star.light_curve.is_saturated)
+                        for i, s in enumerate(star.photometry.is_saturated)
                         if i < len(valid_mask) and valid_mask[i]
                     ]
-                    star.light_curve.airmasses = [
+                    star.photometry.airmasses = [
                         a
-                        for i, a in enumerate(star.light_curve.airmasses)
+                        for i, a in enumerate(star.photometry.airmasses)
                         if i < len(valid_mask) and valid_mask[i]
                     ]
 
@@ -1237,13 +1237,13 @@ class VariabilityAnalyzer:
         which makes them look dimmer. This finds that pattern and removes it.
         """
         for star in self.stellar_objects:
-            if not star.light_curve or not star.light_curve.fluxes_normalized:
+            if not star.photometry or not star.photometry.fluxes_normalized:
                 continue
 
-            fluxes_norm = np.array(star.light_curve.fluxes_normalized)
+            fluxes_norm = np.array(star.photometry.fluxes_normalized)
             airmasses = (
-                np.array(star.light_curve.airmasses)
-                if star.light_curve.airmasses and len(star.light_curve.airmasses) == len(fluxes_norm)
+                np.array(star.photometry.airmasses)
+                if star.photometry.airmasses and len(star.photometry.airmasses) == len(fluxes_norm)
                 else np.ones(len(fluxes_norm))
             )
 
@@ -1254,13 +1254,13 @@ class VariabilityAnalyzer:
                     mean_trend = float(np.mean(trend))
                     if mean_trend > 0:
                         fluxes_detrended = (fluxes_norm / trend) * mean_trend
-                        star.light_curve.fluxes_detrended = [float(f) for f in fluxes_detrended]
+                        star.photometry.fluxes_detrended = [float(f) for f in fluxes_detrended]
                     else:
-                        star.light_curve.fluxes_detrended = [float(f) for f in fluxes_norm]
+                        star.photometry.fluxes_detrended = [float(f) for f in fluxes_norm]
                 except Exception:
-                    star.light_curve.fluxes_detrended = [float(f) for f in fluxes_norm]
+                    star.photometry.fluxes_detrended = [float(f) for f in fluxes_norm]
             else:
-                star.light_curve.fluxes_detrended = [float(f) for f in fluxes_norm]
+                star.photometry.fluxes_detrended = [float(f) for f in fluxes_norm]
 
     def run_bls_transit_search(self, star: StellarObject) -> Any | None:
         """Look for a repeating, box-shaped dip in brightness.
@@ -1276,7 +1276,7 @@ class VariabilityAnalyzer:
             The details of the possible transit or eclipse, or None if
             nothing was found.
         """
-        if not star.light_curve or len(star.light_curve.timestamps) < 8:
+        if not star.photometry or len(star.photometry.timestamps) < 8:
             return None
 
         from astropy.timeseries import BoxLeastSquares
@@ -1287,14 +1287,14 @@ class VariabilityAnalyzer:
         )
 
         t_sec = np.array([
-            (ts - star.light_curve.timestamps[0]).total_seconds() for ts in star.light_curve.timestamps
+            (ts - star.photometry.timestamps[0]).total_seconds() for ts in star.photometry.timestamps
         ])
         t_days = t_sec / 86400.0
 
         raw_fluxes = (
-            star.light_curve.fluxes_detrended
-            if star.light_curve.fluxes_detrended
-            else star.light_curve.fluxes_normalized
+            star.photometry.fluxes_detrended
+            if star.photometry.fluxes_detrended
+            else star.photometry.fluxes_normalized
         )
         fluxes = np.array(raw_fluxes)
         if len(fluxes) < 8 or np.mean(fluxes) <= 0:
@@ -1323,7 +1323,7 @@ class VariabilityAnalyzer:
             transit_snr=snr,
             transit_confidence=significance_to_confidence(snr),
         )
-        star.light_curve.transit_candidate = candidate
+        star.photometry.transit_candidate = candidate
         return candidate
 
     def run_lomb_scargle_periodogram(self, star: StellarObject) -> Any | None:
@@ -1334,7 +1334,7 @@ class VariabilityAnalyzer:
         periodogram : `PeriodogramResult` or `None`
             The analysis results, or None if the math failed.
         """
-        if not star.light_curve or len(star.light_curve.timestamps) < 5:
+        if not star.photometry or len(star.photometry.timestamps) < 5:
             return None
 
         from astropy.timeseries import LombScargle
@@ -1342,13 +1342,13 @@ class VariabilityAnalyzer:
         from astrometricslib.models.stellar_source import PeriodogramResult
 
         t_sec = np.array([
-            (ts - star.light_curve.timestamps[0]).total_seconds() for ts in star.light_curve.timestamps
+            (ts - star.photometry.timestamps[0]).total_seconds() for ts in star.photometry.timestamps
         ])
         t_days = t_sec / 86400.0
         raw_fluxes = (
-            star.light_curve.fluxes_detrended
-            if star.light_curve.fluxes_detrended
-            else star.light_curve.fluxes_normalized
+            star.photometry.fluxes_detrended
+            if star.photometry.fluxes_detrended
+            else star.photometry.fluxes_normalized
         )
         fluxes = np.array(raw_fluxes)
 
@@ -1379,5 +1379,5 @@ class VariabilityAnalyzer:
             power=best_power,
             false_alarm_probability=false_alarm_probability,
         )
-        star.light_curve.periodogram = result
+        star.photometry.periodogram = result
         return result

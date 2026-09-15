@@ -7,7 +7,7 @@ import React from 'react';
 import '../styles/astronomyDisplay.css';
 
 export interface StellarAnalysisDetailsProps {
-    /** Detailed astronomy data containing lightCurve periodogram and transitCandidate. */
+    /** Detailed astronomy data containing photometry periodogram and transitCandidate. */
     astronomyData?: any;
 }
 
@@ -17,9 +17,9 @@ export interface StellarAnalysisDetailsProps {
 export const StellarAnalysisDetails: React.FC<StellarAnalysisDetailsProps> = ({
     astronomyData,
 }) => {
-    const lightCurve = astronomyData?.lightCurve;
-    const periodogram = lightCurve?.periodogram;
-    const transitCandidate = lightCurve?.transitCandidate;
+    const photometry = astronomyData?.photometry;
+    const periodogram = photometry?.periodogram;
+    const transitCandidate = photometry?.transitCandidate;
 
     if (!periodogram && !transitCandidate) {
         return (

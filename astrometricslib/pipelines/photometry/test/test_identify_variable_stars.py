@@ -6,13 +6,13 @@ sigma_threshold * MAD) and its interaction with airmass-detrended flux.
 
 import pytest
 
-from astrometricslib.models.stellar_source import LightCurve, StellarObject
+from astrometricslib.models.stellar_source import PhotometryResult, StellarObject
 from astrometricslib.pipelines.photometry.variability_analyzer import VariabilityAnalyzer
 
 
 def _make_star(star_id: str, fluxes_normalized: list[float], fluxes_detrended: list[float] | None = None):  # ruff: ignore[missing-return-type-private-function]
     star = StellarObject(id=star_id)
-    star.light_curve = LightCurve(
+    star.photometry = PhotometryResult(
         fluxes_normalized=fluxes_normalized,
         fluxes_detrended=fluxes_detrended or [],
     )

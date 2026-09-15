@@ -113,7 +113,7 @@ def _is_empty_value(value: Any) -> bool:
         return value.strip() == ""
     if isinstance(value, list | dict):
         return len(value) == 0
-    if hasattr(value, "fluxes"):  # LightCurve
+    if hasattr(value, "fluxes"):  # PhotometryResult
         return len(value.fluxes) == 0
     return False
 

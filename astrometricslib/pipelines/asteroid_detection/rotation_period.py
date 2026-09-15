@@ -11,10 +11,10 @@ and it looks for a cycle the same way either way.
 from datetime import datetime
 
 from astrometricslib.models.moving_object import AsteroidDetectionCandidate
-from astrometricslib.models.stellar_source import LightCurve, PeriodogramResult, StellarObject
+from astrometricslib.models.stellar_source import PeriodogramResult, PhotometryResult, StellarObject
 
 
-def build_light_curve_from_track(candidate: AsteroidDetectionCandidate) -> LightCurve:
+def build_light_curve_from_track(candidate: AsteroidDetectionCandidate) -> PhotometryResult:
     """Turn one tracked object's per-picture brightness into a light curve.
 
     Each picture's own brightness is divided by that picture's typical
@@ -31,7 +31,7 @@ def build_light_curve_from_track(candidate: AsteroidDetectionCandidate) -> Light
 
     Returns
     -------
-    light_curve : `LightCurve`
+    light_curve : `PhotometryResult`
         Timestamps and corrected ("normalized") brightness values, in
         the same picture order as `candidate.frame_detections`. Empty
         if no picture had both brightness values measured.
@@ -44,7 +44,7 @@ def build_light_curve_from_track(candidate: AsteroidDetectionCandidate) -> Light
         timestamps.append(datetime.fromtimestamp(detection.timestamp))
         corrected_brightness.append(detection.brightness / detection.picture_brightness_level)
 
-    return LightCurve(timestamps=timestamps, fluxes_normalized=corrected_brightness)
+    return PhotometryResult(timestamps=timestamps, fluxes_normalized=corrected_brightness)
 
 
 def find_rotation_period(candidate: AsteroidDetectionCandidate) -> PeriodogramResult | None:
@@ -66,5 +66,5 @@ def find_rotation_period(candidate: AsteroidDetectionCandidate) -> PeriodogramRe
     from astrometricslib.pipelines.photometry.variability_analyzer import VariabilityAnalyzer
 
     light_curve = build_light_curve_from_track(candidate)
-    star = StellarObject(id=candidate.id, light_curve=light_curve)
+    star = StellarObject(id=candidate.id, photometry=light_curve)
     return VariabilityAnalyzer().run_lomb_scargle_periodogram(star)

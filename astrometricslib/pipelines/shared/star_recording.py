@@ -375,7 +375,7 @@ def merge_photometry_stellar_object(existing_stellar_object, updated_stellar_obj
     """
     if existing_stellar_object is None:
         return updated_stellar_object
-    existing_stellar_object.light_curve = updated_stellar_object.light_curve
+    existing_stellar_object.photometry = updated_stellar_object.photometry
     if getattr(updated_stellar_object, "mean_flux", None) is not None:
         existing_stellar_object.mean_flux = updated_stellar_object.mean_flux
         existing_stellar_object.coefficient_of_variation = updated_stellar_object.coefficient_of_variation

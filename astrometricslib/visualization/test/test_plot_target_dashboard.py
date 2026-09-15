@@ -34,7 +34,7 @@ def test_plot_stellar_photometry_renders_light_curve():  # ruff: ignore[missing-
 
     mock_star = MagicMock()
     mock_star.name = "Test Star Photometry"
-    mock_star.light_curve = mock_light_curve
+    mock_star.photometry = mock_light_curve
     mock_star.is_variable_candidate = True
 
     fig = plot_stellar_photometry(mock_star)
@@ -48,9 +48,9 @@ def test_plot_stellar_photometry_raises_on_missing_light_curve():  # ruff: ignor
     Tests error handling for missing photometry data.
     """
     mock_star = MagicMock()
-    mock_star.light_curve = None
+    mock_star.photometry = None
 
-    with pytest.raises(ValueError, match="no light_curve attribute"):
+    with pytest.raises(ValueError, match="no photometry attribute"):
         plot_stellar_photometry(mock_star)
 
 
@@ -150,7 +150,7 @@ def test_plot_target_dashboard_dynamic_layout_cases(monkeypatch):  # ruff: ignor
     mock_light_curve.timestamps = [1.0, 2.0]
     mock_light_curve.fluxes_detrended = [1.0, 1.1]
     mock_light_curve.fluxes_normalized = [1.0, 1.1]
-    star_catalog.light_curve = mock_light_curve
+    star_catalog.photometry = mock_light_curve
 
     star_spectral = MagicMock()
     star_spectral.id = "Gaia DR3 12345::spectroscopy"
@@ -178,7 +178,7 @@ def test_plot_target_dashboard_dynamic_layout_cases(monkeypatch):  # ruff: ignor
     star_catalog_no_spec.dispersion_angle = None
     star_catalog_no_spec.magnitude = 11.0
     star_catalog_no_spec.star_data = {"xcentroid": 50.0, "ycentroid": 50.0}
-    star_catalog_no_spec.light_curve = mock_light_curve
+    star_catalog_no_spec.photometry = mock_light_curve
 
     mock_astrometrics.stars.list_objects.return_value = [star_catalog_no_spec]
     fig_photo_only = plot_target_dashboard(mock_target, mock_astrometrics.stars)
@@ -192,7 +192,7 @@ def test_plot_target_dashboard_dynamic_layout_cases(monkeypatch):  # ruff: ignor
     star_catalog_bare.dispersion_angle = None
     star_catalog_bare.magnitude = 12.0
     star_catalog_bare.star_data = {"xcentroid": 20.0, "ycentroid": 20.0}
-    star_catalog_bare.light_curve = None
+    star_catalog_bare.photometry = None
 
     mock_astrometrics.stars.list_objects.return_value = [star_catalog_bare]
     fig_bare = plot_target_dashboard(mock_target, mock_astrometrics.stars)
@@ -212,7 +212,7 @@ def test_plot_stellar_analysis_renders_both_panels():  # ruff: ignore[missing-re
 
     mock_star = MagicMock()
     mock_star.name = "Combined Star"
-    mock_star.light_curve = mock_light_curve
+    mock_star.photometry = mock_light_curve
     mock_star.stellar_spectral_type = "K0V"
     mock_star.spectroscopy = SpectroscopyResult(
         wavelengths_angstrom=[4500.0, 5500.0],
@@ -236,10 +236,10 @@ def test_plot_stellar_analysis_raises_on_empty_star():  # ruff: ignore[missing-r
     Tests error handling when neither photometry nor spectroscopy is present.
     """
     mock_star = MagicMock()
-    mock_star.light_curve = None
+    mock_star.photometry = None
     mock_star.spectroscopy = None
 
-    with pytest.raises(ValueError, match="neither light_curve nor spectrum"):
+    with pytest.raises(ValueError, match="neither photometry nor spectrum"):
         plot_stellar_analysis(mock_star)
 
 
@@ -294,7 +294,7 @@ def test_plot_target_dashboard_draws_asteroid_candidates_on_the_star_field(tmp_p
     star_catalog_bare.dispersion_angle = None
     star_catalog_bare.magnitude = 12.0
     star_catalog_bare.star_data = {"xcentroid": 20.0, "ycentroid": 20.0}
-    star_catalog_bare.light_curve = None
+    star_catalog_bare.photometry = None
 
     mock_astrometrics = MagicMock()
     mock_astrometrics.stars.list_objects.return_value = [star_catalog_bare]

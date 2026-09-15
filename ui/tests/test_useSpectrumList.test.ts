@@ -45,7 +45,7 @@ describe('useSpectrumList Filtering Suite', () => {
                 label: 'Star 2 (Photometry Only)',
                 has_spectra: false,
                 has_photometry: true,
-                lightCurve: { timestamps: ['2026-01-01'], magnitudes: [12.5], fluxes: [100.0] },
+                photometry: { timestamps: ['2026-01-01'], magnitudes: [12.5], fluxes: [100.0] },
             },
             {
                 id: 'star-3',

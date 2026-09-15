@@ -28,13 +28,14 @@ Astrometrics Library (`astrometricslib`)
    :skip: FrameRecord
    :skip: GroupedFrameStat
    :skip: ImageProcessing
-   :skip: LightCurve
    :skip: LoggerInterface
    :skip: MovingObjectConfig
+   :skip: PhotometryResult
    :skip: PlotData
    :skip: ProcessingJob
    :skip: RenderedImage
    :skip: SpectralObservation
+   :skip: SpectroscopyResult
    :skip: StarIdentifier
    :skip: StellarObject
    :skip: Target

@@ -552,7 +552,7 @@ class StellarService:
                         "spectral_type": obj.spectral_type,
                         "magnitude": obj.magnitude,
                         "has_spectra": bool(obj.spectroscopy and obj.spectroscopy.wavelengths_angstrom),
-                        "has_photometry": bool(obj.light_curve and len(obj.light_curve.timestamps) > 0),
+                        "has_photometry": bool(obj.photometry and len(obj.photometry.timestamps) > 0),
                         "type": "star",
                         "global": obj.id not in local_star_ids,
                         "stackedImage": None,

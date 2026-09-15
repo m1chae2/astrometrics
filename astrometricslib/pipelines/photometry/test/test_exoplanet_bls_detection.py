@@ -72,6 +72,7 @@ def test_bls_transit_search_synthetic_transit():  # ruff: ignore[missing-return-
     assert candidate is not None
     assert candidate.transit_depth_mag > 0.0
     assert candidate.transit_snr > 0.0
+    assert 0.0 < candidate.transit_confidence <= 1.0
 
 
 def test_lomb_scargle_periodogram_periodic_signal():  # ruff: ignore[missing-return-type-undocumented-public-function]

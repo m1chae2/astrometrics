@@ -16,6 +16,8 @@ principles.
 
 import numpy as np
 
+from astrometricslib.pipelines.shared.quality.detection_confidence import significance_to_confidence
+
 # Rest wavelengths of features broad or strong enough for a low-resolution
 # slitless grism to plausibly resolve as a distinct dip. window_angstrom is
 # the half-width of the feature's own core; the surrounding continuum is
@@ -129,7 +131,7 @@ def detect_named_features(wavelength_angstrom: np.ndarray, intensity: np.ndarray
 
         relative_noise = noise / continuum
         significance = depth / relative_noise if relative_noise > 0 else float("inf")
-        confidence = min(max(1.0 - float(np.exp(-significance / 2.0)), 0.0), 1.0)
+        confidence = significance_to_confidence(significance)
 
         detections.append({
             "feature": feature["name"],

@@ -1277,6 +1277,9 @@ class VariabilityAnalyzer:
         from astropy.timeseries import BoxLeastSquares
 
         from astrometricslib.models.stellar_source import ExoplanetTransitCandidate
+        from astrometricslib.pipelines.shared.quality.detection_confidence import (
+            significance_to_confidence,
+        )
 
         t_sec = np.array([
             (ts - star.light_curve.timestamps[0]).total_seconds() for ts in star.light_curve.timestamps
@@ -1313,6 +1316,7 @@ class VariabilityAnalyzer:
             transit_duration_hours=best_duration,
             epoch_t0=best_t0,
             transit_snr=snr,
+            transit_confidence=significance_to_confidence(snr),
         )
         star.light_curve.transit_candidate = candidate
         return candidate

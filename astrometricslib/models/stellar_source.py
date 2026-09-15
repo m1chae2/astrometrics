@@ -67,6 +67,11 @@ class ExoplanetTransitCandidate(BaseModel):
     # Signal-to-noise ratio: how clearly the dip stands out from normal
     # measurement noise. Higher means a more convincing detection.
     transit_snr: float = Field(default=0.0, alias="transitSnr")
+    # transit_snr run through the same significance-to-confidence
+    # heuristic saturation used for spectral feature detection, so 0
+    # means noise and confidence approaches 1 as the dip's SNR grows --
+    # not a calibrated detection probability.
+    transit_confidence: float = Field(default=0.0, alias="transitConfidence")
 
 
 class LightCurve(BaseModel):

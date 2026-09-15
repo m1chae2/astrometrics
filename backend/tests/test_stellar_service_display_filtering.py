@@ -11,7 +11,7 @@ need in full.
 
 from unittest.mock import MagicMock
 
-from astrometricslib import StellarObject
+from astrometricslib import SpectroscopyResult, StellarObject
 from backend.services.data.stellar_service import StellarService, _is_per_frame_photometry_detection
 
 
@@ -84,7 +84,7 @@ def test_stellar_object_has_spectra_and_has_photometry_computed_fields():  # ruf
     """
     star_with_spectra = StellarObject(
         id="Vega",
-        spectrum_data_processed={"wavelengths_angstrom": [5000], "intensities": [1.0]},
+        spectroscopy=SpectroscopyResult(wavelengths_angstrom=[5000], intensities=[1.0]),
     )
     star_with_photometry = StellarObject(
         id="Betelgeuse",

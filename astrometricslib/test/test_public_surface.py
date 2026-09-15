@@ -64,6 +64,7 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "QualityDiagnostics",
     "RenderedImage",
     "SpectralObservation",
+    "SpectroscopyResult",
     "StarIdentifier",
     "StellarCatalog",
     "StellarObject",

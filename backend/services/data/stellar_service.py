@@ -365,7 +365,9 @@ class StellarService:
             IDs of objects with processed spectrum data.
         """
         return [
-            obj.id for obj in self.get_stellar_objects() if getattr(obj, "spectrum_data_processed", False)
+            obj.id
+            for obj in self.get_stellar_objects()
+            if getattr(obj, "spectroscopy", None) and obj.spectroscopy.wavelengths_angstrom
         ]
 
     def find_or_create_by_position(
@@ -549,7 +551,7 @@ class StellarService:
                         "commonName": obj.name or obj.id,
                         "spectral_type": obj.spectral_type,
                         "magnitude": obj.magnitude,
-                        "has_spectra": bool(obj.spectrum_data_processed),
+                        "has_spectra": bool(obj.spectroscopy and obj.spectroscopy.wavelengths_angstrom),
                         "has_photometry": bool(obj.light_curve and len(obj.light_curve.timestamps) > 0),
                         "type": "star",
                         "global": obj.id not in local_star_ids,

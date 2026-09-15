@@ -200,13 +200,23 @@ class StellarObject(BaseModel):
     name: str = Field(default="", alias="name")
     # Where the star is in the sky (right ascension is like longitude,
     # declination is like latitude, but for the sky instead of Earth).
-    right_ascension: Any = Field(default="", alias="ra")
-    declination: Any = Field(default="", alias="dec")
+    # `None` until identification/resolution sets it -- e.g. the
+    # extended-target "Cluster" entry has no single point position.
+    # Stays `Any` (not `float`) rather than `""` -- see the note on
+    # flux below; the same tolerance is needed here too.
+    right_ascension: Any = Field(default=None, alias="ra")
+    declination: Any = Field(default=None, alias="dec")
     # How much light the star gives off (a raw brightness reading).
-    flux: Any = Field(default="", alias="flux")
+    # `Any`, not `float`: pipeline code transiently stashes numpy/
+    # astropy values here before a save normalizes them (see
+    # datastore.local_database.safe_json_dumps) -- `None` is just the
+    # "not yet known" default, not the field's only valid shape.
+    flux: Any = Field(default=None, alias="flux")
     # The star's brightness on the standard astronomical scale, where
     # LOWER numbers mean a BRIGHTER star (the opposite of most scales).
-    magnitude: Any = Field(default="", alias="magnitude")
+    # `None` means not yet known, not "magnitude zero" -- same `Any`
+    # tolerance as flux above.
+    magnitude: Any = Field(default=None, alias="magnitude")
     # spectral_type and stellar_spectral_type are normally kept equal --
     # both hold the star's classification (like "G2V" for a Sun-like
     # star). The one exception is a synthetic entry used to represent a
@@ -221,8 +231,9 @@ class StellarObject(BaseModel):
     spectra_history: list[SpectralObservation] = Field(default_factory=list, alias="spectraHistory")
     # The star's raw pixel position and shape info from source detection
     # (e.g. its centroid coordinates), used to relocate it in later
-    # pictures.
-    star_data: Any = Field(default_factory=list, alias="starData")
+    # pictures. Defaults to an empty dict, not a list -- every real
+    # consumer treats this as a dict (`.get("xcentroid", ...)`).
+    star_data: Any = Field(default_factory=dict, alias="starData")
     # This star's own extracted spectrum and what it suggests about the
     # star -- see SpectroscopyResult. Mirrors photometry above: one
     # nested result per domain, instead of that domain's fields loose

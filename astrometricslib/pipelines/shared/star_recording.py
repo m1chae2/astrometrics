@@ -162,19 +162,16 @@ def _reconcile_position_only_star_ids(
         CATALOG_MATCH_RADIUS_ARCSEC,
     )
 
-    # `StellarObject.right_ascension`/`.declination` are typed `Any` and
-    # default to `""`, not `None` -- an `is not None` check alone would
-    # let that default through and crash the `SkyCoord` arithmetic
-    # below. Every real `FIELD_J...` star has both set to real floats at
-    # the same place its id is minted (star_identifier.py's Step 3), so
-    # this only excludes a malformed star that should never reach
-    # recording in the first place.
+    # Every real `FIELD_J...` star has both set to real floats at the
+    # same place its id is minted (star_identifier.py's Step 3); this
+    # only excludes a malformed star that should never reach recording
+    # in the first place.
     position_only_stars = [
         stellar_object
         for stellar_object in stellar_objects
         if stellar_object.id.startswith(_POSITION_ONLY_STAR_ID_PREFIX)
-        and isinstance(stellar_object.right_ascension, int | float)
-        and isinstance(stellar_object.declination, int | float)
+        and stellar_object.right_ascension is not None
+        and stellar_object.declination is not None
     ]
     if not position_only_stars:
         return stellar_objects

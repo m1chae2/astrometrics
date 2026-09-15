@@ -349,7 +349,7 @@ def _compute_star_coefficients_of_variation(stellar_objects: list[StellarObject]
                 cv_list.append(cv)
 
         if getattr(star, "star_data", None) and isinstance(star.star_data, dict):
-            star.magnitude = star.star_data.get("mag", "")
+            star.magnitude = star.star_data.get("mag")
 
     return cv_list
 

@@ -135,7 +135,7 @@ class GaiaCatalogDriver(CatalogDriver):
                             name=f"Gaia DR3 {source_id}",
                             ra=ra_value,
                             dec=dec_value,
-                            magnitude=magnitude_g if magnitude_g is not None else "",
+                            magnitude=magnitude_g,
                             spectralType="",
                         )
                     )

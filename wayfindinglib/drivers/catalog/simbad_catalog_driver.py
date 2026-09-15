@@ -223,7 +223,7 @@ class SimbadCatalogDriver(CatalogDriver):
                         name=main_id,
                         ra=ra_value,
                         dec=dec_value,
-                        magnitude=magnitude if magnitude is not None else "",
+                        magnitude=magnitude,
                         spectralType=spectral_type or "",
                     )
                 )

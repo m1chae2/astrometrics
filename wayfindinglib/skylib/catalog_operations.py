@@ -268,7 +268,7 @@ def global_catalog(sky, ra_deg: float, dec_deg: float, radius_deg: float) -> lis
                         name=main_id,
                         ra=ra_degrees_value,
                         dec=dec_degrees_value,
-                        magnitude=magnitude or "",
+                        magnitude=magnitude,
                         spectralType=sp_type or "",
                     )
                 )

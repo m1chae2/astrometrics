@@ -292,7 +292,7 @@ class StellarCatalog:
         total = len(stellar_objects)
         with_names = len([o for o in stellar_objects if o.name and "Star_" not in o.id])
         with_spectral = len([o for o in stellar_objects if o.spectral_type and o.spectral_type != "Unknown"])
-        with_magnitude = len([o for o in stellar_objects if o.magnitude not in (None, "", 0.0)])
+        with_magnitude = len([o for o in stellar_objects if o.magnitude not in (None, 0.0)])
 
         return {
             "total_objects": total,

@@ -12,7 +12,7 @@ export interface StellarAnalysisDetailsProps {
 }
 
 /**
- * Renders periodogram and exoplanet transit analysis details.
+ * Renders periodogram and BLS transit/eclipse analysis details.
  */
 export const StellarAnalysisDetails: React.FC<StellarAnalysisDetailsProps> = ({
     astronomyData,
@@ -63,7 +63,7 @@ export const StellarAnalysisDetails: React.FC<StellarAnalysisDetailsProps> = ({
 
             {transitCandidate && (
                 <div className="stellar-analysis-details__section">
-                    <div className="stellar-analysis-details__section-title">Exoplanet Transit (BLS)</div>
+                    <div className="stellar-analysis-details__section-title">Transit / Eclipse (BLS)</div>
                     <div className="stellar-analysis-details__grid">
                         <div className="analysis-row">
                             <span className="analysis-label">Period (P):</span>

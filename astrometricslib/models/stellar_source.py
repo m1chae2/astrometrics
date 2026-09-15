@@ -15,7 +15,6 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field
 # "stub file not found" warnings for re-exports and typing helpers.
 __all__ = [
     "AnalysisResult",
-    "ExoplanetTransitCandidate",
     "FileItem",
     "GroupedFrameStat",
     "LightCurve",
@@ -25,6 +24,7 @@ __all__ = [
     "StellarObject",
     "StellarSessionMatch",
     "TargetFilesResponse",
+    "TransitCandidate",
     "VariableCandidate",
 ]
 
@@ -49,11 +49,15 @@ class PeriodogramResult(BaseModel):
     false_alarm_probability: float = Field(default=1.0, alias="falseAlarmProbability")
 
 
-class ExoplanetTransitCandidate(BaseModel):
-    """Data for when a star dims, possibly because a planet passed in front.
+class TransitCandidate(BaseModel):
+    """Data for a brief, repeating dip in a star's brightness.
 
-    This "transit" pattern -- a brief, repeating dip in brightness -- is
-    one of the main ways astronomers find planets around other stars.
+    This "transit" pattern is how astronomers find planets around other
+    stars, but the same box-shaped dip also shows up when the "star" is
+    actually two stars and one passes in front of the other (an
+    eclipsing binary) -- the detection math (see
+    `VariabilityAnalyzer.run_bls_transit_search`) doesn't know which
+    caused it, so this model doesn't assume either.
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -90,7 +94,7 @@ class LightCurve(BaseModel):
     magnitudes: list[float] = Field(default_factory=list, alias="magnitudes")
     is_saturated: list[bool] = Field(default_factory=list, alias="isSaturated")
     periodogram: PeriodogramResult | None = Field(default=None, alias="periodogram")
-    transit_candidate: ExoplanetTransitCandidate | None = Field(default=None, alias="transitCandidate")
+    transit_candidate: TransitCandidate | None = Field(default=None, alias="transitCandidate")
 
 
 class StellarSessionMatch(BaseModel):

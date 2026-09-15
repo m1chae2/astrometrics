@@ -1264,19 +1264,25 @@ class VariabilityAnalyzer:
                 star.light_curve.fluxes_detrended = [float(f) for f in fluxes_norm]
 
     def run_bls_transit_search(self, star: StellarObject) -> Any | None:
-        """Look for repeating dips in brightness caused by a planet passing by.
+        """Look for a repeating, box-shaped dip in brightness.
+
+        A planet passing in front of its star and one star of an
+        eclipsing binary passing in front of the other both produce
+        this same box-shaped dip -- this search doesn't try to tell
+        the two apart.
 
         Returns
         -------
-        candidate : `ExoplanetTransitCandidate` or `None`
-            The details of the possible planet, or None if nothing was found.
+        candidate : `TransitCandidate` or `None`
+            The details of the possible transit or eclipse, or None if
+            nothing was found.
         """
         if not star.light_curve or len(star.light_curve.timestamps) < 8:
             return None
 
         from astropy.timeseries import BoxLeastSquares
 
-        from astrometricslib.models.stellar_source import ExoplanetTransitCandidate
+        from astrometricslib.models.stellar_source import TransitCandidate
         from astrometricslib.pipelines.shared.quality.detection_confidence import (
             significance_to_confidence,
         )
@@ -1310,7 +1316,7 @@ class VariabilityAnalyzer:
 
         snr = float(best_depth / max(1e-4, np.std(norm_fluxes)))
 
-        candidate = ExoplanetTransitCandidate(
+        candidate = TransitCandidate(
             period_days=best_period,
             transit_depth_mag=float(best_depth * 1.0857),
             transit_duration_hours=best_duration,

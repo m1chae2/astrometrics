@@ -205,6 +205,10 @@ export interface Spectrum {
   trailCenterlinePx?: number[] | null;
   trailWidthPx?: number[] | null;
   stellarSpectralType?: string;
+  selfDeterminedSpectralType?: string;
+  selfDeterminedSpectralTypeConfidence?: number | null;
+  selfDeterminedSpectralTypeCandidates?: Record<string, any>[];
+  probableSpectralFeatures?: Record<string, any>[];
   targetIds?: string[];
   extractionRadius?: number | null;
   meanFlux?: number | null;
@@ -251,17 +255,22 @@ export interface PeriodogramResult {
 }
 
 /**
- * Data for when a star dims, possibly because a planet passed in front.
+ * Data for a brief, repeating dip in a star's brightness.
  *
- * This "transit" pattern -- a brief, repeating dip in brightness -- is
- * one of the main ways astronomers find planets around other stars.
+ * This "transit" pattern is how astronomers find planets around other
+ * stars, but the same box-shaped dip also shows up when the "star" is
+ * actually two stars and one passes in front of the other (an
+ * eclipsing binary) -- the detection math (see
+ * `VariabilityAnalyzer.run_bls_transit_search`) doesn't know which
+ * caused it, so this model doesn't assume either.
  */
-export interface ExoplanetTransitCandidate {
+export interface TransitCandidate {
   periodDays?: number;
   transitDepthMag?: number;
   transitDurationHours?: number;
   epochT0?: number;
   transitSnr?: number;
+  transitConfidence?: number;
 }
 
 /**
@@ -276,7 +285,7 @@ export interface LightCurve {
   magnitudes?: number[];
   isSaturated?: boolean[];
   periodogram?: PeriodogramResult | null;
-  transitCandidate?: ExoplanetTransitCandidate | null;
+  transitCandidate?: TransitCandidate | null;
 }
 
 /**
@@ -738,6 +747,21 @@ export interface PhotometryQualitySummary {
 }
 
 /**
+ * One star whose self-determined spectral type shouldn't be trusted as-is.
+ *
+ * Names exactly which stars a spectroscopy run's own classification is
+ * shaky for, and why, rather than only reporting how many -- so a user
+ * building a personal catalog from self-determined types knows which
+ * entries to double-check instead of taking every one at face value.
+ */
+export interface SpectralClassificationConcern {
+  star_id: string;
+  reason: string;
+  spectral_type: string;
+  confidence?: number | null;
+}
+
+/**
  * Measurements recorded when analyzing a star's light spectrum.
  *
  * A spectroscope splits a star's light into a rainbow-like streak (the
@@ -754,6 +778,9 @@ export interface SpectroscopyPipelineQualityMetrics {
   dispersion_angle_deg?: number | null;
   trail_width_profile_available?: boolean;
   median_trail_width_px?: number | null;
+  low_confidence_classification_count?: number;
+  ambiguous_classification_count?: number;
+  flagged_spectral_classifications?: SpectralClassificationConcern[];
 }
 
 /**

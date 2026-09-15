@@ -32,6 +32,7 @@ from astrometricslib.models.quality_summary import (
     FrameEnsembleComposition,
     PhotometryPipelineQualityMetrics,
     PhotometryQualitySummary,
+    SpectralClassificationConcern,
     SpectroscopyPipelineQualityMetrics,
     SpectroscopyQualitySummary,
     StackingPipelineQualityMetrics,
@@ -40,7 +41,6 @@ from astrometricslib.models.quality_summary import (
 )
 from astrometricslib.models.stellar_source import (
     AnalysisResult,
-    ExoplanetTransitCandidate,
     FileItem,
     GroupedFrameStat,
     LightCurve,
@@ -50,6 +50,7 @@ from astrometricslib.models.stellar_source import (
     StellarObject,
     StellarSessionMatch,
     TargetFilesResponse,
+    TransitCandidate,
     VariableCandidate,
 )
 from astrometricslib.models.target import (
@@ -259,7 +260,7 @@ def main() -> None:
         generate_interface(StellarSessionMatch, "StellarSessionMatch"),
         generate_interface(SpectralObservation, "SpectralObservation"),
         generate_interface(PeriodogramResult, "PeriodogramResult"),
-        generate_interface(ExoplanetTransitCandidate, "ExoplanetTransitCandidate"),
+        generate_interface(TransitCandidate, "TransitCandidate"),
         generate_interface(LightCurve, "LightCurve"),
         generate_interface(TelescopePulse, "TelescopePulse"),
         generate_interface(ProcessingJobPulse, "ProcessingJobPulse"),
@@ -292,6 +293,7 @@ def main() -> None:
         generate_interface(FrameEnsembleComposition, "FrameEnsembleComposition"),
         generate_interface(PhotometryPipelineQualityMetrics, "PhotometryPipelineQualityMetrics"),
         generate_interface(PhotometryQualitySummary, "PhotometryQualitySummary"),
+        generate_interface(SpectralClassificationConcern, "SpectralClassificationConcern"),
         generate_interface(SpectroscopyPipelineQualityMetrics, "SpectroscopyPipelineQualityMetrics"),
         generate_interface(SpectroscopyQualitySummary, "SpectroscopyQualitySummary"),
         generate_interface(FrameDetection, "FrameDetection"),

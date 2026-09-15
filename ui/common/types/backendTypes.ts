@@ -604,9 +604,9 @@ export interface ExcludedFrame {
  * Tracks how many pictures from a single observing session were used.
  */
 export interface TargetSessionContribution {
-  session_id: string;
-  frames_contributed: number;
-  frames_clipped: number;
+  sessionId: string;
+  framesContributed: number;
+  framesClipped: number;
 }
 
 /**
@@ -616,26 +616,26 @@ export interface TargetSessionContribution {
  * like the final image sharpness (FWHM) or if the background was uneven.
  */
 export interface StackingPipelineQualityMetrics {
-  is_spectral: boolean;
-  frames_submitted: number;
-  frames_stacked: number;
-  excluded_frames?: ExcludedFrame[];
-  rejected_pixel_fraction?: number | null;
-  rejected_fraction_flagged?: boolean;
-  background_split_detected?: boolean;
-  background_split_detail?: string | null;
-  calibration_mismatch_flags?: string[];
-  saturated_pixel_fraction?: number | null;
-  saturation_flagged?: boolean;
-  stacked_fwhm_px?: number | null;
-  median_input_fwhm_px?: number | null;
-  fwhm_degraded?: boolean;
-  spectral_registration_flags?: ExcludedFrame[];
-  stacking_duration_seconds?: number | null;
-  timed_out?: boolean;
-  debayer_applied?: boolean | null;
-  registration_reference_frame?: string | null;
-  registration_reference_star_count?: number | null;
+  isSpectral: boolean;
+  framesSubmitted: number;
+  framesStacked: number;
+  excludedFrames?: ExcludedFrame[];
+  rejectedPixelFraction?: number | null;
+  rejectedFractionFlagged?: boolean;
+  backgroundSplitDetected?: boolean;
+  backgroundSplitDetail?: string | null;
+  calibrationMismatchFlags?: string[];
+  saturatedPixelFraction?: number | null;
+  saturationFlagged?: boolean;
+  stackedFwhmPx?: number | null;
+  medianInputFwhmPx?: number | null;
+  fwhmDegraded?: boolean;
+  spectralRegistrationFlags?: ExcludedFrame[];
+  stackingDurationSeconds?: number | null;
+  timedOut?: boolean;
+  debayerApplied?: boolean | null;
+  registrationReferenceFrame?: string | null;
+  registrationReferenceStarCount?: number | null;
 }
 
 /**
@@ -645,18 +645,18 @@ export interface StackingPipelineQualityMetrics {
  * metrics.
  */
 export interface StackQualitySummary {
-  pipeline_name?: string;
-  pipeline_version?: string;
-  target_id: string;
-  target_session_ids?: string[];
-  target_session_breakdown?: TargetSessionContribution[];
-  upstream_quality_summary_reference?: string | null;
-  resolved_parameters?: Record<string, any>;
-  quality_processing_applied?: boolean;
+  pipelineName?: string;
+  pipelineVersion?: string;
+  targetId: string;
+  targetSessionIds?: string[];
+  targetSessionBreakdown?: TargetSessionContribution[];
+  upstreamQualitySummaryReference?: string | null;
+  resolvedParameters?: Record<string, any>;
+  qualityProcessingApplied?: boolean;
   flagged?: boolean;
-  flag_reasons?: string[];
-  created_at?: string;
-  stacking_metrics: StackingPipelineQualityMetrics;
+  flagReasons?: string[];
+  createdAt?: string;
+  stackingMetrics: StackingPipelineQualityMetrics;
 }
 
 /**
@@ -668,36 +668,36 @@ export interface StackQualitySummary {
  * exactly where the telescope was pointed).
  */
 export interface AstrometryPipelineQualityMetrics {
-  catalog_matched_star_count?: number;
-  position_only_star_count?: number;
-  unresolved_star_count?: number;
-  sources_detected: number;
-  solve_attempted: boolean;
-  plate_solve_succeeded: boolean;
-  simbad_matched_count: number;
-  astrometric_residual_rms_arcsec?: number | null;
-  remote_catalog_queries_attempted?: number;
-  remote_catalog_queries_failed?: number;
-  remote_catalog_circuit_breaker_tripped?: boolean;
-  plate_solve_attempts?: number;
+  catalogMatchedStarCount?: number;
+  positionOnlyStarCount?: number;
+  unresolvedStarCount?: number;
+  sourcesDetected: number;
+  solveAttempted: boolean;
+  plateSolveSucceeded: boolean;
+  simbadMatchedCount: number;
+  astrometricResidualRmsArcsec?: number | null;
+  remoteCatalogQueriesAttempted?: number;
+  remoteCatalogQueriesFailed?: number;
+  remoteCatalogCircuitBreakerTripped?: boolean;
+  plateSolveAttempts?: number;
 }
 
 /**
  * The final saved report for an astrometry (coordinate-finding) job.
  */
 export interface AstrometryQualitySummary {
-  pipeline_name?: string;
-  pipeline_version?: string;
-  target_id: string;
-  target_session_ids?: string[];
-  target_session_breakdown?: TargetSessionContribution[];
-  upstream_quality_summary_reference?: string | null;
-  resolved_parameters?: Record<string, any>;
-  quality_processing_applied?: boolean;
+  pipelineName?: string;
+  pipelineVersion?: string;
+  targetId: string;
+  targetSessionIds?: string[];
+  targetSessionBreakdown?: TargetSessionContribution[];
+  upstreamQualitySummaryReference?: string | null;
+  resolvedParameters?: Record<string, any>;
+  qualityProcessingApplied?: boolean;
   flagged?: boolean;
-  flag_reasons?: string[];
-  created_at?: string;
-  astrometry_metrics: AstrometryPipelineQualityMetrics;
+  flagReasons?: string[];
+  createdAt?: string;
+  astrometryMetrics: AstrometryPipelineQualityMetrics;
 }
 
 /**
@@ -708,9 +708,9 @@ export interface AstrometryQualitySummary {
  * the "ensemble"). This records which stars were in that group.
  */
 export interface FrameEnsembleComposition {
-  frame_path: string;
-  ensemble_size: number;
-  excluded_comparison_star_ids?: string[];
+  framePath: string;
+  ensembleSize: number;
+  excludedComparisonStarIds?: string[];
 }
 
 /**
@@ -720,40 +720,40 @@ export interface FrameEnsembleComposition {
  * were found.
  */
 export interface PhotometryPipelineQualityMetrics {
-  catalog_matched_star_count?: number;
-  position_only_star_count?: number;
-  unresolved_star_count?: number;
-  stars_processed: number;
-  stars_found: number;
-  frames_processed: number;
-  rejected_frames?: ExcludedFrame[];
-  frame_ensemble_composition?: FrameEnsembleComposition[];
-  variable_candidate_count: number;
-  light_curve_scatter_rms_mag?: number | null;
-  cross_session_match_count?: number;
-  sessions_missing_wcs?: string[];
-  long_term_variable_candidate_count?: number;
-  astrometry_identified_star_count?: number;
-  sessions_with_reused_header_wcs?: string[];
-  sessions_with_replaced_header_wcs?: string[];
+  catalogMatchedStarCount?: number;
+  positionOnlyStarCount?: number;
+  unresolvedStarCount?: number;
+  starsProcessed: number;
+  starsFound: number;
+  framesProcessed: number;
+  rejectedFrames?: ExcludedFrame[];
+  frameEnsembleComposition?: FrameEnsembleComposition[];
+  variableCandidateCount: number;
+  lightCurveScatterRmsMag?: number | null;
+  crossSessionMatchCount?: number;
+  sessionsMissingWcs?: string[];
+  longTermVariableCandidateCount?: number;
+  astrometryIdentifiedStarCount?: number;
+  sessionsWithReusedHeaderWcs?: string[];
+  sessionsWithReplacedHeaderWcs?: string[];
 }
 
 /**
  * The final saved report for a photometry (brightness-measuring) job.
  */
 export interface PhotometryQualitySummary {
-  pipeline_name?: string;
-  pipeline_version?: string;
-  target_id: string;
-  target_session_ids?: string[];
-  target_session_breakdown?: TargetSessionContribution[];
-  upstream_quality_summary_reference?: string | null;
-  resolved_parameters?: Record<string, any>;
-  quality_processing_applied?: boolean;
+  pipelineName?: string;
+  pipelineVersion?: string;
+  targetId: string;
+  targetSessionIds?: string[];
+  targetSessionBreakdown?: TargetSessionContribution[];
+  upstreamQualitySummaryReference?: string | null;
+  resolvedParameters?: Record<string, any>;
+  qualityProcessingApplied?: boolean;
   flagged?: boolean;
-  flag_reasons?: string[];
-  created_at?: string;
-  photometry_metrics: PhotometryPipelineQualityMetrics;
+  flagReasons?: string[];
+  createdAt?: string;
+  photometryMetrics: PhotometryPipelineQualityMetrics;
 }
 
 /**
@@ -765,9 +765,9 @@ export interface PhotometryQualitySummary {
  * entries to double-check instead of taking every one at face value.
  */
 export interface SpectralClassificationConcern {
-  star_id: string;
+  starId: string;
   reason: string;
-  spectral_type: string;
+  spectralType: string;
   confidence?: number | null;
 }
 
@@ -780,35 +780,35 @@ export interface SpectralClassificationConcern {
  * was too bright (saturated).
  */
 export interface SpectroscopyPipelineQualityMetrics {
-  catalog_matched_star_count?: number;
-  position_only_star_count?: number;
-  unresolved_star_count?: number;
-  zero_order_saturated_pixel_fraction?: number | null;
-  zero_order_saturation_flagged?: boolean;
-  dispersion_angle_deg?: number | null;
-  trail_width_profile_available?: boolean;
-  median_trail_width_px?: number | null;
-  low_confidence_classification_count?: number;
-  ambiguous_classification_count?: number;
-  flagged_spectral_classifications?: SpectralClassificationConcern[];
+  catalogMatchedStarCount?: number;
+  positionOnlyStarCount?: number;
+  unresolvedStarCount?: number;
+  zeroOrderSaturatedPixelFraction?: number | null;
+  zeroOrderSaturationFlagged?: boolean;
+  dispersionAngleDeg?: number | null;
+  trailWidthProfileAvailable?: boolean;
+  medianTrailWidthPx?: number | null;
+  lowConfidenceClassificationCount?: number;
+  ambiguousClassificationCount?: number;
+  flaggedSpectralClassifications?: SpectralClassificationConcern[];
 }
 
 /**
  * The final saved report for a spectroscopy (light-spectrum) job.
  */
 export interface SpectroscopyQualitySummary {
-  pipeline_name?: string;
-  pipeline_version?: string;
-  target_id: string;
-  target_session_ids?: string[];
-  target_session_breakdown?: TargetSessionContribution[];
-  upstream_quality_summary_reference?: string | null;
-  resolved_parameters?: Record<string, any>;
-  quality_processing_applied?: boolean;
+  pipelineName?: string;
+  pipelineVersion?: string;
+  targetId: string;
+  targetSessionIds?: string[];
+  targetSessionBreakdown?: TargetSessionContribution[];
+  upstreamQualitySummaryReference?: string | null;
+  resolvedParameters?: Record<string, any>;
+  qualityProcessingApplied?: boolean;
   flagged?: boolean;
-  flag_reasons?: string[];
-  created_at?: string;
-  spectroscopy_metrics: SpectroscopyPipelineQualityMetrics;
+  flagReasons?: string[];
+  createdAt?: string;
+  spectroscopyMetrics: SpectroscopyPipelineQualityMetrics;
 }
 
 /**
@@ -888,30 +888,30 @@ export interface AsteroidDetectionCandidate {
  * known asteroid?).
  */
 export interface AsteroidDetectionPipelineQualityMetrics {
-  frames_with_wcs_estimate: number;
-  frames_excluded_missing_pointing_metadata: number;
-  candidates_detected: number;
-  candidates_persistence_confirmed: number;
-  candidates_rate_linearity_confirmed: number;
-  candidates_ephemeris_matched: number;
+  framesWithWcsEstimate: number;
+  framesExcludedMissingPointingMetadata: number;
+  candidatesDetected: number;
+  candidatesPersistenceConfirmed: number;
+  candidatesRateLinearityConfirmed: number;
+  candidatesEphemerisMatched: number;
 }
 
 /**
  * The final saved report for an asteroid-hunting job.
  */
 export interface AsteroidDetectionQualitySummary {
-  pipeline_name?: string;
-  pipeline_version?: string;
-  target_id: string;
-  target_session_ids?: string[];
-  target_session_breakdown?: TargetSessionContribution[];
-  upstream_quality_summary_reference?: string | null;
-  resolved_parameters?: Record<string, any>;
-  quality_processing_applied?: boolean;
+  pipelineName?: string;
+  pipelineVersion?: string;
+  targetId: string;
+  targetSessionIds?: string[];
+  targetSessionBreakdown?: TargetSessionContribution[];
+  upstreamQualitySummaryReference?: string | null;
+  resolvedParameters?: Record<string, any>;
+  qualityProcessingApplied?: boolean;
   flagged?: boolean;
-  flag_reasons?: string[];
-  created_at?: string;
-  asteroid_detection_metrics: AsteroidDetectionPipelineQualityMetrics;
+  flagReasons?: string[];
+  createdAt?: string;
+  asteroidDetectionMetrics: AsteroidDetectionPipelineQualityMetrics;
 }
 
 /**

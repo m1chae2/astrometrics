@@ -431,8 +431,8 @@ export const PlanetariumDisplay: React.FC = () => {
         selectedTargetId={selectedTargetId}
         slewRequestId={slewRequestId}
         onCenterChange={handleCenterChange}
-        sensorFovWidthDeg={equipmentConfig?.fov_width_deg}
-        sensorFovHeightDeg={equipmentConfig?.fov_height_deg}
+        sensorFovWidthDeg={equipmentConfig?.fovWidthDeg}
+        sensorFovHeightDeg={equipmentConfig?.fovHeightDeg}
       />
 
       <EquipmentConfigPanel

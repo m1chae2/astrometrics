@@ -40,25 +40,25 @@ import {
 export interface ObservationSessionSummary {
     id: string;
     status: string;
-    night_date: string;
-    entry_count: number;
+    nightDate: string;
+    entryCount: number;
 }
 
 /** Camera sensor profile as returned by observatory:list_cameras. */
 export interface EquipmentCameraProfile {
     name: string;
-    pixel_size_um: number;
-    sensor_width_px: number;
-    sensor_height_px: number;
+    pixelSizeUm: number;
+    sensorWidthPx: number;
+    sensorHeightPx: number;
 }
 
 /** Active equipment configuration with computed imaging geometry, from observatory:get_equipment_configuration. */
 export interface EquipmentConfigurationResult {
-    telescope: { name: string; focal_length_mm: number; focal_ratio: number };
+    telescope: { name: string; focalLengthMm: number; focalRatio: number };
     camera: EquipmentCameraProfile;
-    plate_scale_arcsec_per_px: number;
-    fov_width_deg: number;
-    fov_height_deg: number;
+    plateScaleArcsecPerPx: number;
+    fovWidthDeg: number;
+    fovHeightDeg: number;
 }
 
 // Strongly typed ActionRegistry to map RPC action names to their payload and response models.

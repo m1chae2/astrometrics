@@ -25,29 +25,32 @@ class DivergenceRecord(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    id: str
-    observation_session_id: str
-    queued_observation_package_id: str | None = Field(default=None)
-    capability: ObservatoryCapability
-    comparison_input_id: str
-    observed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    intended_value: float
-    observed_value: float
+    id: str = Field(alias="id")
+    observation_session_id: str = Field(alias="observationSessionId")
+    queued_observation_package_id: str | None = Field(default=None, alias="queuedObservationPackageId")
+    capability: ObservatoryCapability = Field(alias="capability")
+    comparison_input_id: str = Field(alias="comparisonInputId")
+    observed_at: datetime = Field(default_factory=lambda: datetime.now(UTC), alias="observedAt")
+    intended_value: float = Field(alias="intendedValue")
+    observed_value: float = Field(alias="observedValue")
     divergence_magnitude: float = Field(
+        alias="divergenceMagnitude",
         description="Signed: intended minus observed, so systematic bias is "
-        "distinguishable from symmetric noise."
+        "distinguishable from symmetric noise.",
     )
-    divergence_unit: str
+    divergence_unit: str = Field(alias="divergenceUnit")
     tolerance: float = Field(
+        alias="tolerance",
         description="The tolerance this comparison was evaluated against, so a later aggregate "
         "report can recompute e.g. 'within half tolerance' without re-deriving a value this "
-        "record already used."
+        "record already used.",
     )
-    within_tolerance: bool
+    within_tolerance: bool = Field(alias="withinTolerance")
     converged: bool | None = Field(
         default=None,
+        alias="converged",
         description="For PLATE_SOLVE_ALIGNMENT comparisons only: whether the underlying "
         "PointingCorrection converged within its iteration limit. None for every other "
         "capability, and for alignment comparisons recorded before this field existed.",
     )
-    detail: str = Field(default="")
+    detail: str = Field(default="", alias="detail")

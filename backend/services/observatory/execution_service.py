@@ -96,12 +96,12 @@ class ExecutionService:
             {
                 "id": session.id,
                 "status": getattr(session.status, "value", str(session.status)),
-                "night_date": str(getattr(session, "night_date", "")),
-                "entry_count": len(getattr(session, "queue", []) or []),
+                "nightDate": str(getattr(session, "night_date", "")),
+                "entryCount": len(getattr(session, "queue", []) or []),
             }
             for session in sessions
         ]
-        summaries.sort(key=lambda entry: entry["night_date"], reverse=True)
+        summaries.sort(key=lambda entry: entry["nightDate"], reverse=True)
         return summaries
 
     def get_session(self, session_id: str) -> dict[str, Any]:
@@ -117,7 +117,7 @@ class ExecutionService:
         session : `dict`
             The session serialized for transport.
         """
-        return self._load_session(session_id).model_dump(mode="json")
+        return self._load_session(session_id).model_dump(mode="json", by_alias=True)
 
     def abort_session(self, session_id: str, reason: str) -> dict[str, Any]:
         """Abort a session, skipping its remaining pending entries.
@@ -137,7 +137,7 @@ class ExecutionService:
         session = self._load_session(session_id)
         logger.info(f"Aborting observation session {session_id}: {reason}")
         aborted = self._execution.abort_session(session, reason, datetime.now(UTC))
-        return aborted.model_dump(mode="json")
+        return aborted.model_dump(mode="json", by_alias=True)
 
     def reconcile_session(self, session_id: str) -> dict[str, Any]:
         """Run post-session reconciliation and record the results.
@@ -158,7 +158,7 @@ class ExecutionService:
         # execution loop back to the logical target data models in
         # astrometricslib.
         reconciled = self._execution.reconcile_session(session, self.astrometrics)
-        return reconciled.model_dump(mode="json")
+        return reconciled.model_dump(mode="json", by_alias=True)
 
     def record_divergence(
         self,
@@ -218,4 +218,4 @@ class ExecutionService:
             converged=converged,
             detail=detail,
         )
-        return record.model_dump(mode="json")
+        return record.model_dump(mode="json", by_alias=True)

@@ -5,12 +5,13 @@ of stars, and returns the final, cleaned-up color data (spectra) for each star.
 """
 
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 import numpy as np
 
 from astrometricslib.drivers.image import AstrometricsImage
-from astrometricslib.models.stellar_source import SpectroscopyResult, StellarObject
+from astrometricslib.models.stellar_source import SpectralObservation, SpectroscopyResult, StellarObject
 from astrometricslib.pipelines.shared.analysis_context import AnalysisContext
 from astrometricslib.pipelines.shared.quality.quality_metrics import DEFAULT_SATURATION_ADU_THRESHOLD
 from astrometricslib.pipelines.shared.quality.saturation import compute_saturated_pixel_fraction
@@ -321,13 +322,15 @@ class SpectroscopyPipeline:
 
                 # If it's a StellarObject, enrich it with results
                 if is_stellar_obj:
-                    self._apply_result_to_stellar_object(star, result)
+                    self._apply_result_to_stellar_object(star, result, image)
 
                 results.append(result)
 
         return results
 
-    def _apply_result_to_stellar_object(self, star: StellarObject, result: dict[str, Any]) -> None:
+    def _apply_result_to_stellar_object(
+        self, star: StellarObject, result: dict[str, Any], image: AstrometricsImage
+    ) -> None:
         """Copy a single star's extraction result onto its `StellarObject`.
 
         "Quantum Efficiency" (QE) corrects for the fact that camera
@@ -375,6 +378,24 @@ class SpectroscopyPipeline:
             self_determined_spectral_type_candidates=classification["ranked_types"],
             probable_spectral_features=probable_spectral_features,
         )
+
+        # Records this extraction as one more epoch in the star's own
+        # spectral history, so a caller can see how its spectrum has
+        # changed across observing sessions -- not just the latest one
+        # above. merge_spectroscopy_stellar_object folds this single
+        # new entry into the catalog's running history for this star.
+        observation_timestamp = image.timestamp
+        star.spectra_history = [
+            SpectralObservation(
+                timestamp=(
+                    datetime.fromtimestamp(observation_timestamp, tz=UTC)
+                    if observation_timestamp is not None
+                    else datetime.now(UTC)
+                ),
+                wavelengths=wavelengths_angstrom,
+                intensities=intensities,
+            )
+        ]
 
         star.trail_centerline_px = result.get("trail_centerline_px")
         star.trail_width_px = result.get("trail_width_px")

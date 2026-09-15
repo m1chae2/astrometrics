@@ -329,6 +329,29 @@ def merge_astrometry_stellar_object(existing_stellar_object, updated_stellar_obj
     return existing_stellar_object
 
 
+def merge_spectra_history(existing_history, updated_history):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Combine two stars' spectral-observation histories into one timeline.
+
+    Each spectroscopy run contributes one new `SpectralObservation` (see
+    `SpectroscopyPipeline._apply_result_to_stellar_object`); folding it
+    in here -- keyed by timestamp -- is what turns those single-session
+    snapshots into an actual history instead of each run's entry
+    replacing the last. Re-processing the same session's frame again
+    lands on the same timestamp and overwrites that one entry in place
+    rather than appending a duplicate.
+
+    Returns
+    -------
+    merged_history : `list` of `SpectralObservation`
+        Every observation from both histories, one per distinct
+        timestamp (latest write wins), oldest first.
+    """
+    by_timestamp = {observation.timestamp: observation for observation in existing_history}
+    for observation in updated_history:
+        by_timestamp[observation.timestamp] = observation
+    return [by_timestamp[timestamp] for timestamp in sorted(by_timestamp)]
+
+
 def merge_spectroscopy_stellar_object(existing_stellar_object, updated_stellar_object):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Merge rule for spectroscopy updates to a star.
 
@@ -359,6 +382,9 @@ def merge_spectroscopy_stellar_object(existing_stellar_object, updated_stellar_o
     existing_stellar_object.trail_width_px = updated_stellar_object.trail_width_px
     existing_stellar_object.rectangle = updated_stellar_object.rectangle
     existing_stellar_object.spectroscopy = updated_stellar_object.spectroscopy
+    existing_stellar_object.spectra_history = merge_spectra_history(
+        existing_stellar_object.spectra_history, updated_stellar_object.spectra_history
+    )
     return existing_stellar_object
 
 

@@ -179,7 +179,8 @@ def test_a_broken_logs_database_degrades_instead_of_raising(monkeypatch):  # ruf
 def test_an_explicit_log_file_is_used_as_given(isolated_logs, tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify a caller-supplied log path wins over a generated name.
 
-    `stack_and_solve` passes the log file it was already given.
+    A caller that already has its own job log open (a script or
+    notebook run, say) needs that exact path used, not a fresh one.
     """
     chosen = str(tmp_path / "chosen.log")
 

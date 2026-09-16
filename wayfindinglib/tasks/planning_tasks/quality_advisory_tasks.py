@@ -51,7 +51,7 @@ def build_target_quality_advisory(astrometrics, target_id: str) -> TargetQuality
         ("astrometry", target.astrometry_quality_summary),
         ("photometry", target.photometry_quality_summary),
         ("spectroscopy", target.spectroscopy_quality_summary),
-        ("asteroid_recovery", target.asteroid_recovery_quality_summary),
+        ("asteroid_detection", target.asteroid_detection_quality_summary),
     ):
         if summary is not None:
             quality_flags.append(

@@ -12,18 +12,25 @@ import math
 from typing import Any
 
 import numpy as np
+from astropy.stats import sigma_clip
 
 MIN_MATCHED_STAR_PAIRS = 10
 RMSE_OUTLIER_SIGMA = 2.5
 ZERO_ORDER_POSITION_JUMP_OUTLIER_SIGMA = 3.0
 ZERO_ORDER_AMPLITUDE_OUTLIER_SIGMA = 2.5
 
+# astropy.stats.sigma_clip has no "unbounded" sigma_upper/sigma_lower
+# sentinel; a very large finite bound achieves the same "don't clip on
+# this side" effect for the one-sided (low_is_bad) case below.
+_UNBOUNDED_SIGMA = 1e300
+
 
 def flag_outliers(values: list[float | None], sigma_threshold: float, low_is_bad: bool = False) -> list[bool]:
     """Find values that are weirdly different from the rest.
 
     This function calculates the average and then flags any numbers that
-    are too far away from that average (measured in standard deviations).
+    are too far away from that average (measured in standard deviations),
+    via a single-pass `astropy.stats.sigma_clip`.
 
     Parameters
     ----------
@@ -41,21 +48,30 @@ def flag_outliers(values: list[float | None], sigma_threshold: float, low_is_bad
     flags : `list` of `bool`
         A list of True/False flags. True means the number was weird.
     """
-    present = [v for v in values if v is not None]
-    if len(present) < 2:
-        return [False] * len(values)
-    mean, std = float(np.mean(present)), float(np.std(present))
-    if std == 0:
+    data = np.ma.masked_invalid(np.array([np.nan if v is None else v for v in values], dtype=float))
+    if data.count() < 2:
         return [False] * len(values)
 
-    flags = []
-    for v in values:
-        if v is None:
-            flags.append(False)
-            continue
-        z = (v - mean) / std
-        flags.append(z < -sigma_threshold if low_is_bad else abs(z) > sigma_threshold)
-    return flags
+    if low_is_bad:
+        clipped = sigma_clip(
+            data,
+            sigma_lower=sigma_threshold,
+            sigma_upper=_UNBOUNDED_SIGMA,
+            maxiters=1,
+            cenfunc="mean",
+            stdfunc="std",
+            masked=True,
+        )
+    else:
+        clipped = sigma_clip(
+            data, sigma=sigma_threshold, maxiters=1, cenfunc="mean", stdfunc="std", masked=True
+        )
+
+    # Missing (None) values are already masked going in; only report
+    # newly-masked entries as flagged outliers.
+    already_missing = np.ma.getmaskarray(data)
+    outlier_mask = np.ma.getmaskarray(clipped) & ~already_missing
+    return outlier_mask.tolist()
 
 
 def evaluate_spectral_registration_quality(

@@ -365,7 +365,9 @@ class StellarService:
             IDs of objects with processed spectrum data.
         """
         return [
-            obj.id for obj in self.get_stellar_objects() if getattr(obj, "spectrum_data_processed", False)
+            obj.id
+            for obj in self.get_stellar_objects()
+            if getattr(obj, "spectroscopy", None) and obj.spectroscopy.wavelengths_angstrom
         ]
 
     def find_or_create_by_position(
@@ -405,7 +407,7 @@ class StellarService:
                 if spectral_type and not existing.spectral_type:
                     updates["spectral_type"] = spectral_type
                     updates["stellar_spectral_type"] = spectral_type
-                if magnitude is not None and (existing.magnitude == "" or existing.magnitude is None):
+                if magnitude is not None and existing.magnitude is None:
                     updates["magnitude"] = magnitude
                 if target_id and target_id not in existing.target_ids:
                     target_ids = [*list(existing.target_ids), target_id]
@@ -444,7 +446,7 @@ class StellarService:
                     if spectral_type and not obj.spectral_type:
                         updates["spectral_type"] = spectral_type
                         updates["stellar_spectral_type"] = spectral_type
-                    if magnitude is not None and (obj.magnitude == "" or obj.magnitude is None):
+                    if magnitude is not None and obj.magnitude is None:
                         updates["magnitude"] = magnitude
                     if target_id and target_id not in obj.target_ids:
                         updates["target_ids"] = [*list(obj.target_ids), target_id]
@@ -549,8 +551,8 @@ class StellarService:
                         "commonName": obj.name or obj.id,
                         "spectral_type": obj.spectral_type,
                         "magnitude": obj.magnitude,
-                        "has_spectra": bool(obj.spectrum_data_processed),
-                        "has_photometry": bool(obj.light_curve and len(obj.light_curve.timestamps) > 0),
+                        "has_spectra": bool(obj.spectroscopy and obj.spectroscopy.wavelengths_angstrom),
+                        "has_photometry": bool(obj.photometry and len(obj.photometry.timestamps) > 0),
                         "type": "star",
                         "global": obj.id not in local_star_ids,
                         "stackedImage": None,
@@ -603,7 +605,7 @@ class StellarService:
         results = []
         for driver_name, obj in tagged_objects:
             try:
-                magnitude_value = obj.magnitude if obj.magnitude != "" else None
+                magnitude_value = obj.magnitude
                 results.append({
                     "id": obj.id,
                     "ra": float(obj.right_ascension),

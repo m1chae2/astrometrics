@@ -28,8 +28,7 @@ def test_frame_record_per_frame_quality_facts_default_to_none_and_round_trip() -
     frame.saturated_pixel_fraction = 0.0
 
     target = Target(id="TestTarget", frames=[frame])
-    reloaded = Target()
-    reloaded.deserialize(target.serialize())
+    reloaded = Target.model_validate(target.serialize())
 
     reloaded_frame = reloaded.frames[0]
     # Check that the loaded values exactly match what we put in

@@ -9,7 +9,7 @@ in the database.
 import logging
 from typing import Any
 
-from astrometricslib.data_access.catalog_access import AbstractCatalogAccess
+from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.utilities.config_loader import AppConfiguration
 
@@ -23,13 +23,13 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 # Bounds StellarCatalog.list_object_summaries's "browse everything, no
-# target filter" case: without a cap, a UI listing polling that RPC
-# hydrates and transmits the whole catalog's summaries every request --
-# at 270,450 rows, real network and JSON-parse cost even after
-# list_star_summaries already skipped loading full StellarObjects. A
-# caller wanting the true, unbounded catalog for scripting should use
-# list_objects() instead; this cap only applies to the summary path
-# documented for UI catalog-browsing callers.
+# target filter" case: without a cap, a screen that checks in on this
+# repeatedly ends up building and sending the whole catalog's summaries
+# every single time -- at 270,450 rows, real network and JSON-parsing
+# cost even after list_star_summaries already skipped loading full
+# StellarObjects. A caller wanting the true, unbounded catalog for
+# scripting should use list_objects() instead; this cap only applies to
+# the summary path documented for UI catalog-browsing callers.
 DEFAULT_UNFILTERED_SUMMARY_LIMIT = 5000
 
 
@@ -55,8 +55,8 @@ class StellarCatalog:
             Application configuration. Loaded from the application
             configuration when omitted.
         catalog_access : `AbstractCatalogAccess`, optional
-            Storage backend for the stellar catalog. A `CatalogAccess`
-            over `config` is constructed when omitted.
+            The database tool used to save and load the stellar catalog.
+            A `CatalogAccess` over `config` is constructed when omitted.
         """
         if config is None:
             from astrometricslib.utilities.config_loader import get_configuration
@@ -64,7 +64,7 @@ class StellarCatalog:
             config = get_configuration()
         self._config = config
         if catalog_access is None:
-            from astrometricslib.data_access.catalog_access import CatalogAccess
+            from astrometricslib.drivers.catalog_access import CatalogAccess
 
             catalog_access = CatalogAccess(config)
         self.catalog_access = catalog_access
@@ -292,7 +292,7 @@ class StellarCatalog:
         total = len(stellar_objects)
         with_names = len([o for o in stellar_objects if o.name and "Star_" not in o.id])
         with_spectral = len([o for o in stellar_objects if o.spectral_type and o.spectral_type != "Unknown"])
-        with_magnitude = len([o for o in stellar_objects if o.magnitude not in (None, "", 0.0)])
+        with_magnitude = len([o for o in stellar_objects if o.magnitude not in (None, 0.0)])
 
         return {
             "total_objects": total,
@@ -361,6 +361,6 @@ class StellarCatalog:
         sources : `list` [`dict`]
             Detected point sources, sorted by flux.
         """
-        from astrometricslib.image_processing.source_detection import SourceDetector
+        from astrometricslib.pipelines.astrometry.source_detection import SourceDetector
 
         return SourceDetector(threshold_sigma=threshold_sigma, fwhm=fwhm).detect(image_data)

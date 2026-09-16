@@ -63,7 +63,7 @@ def test_stored_session_is_listed_and_retrievable(execution_service):  # ruff: i
 
     session = execution_service.get_session("session-round-trip")
     assert session["id"] == "session-round-trip"
-    assert session["camera_id"] == "test-camera"
+    assert session["cameraId"] == "test-camera"
 
 
 def test_missing_session_raises_rather_than_returning_none(execution_service):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]

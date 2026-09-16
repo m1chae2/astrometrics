@@ -4,7 +4,7 @@
 anything outside it is supposed to use. The UI backend imports from
 `astrometricslib` directly at 35 call sites and never reaches into a
 submodule, and the Sphinx documentation only ever documents this
-top-level namespace -- so the 47 names listed in `__all__` are, in a
+top-level namespace -- so the 46 names listed in `__all__` are, in a
 very real sense, the entire contract this library makes with the rest
 of the repository.
 
@@ -12,12 +12,12 @@ That contract is easy to break by accident during a refactor. Moving a
 class to a new home, renaming it, or forgetting to re-export it after
 splitting a module all look like internal cleanup, but any one of them
 silently changes what `from astrometricslib import Whatever` gives you
--- or whether it works at all. Several of these names are also loaded
-lazily through `__init__.py`'s `__getattr__`, specifically so that
-importing `astrometricslib` does not have to pull in every heavy
-dependency up front; a plain `import astrometricslib` does not exercise
-those at all, so a broken lazy export can pass right by a casual smoke
-test.
+-- or whether it works at all. Several of these names are also
+resolved on demand through `__init__.py`'s `__getattr__`, specifically
+so that importing `astrometricslib` does not have to pull in every
+heavy dependency up front; a plain `import astrometricslib` does not
+exercise those at all, so a broken deferred export can pass right by
+a casual smoke test.
 
 So this file pins both halves of the contract: the exact set of names
 `__all__` promises, and the promise that every one of them actually
@@ -38,7 +38,7 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "AbstractCatalogAccess",
     "AnalysisResult",
     "AppConfiguration",
-    "AsteroidRecoveryCandidate",
+    "AsteroidDetectionCandidate",
     "Astrometrics",
     "AstrometryPipeline",
     "AstrometryPipelineQualityMetrics",
@@ -54,17 +54,17 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "GroupedFrameStat",
     "ImageProcessing",
     "JobHandle",
-    "LightCurve",
     "LoggerInterface",
-    "MosaicInfo",
     "MovingObjectConfig",
     "MovingObjectRecovery",
+    "PhotometryResult",
     "PlotData",
     "ProcessingJob",
     "ProcessingPipelines",
     "QualityDiagnostics",
     "RenderedImage",
     "SpectralObservation",
+    "SpectroscopyResult",
     "StarIdentifier",
     "StellarCatalog",
     "StellarObject",
@@ -112,11 +112,11 @@ def test_public_all_matches_the_pinned_name_set():  # ruff: ignore[missing-retur
 def test_every_public_name_actually_resolves():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verify every name in `__all__` can actually be fetched.
 
-    Several exports are loaded lazily through `__init__.py`'s
+    Several exports are only resolved on demand through `__init__.py`'s
     `__getattr__`, so a plain `import astrometricslib` does not prove
     they work -- only fetching each one by name does. This is what
     would have caught a rename that updated `__all__` but not the
-    lazy-export table underneath it, or vice versa.
+    deferred-export table underneath it, or vice versa.
     """
     unresolvable_names = []
     for name in astrometricslib.__all__:

@@ -4,7 +4,8 @@ import configparser
 import logging
 import os
 from pathlib import Path
-from typing import Any
+
+from .enums import FilterType
 
 _instance = None
 
@@ -65,8 +66,6 @@ class AppConfiguration:
             self.base_dir.parent.parent
             / "backend"
             / "astrometrics.config",  # Backend root folder (Repo/backend/astrometrics.config)
-            self.base_dir.parent.parent
-            / "astrometrics.config",  # Legacy Repository Root (Repo/astrometrics.config)
         ]
 
         for p in candidates:
@@ -95,7 +94,6 @@ class AppConfiguration:
         defaults = {
             "Image Library": {
                 "path": "./libraryIndex",
-                "frames_path": "./libraryIndex/frames",
             },
             "Observatory.Telescope": {
                 "hostname": "localhost",
@@ -108,15 +106,25 @@ class AppConfiguration:
             "Observatory.Camera": {"default_primary_camera": "Unknown", "models": "Unknown"},
             "Observatory.Constraints": {"min_altitude": "0.0", "max_altitude": "90.0"},
             "Processing.Siril": {
-                "siril_executable": "siril",
+                # The -cli entry point, matching astrometrics.config.example.
+                # Plain "siril" is the GUI build: it needs a display
+                # connection and so fails in headless pipe mode, which is how
+                # every stack runs. This default is what a configuration
+                # written before [Processing.Siril] existed falls back to, so
+                # it has to be the working value, not the historical one.
+                "siril_executable": "siril-cli",
                 "rejection_sigma_mode": "adaptive",
                 "rejection_sigma_low": "3.0",
                 "rejection_sigma_high": "3.0",
                 "filter_wfwhm_percentile": "",
                 "filter_round_percentile": "",
-                "stack_weight": "wfwhm",
+                # Blank, matching astrometrics.config.example: -weight= needs
+                # a newer Siril than the default apt install provides, and a
+                # default that breaks the default install is not a default.
+                "stack_weight": "",
                 "generate_rejmap": "true",
                 "background_homogeneity_check_enabled": "true",
+                "auto_open_gui": "false",
             },
             # 500; see get_maximum_identified_stars for why this isn't 0
             # (unlimited) despite that having been this setting's first
@@ -155,22 +163,6 @@ class AppConfiguration:
             self._populate_defaults()
             self.save_configuration()
 
-    def _get_with_fallback(
-        self, section: str, legacy_section: str, key: str, fallback: Any | None = None
-    ) -> Any:
-        """Get a value from a primary section, falling back to a legacy one.
-
-        Returns
-        -------
-        value : `Any`
-            The resolved config value, or `fallback` if not found in
-            either section.
-        """
-        try:
-            return self.app_config.get(section, key)
-        except configparser.NoSectionError, configparser.NoOptionError:
-            return self.app_config.get(legacy_section, key, fallback=fallback)
-
     def get_siril_executable(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Retrieve the Siril executable path from the configuration.
 
@@ -179,12 +171,11 @@ class AppConfiguration:
         executable_path : `str` or `None`
             Path or command name for the Siril executable.
         """
-        # Special case: check Processing.Siril first, then Image Library,
-        # then Library
-        try:
-            return self.app_config.get("Processing.Siril", "siril_executable")
-        except configparser.NoSectionError, configparser.NoOptionError:
-            return self._get_with_fallback("Image Library", "Library", "siril_executable", fallback=None)
+        # Special case: check Processing.Siril first, then Image Library
+        val = self.app_config.get("Processing.Siril", "siril_executable", fallback=None)
+        if val is not None:
+            return val
+        return self.app_config.get("Image Library", "siril_executable", fallback=None)
 
     def get_stack_rejection_sigma_mode(self) -> str:
         """Return the configured stack-time pixel rejection sigma mode.
@@ -253,7 +244,7 @@ class AppConfiguration:
         weight_mode : `str` or `None`
             The configured weight mode, or `None` if disabled.
         """
-        return self.get_value("Processing.Siril", "stack_weight", fallback="wfwhm") or None
+        return self.get_value("Processing.Siril", "stack_weight", fallback="") or None
 
     def get_stack_generate_rejmap(self) -> bool:
         """Return whether Siril should generate a rejection map (-rejmap).
@@ -331,7 +322,7 @@ class AppConfiguration:
             The configured telescope hostname, defaulting to
             ``"localhost"``.
         """
-        return self._get_with_fallback("Observatory.Telescope", "Telescope", "hostname", fallback="localhost")
+        return self.app_config.get("Observatory.Telescope", "hostname", fallback="localhost")
 
     def get_indi_host(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Return the INDI server host, i.e. the telescope hostname.
@@ -351,7 +342,7 @@ class AppConfiguration:
         port : `int`
             The configured INDI server port.
         """
-        val = self._get_with_fallback("Observatory.Telescope", "Telescope", "indi_port", fallback="7624")
+        val = self.app_config.get("Observatory.Telescope", "indi_port", fallback="7624")
         return int(val)
 
     def get_camera_config(self, camera_name=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
@@ -367,23 +358,18 @@ class AppConfiguration:
         -------
         config : `dict`
             The matching section's key/value pairs, checked in order of
-            ``Observatory.Camera.<camera_name>``, ``Camera.<camera_name>``,
-            ``Observatory.Camera``, then ``Camera``. Returns an empty
-            dict if no camera name is resolved or no section matches.
+            ``Observatory.Camera.<camera_name>``, then
+            ``Observatory.Camera``. Returns an empty dict if no camera
+            name is resolved or no section matches.
         """
         if not camera_name:
             # Fallback to default primary camera
-            camera_name = self._get_with_fallback("Observatory.Camera", "Camera", "default_primary_camera")
+            camera_name = self.app_config.get("Observatory.Camera", "default_primary_camera", fallback=None)
             if not camera_name:
                 return {}
 
         # Try specific sections
-        for section in [
-            f"Observatory.Camera.{camera_name}",
-            f"Camera.{camera_name}",
-            "Observatory.Camera",
-            "Camera",
-        ]:
+        for section in [f"Observatory.Camera.{camera_name}", "Observatory.Camera"]:
             if section in self.app_config:
                 return dict(self.app_config[section])
 
@@ -397,8 +383,26 @@ class AppConfiguration:
         camera_names : `list` [`str`]
             Configured camera model names.
         """
-        models_str = self._get_with_fallback("Observatory.Camera", "Camera", "models")
+        models_str = self.app_config.get("Observatory.Camera", "models", fallback=None)
         return [m.strip() for m in models_str.split(",")] if models_str else []
+
+    def get_available_filters(self) -> list[FilterType]:
+        """Return the optical filters installed at this observatory.
+
+        This is the static inventory of filters the filter wheel is
+        loaded with -- not its live position, which is queried directly
+        from the INDI device (see wayfindinglib's ``FilterWheelController``).
+
+        Returns
+        -------
+        filters : `list` [`FilterType`]
+            Configured filters, in the order listed under
+            ``[Observatory.Filters] available``.
+        """
+        filters_str = self.app_config.get("Observatory.Filters", "available", fallback="")
+        if not filters_str:
+            return []
+        return [FilterType[name.strip().upper()] for name in filters_str.split(",") if name.strip()]
 
     def get_all_config(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Return the entire configuration as a dictionary of sections.
@@ -434,7 +438,7 @@ class AppConfiguration:
         focal_length_mm : `float`
             The configured focal length, in millimeters.
         """
-        val = self._get_with_fallback("Observatory.Telescope", "Telescope", "focal_length_mm", fallback="0.0")
+        val = self.app_config.get("Observatory.Telescope", "focal_length_mm", fallback="0.0")
         return float(val)
 
     def get_primary_focal_length_mm(self) -> float | None:
@@ -474,9 +478,7 @@ class AppConfiguration:
             The configured ``default_primary_camera``, or `None` when
             unset.
         """
-        camera_name = self._get_with_fallback(
-            "Observatory.Camera", "Camera", "default_primary_camera", fallback=""
-        )
+        camera_name = self.app_config.get("Observatory.Camera", "default_primary_camera", fallback="")
         camera_name = (camera_name or "").strip()
         return camera_name or None
 
@@ -488,7 +490,7 @@ class AppConfiguration:
         focal_ratio : `float`
             The configured focal ratio.
         """
-        val = self._get_with_fallback("Observatory.Telescope", "Telescope", "focal_ratio", fallback="0.0")
+        val = self.app_config.get("Observatory.Telescope", "focal_ratio", fallback="0.0")
         return float(val)
 
     def get(self, *args, **kwargs):  # ruff: ignore[missing-type-args, missing-type-kwargs, missing-return-type-undocumented-public-function]
@@ -554,20 +556,18 @@ class AppConfiguration:
     def get_frames_path(self) -> Path:
         """Return the absolute path to the frames directory.
 
+        Always a `"frames"` subfolder of the library path -- not
+        independently configurable, so the sandboxing check in
+        `mcp/tool_registry.py` only ever has one library root to reason
+        about.
+
         Returns
         -------
         frames_path : `Path`
-            Absolute path to the resolved frames directory.
+            Absolute path to the frames directory, nested under the
+            library path.
         """
-        try:
-            path_str = self.app_config.get("Image Library", "frames_path")
-            path = Path(path_str)
-            if not path.is_absolute():
-                return (self.get_project_root() / path).absolute()
-            return path.absolute()
-        except configparser.NoSectionError, configparser.NoOptionError, KeyError:
-            # Default to lib_path / frames
-            return self.get_library_path() / "frames"
+        return self.get_library_path() / "frames"
 
     def get_library_file_path(self, filename: str) -> Path:
         """Return the absolute path to a file within libraryIndex.
@@ -623,11 +623,8 @@ class AppConfiguration:
         remote_pictures_path : `str`
             Configured remote pictures path on the telescope host.
         """
-        return self._get_with_fallback(
-            "Observatory.Telescope",
-            "Telescope",
-            "remote_pictures_path",
-            fallback="/home/stellarmate/Pictures",
+        return self.app_config.get(
+            "Observatory.Telescope", "remote_pictures_path", fallback="/home/stellarmate/Pictures"
         )
 
     def get_allow_commands(self) -> bool:
@@ -680,13 +677,19 @@ class AppConfiguration:
         """
         return self.get_value("Processing.Parallelism", "target_workers", fallback="auto")
 
-    def get_siril_concurrency(self) -> int:
-        """Return the max concurrent Siril stacking processes, system-wide.
+    def get_max_concurrent_jobs(self) -> int:
+        """Return the max concurrent heavy jobs allowed, system-wide.
+
+        Covers both Siril stacking and photometry/spectroscopy analysis
+        sessions, sharing one slot pool: they answer the same question
+        ("how many heavy background jobs at once") for a single-machine
+        deployment, so one setting throttles both rather than requiring
+        two independently-tuned resource pools.
 
         Returns
         -------
-        siril_concurrency : `int`
-            Maximum number of concurrent Siril stacking processes.
+        max_concurrent_jobs : `int`
+            Maximum number of concurrent heavy jobs.
         """
         # An environment override is honoured first so a value can reach
         # worker processes. Batch work runs across a ProcessPoolExecutor,
@@ -696,15 +699,15 @@ class AppConfiguration:
         # configured value at every setting: two Siril processes were
         # running during its "1 slot" measurement. The environment is
         # inherited by workers, so it does cross.
-        environment_override = os.environ.get("ASTROMETRICS_SIRIL_CONCURRENCY")
+        environment_override = os.environ.get("ASTROMETRICS_MAX_CONCURRENT_JOBS")
         if environment_override:
             try:
                 return max(1, int(environment_override))
             except ValueError:
                 logging.getLogger(__name__).warning(
-                    "Ignoring non-numeric ASTROMETRICS_SIRIL_CONCURRENCY=%r", environment_override
+                    "Ignoring non-numeric ASTROMETRICS_MAX_CONCURRENT_JOBS=%r", environment_override
                 )
-        return int(self.get_value("Processing.Parallelism", "siril_concurrency", fallback="2"))
+        return int(self.get_value("Processing.Parallelism", "max_concurrent_jobs", fallback="2"))
 
     def get_photometry_workers(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Return the photometry worker count per target, or "auto".
@@ -725,19 +728,6 @@ class AppConfiguration:
             OS niceness value for batch worker processes.
         """
         return int(self.get_value("Processing.Parallelism", "worker_niceness", fallback="10"))
-
-    def get_analysis_concurrency(self) -> int:
-        """Return the max concurrent process-pool-spawning analysis count.
-
-        Covers photometry or spectroscopy sessions, system-wide, across
-        the batch script and the backend combined.
-
-        Returns
-        -------
-        analysis_concurrency : `int`
-            Maximum number of concurrent analysis processes.
-        """
-        return int(self.get_value("Processing.Parallelism", "analysis_concurrency", fallback="2"))
 
     def get_schema(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Return a validated AppConfigSchema for the current configuration.
@@ -796,10 +786,9 @@ class AppConfiguration:
         # Build parallelism config
         parallelism = ParallelismConfig(
             target_workers=str(self.get_target_workers()),
-            siril_concurrency=self.get_siril_concurrency(),
+            max_concurrent_jobs=self.get_max_concurrent_jobs(),
             photometry_workers=str(self.get_photometry_workers()),
             worker_niceness=self.get_worker_niceness(),
-            analysis_concurrency=self.get_analysis_concurrency(),
         )
 
         return AppConfigSchema(

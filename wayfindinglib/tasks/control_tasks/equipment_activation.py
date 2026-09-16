@@ -98,7 +98,7 @@ def list_camera_profiles(config) -> list[dict[str, Any]]:  # ruff: ignore[missin
     from wayfindinglib.observatorylib.equipment_configuration import EquipmentConfigurationManager
 
     manager = EquipmentConfigurationManager(config)
-    return [profile.model_dump() for profile in manager.list_camera_profiles()]
+    return [profile.model_dump(by_alias=True) for profile in manager.list_camera_profiles()]
 
 
 def get_equipment_configuration(config) -> dict[str, Any] | None:  # ruff: ignore[missing-type-function-argument]

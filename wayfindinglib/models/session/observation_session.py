@@ -90,9 +90,9 @@ class InfeasibilityReason(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    observation_package_id: str
-    reason_code: InfeasibilityReasonCode
-    detail: str = Field(default="")
+    observation_package_id: str = Field(alias="observationPackageId")
+    reason_code: InfeasibilityReasonCode = Field(alias="reasonCode")
+    detail: str = Field(default="", alias="detail")
 
 
 class WeatherSample(BaseModel):
@@ -117,23 +117,23 @@ class QueuedObservationPackage(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    id: str
-    observation_package_id: str
-    target_id: str
-    exposure_requests: list[ExposureRequest] = Field(default_factory=list)
-    dither_config: DitherConfig | None = Field(default=None)
-    minimum_altitude_deg: float | None = Field(default=None)
-    priority: int = Field(default=0)
-    applied_priority_boost: int = Field(default=0, ge=0)
-    start_time_mode: StartTimeMode
-    requested_start_time: datetime | None = Field(default=None)
-    computed_start_time: datetime | None = Field(default=None)
-    computed_end_time: datetime | None = Field(default=None)
-    actual_start_time: datetime | None = Field(default=None)
-    actual_end_time: datetime | None = Field(default=None)
-    frames_captured: int = Field(default=0, ge=0)
-    status: QueueEntryStatus = Field(default=QueueEntryStatus.PENDING)
-    status_detail: str = Field(default="")
+    id: str = Field(alias="id")
+    observation_package_id: str = Field(alias="observationPackageId")
+    target_id: str = Field(alias="targetId")
+    exposure_requests: list[ExposureRequest] = Field(default_factory=list, alias="exposureRequests")
+    dither_config: DitherConfig | None = Field(default=None, alias="ditherConfig")
+    minimum_altitude_deg: float | None = Field(default=None, alias="minimumAltitudeDeg")
+    priority: int = Field(default=0, alias="priority")
+    applied_priority_boost: int = Field(default=0, ge=0, alias="appliedPriorityBoost")
+    start_time_mode: StartTimeMode = Field(alias="startTimeMode")
+    requested_start_time: datetime | None = Field(default=None, alias="requestedStartTime")
+    computed_start_time: datetime | None = Field(default=None, alias="computedStartTime")
+    computed_end_time: datetime | None = Field(default=None, alias="computedEndTime")
+    actual_start_time: datetime | None = Field(default=None, alias="actualStartTime")
+    actual_end_time: datetime | None = Field(default=None, alias="actualEndTime")
+    frames_captured: int = Field(default=0, ge=0, alias="framesCaptured")
+    status: QueueEntryStatus = Field(default=QueueEntryStatus.PENDING, alias="status")
+    status_detail: str = Field(default="", alias="statusDetail")
 
 
 class ObservationSession(BaseModel):
@@ -141,20 +141,22 @@ class ObservationSession(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    id: str
-    night_date: date
-    status: SessionStatus = Field(default=SessionStatus.PLANNED)
-    status_detail: str = Field(default="")
-    site_profile_id: str
-    telescope_id: str
-    camera_id: str
-    queue: list[QueuedObservationPackage] = Field(default_factory=list)
-    unplaced_package_diagnostics: list[InfeasibilityReason] = Field(default_factory=list)
-    divergence_records: list[DivergenceRecord] = Field(default_factory=list)
-    fault_records: list[FaultRecord] = Field(default_factory=list)
-    meridian_flips: list[MeridianFlipOutcome] = Field(default_factory=list)
-    target_session_ids: list[str] = Field(default_factory=list)
-    guiding_samples: list[GuidingSample] = Field(default_factory=list)
-    weather_samples: list[WeatherSample] = Field(default_factory=list)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    closed_at: datetime | None = Field(default=None)
+    id: str = Field(alias="id")
+    night_date: date = Field(alias="nightDate")
+    status: SessionStatus = Field(default=SessionStatus.PLANNED, alias="status")
+    status_detail: str = Field(default="", alias="statusDetail")
+    site_profile_id: str = Field(alias="siteProfileId")
+    telescope_id: str = Field(alias="telescopeId")
+    camera_id: str = Field(alias="cameraId")
+    queue: list[QueuedObservationPackage] = Field(default_factory=list, alias="queue")
+    unplaced_package_diagnostics: list[InfeasibilityReason] = Field(
+        default_factory=list, alias="unplacedPackageDiagnostics"
+    )
+    divergence_records: list[DivergenceRecord] = Field(default_factory=list, alias="divergenceRecords")
+    fault_records: list[FaultRecord] = Field(default_factory=list, alias="faultRecords")
+    meridian_flips: list[MeridianFlipOutcome] = Field(default_factory=list, alias="meridianFlips")
+    target_session_ids: list[str] = Field(default_factory=list, alias="targetSessionIds")
+    guiding_samples: list[GuidingSample] = Field(default_factory=list, alias="guidingSamples")
+    weather_samples: list[WeatherSample] = Field(default_factory=list, alias="weatherSamples")
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), alias="createdAt")
+    closed_at: datetime | None = Field(default=None, alias="closedAt")

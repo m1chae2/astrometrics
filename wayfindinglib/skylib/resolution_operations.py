@@ -91,7 +91,7 @@ def resolve_target_coordinates(sky, target_name: str) -> Target | StellarObject:
                     name=main_id,
                     ra=ra_degrees_value,
                     dec=dec_degrees_value,
-                    magnitude=magnitude or "",
+                    magnitude=magnitude,
                     spectralType=sp_type or "",
                 )
             else:

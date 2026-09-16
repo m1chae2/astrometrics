@@ -8,8 +8,8 @@ and `wayfindinglib`.
 
 Each tutorial is an executable Jupyter Notebook stored in the
 `documentation/notebooks/` directory. You can open and run them interactively
-in VS Code or JupyterLab, or click any card below to view the rendered
-notebook in the browser.
+in VS Code or JupyterLab, or click any card below to view the rendered notebook
+in the browser.
 
 ---
 
@@ -71,14 +71,14 @@ In this tutorial, you will learn how to query the internal database for identifi
 :link: /notebooks/astrometrics/user_guide/08_visualization
 :link-type: doc
 
-In this tutorial, you will learn how to use the `astrometrics.visualization` registry to generate plots and dashboards.
+In this tutorial, you will learn how to use the `astrometrics.visualization` registry to render two kinds of dashboard: one showing an entire target's field of stars, and one focused on a single star's light curve and spectrum.
 :::
 
 :::{grid-item-card} 9. End-to-End Image Processing: M 13
 :link: /notebooks/astrometrics/user_guide/09_end_to_end_pipeline_M13
 :link-type: doc
 
-In this User Guide Cookbook, you will learn how to process a single target (M 13) through all the available pipelines in a single workflow.
+In this User Guide Cookbook, you will learn how to process a single real dataset (M 13) through all the available pipelines in a single workflow.
 :::
 
 ::::

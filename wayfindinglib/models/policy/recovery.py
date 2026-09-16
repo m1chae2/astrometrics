@@ -49,9 +49,9 @@ class RecoveryAttempt(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    attempted_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    outcome: DeviceSummaryState
-    detail: str = Field(default="")
+    attempted_at: datetime = Field(default_factory=lambda: datetime.now(UTC), alias="attemptedAt")
+    outcome: DeviceSummaryState = Field(alias="outcome")
+    detail: str = Field(default="", alias="detail")
 
 
 class FaultRecord(BaseModel):
@@ -59,10 +59,10 @@ class FaultRecord(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    id: str
-    device_id: str
-    faulted_state: DeviceSummaryState
-    fault_detail: str = Field(default="")
-    attempts: list[RecoveryAttempt] = Field(default_factory=list)
-    recovered: bool = Field(default=False)
-    escalated_to_safe_state: bool = Field(default=False)
+    id: str = Field(alias="id")
+    device_id: str = Field(alias="deviceId")
+    faulted_state: DeviceSummaryState = Field(alias="faultedState")
+    fault_detail: str = Field(default="", alias="faultDetail")
+    attempts: list[RecoveryAttempt] = Field(default_factory=list, alias="attempts")
+    recovered: bool = Field(default=False, alias="recovered")
+    escalated_to_safe_state: bool = Field(default=False, alias="escalatedToSafeState")

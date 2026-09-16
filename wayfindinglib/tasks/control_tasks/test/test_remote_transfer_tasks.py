@@ -84,7 +84,7 @@ def test_download_remote_frames_indexes_through_science_astrometrics_on_success(
 
     Astrometrics is the science library's public high-level
     interface; this also recalculates total exposure, rather than
-    reaching into astrometricslib.data_access internals directly.
+    reaching into astrometricslib.drivers internals directly.
     """
     target = _FakeTarget("M 81", frame_paths=[])
 

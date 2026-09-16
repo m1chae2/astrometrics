@@ -3,7 +3,6 @@
 REQ: BKD-4.3
 """
 
-import time
 import uuid
 from typing import Any
 
@@ -74,15 +73,12 @@ class MosaicService:
             If `parent_target_id` does not resolve to an existing
             target via `target_manager.get_target`.
         """
-        from astrometricslib import MosaicInfo, Target
+        from astrometricslib import Target
 
         parent = self.target_manager.get_target(parent_target_id)
         if not parent:
             raise ValueError(f"Parent target {parent_target_id} not found")
 
-        group_id = str(uuid.uuid4())
-        group_name = f"{grid_config.get('rows')}x{grid_config.get('cols')} Mosaic"
-        panel_target_ids = []
         plan_items = []
 
         for p in panels:
@@ -93,15 +89,12 @@ class MosaicService:
                 commonName=new_name,
                 ra=p["ra_str"],
                 dec=p["dec_str"],
-                parentGroupId=group_id,
-                panelName=p["panel_id"],
             )
             new_target.main_camera = parent.main_camera
             new_target.main_scope = parent.main_scope
             new_target.field_of_view = parent.field_of_view
 
             self.target_manager.create_target(new_target)
-            panel_target_ids.append(new_name)
 
             plan_items.append({
                 "id": str(uuid.uuid4()),
@@ -115,9 +108,6 @@ class MosaicService:
                 "name": p["panel_id"],
             })
 
-        parent.mosaic_groups.append(
-            MosaicInfo(group_id=group_id, name=group_name, created_at=time.time(), panels=panel_target_ids)
-        )
         return plan_items
 
     def create_mosaic_targets_rpc(

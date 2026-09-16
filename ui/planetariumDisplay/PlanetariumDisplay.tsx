@@ -241,8 +241,8 @@ export const PlanetariumDisplay: React.FC = () => {
 
   const availableTimestamps = useMemo(() => {
     const times = new Set<string>();
-    if (astronomyData?.lightCurve?.timestamps) {
-      astronomyData.lightCurve.timestamps.forEach(t => times.add(t));
+    if (astronomyData?.photometry?.timestamps) {
+      astronomyData.photometry.timestamps.forEach(t => times.add(t));
     }
     if (astronomyData?.spectraHistory) {
       astronomyData.spectraHistory.forEach(s => times.add(s.timestamp));
@@ -431,8 +431,8 @@ export const PlanetariumDisplay: React.FC = () => {
         selectedTargetId={selectedTargetId}
         slewRequestId={slewRequestId}
         onCenterChange={handleCenterChange}
-        sensorFovWidthDeg={equipmentConfig?.fov_width_deg}
-        sensorFovHeightDeg={equipmentConfig?.fov_height_deg}
+        sensorFovWidthDeg={equipmentConfig?.fovWidthDeg}
+        sensorFovHeightDeg={equipmentConfig?.fovHeightDeg}
       />
 
       <EquipmentConfigPanel

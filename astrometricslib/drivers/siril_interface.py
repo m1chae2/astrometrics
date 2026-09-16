@@ -9,6 +9,7 @@ import atexit
 import contextlib
 import logging
 import os
+import queue
 import shutil
 import signal
 import subprocess
@@ -40,6 +41,25 @@ _active_image_processing_instances: weakref.WeakSet = weakref.WeakSet()
 # Note: Only Siril itself is locked; other preparation steps still run
 # in parallel to save time.
 SIRIL_PROCESS_LOCK_PATH = os.path.join(tempfile.gettempdir(), "astrometricslib-siril.lock")
+
+# How long send_commands waits for one Siril command to report its own
+# completion before giving up on the whole script. This is a deadlock
+# guard, not a per-command budget: it has to exceed the slowest single
+# command a real run issues, and `stack` over a few hundred frames is
+# comfortably minutes. Five minutes is far above that while still
+# bounding a Siril that has died without closing the output pipe.
+SIRIL_COMMAND_TIMEOUT_SECONDS = 300
+
+# How long to wait for Siril to open its end of a command/output FIFO
+# before giving up. open() on a FIFO blocks until the other end is
+# opened too, and Siril opens both of ours (-r command_pipe -w
+# output_pipe) moments after launch -- but if it dies before reaching
+# that point (a crash inside a flatpak sandbox, a version that doesn't
+# understand -p/-r/-w, ...), nothing will ever open the other end and
+# that open() blocks forever. This bounds only that initial handshake,
+# not the run itself: SIRIL_COMMAND_TIMEOUT_SECONDS above covers a
+# Siril that connects but then hangs mid-command.
+SIRIL_PIPE_CONNECT_TIMEOUT_SECONDS = 30
 
 
 # Master calibration frames (bias, dark, flat) take a long time to build.
@@ -225,7 +245,10 @@ def siril_process_lock(
     Siril is very demanding on the CPU. If too many instances are run at
     once, the computer will slow down and tasks will fail. This function
     limits how many Siril tasks can run concurrently based on the
-    `siril_concurrency` setting in the configuration file.
+    `max_concurrent_jobs` setting in the configuration file. That slot
+    pool is shared with photometry/spectroscopy analysis jobs (see
+    `AppConfiguration.get_max_concurrent_jobs`), so a running stack and
+    a running analysis compete for the same limit.
 
     It uses a file lock system so that all different parts of the program
     respect the same limit, and the lock is automatically released even
@@ -238,7 +261,7 @@ def siril_process_lock(
         run, so a stalled-looking job is explainable from its log.
     max_concurrent_runs : `int`, optional
         Slot count override, for benchmarking. Defaults to the
-        configured `siril_concurrency`.
+        configured `max_concurrent_jobs`.
 
     Yields
     ------
@@ -254,11 +277,11 @@ def siril_process_lock(
             from astrometricslib.utilities.config_loader import get_configuration
 
             configuration = get_configuration()
-            slot_count = configuration.get_siril_concurrency()
+            slot_count = configuration.get_max_concurrent_jobs()
         except Exception as configuration_error:
             # A missing configuration must not make Siril unrunnable;
             # one slot is the safe reading, matching the old behaviour.
-            logger.debug("Could not read siril_concurrency, using 1 slot: %s", configuration_error)
+            logger.debug("Could not read max_concurrent_jobs, using 1 slot: %s", configuration_error)
             slot_count = 1
     slot_count = max(1, int(slot_count))
 
@@ -270,7 +293,7 @@ def siril_process_lock(
         job_logger.info(waiting_message)
 
     wait_started_at = time.monotonic()
-    with acquire_resource_slot(configuration, "siril", slot_count):
+    with acquire_resource_slot(configuration, "job", slot_count):
         # Recorded whether or not the wait was long: the stacking
         # timeout adds this back to its budget, and a queue that exists
         # to protect the CPU must not convert into a cascade of
@@ -303,7 +326,7 @@ def _frames_use_color_filter_array(frames_directory: str) -> bool:
     uses_color_filter_array : `bool`
         `True` only if a frame declares a ``BAYERPAT``.
     """
-    from astrometricslib.image_processing.fits_access import frame_uses_color_filter_array
+    from astrometricslib.drivers.fits_access import frame_uses_color_filter_array
 
     try:
         frame_names = sorted(os.listdir(frames_directory))
@@ -323,6 +346,82 @@ def _frames_use_color_filter_array(frames_directory: str) -> bool:
             return result
 
     return False
+
+
+def _open_pipe_or_die(
+    path: str,
+    mode: str,
+    process: subprocess.Popen,
+    timeout: float = SIRIL_PIPE_CONNECT_TIMEOUT_SECONDS,
+) -> Any:
+    """Open a named pipe, bailing out if Siril never connects to it.
+
+    A plain `open()` on a FIFO blocks the calling thread until a peer
+    opens the other end -- which is exactly what we want while Siril is
+    alive and simply hasn't gotten to it yet, but not if Siril has
+    already died and nothing ever will. Doing the open in a background
+    thread lets this function bound the wait against `process` and give
+    up instead of hanging forever.
+
+    Parameters
+    ----------
+    path : `str`
+        Path to the FIFO to open.
+    mode : `str`
+        Mode to open it with, e.g. ``"r"`` or ``"w"``.
+    process : `subprocess.Popen`
+        The Siril process expected to open the other end. Polled while
+        waiting so a Siril that has already exited is reported instead
+        of waited on forever.
+    timeout : `float`, optional
+        Seconds to wait for the open to complete after `process` is
+        confirmed still running. Default is
+        `SIRIL_PIPE_CONNECT_TIMEOUT_SECONDS`.
+
+    Returns
+    -------
+    pipe : file object
+        The opened pipe, as returned by the built-in `open`.
+
+    Raises
+    ------
+    RuntimeError
+        If `process` exits before the open completes.
+    TimeoutError
+        If `process` is still running but the open does not complete
+        within `timeout` seconds.
+    """
+    outcome: dict[str, Any] = {}
+
+    def attempt_open() -> None:
+        try:
+            outcome["pipe"] = open(path, mode)
+        except OSError as os_error:
+            outcome["error"] = os_error
+
+    opener = threading.Thread(target=attempt_open, daemon=True)
+    opener.start()
+
+    deadline = time.monotonic() + timeout
+    while opener.is_alive():
+        if process.poll() is not None:
+            # Give the thread one last short grace window in case Siril's
+            # exit and its pipe connection landed at nearly the same
+            # moment, then treat it as a lost cause: nothing else is
+            # going to open the other end of `path`.
+            opener.join(timeout=0.5)
+            if opener.is_alive():
+                raise RuntimeError(
+                    f"Siril exited (return code {process.returncode}) before opening {path!r}."
+                )
+            break
+        if time.monotonic() > deadline:
+            raise TimeoutError(f"Timed out waiting for Siril to open {path!r}.")
+        opener.join(timeout=0.2)
+
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome["pipe"]
 
 
 def _cleanup_all_active_image_processing_instances() -> None:
@@ -589,14 +688,14 @@ class ImageProcessing:
         id : `str`
             Target identifier used to name the working folder.
         image_files : `Any`
-            Either a list of frame records (dict or FrameRecord-like
-            objects with ``path``/``camera``/``telescope``/``iso``/
-            ``exposure``/``filter`` attributes) or a legacy nested
-            dict keyed by telescope/camera/iso/exposure/filter.
+            A list of frame records (dict or FrameRecord-like objects
+            with ``path``/``camera``/``telescope``/``iso``/
+            ``exposure``/``filter`` attributes).
         camera_filter : `str`, optional
             Camera name to restrict light frames to. If `None`
-            (default), it is inferred from the first frame, falling
-            back to ``"ZWO ASI 533MM Pro"``.
+            (default), it is inferred from the first frame; if it
+            still can't be determined, no camera filtering is applied
+            and every frame is treated as a match.
         job_logger : `logging.Logger`, optional
             Logger to record progress to. If `None` (default), the
             module logger is used.
@@ -608,13 +707,9 @@ class ImageProcessing:
         """
         log = job_logger.info if job_logger else logger.info
 
-        if not camera_filter:
-            if isinstance(image_files, list) and len(image_files) > 0:
-                f = image_files[0]
-                camera_filter = f.get("camera") if isinstance(f, dict) else getattr(f, "camera", None)
-
-            if not camera_filter:
-                camera_filter = "ZWO ASI 533MM Pro"
+        if not camera_filter and isinstance(image_files, list) and len(image_files) > 0:
+            f = image_files[0]
+            camera_filter = f.get("camera") if isinstance(f, dict) else getattr(f, "camera", None)
 
         target_folder = os.path.join(self.workdir, id)
         for folder in ["biases", "darks", "flats", "lights", "process"]:
@@ -659,14 +754,15 @@ class ImageProcessing:
             candidate_light_paths = [
                 frame.get("path") if isinstance(frame, dict) else getattr(frame, "path", "")
                 for frame in image_files
-                if (frame.get("camera") if isinstance(frame, dict) else getattr(frame, "camera", "Unknown"))
+                if camera_filter is None
+                or (frame.get("camera") if isinstance(frame, dict) else getattr(frame, "camera", "Unknown"))
                 == camera_filter
             ]
             readable_light_paths = find_readable_paths(candidate_light_paths)
 
             # Applied after the readability filter so a corrupt frame
             # cannot skew which geometry looks dominant.
-            from astrometricslib.image_processing.fits_access import select_dominant_frame_dimensions
+            from astrometricslib.drivers.fits_access import select_dominant_frame_dimensions
 
             readable_light_paths, dominant_dimensions = select_dominant_frame_dimensions(
                 sorted(readable_light_paths)
@@ -694,7 +790,7 @@ class ImageProcessing:
                 path = frame.get("path") if isinstance(frame, dict) else getattr(frame, "path", "")
                 cam = frame.get("camera") if isinstance(frame, dict) else getattr(frame, "camera", "Unknown")
 
-                if cam != camera_filter:
+                if camera_filter is not None and cam != camera_filter:
                     continue
 
                 if path not in readable_light_paths:
@@ -718,11 +814,12 @@ class ImageProcessing:
             matching_frames = [
                 f
                 for f in image_files
-                if (f.get("camera") if isinstance(f, dict) else getattr(f, "camera", "")) == camera_filter
+                if camera_filter is None
+                or (f.get("camera") if isinstance(f, dict) else getattr(f, "camera", "")) == camera_filter
             ]
             if matching_frames:
                 f = matching_frames[0]
-                tel = f.get("telescope") if isinstance(f, dict) else getattr(f, "telescope", "Apertura 75Q")
+                tel = f.get("telescope") if isinstance(f, dict) else getattr(f, "telescope", "Unknown")
                 cam = f.get("camera") if isinstance(f, dict) else getattr(f, "camera", camera_filter)
                 iso = f.get("iso") if isinstance(f, dict) else getattr(f, "iso", "800")
                 exp = f.get("exposure") if isinstance(f, dict) else getattr(f, "exposure", "0")
@@ -839,75 +936,6 @@ class ImageProcessing:
 
             return target_folder
 
-        # Handle Legacy 5-Level Structure
-        if isinstance(image_files, dict):
-            for telescope, tel_val in image_files.items():
-                if not isinstance(tel_val, dict):
-                    continue
-                for camera, cam_val in tel_val.items():
-                    if camera != camera_filter:
-                        continue
-                    for iso, iso_val in cam_val.items():
-                        if not isinstance(iso_val, dict):
-                            continue
-                        for exptime, exp_val in iso_val.items():
-                            if not isinstance(exp_val, dict):
-                                continue
-                            for filt, filter_val in exp_val.items():
-                                file_list = []
-                                if isinstance(filter_val, list):
-                                    file_list = filter_val
-                                elif isinstance(filter_val, dict):
-                                    for date_files in filter_val.values():
-                                        if isinstance(date_files, list):
-                                            file_list.extend(date_files)
-
-                                for item in file_list:
-                                    path = item.get("path") if isinstance(item, dict) else item
-                                    try:
-                                        os.symlink(
-                                            path,
-                                            os.path.join(
-                                                target_folder, "lights", f"light_source_{light_idx:05d}.fits"
-                                            ),
-                                        )
-                                        light_idx += 1
-                                    except Exception as exc:
-                                        logger.debug("Failed to symlink light frame '%s': %s", path, exc)
-
-                                # Calibrations per group
-                                for item in library.get_dark_frames(camera=camera, iso=iso, exposure=exptime):
-                                    try:
-                                        os.symlink(
-                                            item,
-                                            os.path.join(target_folder, "darks", f"dark_{dark_idx:05d}.fits"),
-                                        )
-                                        dark_idx += 1
-                                    except Exception as exc:
-                                        logger.debug("Failed to symlink dark frame '%s': %s", item, exc)
-                                for item in library.get_bias_frames(camera=camera, iso=iso):
-                                    try:
-                                        os.symlink(
-                                            item,
-                                            os.path.join(
-                                                target_folder, "biases", f"bias_{bias_idx:05d}.fits"
-                                            ),
-                                        )
-                                        bias_idx += 1
-                                    except Exception as exc:
-                                        logger.debug("Failed to symlink bias frame '%s': %s", item, exc)
-                                for item in library.get_flat_frames(
-                                    telescope=telescope, camera=camera, filter_type=filt, iso=iso
-                                ):
-                                    try:
-                                        os.symlink(
-                                            item,
-                                            os.path.join(target_folder, "flats", f"flat_{flat_idx:05d}.fits"),
-                                        )
-                                        flat_idx += 1
-                                    except Exception as exc:
-                                        logger.debug("Failed to symlink flat frame '%s': %s", item, exc)
-
         return target_folder
 
     def create_named_pipes(self, base_path: str) -> tuple[str, str]:
@@ -992,9 +1020,26 @@ class ImageProcessing:
         return process
 
     def send_commands(
-        self, command_pipe: str, commands: list[str], job_logger: logging.Logger | None = None
+        self,
+        command_pipe: str,
+        commands: list[str],
+        job_logger: logging.Logger | None = None,
+        status_queue: queue.Queue[str] | None = None,
+        process: subprocess.Popen | None = None,
     ) -> None:
         """Write a sequence of commands to the Siril command pipe.
+
+        Siril's pipe protocol runs one command at a time: sending the
+        next command while it's still executing the current one aborts
+        it ("status: error command interrupted"), rather than queuing.
+        A fixed delay between writes (this function's old behavior)
+        only happened to work on trivially small/fast commands -- any
+        real FITS frame's `convert`/`register`/`stack` step routinely
+        takes longer than that, so every real stacking run raced and
+        lost. Pass `status_queue` (fed by `read_output` on the other,
+        output pipe as it observes each command's own "status:
+        success"/"status: error" line) to make each command wait for
+        that signal before the next is sent.
 
         Parameters
         ----------
@@ -1006,13 +1051,47 @@ class ImageProcessing:
         job_logger : `logging.Logger`, optional
             Logger to record write errors to. If `None` (default),
             errors are silently swallowed.
+        status_queue : `queue.Queue` [`str`], optional
+            Queue that the paired `read_output` call publishes each
+            command's Siril status line to. If `None` (default), falls
+            back to a blind fixed delay between commands, which is only
+            safe when every command is known to complete faster than
+            it -- pass a queue for any real frame.
+        process : `subprocess.Popen`, optional
+            The Siril process expected to open the other end of
+            `command_pipe`. If given, opening the pipe is bounded by
+            `SIRIL_PIPE_CONNECT_TIMEOUT_SECONDS` and fails loudly instead
+            of hanging forever should Siril die before connecting. If
+            `None` (default), opening falls back to a plain blocking
+            `open()`.
         """
         try:
-            with open(command_pipe, "w") as pipe:
+            if process is None:
+                pipe_context = open(command_pipe, "w")
+            else:
+                pipe_context = _open_pipe_or_die(command_pipe, "w", process)
+            with pipe_context as pipe:
                 for cmd in commands:
                     pipe.write(cmd + "\n")
                     pipe.flush()
-                    time.sleep(0.05)
+
+                    if status_queue is None:
+                        time.sleep(0.05)
+                        continue
+
+                    try:
+                        result_line = status_queue.get(timeout=SIRIL_COMMAND_TIMEOUT_SECONDS)
+                    except queue.Empty:
+                        if job_logger:
+                            job_logger.error(f"Timed out waiting for Siril to finish command: {cmd!r}")
+                        break
+
+                    if "status: error" in result_line:
+                        if job_logger:
+                            job_logger.error(
+                                f"Siril reported an error after command {cmd!r}: {result_line.strip()}"
+                            )
+                        break
                 pipe.write("exit\n")
                 pipe.flush()
         except Exception as e:
@@ -1029,6 +1108,8 @@ class ImageProcessing:
         job_logger: logging.Logger | None = None,
         generate_rejmap: bool = False,
         registered_seq_name: str | None = None,
+        status_queue: queue.Queue[str] | None = None,
+        process: subprocess.Popen | None = None,
     ) -> str | None:
         """Read Siril's status output and copy out the finished stack.
 
@@ -1062,6 +1143,17 @@ class ImageProcessing:
         registered_seq_name : `str`, optional
             Base name of the registered ``.seq`` file to copy out.
             If `None` (default), no registration sequence is copied.
+        status_queue : `queue.Queue` [`str`], optional
+            Queue to publish each Siril status line to, so that the
+            paired `send_commands` call can send one command at a time.
+            If `None` (default), status lines are only logged.
+        process : `subprocess.Popen`, optional
+            The Siril process expected to open the other end of
+            `output_pipe`. If given, opening the pipe is bounded by
+            `SIRIL_PIPE_CONNECT_TIMEOUT_SECONDS` and fails loudly instead
+            of hanging forever should Siril die before connecting. If
+            `None` (default), opening falls back to a plain blocking
+            `open()`.
 
         Returns
         -------
@@ -1071,9 +1163,15 @@ class ImageProcessing:
         """
         log = job_logger.info if job_logger else logger.info
         try:
-            with open(output_pipe) as pipe:
+            if process is None:
+                pipe_context = open(output_pipe)
+            else:
+                pipe_context = _open_pipe_or_die(output_pipe, "r", process)
+            with pipe_context as pipe:
                 for line in pipe:
                     log(line.strip())
+                    if status_queue is not None and ("status: success" in line or "status: error" in line):
+                        status_queue.put(line)
                     if "status: success stack" in line:
                         stacked_file = os.path.join(target_folder, "process", "result_stacked.fits")
                         if not os.path.exists(stacked_file):
@@ -1196,8 +1294,7 @@ class ImageProcessing:
             Target identifier used to name the working folder and
             log file.
         image_files : `Any`
-            Frame list or legacy nested dict, as accepted by
-            `build_directories`.
+            Frame list, as accepted by `build_directories`.
         output_file : `str`, optional
             Explicit output filename. If `None` (default), a name
             derived from ``id`` is used.
@@ -1294,13 +1391,9 @@ class ImageProcessing:
         except Exception:
             library_dest = None
 
-        if not camera_filter:
-            if isinstance(image_files, list) and len(image_files) > 0:
-                f = image_files[0]
-                camera_filter = f.get("camera") if isinstance(f, dict) else getattr(f, "camera", None)
-
-            if not camera_filter:
-                camera_filter = "ZWO ASI 533MM Pro"
+        if not camera_filter and isinstance(image_files, list) and len(image_files) > 0:
+            f = image_files[0]
+            camera_filter = f.get("camera") if isinstance(f, dict) else getattr(f, "camera", None)
 
         target_folder = None
         res = None
@@ -1311,6 +1404,14 @@ class ImageProcessing:
                 safe_id, image_files, camera_filter=camera_filter, job_logger=job_logger
             )
             command_pipe, output_pipe = self.create_named_pipes(target_folder)
+            # Lets send_commands wait for each command's own completion
+            # line (read by read_output, on a different thread) instead
+            # of a blind sleep -- see send_commands for why that races
+            # on any non-trivial image. It is a local, handed to both
+            # halves explicitly, rather than instance state:
+            # max_concurrent_jobs allows several process_target calls to
+            # share one ImageProcessing instance, and each needs its own.
+            status_queue: queue.Queue[str] = queue.Queue()
 
             # Get actual counts to handle 1-frame sequence issue in
             # Siril. Siril's 'convert' does not create a .seq file
@@ -1661,7 +1762,9 @@ class ImageProcessing:
                 ]
 
             def write_commands():  # ruff: ignore[missing-return-type-private-function]
-                self.send_commands(command_pipe, script, job_logger=job_logger)
+                self.send_commands(
+                    command_pipe, script, job_logger=job_logger, status_queue=status_queue, process=process
+                )
 
             writer = threading.Thread(target=write_commands)
             writer.daemon = True
@@ -1676,6 +1779,8 @@ class ImageProcessing:
                 job_logger=job_logger,
                 generate_rejmap=generate_rejmap,
                 registered_seq_name=seq,
+                status_queue=status_queue,
+                process=process,
             )
 
             self.last_run_diagnostics["stacking_duration_seconds"] = round(
@@ -1698,7 +1803,7 @@ class ImageProcessing:
             if is_spectral and seq and res:
                 import glob as _glob
 
-                from astrometricslib.image_processing.quality_metrics import parse_zero_order_star
+                from astrometricslib.drivers.siril_output_parsing import parse_zero_order_star
 
                 lst_paths = sorted(
                     _glob.glob(os.path.join(target_folder, "process", "cache", f"{seq}*.lst")),

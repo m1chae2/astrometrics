@@ -19,6 +19,7 @@ from .layers import (
     StarOverlay,
     StarSelectionOverlay,
 )
+from .spectroscopy_field_access import get_spectroscopy_field as _get_spectroscopy_field
 from .visualization_config import VisualizationConfig
 
 
@@ -113,8 +114,7 @@ class _AnalysisView:
         if add_buttons and self.mode == "spectroscopy":
             self.renderer_spectrum.add_balmer_toggle()
             has_qe = any(
-                getattr(obj, "spectrum_data_processed", None)
-                and "quantum_efficiency_corrected_intensities" in obj.spectrum_data_processed
+                _get_spectroscopy_field(obj, "quantum_efficiency_corrected_intensities")
                 for obj in self.stellar_objects
             )
             if has_qe:
@@ -135,25 +135,22 @@ class _AnalysisView:
             return
         obj = self.stellar_objects[self.active_star_index]
         if self.mode == "spectroscopy":
-            data = getattr(obj, "spectrum_data_processed", None) or {}
             self.renderer_spectrum.render_spectrum(
                 self.active_star_index,
                 getattr(obj, "name", ""),
                 getattr(obj, "stellar_spectral_type", ""),
-                data.get("wavelengths_angstrom"),
-                data.get("intensities"),
-                quantum_efficiency_corrected_intensities=data.get("quantum_efficiency_corrected_intensities"),
+                _get_spectroscopy_field(obj, "wavelengths_angstrom"),
+                _get_spectroscopy_field(obj, "intensities"),
+                quantum_efficiency_corrected_intensities=_get_spectroscopy_field(
+                    obj, "quantum_efficiency_corrected_intensities"
+                ),
             )
         else:
-            light_curve = getattr(obj, "light_curve", None)
-            timestamps = light_curve.timestamps if light_curve else None
+            photometry = getattr(obj, "photometry", None)
+            timestamps = photometry.timestamps if photometry else None
             flux = (
-                (
-                    light_curve.fluxes_detrended
-                    if light_curve.fluxes_detrended
-                    else light_curve.fluxes_normalized
-                )
-                if light_curve
+                (photometry.fluxes_detrended if photometry.fluxes_detrended else photometry.fluxes_normalized)
+                if photometry
                 else None
             )
             is_var = getattr(obj, "is_variable_candidate", False)
@@ -231,8 +228,8 @@ class _AnalysisView:
                 return i
 
             if self.mode == "spectroscopy":
-                rect = getattr(obj, "rectangle", None) if is_obj else obj.get("rectangle")
-                angle = getattr(obj, "dispersion_angle", 0.0) if is_obj else obj.get("dispersion_angle", 0.0)
+                rect = _get_spectroscopy_field(obj, "rectangle")
+                angle = _get_spectroscopy_field(obj, "dispersion_angle", 0.0)
                 if rect is not None and hit_test_rectangle(event_x, event_y, rect, angle):
                     return i
         return None
@@ -244,12 +241,8 @@ class _AnalysisView:
         obj = self.stellar_objects[self.active_star_index]
         if self.mode != "spectroscopy":
             return
-        rect = getattr(obj, "rectangle", None) if hasattr(obj, "star_data") else obj.get("rectangle")
-        angle = (
-            getattr(obj, "dispersion_angle", 0.0)
-            if hasattr(obj, "star_data")
-            else obj.get("dispersion_angle", 0.0)
-        )
+        rect = _get_spectroscopy_field(obj, "rectangle")
+        angle = _get_spectroscopy_field(obj, "dispersion_angle", 0.0)
         if rect is None:
             return
 
@@ -268,12 +261,7 @@ class _AnalysisView:
         pt_x = x0 + xr
         pt_y = y0 + yr
 
-        data = (
-            getattr(obj, "spectrum_data_processed", {})
-            if hasattr(obj, "star_data")
-            else obj.get("spectrum_data_processed", {})
-        )
-        wavelengths = data.get("wavelengths_angstrom")
+        wavelengths = _get_spectroscopy_field(obj, "wavelengths_angstrom")
         if wavelengths is not None and len(wavelengths) > 0:
             rel_x = map_point_to_relative_x(pt_x, pt_y, rect, angle)
             idx = max(0, min(int(rel_x), len(wavelengths) - 1))

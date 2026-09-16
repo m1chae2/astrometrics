@@ -57,6 +57,7 @@ mock_astroquery = MagicMock()
 sys.modules["astroquery"] = mock_astroquery
 sys.modules["astroquery.simbad"] = mock_astroquery.simbad
 sys.modules["astroquery.astrometry_net"] = mock_astroquery.astrometry_net
+sys.modules["astroquery.gaia"] = mock_astroquery.gaia
 
 import pytest
 from fastapi.testclient import TestClient

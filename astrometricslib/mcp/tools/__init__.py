@@ -1,8 +1,10 @@
-"""Purpose: Core library MCP developer tools index.
+"""Purpose: The list of hand-written MCP tools in this library.
 
-Aggregates registered class conformance and serialization contract audit tools.
+Right now that's just one: a tool that checks whether the library's
+data models can be safely converted to JSON (see contract_validator.py
+for what that means).
 """
 
-from astrometricslib.mcp.tools import class_conformance_auditor, contract_validator
+from astrometricslib.mcp.tools import contract_validator
 
-__all__ = ["class_conformance_auditor", "contract_validator"]
+__all__ = ["contract_validator"]

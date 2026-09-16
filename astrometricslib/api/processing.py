@@ -65,7 +65,7 @@ class QualityDiagnostics:
             Median FWHM in pixels across the measured stars, or `None`
             if it could not be measured.
         """
-        from astrometricslib.image_processing.quality_metrics import measure_image_fwhm
+        from astrometricslib.pipelines.astrometry.fwhm import measure_image_fwhm
 
         return measure_image_fwhm(path)
 
@@ -84,7 +84,7 @@ class QualityDiagnostics:
             Mean rejected-pixel fraction over the rejmap, or `None` if
             the sibling rejmap file does not exist.
         """
-        from astrometricslib.image_processing.quality_metrics import measure_rejected_fraction
+        from astrometricslib.pipelines.shared.quality.quality_metrics import measure_rejected_fraction
 
         return measure_rejected_fraction(stacked_path)
 
@@ -101,7 +101,7 @@ class QualityDiagnostics:
         frames : `list` of `dict`
             One dict per registered frame, in original submission order.
         """
-        from astrometricslib.image_processing.quality_metrics import parse_seq_file
+        from astrometricslib.drivers.siril_output_parsing import parse_seq_file
 
         return parse_seq_file(seq_path)
 
@@ -119,7 +119,7 @@ class QualityDiagnostics:
             Stats for the brightest star, or `None` if the file does
             not exist or has no data rows.
         """
-        from astrometricslib.image_processing.quality_metrics import parse_zero_order_star
+        from astrometricslib.drivers.siril_output_parsing import parse_zero_order_star
 
         return parse_zero_order_star(lst_path)
 
@@ -337,16 +337,14 @@ class ProcessingPipelines:
         filter_round: str | None = None,
         stack_weight: str | None = None,
         output_file: str | None = None,
-        solve: bool = False,
         log_file: str | None = None,
         generate_rejmap: bool | None = None,
     ) -> str | None:
-        """Stack multiple images into one clean image, optionally solving it.
+        """Stack multiple images into one clean image.
 
         Stacking combines many faint, noisy images into one clear image.
-        If `solve` is True, it will also 'plate-solve' the final image,
-        meaning it will calculate exactly where in the sky the camera was
-        pointing by matching the stars in the image to a known database.
+        To also plate-solve the result, call `run_astrometry` afterward
+        with the same target.
 
         Parameters
         ----------
@@ -366,10 +364,7 @@ class ProcessingPipelines:
         stack_weight : `str`, optional
             Per-frame stacking weight expression.
         output_file : `str`, optional
-            Output path override; ignored when `solve` is `True`.
-        solve : `bool`, optional
-            If `True`, also plate-solve the resulting stack. Defaults
-            to `False`.
+            Output path override.
         log_file : `str`, optional
             Path to write the Siril process log to.
         generate_rejmap : `bool`, optional
@@ -382,10 +377,17 @@ class ProcessingPipelines:
             The path to the stacked output file, or `None` if
             stacking did not produce an output.
         """
-        if solve:
-            from astrometricslib.pipelines.dispatch import stack_and_solve
+        from astrometricslib.pipelines.stacking import stage as stacking_tasks
 
-            return stack_and_solve(
+        with registered_job(
+            enabled=True,
+            job_type="stacking",
+            target_id=target.id,
+            log_file=log_file,
+            completed_message=f"[{target.id}] Stacking completed successfully.",
+            failed_message=f"[{target.id}] Stacking failed.",
+        ) as job:
+            stacked_path = stacking_tasks.stack_frames(
                 target,
                 log_file=log_file,
                 frames_to_stack=frames_to_stack,
@@ -395,22 +397,13 @@ class ProcessingPipelines:
                 filter_round=filter_round,
                 stack_weight=stack_weight,
                 generate_rejmap=generate_rejmap,
+                output_file=output_file,
             )
-
-        from astrometricslib.pipelines.stacking import stage as stacking_tasks
-
-        return stacking_tasks.stack_frames(
-            target,
-            log_file=log_file,
-            frames_to_stack=frames_to_stack,
-            filter_type=filter_type,
-            rejection_sigma=rejection_sigma,
-            filter_wfwhm=filter_wfwhm,
-            filter_round=filter_round,
-            stack_weight=stack_weight,
-            generate_rejmap=generate_rejmap,
-            output_file=output_file,
-        )
+            # Stacking can finish without raising and still produce no
+            # image, so the outcome is decided here rather than left to
+            # the context manager's "no exception means success" default.
+            job.mark("completed" if stacked_path else "failed", 100)
+            return stacked_path
 
     def run_astrometry(self, target: Target, **kwargs: Any) -> dict[str, Any]:
         """Run astrometric plate-solving and catalog cross-matching.
@@ -430,7 +423,7 @@ class ProcessingPipelines:
         result : `dict[str, Any]`
             Astrometry results and status fields.
         """
-        from astrometricslib.pipelines.dispatch import analyze_target
+        from astrometricslib.pipelines.tasks import analyze_target
 
         return analyze_target(target, pipeline_type="astrometry", **kwargs)
 
@@ -452,7 +445,7 @@ class ProcessingPipelines:
         result : `dict[str, Any]`
             Photometry results and status fields.
         """
-        from astrometricslib.pipelines.dispatch import analyze_target
+        from astrometricslib.pipelines.tasks import analyze_target
 
         return analyze_target(target, pipeline_type="photometry", **kwargs)
 
@@ -474,7 +467,7 @@ class ProcessingPipelines:
         result : `dict[str, Any]`
             Spectroscopy results and status fields.
         """
-        from astrometricslib.pipelines.dispatch import analyze_target
+        from astrometricslib.pipelines.tasks import analyze_target
 
         return analyze_target(target, pipeline_type="spectroscopy", **kwargs)
 
@@ -500,7 +493,7 @@ class ProcessingPipelines:
             Maximum concurrent worker count; defaults to the
             configured spectroscopy concurrency.
         on_item_complete : `Callable`, optional
-            Callback invoked after each session finishes.
+            A function to run after each session finishes.
 
         Returns
         -------
@@ -528,7 +521,7 @@ class ProcessingPipelines:
         frames_root_path : `str`
             Root directory to scan for FITS files.
         """
-        from astrometricslib.catalog_services.frame_scanning import scan_target_directory
+        from astrometricslib.pipelines.shared.frame_scanning import scan_target_directory
 
         scan_target_directory(target, frames_root_path)
 
@@ -547,16 +540,17 @@ class ProcessingPipelines:
         frame_record : `astrometricslib.models.target.FrameRecord`
             The frame record derived from the FITS header at `path`.
         """
-        from astrometricslib.catalog_services.frame_scanning import create_frame_record_from_fits
+        from astrometricslib.pipelines.shared.frame_scanning import create_frame_record_from_fits
 
         return create_frame_record_from_fits(path, camera)
 
     def acquire_analysis_slot(self) -> AbstractContextManager:
-        """Limit how many analysis jobs can run at the same time.
+        """Limit how many heavy jobs can run at the same time.
 
         Processing images takes a lot of CPU power. This function ensures
         the computer is not overwhelmed by limiting how many jobs can run
-        simultaneously.
+        simultaneously. Shares its slot pool with stacking (see
+        `acquire_stacking_slot`) -- both draw on `max_concurrent_jobs`.
 
         Returns
         -------
@@ -566,14 +560,16 @@ class ProcessingPipelines:
         """
         from datastore.process_locks import acquire_resource_slot
 
-        return acquire_resource_slot(self._config, "analysis", self._config.get_analysis_concurrency())
+        return acquire_resource_slot(self._config, "job", self._config.get_max_concurrent_jobs())
 
     def acquire_stacking_slot(self) -> AbstractContextManager:
-        """Limit how many image stacking jobs can run at the same time.
+        """Limit how many heavy jobs can run at the same time.
 
         Stacking images uses massive amounts of RAM and CPU. This function
         ensures the computer is not crashed by limiting how many stacking
-        programs can run simultaneously.
+        programs can run simultaneously. Shares its slot pool with
+        analysis (see `acquire_analysis_slot`) -- both draw on
+        `max_concurrent_jobs`.
 
         Returns
         -------
@@ -583,4 +579,4 @@ class ProcessingPipelines:
         """
         from datastore.process_locks import acquire_resource_slot
 
-        return acquire_resource_slot(self._config, "siril", self._config.get_siril_concurrency())
+        return acquire_resource_slot(self._config, "job", self._config.get_max_concurrent_jobs())

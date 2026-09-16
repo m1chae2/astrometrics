@@ -35,9 +35,9 @@ class DitherConfig(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    enabled: bool = Field(default=False)
-    every_n_frames: int = Field(default=3, gt=0)
-    pixels: float = Field(default=3.0, gt=0.0)
+    enabled: bool = Field(default=False, alias="enabled")
+    every_n_frames: int = Field(default=3, gt=0, alias="everyNFrames")
+    pixels: float = Field(default=3.0, gt=0.0, alias="pixels")
 
 
 class ExposureRequest(BaseModel):
@@ -45,11 +45,11 @@ class ExposureRequest(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    frame_type: FrameType
-    filter: FilterType = Field(default=FilterType.NONE)
-    exposure_sec: float = Field(..., gt=0.0)
-    count: int = Field(..., gt=0)
-    delay_sec: float = Field(default=0.0, ge=0.0)
+    frame_type: FrameType = Field(alias="frameType")
+    filter: FilterType = Field(default=FilterType.NONE, alias="filter")
+    exposure_sec: float = Field(..., gt=0.0, alias="exposureSec")
+    count: int = Field(..., gt=0, alias="count")
+    delay_sec: float = Field(default=0.0, ge=0.0, alias="delaySec")
 
     def total_exposure_sec(self) -> float:
         """Total wall-clock time this request occupies, exposures plus pacing.

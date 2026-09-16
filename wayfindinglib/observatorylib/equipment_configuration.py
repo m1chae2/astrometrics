@@ -9,7 +9,7 @@ REQ: BKD-2.1
 import logging
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 logger = logging.getLogger(__name__)
 
@@ -23,18 +23,24 @@ plate_scale (arcsec/px) = 206.265 × pixel_size_μm / focal_length_mm
 class TelescopeProfile(BaseModel):
     """Physical optics properties of the imaging telescope."""
 
-    name: str
-    focal_length_mm: float = Field(..., gt=0.0, description="Effective focal length in millimetres.")
-    focal_ratio: float = Field(default=0.0, ge=0.0, description="Focal ratio (f/number).")
+    model_config = ConfigDict(populate_by_name=True)
+
+    name: str = Field(alias="name")
+    focal_length_mm: float = Field(
+        ..., gt=0.0, alias="focalLengthMm", description="Effective focal length in millimetres."
+    )
+    focal_ratio: float = Field(default=0.0, ge=0.0, alias="focalRatio", description="Focal ratio (f/number).")
 
 
 class CameraProfile(BaseModel):
     """Physical sensor properties of an imaging camera."""
 
-    name: str
-    pixel_size_um: float = Field(..., gt=0.0, description="Pixel pitch in micrometres.")
-    sensor_width_px: int = Field(..., gt=0, description="Sensor width in pixels.")
-    sensor_height_px: int = Field(..., gt=0, description="Sensor height in pixels.")
+    model_config = ConfigDict(populate_by_name=True)
+
+    name: str = Field(alias="name")
+    pixel_size_um: float = Field(..., gt=0.0, alias="pixelSizeUm", description="Pixel pitch in micrometres.")
+    sensor_width_px: int = Field(..., gt=0, alias="sensorWidthPx", description="Sensor width in pixels.")
+    sensor_height_px: int = Field(..., gt=0, alias="sensorHeightPx", description="Sensor height in pixels.")
 
 
 class EquipmentConfiguration(BaseModel):
@@ -43,8 +49,10 @@ class EquipmentConfiguration(BaseModel):
     All geometry properties are computed on access from the stored profiles.
     """
 
-    telescope: TelescopeProfile
-    camera: CameraProfile
+    model_config = ConfigDict(populate_by_name=True)
+
+    telescope: TelescopeProfile = Field(alias="telescope")
+    camera: CameraProfile = Field(alias="camera")
 
     @property
     def plate_scale_arcsec_per_px(self) -> float:
@@ -74,11 +82,11 @@ class EquipmentConfiguration(BaseModel):
             scale and field-of-view values.
         """
         return {
-            "telescope": self.telescope.model_dump(),
-            "camera": self.camera.model_dump(),
-            "plate_scale_arcsec_per_px": round(self.plate_scale_arcsec_per_px, 4),
-            "fov_width_deg": round(self.fov_width_deg, 6),
-            "fov_height_deg": round(self.fov_height_deg, 6),
+            "telescope": self.telescope.model_dump(by_alias=True),
+            "camera": self.camera.model_dump(by_alias=True),
+            "plateScaleArcsecPerPx": round(self.plate_scale_arcsec_per_px, 4),
+            "fovWidthDeg": round(self.fov_width_deg, 6),
+            "fovHeightDeg": round(self.fov_height_deg, 6),
         }
 
 

@@ -5,11 +5,12 @@ searching through a series of images to find things that move (like asteroids)
 against the fixed background stars.
 """
 
-from astrometricslib.models.moving_object import AsteroidRecoveryCandidate
+from astrometricslib.drivers.job_logging import registered_job
+from astrometricslib.models.moving_object import AsteroidDetectionCandidate
 from astrometricslib.models.moving_object_config import MovingObjectConfig
 from astrometricslib.models.target import Target
-from astrometricslib.pipelines.asteroid_recovery.pipeline import (
-    AsteroidRecoveryPipeline,
+from astrometricslib.pipelines.asteroid_detection.pipeline import (
+    AsteroidDetectionPipeline,
 )
 
 __all__ = ["MovingObjectRecovery"]
@@ -41,9 +42,9 @@ class MovingObjectRecovery:
             run needs it.
         """
         self._config = config
-        self._pipeline = AsteroidRecoveryPipeline(config=config)
+        self._pipeline = AsteroidDetectionPipeline(config=config)
 
-    def recover_asteroids(self, target: Target) -> list[AsteroidRecoveryCandidate]:
+    def detect_asteroids(self, target: Target) -> list[AsteroidDetectionCandidate]:
         """Run the full search for asteroids on a specific target.
 
         This runs several algorithms to find dots of light that move in a
@@ -58,7 +59,7 @@ class MovingObjectRecovery:
 
         Returns
         -------
-        candidates : `list` [`AsteroidRecoveryCandidate`]
+        candidates : `list` [`AsteroidDetectionCandidate`]
             Every candidate the discrimination cascade produced,
             including rejected ones.
 
@@ -67,7 +68,19 @@ class MovingObjectRecovery:
         ValueError
             If the target has no `stacked_image`.
         """  # ruff: ignore[docstring-extraneous-exception] -- genuinely propagated from self._pipeline.process
-        return self._pipeline.process(target)
+        light_frames = [
+            (frame.path, frame.timestamp)
+            for frame in target.frames
+            if frame.role == "LIGHT" and frame.timestamp is not None
+        ]
+        with registered_job(
+            enabled=True,
+            job_type="asteroid_detection",
+            target_id=target.id,
+            completed_message=f"[{target.id}] Asteroid detection completed successfully.",
+            failed_message=f"[{target.id}] Asteroid detection failed.",
+        ):
+            return self._pipeline.process(target.id, target.stacked_image, light_frames)
 
     @property
     def last_run_metrics(self) -> dict[str, int]:

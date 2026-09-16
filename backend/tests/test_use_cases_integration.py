@@ -151,6 +151,11 @@ class TestUseCasesIntegration:
         )
         assert resp.status_code == 200
 
+        resp = client.post(
+            "/api/rpc", json={"jsonrpc": "2.0", "method": "system:filters", "params": {}, "id": "5.2"}
+        )
+        assert resp.status_code == 200
+
     async def test_use_case_5_3_telescope_active_guiding(self, client: TestClient):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Verify active guiding status and drift telemetry (Use Case 5.3)."""
         resp = client.post(

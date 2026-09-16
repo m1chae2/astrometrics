@@ -22,7 +22,7 @@ import logging
 import re
 from typing import NamedTuple
 
-from astrometricslib.data_access.catalog_access import POSITION_ONLY_STAR_ID_PREFIX
+from astrometricslib.drivers.catalog_access import POSITION_ONLY_STAR_ID_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -162,19 +162,16 @@ def _reconcile_position_only_star_ids(
         CATALOG_MATCH_RADIUS_ARCSEC,
     )
 
-    # `StellarObject.right_ascension`/`.declination` are typed `Any` and
-    # default to `""`, not `None` -- an `is not None` check alone would
-    # let that default through and crash the `SkyCoord` arithmetic
-    # below. Every real `FIELD_J...` star has both set to real floats at
-    # the same place its id is minted (star_identifier.py's Step 3), so
-    # this only excludes a malformed star that should never reach
-    # recording in the first place.
+    # Every real `FIELD_J...` star has both set to real floats at the
+    # same place its id is minted (star_identifier.py's Step 3); this
+    # only excludes a malformed star that should never reach recording
+    # in the first place.
     position_only_stars = [
         stellar_object
         for stellar_object in stellar_objects
         if stellar_object.id.startswith(_POSITION_ONLY_STAR_ID_PREFIX)
-        and isinstance(stellar_object.right_ascension, int | float)
-        and isinstance(stellar_object.declination, int | float)
+        and stellar_object.right_ascension is not None
+        and stellar_object.declination is not None
     ]
     if not position_only_stars:
         return stellar_objects
@@ -329,6 +326,29 @@ def merge_astrometry_stellar_object(existing_stellar_object, updated_stellar_obj
     return existing_stellar_object
 
 
+def merge_spectra_history(existing_history, updated_history):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Combine two stars' spectral-observation histories into one timeline.
+
+    Each spectroscopy run contributes one new `SpectralObservation` (see
+    `SpectroscopyPipeline._apply_result_to_stellar_object`); folding it
+    in here -- keyed by timestamp -- is what turns those single-session
+    snapshots into an actual history instead of each run's entry
+    replacing the last. Re-processing the same session's frame again
+    lands on the same timestamp and overwrites that one entry in place
+    rather than appending a duplicate.
+
+    Returns
+    -------
+    merged_history : `list` of `SpectralObservation`
+        Every observation from both histories, one per distinct
+        timestamp (latest write wins), oldest first.
+    """
+    by_timestamp = {observation.timestamp: observation for observation in existing_history}
+    for observation in updated_history:
+        by_timestamp[observation.timestamp] = observation
+    return [by_timestamp[timestamp] for timestamp in sorted(by_timestamp)]
+
+
 def merge_spectroscopy_stellar_object(existing_stellar_object, updated_stellar_object):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Merge rule for spectroscopy updates to a star.
 
@@ -353,12 +373,13 @@ def merge_spectroscopy_stellar_object(existing_stellar_object, updated_stellar_o
     existing_stellar_object.magnitude = updated_stellar_object.magnitude
     existing_stellar_object.is_catalog_identified = updated_stellar_object.is_catalog_identified
     existing_stellar_object.star_data = updated_stellar_object.star_data
-    existing_stellar_object.detected_angle = updated_stellar_object.detected_angle
-    existing_stellar_object.dispersion_angle = updated_stellar_object.dispersion_angle
-    existing_stellar_object.trail_centerline_px = updated_stellar_object.trail_centerline_px
-    existing_stellar_object.trail_width_px = updated_stellar_object.trail_width_px
-    existing_stellar_object.rectangle = updated_stellar_object.rectangle
-    existing_stellar_object.spectrum_data_processed = updated_stellar_object.spectrum_data_processed
+    # Carries the trail geometry (rectangle, dispersion_angle, etc.)
+    # along for free -- it lives on SpectroscopyResult now, so a full
+    # replace here covers it without copying each field separately.
+    existing_stellar_object.spectroscopy = updated_stellar_object.spectroscopy
+    existing_stellar_object.spectra_history = merge_spectra_history(
+        existing_stellar_object.spectra_history, updated_stellar_object.spectra_history
+    )
     return existing_stellar_object
 
 
@@ -375,11 +396,21 @@ def merge_photometry_stellar_object(existing_stellar_object, updated_stellar_obj
     """
     if existing_stellar_object is None:
         return updated_stellar_object
-    existing_stellar_object.light_curve = updated_stellar_object.light_curve
-    if getattr(updated_stellar_object, "mean_flux", None) is not None:
-        existing_stellar_object.mean_flux = updated_stellar_object.mean_flux
-        existing_stellar_object.coefficient_of_variation = updated_stellar_object.coefficient_of_variation
-        existing_stellar_object.variability_score = updated_stellar_object.variability_score
+    updated_photometry = updated_stellar_object.photometry
+    existing_photometry = existing_stellar_object.photometry
+    # A repeat run that couldn't recompute mean_flux/coefficient_of_variation
+    # this time (too few usable flux points this session) keeps the
+    # star's last known values instead of wiping them to None; every
+    # other photometry field still comes fully from this run.
+    if (
+        updated_photometry is not None
+        and updated_photometry.mean_flux is None
+        and existing_photometry is not None
+        and existing_photometry.mean_flux is not None
+    ):
+        updated_photometry.mean_flux = existing_photometry.mean_flux
+        updated_photometry.coefficient_of_variation = existing_photometry.coefficient_of_variation
+    existing_stellar_object.photometry = updated_photometry
     # Cross-session matching (see _match_and_merge_across_sessions)
     # recomputes both fresh each run, so a full replace keeps a repeat
     # run's result authoritative rather than accumulating stale matches.

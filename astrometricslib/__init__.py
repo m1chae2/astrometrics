@@ -15,8 +15,10 @@ from importlib.metadata import version as _distribution_version
 from typing import TYPE_CHECKING, Any
 
 try:
-    # Single source of truth is pyproject.toml; both libraries ship from the
-    # same `astrometrics` distribution, so neither carries its own literal.
+    # The version number is only written down once, in pyproject.toml.
+    # astrometricslib and wayfindinglib are installed together as one
+    # package named "astrometrics", so both read that same version number
+    # here instead of each hard-coding their own copy of it.
     __version__ = _distribution_version("astrometrics")
 except PackageNotFoundError:  # running from a source tree without an install
     __version__ = "0.0.0+unknown"
@@ -31,7 +33,7 @@ from astrometricslib.api.processing import (
     registered_job,
 )
 from astrometricslib.api.targets import classify_and_sort_fits_files, derive_target_sessions
-from astrometricslib.models.moving_object import AsteroidRecoveryCandidate
+from astrometricslib.models.moving_object import AsteroidDetectionCandidate
 from astrometricslib.models.moving_object_config import MovingObjectConfig
 from astrometricslib.models.quality_summary import (
     AstrometryPipelineQualityMetrics,
@@ -42,9 +44,10 @@ from astrometricslib.models.stellar_source import (
     AnalysisResult,
     FileItem,
     GroupedFrameStat,
-    LightCurve,
+    PhotometryResult,
     PlotData,
     SpectralObservation,
+    SpectroscopyResult,
     StellarObject,
     TargetFilesResponse,
     VariableCandidate,
@@ -52,7 +55,6 @@ from astrometricslib.models.stellar_source import (
 from astrometricslib.models.target import (
     FitsHeaderEntry,
     FrameRecord,
-    MosaicInfo,
     RenderedImage,
     Target,
 )
@@ -72,7 +74,7 @@ if TYPE_CHECKING:
     from astrometricslib.pipelines.astrometry.pipeline import AstrometryPipeline
     from astrometricslib.pipelines.astrometry.star_identifier import StarIdentifier
 
-_LAZY_EXPORTS = {
+_DEFERRED_EXPORTS = {
     "AstrometryPipeline": "astrometricslib.pipelines.astrometry.pipeline",
     "StarIdentifier": "astrometricslib.pipelines.astrometry.star_identifier",
     "CalibrationCatalog": "astrometricslib.api.processing",
@@ -106,7 +108,7 @@ def __getattr__(name: str) -> Any:
     AttributeError
         If the tool name is not recognized.
     """
-    module_name = _LAZY_EXPORTS.get(name)
+    module_name = _DEFERRED_EXPORTS.get(name)
     if module_name is None:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     import importlib
@@ -145,18 +147,14 @@ class Astrometrics:
         from astrometricslib.api.stars import StellarCatalog
         from astrometricslib.api.targets import TargetCatalog
         from astrometricslib.api.visualization import Visualization
-        from astrometricslib.data_access.catalog_access import CatalogAccess
-        from astrometricslib.drivers import local_database
+        from astrometricslib.drivers.catalog_access import CatalogAccess
         from astrometricslib.utilities.config_loader import get_configuration
 
         self.config = config or app_config or get_configuration()
         self.catalog_access = catalog_access or CatalogAccess(self.config)
 
-        # Run database upgrade verification on startup
-        local_database.verify_and_upgrade_database(self.config)
-
-        # Hydrate the stellar object registry via catalog_access; target state
-        # is owned by TargetCatalog itself (see its docstring).
+        # Load the known stars from storage here; a target's own data is
+        # loaded separately, since TargetCatalog owns that (see its docstring).
         self.stellar_objects: list[StellarObject] = self.catalog_access.get("stellar_catalog", {}) or []
 
         self.targets = TargetCatalog(self.config, self.catalog_access)
@@ -202,7 +200,7 @@ __all__ = [
     "AbstractCatalogAccess",
     "AnalysisResult",
     "AppConfiguration",
-    "AsteroidRecoveryCandidate",
+    "AsteroidDetectionCandidate",
     "Astrometrics",
     "AstrometryPipeline",
     "AstrometryPipelineQualityMetrics",
@@ -218,17 +216,17 @@ __all__ = [
     "GroupedFrameStat",
     "ImageProcessing",
     "JobHandle",
-    "LightCurve",
     "LoggerInterface",
-    "MosaicInfo",
     "MovingObjectConfig",
     "MovingObjectRecovery",
+    "PhotometryResult",
     "PlotData",
     "ProcessingJob",
     "ProcessingPipelines",
     "QualityDiagnostics",
     "RenderedImage",
     "SpectralObservation",
+    "SpectroscopyResult",
     "StarIdentifier",
     "StellarCatalog",
     "StellarObject",

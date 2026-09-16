@@ -2,7 +2,10 @@ r"""Measure how many Siril runs this machine should allow at once.
 
 This tool runs stacking tasks with different concurrency limits to
 help you find the fastest setting for your computer without running
-out of memory or causing tasks to time out.
+out of memory or causing tasks to time out. The slot count it measures
+is [Processing.Parallelism] max_concurrent_jobs -- the same pool
+photometry/spectroscopy analysis jobs draw from, so a setting picked
+here also caps how many analysis sessions can run at once.
 
 Usage::
 
@@ -32,7 +35,7 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     """
     parser = argparse.ArgumentParser(
         prog="benchmark_siril_concurrency",
-        description="Time the same stack at several Siril slot counts to pick siril_concurrency.",
+        description="Time the same stack at several Siril slot counts to pick max_concurrent_jobs.",
     )
     parser.add_argument(
         "--target",
@@ -137,7 +140,7 @@ def time_one_slot_count(
     )
 
     environment = dict(os.environ)
-    environment["ASTROMETRICS_SIRIL_CONCURRENCY"] = str(slot_count)
+    environment["ASTROMETRICS_MAX_CONCURRENT_JOBS"] = str(slot_count)
     environment["HEADLESS"] = "1"
 
     peak_siril = 0
@@ -266,7 +269,9 @@ def run_benchmark(argv: list[str] | None = None) -> int:
             f"{measurement['peak_siril']:>10d}",
             flush=True,
         )
-    print("\nSet the winner as [Processing.Parallelism] siril_concurrency.", flush=True)
+    print("\nSet the winner as [Processing.Parallelism] max_concurrent_jobs.", flush=True)
+    print("This slot pool is shared with photometry/spectroscopy analysis jobs, so the number", flush=True)
+    print("also caps how many of those can run at once system-wide.", flush=True)
     print("peakSiril below the slot count means the limit was never the constraint -- the", flush=True)
     print("measurement says nothing about that setting, so treat it as untested, not as equal.", flush=True)
     print("A count that raises `failed` is oversubscribing: a stack pushed past its timeout", flush=True)

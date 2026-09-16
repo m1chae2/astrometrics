@@ -7,9 +7,16 @@ import logging
 
 import numpy as np
 
+from astrometricslib.pipelines.spectroscopy.optics_physics import (
+    calculate_pixel_offset,
+    calculate_wavelength,
+)
 from astrometricslib.utilities import SpectroscopyConfig
 
 logger = logging.getLogger(__name__)
+
+# nm and mm both measure wavelength here; this file works in mm throughout.
+_NM_TO_MM = 1e-6
 
 
 class SpectroscopyInstrument:
@@ -46,13 +53,8 @@ class SpectroscopyInstrument:
         """Calculate physical properties such as dx/dlambda and length."""
         c = self.config
 
-        # Angstrom to mm conversion
-        ang_to_mm = 1e-7
-
         # Center wavelength in mm
-        lambda_c_mm = (
-            ((c.camera.sensor_min_wavelength + c.camera.sensor_max_wavelength) / 2.0) * ang_to_mm * 10
-        )
+        lambda_c_mm = ((c.camera.sensor_min_wavelength + c.camera.sensor_max_wavelength) / 2.0) * _NM_TO_MM
 
         # Grating spacing (d) is already in config as d_mm
         sin_theta = lambda_c_mm / c.d_mm
@@ -62,12 +64,17 @@ class SpectroscopyInstrument:
         else:
             self.theta = np.arcsin(sin_theta)
 
-        # Linear dispersion (dx/dlambda) in mm/mm
-        # dx/dlambda = L / (d * cos(theta))
-        self.dx_dlambda = c.grating_distance_mm / (c.d_mm * np.cos(self.theta))
+        # Linear dispersion (dx/dlambda) in mm/mm. This is the exact
+        # derivative of this module's own x = L*tan(theta), lambda =
+        # d*sin(theta) geometry (see `optics_physics.py`), not the
+        # small-angle textbook formula L/(d*cos(theta)) -- that
+        # approximation quietly drifts from this pipeline's actual
+        # (exact) geometry as theta grows with higher-dispersion
+        # gratings.
+        self.dx_dlambda = c.grating_distance_mm / (c.d_mm * np.cos(self.theta) ** 3)
 
         # Delta lambda in mm
-        delta_lambda_mm = (c.camera.sensor_max_wavelength - c.camera.sensor_min_wavelength) * 10 * ang_to_mm
+        delta_lambda_mm = (c.camera.sensor_max_wavelength - c.camera.sensor_min_wavelength) * _NM_TO_MM
 
         # Expected length in pixels
         self.expected_length_mm = self.dx_dlambda * delta_lambda_mm
@@ -77,18 +84,26 @@ class SpectroscopyInstrument:
         if c.dispersion_start_px is not None:
             self.zero_order_offset_px = c.dispersion_start_px
         else:
-            # Theoretical offset for min wavelength
-            lambda_min_mm = c.camera.sensor_min_wavelength * 10 * ang_to_mm
-            sin_theta_min = lambda_min_mm / c.d_mm
+            # Theoretical offset for min wavelength, via the same exact
+            # pixel<->wavelength relationship used everywhere else in
+            # the pipeline (`optics_physics.calculate_pixel_offset`).
+            sin_theta_min = (c.camera.sensor_min_wavelength * _NM_TO_MM) / c.d_mm
             if abs(sin_theta_min) < 1:
-                theta_min = np.arcsin(sin_theta_min)
-                self.zero_order_offset_px = (c.grating_distance_mm * np.tan(theta_min)) / c.pixel_pitch_mm
+                self.zero_order_offset_px = calculate_pixel_offset(
+                    wavelength_nm=c.camera.sensor_min_wavelength,
+                    grating_distance_mm=c.grating_distance_mm,
+                    lines_per_mm=c.grating_lines_per_mm,
+                    pixel_size_um=c.camera.pixel_size_um,
+                )
             else:
                 self.zero_order_offset_px = 0.0
 
-        # Adjust for flare masking when ZWO ASI533MM Pro camera is used
-        if c.camera.name == "ZWO ASI533MM Pro":
-            self.expected_length_px = 750.0 - self.zero_order_offset_px
+        # Cap the extraction length when the usable sensor area along
+        # the dispersion axis is smaller than the physics-derived length
+        # (e.g. the setup vignettes, or the calibrated region stops
+        # short of the sensor edge).
+        if c.max_extraction_length_px is not None:
+            self.expected_length_px = c.max_extraction_length_px - self.zero_order_offset_px
 
     def get_dispersion_vector(self) -> np.ndarray:
         """Get an arrow pointing exactly along the rainbow.
@@ -122,14 +137,13 @@ class SpectroscopyInstrument:
         wavelength_nm : `float`
             The color at that pixel, in nanometers.
         """
-        # px_offset is relative to zero order star
-        # mm_offset = px_offset * pixel_pitch
-        mm_offset = px_offset * self.config.pixel_pitch_mm
-
-        # d * sin(theta) = m * lambda
-        # tan(theta) = x / L  => theta = atan(x/L)
-        # lambda = d * sin(atan(x/L))
-        theta = np.arctan(mm_offset / self.config.grating_distance_mm)
-        wavelength_mm = self.config.d_mm * np.sin(theta)
-
-        return wavelength_mm * 1e6  # mm to nm
+        # px_offset is relative to zero order star. Delegates to the
+        # same exact grating-equation implementation used everywhere
+        # else in the pipeline, rather than a second hand-derived copy.
+        c = self.config
+        return calculate_wavelength(
+            pixel_offset_px=px_offset,
+            grating_distance_mm=c.grating_distance_mm,
+            lines_per_mm=c.grating_lines_per_mm,
+            pixel_size_um=c.camera.pixel_size_um,
+        )

@@ -82,7 +82,7 @@ class StellarCatalog:
         return stellar_operations.list_objects(self)
 
     def list_object_summaries(
-        self, target_id: str | None = None, limit: int | None = None
+        self, target_id: str | None = None, limit: int | None = None, *, apply_default_limit: bool = True
     ) -> list[dict[str, Any]]:
         """Get a quick, lightweight summary of stars in the catalog.
 
@@ -103,6 +103,15 @@ class StellarCatalog:
             with the whole catalog rather than with one target's own
             star count. Pass an explicit value to override either
             default.
+        apply_default_limit : `bool`, optional
+            Whether an omitted, target-less `limit` should fall back to
+            `DEFAULT_UNFILTERED_SUMMARY_LIMIT`. Defaults to `True`, matching
+            this function's usual "UI catalog browsing" callers. A caller
+            about to search or filter the *entire* catalog itself --
+            where capping here would silently hide real matches outside
+            the first `DEFAULT_UNFILTERED_SUMMARY_LIMIT` rows, rather
+            than bound the response actually sent back -- should pass
+            `False` and apply its own limit after filtering instead.
 
         Returns
         -------
@@ -112,7 +121,7 @@ class StellarCatalog:
             ``hasPhotometry``, optionally filtered by ``target_id``.
         """
         effective_limit = limit
-        if effective_limit is None and not target_id:
+        if effective_limit is None and not target_id and apply_default_limit:
             effective_limit = DEFAULT_UNFILTERED_SUMMARY_LIMIT
 
         # Keys are camelCase because this dict is handed straight to the

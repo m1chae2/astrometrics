@@ -216,8 +216,15 @@ class StellarService:
             optionally filtered by ``target_id``, ``search``, and
             ``filter_type``, paginated by ``offset`` and ``limit``.
         """
-        effective_limit = None if (search or filter_type or (offset and offset > 0)) else limit
-        summaries = self.astrometrics.stars.list_object_summaries(target_id, effective_limit)
+        needs_full_scan = bool(search or filter_type or (offset and offset > 0))
+        effective_limit = None if needs_full_scan else limit
+        # A search/filter/paginated request must see every row before its
+        # own in-memory filtering below runs, or a real match past
+        # DEFAULT_UNFILTERED_SUMMARY_LIMIT would be silently dropped
+        # before this function ever got a chance to check it.
+        summaries = self.astrometrics.stars.list_object_summaries(
+            target_id, effective_limit, apply_default_limit=not needs_full_scan
+        )
 
         search_needle = search.strip().lower() if search and search.strip() else None
 

@@ -176,6 +176,32 @@ def test_list_object_summaries_a_target_scoped_request_is_not_capped_by_default(
     assert len(summaries) == 10
 
 
+def test_list_object_summaries_apply_default_limit_false_bypasses_the_cap(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """A caller doing its own full-catalog search must see every row.
+
+    `get_displayable_stellar_object_summaries` filters by search text or
+    category *after* calling this function -- if this function silently
+    capped an unfiltered request to `DEFAULT_UNFILTERED_SUMMARY_LIMIT`
+    rows first, a real match sitting past that cutoff would never reach
+    that filtering step, so the search would wrongly report no match at
+    all rather than just truncating how many matches come back.
+    """
+    import astrometricslib.api.stars as stars_module
+    from astrometricslib.api.stars import StellarCatalog
+    from astrometricslib.models.stellar_source import StellarObject
+
+    monkeypatch.setattr(stars_module, "DEFAULT_UNFILTERED_SUMMARY_LIMIT", 3)
+    config = _make_isolated_config(tmp_path)
+    catalog = StellarCatalog(config=config)
+    catalog.catalog_access.put(
+        [StellarObject(id=f"Star{i}", name=f"Star{i}") for i in range(10)], "stellar_catalog", {}
+    )
+
+    summaries = catalog.list_object_summaries(apply_default_limit=False)
+
+    assert len(summaries) == 10
+
+
 def test_list_object_summaries_matches_the_model_computed_properties(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify the recorded columns agree with StellarObject's own properties.
 

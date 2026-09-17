@@ -34,7 +34,7 @@ Maintain clean unidirectional dependency boundaries across layers:
 ## 3. Data & Resource Safety
 - **FITS Access**: ALWAYS use `memmap=False` (or `AstrometricsImage`) to prevent file handle / memory leaks.
 - **Scientific Type Serialization**: Cast `numpy` / `astropy` types (`int64`, `float64`, `ndarray`) using `.item()` or `.tolist()` before binding to Pydantic models or JSON responses.
-- **Target Namespacing**: Keep standard imaging targets (`L`, `R`, `G`, `B`, `Ha`) separate from spectroscopy targets (`SPEC` suffix, e.g. `Vega Spectroscopy`).
+- **Target Multi-Modal Frame Support**: A single `Target` entity represents the celestial object and holds all light frame types (`L`, `R`, `G`, `B`, `Ha`, `SPEC`). Frame differentiation is handled at processing/stacking via `filter_type` and separate master properties (`stacked_image` and `stacked_spectral_target`), rather than creating artificial target entities.
 
 ## 4. Script Usage (MANDATORY)
 ALWAYS prefer executing pre-existing lifecycle scripts under `scripts/` instead of ad-hoc bash commands:

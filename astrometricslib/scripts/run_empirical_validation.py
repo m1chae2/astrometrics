@@ -123,7 +123,17 @@ def run_photometry_validation(astrometrics: Astrometrics, camera_name: str) -> d
 
 
 def run_asteroid_detection_validation(astrometrics: Astrometrics, camera_name: str) -> dict:
-    """Execute asteroid detection validation on NGC 2403 and M 81 datasets.
+    """Execute asteroid detection validation on real target datasets.
+
+    NGC 2403 and M 81 sit 43-52 degrees from the ecliptic, where main-belt
+    asteroids essentially never appear -- a run against SkyBoT there can
+    only ever confirm "found nothing," never confirm a real detection
+    against a known body. M 1, M 45, M 67, NGC 2903, M 16, and NGC 1893
+    all sit within about 10 degrees of the ecliptic (checked via
+    `astropy.coordinates.GeocentricTrueEcliptic`), where a real main-belt
+    asteroid passing through the field is actually plausible, giving this
+    validation a chance at a genuine SkyBoT-matched true positive rather
+    than only ever exercising the "nothing there" path.
 
     Parameters
     ----------
@@ -142,7 +152,7 @@ def run_asteroid_detection_validation(astrometrics: Astrometrics, camera_name: s
     print("--------------------------------------------------")
     results = {}
 
-    for tid in ["NGC 2403", "M 81"]:
+    for tid in ["NGC 2403", "M 81", "M 1", "M 45", "M 67", "NGC 2903", "M 16", "NGC 1893"]:
         target = astrometrics.targets.get(tid)
         if target and target.stacked_image:
             print(f"Running Asteroid Detection Analysis on target: {target.id}")

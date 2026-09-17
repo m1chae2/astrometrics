@@ -358,9 +358,10 @@ class AppConfiguration:
         -------
         config : `dict`
             The matching section's key/value pairs, checked in order of
-            ``Observatory.Camera.<camera_name>``, then
-            ``Observatory.Camera``. Returns an empty dict if no camera
-            name is resolved or no section matches.
+            ``Observatory.Camera.<camera_name>`` (exact, then matched
+            ignoring spaces/case), then ``Observatory.Camera``. Returns
+            an empty dict if no camera name is resolved or no section
+            matches.
         """
         if not camera_name:
             # Fallback to default primary camera
@@ -368,10 +369,31 @@ class AppConfiguration:
             if not camera_name:
                 return {}
 
-        # Try specific sections
-        for section in [f"Observatory.Camera.{camera_name}", "Observatory.Camera"]:
-            if section in self.app_config:
+        exact_section = f"Observatory.Camera.{camera_name}"
+        if exact_section in self.app_config:
+            return dict(self.app_config[exact_section])
+
+        # Camera names in settings and image files often differ slightly
+        # in spacing/capitalization (e.g. "ZWO ASI533MM Pro" in a config
+        # file typed by hand vs. "ZWO ASI 533MM Pro" as the camera's own
+        # FITS header spells it). Matching loosely here, the same way
+        # `astrometricslib.pipelines.stacking.stage._camera_names_match`
+        # already has to for stack lookups, keeps a real per-camera
+        # section (dispersion geometry, grating spacing, etc.) from being
+        # silently skipped over a formatting difference -- which
+        # otherwise falls through to the generic `[Observatory.Camera]`
+        # section's bare model list and produces nonsensical spectroscopy
+        # defaults (e.g. a zero-length extraction) with no error at all.
+        camera_prefix = "Observatory.Camera."
+        for section in self.app_config.sections():
+            if not section.startswith(camera_prefix):
+                continue
+            section_camera_name = section[len(camera_prefix) :]
+            if "".join(section_camera_name.split()).casefold() == "".join(camera_name.split()).casefold():
                 return dict(self.app_config[section])
+
+        if "Observatory.Camera" in self.app_config:
+            return dict(self.app_config["Observatory.Camera"])
 
         return {}
 

@@ -271,12 +271,6 @@ def add_frame(  # ruff: ignore[missing-return-type-undocumented-public-function]
     -------
     frame_record : `FrameRecord`
         The new or updated image record.
-
-    Raises
-    ------
-    ValueError
-        If adding this frame would mix spectral ('SPEC') and standard
-        imaging frames on the same target.
     """
     from astrometricslib.pipelines.shared.frame_scanning import create_frame_record_from_fits
 
@@ -284,21 +278,6 @@ def add_frame(  # ruff: ignore[missing-return-type-undocumented-public-function]
     record.role = role
     if filter_type is not None:
         record.filter = FrameRecord.normalize_filter(filter_type)
-
-    is_spectral = frame_is_spectral(record)
-    has_spectral = any(frame_is_spectral(f) for f in target.frames)
-    has_standard = any(not frame_is_spectral(f) for f in target.frames)
-
-    if is_spectral and has_standard:
-        raise ValueError(
-            "Target contains a mixed set of spectral ('SPEC') and standard imaging frames. "
-            "Stacking mixed frame types is not permitted."
-        )
-    if not is_spectral and has_spectral:
-        raise ValueError(
-            "Target contains a mixed set of spectral ('SPEC') and standard imaging frames. "
-            "Stacking mixed frame types is not permitted."
-        )
 
     # Compare resolved paths, not raw strings -- the same physical frame
     # reachable via two different spellings (a relative vs. absolute

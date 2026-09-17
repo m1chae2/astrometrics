@@ -6,6 +6,7 @@ workflow relies on -- the free functions that replaced Target's former
 orchestration methods.
 """
 
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Never
 
@@ -354,11 +355,10 @@ def test_target_stack_frames_homogeneous_validation() -> None:
     assert result is None
 
 
-def test_target_add_frame_validation(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Tests that add_frame.
+def test_target_add_frame_validation(tmp_path: Path) -> None:
+    """Verify that add_frame extracts FITS metadata, prevents duplicate paths.
 
-    correctly extracts FITS metadata, prevents duplicate paths,. and
-    proactively enforces filter homogeneity.
+    Also verifies multi-modal frame types can be added to a single target.
     """
     # Create test FITS files
     standard_fit = tmp_path / "standard.fits"
@@ -396,11 +396,12 @@ def test_target_add_frame_validation(tmp_path):  # ruff: ignore[missing-type-fun
     assert rec2 == rec1
     assert len(target.frames) == 1
 
-    # 3. Add incompatible spectral frame (proactive boundary validation)
-    with pytest.raises(
-        ValueError, match=r"Target contains a mixed set of spectral.*and standard imaging frames"
-    ):
-        add_frame(target, str(spectral_fit))
+    # 3. Add spectral frame to the same target (multi-modal target support)
+    rec3 = add_frame(target, str(spectral_fit))
+    assert rec3.filter.name == "SPEC"
+    assert rec3.exposure == "10.0"
+    assert target.exposure_sec == pytest.approx(15.0)
+    assert len(target.frames) == 2
 
 
 def test_target_analyze_frame_spectroscopy(tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]

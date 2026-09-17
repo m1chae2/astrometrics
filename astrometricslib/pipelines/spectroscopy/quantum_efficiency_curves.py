@@ -89,4 +89,19 @@ def get_quantum_efficiency_curve(camera_name: str) -> QuantumEfficiencyCurve | N
     curve : `Optional[QuantumEfficiencyCurve]`
         The sensitivity data, or None if we don't have data for this camera.
     """
-    return _QUANTUM_EFFICIENCY_CURVES_BY_CAMERA_NAME.get(camera_name)
+    curve = _QUANTUM_EFFICIENCY_CURVES_BY_CAMERA_NAME.get(camera_name)
+    if curve is not None:
+        return curve
+
+    # Camera names in FITS headers/frame records and camera names typed
+    # into config files often differ slightly in spacing/capitalization
+    # (e.g. "ZWO ASI 533MM Pro" vs. "ZWO ASI533MM Pro"). Matching loosely
+    # here keeps a real camera from silently getting no QE correction
+    # over a formatting difference -- see the same handling in
+    # `AppConfiguration.get_camera_config`.
+    normalized_target = "".join(camera_name.split()).casefold()
+    for known_name, known_curve in _QUANTUM_EFFICIENCY_CURVES_BY_CAMERA_NAME.items():
+        if "".join(known_name.split()).casefold() == normalized_target:
+            return known_curve
+
+    return None

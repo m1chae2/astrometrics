@@ -80,8 +80,8 @@
   width: 100%;
   box-sizing: border-box;
   background: var(--grey-dark);
-  word-break: break-word;
-  white-space: normal;
+  white-space: nowrap;
+  overflow: hidden;
   font-size: var(--target-list-font-size, 13px);
   font-family: inherit;
   padding: 4px 12px;
@@ -98,11 +98,30 @@
 .selectable-list__label {
   display: inline-block;
   vertical-align: middle;
+  min-width: 0;
 }
 /* From SelectableList.tsx refactor */
 .selectable-list__label-content {
   display: flex;
   align-items: center;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+/* Rows are absolutely positioned at a fixed height (see SelectableList.tsx
+   ROW_HEIGHT_PX) -- the label must truncate rather than wrap, or a long
+   star/catalog id would grow the row and overlap the next one. */
+.selectable-list__label-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.selectable-list__badge,
+.selectable-list__no-processed-badge,
+.selectable-list__availability-dot {
+  flex-shrink: 0;
 }
 
 .selectable-list__availability-dot {

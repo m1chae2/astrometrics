@@ -100,7 +100,7 @@ export const PhotometryViewer: React.FC<Props> = ({
     }, [astronomyData, selectedTimestamps, isPhaseFolded, bestPeriodDays, lc]);
 
     const layout = useMemo(() => {
-        const hasMagnitudes = !!(astronomyData?.photometry as any)?.magnitudes;
+        const hasMagnitudes = ((astronomyData?.photometry as any)?.magnitudes?.length ?? 0) > 0;
         const xTitle = isPhaseFolded && bestPeriodDays > 0 ? 'Orbital Phase (0.0 - 1.0)' : 'Time (UTC)';
         const base = buildLayout({
             xTitle,

@@ -19,11 +19,11 @@ export interface SelectableListProps {
     highlightedIds?: Set<string>;
 }
 
-// Matches .selectable-list__item's CSS min-height. A star's id/name can
-// occasionally be long enough to wrap to a second line -- when that
-// happens the row grows past this estimate and can visually overlap
-// its neighbor by a few pixels, which is the deliberate tradeoff here:
-// a rare, minor overlap versus mounting one real DOM node per item.
+// Matches .selectable-list__item's CSS min-height. Rows are absolutely
+// positioned at idx * ROW_HEIGHT_PX, so a row's rendered height must
+// never exceed this value or it will visually overlap the next row.
+// .selectable-list__label-text enforces single-line truncation (rather
+// than wrapping) on the label to guarantee that.
 const ROW_HEIGHT_PX = 32;
 
 // Rendered above/below the visible viewport so a fast scroll or key
@@ -117,7 +117,7 @@ export const SelectableList: React.FC<SelectableListProps> = ({
                                 <span className="radio__indicator"></span>
                             </span>
                             <span className="selectable-list__label selectable-list__label-content">
-                                {item.label}
+                                <span className="selectable-list__label-text">{item.label}</span>
                                 {item.hasSpectra && (
                                     <span className="selectable-list__badge selectable-list__badge--spectra" title="Has Spectrum Data">S</span>
                                 )}

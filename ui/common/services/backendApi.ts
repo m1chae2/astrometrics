@@ -319,12 +319,24 @@ export async function parseResponseError(response: Response): Promise<string> {
 import { emitToast } from '../utils/emitToast';
 
 /**
+ * Optional settings for a single callBackend request.
+ */
+export interface CallBackendOptions {
+    /**
+     * Cancels the request when signalled. A cancelled call rejects with an
+     * `AbortError` and shows no error toast, since cancelling is deliberate.
+     */
+    signal?: AbortSignal;
+}
+
+/**
  * Unified type-safe JSON-RPC 2.0 network client.
  * Dispatches a POST request to '/api/rpc'.
  */
 export async function callBackend<A extends keyof ActionRegistry>(
     action: A,
-    params: ActionRegistry[A]["payload"]
+    params: ActionRegistry[A]["payload"],
+    options?: CallBackendOptions
 ): Promise<ActionRegistry[A]["response"]> {
     try {
         const url = getBackendUrl('/api/rpc');
@@ -340,7 +352,8 @@ export async function callBackend<A extends keyof ActionRegistry>(
                 method: action,
                 params: params,
                 id: requestId
-            })
+            }),
+            signal: options?.signal
         });
 
         if (!response.ok) {
@@ -361,6 +374,10 @@ export async function callBackend<A extends keyof ActionRegistry>(
 
         throw new Error('Malformed RPC response envelope');
     } catch (error: any) {
+        // A deliberate cancel is not a failure worth telling the user about.
+        if (error?.name === 'AbortError') {
+            throw error;
+        }
         const msg = error?.message || String(error);
         emitToast(msg, 'error', `API:${action}`);
         throw error;

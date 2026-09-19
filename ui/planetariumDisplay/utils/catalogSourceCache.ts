@@ -98,3 +98,13 @@ export function storeCatalogSources(
     cache.shift();
   }
 }
+
+/**
+ * Empties the cache, so no earlier query's results can answer a later one.
+ * Used by tests; nothing in the app needs to discard cached regions.
+ *
+ * @returns {void}
+ */
+export function clearCatalogSourceCache(): void {
+  cache.length = 0;
+}

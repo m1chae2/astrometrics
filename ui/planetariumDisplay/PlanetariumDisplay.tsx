@@ -139,6 +139,8 @@ export const PlanetariumDisplay: React.FC = () => {
     0, 0, 180,
     brightStarDrivers,
     true,
+    // Fixed whole-sky query that never changes with the view, so there is nothing to wait out.
+    0,
   );
 
   // Deep-zoom star query: GAIA DR3 supplies stars fainter than Hipparcos's
@@ -147,7 +149,7 @@ export const PlanetariumDisplay: React.FC = () => {
   // per-region density is far higher than Hipparcos's. Gated on showStars
   // so toggling the background field off also stops these network queries.
   const deepStarDrivers = useMemo(() => ['gaia'], []);
-  const { onlineSources: deepStarSources } = useOnlineCatalogSources(
+  const { onlineSources: deepStarSources, loading: deepStarsLoading } = useOnlineCatalogSources(
     raValue, decValue, queryRadius,
     deepStarDrivers,
     showStars,
@@ -501,6 +503,12 @@ export const PlanetariumDisplay: React.FC = () => {
         availableCameras={availableCameras}
         onSelectCamera={setActiveCamera}
       />
+
+      {deepStarsLoading && (
+        <div className="planetarium-loading-chip" role="status" aria-live="polite">
+          Loading deeper stars&hellip;
+        </div>
+      )}
 
       <PlanetariumDateTimeModal
         isOpen={isTimeModalOpen}

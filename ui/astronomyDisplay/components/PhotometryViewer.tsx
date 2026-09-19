@@ -46,13 +46,13 @@ export const PhotometryViewer: React.FC<Props> = ({
 }) => {
     const [isPhaseFolded, setIsPhaseFolded] = useState<boolean>(false);
 
-    const lc = astronomyData?.lightCurve;
+    const lc = astronomyData?.photometry;
     const periodogram = lc?.periodogram;
     const transitCandidate = lc?.transitCandidate;
     const bestPeriodDays = periodogram?.bestPeriodDays || transitCandidate?.periodDays || 0;
 
     const plotData: PlotlyTrace[] = useMemo(() => {
-        if (!astronomyData?.lightCurve) return [];
+        if (!astronomyData?.photometry) return [];
 
         const allX = lc?.timestamps || [];
         const allFlux = lc?.fluxes || [];
@@ -100,7 +100,7 @@ export const PhotometryViewer: React.FC<Props> = ({
     }, [astronomyData, selectedTimestamps, isPhaseFolded, bestPeriodDays, lc]);
 
     const layout = useMemo(() => {
-        const hasMagnitudes = !!(astronomyData?.lightCurve as any)?.magnitudes;
+        const hasMagnitudes = ((astronomyData?.photometry as any)?.magnitudes?.length ?? 0) > 0;
         const xTitle = isPhaseFolded && bestPeriodDays > 0 ? 'Orbital Phase (0.0 - 1.0)' : 'Time (UTC)';
         const base = buildLayout({
             xTitle,

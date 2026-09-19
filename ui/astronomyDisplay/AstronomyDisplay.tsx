@@ -29,7 +29,14 @@ export const AstronomyDisplay: React.FC = () => {
     const params = new URLSearchParams(window.location.search);
     return params.get('star') || localStorage.getItem('planetariumSelectedStar') || '';
   });
-  const [pendingId, setPendingId] = useState<string>('');
+  // Seed pendingId with the same pre-selected star so useSpectrumData fetches
+  // it immediately on mount -- otherwise a star arriving pre-selected (e.g.
+  // via ?star= or the Planetarium hand-off) shows as selected in the list
+  // but never triggers a data fetch, since fetching is driven by pendingId.
+  const [pendingId, setPendingId] = useState<string>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('star') || localStorage.getItem('planetariumSelectedStar') || '';
+  });
   const [selectedTimestamps, setSelectedTimestamps] = useState<Set<string>>(new Set());
 
     const {
@@ -68,8 +75,8 @@ export const AstronomyDisplay: React.FC = () => {
   // REQ: AST-1.3: The display SHALL present a timeline for time-series data.
   const availableTimestamps = useMemo(() => {
     const times = new Set<string>();
-    if (astronomyData?.lightCurve?.timestamps) {
-      astronomyData.lightCurve.timestamps.forEach(t => times.add(t));
+    if (astronomyData?.photometry?.timestamps) {
+      astronomyData.photometry.timestamps.forEach(t => times.add(t));
     }
     if (astronomyData?.spectraHistory) {
       astronomyData.spectraHistory.forEach(s => times.add(s.timestamp));
@@ -82,14 +89,17 @@ export const AstronomyDisplay: React.FC = () => {
   const [startIdx, setStartIdx] = useState<number>(0);
   const [endIdx, setEndIdx] = useState<number>(0);
 
-  // Sync selected timestamps when data changes
+  // Reset the selected timestamp range whenever the underlying data
+  // changes (e.g. a different star is picked). Gating this on "only if
+  // nothing is selected yet" left a previously selected star's
+  // timestamps in place after switching to a star with entirely
+  // different ones, so every point got filtered out of both plots even
+  // though the new star had real data.
   useEffect(() => {
-    if (availableTimestamps.length > 0 && selectedTimestamps.size === 0) {
-      setStartIdx(0);
-      setEndIdx(availableTimestamps.length - 1);
-      setSelectedTimestamps(new Set(availableTimestamps));
-    }
-  }, [availableTimestamps, selectedTimestamps.size]);
+    setStartIdx(0);
+    setEndIdx(Math.max(0, availableTimestamps.length - 1));
+    setSelectedTimestamps(new Set(availableTimestamps));
+  }, [availableTimestamps]);
 
   const handleRangeChange = (start: number, end: number) => {
     setStartIdx(start);

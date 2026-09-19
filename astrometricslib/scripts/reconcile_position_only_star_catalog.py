@@ -45,7 +45,7 @@ import time
 from typing import Any
 
 from astrometricslib import Astrometrics
-from astrometricslib.data_access.catalog_access import StarPosition
+from astrometricslib.drivers.catalog_access import StarPosition
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.astrometry.star_identifier import CATALOG_MATCH_RADIUS_ARCSEC
 
@@ -113,7 +113,7 @@ def _is_empty_value(value: Any) -> bool:
         return value.strip() == ""
     if isinstance(value, list | dict):
         return len(value) == 0
-    if hasattr(value, "fluxes"):  # LightCurve
+    if hasattr(value, "fluxes"):  # PhotometryResult
         return len(value.fluxes) == 0
     return False
 

@@ -220,11 +220,9 @@ def register_astrometrics_reflected_tools():  # ruff: ignore[missing-return-type
     register_astrometrics_tools(registry, astrometrics, branch_mapping)
 
 
-# Runs at import time: constructing the `Astrometrics` astrometrics inside
-# `get_astrometrics()` triggers `local_database.verify_and_upgrade_database`,
-# so `import astrometricslib.mcp` performs a database migration check
-# as a side effect. Deliberate -- the MCP server always needs the
-# reflected tool set built before it can serve requests, and every
-# caller of this module (the `mcp` CLI entry point, `backend`,
-# `wayfindinglib.mcp`) wants that migration to have already run.
+# Runs at import time, so `import astrometricslib.mcp` builds the
+# reflected tool set as a side effect. Deliberate -- the MCP server
+# always needs that tool set built before it can serve requests, and
+# every caller of this module (the `mcp` CLI entry point, `backend`,
+# `wayfindinglib.mcp`) wants it to have already run.
 register_astrometrics_reflected_tools()

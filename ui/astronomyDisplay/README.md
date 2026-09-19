@@ -25,7 +25,8 @@ Caching and cancellation
 Testing and extension points
 
 - `astronomyViewer.tsx` is focused on rendering and should accept normalized
-  `spectrumData` so tests can exercise plotting without needing backend calls.
+  wavelength/intensity arrays so tests can exercise plotting without needing
+  backend calls.
 - To add custom annotations, enhance `astronomyViewer` and pass annotation
   configuration from the manager component.
 

@@ -19,13 +19,13 @@ class MeridianFlipOutcome(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    id: str
-    queued_observation_package_id: str
-    triggered_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    hour_angle_at_trigger_deg: float
-    flip_completed: bool = Field(default=False)
-    realign_attempts: int = Field(default=0, ge=0)
-    residual_pointing_error_arcsec: float | None = Field(default=None)
-    guide_reacquire_attempts: int = Field(default=0, ge=0)
-    resumed: bool = Field(default=False)
-    failure_detail: str | None = Field(default=None)
+    id: str = Field(alias="id")
+    queued_observation_package_id: str = Field(alias="queuedObservationPackageId")
+    triggered_at: datetime = Field(default_factory=lambda: datetime.now(UTC), alias="triggeredAt")
+    hour_angle_at_trigger_deg: float = Field(alias="hourAngleAtTriggerDeg")
+    flip_completed: bool = Field(default=False, alias="flipCompleted")
+    realign_attempts: int = Field(default=0, ge=0, alias="realignAttempts")
+    residual_pointing_error_arcsec: float | None = Field(default=None, alias="residualPointingErrorArcsec")
+    guide_reacquire_attempts: int = Field(default=0, ge=0, alias="guideReacquireAttempts")
+    resumed: bool = Field(default=False, alias="resumed")
+    failure_detail: str | None = Field(default=None, alias="failureDetail")

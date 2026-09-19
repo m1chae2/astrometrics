@@ -70,19 +70,6 @@ export interface FrameRecord {
 }
 
 /**
- * Details about a multi-panel picture (mosaic) created for this target.
- */
-export interface MosaicInfo {
-  /** UUID for the mosaic group */
-  groupId: string;
-  /** Name of the mosaic configuration */
-  name: string;
-  /** Timestamp of creation */
-  createdAt: number;
-  panels?: string[];
-}
-
-/**
  * Represents the current status and telemetry of the telescope.
  *
  * Uses aliases to provide camelCase names for the frontend.
@@ -132,10 +119,7 @@ export interface TargetObject {
   dec?: string;
   fieldOfView?: string;
   mainCamera?: string;
-  guideCamera?: string;
   mainScope?: string;
-  guideScope?: string;
-  mount?: string;
   processedImage?: string;
   stackedImage?: string;
   stacksByConfiguration?: Record<string, StackConfigurationResult>;
@@ -145,15 +129,11 @@ export interface TargetObject {
   astrometryQualitySummary?: AstrometryQualitySummary | null;
   photometryQualitySummary?: PhotometryQualitySummary | null;
   spectroscopyQualitySummary?: SpectroscopyQualitySummary | null;
-  asteroidCandidates?: AsteroidRecoveryCandidate[];
-  asteroidRecoveryQualitySummary?: AsteroidRecoveryQualitySummary | null;
-  trackingQualitySummary?: TrackingQualitySummary | null;
+  asteroidCandidates?: AsteroidDetectionCandidate[];
+  asteroidDetectionQualitySummary?: AsteroidDetectionQualitySummary | null;
   exposureTime?: number;
   numberOfStars?: number;
   frames?: FrameRecord[];
-  mosaicGroups?: MosaicInfo[];
-  parentGroupId?: string | null;
-  panelName?: string;
   /** Flexible index to accommodate additional data from the backend. */
   [key: string]: any;
 }
@@ -213,25 +193,12 @@ export interface Spectrum {
   flux?: any;
   magnitude?: any;
   spectralType?: string;
-  lightCurve?: LightCurve | null;
+  photometry?: PhotometryResult | null;
   spectraHistory?: SpectralObservation[];
-  spectrumData?: any[];
   starData?: any;
-  data?: any[];
-  spectrumDataProcessed?: Record<string, any> | null;
-  rect?: any | null;
-  rectangle?: any | null;
-  detectedAngle?: number | null;
-  dispersionAngle?: number | null;
-  trailCenterlinePx?: number[] | null;
-  trailWidthPx?: number[] | null;
+  spectroscopy?: SpectroscopyResult | null;
   stellarSpectralType?: string;
-  camera?: string | null;
   targetIds?: string[];
-  extractionRadius?: number | null;
-  meanFlux?: number | null;
-  coefficientOfVariation?: number | null;
-  variabilityScore?: number | null;
   sessionMatches?: StellarSessionMatch[];
   isCatalogIdentified?: boolean;
   /** Flexible index to accommodate additional data from the backend. */
@@ -259,7 +226,36 @@ export interface SpectralObservation {
 }
 
 /**
+ * A star's own extracted spectrum, and what it suggests about the star.
+ *
+ * Bundles spectroscopy's results the same way `PhotometryResult` bundles
+ * photometry's: the processed measurement itself alongside what was
+ * derived from it, in one place on `StellarObject`, instead of as
+ * several same-topic fields scattered directly on the star.
+ */
+export interface SpectroscopyResult {
+  wavelengthsAngstrom?: number[];
+  intensities?: number[];
+  quantumEfficiencyCorrectedIntensities?: number[] | null;
+  selfDeterminedSpectralType?: string;
+  selfDeterminedSpectralTypeConfidence?: number | null;
+  selfDeterminedSpectralTypeCandidates?: Record<string, any>[];
+  probableSpectralFeatures?: Record<string, any>[];
+  rectangle?: any | null;
+  detectedAngle?: number | null;
+  dispersionAngle?: number | null;
+  trailCenterlinePx?: number[] | null;
+  trailWidthPx?: number[] | null;
+  extractionRadius?: number | null;
+}
+
+/**
  * The result of searching a star's brightness for repeating cycles.
+ *
+ * A "periodogram" tests many possible repeat lengths (periods) against
+ * a star's brightness history and reports which one fits best -- the
+ * way you might try different guesses for a song's beat until one
+ * lines up.
  */
 export interface PeriodogramResult {
   bestPeriodDays?: number;
@@ -268,20 +264,28 @@ export interface PeriodogramResult {
 }
 
 /**
- * Data for when a star dims, possibly because a planet passed in front.
+ * Data for a brief, repeating dip in a star's brightness.
+ *
+ * This "transit" pattern is how astronomers find planets around other
+ * stars, but the same box-shaped dip also shows up when the "star" is
+ * actually two stars and one passes in front of the other (an
+ * eclipsing binary) -- the detection math (see
+ * `VariabilityAnalyzer.run_bls_transit_search`) doesn't know which
+ * caused it, so this model doesn't assume either.
  */
-export interface ExoplanetTransitCandidate {
+export interface TransitCandidate {
   periodDays?: number;
   transitDepthMag?: number;
   transitDurationHours?: number;
   epochT0?: number;
   transitSnr?: number;
+  transitConfidence?: number;
 }
 
 /**
- * A record of how a star's brightness changes over time.
+ * A record of how a star's brightness changes over time: a light curve.
  */
-export interface LightCurve {
+export interface PhotometryResult {
   timestamps?: string[];
   fluxes?: number[];
   fluxesNormalized?: number[];
@@ -290,7 +294,9 @@ export interface LightCurve {
   magnitudes?: number[];
   isSaturated?: boolean[];
   periodogram?: PeriodogramResult | null;
-  transitCandidate?: ExoplanetTransitCandidate | null;
+  transitCandidate?: TransitCandidate | null;
+  meanFlux?: number | null;
+  coefficientOfVariation?: number | null;
 }
 
 /**
@@ -452,7 +458,6 @@ export interface VariableCandidate {
   id: string;
   meanFlux: number;
   coefficientOfVariation: number;
-  score: number;
   ra: number;
   dec: number;
 }
@@ -599,9 +604,9 @@ export interface ExcludedFrame {
  * Tracks how many pictures from a single observing session were used.
  */
 export interface TargetSessionContribution {
-  session_id: string;
-  frames_contributed: number;
-  frames_clipped: number;
+  sessionId: string;
+  framesContributed: number;
+  framesClipped: number;
 }
 
 /**
@@ -611,26 +616,26 @@ export interface TargetSessionContribution {
  * like the final image sharpness (FWHM) or if the background was uneven.
  */
 export interface StackingPipelineQualityMetrics {
-  is_spectral: boolean;
-  frames_submitted: number;
-  frames_stacked: number;
-  excluded_frames?: ExcludedFrame[];
-  rejected_pixel_fraction?: number | null;
-  rejected_fraction_flagged?: boolean;
-  background_split_detected?: boolean;
-  background_split_detail?: string | null;
-  calibration_mismatch_flags?: string[];
-  saturated_pixel_fraction?: number | null;
-  saturation_flagged?: boolean;
-  stacked_fwhm_px?: number | null;
-  median_input_fwhm_px?: number | null;
-  fwhm_degraded?: boolean;
-  spectral_registration_flags?: ExcludedFrame[];
-  stacking_duration_seconds?: number | null;
-  timed_out?: boolean;
-  debayer_applied?: boolean | null;
-  registration_reference_frame?: string | null;
-  registration_reference_star_count?: number | null;
+  isSpectral: boolean;
+  framesSubmitted: number;
+  framesStacked: number;
+  excludedFrames?: ExcludedFrame[];
+  rejectedPixelFraction?: number | null;
+  rejectedFractionFlagged?: boolean;
+  backgroundSplitDetected?: boolean;
+  backgroundSplitDetail?: string | null;
+  calibrationMismatchFlags?: string[];
+  saturatedPixelFraction?: number | null;
+  saturationFlagged?: boolean;
+  stackedFwhmPx?: number | null;
+  medianInputFwhmPx?: number | null;
+  fwhmDegraded?: boolean;
+  spectralRegistrationFlags?: ExcludedFrame[];
+  stackingDurationSeconds?: number | null;
+  timedOut?: boolean;
+  debayerApplied?: boolean | null;
+  registrationReferenceFrame?: string | null;
+  registrationReferenceStarCount?: number | null;
 }
 
 /**
@@ -640,66 +645,72 @@ export interface StackingPipelineQualityMetrics {
  * metrics.
  */
 export interface StackQualitySummary {
-  pipeline_name?: string;
-  pipeline_version?: string;
-  target_id: string;
-  target_session_ids?: string[];
-  target_session_breakdown?: TargetSessionContribution[];
-  upstream_quality_summary_reference?: string | null;
-  resolved_parameters?: Record<string, any>;
-  quality_processing_applied?: boolean;
+  pipelineName?: string;
+  pipelineVersion?: string;
+  targetId: string;
+  targetSessionIds?: string[];
+  targetSessionBreakdown?: TargetSessionContribution[];
+  upstreamQualitySummaryReference?: string | null;
+  resolvedParameters?: Record<string, any>;
+  qualityProcessingApplied?: boolean;
   flagged?: boolean;
-  flag_reasons?: string[];
-  created_at?: string;
-  stacking_metrics: StackingPipelineQualityMetrics;
+  flagReasons?: string[];
+  createdAt?: string;
+  stackingMetrics: StackingPipelineQualityMetrics;
 }
 
 /**
  * Measurements recorded when figuring out where an image is pointing.
  *
- * This tracks how many stars were found and whether the image's coordinates
- * could be successfully calculated (plate solving).
+ * This tracks how many stars were found and whether the image's
+ * coordinates could be successfully calculated ("plate solving" --
+ * matching the stars in the picture to a star map to figure out
+ * exactly where the telescope was pointed).
  */
 export interface AstrometryPipelineQualityMetrics {
-  catalog_matched_star_count?: number;
-  position_only_star_count?: number;
-  unresolved_star_count?: number;
-  sources_detected: number;
-  solve_attempted: boolean;
-  plate_solve_succeeded: boolean;
-  simbad_matched_count: number;
-  astrometric_residual_rms_arcsec?: number | null;
-  remote_catalog_queries_attempted?: number;
-  remote_catalog_queries_failed?: number;
-  remote_catalog_circuit_breaker_tripped?: boolean;
-  plate_solve_attempts?: number;
+  catalogMatchedStarCount?: number;
+  positionOnlyStarCount?: number;
+  unresolvedStarCount?: number;
+  sourcesDetected: number;
+  solveAttempted: boolean;
+  plateSolveSucceeded: boolean;
+  simbadMatchedCount: number;
+  astrometricResidualRmsArcsec?: number | null;
+  remoteCatalogQueriesAttempted?: number;
+  remoteCatalogQueriesFailed?: number;
+  remoteCatalogCircuitBreakerTripped?: boolean;
+  plateSolveAttempts?: number;
 }
 
 /**
  * The final saved report for an astrometry (coordinate-finding) job.
  */
 export interface AstrometryQualitySummary {
-  pipeline_name?: string;
-  pipeline_version?: string;
-  target_id: string;
-  target_session_ids?: string[];
-  target_session_breakdown?: TargetSessionContribution[];
-  upstream_quality_summary_reference?: string | null;
-  resolved_parameters?: Record<string, any>;
-  quality_processing_applied?: boolean;
+  pipelineName?: string;
+  pipelineVersion?: string;
+  targetId: string;
+  targetSessionIds?: string[];
+  targetSessionBreakdown?: TargetSessionContribution[];
+  upstreamQualitySummaryReference?: string | null;
+  resolvedParameters?: Record<string, any>;
+  qualityProcessingApplied?: boolean;
   flagged?: boolean;
-  flag_reasons?: string[];
-  created_at?: string;
-  astrometry_metrics: AstrometryPipelineQualityMetrics;
+  flagReasons?: string[];
+  createdAt?: string;
+  astrometryMetrics: AstrometryPipelineQualityMetrics;
 }
 
 /**
- * Tracks which known stars were the brightness reference used.
+ * Tracks which comparison stars a picture's brightness was measured with.
+ *
+ * To tell if a star got brighter or dimmer, its light is compared
+ * against a group of other, steady stars in the same picture (called
+ * the "ensemble"). This records which stars were in that group.
  */
 export interface FrameEnsembleComposition {
-  frame_path: string;
-  ensemble_size: number;
-  excluded_comparison_star_ids?: string[];
+  framePath: string;
+  ensembleSize: number;
+  excludedComparisonStarIds?: string[];
 }
 
 /**
@@ -709,122 +720,95 @@ export interface FrameEnsembleComposition {
  * were found.
  */
 export interface PhotometryPipelineQualityMetrics {
-  catalog_matched_star_count?: number;
-  position_only_star_count?: number;
-  unresolved_star_count?: number;
-  stars_processed: number;
-  stars_found: number;
-  frames_processed: number;
-  rejected_frames?: ExcludedFrame[];
-  frame_ensemble_composition?: FrameEnsembleComposition[];
-  variable_candidate_count: number;
-  light_curve_scatter_rms_mag?: number | null;
-  cross_session_match_count?: number;
-  sessions_missing_wcs?: string[];
-  long_term_variable_candidate_count?: number;
-  astrometry_identified_star_count?: number;
-  sessions_with_reused_header_wcs?: string[];
-  sessions_with_replaced_header_wcs?: string[];
+  catalogMatchedStarCount?: number;
+  positionOnlyStarCount?: number;
+  unresolvedStarCount?: number;
+  starsProcessed: number;
+  starsFound: number;
+  framesProcessed: number;
+  rejectedFrames?: ExcludedFrame[];
+  frameEnsembleComposition?: FrameEnsembleComposition[];
+  variableCandidateCount: number;
+  lightCurveScatterRmsMag?: number | null;
+  crossSessionMatchCount?: number;
+  sessionsMissingWcs?: string[];
+  longTermVariableCandidateCount?: number;
+  astrometryIdentifiedStarCount?: number;
+  sessionsWithReusedHeaderWcs?: string[];
+  sessionsWithReplacedHeaderWcs?: string[];
 }
 
 /**
  * The final saved report for a photometry (brightness-measuring) job.
  */
 export interface PhotometryQualitySummary {
-  pipeline_name?: string;
-  pipeline_version?: string;
-  target_id: string;
-  target_session_ids?: string[];
-  target_session_breakdown?: TargetSessionContribution[];
-  upstream_quality_summary_reference?: string | null;
-  resolved_parameters?: Record<string, any>;
-  quality_processing_applied?: boolean;
+  pipelineName?: string;
+  pipelineVersion?: string;
+  targetId: string;
+  targetSessionIds?: string[];
+  targetSessionBreakdown?: TargetSessionContribution[];
+  upstreamQualitySummaryReference?: string | null;
+  resolvedParameters?: Record<string, any>;
+  qualityProcessingApplied?: boolean;
   flagged?: boolean;
-  flag_reasons?: string[];
-  created_at?: string;
-  photometry_metrics: PhotometryPipelineQualityMetrics;
+  flagReasons?: string[];
+  createdAt?: string;
+  photometryMetrics: PhotometryPipelineQualityMetrics;
+}
+
+/**
+ * One star whose self-determined spectral type shouldn't be trusted as-is.
+ *
+ * Names exactly which stars a spectroscopy run's own classification is
+ * shaky for, and why, rather than only reporting how many -- so a user
+ * building a personal catalog from self-determined types knows which
+ * entries to double-check instead of taking every one at face value.
+ */
+export interface SpectralClassificationConcern {
+  starId: string;
+  reason: string;
+  spectralType: string;
+  confidence?: number | null;
 }
 
 /**
  * Measurements recorded when analyzing a star's light spectrum.
  *
- * This tracks details about the spectral lines, like how wide they are
- * and whether any parts of the spectrum were too bright (saturated).
+ * A spectroscope splits a star's light into a rainbow-like streak (the
+ * "trail") so its colors can be measured. This class tracks details
+ * about that streak, like how wide it is and whether any part of it
+ * was too bright (saturated).
  */
 export interface SpectroscopyPipelineQualityMetrics {
-  catalog_matched_star_count?: number;
-  position_only_star_count?: number;
-  unresolved_star_count?: number;
-  zero_order_saturated_pixel_fraction?: number | null;
-  zero_order_saturation_flagged?: boolean;
-  dispersion_angle_deg?: number | null;
-  trail_width_profile_available?: boolean;
-  median_trail_width_px?: number | null;
-  wavelength_calibration_rms_nm?: number | null;
+  catalogMatchedStarCount?: number;
+  positionOnlyStarCount?: number;
+  unresolvedStarCount?: number;
+  zeroOrderSaturatedPixelFraction?: number | null;
+  zeroOrderSaturationFlagged?: boolean;
+  dispersionAngleDeg?: number | null;
+  trailWidthProfileAvailable?: boolean;
+  medianTrailWidthPx?: number | null;
+  lowConfidenceClassificationCount?: number;
+  ambiguousClassificationCount?: number;
+  flaggedSpectralClassifications?: SpectralClassificationConcern[];
 }
 
 /**
  * The final saved report for a spectroscopy (light-spectrum) job.
  */
 export interface SpectroscopyQualitySummary {
-  pipeline_name?: string;
-  pipeline_version?: string;
-  target_id: string;
-  target_session_ids?: string[];
-  target_session_breakdown?: TargetSessionContribution[];
-  upstream_quality_summary_reference?: string | null;
-  resolved_parameters?: Record<string, any>;
-  quality_processing_applied?: boolean;
+  pipelineName?: string;
+  pipelineVersion?: string;
+  targetId: string;
+  targetSessionIds?: string[];
+  targetSessionBreakdown?: TargetSessionContribution[];
+  upstreamQualitySummaryReference?: string | null;
+  resolvedParameters?: Record<string, any>;
+  qualityProcessingApplied?: boolean;
   flagged?: boolean;
-  flag_reasons?: string[];
-  created_at?: string;
-  spectroscopy_metrics: SpectroscopyPipelineQualityMetrics;
-}
-
-/**
- * Measurements that describe how well the telescope tracked the sky.
- *
- * This looks for problems with the telescope mount (like drifting) or
- * changes in the sky conditions (like the background getting brighter).
- * It records the worst-case values across all observing sessions.
- */
-export interface TrackingPipelineQualityMetrics {
-  sessions_found: number;
-  sessions_analyzed: number;
-  usable_frames: number;
-  span_hours?: number | null;
-  drift_rate_x_px_per_hour?: number | null;
-  drift_rate_y_px_per_hour?: number | null;
-  max_excursion_px?: number | null;
-  meridian_flips?: number;
-  periodic_error_period_seconds?: number | null;
-  periodic_error_strength?: number;
-  periodic_error_false_alarm_probability?: number | null;
-  periodic_error_corroborated?: boolean;
-  trailed_frame_count?: number;
-  median_fwhm_px?: number | null;
-  fwhm_spread_px?: number | null;
-  median_roundness?: number | null;
-  median_background?: number | null;
-  background_spread?: number | null;
-}
-
-/**
- * The final saved report for a telescope tracking analysis job.
- */
-export interface TrackingQualitySummary {
-  pipeline_name?: string;
-  pipeline_version?: string;
-  target_id: string;
-  target_session_ids?: string[];
-  target_session_breakdown?: TargetSessionContribution[];
-  upstream_quality_summary_reference?: string | null;
-  resolved_parameters?: Record<string, any>;
-  quality_processing_applied?: boolean;
-  flagged?: boolean;
-  flag_reasons?: string[];
-  created_at?: string;
-  tracking_metrics: TrackingPipelineQualityMetrics;
+  flagReasons?: string[];
+  createdAt?: string;
+  spectroscopyMetrics: SpectroscopyPipelineQualityMetrics;
 }
 
 /**
@@ -837,9 +821,8 @@ export interface FrameDetection {
   pixelY: number;
   rightAscensionDeg: number;
   declinationDeg: number;
-  flux: number;
-  sharpness: number;
-  photutilsRoundness1: number;
+  brightness?: number | null;
+  pictureBrightnessLevel?: number | null;
 }
 
 /**
@@ -862,8 +845,6 @@ export interface MovingObjectTrack {
  * (e.g., it was just a dead pixel).
  */
 export enum CascadeStage {
-  MORPHOLOGY_DETECTED = "morphology_detected",
-  PERSISTENCE_CONFIRMED = "persistence_confirmed",
   REFERENCE_FRAME_CONFIRMED = "reference_frame_confirmed",
   RATE_LINEARITY_CONFIRMED = "rate_linearity_confirmed",
   EPHEMERIS_MATCHED = "ephemeris_matched",
@@ -880,12 +861,7 @@ export enum CascadeStage {
  * (like SkyBoT) that predict where known asteroids should be.
  */
 export interface EphemerisMatch {
-  provider?: string;
   designation: string;
-  mpcNumber?: number | null;
-  predictedVisualMagnitude?: number | null;
-  predictedRightAscensionRateArcsecPerHour?: number | null;
-  predictedDeclinationRateArcsecPerHour?: number | null;
   angularSeparationArcsec: number;
 }
 
@@ -895,7 +871,7 @@ export interface EphemerisMatch {
  * It holds all the individual detections, its calculated path, and
  * whether it matched any known asteroids.
  */
-export interface AsteroidRecoveryCandidate {
+export interface AsteroidDetectionCandidate {
   id: string;
   targetId: string;
   frameDetections?: FrameDetection[];
@@ -911,32 +887,31 @@ export interface AsteroidRecoveryCandidate {
  * successive check (e.g., did it move in a straight line? did it match a
  * known asteroid?).
  */
-export interface AsteroidRecoveryPipelineQualityMetrics {
-  frames_with_wcs_estimate: number;
-  frames_excluded_missing_pointing_metadata: number;
-  candidates_detected: number;
-  candidates_persistence_confirmed: number;
-  candidates_rate_linearity_confirmed: number;
-  candidates_ephemeris_matched: number;
-  trajectory_fit_residual_rms_arcsec?: number | null;
+export interface AsteroidDetectionPipelineQualityMetrics {
+  framesWithWcsEstimate: number;
+  framesExcludedMissingPointingMetadata: number;
+  candidatesDetected: number;
+  candidatesPersistenceConfirmed: number;
+  candidatesRateLinearityConfirmed: number;
+  candidatesEphemerisMatched: number;
 }
 
 /**
  * The final saved report for an asteroid-hunting job.
  */
-export interface AsteroidRecoveryQualitySummary {
-  pipeline_name?: string;
-  pipeline_version?: string;
-  target_id: string;
-  target_session_ids?: string[];
-  target_session_breakdown?: TargetSessionContribution[];
-  upstream_quality_summary_reference?: string | null;
-  resolved_parameters?: Record<string, any>;
-  quality_processing_applied?: boolean;
+export interface AsteroidDetectionQualitySummary {
+  pipelineName?: string;
+  pipelineVersion?: string;
+  targetId: string;
+  targetSessionIds?: string[];
+  targetSessionBreakdown?: TargetSessionContribution[];
+  upstreamQualitySummaryReference?: string | null;
+  resolvedParameters?: Record<string, any>;
+  qualityProcessingApplied?: boolean;
   flagged?: boolean;
-  flag_reasons?: string[];
-  created_at?: string;
-  asteroid_recovery_metrics: AsteroidRecoveryPipelineQualityMetrics;
+  flagReasons?: string[];
+  createdAt?: string;
+  asteroidDetectionMetrics: AsteroidDetectionPipelineQualityMetrics;
 }
 
 /**

@@ -41,7 +41,7 @@ def _process_single_spectroscopy_frame_worker(path: str, target_id: str) -> dict
     """
     from astrometricslib import Astrometrics
     from astrometricslib.models.target import FrameRecord
-    from astrometricslib.pipelines.dispatch import analyze_target
+    from astrometricslib.pipelines.tasks import analyze_target
 
     result = {"status": "failed", "error": None, "stars_processed": 0}
     try:
@@ -124,7 +124,7 @@ def _fallback_independent_frame_analysis(astrometrics: Any, target_id: str, path
         The same `result` dictionary that was passed in, updated with
         success/failure details.
     """
-    from astrometricslib.pipelines.dispatch import analyze_target
+    from astrometricslib.pipelines.tasks import analyze_target
 
     target = astrometrics.targets.get(target_id)
     if target is None:
@@ -211,11 +211,12 @@ def _process_single_spectroscopy_frame_worker_v2(
         "dispersion_angles": [],
         "trail_widths": [],
         "zero_order_saturation_fractions": [],
+        "spectral_classification_concerns": [],
     }
     try:
         from astrometricslib import Astrometrics
-        from astrometricslib.image_processing.image import AstrometricsImage
-        from astrometricslib.pipelines.dispatch import merge_spectroscopy_stellar_object
+        from astrometricslib.drivers.image import AstrometricsImage
+        from astrometricslib.pipelines.shared.star_recording import merge_spectroscopy_stellar_object
 
         astrometrics = Astrometrics()
 
@@ -261,13 +262,15 @@ def _process_single_spectroscopy_frame_worker_v2(
 
         result["stars_processed"] = len(stellar_objects)
         result["dispersion_angles"] = [
-            obj.dispersion_angle for obj in stellar_objects if obj.dispersion_angle is not None
+            obj.spectroscopy.dispersion_angle
+            for obj in stellar_objects
+            if obj.spectroscopy and obj.spectroscopy.dispersion_angle is not None
         ]
         result["trail_widths"] = [
             width
             for obj in stellar_objects
-            if obj.trail_width_px
-            for width in obj.trail_width_px
+            if obj.spectroscopy and obj.spectroscopy.trail_width_px
+            for width in obj.spectroscopy.trail_width_px
             if width > 0.0  # 0.0 marks a per-position fixed-box fallback, not a real fit
         ]
         result["zero_order_saturation_fractions"] = [
@@ -275,6 +278,12 @@ def _process_single_spectroscopy_frame_worker_v2(
             for res in extraction_results
             if "zero_order_saturated_pixel_fraction" in res
         ]
+
+        from astrometricslib.pipelines.spectroscopy.spectral_classifier import (
+            build_spectral_classification_concerns,
+        )
+
+        result["spectral_classification_concerns"] = build_spectral_classification_concerns(stellar_objects)
         result["status"] = "success"
     except Exception as processing_error:
         result["error"] = str(processing_error)
@@ -335,13 +344,13 @@ def process_spectroscopy_frames_by_session(
         The results for each session, pairing the session data with its
         star identification data.
     """
-    from astrometricslib.image_processing.image import AstrometricsImage
+    from astrometricslib.drivers.image import AstrometricsImage
     from astrometricslib.pipelines.astrometry.session_identification import (
         identify_session_stars,
     )
     from astrometricslib.pipelines.astrometry.star_identifier import StarIdentifier
+    from astrometricslib.pipelines.shared.target_center_hint import resolve_target_center_hint
     from astrometricslib.pipelines.shared.target_sessions import derive_target_sessions
-    from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
 
     if max_workers is None:
         worker_counts = resolve_worker_counts("1", api.config.get_photometry_workers())
@@ -350,14 +359,7 @@ def process_spectroscopy_frames_by_session(
     frames_with_timestamp = [frame for frame in frame_records if frame.timestamp is not None]
     sessions = derive_target_sessions(target.id, frames_with_timestamp)
 
-    center_ra = None
-    center_dec = None
-    try:
-        center_ra = parse_coordinate_string(str(target.ra), is_ra=True)
-        center_dec = parse_coordinate_string(str(target.dec), is_ra=False)
-    except Exception as exc:
-        # Blind solve (no center hint) if the target has no usable RA/Dec yet.
-        logger.debug("Falling back to blind solve, could not parse target RA/Dec: %s", exc)
+    center_ra, center_dec = resolve_target_center_hint(target)
 
     star_identifier = StarIdentifier()
     session_results = []
@@ -397,20 +399,31 @@ def _attach_spectroscopy_quality_summary(
     """
     import statistics
 
-    from astrometricslib.image_processing.saturation import is_saturation_significant
     from astrometricslib.models.quality_summary import (
         SpectroscopyPipelineQualityMetrics,
         SpectroscopyQualitySummary,
-        TargetSessionContribution,
     )
+    from astrometricslib.pipelines.shared.quality.saturation import is_saturation_significant
+    from astrometricslib.pipelines.shared.target_sessions import build_target_session_breakdown
 
     all_dispersion_angles = []
     all_trail_widths = []
     all_zero_order_fractions = []
+    all_spectral_classification_concerns = []
     for frame_result in summary.results.values():
         all_dispersion_angles.extend(frame_result.get("dispersion_angles") or [])
         all_trail_widths.extend(frame_result.get("trail_widths") or [])
         all_zero_order_fractions.extend(frame_result.get("zero_order_saturation_fractions") or [])
+        all_spectral_classification_concerns.extend(
+            frame_result.get("spectral_classification_concerns") or []
+        )
+
+    low_confidence_count = sum(
+        1 for concern in all_spectral_classification_concerns if "low_confidence" in concern["reason"]
+    )
+    ambiguous_count = sum(
+        1 for concern in all_spectral_classification_concerns if "ambiguous" in concern["reason"]
+    )
 
     max_zero_order_fraction = max(all_zero_order_fractions) if all_zero_order_fractions else None
     zero_order_flagged = (
@@ -420,14 +433,8 @@ def _attach_spectroscopy_quality_summary(
     median_trail_width_px = statistics.median(all_trail_widths) if trail_width_profile_available else None
 
     failed_paths = {path for path, _error in summary.failed}
-    target_session_breakdown = [
-        TargetSessionContribution(
-            session_id=session.id,
-            frames_contributed=len(session.frame_paths),
-            frames_clipped=sum(1 for path in session.frame_paths if path in failed_paths),
-        )
-        for session, _identify_result in session_results
-    ]
+    sessions = [session for session, _identify_result in session_results]
+    target_session_breakdown = build_target_session_breakdown(sessions, failed_paths)
 
     target.spectroscopy_quality_summary = SpectroscopyQualitySummary(
         target_id=target.id,
@@ -443,10 +450,18 @@ def _attach_spectroscopy_quality_summary(
             dispersion_angle_deg=all_dispersion_angles[0] if all_dispersion_angles else None,
             trail_width_profile_available=trail_width_profile_available,
             median_trail_width_px=median_trail_width_px,
+            low_confidence_classification_count=low_confidence_count,
+            ambiguous_classification_count=ambiguous_count,
+            flagged_spectral_classifications=all_spectral_classification_concerns,
         ),
     )
     if zero_order_flagged:
         target.spectroscopy_quality_summary.flagged = True
         target.spectroscopy_quality_summary.flag_reasons.append(
             "zero-order saturated in at least one processed star"
+        )
+    if all_spectral_classification_concerns:
+        target.spectroscopy_quality_summary.flagged = True
+        target.spectroscopy_quality_summary.flag_reasons.append(
+            f"spectral classification uncertain for {len(all_spectral_classification_concerns)} star(s)"
         )

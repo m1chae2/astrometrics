@@ -3,6 +3,7 @@
 import numpy as np
 from matplotlib.widgets import Button
 
+from astrometricslib.pipelines.spectroscopy.optics_physics import BALMER_SERIES_NM
 from astrometricslib.visualization.visualization_config import VisualizationConfig
 
 
@@ -196,11 +197,13 @@ class SpectrumOverlay:
             "M": {"Ca I": 4227, "TiO": 4761, "TiO_2": 4954, "Mg I": 5175, "Na D": 5890, "TiO_3": 7050},
         }
 
+        # BALMER_SERIES_NM is in nanometers; this plot's x-axis is
+        # angstroms (1 nm = 10 Å).
         lines = {
-            "H-Delta": 4101.7,
-            "H-Gamma": 4340.5,
-            "H-Beta": 4861.3,
-            "H-Alpha": 6562.8,
+            "H-Delta": round(BALMER_SERIES_NM["H-delta"] * 10, 1),
+            "H-Gamma": round(BALMER_SERIES_NM["H-gamma"] * 10, 1),
+            "H-Beta": round(BALMER_SERIES_NM["H-beta"] * 10, 1),
+            "H-Alpha": round(BALMER_SERIES_NM["H-alpha"] * 10, 1),
         }
         if spectral_type and spectral_type[0].upper() in spectral_lines_map:
             lines = spectral_lines_map[spectral_type[0].upper()]

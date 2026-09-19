@@ -9,8 +9,8 @@ work.
 
 import builtins
 
-from astrometricslib.catalog_services.frame_scanning import classify_and_sort_fits_files
 from astrometricslib.models.target import Target
+from astrometricslib.pipelines.shared.frame_scanning import classify_and_sort_fits_files
 from astrometricslib.pipelines.shared.target_sessions import derive_target_sessions
 from astrometricslib.utilities.config_loader import AppConfiguration
 
@@ -22,7 +22,7 @@ __all__ = [
 
 
 class TargetCatalog:
-    """CRUD operations for the target catalog, plus object management.
+    """Create, read, update, and delete targets, plus manage their frames.
 
     This class acts as the primary interface for managing observation
     targets. A target represents a physical region of the sky and
@@ -35,22 +35,22 @@ class TargetCatalog:
         """Initialize with configuration settings and a database manager.
 
         This setup keeps the list of targets and tracked changes right here
-        in memory, which prevents confusing circular dependencies when
-        saving data to disk later.
+        in memory, so nothing gets confused about which data is the real
+        version when it comes time to save to disk later.
 
         Parameters
         ----------
         config : `AppConfiguration`
             Application configuration.
         catalog_access : `AbstractCatalogAccess`
-            Storage backend for the target catalog.
+            The database tool used to save and load the target catalog.
         """
         self._config = config
         self.catalog_access = catalog_access
         self._targets: list = catalog_access.get("target_catalog", {}) or []
         self._touched_target_ids: set = set()
 
-    # -- CRUD ------------------------------------------------------------
+    # -- Create, read, update, delete -------------------------------------
 
     def list(self) -> builtins.list[Target]:
         """Return every Target object from the in-memory catalog.
@@ -60,7 +60,7 @@ class TargetCatalog:
         result : `list` [`Target`]
             The list of all active targets.
         """
-        from astrometricslib.catalog_services import target_records
+        from astrometricslib.pipelines.shared import target_records
 
         return target_records.list_targets(self)
 
@@ -77,7 +77,7 @@ class TargetCatalog:
         target : `Target` or `None`
             The matching target, or `None` if no target matches.
         """
-        from astrometricslib.catalog_services import target_records
+        from astrometricslib.pipelines.shared import target_records
 
         return target_records.get_target(self, target_id)
 
@@ -99,12 +99,12 @@ class TargetCatalog:
         target : `Target`
             The newly created (or existing, matching) Target.
         """
-        from astrometricslib.catalog_services import target_records
+        from astrometricslib.pipelines.shared import target_records
 
         return target_records.create_target(self, target_id)
 
     def add(self, target: Target) -> None:
-        """Append an existing Target domain object to the catalog.
+        """Append an existing Target object to the catalog.
 
         Parameters
         ----------
@@ -129,17 +129,17 @@ class TargetCatalog:
         removed : `bool`
             `True` if a matching target was found and removed.
         """
-        from astrometricslib.catalog_services import target_records
+        from astrometricslib.pipelines.shared import target_records
 
         return target_records.delete_target(self, target_id)
 
     def save(self) -> None:
         """Commit all touched targets back to database storage."""
-        from astrometricslib.catalog_services import target_records
+        from astrometricslib.pipelines.shared import target_records
 
         target_records.save_targets(self)
 
-    # -- Object management (target-scoped, not CRUD) ----------------------
+    # -- Actions on a single target's frames -------------------------------
 
     def add_frame(
         self,
@@ -202,9 +202,9 @@ class TargetCatalog:
             files, so fields added to `FrameRecord` after a frame was
             indexed stay `None` until this runs. Defaults to `False`.
         catalog_access : `AbstractCatalogAccess`, optional
-            Storage backend override; defaults to this catalog's own.
+            Database tool to use instead of this catalog's own.
         """
-        from astrometricslib.catalog_services.target_records import reindex_frames
+        from astrometricslib.pipelines.shared.target_records import reindex_frames
 
         reindex_frames(
             target,
@@ -232,13 +232,22 @@ class TargetCatalog:
         -------
         header_cards : `list[dict[str, str]]`
             The FITS primary header's card entries for `path`.
+
+        Raises
+        ------
+        ValueError
+            If `target` is given and `path` doesn't belong to it.
         """
         if target is not None:
-            from astrometricslib.pipelines.dispatch import get_header_information
+            belongs_to_target = any(f.path == path for f in target.frames) or path in (
+                target.processed_image,
+                target.stacked_image,
+                target.stacked_spectral_target,
+            )
+            if not belongs_to_target:
+                raise ValueError(f"Path {path} does not belong to target {target.id}")
 
-            return get_header_information(target, path)
-
-        from astrometricslib.catalog_services import image_conversions
+        from astrometricslib.pipelines.shared import image_conversions
 
         return image_conversions.get_fits_header(path)
 
@@ -261,7 +270,7 @@ class TargetCatalog:
         frame_path : `str`
             The path of the matching frame.
         """
-        from astrometricslib.catalog_services import image_conversions
+        from astrometricslib.pipelines.shared import image_conversions
 
         return image_conversions.get_frame(target, iso, exposure, index)
 
@@ -281,7 +290,7 @@ class TargetCatalog:
         result : `dict`
             A summary of the deletion outcome.
         """
-        from astrometricslib.catalog_services import image_conversions
+        from astrometricslib.pipelines.shared import image_conversions
 
         return image_conversions.delete_images(paths, self, target_id)
 
@@ -320,7 +329,7 @@ class TargetCatalog:
         counts : `dict` [`str`, `int`]
             ``measured``/``skipped``/``failed`` frame counts.
         """
-        from astrometricslib.data_access import frame_statistics
+        from astrometricslib.pipelines.shared.quality import frame_statistics
 
         counts = frame_statistics.measure_frame_input_quality(
             target,
@@ -346,7 +355,7 @@ class TargetCatalog:
             across the whole catalog used it, sorted by count
             descending.
         """
-        from astrometricslib.data_access import frame_statistics
+        from astrometricslib.pipelines.shared.quality import frame_statistics
 
         return frame_statistics.list_camera_names(self.list())
 
@@ -377,7 +386,7 @@ class TargetCatalog:
             Grouped filter/exposure/dark-match statistics if
             `grouped` is `True`; otherwise flat raw frame counts.
         """
-        from astrometricslib.data_access import frame_statistics
+        from astrometricslib.pipelines.shared.quality import frame_statistics
 
         if not grouped:
             return frame_statistics.get_frame_stats(target)

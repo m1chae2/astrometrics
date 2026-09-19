@@ -6,10 +6,12 @@ because taking pictures on different nights usually means the telescope is
 pointing slightly differently, so they need to be handled in separate batches.
 """
 
+from collections.abc import Sequence
 from datetime import date, datetime, timedelta
 
 from pydantic import BaseModel
 
+from astrometricslib.models.quality_summary import TargetSessionContribution
 from astrometricslib.models.target import FrameRecord
 
 # A session night runs noon-to-noon local time rather than
@@ -99,3 +101,41 @@ def derive_target_sessions(target_id: str, frames: list[FrameRecord]) -> list[Ta
             )
         )
     return sessions
+
+
+def build_target_session_breakdown(
+    sessions: Sequence[TargetSession], excluded_paths: set[str] | None = None
+) -> list[TargetSessionContribution]:
+    """Summarize each session's contribution for a pipeline's quality report.
+
+    Every pipeline that groups frames into sessions (stacking, photometry,
+    spectroscopy, asteroid recovery) reports the same two numbers per
+    session: how many frames it contributed, and how many of those were
+    later excluded. Only the definition of "excluded" differs -- rejected
+    by outlier filtering, missing a plate solve, etc. -- so that's the one
+    thing callers supply.
+
+    Parameters
+    ----------
+    sessions : `Sequence` of `TargetSession`
+        The sessions to summarize, in the order they should appear.
+    excluded_paths : `set` of `str`, optional
+        Frame paths that were excluded from this pipeline's output. Frames
+        not in this set count as contributed and not clipped. Omit it (or
+        pass an empty set) for a pipeline that doesn't track per-frame
+        exclusions -- every session then reports zero frames clipped.
+
+    Returns
+    -------
+    breakdown : `list` of `TargetSessionContribution`
+        One entry per session, in the same order as `sessions`.
+    """
+    excluded_paths = excluded_paths or set()
+    return [
+        TargetSessionContribution(
+            session_id=session.id,
+            frames_contributed=len(session.frame_paths),
+            frames_clipped=sum(1 for path in session.frame_paths if path in excluded_paths),
+        )
+        for session in sessions
+    ]

@@ -36,6 +36,8 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v7
+        with:
+          lfs: true
 
       - name: Filter Changed Paths
         id: filter
@@ -67,6 +69,8 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v7
+        with:
+          lfs: true
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -96,6 +100,8 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v7
+        with:
+          lfs: true
 
       - name: Setup Python Environment
         uses: ./.github/actions/setup-python-env
@@ -118,6 +124,8 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v7
+        with:
+          lfs: true
 
       - name: Set up Node.js
         uses: actions/setup-node@v7

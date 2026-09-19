@@ -130,7 +130,7 @@ class BaseBackgroundService:
         """
         if self._job_service:
             jobs = self._job_service.get_jobs_for_target(target_id)
-            return [j.model_dump() for j in jobs]
+            return [j.model_dump(by_alias=True) for j in jobs]
         return []
 
     def is_processing(self, job_id: str) -> bool:

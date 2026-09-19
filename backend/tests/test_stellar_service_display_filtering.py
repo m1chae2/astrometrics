@@ -11,7 +11,7 @@ need in full.
 
 from unittest.mock import MagicMock
 
-from astrometricslib import StellarObject
+from astrometricslib import SpectroscopyResult, StellarObject
 from backend.services.data.stellar_service import StellarService, _is_per_frame_photometry_detection
 
 
@@ -84,11 +84,11 @@ def test_stellar_object_has_spectra_and_has_photometry_computed_fields():  # ruf
     """
     star_with_spectra = StellarObject(
         id="Vega",
-        spectrum_data_processed={"wavelengths_angstrom": [5000], "intensities": [1.0]},
+        spectroscopy=SpectroscopyResult(wavelengths_angstrom=[5000], intensities=[1.0]),
     )
     star_with_photometry = StellarObject(
         id="Betelgeuse",
-        light_curve={"timestamps": ["2026-01-01T00:00:00Z"], "magnitudes": [0.5]},
+        photometry={"timestamps": ["2026-01-01T00:00:00Z"], "magnitudes": [0.5]},
     )
     star_empty = StellarObject(id="EmptyStar")
 
@@ -220,6 +220,39 @@ def test_get_displayable_stellar_object_summaries_searches_across_all_records() 
     results_by_id = service.get_displayable_stellar_object_summaries(search="99999")
     assert len(results_by_id) == 1
     assert results_by_id[0]["id"] == "HD_99999"
+
+
+def test_get_displayable_stellar_object_summaries_search_disables_the_summary_cap() -> None:
+    """Verify a search request asks for every row, not a capped slice.
+
+    The test above (searches_across_all_records) mocks
+    list_object_summaries to always return every row regardless of what
+    it was asked for, so it cannot catch list_object_summaries itself
+    silently capping the real, un-mocked catalog at
+    DEFAULT_UNFILTERED_SUMMARY_LIMIT (5000) rows before this function's
+    own search filtering ever runs -- a real match past that cutoff
+    would then never be found. This checks the actual call contract
+    instead: a search request must pass apply_default_limit=False.
+    """
+    astrometrics = MagicMock()
+    astrometrics.stars.list_object_summaries.return_value = []
+    service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
+
+    service.get_displayable_stellar_object_summaries(search="Target Star")
+    astrometrics.stars.list_object_summaries.assert_called_once_with(None, None, apply_default_limit=False)
+
+    astrometrics.stars.list_object_summaries.reset_mock()
+    service.get_displayable_stellar_object_summaries(filter_type="With Spectra")
+    astrometrics.stars.list_object_summaries.assert_called_once_with(None, None, apply_default_limit=False)
+
+    astrometrics.stars.list_object_summaries.reset_mock()
+    service.get_displayable_stellar_object_summaries(offset=100)
+    astrometrics.stars.list_object_summaries.assert_called_once_with(None, None, apply_default_limit=False)
+
+    # A plain unfiltered request still uses the default cap.
+    astrometrics.stars.list_object_summaries.reset_mock()
+    service.get_displayable_stellar_object_summaries()
+    astrometrics.stars.list_object_summaries.assert_called_once_with(None, 100, apply_default_limit=True)
 
 
 def test_get_displayable_stellar_object_summaries_category_filters() -> None:

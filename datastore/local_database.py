@@ -21,14 +21,16 @@ logger = logging.getLogger(__name__)
 
 
 class NumpyEncoder(json.JSONEncoder):
-    """Custom JSON encoder for numpy data types.
+    """Custom JSON encoder for scientific data types.
 
-    Handles types such as ``np.int64`` and ``np.float64`` that are
-    commonly returned from astrometry and source detection packages.
+    Handles types such as ``np.int64``, ``np.float64``, an astropy
+    ``Quantity``, or a pandas ``Series``/``DataFrame`` -- all things
+    that are commonly returned from astrometry and source detection
+    packages, but that plain `json.dumps` cannot serialize on its own.
     """
 
     def default(self, obj):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-        """Serialize numpy datatypes and datetimes to plain Python types.
+        """Serialize scientific datatypes and datetimes to plain Python types.
 
         Parameters
         ----------
@@ -39,12 +41,14 @@ class NumpyEncoder(json.JSONEncoder):
         -------
         serializable : `Any`
             A JSON-serializable representation of `obj` if it is a
-            recognized numpy or datetime type; otherwise delegates to
-            the superclass implementation.
+            recognized numpy, astropy, pandas, or datetime type;
+            otherwise delegates to the superclass implementation.
         """
         from datetime import datetime
 
+        import astropy.units as u
         import numpy as np
+        import pandas as pd
 
         if isinstance(obj, datetime):
             return obj.isoformat()
@@ -52,8 +56,28 @@ class NumpyEncoder(json.JSONEncoder):
             return int(obj)
         elif isinstance(obj, (np.floating, np.float64, np.float32, np.float16)):
             return float(obj)
+        elif isinstance(obj, u.Quantity):
+            # Checked before the plain np.ndarray case below -- Quantity
+            # is itself an ndarray subclass, and its .tolist() raises
+            # rather than dropping the unit silently. Keeping the unit
+            # alongside the number avoids a bare float being mistaken
+            # for a different unit than the one it was actually
+            # measured in.
+            value = obj.value
+            return {
+                "value": value.tolist() if isinstance(value, np.ndarray) else float(value),
+                "unit": str(obj.unit),
+            }
         elif isinstance(obj, np.ndarray):
             return obj.tolist()
+        elif isinstance(obj, pd.Series):
+            # Values only, in order -- matches np.ndarray's own
+            # tolist() above. A Series with meaningful string labels
+            # (not just a numeric row index) loses those labels here;
+            # nothing in this codebase stores one of those today.
+            return obj.tolist()
+        elif isinstance(obj, pd.DataFrame):
+            return obj.to_dict(orient="list")
         return super().default(obj)
 
 

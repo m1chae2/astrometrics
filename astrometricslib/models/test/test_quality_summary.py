@@ -8,8 +8,8 @@ all the necessary information.
 import pytest
 
 from astrometricslib.models.quality_summary import (
-    AsteroidRecoveryPipelineQualityMetrics,
-    AsteroidRecoveryQualitySummary,
+    AsteroidDetectionPipelineQualityMetrics,
+    AsteroidDetectionQualitySummary,
     AstrometryPipelineQualityMetrics,
     AstrometryQualitySummary,
     ExcludedFrame,
@@ -23,7 +23,7 @@ from astrometricslib.models.quality_summary import (
 )
 
 
-def _make_asteroid_recovery_metrics(**overrides) -> AsteroidRecoveryPipelineQualityMetrics:  # ruff: ignore[missing-type-kwargs]
+def _make_asteroid_detection_metrics(**overrides) -> AsteroidDetectionPipelineQualityMetrics:  # ruff: ignore[missing-type-kwargs]
     defaults = {
         "frames_with_wcs_estimate": 40,
         "frames_excluded_missing_pointing_metadata": 0,
@@ -33,24 +33,24 @@ def _make_asteroid_recovery_metrics(**overrides) -> AsteroidRecoveryPipelineQual
         "candidates_ephemeris_matched": 1,
     }
     defaults.update(overrides)
-    return AsteroidRecoveryPipelineQualityMetrics(**defaults)
+    return AsteroidDetectionPipelineQualityMetrics(**defaults)
 
 
-def test_asteroid_recovery_quality_summary_constructs_with_minimal_fields():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_asteroid_detection_quality_summary_constructs_with_minimal_fields():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Check that we can create an asteroid report with only required data."""
-    summary = AsteroidRecoveryQualitySummary(
-        target_id="M 81", asteroid_recovery_metrics=_make_asteroid_recovery_metrics()
+    summary = AsteroidDetectionQualitySummary(
+        target_id="M 81", asteroid_detection_metrics=_make_asteroid_detection_metrics()
     )
-    assert summary.asteroid_recovery_metrics.candidates_detected == 5
-    assert summary.pipeline_name == "asteroid_recovery"
+    assert summary.asteroid_detection_metrics.candidates_detected == 5
+    assert summary.pipeline_name == "asteroid_detection"
     assert summary.upstream_quality_summary_reference == "astrometry"
     assert summary.flagged is False
 
 
-def test_asteroid_recovery_quality_summary_defaults_to_empty_session_provenance():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_asteroid_detection_quality_summary_defaults_to_empty_session_provenance():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Check that the list of observing sessions starts out empty."""
-    summary = AsteroidRecoveryQualitySummary(
-        target_id="M 81", asteroid_recovery_metrics=_make_asteroid_recovery_metrics()
+    summary = AsteroidDetectionQualitySummary(
+        target_id="M 81", asteroid_detection_metrics=_make_asteroid_detection_metrics()
     )
     assert summary.target_session_ids == []
     assert summary.target_session_breakdown == []

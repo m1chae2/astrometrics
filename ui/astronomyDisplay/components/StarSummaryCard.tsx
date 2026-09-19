@@ -43,7 +43,7 @@ export const StarSummaryCard: React.FC<StarSummaryCardProps> = ({
     const dec = astronomyData?.dec ?? astronomyData?.declination;
     const formattedCoords = formatCoordinates(ra, dec);
     const mag = astronomyData?.magnitude ?? astronomyData?.mag;
-    const meanFlux = astronomyData?.meanFlux ?? astronomyData?.mean_flux;
+    const meanFlux = astronomyData?.photometry?.meanFlux ?? astronomyData?.photometry?.mean_flux;
     const variabilityScore = astronomyData?.variabilityScore ?? astronomyData?.variability_score;
     const targetIds: string[] = Array.isArray(astronomyData?.targetIds) ? astronomyData.targetIds : [];
 

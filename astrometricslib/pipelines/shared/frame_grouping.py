@@ -8,6 +8,7 @@ the one place that logic lives, so every pipeline answers the question
 the same way.
 """
 
+import os
 from typing import Any
 
 from astrometricslib.models.target import FrameRecord
@@ -136,6 +137,124 @@ def select_frames_for_configuration(target: Any, configuration_key: str) -> list
     return [frame for frame in target.frames or [] if frame_configuration_key(frame) == configuration_key]
 
 
+def frame_is_spectral(frame: Any) -> bool:
+    """Decide whether a frame is a spectroscopy frame.
+
+    A frame's filter can show up as an already-normalized `FilterType`
+    member, a bare string that skipped normalization, or the catalog
+    value itself ("Star Analyzer 200") rather than the "SPEC" alias --
+    checking all three keeps spectral frames recognized the same way
+    everywhere they're classified, instead of each caller growing its
+    own slightly different test.
+
+    Parameters
+    ----------
+    frame : `Any`
+        The frame record (or anything with a `.filter` attribute) to check.
+
+    Returns
+    -------
+    is_spectral : `bool`
+        True if the frame is a spectroscopy frame.
+    """
+    frame_filter = getattr(frame, "filter", None)
+    return (
+        frame_filter == FilterType.SPEC
+        or getattr(frame_filter, "name", None) == "SPEC"
+        or str(frame_filter).upper() in ("SPEC", "STAR ANALYZER 200")
+    )
+
+
+def select_frames_for_processing(
+    target: Any, camera_name: str, focal_length_mm: float | None
+) -> list[FrameRecord] | None:
+    """Narrow a target's frames down to one camera and (optionally) one optic.
+
+    Frames of different focal length image at different scales -- this
+    library's 300mm and 405mm optics differ by 1.35x -- so a stack
+    blending them has no single pixel scale, cannot be plate solved
+    accurately, and produces fluxes that are not comparable between
+    frames. Seven targets were being stacked that way, NGC 7023 worst
+    at 424 frames of one optic mixed with 111 of the other.
+
+    Returns
+    -------
+    camera_frames : `list` [`FrameRecord`] or `None`
+        The matching frames, or `None` if there are none to process
+        (already logged, so the caller should stop with no work done).
+    """
+    # Restrict all processing to frames captured with the requested
+    # camera; every other camera's frames on this target are excluded.
+    camera_frames = select_frames_for_camera(target, camera_name)
+
+    if focal_length_mm is not None:
+        requested_key_suffix = f"@{round(float(focal_length_mm))}mm"
+        selected_frames = [
+            frame
+            for frame in camera_frames
+            if (frame_configuration_key(frame) or "").endswith(requested_key_suffix)
+        ]
+        if not selected_frames:
+            print(
+                f"[{target.id}] No frames at {focal_length_mm:g}mm for camera '{camera_name}'. "
+                "Skipping all processing steps."
+            )
+            return None
+        unassignable = frames_missing_focal_length(target, camera_name)
+        if unassignable:
+            # Never dropped silently: a frame with no FOCALLEN cannot be
+            # grouped, and on this library that is 602 frames. See
+            # scripts/backfill_focal_length.
+            print(
+                f"[{target.id}] {len(unassignable)} frame(s) excluded: no FOCALLEN recorded, "
+                "so their optic is unknown."
+            )
+        camera_frames = selected_frames
+
+    if not camera_frames:
+        print(
+            f"[{target.id}] No frames matching camera '{camera_name}' found for this target. "
+            "Skipping all processing steps."
+        )
+        return None
+
+    return camera_frames
+
+
+def split_standard_and_spectral_frames(
+    target: Any, camera_frames: list[FrameRecord]
+) -> tuple[list[FrameRecord], list[FrameRecord]]:
+    """Split a target's camera frames into standard and spectral groups.
+
+    Excludes derived frames (already-stacked images, starless/starmask
+    products) before classifying what's left by filter.
+
+    Returns
+    -------
+    standard_frames, spectral_frames : `list` [`FrameRecord`]
+        The non-SPEC and SPEC frames, respectively.
+    """
+    print(f"[{target.id}] Stacking frames...")
+    target_frames = [
+        frame
+        for frame in camera_frames
+        if not any(k in frame.path.lower() for k in ("_stacked", "starless", "starmask"))
+    ]
+
+    # Check if there is a mixed set of spectral and standard frames.
+    # If so, run standard stacking on standard frames, and spectral
+    # stacking on spectral frames.
+    standard_frames = []
+    spectral_frames = []
+    for frame in target_frames:
+        if frame_is_spectral(frame):
+            spectral_frames.append(frame)
+        else:
+            standard_frames.append(frame)
+
+    return standard_frames, spectral_frames
+
+
 def add_frame(  # ruff: ignore[missing-return-type-undocumented-public-function]
     target,  # ruff: ignore[missing-type-function-argument]
     path: str,
@@ -152,37 +271,21 @@ def add_frame(  # ruff: ignore[missing-return-type-undocumented-public-function]
     -------
     frame_record : `FrameRecord`
         The new or updated image record.
-
-    Raises
-    ------
-    ValueError
-        If adding this frame would mix spectral ('SPEC') and standard
-        imaging frames on the same target.
     """
-    from astrometricslib.catalog_services.frame_scanning import create_frame_record_from_fits
+    from astrometricslib.pipelines.shared.frame_scanning import create_frame_record_from_fits
 
     record = create_frame_record_from_fits(path, camera)
     record.role = role
     if filter_type is not None:
         record.filter = FrameRecord.normalize_filter(filter_type)
 
-    is_spectral = record.filter == FilterType.SPEC
-    has_spectral = any(f.filter == FilterType.SPEC for f in target.frames)
-    has_standard = any(f.filter != FilterType.SPEC for f in target.frames)
-
-    if is_spectral and has_standard:
-        raise ValueError(
-            "Target contains a mixed set of spectral ('SPEC') and standard imaging frames. "
-            "Stacking mixed frame types is not permitted."
-        )
-    if not is_spectral and has_spectral:
-        raise ValueError(
-            "Target contains a mixed set of spectral ('SPEC') and standard imaging frames. "
-            "Stacking mixed frame types is not permitted."
-        )
-
+    # Compare resolved paths, not raw strings -- the same physical frame
+    # reachable via two different spellings (a relative vs. absolute
+    # path, a redundant "./", or a symlink) would otherwise be recorded
+    # twice.
+    real_path = os.path.realpath(path)
     for f in target.frames:
-        if f.path == path:
+        if os.path.realpath(f.path) == real_path:
             f.role = role
             if filter_type is not None:
                 f.filter = record.filter

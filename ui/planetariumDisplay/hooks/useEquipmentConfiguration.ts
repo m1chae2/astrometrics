@@ -73,13 +73,13 @@ export const useEquipmentConfiguration = (): UseEquipmentConfigurationResult => 
     // Compute and apply the new FOV immediately from already-known local data
     const camera = availableCameras.find(candidateCamera => candidateCamera.name === cameraName);
     if (camera && configuration) {
-      const plateScale = 206.265 * camera.pixel_size_um / configuration.telescope.focal_length_mm;
+      const plateScale = 206.265 * camera.pixelSizeUm / configuration.telescope.focalLengthMm;
       setConfiguration({
         ...configuration,
         camera,
-        plate_scale_arcsec_per_px: Math.round(plateScale * 10000) / 10000,
-        fov_width_deg: Math.round(plateScale * camera.sensor_width_px / 3600 * 1000000) / 1000000,
-        fov_height_deg: Math.round(plateScale * camera.sensor_height_px / 3600 * 1000000) / 1000000,
+        plateScaleArcsecPerPx: Math.round(plateScale * 10000) / 10000,
+        fovWidthDeg: Math.round(plateScale * camera.sensorWidthPx / 3600 * 1000000) / 1000000,
+        fovHeightDeg: Math.round(plateScale * camera.sensorHeightPx / 3600 * 1000000) / 1000000,
       });
     }
     // Persist to config in the background — no need to re-fetch

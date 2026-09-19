@@ -31,7 +31,7 @@ class _FakeTarget:
         self.astrometry_quality_summary = overrides.get("astrometry_quality_summary")
         self.photometry_quality_summary = overrides.get("photometry_quality_summary")
         self.spectroscopy_quality_summary = overrides.get("spectroscopy_quality_summary")
-        self.asteroid_recovery_quality_summary = overrides.get("asteroid_recovery_quality_summary")
+        self.asteroid_detection_quality_summary = overrides.get("asteroid_detection_quality_summary")
         self.asteroid_candidates = overrides.get("asteroid_candidates", [])
 
 

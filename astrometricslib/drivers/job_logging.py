@@ -19,9 +19,10 @@ keeps every logger it has ever created, so a long batch run slowly runs
 out of file handles.
 
 This module existed as four separate hand-written copies before, in
-`analyze_target`, `stack_and_solve`, the backend's analysis orchestrator,
-and the wayfinding library's transfer task. None of the four closed their
-handlers, and only one of them detached from both loggers.
+`analyze_target`, the pipeline's stacking job wrapper, the backend's
+analysis orchestrator, and the wayfinding library's transfer task. None
+of the four closed their handlers, and only one of them detached from
+both loggers.
 """
 
 import logging

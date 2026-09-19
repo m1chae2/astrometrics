@@ -10,22 +10,10 @@ live-capture data (guiding telemetry, weather) recorded in its own library.
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from wayfindinglib.models.session.observation_session import WeatherSample
 from wayfindinglib.models.session.telemetry import GuidingSample
 
-
-class WeatherSample(BaseModel):
-    """A single weather observation.
-
-    No populator exists yet -- schema-ready, empty until an actual
-    weather-station integration is built (only raw, unmodeled INDI
-    temperature/humidity property reads exist today).
-    """
-
-    model_config = ConfigDict(populate_by_name=True)
-    time: float = Field(..., ge=0.0)
-    ambient_temperature_c: float | None = Field(None, alias="ambientTemperatureC")
-    humidity_percent: float | None = Field(None, alias="humidityPercent")
-    dew_point_c: float | None = Field(None, alias="dewPointC")
+__all__ = ["ObservationSession", "WeatherSample"]
 
 
 class ObservationSession(BaseModel):

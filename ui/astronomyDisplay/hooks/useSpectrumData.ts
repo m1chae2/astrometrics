@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { fetchAstronomyData } from '../../common/services/astronomyService';
 import { reportError } from '../../common/utils/reportError';
 
-import { Spectrum, LightCurve } from '../../common/types/backendTypes';
+import { Spectrum, PhotometryResult } from '../../common/types/backendTypes';
 
 /** Represents parsed astronomy data, extending the base Spectrum with processed arrays. */
 export interface ParsedAstronomyData extends Spectrum {

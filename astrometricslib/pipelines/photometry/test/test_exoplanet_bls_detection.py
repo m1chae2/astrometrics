@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 import numpy as np
 from astropy.io import fits
 
-from astrometricslib.models.stellar_source import LightCurve, StellarObject
+from astrometricslib.models.stellar_source import PhotometryResult, StellarObject
 from astrometricslib.pipelines.photometry.variability_analyzer import (
     VariabilityAnalyzer,
     compute_frame_airmass,
@@ -31,21 +31,21 @@ def test_detrend_light_curves_airmass():  # ruff: ignore[missing-return-type-und
     """Verify detrend_light_curves_airmass removes extinction trend."""
     analyzer = VariabilityAnalyzer()
     star = StellarObject(id="star_1")
-    star.light_curve = LightCurve()
+    star.photometry = PhotometryResult()
 
     airmasses = [1.0, 1.2, 1.4, 1.6, 1.8, 2.0]
     # Synthetic light curve with extinction slope
     fluxes_norm = [1.0 - 0.05 * (x - 1.0) for x in airmasses]
 
-    star.light_curve.fluxes_normalized = fluxes_norm
-    star.light_curve.airmasses = airmasses
+    star.photometry.fluxes_normalized = fluxes_norm
+    star.photometry.airmasses = airmasses
     analyzer.stellar_objects = [star]
 
     analyzer.detrend_light_curves_airmass()
 
-    assert len(star.light_curve.fluxes_detrended) == 6
+    assert len(star.photometry.fluxes_detrended) == 6
     # Detrended fluxes should have lower variance than original trend
-    assert np.std(star.light_curve.fluxes_detrended) < np.std(fluxes_norm)
+    assert np.std(star.photometry.fluxes_detrended) < np.std(fluxes_norm)
 
 
 def test_bls_transit_search_synthetic_transit():  # ruff: ignore[missing-return-type-undocumented-public-function]
@@ -61,7 +61,7 @@ def test_bls_transit_search_synthetic_transit():  # ruff: ignore[missing-return-
     fluxes[9] = 0.985
     fluxes[10] = 0.985
 
-    star.light_curve = LightCurve(
+    star.photometry = PhotometryResult(
         timestamps=timestamps,
         fluxes=fluxes,
         fluxes_normalized=fluxes,
@@ -72,6 +72,7 @@ def test_bls_transit_search_synthetic_transit():  # ruff: ignore[missing-return-
     assert candidate is not None
     assert candidate.transit_depth_mag > 0.0
     assert candidate.transit_snr > 0.0
+    assert 0.0 < candidate.transit_confidence <= 1.0
 
 
 def test_lomb_scargle_periodogram_periodic_signal():  # ruff: ignore[missing-return-type-undocumented-public-function]
@@ -85,7 +86,7 @@ def test_lomb_scargle_periodogram_periodic_signal():  # ruff: ignore[missing-ret
     t_days = np.array([i / 24.0 for i in range(24)])
     fluxes = (1.0 + 0.1 * np.sin(2 * np.pi * t_days / 0.25)).tolist()
 
-    star.light_curve = LightCurve(
+    star.photometry = PhotometryResult(
         timestamps=timestamps,
         fluxes=fluxes,
         fluxes_normalized=fluxes,

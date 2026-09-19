@@ -1,7 +1,7 @@
 """Purpose: Regression tests for per-frame light-curve array alignment.
 
-Description: A LightCurve's timestamps, fluxes, is_saturated and airmasses
-share one index space -- entry i of each describes the same frame.
+Description: A PhotometryResult's timestamps, fluxes, is_saturated and
+airmasses share one index space -- entry i of each describes the same frame.
 normalize_light_curves drops frames twice (those without a normalization
 factor, then per-star sigma clipping), and both filters must apply to every
 array. Rewriting only some of them left the rest longer and positionally
@@ -12,7 +12,7 @@ flags because of it.
 
 from datetime import datetime, timedelta
 
-from astrometricslib.models.stellar_source import LightCurve, StellarObject
+from astrometricslib.models.stellar_source import PhotometryResult, StellarObject
 from astrometricslib.pipelines.photometry.variability_analyzer import VariabilityAnalyzer
 
 _FRAME_COUNT = 40
@@ -29,7 +29,7 @@ def _build_star(star_id: str, flux_per_frame: list[float], timestamps: list):  #
     """
     star = StellarObject(id=star_id)
     star.flux = flux_per_frame[0]
-    star.light_curve = LightCurve(
+    star.photometry = PhotometryResult(
         timestamps=list(timestamps),
         fluxes=list(flux_per_frame),
         is_saturated=[False] * len(flux_per_frame),
@@ -85,7 +85,7 @@ def test_every_per_frame_array_stays_the_same_length():  # ruff: ignore[missing-
     analyzer = _run(stars, timestamps)
 
     for star in analyzer.stellar_objects:
-        light_curve = star.light_curve
+        light_curve = star.photometry
         # The unusable tail really was dropped, so this exercises the
         # filter rather than passing because nothing changed.
         assert len(light_curve.fluxes) == _UNUSABLE_FRAME_START
@@ -105,13 +105,13 @@ def test_arrays_stay_aligned_when_sigma_clipping_drops_frames():  # ruff: ignore
     stars = [_build_star(f"Star_{i}", [1000.0 + i] * _FRAME_COUNT, timestamps) for i in range(40)]
 
     outlier = stars[0]
-    outlier.light_curve.fluxes[7] = 500000.0
-    outlier.light_curve.is_saturated[7] = True
+    outlier.photometry.fluxes[7] = 500000.0
+    outlier.photometry.is_saturated[7] = True
 
     analyzer = _run(stars, timestamps)
 
     for star in analyzer.stellar_objects:
-        light_curve = star.light_curve
+        light_curve = star.photometry
         assert len(light_curve.is_saturated) == len(light_curve.fluxes)
         assert len(light_curve.airmasses) == len(light_curve.fluxes)
         assert len(light_curve.timestamps) == len(light_curve.fluxes)
@@ -138,12 +138,12 @@ def test_a_pre_existing_length_mismatch_is_not_silently_reindexed():  # ruff: ig
     mismatched_star = _build_star("MismatchedStar", [1000.0] * _FRAME_COUNT, timestamps)
     # Simulate a pre-existing mismatch: is_saturated/airmasses are
     # shorter than timestamps/fluxes before normalization ever runs.
-    mismatched_star.light_curve.is_saturated = mismatched_star.light_curve.is_saturated[:10]
-    mismatched_star.light_curve.airmasses = mismatched_star.light_curve.airmasses[:10]
+    mismatched_star.photometry.is_saturated = mismatched_star.photometry.is_saturated[:10]
+    mismatched_star.photometry.airmasses = mismatched_star.photometry.airmasses[:10]
 
     analyzer = _run([*well_formed_stars, mismatched_star], timestamps)
 
-    light_curve = next(star.light_curve for star in analyzer.stellar_objects if star.id == "MismatchedStar")
+    light_curve = next(star.photometry for star in analyzer.stellar_objects if star.id == "MismatchedStar")
     assert len(light_curve.fluxes) == _FRAME_COUNT
     assert light_curve.is_saturated == []
     assert light_curve.airmasses == []
@@ -161,11 +161,11 @@ def test_the_surviving_saturation_flag_belongs_to_its_own_frame():  # ruff: igno
     # Mark one frame saturated on a star that will not be clipped.
     marked = stars[5]
     saturated_timestamp = timestamps[3]
-    marked.light_curve.is_saturated[3] = True
+    marked.photometry.is_saturated[3] = True
 
     _run(stars, timestamps)
 
-    light_curve = marked.light_curve
+    light_curve = marked.photometry
     surviving = dict(zip(light_curve.timestamps, light_curve.is_saturated, strict=True))
     assert surviving.get(saturated_timestamp) is True
     assert sum(1 for flag in light_curve.is_saturated if flag) == 1

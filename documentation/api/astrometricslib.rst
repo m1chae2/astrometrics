@@ -15,7 +15,7 @@ Astrometrics Library (`astrometricslib`)
    :skip: AbstractCatalogAccess
    :skip: AnalysisResult
    :skip: AppConfiguration
-   :skip: AsteroidRecoveryCandidate
+   :skip: AsteroidDetectionCandidate
    :skip: AstrometryPipeline
    :skip: AstrometryPipelineQualityMetrics
    :skip: AstrometryQualitySummary
@@ -28,14 +28,14 @@ Astrometrics Library (`astrometricslib`)
    :skip: FrameRecord
    :skip: GroupedFrameStat
    :skip: ImageProcessing
-   :skip: LightCurve
    :skip: LoggerInterface
-   :skip: MosaicInfo
    :skip: MovingObjectConfig
+   :skip: PhotometryResult
    :skip: PlotData
    :skip: ProcessingJob
    :skip: RenderedImage
    :skip: SpectralObservation
+   :skip: SpectroscopyResult
    :skip: StarIdentifier
    :skip: StellarObject
    :skip: Target

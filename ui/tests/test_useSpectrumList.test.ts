@@ -45,12 +45,12 @@ describe('useSpectrumList Filtering Suite', () => {
                 label: 'Star 2 (Photometry Only)',
                 has_spectra: false,
                 has_photometry: true,
-                lightCurve: { timestamps: ['2026-01-01'], magnitudes: [12.5], fluxes: [100.0] },
+                photometry: { timestamps: ['2026-01-01'], magnitudes: [12.5], fluxes: [100.0] },
             },
             {
                 id: 'star-3',
-                label: 'Star 3 (Neither Flag but has spectrumData)',
-                spectrumData: [[5000, 5010], [1.0, 0.9]],
+                label: 'Star 3 (Neither Flag but has spectroscopy data)',
+                spectroscopy: { wavelengthsAngstrom: [5000, 5010], intensities: [1.0, 0.9] },
             },
             {
                 id: 'star-4',

@@ -64,7 +64,7 @@ def test_hint_based_identification_skips_closer_galaxy_and_uses_star(monkeypatch
     identifier.stellar_objects = [_make_center_stellar_object(1000, 1000)]
 
     monkeypatch.setattr(
-        star_identifier_module.Simbad, "query_region", MagicMock(return_value=_build_simbad_table())
+        star_identifier_module.simbad_interface, "query_region", MagicMock(return_value=_build_simbad_table())
     )
 
     identifier._identify_stars_with_simbad(
@@ -83,7 +83,7 @@ def test_wcs_based_identification_skips_closer_galaxy_and_uses_star(monkeypatch)
     identifier.stellar_objects = [_make_center_stellar_object(1000, 1000)]
 
     monkeypatch.setattr(
-        star_identifier_module.Simbad, "query_region", MagicMock(return_value=_build_simbad_table())
+        star_identifier_module.simbad_interface, "query_region", MagicMock(return_value=_build_simbad_table())
     )
 
     fake_wcs = MagicMock()
@@ -116,7 +116,7 @@ def test_is_catalog_identified_stays_false_without_a_simbad_match(monkeypatch): 
         "dec": [VEGA_DEC_DEG],
     })
     monkeypatch.setattr(
-        star_identifier_module.Simbad, "query_region", MagicMock(return_value=galaxy_only_table)
+        star_identifier_module.simbad_interface, "query_region", MagicMock(return_value=galaxy_only_table)
     )
 
     identifier._identify_stars_with_simbad(
@@ -141,7 +141,7 @@ def test_identify_stars_with_wcs_public_api_identifies_every_star(monkeypatch): 
     stellar_objects = [center_star, off_center_star]
 
     monkeypatch.setattr(
-        star_identifier_module.Simbad, "query_region", MagicMock(return_value=_build_simbad_table())
+        star_identifier_module.simbad_interface, "query_region", MagicMock(return_value=_build_simbad_table())
     )
 
     fake_wcs = MagicMock()
@@ -184,7 +184,7 @@ def test_process_image_delegates_to_identify_stars_with_wcs(monkeypatch):  # ruf
 
     monkeypatch.setattr(identifier, "identify_stars_with_wcs", _spy)
     monkeypatch.setattr(
-        star_identifier_module.Simbad, "query_region", MagicMock(return_value=_build_simbad_table())
+        star_identifier_module.simbad_interface, "query_region", MagicMock(return_value=_build_simbad_table())
     )
 
     fake_wcs = MagicMock()
@@ -225,7 +225,7 @@ def test_no_stellar_matches_leaves_generic_name_and_logs_warning(monkeypatch, ca
         "dec": [VEGA_DEC_DEG],
     })
     monkeypatch.setattr(
-        star_identifier_module.Simbad, "query_region", MagicMock(return_value=galaxy_only_table)
+        star_identifier_module.simbad_interface, "query_region", MagicMock(return_value=galaxy_only_table)
     )
 
     with caplog.at_level("WARNING", logger=star_identifier_module.logger.name):

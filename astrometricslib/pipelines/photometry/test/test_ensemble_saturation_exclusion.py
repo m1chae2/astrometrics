@@ -8,7 +8,7 @@ correctly records the resulting per-frame ensemble size and exclusions.
 
 from datetime import datetime, timedelta
 
-from astrometricslib.models.stellar_source import LightCurve, StellarObject
+from astrometricslib.models.stellar_source import PhotometryResult, StellarObject
 from astrometricslib.pipelines.photometry.variability_analyzer import (
     MAXIMUM_ENSEMBLE_SATURATED_FRACTION,
     TARGET_ENSEMBLE_SIZE,
@@ -54,7 +54,7 @@ def _build_ensemble_stars(saturated_star_index: int, first_timestamp: datetime):
         is_saturated_per_frame = [False] * _FRAME_COUNT
         if i == saturated_star_index:
             is_saturated_per_frame[0] = True
-        star.light_curve = LightCurve(
+        star.photometry = PhotometryResult(
             timestamps=list(timestamps),
             fluxes=[1000.0] * _FRAME_COUNT,
             is_saturated=is_saturated_per_frame,
@@ -150,7 +150,7 @@ def test_a_persistently_saturated_star_is_kept_out_of_the_ensemble():  # ruff: i
         saturated_star_index=-1, first_timestamp=datetime(2026, 7, 20, 22, 0)
     )
     always_saturated = stars[0]
-    always_saturated.light_curve.is_saturated = [True] * _FRAME_COUNT
+    always_saturated.photometry.is_saturated = [True] * _FRAME_COUNT
 
     composition_by_path = _run_analyzer(stars, timestamps)
     composition = composition_by_path["frame_000.fits"]

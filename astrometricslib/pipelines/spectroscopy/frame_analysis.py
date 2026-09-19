@@ -25,8 +25,9 @@ def analyze_frame_spectroscopy(target: Target, path: str, limit: int = 10) -> tu
     if not any(f.path == path for f in target.frames):
         add_frame(target, path)
 
-    from astrometricslib.data_access.catalog_access import CatalogAccess
+    from astrometricslib.drivers.catalog_access import CatalogAccess
     from astrometricslib.pipelines.astrometry.pipeline import AstrometryPipeline
+    from astrometricslib.pipelines.shared.star_recording import merge_spectra_history
     from astrometricslib.pipelines.spectroscopy.pipeline import (
         SpectroscopyPipeline,
     )
@@ -57,7 +58,8 @@ def analyze_frame_spectroscopy(target: Target, path: str, limit: int = 10) -> tu
         for target_id in updated.target_ids:
             if target_id not in existing.target_ids:
                 existing.target_ids.append(target_id)
-        existing.spectrum_data_processed = updated.spectrum_data_processed
+        existing.spectroscopy = updated.spectroscopy
+        existing.spectra_history = merge_spectra_history(existing.spectra_history, updated.spectra_history)
         return existing
 
     CatalogAccess(config).merge_and_record("stellar_catalog", stellar_objects, _merge_frame_star)

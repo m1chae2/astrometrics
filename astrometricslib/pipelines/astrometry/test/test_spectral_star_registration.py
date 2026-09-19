@@ -11,7 +11,7 @@ side to register.
 import numpy as np
 import pytest
 
-from astrometricslib.models.stellar_source import StellarObject
+from astrometricslib.models.stellar_source import SpectroscopyResult, StellarObject
 from astrometricslib.pipelines.astrometry.spectral_star_registration import (
     identify_spectral_stars_via_registration,
 )
@@ -32,8 +32,9 @@ def _reference_star(star_id: str, x: float, y: float) -> StellarObject:
 def _spectral_star(star_id: str, x: float, y: float) -> StellarObject:
     star = StellarObject(id=star_id, name=star_id)
     star.star_data = {"xcentroid": x, "ycentroid": y}
-    star.dispersion_angle = 1.5
-    star.spectrum_data_processed = {"wavelengths_angstrom": [4000.0], "intensities": [1.0]}
+    star.spectroscopy = SpectroscopyResult(
+        wavelengths_angstrom=[4000.0], intensities=[1.0], dispersion_angle=1.5
+    )
     return star
 
 
@@ -72,9 +73,11 @@ def test_identify_spectral_stars_via_registration_matches_rotated_translated_fie
         assert spectral_star.name == reference_star.name
         assert spectral_star.is_catalog_identified is True
         # Spectroscopy-owned fields must survive identification untouched.
-        assert spectral_star.dispersion_angle == pytest.approx(1.5)
-        expected_spectrum = {"wavelengths_angstrom": [4000.0], "intensities": [1.0]}
-        assert spectral_star.spectrum_data_processed == expected_spectrum
+        assert spectral_star.spectroscopy.dispersion_angle == pytest.approx(1.5)
+        expected_spectrum = SpectroscopyResult(
+            wavelengths_angstrom=[4000.0], intensities=[1.0], dispersion_angle=1.5
+        )
+        assert spectral_star.spectroscopy == expected_spectrum
 
 
 def test_identify_spectral_stars_via_registration_leaves_extra_stars_unmatched():  # ruff: ignore[missing-return-type-undocumented-public-function]

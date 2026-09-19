@@ -6,8 +6,8 @@ find-clusters -> apply -> delete flow end to end against a throwaway
 isolated catalog database -- never the real one.
 """
 
-from astrometricslib.data_access.catalog_access import CatalogAccess, StarPosition
-from astrometricslib.models.stellar_source import LightCurve, StellarObject
+from astrometricslib.drivers.catalog_access import CatalogAccess, StarPosition
+from astrometricslib.models.stellar_source import PhotometryResult, StellarObject
 from astrometricslib.scripts.reconcile_position_only_star_catalog import (
     _is_empty_value,
     _merge_duplicate_into_survivor,
@@ -32,7 +32,7 @@ def _make_isolated_config(tmp_path) -> AppConfiguration:  # ruff: ignore[missing
     frames_path.mkdir(parents=True)
 
     config = AppConfiguration()
-    config.update_config({"Image Library": {"path": str(library_path), "frames_path": str(frames_path)}})
+    config.update_config({"Image Library": {"path": str(library_path)}})
     return config
 
 
@@ -95,11 +95,11 @@ def test_is_empty_value_covers_every_shape_of_empty():  # ruff: ignore[missing-r
     assert _is_empty_value("   ")
     assert _is_empty_value([])
     assert _is_empty_value({})
-    assert _is_empty_value(LightCurve())
+    assert _is_empty_value(PhotometryResult())
     assert not _is_empty_value("Vega")
     assert not _is_empty_value(0.0)
     assert not _is_empty_value([1])
-    assert not _is_empty_value(LightCurve(fluxes=[1.0]))
+    assert not _is_empty_value(PhotometryResult(fluxes=[1.0]))
 
 
 def test_merge_duplicate_into_survivor_fills_gaps_without_overwriting():  # ruff: ignore[missing-return-type-undocumented-public-function]
@@ -110,14 +110,14 @@ def test_merge_duplicate_into_survivor_fills_gaps_without_overwriting():  # ruff
 
     duplicate = StellarObject(id="FIELD_JB", name="FIELD_JB")
     duplicate.magnitude = 99.9  # must NOT overwrite the survivor's own value
-    duplicate.light_curve = LightCurve(fluxes=[1.0, 2.0, 3.0])
+    duplicate.photometry = PhotometryResult(fluxes=[1.0, 2.0, 3.0])
     duplicate.spectral_type = "A0V"
     duplicate.target_ids = ["M42", "M43"]
 
     _merge_duplicate_into_survivor(survivor, duplicate)
 
     assert survivor.magnitude == 12.5  # ruff: ignore[float-equality-comparison]
-    assert survivor.light_curve.fluxes == [1.0, 2.0, 3.0]
+    assert survivor.photometry.fluxes == [1.0, 2.0, 3.0]
     assert survivor.spectral_type == "A0V"
     assert survivor.target_ids == ["M42", "M43"]
 
@@ -153,7 +153,7 @@ def test_find_and_apply_clusters_merges_and_deletes_against_a_real_catalog(tmp_p
     duplicate = StellarObject(id="FIELD_J083344.3050-263739.9980", name="FIELD_J083344.3050-263739.9980")
     duplicate.right_ascension = 128.834305
     duplicate.declination = -26.627770
-    duplicate.light_curve = LightCurve(fluxes=[10.0, 11.0])
+    duplicate.photometry = PhotometryResult(fluxes=[10.0, 11.0])
     duplicate.target_ids = ["M42"]
 
     unrelated = StellarObject(id="FIELD_J090000.0000-260000.0000", name="FIELD_J090000.0000-260000.0000")
@@ -181,7 +181,7 @@ def test_find_and_apply_clusters_merges_and_deletes_against_a_real_catalog(tmp_p
     assert set(remaining_by_id) == {survivor.id, unrelated.id}
     # The duplicate's light curve was gap-filled onto the surviving row,
     # not lost when the duplicate's own row was deleted.
-    assert remaining_by_id[survivor.id].light_curve.fluxes == [10.0, 11.0]
+    assert remaining_by_id[survivor.id].photometry.fluxes == [10.0, 11.0]
     assert remaining_by_id[survivor.id].magnitude == 15.2  # ruff: ignore[float-equality-comparison]
 
 

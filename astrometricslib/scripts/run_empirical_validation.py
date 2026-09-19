@@ -122,8 +122,18 @@ def run_photometry_validation(astrometrics: Astrometrics, camera_name: str) -> d
     return results
 
 
-def run_asteroid_recovery_validation(astrometrics: Astrometrics, camera_name: str) -> dict:
-    """Execute asteroid recovery validation on NGC 2403 and M 81 datasets.
+def run_asteroid_detection_validation(astrometrics: Astrometrics, camera_name: str) -> dict:
+    """Execute asteroid detection validation on real target datasets.
+
+    NGC 2403 and M 81 sit 43-52 degrees from the ecliptic, where main-belt
+    asteroids essentially never appear -- a run against SkyBoT there can
+    only ever confirm "found nothing," never confirm a real detection
+    against a known body. M 1, M 45, M 67, NGC 2903, M 16, and NGC 1893
+    all sit within about 10 degrees of the ecliptic (checked via
+    `astropy.coordinates.GeocentricTrueEcliptic`), where a real main-belt
+    asteroid passing through the field is actually plausible, giving this
+    validation a chance at a genuine SkyBoT-matched true positive rather
+    than only ever exercising the "nothing there" path.
 
     Parameters
     ----------
@@ -135,19 +145,19 @@ def run_asteroid_recovery_validation(astrometrics: Astrometrics, camera_name: st
     Returns
     -------
     metrics : `dict`
-        Summary dictionary of asteroid recovery validation results.
+        Summary dictionary of asteroid detection validation results.
     """
     print("\n--------------------------------------------------")
-    print("RUNNING PIPELINE 3/5: ASTEROID / MOVING OBJECT RECOVERY")
+    print("RUNNING PIPELINE 3/5: ASTEROID / MOVING OBJECT DETECTION")
     print("--------------------------------------------------")
     results = {}
 
-    for tid in ["NGC 2403", "M 81"]:
+    for tid in ["NGC 2403", "M 81", "M 1", "M 45", "M 67", "NGC 2903", "M 16", "NGC 1893"]:
         target = astrometrics.targets.get(tid)
         if target and target.stacked_image:
-            print(f"Running Asteroid Recovery Analysis on target: {target.id}")
+            print(f"Running Asteroid Detection Analysis on target: {target.id}")
             try:
-                candidates = astrometrics.moving_objects.recover_asteroids(target)
+                candidates = astrometrics.moving_objects.detect_asteroids(target)
                 metrics = astrometrics.moving_objects.last_run_metrics
                 det = metrics.get("candidates_detected", 0)
                 lin = metrics.get("candidates_rate_linearity_confirmed", 0)
@@ -161,7 +171,7 @@ def run_asteroid_recovery_validation(astrometrics: Astrometrics, camera_name: st
                 astrometrics.targets.save()
                 print(f"  Incremental save completed for target: {target.id}")
             except Exception as err:
-                print(f"  Asteroid recovery notice for {target.id}: {err}")
+                print(f"  Asteroid detection notice for {target.id}: {err}")
                 results[target.id] = {"status": "notice", "message": str(err)}
 
     return results
@@ -274,8 +284,8 @@ def main() -> None:
         # Pipeline 2: Photometry
         _ = run_photometry_validation(astrometrics, args.camera)
 
-        # Pipeline 3: Asteroid Recovery
-        _ = run_asteroid_recovery_validation(astrometrics, args.camera)
+        # Pipeline 3: Asteroid Detection
+        _ = run_asteroid_detection_validation(astrometrics, args.camera)
 
         # Pipeline 4: Astrometry
         _ = run_astrometry_validation(astrometrics, args.camera)

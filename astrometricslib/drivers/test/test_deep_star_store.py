@@ -17,6 +17,7 @@ from astrometricslib.drivers.deep_star_store import (
     COARSE_TILE_HEIGHT_DEGREES,
     FINE_TILE_HEIGHT_DEGREES,
     TileGrid,
+    count_stars_by_grid,
     find_deep_stars,
     get_deep_catalog_path,
     get_deep_catalog_status,
@@ -300,3 +301,20 @@ def test_tile_sizes_are_the_documented_ones():  # ruff: ignore[missing-return-ty
     assert COARSE_TILE_HEIGHT_DEGREES == pytest.approx(5.0)
     assert FINE_TILE_HEIGHT_DEGREES == pytest.approx(1.0)
     assert math.isclose(BRIGHT_TIER_MAX_MAGNITUDE, 12.0)
+
+
+def test_stars_are_counted_by_grid(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """The end-of-download report can say how many stars are in each grid."""
+    config = _LibraryConfig(tmp_path)
+    assert count_stars_by_grid(config) == {"bright": 0, "faint": 0}
+
+    record_downloaded_pixel(
+        config,
+        0,
+        np.array([1, 2, 3], dtype=np.int64),
+        np.array([10.0, 20.0, 30.0]),
+        np.array([5.0, 5.0, 5.0]),
+        np.array([8.0, BRIGHT_TIER_MAX_MAGNITUDE, 14.0]),
+    )
+
+    assert count_stars_by_grid(config) == {"bright": 2, "faint": 1}

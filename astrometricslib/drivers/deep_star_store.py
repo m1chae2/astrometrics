@@ -43,6 +43,7 @@ __all__ = [
     "COARSE_TILE_HEIGHT_DEGREES",
     "FINE_TILE_HEIGHT_DEGREES",
     "TileGrid",
+    "count_stars_by_grid",
     "find_deep_stars",
     "get_deep_catalog_path",
     "get_deep_catalog_status",
@@ -563,6 +564,41 @@ def find_deep_stars(
         )
         for row in stars
     ]
+
+
+def count_stars_by_grid(config: Any) -> dict[str, int]:
+    """Count how many saved stars are in each grid.
+
+    This reads every star's index entry, so on a full catalog it takes a
+    while. It is meant for a report at the end of a download, not for
+    something that runs every time the app starts.
+
+    Parameters
+    ----------
+    config : `AppConfiguration`
+        The application settings.
+
+    Returns
+    -------
+    counts : `dict` [`str`, `int`]
+        ``bright`` (the coarse grid, up to `BRIGHT_TIER_MAX_MAGNITUDE`) and
+        ``faint`` (the fine grid). Both are 0 if nothing is saved.
+    """
+    counts = {"bright": 0, "faint": 0}
+    cache_db_path = get_deep_catalog_path(config)
+    if not cache_db_path.exists():
+        return counts
+    connection = sqlite3.connect(f"file:{cache_db_path}?mode=ro", uri=True)
+    try:
+        for grid_number, star_count in connection.execute(
+            "SELECT grid, COUNT(*) FROM deep_stars GROUP BY grid"
+        ):
+            counts["bright" if grid_number == _GRID_COARSE else "faint"] = star_count
+    except sqlite3.Error as catalog_error:
+        logger.debug("Could not count the deep-star catalog: %s", catalog_error)
+    finally:
+        connection.close()
+    return counts
 
 
 def get_deep_catalog_status(config: Any) -> dict[str, Any]:

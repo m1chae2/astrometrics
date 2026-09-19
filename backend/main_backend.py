@@ -51,6 +51,31 @@ logging.getLogger("uvicorn.error").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
+
+def _use_bundled_earth_orientation_data() -> None:
+    """Stop astropy downloading Earth-orientation (IERS) data while running.
+
+    Turning a star's position into altitude and azimuth needs a small table
+    of how the Earth's rotation drifts (UT1 minus UTC). By default astropy
+    tries to download the latest copy the first time it is needed, which
+    stalled the first star click for 6 to 14 seconds, and quietly needed the
+    internet. The copy that ships with astropy is used instead.
+
+    Measured (astropy 8.0.1, Bozeman, a star at RA 315.7 deg, Dec 68.7 deg):
+    the first conversion took 5.8 to 13.8 s with the download and 0.5 s
+    without. Altitude and azimuth differed by at most 0.5 arcseconds across
+    dates from two years ago to ten years ahead, far below what a sky map or
+    a telescope slew can resolve, and nothing raised an error for any date.
+    """
+    from astropy.utils import iers
+
+    iers.conf.auto_download = False
+    # Without this, astropy refuses to use a table more than 30 days old.
+    iers.conf.auto_max_age = None
+
+
+_use_bundled_earth_orientation_data()
+
 # Initialize Container Resources
 container.init_resources()
 
@@ -312,6 +337,23 @@ async def periodic_telemetry_loop():  # ruff: ignore[missing-return-type-undocum
 sky_catalog_warmup_finished = threading.Event()
 
 
+def _warm_earth_orientation_data() -> None:
+    """Load astropy's Earth-orientation table now, while the splash is up.
+
+    The first altitude/azimuth conversion in a process reads that table
+    (about half a second), so do one here instead of on the first star click.
+    """
+    import astropy.units as u
+    from astropy.coordinates import AltAz, EarthLocation, SkyCoord
+    from astropy.time import Time
+
+    started_at = time.monotonic()
+    SkyCoord(0.0 * u.deg, 0.0 * u.deg).transform_to(
+        AltAz(obstime=Time.now(), location=EarthLocation(lat=0.0 * u.deg, lon=0.0 * u.deg))
+    )
+    logger.info("Earth-orientation data loaded in %.1fs", time.monotonic() - started_at)
+
+
 def _warm_sky_catalog() -> None:
     """Load the Planetarium's star catalog into memory ahead of first use.
 
@@ -327,6 +369,10 @@ def _warm_sky_catalog() -> None:
         logger.info("Sky catalog warmed in %.1fs", time.monotonic() - started_at)
     except Exception as warm_error:
         logger.warning("Sky catalog warm-up failed; first Planetarium load will be slow: %s", warm_error)
+    try:
+        _warm_earth_orientation_data()
+    except Exception as warm_error:
+        logger.warning("Earth-orientation warm-up failed; the first star click will be slow: %s", warm_error)
     finally:
         sky_catalog_warmup_finished.set()
 

@@ -60,6 +60,20 @@ export const AstronomyDisplay: React.FC = () => {
     }
   }, [setFilterOption]);
 
+  // Picks up a star handed off from Planetarium's "Open in Astronomy Manager"
+  // action while this panel is already mounted. The `?star=`/localStorage
+  // read above only runs once, on this component's first mount, so a panel
+  // that was visited earlier in the session needs this live event to react
+  // to a later hand-off instead of missing it.
+  useEffect(() => {
+    const handleSelectStar = (event: Event) => {
+      const starId = (event as CustomEvent<string>).detail;
+      if (starId) setPendingId(starId);
+    };
+    window.addEventListener('astrometrics:astronomySelectStar', handleSelectStar);
+    return () => window.removeEventListener('astrometrics:astronomySelectStar', handleSelectStar);
+  }, []);
+
   /** Callback triggered when a new spectrum is successfully loaded into the viewer. */
   const handleLoaded = useCallback((id: string) => {
     setSelectedSpectrum(id);

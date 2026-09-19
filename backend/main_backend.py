@@ -7,6 +7,8 @@ defines API/WebSocket routes.
 
 import logging
 import os
+import threading
+import time
 import warnings
 
 import uvicorn
@@ -218,6 +220,25 @@ async def session_token():  # ruff: ignore[missing-return-type-undocumented-publ
     return {"token": session_auth.SESSION_TOKEN}
 
 
+@app.get("/api/ready")
+async def readiness():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Report whether startup warm-up has finished.
+
+    Distinct from the liveness route below: the backend accepts requests
+    as soon as it is listening, but the first Planetarium load stays slow
+    until the star catalog has been loaded into memory.
+
+    Returns
+    -------
+    response : `~fastapi.responses.JSONResponse`
+        Status 200 with ``{"ready": true}`` once warm-up has finished,
+        otherwise status 503 with ``{"ready": false}``.
+    """
+    if sky_catalog_warmup_finished.is_set():
+        return JSONResponse(status_code=200, content={"ready": True})
+    return JSONResponse(status_code=503, content={"ready": False})
+
+
 @app.get("/")
 async def root():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Return a simple liveness message for the backend root route.
@@ -283,12 +304,40 @@ async def periodic_telemetry_loop():  # ruff: ignore[missing-return-type-undocum
         await asyncio.sleep(2.0)
 
 
+# Set once the startup catalog warm-up below has finished, whether or not it
+# succeeded. The desktop shell polls `/api/ready` and holds its splash screen
+# until this is set, so the UI never opens onto a Planetarium that would sit
+# empty while the catalog loads. It is set on failure too: a broken warm-up
+# only means a slow first load, and must never keep the app from opening.
+sky_catalog_warmup_finished = threading.Event()
+
+
+def _warm_sky_catalog() -> None:
+    """Load the Planetarium's star catalog into memory ahead of first use.
+
+    The first `planetarium:get_sources` request otherwise pays a one-time
+    cost of tens of seconds (deserializing every stored star) while the
+    user waits on an empty sky. A tiny query constructs the sky engine and
+    loads that catalog now, in a worker thread, so it doesn't delay startup
+    or block other requests.
+    """
+    started_at = time.monotonic()
+    try:
+        container.wayfinder.planning.get_sources(0.0, 0.0, 0.01)
+        logger.info("Sky catalog warmed in %.1fs", time.monotonic() - started_at)
+    except Exception as warm_error:
+        logger.warning("Sky catalog warm-up failed; first Planetarium load will be slow: %s", warm_error)
+    finally:
+        sky_catalog_warmup_finished.set()
+
+
 @app.on_event("startup")
 # ruff: ignore[unused-async] -- required async signature for FastAPI's
 # on_event("startup") decorator, which awaits this handler.
 async def startup_event():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Launch the background telemetry loop on FastAPI startup."""
+    """Launch the telemetry loop and sky catalog warm-up on startup."""
     app.state.telemetry_task = asyncio.create_task(periodic_telemetry_loop())
+    app.state.sky_warmup_task = asyncio.create_task(asyncio.to_thread(_warm_sky_catalog))
 
 
 @app.on_event("shutdown")

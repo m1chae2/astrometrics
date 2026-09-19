@@ -183,7 +183,15 @@ export class StarFieldRenderer {
 
     let writeIndex = 0;
     for (const source of sources) {
-      if (!isDisplayableStar(source, projectionContext.showStars, projectionContext.showCatalog, limitingMagnitude))
+      if (
+        !isDisplayableStar(
+          source,
+          projectionContext.showStars,
+          projectionContext.showCatalog,
+          limitingMagnitude,
+          projectionContext.fov,
+        )
+      )
         continue;
 
       const point = projectionContext.projectCoords(source.ra, source.dec);

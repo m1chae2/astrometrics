@@ -15,6 +15,7 @@ from astrometricslib import StellarObject, Target
 from wayfindinglib.sky import Sky
 from wayfindinglib.skylib.catalog_operations import astrometrics_catalog
 from wayfindinglib.skylib.coordinate_operations import compute_altaz
+from wayfindinglib.skylib.resolution_operations import get_sources
 
 
 def test_sky_initialization() -> None:
@@ -137,6 +138,32 @@ def test_astrometrics_catalog_skips_unparseable_target_without_dropping_others()
 
     assert len(results) == 1
     assert results[0].id == "GOOD"
+
+
+def test_astrometrics_catalog_filters_stellar_objects_by_radius() -> None:
+    """Verifies the stellar-object branch returns only in-radius stars.
+
+    Also covers the local-only (`include_catalog=False`) path of
+    `Sky.get_sources`, which used to return every stellar object
+    regardless of the requested region.
+    """
+    near_star = StellarObject(id="NEAR", ra=250.17, dec=36.46)
+    far_star = StellarObject(id="FAR", ra=10.0, dec=-60.0)
+    no_coordinates_star = StellarObject(id="BLANK", ra="", dec="")
+
+    fake_astrometrics = MagicMock()
+    fake_astrometrics.targets.list.return_value = []
+    fake_astrometrics.stellar_objects = [near_star, far_star, no_coordinates_star]
+
+    fake_sky = MagicMock()
+    fake_sky._astrometrics = fake_astrometrics
+
+    results = astrometrics_catalog(fake_sky, ra_deg=250.17, dec_deg=36.46, radius_deg=1.0)
+
+    assert [result.id for result in results] == ["NEAR"]
+
+    local_only = get_sources(fake_sky, 250.17, 36.46, 1.0, include_catalog=False)
+    assert [result.id for result in local_only] == ["NEAR"]
 
 
 def test_compute_altaz_matches_recorded_indi_driver_baseline() -> None:

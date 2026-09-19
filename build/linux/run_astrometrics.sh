@@ -2,7 +2,20 @@
 set -euo pipefail
 
 # run_astrometrics.sh (moved to scripts/)
-# Wraps the Astrometrics frontend/electron startup.
+# Wraps the Astrometrics backend + frontend/electron startup.
+#
+# The backend is launched first, in the background, WITHOUT waiting for it to
+# answer, and Electron is started as soon as Vite is up. That way the splash
+# screen appears within a couple of seconds and stays up while the backend
+# starts and loads its star catalog (Electron polls the backend's /api/ready
+# route before opening the main window). Running run_backend.sh start first
+# would defeat that: it blocks until the backend answers, so Electron -- and
+# its splash -- could not start until the wait was already over.
+#
+# A backend that is already running is left alone. `stop` and `restart` also
+# stop the backend; `foreground` stops it on exit only if it launched it.
+# Set DEV_LAN=1 to bind the backend to the LAN too, matching Vite.
+#
 # Usage:
 #   ./run_astrometrics.sh start [port]        - Start in background
 #   ./run_astrometrics.sh stop                - Stop background processes
@@ -18,6 +31,12 @@ mkdir -p "$LOG_DIR" "$PID_DIR"
 
 VITE_PID_FILE="$PID_DIR/vite.pid"
 ELECTRON_PID_FILE="$PID_DIR/electron.pid"
+BACKEND_PID_FILE="$PID_DIR/backend.pid"
+BACKEND_LAUNCHER="$ROOT_DIR/build/linux/run_backend.sh"
+BACKEND_URL="http://127.0.0.1:5000/"
+# Set to 1 when this invocation launched the backend, so `foreground` knows
+# whether it is responsible for stopping it on exit.
+BACKEND_LAUNCHED_HERE=0
 
 # Default values
 CMD="foreground"
@@ -122,6 +141,44 @@ check_frontend_deps() {
 
 # --- Background execution functions ---
 
+backend_is_running() {
+  if [ -f "$BACKEND_PID_FILE" ] && kill -0 "$(cat "$BACKEND_PID_FILE" 2>/dev/null)" 2>/dev/null; then
+    return 0
+  fi
+  curl -s -o /dev/null --max-time 3 "$BACKEND_URL"
+}
+
+# Launches the backend and returns immediately (it keeps starting up in the
+# background). Leaves an already-running backend alone.
+launch_backend_bg() {
+  if backend_is_running; then
+    echo "Backend already running; not starting another."
+    return 0
+  fi
+  local launcher_args=()
+  [ "${DEV_LAN:-0}" = "1" ] && launcher_args+=(--lan)
+  echo "Launching backend (logs: $LOG_DIR/backend.log)..."
+  # Explicit `|| return 1`: callers use this inside `if !`, where `set -e` is
+  # suppressed, so a failed launch would otherwise be silently ignored.
+  "$BACKEND_LAUNCHER" ${launcher_args[@]+"${launcher_args[@]}"} launch || return 1
+  BACKEND_LAUNCHED_HERE=1
+}
+
+# Stops the backend whenever a pidfile says one is running (explicit stop/restart).
+stop_backend() {
+  if [ -f "$BACKEND_PID_FILE" ]; then
+    "$BACKEND_LAUNCHER" stop
+  fi
+}
+
+# Stops the backend only if this invocation launched it, so exiting or failing
+# never takes down a backend the user started separately.
+stop_backend_if_launched_here() {
+  if [ "$BACKEND_LAUNCHED_HERE" = "1" ]; then
+    stop_backend
+  fi
+}
+
 start_vite_bg() {
   echo "Starting Vite on ${PORT} (logs: $LOG_DIR/vite.log)..."
   local host_arg=""
@@ -163,8 +220,8 @@ wait_for_vite() {
   return 1
 }
 
-stop_all() {
-  echo "Stopping Astrometrics processes..."
+stop_frontend() {
+  echo "Stopping Astrometrics frontend processes..."
   if [ -f "$ELECTRON_PID_FILE" ]; then
     epid=$(cat "$ELECTRON_PID_FILE" 2>/dev/null || true)
     if [ -n "$epid" ]; then
@@ -188,6 +245,16 @@ stop_all() {
   kill_port_pids
 }
 
+stop_all() {
+  stop_frontend
+  stop_backend
+}
+
+stop_what_this_run_started() {
+  stop_frontend
+  stop_backend_if_launched_here
+}
+
 status_check() {
   local running=0
   if [ -f "$ELECTRON_PID_FILE" ] && kill -0 "$(cat "$ELECTRON_PID_FILE" 2>/dev/null)" 2>/dev/null; then
@@ -202,6 +269,12 @@ status_check() {
   else
     echo "Vite is NOT running."
   fi
+  if backend_is_running; then
+    echo "Backend is running."
+    running=1
+  else
+    echo "Backend is NOT running."
+  fi
   return 0
 }
 
@@ -212,17 +285,23 @@ check_and_fix_sandbox || true
 
 case "$CMD" in
   start)
-    # Stop existing if running
-    stop_all
+    # Stop a previous frontend, but leave any running backend alone
+    stop_frontend
 
+    # Backend first: its launcher purges the shared log dir, which must happen
+    # before Vite starts writing vite.log there.
+    if ! launch_backend_bg; then
+        echo "Backend failed to launch."
+        exit 1
+    fi
     start_vite_bg
     if ! wait_for_vite; then
         echo "Vite failed to start."
-        stop_all
+        stop_what_this_run_started
         exit 1
     fi
     start_electron_bg
-    echo "Astrometrics started."
+    echo "Astrometrics started. The splash screen stays up until the backend is ready."
     ;;
   stop)
     stop_all
@@ -243,8 +322,12 @@ case "$CMD" in
     # Start npm run dev:local logic inline or just use generic functions but wait?
     # To keep exact behavior, we replicate the original logic
 
-    trap 'stop_all' EXIT INT TERM
+    trap 'stop_what_this_run_started' EXIT INT TERM
 
+    if ! launch_backend_bg; then
+        echo "Backend failed to launch."
+        exit 1
+    fi
     start_vite_bg
     if ! wait_for_vite; then
         echo "Vite failed."

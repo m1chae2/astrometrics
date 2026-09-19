@@ -1,6 +1,7 @@
 """StellarObject lifecycle, planetarium sky sources, and visibility queries."""
 
 import logging
+import math
 import re
 
 from astrometricslib import Astrometrics, StellarObject
@@ -27,6 +28,36 @@ def _is_per_frame_photometry_detection(object_id: str) -> bool:
         VariabilityAnalyzer generates, rather than a curated catalog id.
     """
     return bool(_PER_FRAME_DETECTION_ID_SUFFIX.search(object_id))
+
+
+# Real apparent magnitudes bottom out near -1.5 (Sirius), but photometry
+# stores instrumental magnitudes (about -10 to -17) in the same field, which
+# say nothing about how bright a star looks. Must match
+# BRIGHTEST_CATALOG_MAGNITUDE in ui/planetariumDisplay/layers/StarOverlay.ts.
+_BRIGHTEST_CATALOG_MAGNITUDE = -2.0
+
+
+def _has_catalog_magnitude(magnitude: object) -> bool:
+    """Say whether a star's magnitude is a real catalog magnitude.
+
+    Parameters
+    ----------
+    magnitude : `object`
+        The star's raw magnitude field, which may be a number, `None`, or
+        an empty string.
+
+    Returns
+    -------
+    has_catalog_magnitude : `bool`
+        `True` for a finite number at or above the catalog floor; `False`
+        for a missing (`None`, `""`) or instrumental (very negative) value.
+    """
+    return (
+        isinstance(magnitude, int | float)
+        and not isinstance(magnitude, bool)
+        and math.isfinite(magnitude)
+        and magnitude >= _BRIGHTEST_CATALOG_MAGNITUDE
+    )
 
 
 def _serialize_target_for_planetarium(target, local_target_ids: set | None = None) -> dict | None:  # ruff: ignore[missing-type-function-argument]
@@ -505,7 +536,15 @@ class StellarService:
         """
         return self.astrometrics.stars.get_audit()
 
-    def get_sources(self, ra: float, dec: float, radius: float, include_catalog: bool = False) -> list[dict]:
+    def get_sources(
+        self,
+        ra: float,
+        dec: float,
+        radius: float,
+        include_catalog: bool = False,
+        limiting_magnitude: float | None = None,
+        include_stars_without_catalog_magnitude: bool = True,
+    ) -> list[dict]:
         """Return all stellar and target objects in a region.
 
         Includes the global SIMBAD catalog if specified.
@@ -520,6 +559,18 @@ class StellarService:
             Viewport radius in degrees.
         include_catalog : bool
             If True, query includes the global SIMBAD catalog.
+        limiting_magnitude : float, optional
+            Faintest star magnitude worth returning. Stars with a catalog
+            magnitude fainter than this are omitted. `None` disables the
+            filter. Targets are never filtered.
+        include_stars_without_catalog_magnitude : bool
+            Whether to return stars that have no usable catalog magnitude
+            (see `_has_catalog_magnitude`). Most local stars are per-field
+            detections whose magnitude is empty or instrumental, so
+            `limiting_magnitude` can't thin them out, and a wide-FOV
+            Planetarium view can match hundreds of thousands of them. The
+            Planetarium passes `False` above the FOV at which it stops
+            drawing them.
 
         Returns
         -------
@@ -528,8 +579,15 @@ class StellarService:
         """
         objects = self.wayfinder.planning.get_sources(ra, dec, radius, include_catalog=include_catalog)
 
-        local_star_ids = {o.id for o in self.get_stellar_objects()}
-        local_target_ids = {o.id for o in self.astrometrics.targets.list()}
+        # These ID sets exist only to tell apart local objects from ones
+        # merged in from the global SIMBAD catalog, which only happens when
+        # include_catalog is True -- get_sources() returns local-only
+        # objects otherwise. Building them unconditionally meant every
+        # viewport-scoped Planetarium query (include_catalog=False) paid
+        # for a full scan of the local catalog just to compute a flag that
+        # was already guaranteed False for every returned object.
+        local_star_ids = {o.id for o in self.get_stellar_objects()} if include_catalog else None
+        local_target_ids = {o.id for o in self.astrometrics.targets.list()} if include_catalog else None
 
         sources = []
         for obj in objects:
@@ -550,6 +608,11 @@ class StellarService:
                         # (one per detected point source in the reference
                         # frame), never meant to be browsable catalog stars.
                         continue
+                    if _has_catalog_magnitude(obj.magnitude):
+                        if limiting_magnitude is not None and obj.magnitude > limiting_magnitude:
+                            continue
+                    elif not include_stars_without_catalog_magnitude:
+                        continue
                     sources.append({
                         "id": obj.id,
                         "ra": float(obj.right_ascension),
@@ -561,12 +624,20 @@ class StellarService:
                         "has_spectra": bool(obj.spectroscopy and obj.spectroscopy.wavelengths_angstrom),
                         "has_photometry": bool(obj.photometry and len(obj.photometry.timestamps) > 0),
                         "type": "star",
-                        "global": obj.id not in local_star_ids,
+                        "global": (obj.id not in local_star_ids) if include_catalog else False,
                         "stackedImage": None,
                         "fieldOfView": None,
                     })
                 else:  # Target — delegate to shared serializer. REQ: PLN-2.2
                     serialized = _serialize_target_for_planetarium(obj, local_target_ids)
+                    if serialized and not include_catalog:
+                        # _serialize_target_for_planetarium() defaults to
+                        # is_global=True when local_target_ids is None (its
+                        # own docstring: "when provided..."), which is the
+                        # wrong default here -- when include_catalog is
+                        # False every returned target is local by
+                        # construction, not global.
+                        serialized["global"] = False
                     if serialized:
                         sources.append(serialized)
             except Exception as exc:

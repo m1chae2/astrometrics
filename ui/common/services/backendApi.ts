@@ -86,7 +86,7 @@ export interface ActionRegistry {
     "astronomy:update": { payload: { object_id: string; updates: Partial<Spectrum> }; response: Spectrum | null };
     "astronomy:create": { payload: { object_id: string; ra?: string; dec?: string }; response: Spectrum | null };
     "astronomy:get_audit": { payload: Record<string, never>; response: Record<string, any>[] };
-    "planetarium:get_sources": { payload: { ra: number; dec: number; radius: number }; response: PlanetariumSource[] };
+    "planetarium:get_sources": { payload: { ra: number; dec: number; radius: number; limiting_magnitude?: number; include_stars_without_catalog_magnitude?: boolean }; response: PlanetariumSource[] };
     "planetarium:get_targets": { payload: Record<string, never>; response: PlanetariumTarget[] };
     "planetarium:get_visibility": { payload: { objects: Array<{ id: string; type?: string }>; time?: string }; response: PlanetariumVisibilityItem[] };
     "planetarium:get_observer_location": { payload: Record<string, never>; response: ObserverLocation };

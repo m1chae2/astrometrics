@@ -23,6 +23,9 @@ export class BackendManager {
      * the renderer over IPC, with neither path crossing a browser origin.
      */
     this.sessionToken = crypto.randomBytes(32).toString('base64url');
+
+    /** Set once a backend this manager spawned has exited, so waiting on it can stop early. */
+    this.backendExited = false;
   }
 
   /**
@@ -76,6 +79,52 @@ export class BackendManager {
     if (this.backendProcess) {
       this._setupListeners(onReady);
     }
+  }
+
+  /**
+   * Waits until the backend reports that its startup warm-up has finished.
+   *
+   * The backend starts accepting requests as soon as it is listening, but it
+   * then loads the whole star catalog into memory, and until that is done the
+   * first Planetarium load sits empty for tens of seconds. Polling here lets
+   * the splash screen cover that time instead. Works whether this manager
+   * spawned the backend or `SKIP_BACKEND` pointed it at one started elsewhere.
+   *
+   * Never blocks the app indefinitely: it gives up after `timeoutMs`, when a
+   * spawned backend has exited, or if the backend has no `/api/ready` route
+   * (an older build), and the caller opens the window anyway.
+   *
+   * @param {{timeoutMs?: number, pollIntervalMs?: number}} [options] - Polling limits.
+   * @return {Promise<boolean>} True if the backend reported ready, false if it gave up waiting.
+   */
+  async waitUntilWarm({ timeoutMs = 180000, pollIntervalMs = 500 } = {}) {
+    const port = process.env.ASTROMETRICS_PORT || '5000';
+    const readyUrl = `http://127.0.0.1:${port}/api/ready`;
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
+      if (this.backendExited) {
+        log.warn('Backend exited before finishing warm-up; not waiting any longer.');
+        return false;
+      }
+      try {
+        const response = await fetch(readyUrl, { signal: AbortSignal.timeout(2000) });
+        if (response.ok) {
+          log.info('Backend finished warm-up.');
+          return true;
+        }
+        if (response.status === 404) {
+          log.warn('Backend has no /api/ready route; not waiting for warm-up.');
+          return true;
+        }
+      } catch {
+        // Not listening yet, or too busy loading the catalog to answer in time; keep polling.
+      }
+      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+    }
+
+    log.warn(`Backend did not report ready within ${timeoutMs}ms; opening the window anyway.`);
+    return false;
   }
 
   stop() {
@@ -136,6 +185,9 @@ export class BackendManager {
     });
 
     this.backendProcess.on('error', (err) => log.error('Backend process error:', err));
-    this.backendProcess.on('close', (code) => log.info(`Backend exited with code ${code}`));
+    this.backendProcess.on('close', (code) => {
+      this.backendExited = true;
+      log.info(`Backend exited with code ${code}`);
+    });
   }
 }

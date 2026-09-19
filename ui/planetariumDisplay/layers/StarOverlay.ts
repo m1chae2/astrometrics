@@ -110,6 +110,37 @@ export function computeLimitingMagnitude(fovDegrees: number): number {
 }
 
 /**
+ * Brightest magnitude treated as a real catalog magnitude. Sirius, the
+ * brightest star in the sky, is about -1.5, but the same field also holds
+ * instrumental magnitudes from photometry (around -10 to -17), which say
+ * nothing about how bright a star looks on the sky. Anything below this
+ * floor is therefore treated as "no catalog magnitude". Must match
+ * `_BRIGHTEST_CATALOG_MAGNITUDE` in backend/services/data/stellar_service.py.
+ */
+export const BRIGHTEST_CATALOG_MAGNITUDE = -2.0;
+
+/**
+ * Widest FOV, in degrees, at which the user's own stars that have no catalog
+ * magnitude are shown. Most of a local library's stars are detections around
+ * imaged targets with an empty or instrumental magnitude, so no magnitude cut
+ * can thin them out; at a wide FOV they are just dense dot clusters (a library
+ * can hold hundreds of thousands), so they only appear once the view is
+ * narrow enough for a target's field to be worth looking at.
+ */
+export const UNCATALOGED_STAR_MAX_FOV_DEG = 10.0;
+
+/**
+ * Whether a star's magnitude is a real catalog magnitude rather than missing
+ * (`null`/`""`) or instrumental (see BRIGHTEST_CATALOG_MAGNITUDE).
+ *
+ * @param {unknown} magnitude - The source's magnitude field as received from the backend.
+ * @returns {boolean} True if the value is a finite number at or above the catalog floor.
+ */
+export function hasCatalogMagnitude(magnitude: unknown): magnitude is number {
+  return typeof magnitude === 'number' && Number.isFinite(magnitude) && magnitude >= BRIGHTEST_CATALOG_MAGNITUDE;
+}
+
+/**
  * Determines whether a source qualifies as a displayable star point, applying
  * the same catalog-routing rule StarOverlay and StarFieldRenderer both need
  * to agree on: Hipparcos and GAIA stars (the generic background sky, at
@@ -119,10 +150,15 @@ export function computeLimitingMagnitude(fovDegrees: number): number {
  * independently of showStars -- unchecking the generic background field
  * should not also hide the user's own tracked catalog.
  *
+ * The user's own stars without a catalog magnitude can't be judged against
+ * the limiting magnitude, so they show only at or below
+ * UNCATALOGED_STAR_MAX_FOV_DEG instead.
+ *
  * @param {ProjectionContext['sources'][number]} source - The candidate source.
  * @param {boolean} showStars - Whether the generic Hipparcos background star field should display.
  * @param {boolean} showCatalog - Whether the user's own cataloged (non-Hipparcos) sources should display.
  * @param {number} limitingMagnitude - Faintest magnitude to display at the current FOV (see computeLimitingMagnitude).
+ * @param {number} fovDegrees - Current viewport field of view, in degrees.
  * @returns {boolean} True if this source should be rendered as a star point.
  */
 export function isDisplayableStar(
@@ -130,14 +166,22 @@ export function isDisplayableStar(
   showStars: boolean,
   showCatalog: boolean,
   limitingMagnitude: number,
+  fovDegrees: number,
 ): boolean {
   if (source.ra === 0 && source.dec === 0) return false;
   if (source.type !== 'star') return false;
 
-  const magnitude = typeof source.magnitude === 'number' ? source.magnitude : 5.0;
-  if (magnitude > limitingMagnitude) return false;
+  if (source.catalogSource === 'hipparcos' || source.catalogSource === 'gaia') {
+    const magnitude = typeof source.magnitude === 'number' ? source.magnitude : 5.0;
+    if (magnitude > limitingMagnitude) return false;
+    return showStars;
+  }
 
-  if (source.catalogSource === 'hipparcos' || source.catalogSource === 'gaia') return showStars;
+  if (hasCatalogMagnitude(source.magnitude)) {
+    if (source.magnitude > limitingMagnitude) return false;
+  } else if (fovDegrees > UNCATALOGED_STAR_MAX_FOV_DEG) {
+    return false;
+  }
   return showCatalog;
 }
 
@@ -206,7 +250,13 @@ export class StarOverlay implements PlanetariumOverlay {
     // and hiding stars fainter than the current FOV's limiting magnitude
     const limitingMagnitude = computeLimitingMagnitude(projectionContext.fov);
     const stars = projectionContext.sources.filter(source =>
-      isDisplayableStar(source, projectionContext.showStars, projectionContext.showCatalog, limitingMagnitude),
+      isDisplayableStar(
+        source,
+        projectionContext.showStars,
+        projectionContext.showCatalog,
+        limitingMagnitude,
+        projectionContext.fov,
+      ),
     );
 
     stars.forEach(source => {

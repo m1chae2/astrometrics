@@ -27,6 +27,37 @@ function formatCoordinates(ra?: any, dec?: any): string {
 }
 
 /**
+ * Switches the app to Planetarium, centered on the given star, in place --
+ * the reverse of Planetarium's "Open in Astronomy Manager" action.
+ *
+ * @param id Star identifier to select once Planetarium mounts.
+ * @param name Display name for the star.
+ * @param ra Right ascension in degrees.
+ * @param dec Declination in degrees.
+ * @param hasSpectra Whether spectroscopy data exists for this star.
+ * @param hasPhotometry Whether photometry data exists for this star.
+ * @returns {void}
+ */
+function locateInPlanetarium(
+    id: string,
+    name: string,
+    ra: number,
+    dec: number,
+    hasSpectra: boolean,
+    hasPhotometry: boolean
+): void {
+    const payload = { id, name, ra, dec, hasSpectra, hasPhotometry };
+    try {
+        window.localStorage.setItem('astronomyLocateStar', JSON.stringify(payload));
+        window.localStorage.setItem('appMode', 'Planetarium');
+    } catch {
+        // Ignore localStorage access failures (e.g. in private browsing)
+    }
+    window.dispatchEvent(new CustomEvent('astrometrics:modeChange', { detail: 'Planetarium' }));
+    window.dispatchEvent(new CustomEvent('astrometrics:planetariumLocateStar', { detail: payload }));
+}
+
+/**
  * Renders stellar metadata summary bar above astronomy plots.
  */
 export const StarSummaryCard: React.FC<StarSummaryCardProps> = ({
@@ -42,6 +73,9 @@ export const StarSummaryCard: React.FC<StarSummaryCardProps> = ({
     const ra = astronomyData?.ra ?? astronomyData?.right_ascension;
     const dec = astronomyData?.dec ?? astronomyData?.declination;
     const formattedCoords = formatCoordinates(ra, dec);
+    const raNum = typeof ra === 'number' ? ra : parseFloat(ra);
+    const decNum = typeof dec === 'number' ? dec : parseFloat(dec);
+    const canLocate = Number.isFinite(raNum) && Number.isFinite(decNum);
     const mag = astronomyData?.magnitude ?? astronomyData?.mag;
     const meanFlux = astronomyData?.photometry?.meanFlux ?? astronomyData?.photometry?.mean_flux;
     const variabilityScore = astronomyData?.variabilityScore ?? astronomyData?.variability_score;
@@ -58,6 +92,22 @@ export const StarSummaryCard: React.FC<StarSummaryCardProps> = ({
                     <span className="star-summary-card__badge variability-badge">
                         Var Score: {(Number(variabilityScore)).toFixed(2)}
                     </span>
+                )}
+                {canLocate && (
+                    <button
+                        type="button"
+                        className="star-summary-card__locate-btn"
+                        onClick={() => locateInPlanetarium(
+                            String(astronomyData?.id || astronomyData?.name || starId),
+                            String(name),
+                            raNum,
+                            decNum,
+                            !!(astronomyData?.hasSpectra ?? astronomyData?.has_spectra),
+                            !!(astronomyData?.hasPhotometry ?? astronomyData?.has_photometry)
+                        )}
+                    >
+                        Locate in Planetarium
+                    </button>
                 )}
             </div>
 

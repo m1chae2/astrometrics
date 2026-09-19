@@ -10,6 +10,9 @@ set -euo pipefail
 #
 # Usage:
 #   ./run_backend.sh start             - start backend in background (writes PID to .run_pids/backend.pid)
+#   ./run_backend.sh launch            - like start, but return immediately instead of waiting for the
+#                                        backend to answer (used by run_astrometrics.sh so the app's
+#                                        splash screen can cover the backend's startup)
 #   ./run_backend.sh foreground        - run backend in foreground (logs to stdout)
 #   ./run_backend.sh stop              - stop backgrounded backend
 #   ./run_backend.sh status            - show status
@@ -90,7 +93,7 @@ done
 # Replace positional parameters with filtered args
 set -- "${NEW_ARGS[@]:-}"
 
-start_backend() {
+launch_backend() {
 
   if [ -f "$PID_FILE" ]; then
     if kill -0 "$(cat "$PID_FILE")" >/dev/null 2>&1; then
@@ -118,6 +121,11 @@ start_backend() {
   ASTROMETRICS_BIND_HOST="$BIND_HOST" nohup "$PYTHON" -u -m "$BACKEND_MODULE" >"$LOG_FILE" 2>&1 &
   backend_pid=$!
   echo "$backend_pid" > "$PID_FILE"
+}
+
+wait_for_backend_healthy() {
+  local backend_pid
+  backend_pid=$(cat "$PID_FILE")
 
   # Health Check Loop
   echo "Waiting for backend to become healthy..."
@@ -147,6 +155,11 @@ start_backend() {
   echo "It might be hanging or stuck. Check logs:"
   echo "$LOG_FILE"
   return 1
+}
+
+start_backend() {
+  launch_backend
+  wait_for_backend_healthy
 }
 
 install_into_env() {
@@ -209,6 +222,9 @@ case ${1:-start} in
   start)
     start_backend
     ;;
+  launch)
+    launch_backend
+    ;;
   install)
     install_into_env
     ;;
@@ -222,6 +238,7 @@ Usage: ./scripts/run_backend.sh [OPTIONS] <command>
 
 Commands:
   start               Start backend in background (writes PID to .run_pids/backend.pid)
+  launch              Start backend in background and return immediately, without waiting for it to answer
   foreground          Run backend in foreground (logs to stdout)
   stop                Stop backgrounded backend (uses PID file)
   restart             Stop and then start the backend
@@ -250,7 +267,7 @@ EOF
     start_backend
     ;;
   *)
-    echo "Usage: $0 {start|stop|restart|status|foreground|install}"
+    echo "Usage: $0 {start|launch|stop|restart|status|foreground|install}"
     exit 2
     ;;
 esac

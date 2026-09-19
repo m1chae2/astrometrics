@@ -75,7 +75,7 @@ export function findNearestSource(params: HitTestParams): PlanetariumSource | nu
   const combined = [...sources, ...(targets as unknown as PlanetariumSource[])];
   const activeSources = combined.filter(source => {
     if (source.ra === 0 && source.dec === 0) return false;
-    if (source.type === 'star') return isDisplayableStar(source, showStars, showCatalog, limitingMagnitude);
+    if (source.type === 'star') return isDisplayableStar(source, showStars, showCatalog, limitingMagnitude, fov);
     return showCatalog;
   });
 

@@ -137,12 +137,15 @@ def get_sources(
     """
     from wayfindinglib.skylib import catalog_operations
 
-    if not include_catalog:
-        sources = []
-        sources.extend(sky._astrometrics.targets.list())
-        sources.extend(sky._astrometrics.stellar_objects)
-        return sources
-
+    # astrometrics_catalog() already restricts local targets/stars to
+    # ra_deg/dec_deg/radius_deg via a batched SkyCoord separation check
+    # (see its own docstring), so it's used for both branches below --
+    # there used to be a separate "not include_catalog" fast path that
+    # returned sky._astrometrics.targets.list() and .stellar_objects
+    # directly, unfiltered by radius_deg. That meant every viewport-scoped
+    # Planetarium query (which always calls this with include_catalog=False)
+    # fetched and serialized the entire local catalog instead of just
+    # what's in view.
     sources = catalog_operations.astrometrics_catalog(sky, ra_deg, dec_deg, radius_deg)
     if include_catalog:
         online_sources = catalog_operations.global_catalog(sky, ra_deg, dec_deg, radius_deg)

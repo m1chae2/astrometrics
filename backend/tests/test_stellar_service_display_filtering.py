@@ -12,7 +12,11 @@ need in full.
 from unittest.mock import MagicMock
 
 from astrometricslib import SpectroscopyResult, StellarObject
-from backend.services.data.stellar_service import StellarService, _is_per_frame_photometry_detection
+from backend.services.data.stellar_service import (
+    StellarService,
+    _has_catalog_magnitude,
+    _is_per_frame_photometry_detection,
+)
 
 
 def _make_service(stellar_objects=None, planning_sources=None) -> StellarService:  # ruff: ignore[missing-type-function-argument]
@@ -302,3 +306,55 @@ def test_get_displayable_stellar_object_summaries_offset_pagination() -> None:
     assert len(page_3) == 50
     assert page_3[0]["id"] == "HD_200"
     assert page_3[49]["id"] == "HD_249"
+
+
+def test_has_catalog_magnitude_rejects_missing_and_instrumental_values():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify only real apparent magnitudes count as catalog magnitudes."""
+    assert _has_catalog_magnitude(0.03) is True
+    assert _has_catalog_magnitude(-1.46) is True  # Sirius
+    assert _has_catalog_magnitude(14) is True
+    assert _has_catalog_magnitude("") is False
+    assert _has_catalog_magnitude(None) is False
+    assert _has_catalog_magnitude(-14.98) is False  # instrumental photometry
+    assert _has_catalog_magnitude(float("nan")) is False
+    assert _has_catalog_magnitude(True) is False
+
+
+def test_get_sources_thins_faint_and_uncataloged_stars():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify limiting_magnitude and the uncataloged-stars flag trim results.
+
+    A wide-FOV Planetarium view can match hundreds of thousands of local
+    stars, most of them per-field detections whose magnitude is empty or
+    instrumental, so a magnitude cut alone can't thin them out.
+    """
+    bright_star = StellarObject(id="Bright", ra=10.0, dec=10.0, magnitude=3.0)
+    faint_star = StellarObject(id="Faint", ra=10.1, dec=10.1, magnitude=14.0)
+    empty_magnitude_star = StellarObject(id="EmptyMagnitude", ra=10.2, dec=10.2, magnitude="")
+    unknown_magnitude_star = StellarObject(id="NoMagnitude", ra=10.3, dec=10.3)
+    instrumental_star = StellarObject(id="Instrumental", ra=10.4, dec=10.4, magnitude=-14.9)
+
+    service = _make_service(
+        planning_sources=[
+            bright_star,
+            faint_star,
+            empty_magnitude_star,
+            unknown_magnitude_star,
+            instrumental_star,
+        ],
+    )
+
+    def returned_ids(**filters: float | bool) -> list[str]:
+        return [source["id"] for source in service.get_sources(ra=10.0, dec=10.0, radius=5.0, **filters)]
+
+    assert returned_ids() == ["Bright", "Faint", "EmptyMagnitude", "NoMagnitude", "Instrumental"]
+
+    assert returned_ids(limiting_magnitude=6.0) == [
+        "Bright",
+        "EmptyMagnitude",
+        "NoMagnitude",
+        "Instrumental",
+    ]
+
+    assert returned_ids(include_stars_without_catalog_magnitude=False) == ["Bright", "Faint"]
+
+    assert returned_ids(limiting_magnitude=6.0, include_stars_without_catalog_magnitude=False) == ["Bright"]

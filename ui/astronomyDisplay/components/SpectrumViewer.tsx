@@ -12,6 +12,17 @@ import '../styles/astronomyViewer.css';
 
 import { Spectrum, SpectralObservation } from '../../common/types/backendTypes';
 
+/**
+ * Shortens a named feature's label for display on the plot.
+ * Prefers the short form in trailing parentheses (e.g. "Hydrogen Balmer
+ * series (H-alpha)" -> "H-alpha") since the full names are too long to
+ * fit as a vertical axis label; falls back to the full name otherwise.
+ */
+const shortenFeatureLabel = (name: string): string => {
+    const parenMatch = name.match(/\(([^)]+)\)\s*$/);
+    return parenMatch ? parenMatch[1] : name;
+};
+
 interface Props {
     astronomyData: (Spectrum & { wavelength: number[]; spectrumFlux: number[] }) | null;
     loading: boolean;
@@ -87,6 +98,14 @@ export const SpectrumViewer: React.FC<Props> = ({
     };
 
     const [isOverlayingEpochs, setIsOverlayingEpochs] = useState<boolean>(true);
+    const [showFeatures, setShowFeatures] = useState<boolean>(true);
+
+    // Named absorption features (Balmer series, Ca II H&K, etc.) the backend
+    // detected as plausible dips against the local continuum.
+    const probableSpectralFeatures = useMemo(
+        () => astronomyData?.spectroscopy?.probableSpectralFeatures ?? [],
+        [astronomyData]
+    );
 
     const plotData: PlotlyTrace[] = useMemo(() => {
         if (!astronomyData) return [];
@@ -152,7 +171,7 @@ export const SpectrumViewer: React.FC<Props> = ({
 
         // REQ: AST-2.6: The display SHALL overlay vertical lines spanning the height of the plot for selections.
         const selectionColor = getVar('--plot-selection', '#ff4444');
-        base.shapes = selections.map(sel => ({
+        const selectionShapes = selections.map(sel => ({
             type: 'line',
             x0: sel.x,
             y0: 0,
@@ -167,8 +186,44 @@ export const SpectrumViewer: React.FC<Props> = ({
             }
         }));
 
+        const featureColor = getVar('--plot-green', '#00ff00');
+        const featureShapes = showFeatures ? probableSpectralFeatures.map((f) => ({
+            type: 'line',
+            x0: f.wavelength_angstrom,
+            y0: 0,
+            x1: f.wavelength_angstrom,
+            y1: 1,
+            xref: 'x',
+            yref: 'paper',
+            opacity: Math.max(0.35, Number(f.confidence) || 0),
+            line: {
+                color: featureColor,
+                width: 1,
+                dash: 'dot'
+            }
+        })) : [];
+
+        base.shapes = [...selectionShapes, ...featureShapes];
+
+        base.annotations = showFeatures ? probableSpectralFeatures.map((f) => {
+            const confidencePct = Number.isFinite(Number(f.confidence)) ? Math.round(Number(f.confidence) * 100) : null;
+            const label = shortenFeatureLabel(String(f.feature));
+            return {
+                x: f.wavelength_angstrom,
+                y: 1,
+                xref: 'x',
+                yref: 'paper',
+                yanchor: 'bottom',
+                showarrow: false,
+                textangle: -90,
+                text: confidencePct !== null ? `${label} (${confidencePct}%)` : label,
+                font: { color: featureColor, size: 10 },
+                opacity: Math.max(0.5, Number(f.confidence) || 0)
+            };
+        }) : [];
+
         return base;
-    }, [selections]);
+    }, [selections, probableSpectralFeatures, showFeatures]);
 
     if (loading) return <div className="astronomy-viewer-loading">Loading spectrum...</div>;
     if (error) return <div className="astronomy-viewer-error">{error}</div>;
@@ -179,27 +234,41 @@ export const SpectrumViewer: React.FC<Props> = ({
     );
 
     const hasEpochs = Array.isArray(astronomyData?.spectraHistory) && astronomyData.spectraHistory.length > 1;
+    const hasFeatures = probableSpectralFeatures.length > 0;
 
     return (
         <div className="astronomy-viewer-root astronomy-viewer-root--full-height" ref={containerRef}>
-            {hasEpochs && (
+            {(hasEpochs || hasFeatures) && (
                 <div className="astronomy-viewer__toolbar">
-                    <div className="astronomy-viewer__segmented-control">
-                        <button
-                            type="button"
-                            className={`segmented-btn ${!isOverlayingEpochs ? 'active' : ''}`}
-                            onClick={() => setIsOverlayingEpochs(false)}
-                        >
-                            Latest Epoch
-                        </button>
-                        <button
-                            type="button"
-                            className={`segmented-btn ${isOverlayingEpochs ? 'active' : ''}`}
-                            onClick={() => setIsOverlayingEpochs(true)}
-                        >
-                            Overlay All Epochs ({astronomyData.spectraHistory?.length ?? 0})
-                        </button>
-                    </div>
+                    {hasFeatures && (
+                        <div className="astronomy-viewer__segmented-control">
+                            <button
+                                type="button"
+                                className={`segmented-btn ${showFeatures ? 'active' : ''}`}
+                                onClick={() => setShowFeatures((v) => !v)}
+                            >
+                                Features ({probableSpectralFeatures.length})
+                            </button>
+                        </div>
+                    )}
+                    {hasEpochs && (
+                        <div className="astronomy-viewer__segmented-control">
+                            <button
+                                type="button"
+                                className={`segmented-btn ${!isOverlayingEpochs ? 'active' : ''}`}
+                                onClick={() => setIsOverlayingEpochs(false)}
+                            >
+                                Latest Epoch
+                            </button>
+                            <button
+                                type="button"
+                                className={`segmented-btn ${isOverlayingEpochs ? 'active' : ''}`}
+                                onClick={() => setIsOverlayingEpochs(true)}
+                            >
+                                Overlay All Epochs ({astronomyData.spectraHistory?.length ?? 0})
+                            </button>
+                        </div>
+                    )}
                 </div>
             )}
             <BasePlot

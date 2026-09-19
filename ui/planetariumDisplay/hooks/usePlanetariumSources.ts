@@ -23,12 +23,21 @@ import { PlanetariumSource } from '../../common/types/planetariumTypes';
  * @param {number} ra - Query center Right Ascension in degrees.
  * @param {number} dec - Query center Declination in degrees.
  * @param {number} radius - Query radius in degrees.
+ * @param {number} limitingMagnitude - Faintest star magnitude the current FOV can display (see
+ *   computeLimitingMagnitude). Sent to the backend so it doesn't return, serialize, and ship stars the
+ *   renderer would discard anyway -- at a wide FOV the local catalog otherwise matches hundreds of
+ *   thousands of them.
+ * @param {boolean} includeStarsWithoutCatalogMagnitude - Whether the current FOV is narrow enough to
+ *   draw stars that have no catalog magnitude (see UNCATALOGED_STAR_MAX_FOV_DEG). Most local stars are
+ *   in this group, so this is what actually thins a wide-FOV query.
  * @returns {{ sources: PlanetariumSource[]; loading: boolean; error: string | null }}
  */
 export const usePlanetariumSources = (
   ra: number,
   dec: number,
   radius: number,
+  limitingMagnitude: number,
+  includeStarsWithoutCatalogMagnitude: boolean,
 ) => {
   const [sources, setSources] = useState<PlanetariumSource[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -39,7 +48,13 @@ export const usePlanetariumSources = (
     const fetchSources = async () => {
       try {
         setLoading(true);
-        const data = await callBackend('planetarium:get_sources', { ra, dec, radius });
+        const data = await callBackend('planetarium:get_sources', {
+          ra,
+          dec,
+          radius,
+          limiting_magnitude: limitingMagnitude,
+          include_stars_without_catalog_magnitude: includeStarsWithoutCatalogMagnitude,
+        });
         if (active) {
           setSources(data);
           setError(null);
@@ -60,7 +75,7 @@ export const usePlanetariumSources = (
     return () => {
       active = false;
     };
-  }, [ra, dec, radius]);
+  }, [ra, dec, radius, limitingMagnitude, includeStarsWithoutCatalogMagnitude]);
 
   return { sources, loading, error };
 };

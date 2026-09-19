@@ -97,6 +97,24 @@
     margin-right: 4px;
 }
 
+.star-summary-card__locate-btn {
+    margin-left: auto;
+    background: transparent;
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.2));
+    color: var(--text-secondary, #a0a0a0);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.star-summary-card__locate-btn:hover {
+    background: var(--accent-color, #2196f3);
+    border-color: var(--accent-color, #2196f3);
+    color: #ffffff;
+}
+
 .star-summary-card__details {
     display: flex;
     align-items: center;
@@ -168,6 +186,8 @@
 .astronomy-viewer__toolbar {
     display: flex;
     justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
     padding: 2px 4px;
 }
 

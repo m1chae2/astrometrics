@@ -35,6 +35,7 @@ import { useTargetListLogic } from '../common/hooks/useTargetListLogic';
 import { useRemoteStatusContext } from '../common/context/RemoteStatusContext';
 import { useTelescopeStatus } from '../common/hooks/useTelescopeStatus';
 import { safeParse } from './utils/coordinateUtils';
+import { computeLimitingMagnitude, UNCATALOGED_STAR_MAX_FOV_DEG } from './layers/StarOverlay';
 import './styles/planetariumDisplay.css';
 
 /**
@@ -106,7 +107,18 @@ export const PlanetariumDisplay: React.FC = () => {
   // Extend query radius 1.5× beyond FOV to preload sources at pan edges; minimum 0.5°
   const queryRadius = useMemo(() => Math.max(currentFOV * 1.5, 0.5), [currentFOV]);
 
-  const { sources: localSources } = usePlanetariumSources(raValue, decValue, queryRadius);
+  // Same cutoff the renderer applies (see isDisplayableStar), so the backend can skip
+  // stars that would be fetched and then immediately discarded.
+  const limitingMagnitude = useMemo(() => computeLimitingMagnitude(currentFOV), [currentFOV]);
+  const includeStarsWithoutCatalogMagnitude = currentFOV <= UNCATALOGED_STAR_MAX_FOV_DEG;
+
+  const { sources: localSources } = usePlanetariumSources(
+    raValue,
+    decValue,
+    queryRadius,
+    limitingMagnitude,
+    includeStarsWithoutCatalogMagnitude,
+  );
 
   // Whole-sky bright-star query: served from the locally bundled Hipparcos
   // extract ('hipparcos') rather than a live query. GAIA DR3 is unsuitable
@@ -319,6 +331,55 @@ export const PlanetariumDisplay: React.FC = () => {
     // changes nothing at runtime -- matching how the sibling callback below
     // already declares it.
   }, [libraryTargets, targetList.targets, targetList.stars, setSelectedTargetId, setPendingTarget]);
+
+  /**
+   * Centers the sky map on and selects a star handed off from Astronomy
+   * Manager's "Locate in Planetarium" action.
+   *
+   * Unlike handleSelectObject, this doesn't look the star up in
+   * libraryTargets/targetList -- those lists are paginated/query-scoped and
+   * may not contain the handed-off star, so the RA/Dec and flags carried in
+   * the hand-off itself are used directly instead.
+   *
+   * @param {PlanetariumSource} source - The star to center on and select.
+   * @returns {void}
+   */
+  const applyLocateStar = useCallback((source: PlanetariumSource) => {
+    setViewerCenter({ ra: source.ra, dec: source.dec });
+    setSelectedSource(source);
+    setSelectedTargetId(source.id);
+    setPendingTarget(source.id);
+    setSlewRequestId(prev => prev + 1);
+  }, [setSelectedTargetId, setPendingTarget]);
+
+  // Consumes a star handed off from Astronomy Manager. Read once on mount
+  // (covers this panel's first mount, triggered by the hand-off's own mode
+  // switch) and removed immediately so it doesn't reapply on a later,
+  // unrelated visit to this mode.
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem('astronomyLocateStar');
+      if (raw) {
+        window.localStorage.removeItem('astronomyLocateStar');
+        applyLocateStar(JSON.parse(raw) as PlanetariumSource);
+      }
+    } catch {
+      // Ignore malformed or inaccessible localStorage payloads
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Live event for the case where this panel was already mounted (visited
+  // earlier in the session) when the hand-off fired -- the mount-time effect
+  // above only runs once and would otherwise miss it.
+  useEffect(() => {
+    const handleLocateStar = (event: Event) => {
+      const source = (event as CustomEvent<PlanetariumSource>).detail;
+      if (source) applyLocateStar(source);
+    };
+    window.addEventListener('astrometrics:planetariumLocateStar', handleLocateStar);
+    return () => window.removeEventListener('astrometrics:planetariumLocateStar', handleLocateStar);
+  }, [applyLocateStar]);
 
   /**
    * Handles source selection from the canvas, resetting plot visibility toggles.

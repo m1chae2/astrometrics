@@ -33,6 +33,7 @@ let mainWindow = null;
 let secondaryWindow = null;
 let splashWindow = null;
 let splashShownAt = 0;
+let isOpeningMainWindow = false;
 let tray = null;
 const backendManager = new BackendManager(app);
 
@@ -89,6 +90,20 @@ function dismissSplashAndShowMainWindow() {
       mainWindow.show();
     }
   }, remaining);
+}
+
+/**
+ * Opens the main window once the backend has finished loading its star catalog.
+ *
+ * The backend's "ready" signal can arrive more than once (it is matched against
+ * streamed output), so this guards against starting a second wait or window
+ * while one is already underway.
+ */
+async function openMainWindowWhenBackendIsWarm() {
+  if (mainWindow || isOpeningMainWindow) return;
+  isOpeningMainWindow = true;
+  await backendManager.waitUntilWarm();
+  createMainWindow();
 }
 
 /**
@@ -201,10 +216,10 @@ app.on('ready', () => {
     });
   });
 
-  // Start backend and transition to UI when ready
-  backendManager.start(() => {
-    if (!mainWindow) createMainWindow();
-  });
+  // Start backend and transition to UI once it has finished warming up. The
+  // splash stays up until then (it is only dismissed by the main window's
+  // ready-to-show), so nothing opens onto an empty Planetarium.
+  backendManager.start(openMainWindowWhenBackendIsWarm);
 
   // System Tray
   try {

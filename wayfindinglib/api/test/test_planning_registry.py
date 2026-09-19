@@ -222,6 +222,51 @@ def test_sky_and_observation_engines_are_lazily_constructed_once(isolated_butler
     assert planning._observation_engine is observation_engine
 
 
+def test_sky_engine_is_constructed_once_under_concurrent_first_access(isolated_butler, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify simultaneous first requests share one `Sky` instead of one each.
+
+    Regression test: the Planetarium fires several queries at once on mount,
+    and an unguarded lazy init let every one of them construct its own `Sky`
+    -- each loading a full copy of the star catalog (tens of seconds and
+    gigabytes each on a 270k-star library).
+    """
+    import threading
+    import time
+
+    import wayfindinglib.sky
+
+    construction_count = 0
+    count_lock = threading.Lock()
+
+    class SlowFakeSky:
+        def __init__(self, config=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+            nonlocal construction_count
+            with count_lock:
+                construction_count += 1
+            time.sleep(0.2)  # long enough that every thread arrives mid-construction
+
+    monkeypatch.setattr(wayfindinglib.sky, "Sky", SlowFakeSky)
+
+    planning = ObservationPlanning(butler=isolated_butler)
+    thread_count = 8
+    start_together = threading.Barrier(thread_count)
+    engines = []
+
+    def request_engine() -> None:
+        start_together.wait()
+        engines.append(planning._sky_engine)
+
+    threads = [threading.Thread(target=request_engine) for _ in range(thread_count)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert construction_count == 1
+    assert len(engines) == thread_count
+    assert all(engine is engines[0] for engine in engines)
+
+
 def test_planning_module_tree_imports_no_device_driver():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verify no planning_tasks/api source file imports the INDI device layer.
 

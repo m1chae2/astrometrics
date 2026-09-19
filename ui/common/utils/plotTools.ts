@@ -45,6 +45,7 @@ export type PlotlyLayout = {
   showlegend?: boolean;
   hovermode?: string;
   shapes?: any[];
+  annotations?: any[];
 };
 
 export type PlotlyStatic = {

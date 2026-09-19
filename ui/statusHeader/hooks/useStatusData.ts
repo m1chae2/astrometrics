@@ -32,6 +32,19 @@ export const useStatusData = () => {
         }
     });
 
+    // Keeps the header's mode label in sync with mode switches that don't go
+    // through chooseMode() below -- e.g. a remote "navigate" socket action, or
+    // a cross-view hand-off like Planetarium's "Open in Astronomy Manager" --
+    // both of which dispatch this event directly rather than calling chooseMode.
+    useEffect(() => {
+        const handleModeChange = (event: Event) => {
+            const nextMode = (event as CustomEvent<string>).detail;
+            if (nextMode) setSelectedMode(nextMode);
+        };
+        window.addEventListener('astrometrics:modeChange', handleModeChange);
+        return () => window.removeEventListener('astrometrics:modeChange', handleModeChange);
+    }, []);
+
     // Refs for transition detection
     const prevTelescopeConnection = useRef<boolean | null>(null);
     const prevTelescopeTracking = useRef<string | null>(null);

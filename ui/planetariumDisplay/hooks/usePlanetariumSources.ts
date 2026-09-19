@@ -6,18 +6,27 @@
  * Online catalog sources (e.g. GAIA, bundled Hipparcos) are handled separately
  * by useOnlineCatalogSources to decouple network latency from this fast local fetch.
  *
+ * A request waits for the view to stop changing before it is sent, and is cancelled
+ * if the view changes again while it is in flight. A wheel-zoom changes the view
+ * dozens of times in a couple of seconds; without this, each step sent its own
+ * request and the backend queued them all, so the final view took about ten seconds
+ * to arrive after the gesture ended.
+ *
  * REQ: PLN-1.1, REQ: PLN-2.1
  */
 
 import { useState, useEffect } from 'react';
 import { callBackend } from '../../common/services/backendApi';
 import { PlanetariumSource } from '../../common/types/planetariumTypes';
+import { LOCAL_CATALOG_QUERY_DEBOUNCE_MS } from './useOnlineCatalogSources';
 
 /**
  * Fetches local library PlanetariumSource objects within a circular sky region.
  *
- * Re-fetches whenever the center position or radius changes. The radius is typically
- * set to 1.5× the current FOV by the parent component to preload sources at pan edges.
+ * Re-fetches whenever the center position or radius changes, once the view has been
+ * still for LOCAL_CATALOG_QUERY_DEBOUNCE_MS. The radius is typically set to 1.5× the
+ * current FOV by the parent component to preload sources at pan edges. The previous
+ * sources stay on screen until the new ones arrive.
  *
  * @func usePlanetariumSources
  * @param {number} ra - Query center Right Ascension in degrees.
@@ -45,22 +54,29 @@ export const usePlanetariumSources = (
 
   useEffect(() => {
     let active = true;
+    const abortController = new AbortController();
+
     const fetchSources = async () => {
       try {
-        setLoading(true);
-        const data = await callBackend('planetarium:get_sources', {
-          ra,
-          dec,
-          radius,
-          limiting_magnitude: limitingMagnitude,
-          include_stars_without_catalog_magnitude: includeStarsWithoutCatalogMagnitude,
-        });
+        const data = await callBackend(
+          'planetarium:get_sources',
+          {
+            ra,
+            dec,
+            radius,
+            limiting_magnitude: limitingMagnitude,
+            include_stars_without_catalog_magnitude: includeStarsWithoutCatalogMagnitude,
+          },
+          { signal: abortController.signal },
+        );
         if (active) {
           setSources(data);
           setError(null);
         }
       } catch (error: unknown) {
-        if (active) {
+        // A cancelled request means a newer one replaced it; that request owns the state now.
+        const wasCancelled = error instanceof Error && error.name === 'AbortError';
+        if (active && !wasCancelled) {
           const message = error instanceof Error ? error.message : 'Failed to fetch planetarium sources';
           setError(message);
         }
@@ -71,9 +87,13 @@ export const usePlanetariumSources = (
       }
     };
 
-    fetchSources();
+    // Show that a request is pending straight away, including during the wait.
+    setLoading(true);
+    const debounceTimer = setTimeout(fetchSources, LOCAL_CATALOG_QUERY_DEBOUNCE_MS);
     return () => {
       active = false;
+      clearTimeout(debounceTimer);
+      abortController.abort();
     };
   }, [ra, dec, radius, limitingMagnitude, includeStarsWithoutCatalogMagnitude]);
 

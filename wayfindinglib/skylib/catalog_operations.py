@@ -17,34 +17,36 @@ from astropy.coordinates import SkyCoord
 from astrometricslib import StellarObject, Target, parse_coordinate_string
 from wayfindinglib.drivers.catalog import (
     CatalogDriver,
-    GaiaCatalogDriver,
-    GaiaStarCache,
+    DeepStarCatalogDriver,
+    DeepStarSource,
     LocalBrightStarCatalogDriver,
-    SimbadCatalogDriver,
 )
 from wayfindinglib.drivers.catalog.simbad_catalog_driver import resolve_simbad_radec
 
 logger = logging.getLogger(__name__)
 
 
-def build_catalog_driver_registry(star_cache: GaiaStarCache | None = None) -> dict[str, CatalogDriver]:
-    """Construct the registry of online/local catalog query drivers.
+def build_catalog_driver_registry(star_source: DeepStarSource | None = None) -> dict[str, CatalogDriver]:
+    """Construct the registry of catalog query drivers.
+
+    Every driver reads from this computer; none of them use the internet.
 
     Parameters
     ----------
-    star_cache : `GaiaStarCache`, optional
-        Where the Gaia driver looks for, and saves, stars on the local disk.
-        Without one, the Gaia driver always downloads.
+    star_source : `DeepStarSource`, optional
+        Where the deep-star driver reads the downloaded Gaia stars from.
+        Without one, the deep-star driver returns no stars.
 
     Returns
     -------
     Dict[str, CatalogDriver]
-        Registry keyed by driver name: "simbad", "gaia", "hipparcos".
+        Registry keyed by driver name: "deep_stars", "hipparcos".
     """
     return {
-        "simbad": SimbadCatalogDriver(),
-        # Live TAP-backed driver, for small viewport-scoped deep queries.
-        "gaia": GaiaCatalogDriver(star_cache=star_cache),
+        # Faint stars from the Gaia DR3 copy downloaded to disk, for the
+        # viewport-scoped deep layer. Replaces the live Gaia archive query,
+        # which took tens of seconds per view and could not be cached.
+        "deep_stars": DeepStarCatalogDriver(star_source=star_source),
         # Locally bundled Hipparcos extract, for the full-sky "Bright
         # Stars" overview layer. GAIA is unsuitable for this layer — its
         # detectors saturate on very bright stars, so it's missing nearly

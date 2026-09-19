@@ -148,6 +148,24 @@ def test_get_online_catalog_sources_limit_is_optional():  # ruff: ignore[missing
     assert service.wayfinder.planning.get_online_catalog_sources.call_args.kwargs["magnitude_limit"] is None
 
 
+def test_get_deep_catalog_status_adds_the_install_command():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify the status the UI sees names the command that downloads it."""
+    from backend.services.data.stellar_service import DEEP_CATALOG_INSTALL_COMMAND
+
+    service = _make_service()
+    service.astrometrics.stars.get_deep_catalog_status.return_value = {
+        "installed": False,
+        "complete": False,
+        "star_count": 0,
+    }
+
+    status = service.get_deep_catalog_status()
+
+    assert status["installed"] is False
+    assert status["installCommand"] == DEEP_CATALOG_INSTALL_COMMAND
+    assert "build_deep_star_catalog" in status["installCommand"]
+
+
 def test_stellar_object_has_spectra_and_has_photometry_computed_fields():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verify StellarObject hasSpectra/hasPhotometry fields in model dump.
 

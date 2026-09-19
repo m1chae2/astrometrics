@@ -18,7 +18,7 @@ import { PlanetariumToolbar } from './components/PlanetariumToolbar';
 import { PlanetariumContextMenu } from './components/PlanetariumContextMenu';
 import { PlanetariumDateTimeModal } from './components/PlanetariumDateTimeModal';
 import { usePlanetariumSources } from './hooks/usePlanetariumSources';
-import { useOnlineCatalogSources } from './hooks/useOnlineCatalogSources';
+import { useOnlineCatalogSources, LOCAL_CATALOG_QUERY_DEBOUNCE_MS } from './hooks/useOnlineCatalogSources';
 import { useConstellationLines } from './hooks/useConstellationLines';
 import { usePlanetariumTargets } from './hooks/usePlanetariumTargets';
 import { useObserverLocation } from './hooks/useObserverLocation';
@@ -36,6 +36,8 @@ import { useRemoteStatusContext } from '../common/context/RemoteStatusContext';
 import { useTelescopeStatus } from '../common/hooks/useTelescopeStatus';
 import { safeParse } from './utils/coordinateUtils';
 import { computeLimitingMagnitude, DEEP_STAR_MAX_MAGNITUDE, UNCATALOGED_STAR_MAX_FOV_DEG } from './layers/StarOverlay';
+import { useDeepCatalogStatus } from './hooks/useDeepCatalogStatus';
+import { DeepCatalogPrompt } from './components/DeepCatalogPrompt';
 import './styles/planetariumDisplay.css';
 
 /**
@@ -143,25 +145,27 @@ export const PlanetariumDisplay: React.FC = () => {
     { debounceMilliseconds: 0 },
   );
 
-  // Deep-zoom star query: GAIA DR3 supplies stars fainter than Hipparcos's
-  // ~magnitude-12 completeness limit (see MAX_ZOOM_LIMITING_MAGNITUDE),
-  // scoped to the current viewport rather than the whole sky since GAIA's
-  // per-region density is far higher than Hipparcos's. Gated on showStars
-  // so toggling the background field off also stops these network queries.
-  const deepStarDrivers = useMemo(() => ['gaia'], []);
+  // Faint-star query: the Gaia DR3 copy downloaded to this computer (see the
+  // deep-star catalog prompt) supplies stars fainter than the bundled Hipparcos
+  // extract, scoped to the current viewport since its per-region density is far
+  // higher. A local database read, so it takes milliseconds and never touches the
+  // internet. Gated on showStars so toggling the background field off also stops it.
+  const deepStarDrivers = useMemo(() => ['deep_stars'], []);
   // Rounded up to a whole magnitude so a slow zoom reuses one query (and one cached region)
   // instead of asking for a slightly deeper limit at every step, and capped at the depth the
-  // backend will actually return so a deeper request is not cached as if it had been served.
+  // catalog holds so a deeper request is not cached as if it had been served.
   const deepStarLimitingMagnitude = useMemo(
     () => Math.min(Math.ceil(limitingMagnitude), DEEP_STAR_MAX_MAGNITUDE),
     [limitingMagnitude],
   );
-  const { onlineSources: deepStarSources, loading: deepStarsLoading } = useOnlineCatalogSources(
+  const { onlineSources: deepStarSources } = useOnlineCatalogSources(
     raValue, decValue, queryRadius,
     deepStarDrivers,
     showStars,
-    { limitingMagnitude: deepStarLimitingMagnitude },
+    // A local lookup, so only a short wait to skip the steps of one gesture, not the 300 ms a remote query needs.
+    { limitingMagnitude: deepStarLimitingMagnitude, debounceMilliseconds: LOCAL_CATALOG_QUERY_DEBOUNCE_MS },
   );
+  const { status: deepCatalogStatus } = useDeepCatalogStatus();
 
   // Bundled constellation stick-figure lines: fetched once (no ra/dec/radius —
   // the whole dataset is static and small) rather than re-queried on pan/zoom.
@@ -512,11 +516,7 @@ export const PlanetariumDisplay: React.FC = () => {
         onSelectCamera={setActiveCamera}
       />
 
-      {deepStarsLoading && (
-        <div className="planetarium-loading-chip" role="status" aria-live="polite">
-          Loading deeper stars&hellip;
-        </div>
-      )}
+      <DeepCatalogPrompt status={deepCatalogStatus} />
 
       <PlanetariumDateTimeModal
         isOpen={isTimeModalOpen}

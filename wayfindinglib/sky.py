@@ -75,7 +75,7 @@ class Sky:
         from astrometricslib import Astrometrics
 
         self._astrometrics = Astrometrics()
-        self._catalog_driver_registry = build_catalog_driver_registry(star_cache=self._astrometrics.stars)
+        self._catalog_driver_registry = build_catalog_driver_registry(star_source=self._astrometrics.stars)
         # Bundled constellation stick-figure line data — not a CatalogDriver
         # since it's static cultural/artistic topology, not a live query.
         self._constellation_lines = ConstellationLineLibrary()

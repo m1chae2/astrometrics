@@ -9,7 +9,7 @@ in the database.
 import logging
 from typing import Any
 
-from astrometricslib.drivers import catalog_store
+from astrometricslib.drivers import deep_star_store
 from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.utilities.config_loader import AppConfiguration
@@ -141,14 +141,15 @@ class StellarCatalog:
             for star in self.catalog_access.list_star_summaries(target_id=target_id, limit=effective_limit)
         ]
 
-    def find_saved_gaia_stars(
-        self, ra: float, dec: float, radius: float, magnitude_limit: float
-    ) -> list[tuple[str, float, float, float, str]] | None:
-        """Look up saved Gaia stars for a circle of sky, if it is fully saved.
+    def find_deep_stars(
+        self, ra: float, dec: float, radius: float, magnitude_limit: float, maximum_stars: int | None = None
+    ) -> list[tuple[int, float, float, float]] | None:
+        """Look up stars in the downloaded Gaia deep-star catalog.
 
-        Stars come from the local Gaia cache on disk, so no internet request
-        is made. This is meant for drawing a sky map quickly; it does not
-        touch the stars in the catalog itself.
+        The catalog is a copy of Gaia DR3 saved on this computer by
+        ``python -m astrometricslib.scripts.build_deep_star_catalog``, so
+        this makes no internet request. It is meant for drawing a sky map
+        quickly; it does not touch the stars in the library itself.
 
         Parameters
         ----------
@@ -157,45 +158,29 @@ class StellarCatalog:
         radius : `float`
             The radius of the circle, in degrees.
         magnitude_limit : `float`
-            Only stars brighter than this Gaia G magnitude are wanted.
+            Only stars as bright as this Gaia G magnitude, or brighter.
+        maximum_stars : `int`, optional
+            Return at most this many stars, keeping the brightest.
 
         Returns
         -------
-        rows : `list` of `tuple` or `None`
-            One ``(source_id, ra, dec, phot_g_mean_mag, designation)`` tuple
-            per star, brightest first. `None` if the circle is not fully
-            saved yet, meaning the caller has to download it.
+        stars : `list` of `tuple` or `None`
+            One ``(source_id, ra, dec, magnitude)`` tuple per star, brightest
+            first, or `None` if the catalog has not been downloaded at all.
         """
-        return catalog_store.find_planetarium_stars(self._config, ra, dec, radius, magnitude_limit)
+        return deep_star_store.find_deep_stars(self._config, ra, dec, radius, magnitude_limit, maximum_stars)
 
-    def save_downloaded_gaia_stars(
-        self,
-        ra: float,
-        dec: float,
-        radius: float,
-        magnitude_limit: float,
-        rows: list[tuple[str, float, float, float, str]],
-    ) -> None:
-        """Save just-downloaded Gaia stars so they load fast next time.
+    def get_deep_catalog_status(self) -> dict[str, Any]:
+        """Say how much of the deep-star catalog has been downloaded.
 
-        The stars go in their own tables, apart from the ones star
-        identification reads, so saving a partial sky-map download here
-        cannot make identification think it already has every faint star.
-
-        Parameters
-        ----------
-        ra, dec : `float`
-            The center of the circle that was downloaded, in degrees.
-        radius : `float`
-            The radius of the circle that was downloaded, in degrees.
-        magnitude_limit : `float`
-            How faint the download is complete to: every Gaia star at least
-            this bright inside the circle is in ``rows``.
-        rows : `list` of `tuple`
-            One ``(source_id, ra, dec, phot_g_mean_mag, designation)`` tuple
-            per star.
+        Returns
+        -------
+        status : `dict`
+            ``installed``, ``complete``, ``star_count``, ``pixels_downloaded``,
+            ``pixels_total``, ``healpix_level``, ``magnitude_limit`` and
+            ``size_megabytes``. See `deep_star_store.get_deep_catalog_status`.
         """
-        catalog_store.store_planetarium_region(self._config, ra, dec, radius, magnitude_limit, rows)
+        return deep_star_store.get_deep_catalog_status(self._config)
 
     def get_object(self, object_id: str) -> StellarObject | None:
         """Find a single star in the catalog using its ID.

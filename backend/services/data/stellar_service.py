@@ -8,6 +8,11 @@ from astrometricslib import Astrometrics, StellarObject
 
 logger = logging.getLogger(__name__)
 
+# The command that downloads the deep-star catalog the Planetarium draws
+# from. Sent to the UI with the catalog's status so the first-launch prompt
+# shows the same command the script documents.
+DEEP_CATALOG_INSTALL_COMMAND = "python -m astrometricslib.scripts.build_deep_star_catalog"
+
 # Matches the ID suffix VariabilityAnalyzer stamps onto every per-frame point
 # source it detects during photometry (target_sessions.py's
 # "{target_id}:{night_date}:{gain}:{offset}" session id, joined with
@@ -669,7 +674,7 @@ class StellarService:
         radius : float
             Search radius in degrees.
         enabled_drivers : List[str]
-            Registry keys of drivers to query (e.g. ['simbad', 'gaia']).
+            Registry keys of drivers to query, e.g. ['deep_stars'].
         limiting_magnitude : float, optional
             Faintest star magnitude the map can draw at the current zoom
             (the same value the UI sends to get_sources). Drivers that can
@@ -717,8 +722,28 @@ class StellarService:
                 )
         return results
 
+    def get_deep_catalog_status(self) -> dict:
+        """Say how much of the downloaded deep-star catalog is installed.
+
+        The Planetarium draws faint stars from a copy of Gaia DR3 saved on
+        this computer. This tells it whether that copy is there, so it can
+        prompt to download it when it is not.
+
+        Returns
+        -------
+        dict
+            ``installed``, ``complete``, ``star_count``, ``pixels_downloaded``,
+            ``pixels_total``, ``healpix_level``, ``magnitude_limit`` and
+            ``size_megabytes`` (from ``get_deep_catalog_status`` on the
+            stars API),
+            plus ``installCommand``: the command that downloads it.
+        """
+        status = dict(self.astrometrics.stars.get_deep_catalog_status())
+        status["installCommand"] = DEEP_CATALOG_INSTALL_COMMAND
+        return status
+
     def list_catalog_drivers(self) -> list[dict]:
-        """Return display metadata for all registered online catalog drivers.
+        """Return display metadata for all registered catalog drivers.
 
         Returns
         -------

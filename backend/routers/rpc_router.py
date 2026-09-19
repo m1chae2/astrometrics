@@ -208,6 +208,7 @@ class RPCHandlerRegistry:
         self.register("planetarium:get_observer_location", ("telescope_service", "get_observer_location"))
         self.register("planetarium:get_catalog_sources", ("stellar_service", "get_online_catalog_sources"))
         self.register("planetarium:list_catalog_drivers", ("stellar_service", "list_catalog_drivers"))
+        self.register("planetarium:get_deep_catalog_status", ("stellar_service", "get_deep_catalog_status"))
         self.register("planetarium:get_constellation_lines", ("stellar_service", "get_constellation_lines"))
 
         # --- Imaging (Camera) (Infrastructure level) ---

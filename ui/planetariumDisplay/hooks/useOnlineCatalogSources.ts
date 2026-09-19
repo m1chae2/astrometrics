@@ -34,6 +34,16 @@ import { findCachedCatalogSources, storeCatalogSources } from '../utils/catalogS
 export const CATALOG_QUERY_DEBOUNCE_MS = 300;
 
 /**
+ * The wait, in milliseconds, for a catalog that is read from this computer.
+ *
+ * A local lookup takes tens of milliseconds (about 50 ms for a busy view on a synthetic
+ * 10 million star catalog), so it does not need the 300 ms a remote query does. A short
+ * wait still skips the intermediate views of one wheel-zoom or drag, which would
+ * otherwise each cost a lookup and a large response. Chosen by judgement, not measured.
+ */
+export const LOCAL_CATALOG_QUERY_DEBOUNCE_MS = 100;
+
+/**
  * Optional settings for useOnlineCatalogSources.
  */
 export interface UseOnlineCatalogSourcesOptions {

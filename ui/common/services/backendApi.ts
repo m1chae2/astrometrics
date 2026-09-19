@@ -44,6 +44,22 @@ export interface ObservationSessionSummary {
     entryCount: number;
 }
 
+/** How much of the downloaded deep-star (Gaia DR3) catalog is installed, from planetarium:get_deep_catalog_status. */
+export interface DeepCatalogStatus {
+    /** True once any part of the catalog has been downloaded. */
+    installed: boolean;
+    /** True once every chunk of the sky has been downloaded. */
+    complete: boolean;
+    star_count: number;
+    pixels_downloaded: number;
+    pixels_total: number | null;
+    healpix_level: number | null;
+    magnitude_limit: number | null;
+    size_megabytes: number;
+    /** The command that downloads the catalog. */
+    installCommand: string;
+}
+
 /** Camera sensor profile as returned by observatory:list_cameras. */
 export interface EquipmentCameraProfile {
     name: string;
@@ -91,6 +107,7 @@ export interface ActionRegistry {
     "planetarium:get_visibility": { payload: { objects: Array<{ id: string; type?: string }>; time?: string }; response: PlanetariumVisibilityItem[] };
     "planetarium:get_observer_location": { payload: Record<string, never>; response: ObserverLocation };
     "planetarium:get_catalog_sources": { payload: { ra: number; dec: number; radius: number; enabled_drivers: string[]; limiting_magnitude?: number }; response: PlanetariumSource[] };
+    "planetarium:get_deep_catalog_status": { payload: Record<string, never>; response: DeepCatalogStatus };
     "planetarium:list_catalog_drivers": { payload: Record<string, never>; response: Array<{ driver_name: string; display_name: string; maximum_query_radius_degrees: number }> };
     "planetarium:get_constellation_lines": { payload: Record<string, never>; response: ConstellationLineSegment[] };
 

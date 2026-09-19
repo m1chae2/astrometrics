@@ -147,7 +147,12 @@ class Sky:
         return resolution_operations.resolve_target_coordinates(self, target_name)
 
     def get_sources(
-        self, ra_deg: float, dec_deg: float, radius_deg: float, include_catalog: bool = False
+        self,
+        ra_deg: float,
+        dec_deg: float,
+        radius_deg: float,
+        include_catalog: bool = False,
+        include_stars: bool = True,
     ) -> list[Target | StellarObject]:
         """Delegate get_sources to skylib resolution_operations.
 
@@ -158,7 +163,29 @@ class Sky:
         """
         from wayfindinglib.skylib import resolution_operations
 
-        return resolution_operations.get_sources(self, ra_deg, dec_deg, radius_deg, include_catalog)
+        return resolution_operations.get_sources(
+            self, ra_deg, dec_deg, radius_deg, include_catalog, include_stars
+        )
+
+    def get_library_star_summaries(
+        self,
+        ra_deg: float,
+        dec_deg: float,
+        radius_deg: float,
+        magnitude_range: tuple[float, float] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Delegate get_library_star_summaries to skylib resolution_operations.
+
+        Returns
+        -------
+        summaries : `list` [`dict`]
+            Quick summaries of the user's own stars inside the region.
+        """
+        from wayfindinglib.skylib import resolution_operations
+
+        return resolution_operations.get_library_star_summaries(
+            self, ra_deg, dec_deg, radius_deg, magnitude_range
+        )
 
     def get_online_catalog_sources(
         self,

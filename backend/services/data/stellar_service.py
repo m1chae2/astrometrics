@@ -582,7 +582,15 @@ class StellarService:
         List[dict]
             List of serialized sources with coordinate and metadata.
         """
-        objects = self.wayfinder.planning.get_sources(ra, dec, radius, include_catalog=include_catalog)
+        # Without the SIMBAD catalog the user's own stars are read a faster
+        # way, below: loading every library star in full (photometry and
+        # all) to check its position took about ten seconds on a real
+        # 270,000-star library. Only targets are loaded here. With the
+        # catalog on, the full objects are still needed to tell the
+        # library's stars apart from SIMBAD's.
+        objects = self.wayfinder.planning.get_sources(
+            ra, dec, radius, include_catalog=include_catalog, include_stars=include_catalog
+        )
 
         # These ID sets exist only to tell apart local objects from ones
         # merged in from the global SIMBAD catalog, which only happens when
@@ -649,6 +657,83 @@ class StellarService:
                 logger.warning("Failed to serialize celestial object %s: %s", obj.id, exc)
                 continue
 
+        if not include_catalog:
+            # When stars without a catalog magnitude are not wanted, only
+            # stars whose magnitude is a real catalog one, and no fainter
+            # than the limit, can be kept. Say so up front so the database
+            # skips the rest instead of the loop below throwing them away.
+            # Every other case needs stars with no magnitude, so it asks
+            # for everything and the loop below does the trimming.
+            magnitude_range = None
+            if not include_stars_without_catalog_magnitude:
+                faintest_magnitude = math.inf if limiting_magnitude is None else limiting_magnitude
+                magnitude_range = (_BRIGHTEST_CATALOG_MAGNITUDE, faintest_magnitude)
+            sources.extend(
+                self._serialize_library_star_summaries(
+                    self.wayfinder.planning.get_library_star_summaries(ra, dec, radius, magnitude_range),
+                    limiting_magnitude,
+                    include_stars_without_catalog_magnitude,
+                )
+            )
+
+        return sources
+
+    @staticmethod
+    def _serialize_library_star_summaries(
+        star_summaries: list[dict],
+        limiting_magnitude: float | None,
+        include_stars_without_catalog_magnitude: bool,
+    ) -> list[dict]:
+        """Turn the library's quick star summaries into Planetarium sources.
+
+        Applies the same rules `get_sources` applies to a full star, so the
+        map shows the same stars it always did.
+
+        Parameters
+        ----------
+        star_summaries : `list` [`dict`]
+            Summaries from ``planning.get_library_star_summaries``.
+        limiting_magnitude : `float`, optional
+            Faintest catalog magnitude to keep. `None` keeps every star.
+        include_stars_without_catalog_magnitude : `bool`
+            Whether to keep stars that have no usable catalog magnitude.
+
+        Returns
+        -------
+        sources : `list` [`dict`]
+            Planetarium source payloads, one per kept star.
+        """
+        sources = []
+        for summary in star_summaries:
+            # A star with either coordinate exactly zero has no position
+            # saved yet, so there is nowhere to draw it.
+            if not summary["ra"] or not summary["dec"]:
+                continue
+            # See `get_sources`: these per-frame detection stubs are never
+            # meant to be browsable stars.
+            if _is_per_frame_photometry_detection(summary["id"]):
+                continue
+            magnitude = summary["magnitude"]
+            if _has_catalog_magnitude(magnitude):
+                if limiting_magnitude is not None and magnitude > limiting_magnitude:
+                    continue
+            elif not include_stars_without_catalog_magnitude:
+                continue
+            sources.append({
+                "id": summary["id"],
+                "ra": float(summary["ra"]),
+                "dec": float(summary["dec"]),
+                "name": summary["name"] or summary["id"],
+                "commonName": summary["name"] or summary["id"],
+                "spectralType": summary["spectralType"],
+                "magnitude": magnitude,
+                "hasSpectra": summary["hasSpectra"],
+                "hasPhotometry": summary["hasPhotometry"],
+                "type": "star",
+                "global": False,
+                "stackedImage": None,
+                "fieldOfView": None,
+            })
         return sources
 
     def get_online_catalog_sources(

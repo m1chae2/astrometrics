@@ -131,16 +131,48 @@ class ObservationPlanning:
         return self._sky_engine.resolve_target_coordinates(target_name)
 
     def get_sources(
-        self, ra_deg: float, dec_deg: float, radius_deg: float, include_catalog: bool = False
+        self,
+        ra_deg: float,
+        dec_deg: float,
+        radius_deg: float,
+        include_catalog: bool = False,
+        include_stars: bool = True,
     ) -> list[Any]:
         """Return targets/stellar objects within a search radius of a point.
+
+        Pass ``include_stars=False`` to get only targets. Loading every
+        library star in full takes seconds on a large library; read them
+        with `get_library_star_summaries` instead.
 
         Returns
         -------
         sources : `list`
             Targets and/or stellar objects within the search radius.
         """
-        return self._sky_engine.get_sources(ra_deg, dec_deg, radius_deg, include_catalog)
+        return self._sky_engine.get_sources(ra_deg, dec_deg, radius_deg, include_catalog, include_stars)
+
+    def get_library_star_summaries(
+        self,
+        ra_deg: float,
+        dec_deg: float,
+        radius_deg: float,
+        magnitude_range: tuple[float, float] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return quick summaries of the user's own stars near a point.
+
+        ``magnitude_range`` keeps only stars whose magnitude is between
+        the two values, ends included; stars with no saved magnitude are
+        left out. Every star is kept when it is omitted.
+
+        Returns
+        -------
+        summaries : `list` [`dict`]
+            One dict per library star inside the search radius, with keys
+            ``id``, ``name``, ``ra``, ``dec``, ``targetIds``,
+            ``hasSpectra``, ``hasPhotometry``, ``magnitude`` and
+            ``spectralType``.
+        """
+        return self._sky_engine.get_library_star_summaries(ra_deg, dec_deg, radius_deg, magnitude_range)
 
     def get_online_catalog_sources(
         self,

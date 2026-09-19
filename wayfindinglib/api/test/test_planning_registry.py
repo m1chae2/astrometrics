@@ -179,7 +179,10 @@ def test_sky_browsing_methods_delegate_to_the_sky_engine(mocker, isolated_butler
     fake_sky.resolve_target_coordinates.assert_called_once_with("M 81")
 
     planning.get_sources(1.0, 2.0, 3.0, include_catalog=True)
-    fake_sky.get_sources.assert_called_once_with(1.0, 2.0, 3.0, True)
+    fake_sky.get_sources.assert_called_once_with(1.0, 2.0, 3.0, True, True)
+
+    planning.get_library_star_summaries(1.0, 2.0, 3.0)
+    fake_sky.get_library_star_summaries.assert_called_once_with(1.0, 2.0, 3.0, None)
 
     planning.get_visibility(["obj"], time_input="now")
     fake_sky.get_visibility.assert_called_once_with(["obj"], "now")

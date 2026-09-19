@@ -9,6 +9,7 @@ itself, which internal round-trip callers like save_objects still
 need in full.
 """
 
+import math
 from unittest.mock import MagicMock
 
 from astrometricslib import SpectroscopyResult, StellarObject
@@ -19,13 +20,61 @@ from backend.services.data.stellar_service import (
 )
 
 
-def _make_service(stellar_objects=None, planning_sources=None) -> StellarService:  # ruff: ignore[missing-type-function-argument]
+def _summary_of(star: StellarObject) -> dict:
+    """Describe a star the way the library's quick region read does.
+
+    Returns
+    -------
+    summary : `dict`
+        The keys ``planning.get_library_star_summaries`` returns, with
+        an empty coordinate or magnitude turned into `None` as the
+        database column would hold it.
+    """
+
+    def number_or_none(value: object) -> float | None:
+        return value if isinstance(value, int | float) and not isinstance(value, bool) else None
+
+    return {
+        "id": star.id,
+        "name": star.name,
+        "ra": number_or_none(star.right_ascension),
+        "dec": number_or_none(star.declination),
+        "targetIds": star.target_ids,
+        "hasSpectra": star.has_spectra,
+        "hasPhotometry": star.has_photometry,
+        "magnitude": number_or_none(star.magnitude),
+        "spectralType": star.spectral_type,
+    }
+
+
+def _make_service(stellar_objects=None, planning_sources=None, library_stars=None) -> StellarService:  # ruff: ignore[missing-type-function-argument]
+    """Build a StellarService whose library and planning are stand-ins.
+
+    Parameters
+    ----------
+    stellar_objects : `list` [`StellarObject`], optional
+        What the full-record star listing returns.
+    planning_sources : `list`, optional
+        What ``planning.get_sources`` returns (targets, and stars when
+        the SIMBAD catalog is asked for).
+    library_stars : `list` [`StellarObject`], optional
+        The library stars in view. They reach the service as quick
+        summaries, the way the real region read supplies them.
+
+    Returns
+    -------
+    service : `StellarService`
+        A service wired to mock astrometrics and wayfinder objects.
+    """
     astrometrics = MagicMock()
     astrometrics.stars.list_objects.return_value = stellar_objects or []
     astrometrics.targets.list.return_value = []
 
     wayfinder = MagicMock()
     wayfinder.planning.get_sources.return_value = planning_sources or []
+    wayfinder.planning.get_library_star_summaries.return_value = [
+        _summary_of(star) for star in library_stars or []
+    ]
 
     return StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=wayfinder)
 
@@ -71,7 +120,7 @@ def test_get_sources_excludes_per_frame_detections_with_real_coordinates():  # r
     unsolved_detection = StellarObject(id="M 81:2026-01-14:0:0:Star_61", ra="", dec="")
 
     service = _make_service(
-        planning_sources=[catalog_star, solved_detection, unsolved_detection],
+        library_stars=[catalog_star, solved_detection, unsolved_detection],
     )
 
     sources = service.get_sources(ra=148.9, dec=69.0, radius=2.5)
@@ -96,7 +145,7 @@ def test_get_sources_uses_camel_case_keys_the_planetarium_reads():  # ruff: igno
     )
     star_without_data = StellarObject(id="Polaris", ra=37.95, dec=89.26)
 
-    service = _make_service(planning_sources=[star_with_photometry, star_without_data])
+    service = _make_service(library_stars=[star_with_photometry, star_without_data])
 
     sources = {source["id"]: source for source in service.get_sources(ra=250.76, dec=36.72, radius=2.5)}
 
@@ -422,7 +471,7 @@ def test_get_sources_thins_faint_and_uncataloged_stars():  # ruff: ignore[missin
     instrumental_star = StellarObject(id="Instrumental", ra=10.4, dec=10.4, magnitude=-14.9)
 
     service = _make_service(
-        planning_sources=[
+        library_stars=[
             bright_star,
             faint_star,
             empty_magnitude_star,
@@ -446,3 +495,59 @@ def test_get_sources_thins_faint_and_uncataloged_stars():  # ruff: ignore[missin
     assert returned_ids(include_stars_without_catalog_magnitude=False) == ["Bright", "Faint"]
 
     assert returned_ids(limiting_magnitude=6.0, include_stars_without_catalog_magnitude=False) == ["Bright"]
+
+
+def test_get_sources_reads_stars_from_summaries_and_loads_only_targets():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify the Planetarium path never loads the library's stars in full.
+
+    Loading every star just to check its position took about ten seconds
+    on a real library, so the stars must arrive as quick summaries and the
+    full-object search must be told to leave them out.
+    """
+    star = StellarObject(id="Polaris", ra=37.95, dec=89.26, magnitude=2.0)
+    service = _make_service(library_stars=[star])
+
+    sources = service.get_sources(ra=37.95, dec=89.26, radius=2.5)
+
+    assert [source["id"] for source in sources] == ["Polaris"]
+    service.wayfinder.planning.get_sources.assert_called_once_with(
+        37.95, 89.26, 2.5, include_catalog=False, include_stars=False
+    )
+    service.wayfinder.planning.get_library_star_summaries.assert_called_once_with(37.95, 89.26, 2.5, None)
+
+
+def test_get_sources_summary_payload_has_the_same_shape_as_a_full_star_payload():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify a star read from a summary is described the same way.
+
+    The Planetarium reads these keys, so the fast path must send exactly
+    what the full-object path sends for the same star.
+    """
+    star = StellarObject(
+        id="HD 201684", name="HD 201684", ra=316.8, dec=68.6, magnitude=8.09, spectral_type="B3V"
+    )
+
+    summary_source = _make_service(library_stars=[star]).get_sources(ra=316.8, dec=68.6, radius=2.5)[0]
+    full_object_source = _make_service(planning_sources=[star]).get_sources(
+        ra=316.8, dec=68.6, radius=2.5, include_stars_without_catalog_magnitude=True
+    )[0]
+
+    assert summary_source == full_object_source
+
+
+def test_get_sources_asks_the_library_only_for_catalog_magnitudes_when_uncataloged_stars_are_off():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify the magnitude limit reaches the database as a range.
+
+    A wide view only wants stars with a real catalog magnitude, at or
+    below the limit. Asking the database for exactly that keeps it from
+    reading tens of thousands of stars the loop would only throw away.
+    """
+    service = _make_service()
+
+    service.get_sources(
+        ra=10.0, dec=10.0, radius=5.0, limiting_magnitude=6.0, include_stars_without_catalog_magnitude=False
+    )
+    service.get_sources(ra=10.0, dec=10.0, radius=5.0, include_stars_without_catalog_magnitude=False)
+
+    calls = service.wayfinder.planning.get_library_star_summaries.call_args_list
+    assert calls[0].args == (10.0, 10.0, 5.0, (-2.0, 6.0))
+    assert calls[1].args == (10.0, 10.0, 5.0, (-2.0, math.inf))

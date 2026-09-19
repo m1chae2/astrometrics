@@ -95,6 +95,7 @@ def astrometrics_catalog(
     ra_deg: float,
     dec_deg: float,
     radius_deg: float,
+    include_stars: bool = True,
 ) -> list[Target | StellarObject]:
     """Query the local Astrometrics database for objects in a region.
 
@@ -108,6 +109,11 @@ def astrometrics_catalog(
         Declination of the search center in degrees.
     radius_deg : float
         Search radius in degrees.
+    include_stars : bool
+        If False, only targets are searched. The stars branch loads every
+        star in the library in full and takes seconds on a large one, so
+        a caller that reads the stars another way (see
+        `resolution_operations.get_library_star_summaries`) skips it.
 
     Returns
     -------
@@ -168,6 +174,9 @@ def astrometrics_catalog(
             frame="icrs",
         )
         results.extend(_filter_within_radius(candidate_targets, target_coordinates, center, radius_deg))
+
+    if not include_stars:
+        return results
 
     # 2. Fetch and filter StellarObjects, batched the same way as
     # Targets above.

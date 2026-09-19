@@ -4,7 +4,7 @@ Defines mathematical correctness verification tests.
 """
 
 from datetime import datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import astropy.units as u
 import pytest
@@ -15,7 +15,7 @@ from astrometricslib import StellarObject, Target
 from wayfindinglib.sky import Sky
 from wayfindinglib.skylib.catalog_operations import astrometrics_catalog
 from wayfindinglib.skylib.coordinate_operations import compute_altaz
-from wayfindinglib.skylib.resolution_operations import get_sources
+from wayfindinglib.skylib.resolution_operations import get_library_star_summaries, get_sources
 
 
 def test_sky_initialization() -> None:
@@ -164,6 +164,40 @@ def test_astrometrics_catalog_filters_stellar_objects_by_radius() -> None:
 
     local_only = get_sources(fake_sky, 250.17, 36.46, 1.0, include_catalog=False)
     assert [result.id for result in local_only] == ["NEAR"]
+
+
+def test_astrometrics_catalog_leaves_the_stars_alone_when_asked_not_to_load_them() -> None:
+    """Verifies include_stars=False returns targets without touching the stars.
+
+    Reading every star in full takes seconds on a large library, so a
+    caller that gets the stars another way must be able to skip that. The
+    stellar objects are made to raise if they are read at all.
+    """
+    target = Target(id="T1", commonName="Target 1", ra="16h 41m 40s", dec="+36d 27m 36s")
+
+    fake_astrometrics = MagicMock()
+    fake_astrometrics.targets.list.return_value = [target]
+    type(fake_astrometrics).stellar_objects = PropertyMock(side_effect=AssertionError("stars were loaded"))
+
+    fake_sky = MagicMock()
+    fake_sky._astrometrics = fake_astrometrics
+
+    results = get_sources(fake_sky, 250.17, 36.46, 1.0, include_catalog=False, include_stars=False)
+
+    assert [result.id for result in results] == ["T1"]
+
+
+def test_get_library_star_summaries_reads_the_region_summaries_from_astrometrics() -> None:
+    """Verifies the summaries come from the library's fast region read."""
+    fake_sky = MagicMock()
+    fake_sky._astrometrics.stars.list_object_summaries_in_region.return_value = [{"id": "S1"}]
+
+    summaries = get_library_star_summaries(fake_sky, 250.17, 36.46, 2.0)
+
+    assert summaries == [{"id": "S1"}]
+    fake_sky._astrometrics.stars.list_object_summaries_in_region.assert_called_once_with(
+        250.17, 36.46, 2.0, None
+    )
 
 
 def test_compute_altaz_matches_recorded_indi_driver_baseline() -> None:

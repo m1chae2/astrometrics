@@ -141,6 +141,55 @@ class StellarCatalog:
             for star in self.catalog_access.list_star_summaries(target_id=target_id, limit=effective_limit)
         ]
 
+    def list_object_summaries_in_region(
+        self, ra: float, dec: float, radius: float, magnitude_range: tuple[float, float] | None = None
+    ) -> list[dict[str, Any]]:
+        """Get quick summaries of the library stars inside a circle of sky.
+
+        Like `list_object_summaries`, this never loads a star's full
+        record, so it stays fast however large the library is. The
+        difference is that it only reads the stars near one spot, using
+        the database's declination index, and each summary also carries
+        the star's magnitude and spectral type. The sky map calls it on
+        every pan and zoom.
+
+        Parameters
+        ----------
+        ra : `float`
+            Right ascension of the circle's center, in degrees.
+        dec : `float`
+            Declination of the circle's center, in degrees.
+        radius : `float`
+            Radius of the circle, in degrees.
+        magnitude_range : `tuple` [`float`, `float`], optional
+            Lowest and highest magnitude to keep, ends included. Stars
+            with no saved magnitude are left out. Every star is kept when
+            omitted.
+
+        Returns
+        -------
+        summaries : `list` [`dict`]
+            One dict per star inside the circle with keys ``id``,
+            ``name``, ``ra``, ``dec``, ``targetIds``, ``hasSpectra``,
+            ``hasPhotometry``, ``magnitude`` (`None` when unknown), and
+            ``spectralType`` (an empty string when unknown).
+        """
+        # camelCase keys for the same reason as in `list_object_summaries`.
+        return [
+            {
+                "id": star.id,
+                "name": star.name,
+                "ra": star.right_ascension,
+                "dec": star.declination,
+                "targetIds": star.target_ids,
+                "hasSpectra": star.has_spectra,
+                "hasPhotometry": star.has_photometry,
+                "magnitude": star.magnitude,
+                "spectralType": star.spectral_type,
+            }
+            for star in self.catalog_access.list_stars_in_region(ra, dec, radius, magnitude_range)
+        ]
+
     def find_deep_stars(
         self, ra: float, dec: float, radius: float, magnitude_limit: float, maximum_stars: int | None = None
     ) -> list[tuple[int, float, float, float]] | None:

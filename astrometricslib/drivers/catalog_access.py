@@ -6,11 +6,13 @@ worry about where the data actually lives.
 """
 
 import logging
+import math
 import os
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Any
 
+import numpy as np
 from pydantic import BaseModel, Field
 
 from astrometricslib.utilities.enums import FilterType
@@ -105,6 +107,10 @@ class StarSummary(BaseModel):
     target_ids: list[str] = Field(default_factory=list)
     has_spectra: bool = False
     has_photometry: bool = False
+    # Only filled in by `list_stars_in_region`, which the sky map uses.
+    # A star with no known brightness or spectral type keeps the defaults.
+    magnitude: float | None = None
+    spectral_type: str = ""
 
 
 class StarPosition(BaseModel):
@@ -118,6 +124,101 @@ class StarPosition(BaseModel):
     right_ascension: float
     declination: float
     target_ids: list[str] = Field(default_factory=list)
+
+
+# A circle on the sky is searched by first cutting out a box that surely
+# contains it, using the database's sorted columns, and then checking each
+# star in the box against the circle. The box is made a hair larger than the
+# circle so a star sitting exactly on the edge is never lost to rounding.
+# 1e-6 degrees is about 0.004 arcseconds, far below any position we store.
+_BOX_MARGIN_DEGREES = 1e-6
+
+_FULL_CIRCLE_DEGREES = 360.0
+
+
+def _region_search_box(
+    ra_degrees: float, dec_degrees: float, radius_degrees: float
+) -> tuple[tuple[float, float], list[tuple[float, float]] | None]:
+    """Work out a box on the sky that contains a circle.
+
+    Declination (up/down) is easy: the box is the circle's center plus and
+    minus its radius. Right ascension (left/right) is harder for two
+    reasons. Lines of equal right ascension squeeze together near the
+    poles, so a circle there spans more right ascension than its radius.
+    And right ascension wraps around from 360 back to 0, so a circle near
+    that seam needs two ranges.
+
+    Parameters
+    ----------
+    ra_degrees : `float`
+        Right ascension of the circle's center, in degrees.
+    dec_degrees : `float`
+        Declination of the circle's center, in degrees.
+    radius_degrees : `float`
+        Radius of the circle, in degrees.
+
+    Returns
+    -------
+    dec_range : `tuple` [`float`, `float`]
+        Lowest and highest declination in the box.
+    ra_ranges : `list` [`tuple` [`float`, `float`]] or `None`
+        Right ascension ranges of the box, one or two of them. `None`
+        means the circle reaches a pole or is so wide that every right
+        ascension must be searched.
+    """
+    radius = min(radius_degrees, 180.0) + _BOX_MARGIN_DEGREES
+    dec_range = (max(dec_degrees - radius, -90.0), min(dec_degrees + radius, 90.0))
+    if dec_degrees + radius >= 90.0 or dec_degrees - radius <= -90.0:
+        return dec_range, None
+
+    # For a circle that does not reach a pole, the widest it gets in right
+    # ascension is asin(sin(radius) / cos(dec)). The formula only works
+    # while that ratio is below 1, which the pole check above guarantees.
+    half_width_degrees = math.degrees(
+        math.asin(math.sin(math.radians(radius)) / math.cos(math.radians(dec_degrees)))
+    )
+    if half_width_degrees >= 180.0:
+        return dec_range, None
+
+    ra_low = ra_degrees - half_width_degrees
+    ra_high = ra_degrees + half_width_degrees
+    if ra_low < 0.0:
+        return dec_range, [(ra_low + _FULL_CIRCLE_DEGREES, _FULL_CIRCLE_DEGREES), (0.0, ra_high)]
+    if ra_high >= _FULL_CIRCLE_DEGREES:
+        return dec_range, [(ra_low, _FULL_CIRCLE_DEGREES), (0.0, ra_high - _FULL_CIRCLE_DEGREES)]
+    return dec_range, [(ra_low, ra_high)]
+
+
+def _angular_separation_degrees(
+    ra_degrees: float, dec_degrees: float, other_ra_degrees: np.ndarray, other_dec_degrees: np.ndarray
+) -> np.ndarray:
+    """Measure the angle on the sky from one point to many points.
+
+    Uses the haversine formula, which stays accurate for very small angles
+    where the simpler cosine formula loses digits.
+
+    Parameters
+    ----------
+    ra_degrees, dec_degrees : `float`
+        The single point, in degrees.
+    other_ra_degrees, other_dec_degrees : `numpy.ndarray`
+        The many points, in degrees.
+
+    Returns
+    -------
+    separation_degrees : `numpy.ndarray`
+        The angle from the single point to each of the many points.
+    """
+    ra_radians = math.radians(ra_degrees)
+    dec_radians = math.radians(dec_degrees)
+    other_ra_radians = np.radians(other_ra_degrees)
+    other_dec_radians = np.radians(other_dec_degrees)
+    half_dec_difference = np.sin((other_dec_radians - dec_radians) / 2.0)
+    half_ra_difference = np.sin((other_ra_radians - ra_radians) / 2.0)
+    haversine = (
+        half_dec_difference**2 + math.cos(dec_radians) * np.cos(other_dec_radians) * half_ra_difference**2
+    )
+    return np.degrees(2.0 * np.arcsin(np.sqrt(np.clip(haversine, 0.0, 1.0))))
 
 
 def _split_target_ids(joined_target_ids: Any) -> list[str]:
@@ -231,6 +332,37 @@ class AbstractCatalogAccess(ABC):
         pass
 
     @abstractmethod
+    def list_stars_in_region(
+        self,
+        ra_degrees: float,
+        dec_degrees: float,
+        radius_degrees: float,
+        magnitude_range: tuple[float, float] | None = None,
+    ) -> list[StarSummary]:
+        """List the stars inside a circle on the sky, in short form.
+
+        Parameters
+        ----------
+        ra_degrees : `float`
+            Right ascension of the circle's center, in degrees.
+        dec_degrees : `float`
+            Declination of the circle's center, in degrees.
+        radius_degrees : `float`
+            Radius of the circle, in degrees.
+        magnitude_range : `tuple` [`float`, `float`], optional
+            Lowest and highest magnitude to keep, ends included. Stars
+            with no saved magnitude are left out. Every star is kept when
+            omitted.
+
+        Returns
+        -------
+        summaries : `list` [`StarSummary`]
+            One summary, with brightness and spectral type filled in, per
+            star whose position is inside the circle.
+        """
+        pass
+
+    @abstractmethod
     def list_position_only_stars(self, target_id: str | None = None) -> list[StarPosition]:
         """List the stars known only by position, with their coordinates.
 
@@ -299,6 +431,7 @@ def _stellar_extra_columns(stellar_object: Any) -> dict[str, Any]:
         "magnitude": _coerce_float(getattr(stellar_object, "magnitude", None)),
         "has_spectra": int(stellar_object.has_spectra),
         "has_photometry": int(stellar_object.has_photometry),
+        "spectral_type": stellar_object.spectral_type or "",
     }
 
 
@@ -354,10 +487,18 @@ class CatalogAccess(AbstractCatalogAccess):
                         "magnitude": "REAL",
                         "has_spectra": "INTEGER",
                         "has_photometry": "INTEGER",
+                        "spectral_type": "TEXT",
                     },
                     extra_columns=_stellar_extra_columns,
-                    # Speeds up an exact single-target match (the common
-                    # case: most stars belong to only one target). The
+                    # Rows saved before this column existed still hold the
+                    # value inside their stored JSON. The database copies it
+                    # out once, when the column is first added.
+                    column_backfills={
+                        "spectral_type": "COALESCE(json_extract(data_json, '$.spectralType'), '')"
+                    },
+                    # The first entry speeds up an exact single-target
+                    # match (the common case: most stars belong to only
+                    # one target). The
                     # two places this column is actually filtered today
                     # -- list_star_summaries and list_position_only_stars
                     # -- use `like` (a star can belong to more than one
@@ -368,7 +509,31 @@ class CatalogAccess(AbstractCatalogAccess):
                     # regardless. Kept anyway since it costs little at
                     # this table's size and does serve an exact match, if
                     # a future caller adds one.
-                    indexed_columns=("target_id",),
+                    #
+                    # The second entry is one index over every column that
+                    # `list_stars_in_region` reads, starting with "dec". A
+                    # sky map only wants the stars near one spot. Sorting
+                    # by declination lets the database skip the stars that
+                    # are too far north or south, and holding every column
+                    # the map reads means it never opens the large stored
+                    # rows. Measured on a real 270,000-star library, a
+                    # region read took about 136 ms with a plain "dec"
+                    # index and about 8 ms with this one, at a cost of
+                    # about 30 MB of disk.
+                    indexed_columns=(
+                        "target_id",
+                        (
+                            "dec",
+                            "ra",
+                            "magnitude",
+                            "has_spectra",
+                            "has_photometry",
+                            "spectral_type",
+                            "name",
+                            "target_id",
+                            "id",
+                        ),
+                    ),
                 ),
             },
         )
@@ -568,6 +733,96 @@ class CatalogAccess(AbstractCatalogAccess):
                     target_ids=target_ids,
                     has_spectra=bool(row["has_spectra"]),
                     has_photometry=bool(row["has_photometry"]),
+                )
+            )
+        return summaries
+
+    def list_stars_in_region(
+        self,
+        ra_degrees: float,
+        dec_degrees: float,
+        radius_degrees: float,
+        magnitude_range: tuple[float, float] | None = None,
+    ) -> list[StarSummary]:
+        """List the stars inside a circle on the sky, in short form.
+
+        Reads only the saved columns, so a star's stored JSON is never
+        parsed, and uses the declination index so stars far from the
+        circle are never read at all. Loading every star in full for each
+        pan or zoom of the sky map took about ten seconds on a real
+        270,000-star library.
+
+        Parameters
+        ----------
+        ra_degrees : `float`
+            Right ascension of the circle's center, in degrees.
+        dec_degrees : `float`
+            Declination of the circle's center, in degrees.
+        radius_degrees : `float`
+            Radius of the circle, in degrees.
+        magnitude_range : `tuple` [`float`, `float`], optional
+            Lowest and highest magnitude to keep, ends included. Stars
+            with no saved magnitude are left out. Every star is kept when
+            omitted. The database applies this while it searches, so a
+            wide view that only wants bright stars never reads the faint
+            ones at all.
+
+        Returns
+        -------
+        summaries : `list` [`StarSummary`]
+            One summary, with brightness and spectral type filled in, per
+            star whose position is inside the circle. Stars with no
+            position are left out. A star exactly at right ascension 0 and
+            declination 0 is a "no position" placeholder and is left out
+            too, the same as the sky map has always done.
+        """
+        dec_range, ra_ranges = _region_search_box(ra_degrees, dec_degrees, radius_degrees)
+        columns = [
+            "id",
+            "name",
+            "ra",
+            "dec",
+            "target_id",
+            "has_spectra",
+            "has_photometry",
+            "magnitude",
+            "spectral_type",
+        ]
+        rows: list[dict[str, Any]] = []
+        for ra_range in ra_ranges if ra_ranges is not None else [None]:
+            between = {"dec": dec_range}
+            if ra_range is not None:
+                between["ra"] = ra_range
+            if magnitude_range is not None:
+                between["magnitude"] = magnitude_range
+            rows.extend(self._generic.list_projected("stellar_catalog", columns, between=between))
+        if not rows:
+            return []
+
+        star_ras = np.array([row["ra"] for row in rows], dtype=float)
+        star_decs = np.array([row["dec"] for row in rows], dtype=float)
+        separations = _angular_separation_degrees(ra_degrees, dec_degrees, star_ras, star_decs)
+        is_inside_circle = separations <= radius_degrees
+
+        summaries = []
+        for row, star_ra, star_dec, is_inside in zip(
+            rows, star_ras, star_decs, is_inside_circle, strict=True
+        ):
+            # Both coordinates being zero means "no position saved yet".
+            has_no_position = not (star_ra or star_dec)
+            if not is_inside or has_no_position:
+                continue
+            summaries.append(
+                StarSummary(
+                    id=row["id"],
+                    name=row["name"] or "",
+                    right_ascension=float(star_ra),
+                    declination=float(star_dec),
+                    target_ids=_split_target_ids(row["target_id"]),
+                    has_spectra=bool(row["has_spectra"]),
+                    has_photometry=bool(row["has_photometry"]),
+                    magnitude=row["magnitude"],
+                    spectral_type=row["spectral_type"] or "",
                 )
             )
         return summaries

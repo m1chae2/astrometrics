@@ -4,6 +4,8 @@ Resolves a named target/star against the local Astrometrics database or
 SIMBAD, and retrieves objects within a sky region for wayfindinglib.sky.Sky.
 """
 
+from typing import Any
+
 from astrometricslib import StellarObject, Target
 from wayfindinglib.drivers.catalog.simbad_catalog_driver import resolve_simbad_radec
 from wayfindinglib.exceptions import AstrometryHardwareError
@@ -113,6 +115,7 @@ def get_sources(
     dec_deg: float,
     radius_deg: float,
     include_catalog: bool = False,
+    include_stars: bool = True,
 ) -> list[Target | StellarObject]:
     """Retrieve list of targets and stars in a specific sky region.
 
@@ -129,6 +132,9 @@ def get_sources(
     include_catalog : bool
         If True, query includes the global SIMBAD catalog. If False,
         returns local database records only.
+    include_stars : bool
+        If False, the user's own stars are left out and only targets
+        (plus the SIMBAD results, if asked for) come back.
 
     Returns
     -------
@@ -146,7 +152,7 @@ def get_sources(
     # Planetarium query (which always calls this with include_catalog=False)
     # fetched and serialized the entire local catalog instead of just
     # what's in view.
-    sources = catalog_operations.astrometrics_catalog(sky, ra_deg, dec_deg, radius_deg)
+    sources = catalog_operations.astrometrics_catalog(sky, ra_deg, dec_deg, radius_deg, include_stars)
     if include_catalog:
         online_sources = catalog_operations.global_catalog(sky, ra_deg, dec_deg, radius_deg)
         # Avoid duplicating IDs
@@ -155,6 +161,45 @@ def get_sources(
             if online_source.id not in local_ids:
                 sources.append(online_source)
     return sources
+
+
+def get_library_star_summaries(
+    sky,  # ruff: ignore[missing-type-function-argument]
+    ra_deg: float,
+    dec_deg: float,
+    radius_deg: float,
+    magnitude_range: tuple[float, float] | None = None,
+) -> list[dict[str, Any]]:
+    """Retrieve quick summaries of the user's own stars in a sky region.
+
+    `get_sources` loads every library star in full and checks each one, so
+    it takes seconds on a large library. This reads only the saved columns
+    of the stars near the region, which takes milliseconds.
+
+    Parameters
+    ----------
+    sky : Sky
+        The Sky instance providing the local Astrometrics catalog.
+    ra_deg : float
+        Center Right Ascension in degrees.
+    dec_deg : float
+        Center Declination in degrees.
+    radius_deg : float
+        Search radius in degrees.
+    magnitude_range : Tuple[float, float], optional
+        Lowest and highest magnitude to keep, ends included. Stars with no
+        saved magnitude are left out. Every star is kept when omitted.
+
+    Returns
+    -------
+    List[Dict[str, Any]]
+        One dict per star inside the region, with keys ``id``, ``name``,
+        ``ra``, ``dec``, ``targetIds``, ``hasSpectra``, ``hasPhotometry``,
+        ``magnitude`` and ``spectralType``.
+    """
+    return sky._astrometrics.stars.list_object_summaries_in_region(
+        ra_deg, dec_deg, radius_deg, magnitude_range
+    )
 
 
 def get_online_catalog_sources(

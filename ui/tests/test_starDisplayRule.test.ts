@@ -9,6 +9,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  formatCatalogMagnitude,
   hasCatalogMagnitude,
   isDisplayableStar,
   computeLimitingMagnitude,
@@ -23,6 +24,26 @@ const localStar = (magnitude: unknown) =>
 
 const isShownLocally = (magnitude: unknown, fovDegrees: number) =>
   isDisplayableStar(localStar(magnitude), true, true, computeLimitingMagnitude(fovDegrees), fovDegrees);
+
+describe('formatCatalogMagnitude', () => {
+  it('formats real catalog magnitudes, including negative ones', () => {
+    expect(formatCatalogMagnitude(6.2)).toBe('6.20');
+    expect(formatCatalogMagnitude(-1.46)).toBe('-1.46');
+    expect(formatCatalogMagnitude(12.3456, 3)).toBe('12.346');
+  });
+
+  it('shows the legacy 0.0 placeholder as unknown rather than a measurement', () => {
+    expect(formatCatalogMagnitude(0)).toBe('--');
+  });
+
+  it('shows missing, empty, non-finite and instrumental values as unknown', () => {
+    expect(formatCatalogMagnitude(undefined)).toBe('--');
+    expect(formatCatalogMagnitude(null)).toBe('--');
+    expect(formatCatalogMagnitude('')).toBe('--');
+    expect(formatCatalogMagnitude(NaN)).toBe('--');
+    expect(formatCatalogMagnitude(-14.98)).toBe('--');
+  });
+});
 
 describe('hasCatalogMagnitude', () => {
   it('accepts real apparent magnitudes, including the brightest stars', () => {

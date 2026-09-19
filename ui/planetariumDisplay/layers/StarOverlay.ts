@@ -141,6 +141,24 @@ export function hasCatalogMagnitude(magnitude: unknown): magnitude is number {
 }
 
 /**
+ * Formats a star's magnitude for display, or `'--'` when it isn't a real one.
+ *
+ * Older library records store an exact `0` for stars whose catalog had no
+ * magnitude (the pipeline used to write `0.0` as a placeholder). A genuine
+ * catalog magnitude is never exactly `0`, so it is shown as unknown here
+ * rather than as a measurement. Instrumental and missing values are unknown
+ * too (see hasCatalogMagnitude).
+ *
+ * @param {unknown} magnitude - The source's magnitude field as received from the backend.
+ * @param {number} decimals - Number of decimal places. Defaults to 2.
+ * @returns {string} The formatted magnitude, or `'--'` if it is unknown.
+ */
+export function formatCatalogMagnitude(magnitude: unknown, decimals: number = 2): string {
+  if (!hasCatalogMagnitude(magnitude) || magnitude === 0) return '--';
+  return magnitude.toFixed(decimals);
+}
+
+/**
  * Determines whether a source qualifies as a displayable star point, applying
  * the same catalog-routing rule StarOverlay and StarFieldRenderer both need
  * to agree on: Hipparcos and GAIA stars (the generic background sky, at

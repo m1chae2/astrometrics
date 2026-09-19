@@ -271,6 +271,43 @@ def _rescale_source_centroids(sources: list[dict], factor: int) -> None:
                 source[y_key] = source[y_key] * factor + offset
 
 
+def _read_catalog_magnitude(match: Any, column_names: list[str]) -> float | None:
+    """Read a star's brightness from a catalog row, if the catalog has one.
+
+    A catalog often has no brightness for a star (the value is masked, or
+    the column is missing). That case must stay `None`, meaning "not yet
+    known" (see `StellarObject.magnitude`). Returning ``0.0`` instead
+    would look like a real measurement, since magnitude 0 is about as
+    bright as Vega, and it would also stop a real magnitude from being
+    filled in later.
+
+    Parameters
+    ----------
+    match : `astropy.table.Row`
+        One row of a SIMBAD or Gaia result table.
+    column_names : `list` [`str`]
+        Names of the columns that can hold this catalog's magnitude, in
+        the order to try them. Only the first one that exists is used.
+
+    Returns
+    -------
+    magnitude : `float` or `None`
+        The magnitude, or `None` if the catalog has no usable value.
+    """
+    for column_name in column_names:
+        if column_name not in match.colnames:
+            continue
+        value = match[column_name]
+        if value is None or (hasattr(value, "mask") and bool(value.mask)):
+            return None
+        try:
+            magnitude = float(value)
+        except ValueError, TypeError:
+            return None
+        return magnitude if math.isfinite(magnitude) else None
+    return None
+
+
 class StarIdentifier:
     """The main tool for finding stars, mapping the image, and naming them."""
 
@@ -1457,17 +1494,8 @@ class StarIdentifier:
         if not spectral_type or str(spectral_type).strip() == "":
             spectral_type = "Unknown"
 
-        magnitude = 0.0
-        # Map SIMBAD flux (magnitude)
-        for col in ["V", "FLUX_V", "flux_v", "flux(V)"]:
-            if col in match.colnames:
-                val = match[col]
-                if val is not None and not (hasattr(val, "mask") and bool(val.mask)):
-                    try:
-                        magnitude = float(val)
-                    except ValueError, TypeError:
-                        magnitude = 0.0
-                break
+        # Map SIMBAD flux (magnitude); stays None when SIMBAD has no V value.
+        magnitude = _read_catalog_magnitude(match, ["V", "FLUX_V", "flux_v", "flux(V)"])
 
         stellar_object.name = common_name if common_name else str(main_id)
         stellar_object.id = str(main_id)
@@ -1477,8 +1505,9 @@ class StarIdentifier:
         stellar_object.right_ascension = float(ra)
         stellar_object.declination = float(dec)
         stellar_object.is_catalog_identified = True
+        magnitude_text = f"{magnitude:.2f}" if magnitude is not None else "unknown"
         logger.info(
-            f"  Identified: {stellar_object.name} ({stellar_object.spectral_type}, mag: {magnitude:.2f}) "
+            f"  Identified: {stellar_object.name} ({stellar_object.spectral_type}, mag: {magnitude_text}) "
             f"at {ra:.4f}, {dec:.4f}"
         )
 
@@ -1497,16 +1526,8 @@ class StarIdentifier:
         elif not source_id.startswith("Gaia"):
             source_id = f"Gaia DR3 {source_id}"
 
-        magnitude = 0.0
-        for col in ["phot_g_mean_mag", "PHOT_G_MEAN_MAG", "g_mag"]:
-            if col in match.colnames:
-                val = match[col]
-                if val is not None and not (hasattr(val, "mask") and bool(val.mask)):
-                    try:
-                        magnitude = float(val)
-                    except ValueError, TypeError:
-                        magnitude = 0.0
-                break
+        # Stays None when Gaia has no G-band value for this star.
+        magnitude = _read_catalog_magnitude(match, ["phot_g_mean_mag", "PHOT_G_MEAN_MAG", "g_mag"])
 
         stellar_object.name = source_id
         stellar_object.id = source_id
@@ -1516,6 +1537,7 @@ class StarIdentifier:
         stellar_object.right_ascension = float(ra)
         stellar_object.declination = float(dec)
         stellar_object.is_catalog_identified = True
+        magnitude_text = f"{magnitude:.2f}" if magnitude is not None else "unknown"
         logger.info(
-            f"  Identified (Gaia): {stellar_object.name} (mag: {magnitude:.2f}) at {ra:.4f}, {dec:.4f}"
+            f"  Identified (Gaia): {stellar_object.name} (mag: {magnitude_text}) at {ra:.4f}, {dec:.4f}"
         )

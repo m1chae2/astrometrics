@@ -43,6 +43,7 @@ Table columns are the five pipelines plus a column for code shared across all of
 - **Star detection and centroiding:** `star_identifier.py` and `source_detection.py`
 - **Coordinate transformations (WCS) and pipeline orchestration:** `pipeline.py`
 - **Local Gaia catalog cache:** `astrometricslib/drivers/catalog_store.py`
+- **Deep-star catalog download (the Planetarium's faint stars):** `deep_catalog_builder.py`, saved by `astrometricslib/drivers/deep_star_store.py`
 
 ### Photometry
 *Located in:* `astrometricslib/pipelines/photometry/`
@@ -85,6 +86,7 @@ Table columns are the five pipelines plus a column for code shared across all of
 - **Siril stacking/registration:** `siril_interface.py` and `siril_output_parsing.py`
 - **Astrometry.net plate solving:** `plate_solve_interface.py`
 - **Local Gaia catalog cache:** `catalog_store.py`
+- **Deep-star catalog (Gaia DR3 to G = 16, tiled by sky position, read with no network access):** `deep_star_store.py`
 - **SIMBAD star lookups:** `simbad_interface.py`
 - **Calibration frame library (darks/bias/flats):** `calibration_library.py`
 - **One-time startup migration and schema backfill for the target/stellar catalogs:** `local_database.py`
@@ -120,5 +122,6 @@ keyed-record SQLite store shared with wayfindinglib:
 These top-level scripts orchestrate the pipeline across multiple targets and manage execution environments.
 - **Batch execution:** `run_all_target_processing.py`
 - **Catalog seeding:** `seed_local_star_catalog.py`
+- **Deep-star catalog download:** `build_deep_star_catalog.py`. Run once with `python -m astrometricslib.scripts.build_deep_star_catalog`. It downloads Gaia DR3 in about 3,000 small requests, can be stopped and resumed, and offers `--dry-run` (no network) and `--estimate` (counts a sample to guess the size on disk).
 - **Concurrency benchmarking:** `benchmark_siril_concurrency.py`
 - **Data backfilling:** `backfill_focal_length.py`

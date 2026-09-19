@@ -652,6 +652,7 @@ class StellarService:
         dec: float,
         radius: float,
         enabled_drivers: list[str],
+        limiting_magnitude: float | None = None,
     ) -> list[dict]:
         """Return serialized StellarObjects from online catalog drivers.
 
@@ -669,6 +670,10 @@ class StellarService:
             Search radius in degrees.
         enabled_drivers : List[str]
             Registry keys of drivers to query (e.g. ['simbad', 'gaia']).
+        limiting_magnitude : float, optional
+            Faintest star magnitude the map can draw at the current zoom
+            (the same value the UI sends to get_sources). Drivers that can
+            use it fetch fewer stars.
 
         Returns
         -------
@@ -678,7 +683,11 @@ class StellarService:
         REQ: PLN-3.1, PLN-3.2
         """
         tagged_objects = self.wayfinder.planning.get_online_catalog_sources(
-            ra_deg=ra, dec_deg=dec, radius_deg=radius, enabled_driver_names=enabled_drivers
+            ra_deg=ra,
+            dec_deg=dec,
+            radius_deg=radius,
+            enabled_driver_names=enabled_drivers,
+            magnitude_limit=limiting_magnitude,
         )
         results = []
         for driver_name, obj in tagged_objects:

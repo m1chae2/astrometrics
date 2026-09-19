@@ -18,6 +18,7 @@ from astrometricslib import StellarObject, Target, parse_coordinate_string
 from wayfindinglib.drivers.catalog import (
     CatalogDriver,
     GaiaCatalogDriver,
+    GaiaStarCache,
     LocalBrightStarCatalogDriver,
     SimbadCatalogDriver,
 )
@@ -26,8 +27,14 @@ from wayfindinglib.drivers.catalog.simbad_catalog_driver import resolve_simbad_r
 logger = logging.getLogger(__name__)
 
 
-def build_catalog_driver_registry() -> dict[str, CatalogDriver]:
+def build_catalog_driver_registry(star_cache: GaiaStarCache | None = None) -> dict[str, CatalogDriver]:
     """Construct the registry of online/local catalog query drivers.
+
+    Parameters
+    ----------
+    star_cache : `GaiaStarCache`, optional
+        Where the Gaia driver looks for, and saves, stars on the local disk.
+        Without one, the Gaia driver always downloads.
 
     Returns
     -------
@@ -37,7 +44,7 @@ def build_catalog_driver_registry() -> dict[str, CatalogDriver]:
     return {
         "simbad": SimbadCatalogDriver(),
         # Live TAP-backed driver, for small viewport-scoped deep queries.
-        "gaia": GaiaCatalogDriver(),
+        "gaia": GaiaCatalogDriver(star_cache=star_cache),
         # Locally bundled Hipparcos extract, for the full-sky "Bright
         # Stars" overview layer. GAIA is unsuitable for this layer — its
         # detectors saturate on very bright stars, so it's missing nearly
@@ -329,6 +336,7 @@ def query_online_catalogs(
     dec_degrees: float,
     radius_degrees: float,
     enabled_driver_names: list[str],
+    magnitude_limit: float | None = None,
 ) -> list[tuple[str, StellarObject]]:
     """Query one or more registered online catalog drivers in parallel.
 
@@ -349,6 +357,9 @@ def query_online_catalogs(
         maximum_query_radius_degrees before dispatch.
     enabled_driver_names : List[str]
         Registry keys of drivers to query (e.g. ['simbad', 'gaia']).
+    magnitude_limit : float, optional
+        Faintest magnitude the caller wants, passed to every driver. A driver
+        that cannot use it ignores it.
 
     Returns
     -------
@@ -372,7 +383,9 @@ def query_online_catalogs(
     def _query_driver(driver: CatalogDriver) -> list[tuple[str, StellarObject]]:
         effective_radius = min(radius_degrees, driver.maximum_query_radius_degrees)
         try:
-            objects = driver.query_region(ra_degrees, dec_degrees, effective_radius)
+            objects = driver.query_region(
+                ra_degrees, dec_degrees, effective_radius, magnitude_limit=magnitude_limit
+            )
             return [(driver.driver_name, obj) for obj in objects]
         except Exception as driver_error:
             logger.warning(

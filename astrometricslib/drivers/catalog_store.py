@@ -7,15 +7,26 @@ place that opens that database file directly. Everything else asks
 these functions for cached stars or tells them to save some, instead
 of running SQL itself.
 
-The database has two tables:
+The database has four tables, in two separate pairs:
 
-- ``gaia_sources``: one row per star we have downloaded, keyed by its
-  Gaia source ID.
-- ``cached_regions``: one row per circular patch of sky we have already
-  downloaded, so we know not to download it again.
+- ``gaia_sources``: one row per star that star identification has
+  downloaded, keyed by its Gaia source ID.
+- ``cached_regions``: one row per circular patch of sky that star
+  identification has already downloaded, so we know not to download it
+  again.
+- ``planetarium_sources`` and ``planetarium_regions``: the same two
+  ideas, but for stars the Planetarium looked up to draw its sky map.
+
+The Planetarium keeps its own pair on purpose. Star identification
+counts any five or more stars in a box of ``gaia_sources`` as a
+complete answer for that box, so if the Planetarium saved its
+partial, brightest-stars-only results there, identification would stop
+downloading the fainter stars it needs. The Planetarium may *read*
+``gaia_sources`` (stars there are real), but only writes its own pair.
 """
 
 import logging
+import math
 import os
 import sqlite3
 from pathlib import Path
@@ -26,13 +37,29 @@ logger = logging.getLogger(__name__)
 _CATALOG_DB_FILENAME = "catalog_cache.db"
 
 __all__ = [
+    "PIPELINE_CACHE_MAGNITUDE_LIMIT",
+    "find_planetarium_stars",
     "get_catalog_cache_path",
     "insert_gaia_sources",
     "is_region_cached",
     "mark_region_cached",
     "query_gaia_sources_in_bounds",
+    "store_planetarium_region",
     "summarize_catalog_coverage",
 ]
+
+# Star identification downloads every Gaia star brighter than this
+# magnitude for each region it records in ``cached_regions``. It matches
+# DEFAULT_MAGNITUDE_LIMIT in pipelines/astrometry/catalog_seeding.py and the
+# default in StarIdentifier._seed_gaia_cache_for_field, which write those
+# rows. That is what lets the Planetarium trust such a region as complete
+# down to this depth.
+PIPELINE_CACHE_MAGNITUDE_LIMIT = 18.0
+
+# Angular slack, in degrees, when checking that one circle of sky lies
+# inside another. It only absorbs rounding error, so a region that fits
+# exactly is not rejected because of the last decimal place.
+_CONTAINMENT_TOLERANCE_DEGREES = 1e-6
 
 
 def get_catalog_cache_path(config: Any) -> Path:
@@ -80,6 +107,30 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
             radius REAL
         )
     """)
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS planetarium_sources (
+            source_id TEXT PRIMARY KEY,
+            ra REAL,
+            dec REAL,
+            phot_g_mean_mag REAL,
+            designation TEXT
+        )
+    """)
+    # ``magnitude_limit`` is how faint this region is complete to: every
+    # Gaia star at least that bright inside the circle has been saved.
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS planetarium_regions (
+            region_key TEXT PRIMARY KEY,
+            ra REAL,
+            dec REAL,
+            radius REAL,
+            magnitude_limit REAL
+        )
+    """)
+    # Box searches filter on declination first, so an index on it keeps
+    # them from reading every row.
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_gaia_sources_dec ON gaia_sources (dec)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_planetarium_sources_dec ON planetarium_sources (dec)")
     connection.commit()
 
 
@@ -196,6 +247,211 @@ def query_gaia_sources_in_bounds(
             (min_ra, max_ra, min_dec, max_dec),
         )
         return cursor.fetchall()
+    finally:
+        connection.close()
+
+
+def _angular_separation_degrees(ra_one: float, dec_one: float, ra_two: float, dec_two: float) -> float:
+    """Measure the angle between two points on the sky.
+
+    Parameters
+    ----------
+    ra_one, dec_one : `float`
+        The first point, in degrees.
+    ra_two, dec_two : `float`
+        The second point, in degrees.
+
+    Returns
+    -------
+    separation : `float`
+        The angle between the points, in degrees.
+    """
+    dec_one_radians = math.radians(dec_one)
+    dec_two_radians = math.radians(dec_two)
+    half_delta_dec = (dec_two_radians - dec_one_radians) / 2.0
+    half_delta_ra = math.radians(ra_two - ra_one) / 2.0
+    # The haversine formula stays accurate for very small angles, unlike
+    # the simpler arccos formula.
+    haversine_term = (
+        math.sin(half_delta_dec) ** 2
+        + math.cos(dec_one_radians) * math.cos(dec_two_radians) * math.sin(half_delta_ra) ** 2
+    )
+    return math.degrees(2.0 * math.asin(math.sqrt(min(1.0, max(0.0, haversine_term)))))
+
+
+def _covering_region_exists(
+    regions: list[tuple[float, float, float]], ra: float, dec: float, radius: float
+) -> bool:
+    """Check whether one saved region contains a whole circle of sky.
+
+    A circle fits inside a bigger one when the distance between their
+    centers plus the smaller radius is no more than the bigger radius.
+
+    Parameters
+    ----------
+    regions : `list` of `tuple`
+        Saved regions, each ``(ra, dec, radius)`` in degrees.
+    ra, dec : `float`
+        The center of the circle to look for, in degrees.
+    radius : `float`
+        The radius of the circle to look for, in degrees.
+
+    Returns
+    -------
+    covered : `bool`
+        `True` if at least one saved region contains the whole circle.
+    """
+    return any(
+        _angular_separation_degrees(ra, dec, region_ra, region_dec) + radius
+        <= region_radius + _CONTAINMENT_TOLERANCE_DEGREES
+        for region_ra, region_dec, region_radius in regions
+    )
+
+
+def find_planetarium_stars(
+    config: Any, ra: float, dec: float, radius: float, magnitude_limit: float
+) -> list[tuple[str, float, float, float, str]] | None:
+    """Look up saved Gaia stars for a circle of sky, if it is fully saved.
+
+    A circle counts as saved when one earlier download covers all of it
+    at least as faintly as ``magnitude_limit``. That earlier download can
+    be one the Planetarium made (``planetarium_regions``) or one star
+    identification made (``cached_regions``, complete to
+    `PIPELINE_CACHE_MAGNITUDE_LIMIT`). When only part of the circle is
+    saved, this returns `None` rather than a partial answer, so the
+    caller knows to download it.
+
+    Parameters
+    ----------
+    config : `AppConfiguration`
+        The application settings.
+    ra, dec : `float`
+        The center of the circle, in degrees.
+    radius : `float`
+        The radius of the circle, in degrees.
+    magnitude_limit : `float`
+        Only stars brighter than this Gaia G magnitude are wanted.
+
+    Returns
+    -------
+    rows : `list` of `tuple` or `None`
+        One tuple per star, ``(source_id, ra, dec, phot_g_mean_mag,
+        designation)``, brightest first, or `None` if the circle is not
+        fully saved yet.
+    """
+    cache_db_path = get_catalog_cache_path(config)
+    if not cache_db_path.exists():
+        return None
+    connection = sqlite3.connect(cache_db_path)
+    try:
+        _ensure_schema(connection)
+
+        saved_regions: list[tuple[float, float, float]] = []
+        if magnitude_limit <= PIPELINE_CACHE_MAGNITUDE_LIMIT:
+            saved_regions.extend(connection.execute("SELECT ra, dec, radius FROM cached_regions").fetchall())
+        saved_regions.extend(
+            connection.execute(
+                "SELECT ra, dec, radius FROM planetarium_regions WHERE magnitude_limit >= ?",
+                (magnitude_limit,),
+            ).fetchall()
+        )
+        if not _covering_region_exists(saved_regions, ra, dec, radius):
+            return None
+
+        # First narrow to a box with the database, then trim the box's
+        # corners down to the true circle in Python.
+        dec_low = dec - radius
+        dec_high = dec + radius
+        box_clause = "dec >= ? AND dec <= ? AND phot_g_mean_mag < ?"
+        box_parameters: list[float] = [dec_low, dec_high, magnitude_limit]
+        # Near a pole, or for a very wide circle, a right-ascension box is
+        # meaningless (every RA is close), so it is left out there.
+        cos_dec = math.cos(math.radians(min(89.0, abs(dec) + radius)))
+        if dec_high < 89.0 and dec_low > -89.0 and radius / cos_dec < 90.0:
+            half_width = radius / cos_dec
+            ra_low = ra - half_width
+            ra_high = ra + half_width
+            if ra_low < 0.0:
+                box_clause += " AND (ra >= ? OR ra <= ?)"
+                box_parameters += [ra_low + 360.0, ra_high]
+            elif ra_high >= 360.0:
+                box_clause += " AND (ra >= ? OR ra <= ?)"
+                box_parameters += [ra_low, ra_high - 360.0]
+            else:
+                box_clause += " AND ra >= ? AND ra <= ?"
+                box_parameters += [ra_low, ra_high]
+
+        rows_by_source_id: dict[str, tuple[str, float, float, float, str]] = {}
+        for select_statement in (
+            "SELECT source_id, ra, dec, phot_g_mean_mag, designation FROM gaia_sources WHERE ",
+            "SELECT source_id, ra, dec, phot_g_mean_mag, designation FROM planetarium_sources WHERE ",
+        ):
+            # Only fixed text and "?" placeholders are joined here; the
+            # values themselves always travel in `box_parameters`.
+            for row in connection.execute(select_statement + box_clause, box_parameters):
+                if _angular_separation_degrees(ra, dec, row[1], row[2]) <= radius:
+                    rows_by_source_id[row[0]] = row
+        return sorted(rows_by_source_id.values(), key=lambda row: row[3])
+    finally:
+        connection.close()
+
+
+def store_planetarium_region(
+    config: Any,
+    ra: float,
+    dec: float,
+    radius: float,
+    magnitude_limit: float,
+    rows: list[tuple[str, float, float, float, str]],
+) -> None:
+    """Save the stars the Planetarium downloaded for a circle of sky.
+
+    The stars go in ``planetarium_sources`` and the circle in
+    ``planetarium_regions``, never in the tables star identification
+    reads (see the module docstring). If the same circle was saved
+    before, it keeps the deeper of the two magnitude limits.
+
+    Parameters
+    ----------
+    config : `AppConfiguration`
+        The application settings.
+    ra, dec : `float`
+        The center of the circle, in degrees.
+    radius : `float`
+        The radius of the circle, in degrees.
+    magnitude_limit : `float`
+        How faint the saved stars are complete to: every Gaia star at
+        least this bright inside the circle is in ``rows``. A download
+        that was cut short at its row limit is only complete to the
+        faintest star it did return, so pass that magnitude instead of
+        the one that was asked for.
+    rows : `list` of `tuple`
+        One tuple per star: ``(source_id, ra, dec, phot_g_mean_mag,
+        designation)``.
+    """
+    cache_db_path = get_catalog_cache_path(config)
+    os.makedirs(cache_db_path.parent, exist_ok=True)
+    connection = sqlite3.connect(cache_db_path)
+    try:
+        _ensure_schema(connection)
+        connection.executemany(
+            """
+            INSERT OR REPLACE INTO planetarium_sources (source_id, ra, dec, phot_g_mean_mag, designation)
+            VALUES (?, ?, ?, ?, ?)
+        """,
+            rows,
+        )
+        region_key = f"{ra:.4f}_{dec:.4f}_{radius:.4f}"
+        connection.execute(
+            """
+            INSERT INTO planetarium_regions (region_key, ra, dec, radius, magnitude_limit)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(region_key) DO UPDATE SET
+                magnitude_limit = MAX(magnitude_limit, excluded.magnitude_limit)
+        """,
+            (region_key, ra, dec, radius, magnitude_limit),
+        )
+        connection.commit()
     finally:
         connection.close()
 

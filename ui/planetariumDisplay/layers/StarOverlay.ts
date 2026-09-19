@@ -76,7 +76,8 @@ export const NAKED_EYE_LIMITING_MAGNITUDE = 6.0;
  * Hipparcos catalog's own effective faint completeness limit (~magnitude
  * 12), so reaching this depth requires the GAIA DR3 online catalog (see
  * GaiaCatalogDriver) -- Hipparcos alone can't supply anything fainter than
- * ~12.
+ * ~12. The deep-star layer itself stops at DEEP_STAR_MAX_MAGNITUDE, so at the
+ * deepest zooms only the user's own library stars go fainter than that.
  */
 export const MAX_ZOOM_LIMITING_MAGNITUDE = 22.0;
 
@@ -108,6 +109,18 @@ export function computeLimitingMagnitude(fovDegrees: number): number {
     NAKED_EYE_LIMITING_MAGNITUDE + zoomFraction * (MAX_ZOOM_LIMITING_MAGNITUDE - NAKED_EYE_LIMITING_MAGNITUDE)
   );
 }
+
+/**
+ * Faintest magnitude the deep-star (Gaia) layer fetches, however far the view is zoomed in.
+ *
+ * Derivation: for a 30 s exposure with the 75 mm Apertura 75Q and the ASI533MM Pro, a
+ * back-of-envelope signal-to-noise estimate puts 5-sigma detection at about G = 17.5 and
+ * photometry good to about 5 percent at about G = 15.7 (assuming roughly 21 mag/arcsec^2 sky,
+ * so uncertain by about half a magnitude). 16 keeps the stars whose photometry can be trusted
+ * and is about a third of the data of G = 18. See the fuller derivation and validation on
+ * `_GAIA_MAGNITUDE_LIMIT`. Must match it in wayfindinglib/drivers/catalog/gaia_catalog_driver.py.
+ */
+export const DEEP_STAR_MAX_MAGNITUDE = 16;
 
 /**
  * Brightest magnitude treated as a real catalog magnitude. Sirius, the

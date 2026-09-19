@@ -90,7 +90,7 @@ export interface ActionRegistry {
     "planetarium:get_targets": { payload: Record<string, never>; response: PlanetariumTarget[] };
     "planetarium:get_visibility": { payload: { objects: Array<{ id: string; type?: string }>; time?: string }; response: PlanetariumVisibilityItem[] };
     "planetarium:get_observer_location": { payload: Record<string, never>; response: ObserverLocation };
-    "planetarium:get_catalog_sources": { payload: { ra: number; dec: number; radius: number; enabled_drivers: string[] }; response: PlanetariumSource[] };
+    "planetarium:get_catalog_sources": { payload: { ra: number; dec: number; radius: number; enabled_drivers: string[]; limiting_magnitude?: number }; response: PlanetariumSource[] };
     "planetarium:list_catalog_drivers": { payload: Record<string, never>; response: Array<{ driver_name: string; display_name: string; maximum_query_radius_degrees: number }> };
     "planetarium:get_constellation_lines": { payload: Record<string, never>; response: ConstellationLineSegment[] };
 

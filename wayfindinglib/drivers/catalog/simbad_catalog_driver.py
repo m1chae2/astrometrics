@@ -116,6 +116,7 @@ class SimbadCatalogDriver(CatalogDriver):
         ra_degrees: float,
         dec_degrees: float,
         radius_degrees: float,
+        magnitude_limit: float | None = None,
     ) -> list[StellarObject]:
         """Query SIMBAD for stellar objects in a circular sky region.
 

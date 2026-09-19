@@ -115,6 +115,39 @@ def test_get_sources_uses_camel_case_keys_the_planetarium_reads():  # ruff: igno
         assert "spectral_type" not in source
 
 
+def test_get_online_catalog_sources_passes_the_limiting_magnitude_to_the_drivers():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify the map's limiting magnitude reaches the catalog drivers.
+
+    The deep-star (Gaia) layer only needs stars the map can draw at the
+    current zoom, so the UI's limit must travel down to the driver that
+    builds the query.
+    """
+    service = _make_service()
+    service.wayfinder.planning.get_online_catalog_sources.return_value = []
+
+    service.get_online_catalog_sources(
+        ra=250.0, dec=36.0, radius=2.0, enabled_drivers=["gaia"], limiting_magnitude=14.0
+    )
+
+    service.wayfinder.planning.get_online_catalog_sources.assert_called_once_with(
+        ra_deg=250.0,
+        dec_deg=36.0,
+        radius_deg=2.0,
+        enabled_driver_names=["gaia"],
+        magnitude_limit=14.0,
+    )
+
+
+def test_get_online_catalog_sources_limit_is_optional():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify callers sending no limit (e.g. Hipparcos) still work."""
+    service = _make_service()
+    service.wayfinder.planning.get_online_catalog_sources.return_value = []
+
+    service.get_online_catalog_sources(ra=0.0, dec=0.0, radius=180.0, enabled_drivers=["hipparcos"])
+
+    assert service.wayfinder.planning.get_online_catalog_sources.call_args.kwargs["magnitude_limit"] is None
+
+
 def test_stellar_object_has_spectra_and_has_photometry_computed_fields():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verify StellarObject hasSpectra/hasPhotometry fields in model dump.
 

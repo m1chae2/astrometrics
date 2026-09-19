@@ -143,7 +143,12 @@ class ObservationPlanning:
         return self._sky_engine.get_sources(ra_deg, dec_deg, radius_deg, include_catalog)
 
     def get_online_catalog_sources(
-        self, ra_deg: float, dec_deg: float, radius_deg: float, enabled_driver_names: list[str]
+        self,
+        ra_deg: float,
+        dec_deg: float,
+        radius_deg: float,
+        enabled_driver_names: list[str],
+        magnitude_limit: float | None = None,
     ) -> list[tuple[str, Any]]:
         """Return matching stellar objects from enabled catalog drivers.
 
@@ -152,7 +157,9 @@ class ObservationPlanning:
         sources : `list` [`tuple` [`str`, `Any`]]
             Each match paired with the driver name that found it.
         """
-        return self._sky_engine.get_online_catalog_sources(ra_deg, dec_deg, radius_deg, enabled_driver_names)
+        return self._sky_engine.get_online_catalog_sources(
+            ra_deg, dec_deg, radius_deg, enabled_driver_names, magnitude_limit
+        )
 
     def list_catalog_driver_metadata(self) -> list[dict[str, Any]]:
         """Return metadata describing each registered online catalog driver.

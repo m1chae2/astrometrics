@@ -75,7 +75,7 @@ class Sky:
         from astrometricslib import Astrometrics
 
         self._astrometrics = Astrometrics()
-        self._catalog_driver_registry = build_catalog_driver_registry()
+        self._catalog_driver_registry = build_catalog_driver_registry(star_cache=self._astrometrics.stars)
         # Bundled constellation stick-figure line data — not a CatalogDriver
         # since it's static cultural/artistic topology, not a live query.
         self._constellation_lines = ConstellationLineLibrary()
@@ -166,6 +166,7 @@ class Sky:
         dec_deg: float,
         radius_deg: float,
         enabled_driver_names: list[str],
+        magnitude_limit: float | None = None,
     ) -> list[tuple[str, StellarObject]]:
         """Delegate get_online_catalog_sources to resolution_operations.
 
@@ -178,7 +179,7 @@ class Sky:
         from wayfindinglib.skylib import resolution_operations
 
         return resolution_operations.get_online_catalog_sources(
-            self, ra_deg, dec_deg, radius_deg, enabled_driver_names
+            self, ra_deg, dec_deg, radius_deg, enabled_driver_names, magnitude_limit
         )
 
     def list_catalog_driver_metadata(self) -> list[dict[str, Any]]:

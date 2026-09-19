@@ -116,7 +116,7 @@ describe('useOnlineCatalogSources', () => {
 
   it('skips the wait when told the query never changes with the view', async () => {
     mockedCallBackend.mockResolvedValue([star('d')] as never);
-    renderHook(() => useOnlineCatalogSources(0, 0, 180, ['hipparcos'], true, 0));
+    renderHook(() => useOnlineCatalogSources(0, 0, 180, ['hipparcos'], true, { debounceMilliseconds: 0 }));
 
     await act(async () => {
       vi.advanceTimersByTime(0);
@@ -124,6 +124,47 @@ describe('useOnlineCatalogSources', () => {
     await flushPromises();
 
     expect(mockedCallBackend).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends the limiting magnitude to the backend', async () => {
+    mockedCallBackend.mockResolvedValue([star('e')] as never);
+    renderHook(() => useOnlineCatalogSources(10, 10, 1, ['gaia'], true, { limitingMagnitude: 14 }));
+
+    await act(async () => {
+      vi.advanceTimersByTime(CATALOG_QUERY_DEBOUNCE_MS);
+    });
+    await flushPromises();
+
+    expect(mockedCallBackend.mock.calls[0][1]).toMatchObject({ limiting_magnitude: 14 });
+  });
+
+  it('refetches when the view needs stars fainter than the cached region holds', async () => {
+    mockedCallBackend.mockResolvedValue([star('f')] as never);
+    const { rerender } = renderHook(
+      ({ limit }) => useOnlineCatalogSources(10, 10, 1, ['gaia'], true, { limitingMagnitude: limit }),
+      { initialProps: { limit: 12 } },
+    );
+    await act(async () => {
+      vi.advanceTimersByTime(CATALOG_QUERY_DEBOUNCE_MS);
+    });
+    await flushPromises();
+    expect(mockedCallBackend).toHaveBeenCalledTimes(1);
+
+    // A shallower need is already covered: no new query.
+    rerender({ limit: 10 });
+    await act(async () => {
+      vi.advanceTimersByTime(CATALOG_QUERY_DEBOUNCE_MS);
+    });
+    await flushPromises();
+    expect(mockedCallBackend).toHaveBeenCalledTimes(1);
+
+    // A deeper need is not: the cached region lacks the fainter stars.
+    rerender({ limit: 15 });
+    await act(async () => {
+      vi.advanceTimersByTime(CATALOG_QUERY_DEBOUNCE_MS);
+    });
+    await flushPromises();
+    expect(mockedCallBackend).toHaveBeenCalledTimes(2);
   });
 
   it('does not query, and is not loading, when disabled', () => {

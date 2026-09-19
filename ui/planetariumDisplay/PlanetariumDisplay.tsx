@@ -35,7 +35,7 @@ import { useTargetListLogic } from '../common/hooks/useTargetListLogic';
 import { useRemoteStatusContext } from '../common/context/RemoteStatusContext';
 import { useTelescopeStatus } from '../common/hooks/useTelescopeStatus';
 import { safeParse } from './utils/coordinateUtils';
-import { computeLimitingMagnitude, UNCATALOGED_STAR_MAX_FOV_DEG } from './layers/StarOverlay';
+import { computeLimitingMagnitude, DEEP_STAR_MAX_MAGNITUDE, UNCATALOGED_STAR_MAX_FOV_DEG } from './layers/StarOverlay';
 import './styles/planetariumDisplay.css';
 
 /**
@@ -140,7 +140,7 @@ export const PlanetariumDisplay: React.FC = () => {
     brightStarDrivers,
     true,
     // Fixed whole-sky query that never changes with the view, so there is nothing to wait out.
-    0,
+    { debounceMilliseconds: 0 },
   );
 
   // Deep-zoom star query: GAIA DR3 supplies stars fainter than Hipparcos's
@@ -149,10 +149,18 @@ export const PlanetariumDisplay: React.FC = () => {
   // per-region density is far higher than Hipparcos's. Gated on showStars
   // so toggling the background field off also stops these network queries.
   const deepStarDrivers = useMemo(() => ['gaia'], []);
+  // Rounded up to a whole magnitude so a slow zoom reuses one query (and one cached region)
+  // instead of asking for a slightly deeper limit at every step, and capped at the depth the
+  // backend will actually return so a deeper request is not cached as if it had been served.
+  const deepStarLimitingMagnitude = useMemo(
+    () => Math.min(Math.ceil(limitingMagnitude), DEEP_STAR_MAX_MAGNITUDE),
+    [limitingMagnitude],
+  );
   const { onlineSources: deepStarSources, loading: deepStarsLoading } = useOnlineCatalogSources(
     raValue, decValue, queryRadius,
     deepStarDrivers,
     showStars,
+    { limitingMagnitude: deepStarLimitingMagnitude },
   );
 
   // Bundled constellation stick-figure lines: fetched once (no ra/dec/radius —

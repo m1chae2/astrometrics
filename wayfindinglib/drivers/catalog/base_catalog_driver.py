@@ -58,6 +58,7 @@ class CatalogDriver(abc.ABC):
         ra_degrees: float,
         dec_degrees: float,
         radius_degrees: float,
+        magnitude_limit: float | None = None,
     ) -> list[StellarObject]:
         """Query the catalog for objects in a circular sky region.
 
@@ -73,6 +74,9 @@ class CatalogDriver(abc.ABC):
             Center Declination in degrees (ICRS).
         radius_degrees : float
             Search radius in degrees.
+        magnitude_limit : float, optional
+            Faintest magnitude the caller wants. A driver that can use this
+            to fetch fewer stars should; one that cannot may ignore it.
 
         Returns
         -------

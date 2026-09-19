@@ -9,6 +9,7 @@ in the database.
 import logging
 from typing import Any
 
+from astrometricslib.drivers import catalog_store
 from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.utilities.config_loader import AppConfiguration
@@ -139,6 +140,62 @@ class StellarCatalog:
             }
             for star in self.catalog_access.list_star_summaries(target_id=target_id, limit=effective_limit)
         ]
+
+    def find_saved_gaia_stars(
+        self, ra: float, dec: float, radius: float, magnitude_limit: float
+    ) -> list[tuple[str, float, float, float, str]] | None:
+        """Look up saved Gaia stars for a circle of sky, if it is fully saved.
+
+        Stars come from the local Gaia cache on disk, so no internet request
+        is made. This is meant for drawing a sky map quickly; it does not
+        touch the stars in the catalog itself.
+
+        Parameters
+        ----------
+        ra, dec : `float`
+            The center of the circle, in degrees.
+        radius : `float`
+            The radius of the circle, in degrees.
+        magnitude_limit : `float`
+            Only stars brighter than this Gaia G magnitude are wanted.
+
+        Returns
+        -------
+        rows : `list` of `tuple` or `None`
+            One ``(source_id, ra, dec, phot_g_mean_mag, designation)`` tuple
+            per star, brightest first. `None` if the circle is not fully
+            saved yet, meaning the caller has to download it.
+        """
+        return catalog_store.find_planetarium_stars(self._config, ra, dec, radius, magnitude_limit)
+
+    def save_downloaded_gaia_stars(
+        self,
+        ra: float,
+        dec: float,
+        radius: float,
+        magnitude_limit: float,
+        rows: list[tuple[str, float, float, float, str]],
+    ) -> None:
+        """Save just-downloaded Gaia stars so they load fast next time.
+
+        The stars go in their own tables, apart from the ones star
+        identification reads, so saving a partial sky-map download here
+        cannot make identification think it already has every faint star.
+
+        Parameters
+        ----------
+        ra, dec : `float`
+            The center of the circle that was downloaded, in degrees.
+        radius : `float`
+            The radius of the circle that was downloaded, in degrees.
+        magnitude_limit : `float`
+            How faint the download is complete to: every Gaia star at least
+            this bright inside the circle is in ``rows``.
+        rows : `list` of `tuple`
+            One ``(source_id, ra, dec, phot_g_mean_mag, designation)`` tuple
+            per star.
+        """
+        catalog_store.store_planetarium_region(self._config, ra, dec, radius, magnitude_limit, rows)
 
     def get_object(self, object_id: str) -> StellarObject | None:
         """Find a single star in the catalog using its ID.

@@ -163,6 +163,7 @@ def get_online_catalog_sources(
     dec_deg: float,
     radius_deg: float,
     enabled_driver_names: list[str],
+    magnitude_limit: float | None = None,
 ) -> list[tuple[str, StellarObject]]:
     """Query registered online catalog drivers for objects in a sky region.
 
@@ -183,6 +184,9 @@ def get_online_catalog_sources(
         Search radius in degrees.
     enabled_driver_names : List[str]
         Registry keys of drivers to query (e.g. ['simbad', 'gaia']).
+    magnitude_limit : float, optional
+        Faintest magnitude the caller wants; drivers that can use it fetch
+        fewer stars.
 
     Returns
     -------
@@ -199,4 +203,5 @@ def get_online_catalog_sources(
         dec_degrees=dec_deg,
         radius_degrees=radius_deg,
         enabled_driver_names=enabled_driver_names,
+        magnitude_limit=magnitude_limit,
     )

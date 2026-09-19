@@ -224,3 +224,21 @@ def test_object_visibility() -> None:
     vis_subhorizon = sky.get_object_visibility(180.0, -85.0, time)
     assert vis_subhorizon["rise_time"] == "Never Rises"
     assert vis_subhorizon["set_time"] == "Never Rises"
+
+
+def test_query_online_catalogs_passes_the_magnitude_limit_to_every_driver():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """A magnitude limit given to the dispatcher reaches each driver."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from wayfindinglib.skylib.catalog_operations import query_online_catalogs
+
+    driver = MagicMock()
+    driver.driver_name = "gaia"
+    driver.maximum_query_radius_degrees = 90.0
+    driver.query_region.return_value = []
+    sky = SimpleNamespace(_catalog_driver_registry={"gaia": driver})
+
+    query_online_catalogs(sky, 250.0, 36.0, 2.0, ["gaia"], magnitude_limit=14.0)
+
+    driver.query_region.assert_called_once_with(250.0, 36.0, 2.0, magnitude_limit=14.0)

@@ -34,6 +34,24 @@ import { findCachedCatalogSources, storeCatalogSources } from '../utils/catalogS
 export const CATALOG_QUERY_DEBOUNCE_MS = 300;
 
 /**
+ * Optional settings for useOnlineCatalogSources.
+ */
+export interface UseOnlineCatalogSourcesOptions {
+  /**
+   * How long the view must stay unchanged, in milliseconds, before an uncached query is sent.
+   * Defaults to CATALOG_QUERY_DEBOUNCE_MS; pass 0 for a query whose arguments never change with
+   * the view (e.g. the fixed whole-sky Hipparcos query).
+   */
+  debounceMilliseconds?: number;
+  /**
+   * Faintest magnitude worth fetching. Sent to the backend so drivers that can use it (Gaia)
+   * fetch fewer stars, and used to decide whether a cached region is deep enough to reuse.
+   * Omit for no limit.
+   */
+  limitingMagnitude?: number;
+}
+
+/**
  * Fetches online catalog sources for enabled drivers within a sky region.
  *
  * Re-fetches whenever the center position, radius, or enabled driver list changes,
@@ -47,9 +65,7 @@ export const CATALOG_QUERY_DEBOUNCE_MS = 300;
  * @param {number} radius - Query radius in degrees.
  * @param {string[]} enabledDrivers - Registry keys of drivers to query (e.g. ['hipparcos', 'gaia']).
  * @param {boolean} enabled - When false, returns empty results without querying.
- * @param {number} debounceMilliseconds - How long the view must stay unchanged before an
- *   uncached query is sent. Defaults to CATALOG_QUERY_DEBOUNCE_MS; pass 0 for a query whose
- *   arguments never change with the view (e.g. the fixed whole-sky Hipparcos query).
+ * @param {UseOnlineCatalogSourcesOptions} options - Optional tuning; see UseOnlineCatalogSourcesOptions.
  * @returns {{ onlineSources: PlanetariumSource[]; loading: boolean; error: string | null }}
  */
 export const useOnlineCatalogSources = (
@@ -58,8 +74,9 @@ export const useOnlineCatalogSources = (
   radius: number,
   enabledDrivers: string[],
   enabled: boolean,
-  debounceMilliseconds: number = CATALOG_QUERY_DEBOUNCE_MS,
+  options: UseOnlineCatalogSourcesOptions = {},
 ) => {
+  const { debounceMilliseconds = CATALOG_QUERY_DEBOUNCE_MS, limitingMagnitude } = options;
   const [onlineSources, setOnlineSources] = useState<PlanetariumSource[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -74,7 +91,7 @@ export const useOnlineCatalogSources = (
       return;
     }
 
-    const cached = findCachedCatalogSources(ra, dec, radius, enabledDriversKey);
+    const cached = findCachedCatalogSources(ra, dec, radius, enabledDriversKey, limitingMagnitude);
     if (cached) {
       setOnlineSources(cached);
       setError(null);
@@ -94,13 +111,14 @@ export const useOnlineCatalogSources = (
             dec,
             radius,
             enabled_drivers: enabledDrivers,
+            limiting_magnitude: limitingMagnitude,
           },
           { signal: abortController.signal },
         );
         if (active) {
           setOnlineSources(data);
           setError(null);
-          storeCatalogSources(ra, dec, radius, enabledDriversKey, data);
+          storeCatalogSources(ra, dec, radius, enabledDriversKey, data, limitingMagnitude);
         }
       } catch (error: unknown) {
         // A cancelled request means a newer one replaced it; that request owns the state now.
@@ -127,7 +145,7 @@ export const useOnlineCatalogSources = (
       abortController.abort();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ra, dec, radius, enabled, enabledDriversKey]);
+  }, [ra, dec, radius, enabled, enabledDriversKey, limitingMagnitude]);
 
   return { onlineSources, loading, error };
 };

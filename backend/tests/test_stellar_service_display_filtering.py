@@ -78,6 +78,43 @@ def test_get_sources_excludes_per_frame_detections_with_real_coordinates():  # r
     assert [source["id"] for source in sources] == ["Polaris"]
 
 
+def test_get_sources_uses_camel_case_keys_the_planetarium_reads():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify source payloads use camelCase data-flag and spectral-type keys.
+
+    Regression test: ``hasSpectra``, ``hasPhotometry`` and ``spectralType``
+    were once sent in snake_case while the Planetarium's PlanetariumSource
+    type and info card read camelCase, so a star clicked on the sky map
+    always looked like it had no data and its plot checkboxes and "Open in
+    Astronomy Manager" never showed.
+    """
+    star_with_photometry = StellarObject(
+        id="2MASS J16430250+3643212",
+        ra=250.76,
+        dec=36.72,
+        spectral_type="K2",
+        photometry={"timestamps": ["2026-01-01T00:00:00Z"], "magnitudes": [0.5]},
+    )
+    star_without_data = StellarObject(id="Polaris", ra=37.95, dec=89.26)
+
+    service = _make_service(planning_sources=[star_with_photometry, star_without_data])
+
+    sources = {source["id"]: source for source in service.get_sources(ra=250.76, dec=36.72, radius=2.5)}
+
+    with_data = sources["2MASS J16430250+3643212"]
+    assert with_data["hasPhotometry"] is True
+    assert with_data["hasSpectra"] is False
+    assert with_data["spectralType"] == "K2"
+
+    without_data = sources["Polaris"]
+    assert without_data["hasPhotometry"] is False
+    assert without_data["hasSpectra"] is False
+
+    for source in sources.values():
+        assert "has_spectra" not in source
+        assert "has_photometry" not in source
+        assert "spectral_type" not in source
+
+
 def test_stellar_object_has_spectra_and_has_photometry_computed_fields():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verify StellarObject hasSpectra/hasPhotometry fields in model dump.
 

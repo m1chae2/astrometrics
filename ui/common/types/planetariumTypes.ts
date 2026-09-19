@@ -33,7 +33,7 @@ export interface PlanetariumSource {
   transitTime?: string;
   aboveHorizon?: boolean;
   /** Online catalog driver that produced this source. Undefined for local library sources. */
-  catalogSource?: 'gaia' | 'hipparcos';
+  catalogSource?: 'deep_stars' | 'hipparcos';
   stackedImage?: string;
   fieldOfView?: string;
 }

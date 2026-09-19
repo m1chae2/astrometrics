@@ -151,12 +151,16 @@ export const PlanetariumDisplay: React.FC = () => {
   // higher. A local database read, so it takes milliseconds and never touches the
   // internet. Gated on showStars so toggling the background field off also stops it.
   const deepStarDrivers = useMemo(() => ['deep_stars'], []);
+  const { status: deepCatalogStatus } = useDeepCatalogStatus();
+  // The depth the catalog was actually built to, as it reports itself; the default only stands
+  // in until the status arrives or when no catalog is installed.
+  const deepCatalogMagnitudeLimit = deepCatalogStatus?.magnitude_limit ?? DEEP_STAR_MAX_MAGNITUDE;
   // Rounded up to a whole magnitude so a slow zoom reuses one query (and one cached region)
   // instead of asking for a slightly deeper limit at every step, and capped at the depth the
   // catalog holds so a deeper request is not cached as if it had been served.
   const deepStarLimitingMagnitude = useMemo(
-    () => Math.min(Math.ceil(limitingMagnitude), DEEP_STAR_MAX_MAGNITUDE),
-    [limitingMagnitude],
+    () => Math.min(Math.ceil(limitingMagnitude), deepCatalogMagnitudeLimit),
+    [limitingMagnitude, deepCatalogMagnitudeLimit],
   );
   const { onlineSources: deepStarSources } = useOnlineCatalogSources(
     raValue, decValue, queryRadius,
@@ -165,7 +169,6 @@ export const PlanetariumDisplay: React.FC = () => {
     // A local lookup, so only a short wait to skip the steps of one gesture, not the 300 ms a remote query needs.
     { limitingMagnitude: deepStarLimitingMagnitude, debounceMilliseconds: LOCAL_CATALOG_QUERY_DEBOUNCE_MS },
   );
-  const { status: deepCatalogStatus } = useDeepCatalogStatus();
 
   // Bundled constellation stick-figure lines: fetched once (no ra/dec/radius —
   // the whole dataset is static and small) rather than re-queried on pan/zoom.

@@ -13,6 +13,10 @@ import {
   hasCatalogMagnitude,
   isDisplayableStar,
   computeLimitingMagnitude,
+  computeSourceBrightness,
+  computeStarBrightness,
+  STAR_MIN_BRIGHTNESS,
+  UNCATALOGED_STAR_FULL_BRIGHTNESS_FOV_DEG,
   UNCATALOGED_STAR_MAX_FOV_DEG,
 } from '../planetariumDisplay/layers/StarOverlay';
 
@@ -97,9 +101,41 @@ describe('isDisplayableStar for the online background sky', () => {
   });
 
   it('follows showStars, not showCatalog', () => {
-    const gaiaStar = { ra: 10, dec: 10, type: 'star', catalogSource: 'gaia', magnitude: 5 } as Parameters<
+    const deepStar = { ra: 10, dec: 10, type: 'star', catalogSource: 'deep_stars', magnitude: 5 } as Parameters<
       typeof isDisplayableStar
     >[0];
-    expect(isDisplayableStar(gaiaStar, false, true, computeLimitingMagnitude(WIDE_FOV_DEG), WIDE_FOV_DEG)).toBe(false);
+    const limit = computeLimitingMagnitude(WIDE_FOV_DEG);
+    expect(isDisplayableStar(deepStar, false, true, limit, WIDE_FOV_DEG)).toBe(false);
+    expect(isDisplayableStar(deepStar, true, false, limit, WIDE_FOV_DEG)).toBe(true);
+  });
+});
+
+describe('computeSourceBrightness', () => {
+  it('shades a star with a real catalog magnitude by that magnitude at any FOV', () => {
+    expect(computeSourceBrightness(3.0, WIDE_FOV_DEG)).toBe(computeStarBrightness(3.0));
+    expect(computeSourceBrightness(3.0, NARROW_FOV_DEG)).toBe(computeStarBrightness(3.0));
+  });
+
+  it('draws a star with no catalog magnitude invisible at the FOV where it first appears', () => {
+    expect(computeSourceBrightness('', UNCATALOGED_STAR_MAX_FOV_DEG)).toBe(0);
+    expect(computeSourceBrightness(undefined, UNCATALOGED_STAR_MAX_FOV_DEG + 5)).toBe(0);
+  });
+
+  it('draws a star with no catalog magnitude at the dimmest brightness once the fade is done', () => {
+    expect(computeSourceBrightness('', UNCATALOGED_STAR_FULL_BRIGHTNESS_FOV_DEG)).toBe(STAR_MIN_BRIGHTNESS);
+    expect(computeSourceBrightness('', NARROW_FOV_DEG)).toBe(STAR_MIN_BRIGHTNESS);
+  });
+
+  it('fades in smoothly with no jump between the two ends', () => {
+    const halfwayFov = (UNCATALOGED_STAR_MAX_FOV_DEG + UNCATALOGED_STAR_FULL_BRIGHTNESS_FOV_DEG) / 2;
+    const halfway = computeSourceBrightness('', halfwayFov);
+    expect(halfway).toBeGreaterThan(0);
+    expect(halfway).toBeLessThan(STAR_MIN_BRIGHTNESS);
+    expect(computeSourceBrightness('', UNCATALOGED_STAR_MAX_FOV_DEG - 0.01)).toBeLessThan(0.01);
+  });
+
+  it('treats an instrumental magnitude like a missing one instead of drawing it at full brightness', () => {
+    expect(computeSourceBrightness(-14.98, NARROW_FOV_DEG)).toBe(STAR_MIN_BRIGHTNESS);
+    expect(computeSourceBrightness(-14.98, UNCATALOGED_STAR_MAX_FOV_DEG)).toBe(0);
   });
 });

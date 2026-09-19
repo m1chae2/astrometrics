@@ -23,7 +23,7 @@ import { ProjectionContext } from '../layers/overlayTypes';
 import {
   isDisplayableStar,
   computeLimitingMagnitude,
-  computeStarBrightness,
+  computeSourceBrightness,
   STAR_MARKER_RADIUS_PX,
 } from '../layers/StarOverlay';
 import { viewportDipsBelowHorizon } from '../layers/overlayShared';
@@ -198,12 +198,11 @@ export class StarFieldRenderer {
       if (!point.visible) continue;
       if (shouldDiscardBelowHorizon && point.alt < 0) continue;
 
-      const magnitude = typeof source.magnitude === 'number' ? source.magnitude : 5.0;
       const offset = writeIndex * FLOATS_PER_STAR;
       this.starInstanceData[offset] = point.x;
       this.starInstanceData[offset + 1] = point.y;
       this.starInstanceData[offset + 2] = STAR_MARKER_RADIUS_PX;
-      this.starInstanceData[offset + 3] = computeStarBrightness(magnitude);
+      this.starInstanceData[offset + 3] = computeSourceBrightness(source.magnitude, projectionContext.fov);
       writeIndex += 1;
     }
 

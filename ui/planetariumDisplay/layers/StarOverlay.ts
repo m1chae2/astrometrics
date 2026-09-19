@@ -111,14 +111,18 @@ export function computeLimitingMagnitude(fovDegrees: number): number {
 }
 
 /**
- * Faintest magnitude the deep-star (Gaia) layer asks for, however far the view is zoomed in.
+ * Faintest magnitude the deep-star (Gaia) layer asks for, however far the view is zoomed in,
+ * when the catalog has not reported its own depth (`magnitude_limit` from
+ * `planetarium:get_deep_catalog_status`) -- before that status arrives, or with no catalog
+ * installed. Once it has, the catalog's own value is used instead, so this only has to agree
+ * with the builder's default, not track a catalog built to a different depth.
  *
  * Derivation: for a 30 s exposure with the 75 mm Apertura 75Q and the ASI533MM Pro, a
  * back-of-envelope signal-to-noise estimate puts 5-sigma detection at about G = 17.5 and
  * photometry good to about 5 percent at about G = 15.7 (assuming roughly 21 mag/arcsec^2 sky,
  * so uncertain by about half a magnitude). 16 keeps the stars whose photometry can be trusted
  * and is about a third of the data of G = 18. See the fuller derivation and validation on
- * `DEFAULT_MAGNITUDE_LIMIT`. Must match it in astrometricslib/pipelines/astrometry/deep_catalog_builder.py.
+ * `DEFAULT_MAGNITUDE_LIMIT` in astrometricslib/pipelines/astrometry/deep_catalog_builder.py, whose default this mirrors.
  */
 export const DEEP_STAR_MAX_MAGNITUDE = 16;
 
@@ -141,6 +145,15 @@ export const BRIGHTEST_CATALOG_MAGNITUDE = -2.0;
  * narrow enough for a target's field to be worth looking at.
  */
 export const UNCATALOGED_STAR_MAX_FOV_DEG = 10.0;
+
+/**
+ * FOV, in degrees, at which the user's own stars with no catalog magnitude
+ * reach their full (dim) brightness. Between UNCATALOGED_STAR_MAX_FOV_DEG and
+ * this value they fade in from invisible instead of appearing all at once, so
+ * zooming in never makes a whole imaged field pop into view. Half the gate FOV
+ * is one halving of the view, chosen by judgement, not measured.
+ */
+export const UNCATALOGED_STAR_FULL_BRIGHTNESS_FOV_DEG = UNCATALOGED_STAR_MAX_FOV_DEG / 2;
 
 /**
  * Whether a star's magnitude is a real catalog magnitude rather than missing
@@ -202,7 +215,7 @@ export function isDisplayableStar(
   if (source.ra === 0 && source.dec === 0) return false;
   if (source.type !== 'star') return false;
 
-  if (source.catalogSource === 'hipparcos' || source.catalogSource === 'gaia') {
+  if (source.catalogSource === 'hipparcos' || source.catalogSource === 'deep_stars') {
     const magnitude = typeof source.magnitude === 'number' ? source.magnitude : 5.0;
     if (magnitude > limitingMagnitude) return false;
     return showStars;
@@ -216,6 +229,30 @@ export function isDisplayableStar(
   return showCatalog;
 }
 
+
+/**
+ * Computes how bright a source is drawn, given its magnitude and the current FOV.
+ *
+ * A star with a real catalog magnitude is shaded by that magnitude (see
+ * computeStarBrightness). Any other star -- the user's own detections, whose
+ * magnitude is missing or instrumental (see hasCatalogMagnitude) -- says nothing
+ * about how bright it looks, so it is drawn dim at the lowest brightness and
+ * fades in as the FOV narrows from UNCATALOGED_STAR_MAX_FOV_DEG to
+ * UNCATALOGED_STAR_FULL_BRIGHTNESS_FOV_DEG. Sharing this between StarOverlay and
+ * StarFieldRenderer keeps both drawing paths identical.
+ *
+ * @param {unknown} magnitude - The source's magnitude field as received from the backend.
+ * @param {number} fovDegrees - Current viewport field of view, in degrees.
+ * @returns {number} Opacity in [0, STAR_MAX_BRIGHTNESS].
+ */
+export function computeSourceBrightness(magnitude: unknown, fovDegrees: number): number {
+  if (hasCatalogMagnitude(magnitude)) return computeStarBrightness(magnitude);
+
+  const fadeProgress =
+    (UNCATALOGED_STAR_MAX_FOV_DEG - fovDegrees) /
+    (UNCATALOGED_STAR_MAX_FOV_DEG - UNCATALOGED_STAR_FULL_BRIGHTNESS_FOV_DEG);
+  return STAR_MIN_BRIGHTNESS * Math.max(0, Math.min(1, fadeProgress));
+}
 
 /**
  * Draws the selection reticle (ring + four tick marks) centered on a screen
@@ -294,8 +331,7 @@ export class StarOverlay implements PlanetariumOverlay {
       const point = projectionContext.projectCoords(source.ra, source.dec);
       if (!point.visible) return;
 
-      const magnitude = typeof source.magnitude === 'number' ? source.magnitude : 5.0;
-      const brightness = computeStarBrightness(magnitude);
+      const brightness = computeSourceBrightness(source.magnitude, projectionContext.fov);
 
       context.fillStyle = `rgba(255, 255, 255, ${brightness})`;
       context.beginPath();

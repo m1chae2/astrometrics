@@ -63,13 +63,15 @@ def _registration_reference_candidates(target: Target, catalog_access: Any) -> l
     Returns
     -------
     candidates : `list` [`StellarObject`]
-        This target's own catalog-identified, non-spectroscopy-derived
-        stars if any exist, otherwise every such star in the catalog.
+        This target's own catalog-identified stars if any exist,
+        otherwise every catalog-identified star in the catalog. A star
+        with no normal-image pixel position is skipped later by the
+        registration itself.
     """
     catalog_identified = [
         stellar_object
         for stellar_object in catalog_access.get("stellar_catalog", {})
-        if stellar_object.is_catalog_identified and not stellar_object.id.endswith("::spectroscopy")
+        if stellar_object.is_catalog_identified
     ]
     own_target_stars = [
         stellar_object for stellar_object in catalog_identified if target.id in stellar_object.target_ids

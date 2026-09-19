@@ -20,6 +20,7 @@ stubbed out, capturing the command script that would have been sent.
 """
 
 import logging
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -159,11 +160,18 @@ def test_standard_path_filters_on_seqapplyreg_not_stack(captured_siril_script): 
     assert "-filter-round" not in stack_command
 
 
-def test_spectral_path_filters_on_stack(captured_siril_script):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Single-pass registration leaves the filters on stack."""
+def test_spectral_path_filters_on_stack(captured_siril_script: Any) -> None:
+    """Spectral registration leaves filters on stack and tunes findstar."""
     commands = captured_siril_script(is_spectral=True, filter_wfwhm="90%", filter_round="90%")
 
     assert not [command for command in commands if command.startswith("seqapplyreg")]
+
+    setfindstar_command = _find_command(commands, "setfindstar")
+    assert "-roundness=0.15" in setfindstar_command
+    assert "-radius=3" in setfindstar_command
+
+    register_command = _find_command(commands, "register")
+    assert "-transf=shift" in register_command
 
     stack_command = _find_command(commands, "stack r_")
     assert "-filter-wfwhm=90%" in stack_command

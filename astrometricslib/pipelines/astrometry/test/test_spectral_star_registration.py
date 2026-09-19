@@ -69,7 +69,8 @@ def test_identify_spectral_stars_via_registration_matches_rotated_translated_fie
 
     assert matched_count == len(spectral_stars)
     for reference_star, spectral_star in zip(reference_stars, spectral_stars, strict=True):
-        assert spectral_star.id == f"{reference_star.id}::spectroscopy"
+        # The same id, so the catalog merge lands in the star's existing row.
+        assert spectral_star.id == reference_star.id
         assert spectral_star.name == reference_star.name
         assert spectral_star.is_catalog_identified is True
         # Spectroscopy-owned fields must survive identification untouched.

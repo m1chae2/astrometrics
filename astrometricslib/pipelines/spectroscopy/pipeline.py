@@ -21,11 +21,10 @@ from astrometricslib.pipelines.spectroscopy.quantum_efficiency_correction import
 from astrometricslib.pipelines.spectroscopy.quantum_efficiency_curves import (
     get_quantum_efficiency_curve,
 )
-from astrometricslib.pipelines.spectroscopy.spectral_classifier import classify_spectral_type
-from astrometricslib.pipelines.spectroscopy.spectral_feature_detector import detect_named_features
 from astrometricslib.pipelines.spectroscopy.spectroscopy_instrument import (
     SpectroscopyInstrument,
 )
+from astrometricslib.pipelines.spectroscopy.spectrum_analysis import analyze_spectrum
 from astrometricslib.pipelines.spectroscopy.spectrum_calibrator import SpectrumCalibrator
 from astrometricslib.pipelines.spectroscopy.spectrum_extractor import SpectrumExtractor
 from astrometricslib.utilities import SpectroscopyConfig
@@ -78,6 +77,44 @@ def _star_pixel_position(star: Any) -> tuple[bool, tuple[Any, Any]]:
     is_stellar_obj = hasattr(star, "star_data")
     source = star.star_data if is_stellar_obj else star
     return is_stellar_obj, _read_xy_source_position(source)
+
+
+def keep_usable_samples(
+    wavelengths_nm: np.ndarray,
+    intensities: np.ndarray,
+    minimum_wavelength_nm: float,
+    maximum_wavelength_nm: float,
+) -> np.ndarray:
+    """Find which samples of an extracted spectrum hold real measurements.
+
+    A sample is not usable when the spectrum trail ran off the edge of the
+    picture there (the extractor marks those samples as NaN, "not a
+    number"), or when its wavelength is outside the range the camera can
+    actually see. Treating such samples as zero brightness would make the
+    star look like it goes dark, which is not what was measured.
+
+    Parameters
+    ----------
+    wavelengths_nm : `np.ndarray`
+        The wavelength of each sample, in nanometers.
+    intensities : `np.ndarray`
+        The brightness of each sample, NaN where nothing was measured.
+    minimum_wavelength_nm : `float`
+        The shortest wavelength the camera can see, in nanometers.
+    maximum_wavelength_nm : `float`
+        The longest wavelength the camera can see, in nanometers.
+
+    Returns
+    -------
+    usable : `np.ndarray`
+        A boolean array, `True` for each sample worth keeping.
+    """
+    return (
+        np.isfinite(wavelengths_nm)
+        & np.isfinite(intensities)
+        & (wavelengths_nm >= minimum_wavelength_nm)
+        & (wavelengths_nm <= maximum_wavelength_nm)
+    )
 
 
 class SpectroscopyPipeline:
@@ -350,23 +387,22 @@ class SpectroscopyPipeline:
                 curve=quantum_efficiency_curve,
             ).tolist()
 
-        # Classify against the QE-corrected spectrum when available -- it
-        # better reflects the star's true color than raw sensor counts --
-        # falling back to the raw intensities otherwise.
-        classification_intensities = (
-            quantum_efficiency_corrected_intensities
-            if quantum_efficiency_corrected_intensities is not None
-            else intensities
+        # Classify and test features on the QE-corrected spectrum when
+        # available -- it better reflects the star's true color than raw
+        # sensor counts.
+        analysis = analyze_spectrum(
+            np.array(wavelengths_angstrom),
+            np.array(
+                quantum_efficiency_corrected_intensities
+                if quantum_efficiency_corrected_intensities is not None
+                else intensities
+            ),
+            self.config.camera.name,
+            is_quantum_efficiency_corrected=quantum_efficiency_corrected_intensities is not None,
+            catalog_spectral_type=star.spectral_type,
         )
-        classification_wavelengths = np.array(wavelengths_angstrom)
-        classification = classify_spectral_type(
-            wavelength_angstrom=classification_wavelengths,
-            intensity=np.array(classification_intensities),
-        )
-        probable_spectral_features = detect_named_features(
-            wavelength_angstrom=classification_wavelengths,
-            intensity=np.array(classification_intensities),
-        )
+        classification = analysis.classification
+        probable_spectral_features = analysis.features
 
         # Compute the visual overlay rectangle and total rotated
         # dispersion angle
@@ -382,8 +418,17 @@ class SpectroscopyPipeline:
             quantum_efficiency_corrected_intensities=quantum_efficiency_corrected_intensities,
             self_determined_spectral_type=classification["spectral_type"],
             self_determined_spectral_type_confidence=classification["confidence"],
+            self_determined_spectral_type_rms=classification["rms"],
+            self_determined_spectral_type_note=classification.get("reason") or "",
             self_determined_spectral_type_candidates=classification["ranked_types"],
             probable_spectral_features=probable_spectral_features,
+            star_position_px=[float(result["target_pos"][0]), float(result["target_pos"][1])],
+            requested_wavelength_range_angstrom=(
+                [float(value) * 10.0 for value in result["requested_wavelength_range_nm"]]
+                if result.get("requested_wavelength_range_nm")
+                else None
+            ),
+            valid_fraction=result.get("valid_fraction"),
             rectangle=rectangle,
             detected_angle=result["detected_angle"],
             dispersion_angle=dispersion_angle,
@@ -456,6 +501,32 @@ class SpectroscopyPipeline:
 
         zero_order_saturated_pixel_fraction = self._measure_zero_order_saturation(image, target_pos)
 
+        # Keep only the samples that were really measured: on the image and
+        # inside the camera's sensitive range. The trail arrays line up with
+        # the spectrum one-to-one, so they are trimmed the same way.
+        wavelengths = np.asarray(wavelengths, dtype=float)
+        intensities = np.asarray(intensities, dtype=float)
+        if wavelengths.size == 0:
+            return {
+                "error": "The instrument model asked for a spectrum of zero length; check the camera config."
+            }
+        requested_wavelength_range_nm = [float(np.nanmin(wavelengths)), float(np.nanmax(wavelengths))]
+        usable = keep_usable_samples(
+            wavelengths,
+            intensities,
+            self.config.camera.sensor_min_wavelength,
+            self.config.camera.sensor_max_wavelength,
+        )
+        if not usable.any():
+            return {"error": "No part of the spectrum trail is on the image and inside the camera's range."}
+        valid_fraction = float(usable.mean())
+        wavelengths = wavelengths[usable]
+        intensities = intensities[usable]
+        if trail_centerline_px is not None and len(trail_centerline_px) == len(usable):
+            trail_centerline_px = np.asarray(trail_centerline_px, dtype=float)[usable].tolist()
+        if trail_width_px is not None and len(trail_width_px) == len(usable):
+            trail_width_px = np.asarray(trail_width_px, dtype=float)[usable].tolist()
+
         return {
             "wavelengths": wavelengths.tolist(),
             "intensities": intensities.tolist(),
@@ -465,6 +536,8 @@ class SpectroscopyPipeline:
             "zero_order_saturated_pixel_fraction": zero_order_saturated_pixel_fraction,
             "trail_centerline_px": trail_centerline_px,
             "trail_width_px": trail_width_px,
+            "valid_fraction": valid_fraction,
+            "requested_wavelength_range_nm": requested_wavelength_range_nm,
         }
 
     def _extract_via_flare_mask(
@@ -774,6 +847,7 @@ class SpectroscopyPipeline:
                 "flux": 100000.0,
             },
             spectroscopy=SpectroscopyResult(
+                star_position_px=[float(extraction_center[0]), float(extraction_center[1])],
                 rectangle=rectangle,
                 dispersion_angle=dispersion_angle,
                 extraction_radius=int(extraction_radius),

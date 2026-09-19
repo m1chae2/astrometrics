@@ -118,8 +118,10 @@ class StellarCatalog:
         -------
         summaries : `list` [`dict`]
             One dict per star with keys ``id``, ``name``, ``ra``,
-            ``dec``, ``targetIds``, ``hasSpectra``, and
-            ``hasPhotometry``, optionally filtered by ``target_id``.
+            ``dec``, ``targetIds``, ``hasSpectra``, ``hasPhotometry``,
+            ``magnitude`` (`None` when unknown), and ``spectralType`` (an
+            empty string when unknown), optionally filtered by
+            ``target_id``.
         """
         effective_limit = limit
         if effective_limit is None and not target_id and apply_default_limit:
@@ -137,6 +139,8 @@ class StellarCatalog:
                 "targetIds": star.target_ids,
                 "hasSpectra": star.has_spectra,
                 "hasPhotometry": star.has_photometry,
+                "magnitude": star.magnitude,
+                "spectralType": star.spectral_type,
             }
             for star in self.catalog_access.list_star_summaries(target_id=target_id, limit=effective_limit)
         ]
@@ -247,6 +251,40 @@ class StellarCatalog:
         from astrometricslib.api import stellar_operations
 
         return stellar_operations.get_object(self, object_id)
+
+    def analyze_periodicity(self, object_id: str) -> StellarObject | None:
+        """Search a star's light curve for a repeating pattern, and save it.
+
+        Runs the Lomb-Scargle periodogram (needs at least 5 brightness
+        measurements) and the box-fitting transit search (needs at least
+        8), and saves whichever produced a result on the star's
+        photometry. The photometry pipeline does not run these itself, so
+        this is how a star gets its period and transit numbers.
+
+        Parameters
+        ----------
+        object_id : `str`
+            The id of the star to analyze.
+
+        Returns
+        -------
+        stellar_object : `StellarObject` or `None`
+            The star with any new analysis saved, or `None` if no such
+            star exists. A star with too few measurements is returned
+            unchanged.
+        """
+        from astrometricslib.pipelines.photometry.variability_analyzer import VariabilityAnalyzer
+
+        star = self.get_object(object_id)
+        if star is None or not star.photometry:
+            return star
+
+        analyzer = VariabilityAnalyzer()
+        periodogram = analyzer.run_lomb_scargle_periodogram(star)
+        transit_candidate = analyzer.run_bls_transit_search(star)
+        if periodogram is None and transit_candidate is None:
+            return star
+        return self.update(star.id, {"photometry": star.photometry})
 
     def tune_spectroscopy_calibration(
         self,

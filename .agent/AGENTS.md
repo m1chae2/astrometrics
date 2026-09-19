@@ -8,6 +8,7 @@ Guidelines and rules for AI agents operating on the `astrometrics` repository.
 - **Documentation**: Follow the conventions in [`documentation-style`](skills/documentation-style/SKILL.md) when editing files under `documentation/`.
 - **Environment**: ALWAYS use `.venv/bin/python` (Linux) or `.venv\Scripts\python` (Windows).
 - **`# ruff: ignore[...]` / `# noqa` suppressions are debt markers, not permanent exemptions.** They were bulk-added (mainly `ANN001`/`ANN201`/`ANN202`/`ANN204`) to grandfather in the pre-existing codebase when those rules were enabled, not to bless the pattern going forward. If you edit a function or class that carries one of these suppressions, remove the suppression and satisfy the rule (e.g. add the missing type annotation) as part of that edit — don't leave a function you just touched still exempted. Do not add new blanket suppressions for code you write; only pre-existing violations you didn't touch should keep theirs.
+- **Deprecation Markers**: Any deprecated code, parameter, fallback, or legacy compatibility shim MUST be marked with `# TODO: DEPRECATED - <description of deprecation and what to migrate to>` so that a single repository-wide search (`grep -rn "TODO: DEPRECATED"`) identifies all deprecated code and technical debt.
 
 ## 2. Architecture & Layering Rules
 Maintain clean unidirectional dependency boundaries across layers:
@@ -44,4 +45,30 @@ ALWAYS prefer executing pre-existing lifecycle scripts under `scripts/` instead 
 - **Environment Setup**: `scripts/linux/setup_venv.sh`
 
 ## 5. MCP Tool Usage Guidelines (MANDATORY)
-ALWAYS prefer invoking reflected domain MCP tools (`astrometricslib-core`, `wayfindinglib-core`, `astrometrics-backend`) for image calibration, plate-solving, stacking, target management, visibility calculations, and observatory control before falling back to ad-hoc Python scripts or bash command lines.
+Domain queries and operations MUST use the reflected MCP tools first. Do NOT fall back to ad-hoc `curl`, exploratory python snippets, or filesystem inspection unless the MCP call fails or returns an explicit connection error.
+
+### Server Selection Hierarchy
+- `astrometricslib-core`: Domain library functions (catalog targets, image processing, stacking, astrometry, photometry, spectroscopy, and star catalogs).
+- `wayfindinglib-core`: Observatory control, telescope status, tracking, slewing, focusing, guiding, and observation planning.
+- `astrometrics-backend`: Backend session/persistence operations and direct state queries.
+- `astrometrics-ui`: UI diagnostic, build, test, and accessibility verification suites.
+
+### Common Invocations Cheat Sheet
+- **List targets in catalog**:
+  `call_mcp_tool(ServerName="astrometricslib-core", ToolName="target_list", Arguments={})`
+- **Get specific target**:
+  `call_mcp_tool(ServerName="astrometricslib-core", ToolName="target_get", Arguments={"target_name": "<name>"})`
+- **Add target frame**:
+  `call_mcp_tool(ServerName="astrometricslib-core", ToolName="target_add_frame", Arguments={"target_name": "<name>", "frame_path": "<path>"})`
+- **Run astrometry / plate-solving**:
+  `call_mcp_tool(ServerName="astrometricslib-core", ToolName="processing_run_astrometry", Arguments={"target_name": "<name>"})`
+- **Run stacking**:
+  `call_mcp_tool(ServerName="astrometricslib-core", ToolName="processing_run_stacking", Arguments={"target_name": "<name>"})`
+- **Run spectroscopy**:
+  `call_mcp_tool(ServerName="astrometricslib-core", ToolName="processing_run_spectroscopy", Arguments={"target_name": "<name>"})`
+- **Check telescope status**:
+  `call_mcp_tool(ServerName="wayfindinglib-core", ToolName="observatory_get_telescope_status", Arguments={})`
+- **Slew to target**:
+  `call_mcp_tool(ServerName="wayfindinglib-core", ToolName="observatory_slew_to_target", Arguments={"target_name": "<name>"})`
+- **Run UI tests**:
+  `call_mcp_tool(ServerName="astrometrics-ui", ToolName="ui_run_tests", Arguments={})`

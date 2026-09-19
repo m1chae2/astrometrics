@@ -1,7 +1,8 @@
 /* Astronomy Display Layout */
 .astronomy-display {
     height: 100%;
-    --layout-right-col-width: 260px;
+    --layout-left-col-width: 300px;
+    --layout-right-col-width: 340px;
 }
 
 .astronomy-display__plots {
@@ -19,6 +20,18 @@
     min-height: 0;
 }
 
+/* A plot with nothing to show shrinks to a one-line note. */
+.astronomy-display__plots > .panel.astronomy-display__panel--collapsed {
+    flex: 0 0 auto;
+}
+
+.astronomy-display__collapsed-note {
+    padding: 8px 12px;
+    color: var(--text-muted, #757575);
+    font-style: italic;
+    font-size: 0.85rem;
+}
+
 .astronomy-display__right-column {
     display: flex;
     flex-direction: column;
@@ -31,6 +44,12 @@
     flex: 1;
     min-height: 0;
     overflow-y: auto;
+}
+
+/* The timeline is only a slider and a line of text, so it takes just the
+   height it needs and Stellar Analysis gets the rest. */
+.astronomy-display__right-column > .panel.astronomy-display__panel--compact {
+    flex: 0 0 auto;
 }
 
 /* Timeline Column */
@@ -79,6 +98,21 @@
     background: rgba(33, 150, 243, 0.2);
     color: #64b5f6;
     border: 1px solid rgba(33, 150, 243, 0.4);
+}
+
+/* A poor template match, or one far from the catalog type: shown in amber so it
+   is not read as a measurement. */
+.spectral-badge--caution {
+    background: rgba(255, 152, 0, 0.2);
+    color: #ffb74d;
+    border-color: rgba(255, 152, 0, 0.4);
+}
+
+/* A type measured from this star's own spectrum, as opposed to a catalog lookup. */
+.spectral-badge--measured {
+    background: rgba(76, 175, 80, 0.2);
+    color: #81c784;
+    border-color: rgba(76, 175, 80, 0.4);
 }
 
 .variability-badge {
@@ -143,6 +177,39 @@
     color: var(--text-muted, #757575);
     font-style: italic;
     font-size: 0.85rem;
+}
+
+.stellar-analysis-details__note {
+    color: var(--text-muted, #9e9e9e);
+    font-size: 0.8rem;
+    line-height: 1.35;
+}
+
+.stellar-analysis-details__note--error {
+    color: #ef9a9a;
+}
+
+.stellar-analysis-details__run-btn {
+    align-self: flex-start;
+    background: transparent;
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.2));
+    color: var(--text-secondary, #a0a0a0);
+    padding: 3px 10px;
+    border-radius: 4px;
+    font-size: 0.78rem;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.stellar-analysis-details__run-btn:hover:not(:disabled) {
+    background: var(--accent-color, #2196f3);
+    border-color: var(--accent-color, #2196f3);
+    color: #ffffff;
+}
+
+.stellar-analysis-details__run-btn:disabled {
+    opacity: 0.6;
+    cursor: default;
 }
 
 .stellar-analysis-details__section {
@@ -218,4 +285,64 @@
     background: var(--accent-color, #2196f3);
     color: #ffffff;
     font-weight: 600;
+}
+
+/* Absorption feature results table */
+/* The wrapper scrolls sideways rather than clipping if a narrow window makes the table too wide. */
+.stellar-analysis-details__table-wrapper {
+    overflow-x: auto;
+}
+
+.stellar-analysis-details__table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.72rem;
+}
+
+.stellar-analysis-details__table td,
+.stellar-analysis-details__table th {
+    white-space: nowrap;
+}
+
+.stellar-analysis-details__table .feature-name-cell {
+    white-space: normal;
+}
+
+.stellar-analysis-details__table th {
+    text-align: left;
+    font-weight: 500;
+    color: var(--text-muted, #808080);
+    padding: 2px 3px;
+    border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+}
+
+.stellar-analysis-details__table td {
+    padding: 2px 3px;
+    color: var(--text-secondary, #a0a0a0);
+}
+
+.feature-row--detected td {
+    color: var(--text-primary, #ffffff);
+    font-weight: 600;
+}
+
+.feature-row--possible td {
+    color: var(--text-primary, #ffffff);
+}
+
+.feature-row--not_covered td {
+    opacity: 0.5;
+}
+
+.stellar-analysis-details__result {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    margin-bottom: 6px;
+}
+
+.stellar-analysis-details__result-title {
+    font-size: 0.78rem;
+    color: var(--text-primary, #ffffff);
+    font-weight: 500;
 }

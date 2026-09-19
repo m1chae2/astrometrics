@@ -77,6 +77,7 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "capture_job_logs",
     "classify_and_sort_fits_files",
     "derive_target_sessions",
+    "frame_is_spectral",
     "get_configuration",
     "parse_coordinate_string",
     "registered_job",

@@ -155,6 +155,14 @@ const AppContent: React.FC = () => {
             setMode(payload.mode);
             window.dispatchEvent(new CustomEvent('astrometrics:modeChange', { detail: payload.mode }));
           }
+        } else if (action === 'handoff') {
+          if (payload.active_mode) {
+            setMode(payload.active_mode);
+            window.dispatchEvent(new CustomEvent('astrometrics:modeChange', { detail: payload.active_mode }));
+          }
+          if (payload.selected_target) {
+            window.dispatchEvent(new CustomEvent('astrometrics:targetSelected', { detail: payload.selected_target }));
+          }
         } else if (action === 'log') {
           window.dispatchEvent(new CustomEvent('astrometrics:log', { detail: payload }));
         } else if (action === 'refresh') {
@@ -170,6 +178,11 @@ const AppContent: React.FC = () => {
     const onModeChange = (e: Event): void => {
       const detail = (e as CustomEvent).detail;
       setMode(detail);
+      fetch('/api/handoff/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active_mode: detail, origin_device: 'desktop' }),
+      }).catch(() => {});
     };
     window.addEventListener('astrometrics:modeChange', onModeChange);
 

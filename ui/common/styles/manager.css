@@ -124,3 +124,13 @@
   user-select: none;
   letter-spacing: 0.5px;
 }
+
+/* Key for the badges on each list row, shown under the filters */
+.manager__legend {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 12px;
+  font-size: 11px;
+  color: var(--text-dim, #9aa5b5);
+}

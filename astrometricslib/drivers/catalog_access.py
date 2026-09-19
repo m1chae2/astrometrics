@@ -107,8 +107,8 @@ class StarSummary(BaseModel):
     target_ids: list[str] = Field(default_factory=list)
     has_spectra: bool = False
     has_photometry: bool = False
-    # Only filled in by `list_stars_in_region`, which the sky map uses.
-    # A star with no known brightness or spectral type keeps the defaults.
+    # Filled in by `list_star_summaries` and `list_stars_in_region`. A star
+    # with no known brightness or spectral type keeps the defaults.
     magnitude: float | None = None
     spectral_type: str = ""
 
@@ -715,7 +715,17 @@ class CatalogAccess(AbstractCatalogAccess):
         """
         rows = self._generic.list_projected(
             "stellar_catalog",
-            ["id", "name", "ra", "dec", "target_id", "has_spectra", "has_photometry"],
+            [
+                "id",
+                "name",
+                "ra",
+                "dec",
+                "target_id",
+                "has_spectra",
+                "has_photometry",
+                "magnitude",
+                "spectral_type",
+            ],
             like={"target_id": target_id} if target_id else None,
             limit=limit,
         )
@@ -733,6 +743,8 @@ class CatalogAccess(AbstractCatalogAccess):
                     target_ids=target_ids,
                     has_spectra=bool(row["has_spectra"]),
                     has_photometry=bool(row["has_photometry"]),
+                    magnitude=_coerce_float(row["magnitude"]),
+                    spectral_type=row["spectral_type"] or "",
                 )
             )
         return summaries

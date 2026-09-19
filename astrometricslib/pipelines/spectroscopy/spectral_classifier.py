@@ -1,21 +1,30 @@
-"""Guesses a star's broad spectral type by matching its spectrum to references.
+"""Finds the bundled reference spectrum a star's spectrum most resembles.
 
 A slitless grism can't resolve spectral lines finely enough to derive a
 star's physical properties from first principles, and it can't tell you
 a catalog name either. What it can do is compare the overall shape of an
 observed spectrum -- continuum slope, Balmer line strength -- against a
-library of known reference stars and report which one it most resembles.
-That's enough to place a star in its broad O/B/A/F/G/K/M class, using the
-same technique real low-resolution spectroscopy tools use, without ever
-looking the star up.
+library of reference stars and report which one it most resembles.
+
+That comparison only means something after the instrument's own tilt has
+been removed (see `instrument_response`). Without it, every reference
+correlates 0.95 or better with every star and the "best" match is an
+accident of that tilt: a spectrum of Vega (A0V) matched F6V. So this
+module expects a spectrum that has already been corrected, compares it
+with the references blurred to the instrument's resolution, and scores
+each by the root-mean-square difference between the two normalized
+curves. It is a match score, not a probability that the star has that
+type.
 """
 
 import csv
+import re
 from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
+from scipy.ndimage import gaussian_filter1d
 
 if TYPE_CHECKING:
     from astrometricslib.models.stellar_source import StellarObject
@@ -24,7 +33,7 @@ _TEMPLATE_DIR = Path(__file__).parent / "data"
 
 # The reference spectral types this classifier ships with, drawn from the
 # Pickles (1998) stellar flux library (Pickles, A.J. 1998, PASP, 110, 863).
-# Each covers 3500-8000 A at 5 A sampling, normalized to 1.0 at 5556 A --
+# Each covers 3000-10000 A at 5 A sampling, normalized to 1.0 at 5556 A --
 # enough range to capture the Balmer lines and the overall continuum slope
 # a low-resolution slitless grism can actually resolve. This is the full
 # non-metallicity-variant main-sequence ladder the library offers (every
@@ -69,30 +78,92 @@ REFERENCE_SPECTRAL_TYPES: tuple[str, ...] = (
     "M6V",
 )
 
-# Below this many overlapping points, a correlation is too noisy to trust.
+# Below this many overlapping points, a comparison is too noisy to trust.
 _MINIMUM_OVERLAP_POINTS = 20
-# Reference and observed spectra must share at least this much real
-# wavelength range (in Angstroms) before they're compared at all.
-_MINIMUM_OVERLAP_ANGSTROM = 500.0
-# Softmax temperature (in correlation-coefficient units) used to turn
-# correlations into a probability-like ranking. Correlations for the
-# right type are typically 0.99+ while wrong types land around 0.85-0.98,
-# so a small temperature is needed for the ranking to separate them at
-# all instead of spreading probability almost evenly across every type.
-_RANKING_SOFTMAX_TEMPERATURE = 0.02
 
-# Below this winning correlation, the "best" match still doesn't
-# resemble the observed spectrum closely enough to trust on its own
-# (a guess, like _MINIMUM_OVERLAP_POINTS above -- may need tuning
-# against more real data).
-LOW_CONFIDENCE_THRESHOLD = 0.5
+# The widest range a comparison can use: where the reference spectra exist,
+# which is also the camera's wavelength range (3000-10000 A for the ASI533MM
+# Pro). The range actually compared is narrower: the instrument response
+# marks the samples it does not cover as unusable (4200-8000 A by default,
+# see `instrument_response.DEFAULT_RESPONSE_WAVELENGTH_RANGE_ANGSTROM`), and
+# only finite samples are compared.
+CLASSIFICATION_WAVELENGTH_RANGE_ANGSTROM = (3000.0, 10000.0)
 
-# When the top two ranked types' probabilities are closer than this,
-# the classifier can't meaningfully tell them apart, and reporting only
-# the winner would hide a near-tie.
+# The observed spectrum must cover at least this much (in Angstroms) to be
+# classified at all. Telling hot stars from cool ones depends on the slope
+# across the spectrum, so a short piece (for example the trail of a star
+# near the image edge, which only reaches 6800 A) cannot separate them.
+# Two thirds of the 3800 A default comparison range (4200-8000 A) is
+# required.
+MINIMUM_CLASSIFICATION_COVERAGE_ANGSTROM = 2500.0
+
+# The instrument's resolution element, in Angstroms. The references are
+# much sharper than a grism spectrum, so they are blurred to this width
+# before being compared; comparing sharp references with a blurred
+# observation would add a mismatch that has nothing to do with the type.
+_RESOLUTION_ELEMENT_ANGSTROM = 30.0
+
+# Softmax temperature (in root-mean-square difference units) used to turn
+# match scores into a weight for each type. Neighboring types differ by
+# about 0.01 in this measure, so a temperature of 0.01 lets a near
+# neighbor keep a visible share instead of one type taking everything.
+_RANKING_SOFTMAX_TEMPERATURE = 0.01
+
+# A best match with a root-mean-square difference above this is poor.
+# Provisional value from the standard-star check in
+# validate_spectral_and_period_analysis.py: stars that matched their
+# known type had a difference of 0.07-0.11 (Alcor's second star,
+# HD 151023, Vega itself), while stars that matched the wrong type had
+# 0.19-0.36. 0.15 sits between them. It rests on only a handful of
+# stars and should be revisited as more standards are observed.
+POOR_MATCH_RMS_THRESHOLD = 0.15
+
+# The score reported as "confidence" is 1 minus the root-mean-square
+# difference, so the poor-match threshold above becomes this score.
+LOW_CONFIDENCE_THRESHOLD = 1.0 - POOR_MATCH_RMS_THRESHOLD
+
+# When the top two ranked types' weights are closer than this, the
+# classifier can't meaningfully tell them apart, and reporting only the
+# winner would hide a near-tie.
 AMBIGUOUS_PROBABILITY_MARGIN = 0.15
 
 _reference_cache: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+_blurred_cache: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+
+
+_SPECTRAL_LETTER_ORDER = "OBAFGKM"
+
+
+def nearest_reference_type(spectral_type_text: str | None) -> str | None:
+    """Find the bundled reference type closest to a catalog spectral type.
+
+    Catalog types come in many forms ("A0Va", "K0", "B7III",
+    "A5V+M3-4V"). The letter and first number are read from the start
+    (so for a double star the first, brighter component is used), and the
+    closest bundled reference on the O to M ladder is returned.
+
+    Parameters
+    ----------
+    spectral_type_text : `str` or `None`
+        A catalog spectral type.
+
+    Returns
+    -------
+    reference_type : `str` or `None`
+        A label from `REFERENCE_SPECTRAL_TYPES`, or `None` when the text
+        has no recognizable letter and number.
+    """
+    if not spectral_type_text:
+        return None
+    match = re.match(r"^\s*([OBAFGKM])\s*(\d(?:\.\d)?)", spectral_type_text.strip().upper())
+    if match is None:
+        return None
+    position = _SPECTRAL_LETTER_ORDER.index(match.group(1)) * 10 + float(match.group(2))
+
+    def ladder_position(reference_type: str) -> float:
+        return _SPECTRAL_LETTER_ORDER.index(reference_type[0]) * 10 + float(reference_type[1])
+
+    return min(REFERENCE_SPECTRAL_TYPES, key=lambda reference: abs(ladder_position(reference) - position))
 
 
 def _load_reference_template(spectral_type: str) -> tuple[np.ndarray, np.ndarray]:
@@ -132,140 +203,181 @@ def _get_reference_templates() -> dict[str, tuple[np.ndarray, np.ndarray]]:
     return _reference_cache
 
 
-def _continuum_normalize(flux: np.ndarray) -> np.ndarray:
-    """Rescale a flux array onto a common brightness scale for comparison.
-
-    Observed intensities are in arbitrary sensor counts, while the
-    reference library is flux-calibrated -- dividing both by their own
-    median puts them on the same footing before comparing shapes.
+def _get_blurred_templates() -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    """Give every reference spectrum blurred to the instrument's resolution.
 
     Returns
     -------
-    normalized_flux : `np.ndarray`
-        The input scaled so its median is 1.0.
+    templates : `dict`
+        Spectral type label mapped to `(wavelength_angstrom, flux)`, the
+        flux blurred with a gaussian as wide as one resolution element.
     """
-    median = np.median(flux)
-    if median <= 0:
-        return flux
-    return flux / median
+    if not _blurred_cache:
+        for spectral_type, (wavelength, flux) in _get_reference_templates().items():
+            sigma_samples = _RESOLUTION_ELEMENT_ANGSTROM / 2.355 / float(np.median(np.diff(wavelength)))
+            _blurred_cache[spectral_type] = (wavelength, gaussian_filter1d(flux, sigma_samples))
+    return _blurred_cache
 
 
-def _rank_by_probability(correlation_by_type: dict[str, float]) -> list[dict[str, object]]:
-    """Turn correlation scores into a sorted, probability-like ranking.
+def _rank_by_probability(
+    rms_by_type: dict[str, float], correlation_by_type: dict[str, float]
+) -> list[dict[str, object]]:
+    """Turn match scores into a sorted ranking with a weight for each type.
 
     This is a heuristic ranking, not a calibrated statistical probability:
-    it applies a softmax to the correlation coefficients so the reported
-    weights are non-negative and sum to 1, which makes close calls between
-    types visible without claiming more rigor than a shape-matching score
-    supports.
+    a softmax over the (negative) differences makes the weights
+    non-negative and sum to 1, which makes close calls between types
+    visible without claiming more rigor than shape matching supports.
 
     Returns
     -------
     ranked_types : `list` [`dict`]
-        Every compared type, most probable first. Each entry has
-        ``"spectral_type"``, ``"probability"`` (sums to 1 across the
-        list), and ``"correlation"`` (the underlying Pearson coefficient).
+        Every compared type, best first. Each entry has
+        ``"spectral_type"``, ``"probability"`` (a weight; sums to 1
+        across the list), ``"rms"`` (the root-mean-square difference; lower
+        is better) and ``"correlation"`` (the Pearson coefficient, kept for
+        comparison; it barely separates types).
     """
-    if not correlation_by_type:
+    if not rms_by_type:
         return []
-
-    types = list(correlation_by_type.keys())
-    correlations = np.array([correlation_by_type[t] for t in types])
-    scaled = correlations / _RANKING_SOFTMAX_TEMPERATURE
-    scaled -= scaled.max()
+    types = list(rms_by_type.keys())
+    differences = np.array([rms_by_type[t] for t in types])
+    scaled = -(differences - differences.min()) / _RANKING_SOFTMAX_TEMPERATURE
     weights = np.exp(scaled)
     probabilities = weights / weights.sum()
-
     ranked = [
-        {"spectral_type": t, "probability": float(p), "correlation": float(c)}
-        for t, p, c in zip(types, probabilities, correlations, strict=True)
+        {
+            "spectral_type": t,
+            "probability": float(p),
+            "rms": float(rms_by_type[t]),
+            "correlation": float(correlation_by_type[t]),
+        }
+        for t, p in zip(types, probabilities, strict=True)
     ]
-    ranked.sort(key=lambda entry: entry["probability"], reverse=True)
+    ranked.sort(key=lambda entry: entry["rms"])
     return ranked
 
 
-def classify_spectral_type(wavelength_angstrom: np.ndarray, intensity: np.ndarray) -> dict[str, object]:
-    """Guess a star's broad spectral type by matching it to a reference.
+def unclassified_result(reason: str) -> dict[str, object]:
+    """Build the result for a spectrum that could not be classified.
 
-    Resamples the observed spectrum onto each bundled reference star's
-    wavelength grid, continuum-normalizes both, and scores the match with
-    a Pearson correlation coefficient. The reference type with the
-    highest correlation wins.
+    Returns
+    -------
+    result : `dict`
+        An ``"Unknown"`` result carrying the `reason` and empty rankings.
+    """
+    return {
+        "spectral_type": "Unknown",
+        "confidence": None,
+        "rms": None,
+        "match_quality": None,
+        "reason": reason,
+        "correlation_by_type": {},
+        "ranked_types": [],
+    }
+
+
+def classify_spectral_type(wavelength_angstrom: np.ndarray, intensity: np.ndarray) -> dict[str, object]:
+    """Find the bundled reference spectrum a star's spectrum most resembles.
+
+    The observed spectrum must already have had the instrument's response
+    removed (see `instrument_response`); this function does not do that,
+    and a spectrum that still carries the instrument's tilt gives a
+    meaningless answer.
+
+    Each reference, blurred to the instrument's resolution, is compared
+    with the observation over `CLASSIFICATION_WAVELENGTH_RANGE_ANGSTROM`.
+    Both are divided by their own median first, so only shape matters, and
+    the score is the root-mean-square difference between them.
 
     Parameters
     ----------
     wavelength_angstrom : `np.ndarray`
         The observed spectrum's wavelength grid, in Angstroms.
     intensity : `np.ndarray`
-        The observed spectrum's brightness at each wavelength, in
-        whatever units extraction produced -- arbitrary sensor counts
-        are fine, see `_continuum_normalize`.
+        The observed spectrum's brightness at each wavelength, already
+        corrected for the instrument. Arbitrary units are fine; only the
+        shape is used.
 
     Returns
     -------
     result : `dict`
         ``"spectral_type"``: the best-matching reference label, or
-        ``"Unknown"`` if there wasn't enough usable data to compare.
-        ``"confidence"``: the winning correlation coefficient (-1 to 1;
-        higher is a better match), or `None` when unknown.
-        ``"correlation_by_type"``: every reference type's correlation
-        coefficient, for inspecting close calls yourself.
-        ``"ranked_types"``: every compared type as a probability-ranked
-        list (see `_rank_by_probability`), most probable first.
+        ``"Unknown"`` when there was not enough of the spectrum to compare
+        (then ``"reason"`` says why).
+        ``"confidence"``: 1 minus the best root-mean-square difference,
+        or `None` when unknown. A match score, not a probability.
+        ``"rms"``: the best root-mean-square difference itself.
+        ``"match_quality"``: ``"good"`` or ``"poor"`` (see
+        `POOR_MATCH_RMS_THRESHOLD`).
+        ``"correlation_by_type"``: every reference's Pearson correlation.
+        ``"ranked_types"``: every compared type, best first (see
+        `_rank_by_probability`).
     """
     wavelength_angstrom = np.asarray(wavelength_angstrom, dtype=float)
     intensity = np.asarray(intensity, dtype=float)
-    valid = np.isfinite(wavelength_angstrom) & np.isfinite(intensity)
+    valid = np.isfinite(wavelength_angstrom) & np.isfinite(intensity) & (intensity > 0)
     wavelength_angstrom = wavelength_angstrom[valid]
     intensity = intensity[valid]
 
-    if len(wavelength_angstrom) < _MINIMUM_OVERLAP_POINTS:
-        return {"spectral_type": "Unknown", "confidence": None, "correlation_by_type": {}, "ranked_types": []}
-
+    low, high = CLASSIFICATION_WAVELENGTH_RANGE_ANGSTROM
+    in_range = (wavelength_angstrom >= low) & (wavelength_angstrom <= high)
+    if in_range.sum() < _MINIMUM_OVERLAP_POINTS:
+        return unclassified_result("too few samples inside the comparison range")
     order = np.argsort(wavelength_angstrom)
     wavelength_angstrom = wavelength_angstrom[order]
     intensity = intensity[order]
 
-    correlation_by_type: dict[str, float] = {}
-    for spectral_type, (template_wavelength, template_flux) in _get_reference_templates().items():
-        overlap_min = max(wavelength_angstrom.min(), template_wavelength.min())
-        overlap_max = min(wavelength_angstrom.max(), template_wavelength.max())
-        if overlap_max - overlap_min < _MINIMUM_OVERLAP_ANGSTROM:
-            continue
+    coverage = min(wavelength_angstrom.max(), high) - max(wavelength_angstrom.min(), low)
+    if coverage < MINIMUM_CLASSIFICATION_COVERAGE_ANGSTROM:
+        return unclassified_result(
+            f"the spectrum covers only {max(coverage, 0.0):.0f} A, and at least "
+            f"{MINIMUM_CLASSIFICATION_COVERAGE_ANGSTROM:.0f} A is needed"
+        )
 
+    rms_by_type: dict[str, float] = {}
+    correlation_by_type: dict[str, float] = {}
+    for spectral_type, (template_wavelength, template_flux) in _get_blurred_templates().items():
+        overlap_min = max(wavelength_angstrom.min(), template_wavelength.min(), low)
+        overlap_max = min(wavelength_angstrom.max(), template_wavelength.max(), high)
+        if overlap_max - overlap_min < MINIMUM_CLASSIFICATION_COVERAGE_ANGSTROM:
+            continue
         common_grid = template_wavelength[
             (template_wavelength >= overlap_min) & (template_wavelength <= overlap_max)
         ]
         if len(common_grid) < _MINIMUM_OVERLAP_POINTS:
             continue
 
-        observed_on_grid = np.interp(common_grid, wavelength_angstrom, intensity)
-        template_on_grid = np.interp(common_grid, template_wavelength, template_flux)
-
-        observed_norm = _continuum_normalize(observed_on_grid)
-        template_norm = _continuum_normalize(template_on_grid)
-
+        observed_norm = np.interp(common_grid, wavelength_angstrom, intensity)
+        template_norm = np.interp(common_grid, template_wavelength, template_flux)
+        observed_norm = observed_norm / np.median(observed_norm)
+        template_norm = template_norm / np.median(template_norm)
         if np.std(observed_norm) == 0 or np.std(template_norm) == 0:
             continue
 
+        rms_by_type[spectral_type] = float(np.sqrt(np.mean((observed_norm - template_norm) ** 2)))
         correlation_by_type[spectral_type] = float(np.corrcoef(observed_norm, template_norm)[0, 1])
 
-    if not correlation_by_type:
-        return {"spectral_type": "Unknown", "confidence": None, "correlation_by_type": {}, "ranked_types": []}
+    if not rms_by_type:
+        return unclassified_result("no reference overlaps the spectrum enough to compare")
 
-    best_type = max(correlation_by_type, key=correlation_by_type.get)
+    best_type = min(rms_by_type, key=rms_by_type.get)
+    best_rms = rms_by_type[best_type]
     return {
         "spectral_type": best_type,
-        "confidence": correlation_by_type[best_type],
+        "confidence": max(0.0, 1.0 - best_rms),
+        "rms": best_rms,
+        "match_quality": "poor" if best_rms > POOR_MATCH_RMS_THRESHOLD else "good",
+        "reason": None,
         "correlation_by_type": correlation_by_type,
-        "ranked_types": _rank_by_probability(correlation_by_type),
+        "ranked_types": _rank_by_probability(rms_by_type, correlation_by_type),
     }
 
 
 def is_classification_low_confidence(
     confidence: float | None, threshold: float = LOW_CONFIDENCE_THRESHOLD
 ) -> bool:
-    """Decide if a classification's winning correlation is too weak to trust.
+    """Decide if a classification's match score is too weak to trust.
 
     Returns
     -------

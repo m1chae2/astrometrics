@@ -46,7 +46,27 @@ def isolated_config(tmp_path):  # ruff: ignore[missing-type-function-argument, m
         process-wide singleton for the duration of the test.
     """
     config = AppConfiguration()
-    config.update_config({"Image Library": {"path": str(tmp_path)}})
+    config.update_config({
+        "Image Library": {"path": str(tmp_path)},
+        # A real camera section. Without one the instrument model has no
+        # dispersion geometry, so it extracts a spectrum of zero length;
+        # the pipeline now reports that as an error instead of quietly
+        # saving an empty spectrum.
+        "Observatory.Camera": {"default_primary_camera": "ZWO ASI 533MM Pro"},
+        "Observatory.Camera.ZWO ASI 533MM Pro": {
+            "name": "ZWO ASI 533MM Pro",
+            "pixel_size_μm": "3.76",
+            "sensor_width_px": "3008",
+            "sensor_height_px": "3008",
+            "grating_distance_mm": "16.54",
+            "sensor_min_wavelength": "300",
+            "sensor_max_wavelength": "1000",
+            "dispersion_orientation": "vertical",
+            "dispersion_direction": "positive",
+            "dispersion_start_px": "335.3",
+            "grating_lines_per_mm": "200",
+        },
+    })
     original_instance = config_loader._instance
     config_loader._instance = config
     yield config
@@ -64,7 +84,11 @@ def _make_wcs_header(ra_center=279.0, dec_center=38.0, scale_deg_per_px=0.0001):
 
 def _write_frame_fits(path, date_obs, with_own_wcs=False):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
     rng = np.random.default_rng(0)
-    shape = (256, 256)
+    # Tall enough for the spectrum trail: with the default vertical
+    # dispersion it starts about 335 pixels below the star and runs on
+    # from there. A frame too short to hold it has no usable spectrum, and
+    # the worker rightly records no star for it.
+    shape = (1300, 256)
     data = rng.normal(100.0, 5.0, shape).astype(np.float32)
     yy, xx = np.mgrid[0 : shape[0], 0 : shape[1]]
     data += Gaussian2D(5000.0, 128.0, 128.0, 2.0, 2.0)(xx, yy)
@@ -436,7 +460,7 @@ class TestAttachSpectroscopyQualitySummary:
                     "zero_order_saturation_fractions": [0.0],
                     "spectral_classification_concerns": [
                         {
-                            "star_id": "HD 150579::spectroscopy",
+                            "star_id": "HD 150579",
                             "reason": "low_confidence",
                             "spectral_type": "O5V",
                             "confidence": 0.33,
@@ -451,7 +475,7 @@ class TestAttachSpectroscopyQualitySummary:
                     "zero_order_saturation_fractions": [0.0],
                     "spectral_classification_concerns": [
                         {
-                            "star_id": "HD 150998::spectroscopy",
+                            "star_id": "HD 150998",
                             "reason": "ambiguous",
                             "spectral_type": "K5V",
                             "confidence": 0.93,
@@ -469,8 +493,8 @@ class TestAttachSpectroscopyQualitySummary:
         assert metrics.low_confidence_classification_count == 1
         assert metrics.ambiguous_classification_count == 1
         assert {c.star_id for c in metrics.flagged_spectral_classifications} == {
-            "HD 150579::spectroscopy",
-            "HD 150998::spectroscopy",
+            "HD 150579",
+            "HD 150998",
         }
         assert target.spectroscopy_quality_summary.flagged is True
         assert any(
@@ -528,3 +552,77 @@ class TestAttachSpectroscopyQualitySummary:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+def _make_catalog_star(
+    star_id: str,
+    ra: float,
+    dec: float,
+    magnitude: float = 8.0,
+    spectral_type: str = "A0V",
+    identified: bool = True,
+) -> StellarObject:
+    """Build a star as the session identification would return it.
+
+    Returns
+    -------
+    StellarObject
+        A star with the given position, brightness and catalog match state.
+    """
+    star = StellarObject(id=star_id, name=star_id)
+    star.right_ascension = ra
+    star.declination = dec
+    star.magnitude = magnitude
+    star.spectral_type = spectral_type
+    star.is_catalog_identified = identified
+    return star
+
+
+class TestSelectTemporalTrackingStars:
+    """Unit tests for select_temporal_tracking_stars."""
+
+    def test_puts_the_star_nearest_the_target_first_then_bright_verified_stars(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        """Verify the primary star leads, then verified stars by brightness."""
+        target_star = _make_catalog_star("* alf Lyr", 279.234, 38.783, magnitude=0.03)
+        faint = _make_catalog_star("HD 1", 279.5, 38.9, magnitude=9.0)
+        bright = _make_catalog_star("HD 2", 279.4, 38.8, magnitude=6.0)
+
+        chosen = batch.select_temporal_tracking_stars([faint, bright, target_star], 279.234, 38.783)
+
+        assert [star.id for star in chosen] == ["* alf Lyr", "HD 2", "HD 1"]
+
+    def test_never_chooses_position_only_or_unverified_stars(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        """Verify field stubs and unverified stars are left out."""
+        target_star = _make_catalog_star("* alf Lyr", 279.234, 38.783)
+        field_stub = _make_catalog_star("FIELD_J279.2400+38.7900", 279.24, 38.79, identified=False)
+        field_stub_marked = _make_catalog_star("FIELD_J279.3000+38.8000", 279.3, 38.8)
+        unknown_type = _make_catalog_star("Gaia DR3 1", 279.3, 38.8, spectral_type="Unknown")
+        instrumental_magnitude = _make_catalog_star("Gaia DR3 2", 279.3, 38.8, magnitude=-16.4)
+
+        chosen = batch.select_temporal_tracking_stars(
+            [target_star, field_stub, field_stub_marked, unknown_type, instrumental_magnitude],
+            279.234,
+            38.783,
+        )
+
+        assert [star.id for star in chosen] == ["* alf Lyr"]
+
+    def test_caps_the_number_of_stars(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        """Verify no more than the limit are returned from a crowded field."""
+        stars = [_make_catalog_star(f"HD {i}", 279.0 + i * 0.01, 38.0, magnitude=5.0 + i) for i in range(40)]
+
+        chosen = batch.select_temporal_tracking_stars(stars, 279.0, 38.0, limit=7)
+
+        assert len(chosen) == 7
+        assert chosen[0].id == "HD 0"
+
+    def test_without_a_target_position_only_verified_stars_are_used(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        """Verify no target position means no primary star."""
+        stars = [
+            _make_catalog_star("HD 2", 10.0, 10.0, magnitude=7.0),
+            _make_catalog_star("HD 1", 11.0, 10.0, magnitude=5.0),
+        ]
+
+        chosen = batch.select_temporal_tracking_stars(stars, None, None)
+
+        assert [star.id for star in chosen] == ["HD 1", "HD 2"]

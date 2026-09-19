@@ -1,68 +1,107 @@
+/**
+ * @fileoverview Compact time range control for AstronomyDisplay: one slider
+ * with a handle for each end of the range, and a line saying what is selected.
+ */
+
 import React from 'react';
 import '../styles/timeline.css';
 
 interface TimelineRangeSelectorProps {
+  /** Every measurement time, oldest first. */
   timestamps: string[];
+  /** Index in `timestamps` where the selected range starts. */
   startIdx: number;
+  /** Index in `timestamps` where the selected range ends. */
   endIdx: number;
+  /** Called with the new start and end indexes when either handle moves. */
   onChange: (start: number, end: number) => void;
 }
 
-export const TimelineRangeSelector: React.FC<TimelineRangeSelectorProps> = ({ timestamps, startIdx, endIdx, onChange }) => {
-  const max = Math.max(0, timestamps.length - 1);
+/**
+ * Formats a timestamp as a short local date and time.
+ * @param timestamp The timestamp to format.
+ * @returns For example "May 24, 04:46 AM".
+ */
+function formatTime(timestamp: string): string {
+  return new Date(timestamp).toLocaleString([], {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
 
-  const handleStartChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = Number(e.target.value);
-    onChange(Math.min(val, endIdx), endIdx);
+/**
+ * Renders a two-handle slider that picks which stretch of time is shown.
+ *
+ * The handles move over measurement numbers, not clock time, so each step
+ * lands on a real measurement.
+ */
+export const TimelineRangeSelector: React.FC<TimelineRangeSelectorProps> = ({
+  timestamps,
+  startIdx,
+  endIdx,
+  onChange,
+}) => {
+  const lastIndex = Math.max(0, timestamps.length - 1);
+
+  const handleStartChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    onChange(Math.min(Number(event.target.value), endIdx), endIdx);
   };
 
-  const handleEndChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = Number(e.target.value);
-    onChange(startIdx, Math.max(val, startIdx));
-  };
-
-  const formatTime = (t: string) => {
-    return new Date(t).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const handleEndChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    onChange(startIdx, Math.max(Number(event.target.value), startIdx));
   };
 
   if (timestamps.length === 0) {
     return <p className="empty-text">No time-series data available.</p>;
   }
 
+  const startFraction = lastIndex > 0 ? startIdx / lastIndex : 0;
+  const endFraction = lastIndex > 0 ? endIdx / lastIndex : 1;
+  const selectedCount = endIdx - startIdx + 1;
+
   return (
     <div className="timeline-selector">
-      <div className="timeline-sliders">
-        <label className="slider-label">
-          <div className="slider-label-text">Start: {formatTime(timestamps[startIdx])}</div>
-          <input type="range" min={0} max={max} value={startIdx} onChange={handleStartChange} />
-        </label>
-        <label className="slider-label">
-          <div className="slider-label-text">End: {formatTime(timestamps[endIdx])}</div>
-          <input type="range" min={0} max={max} value={endIdx} onChange={handleEndChange} />
-        </label>
+      <div className="timeline-summary">
+        <div className="timeline-summary__range">
+          {formatTime(timestamps[startIdx])} → {formatTime(timestamps[endIdx])}
+        </div>
+        <div className="timeline-summary__count">
+          {selectedCount} of {timestamps.length} time points
+        </div>
       </div>
 
-      <div className="timeline-visual">
-        <div className="timeline-points">
-          <div className="timeline-track">
-             <div
-               className="timeline-highlight"
-               style={{
-                 top: `${max > 0 ? (startIdx / max) * 100 : 0}%`,
-                 height: `${max > 0 ? ((endIdx - startIdx) / max) * 100 : 100}%`
-               }}
-             />
-          </div>
-          {timestamps.map((t, i) => {
-            const isActive = i >= startIdx && i <= endIdx;
-            return (
-              <div key={t} className={`timeline-point ${isActive ? 'active' : ''}`}>
-                <div className="timeline-dot" />
-                <span className="timeline-time">{formatTime(t)}</span>
-              </div>
-            );
-          })}
+      <div className="timeline-range">
+        <div className="timeline-range__track">
+          <div
+            className="timeline-range__fill"
+            style={{
+              left: `calc(${startFraction} * (100% - var(--timeline-thumb-size)) + var(--timeline-thumb-size) / 2)`,
+              width: `calc(${endFraction - startFraction} * (100% - var(--timeline-thumb-size)))`,
+            }}
+          />
         </div>
+        {/* The two sliders sit on top of each other. When both handles are near
+            the right end, the start handle goes on top so it can still be dragged left. */}
+        <input
+          type="range"
+          aria-label="Start of time range"
+          min={0}
+          max={lastIndex}
+          value={startIdx}
+          onChange={handleStartChange}
+          style={{ zIndex: startFraction > 0.5 ? 3 : 1 }}
+        />
+        <input
+          type="range"
+          aria-label="End of time range"
+          min={0}
+          max={lastIndex}
+          value={endIdx}
+          onChange={handleEndChange}
+          style={{ zIndex: 2 }}
+        />
       </div>
     </div>
   );

@@ -11,6 +11,7 @@ a loud error.
 """
 
 import numpy as np
+from scipy.ndimage import gaussian_filter1d
 
 from astrometricslib.models.stellar_source import SpectroscopyResult, StellarObject
 from astrometricslib.pipelines.spectroscopy.spectral_classifier import (
@@ -20,6 +21,7 @@ from astrometricslib.pipelines.spectroscopy.spectral_classifier import (
     classify_spectral_type,
     is_classification_ambiguous,
     is_classification_low_confidence,
+    nearest_reference_type,
 )
 
 
@@ -44,7 +46,7 @@ def test_a_template_matched_against_itself_wins_with_high_confidence():  # ruff:
     result = classify_spectral_type(wavelength, noisy_flux)
 
     assert result["spectral_type"] == "G0V"
-    assert result["confidence"] > 0.99
+    assert result["confidence"] > 0.95
 
 
 def test_ranked_types_puts_the_winner_first_and_sums_to_one():  # ruff: ignore[missing-return-type-undocumented-public-function]
@@ -188,3 +190,58 @@ def test_build_spectral_classification_concerns_flags_low_confidence_and_ambiguo
     assert set(concerns_by_id) == {"LowConfidenceStar", "AmbiguousStar"}
     assert concerns_by_id["LowConfidenceStar"]["reason"] == "low_confidence"
     assert concerns_by_id["AmbiguousStar"]["reason"] == "ambiguous"
+
+
+def test_a_spectrum_covering_too_little_of_the_range_is_not_classified():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify a spectrum that stops early gets no type."""
+    wavelength, flux = _get_reference_templates()["G0V"]
+    keep = wavelength <= 4500.0  # only 1500 A of the spectrum, less than the 2500 A needed
+
+    result = classify_spectral_type(wavelength[keep], flux[keep])
+
+    assert result["spectral_type"] == "Unknown"
+    assert result["confidence"] is None
+    assert "covers only" in result["reason"]
+
+
+def test_a_spectrum_unlike_every_reference_is_flagged_as_a_poor_match():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify an odd tilt gets a poor-match flag."""
+    wavelength, flux = _get_reference_templates()["G0V"]
+    tilted = flux * np.exp(-(((wavelength - 6000.0) / 900.0) ** 2) * 2.0)  # a strong bump no star has
+
+    result = classify_spectral_type(wavelength, tilted)
+
+    assert result["match_quality"] == "poor"
+    assert result["rms"] > 0.15
+
+
+def test_the_score_separates_types_that_correlation_cannot():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify an A0V spectrum is far from F6V by score though they correlate.
+
+    This is the failure the score replaced: with correlation, an A0V
+    spectrum correlates almost as well with an F6V reference as with A0V.
+    """
+    wavelength, flux = _get_reference_templates()["A0V"]
+    blurred = gaussian_filter1d(flux, 30.0 / 2.355 / 5.0)  # what the instrument would record
+    # The instrument response leaves only 4200-8000 A usable, so only that
+    # part is compared in practice.
+    blurred[(wavelength < 4200.0) | (wavelength > 8000.0)] = np.nan
+
+    result = classify_spectral_type(wavelength, blurred)
+
+    by_type = {entry["spectral_type"]: entry for entry in result["ranked_types"]}
+    assert result["spectral_type"] == "A0V"
+    assert by_type["A0V"]["rms"] < 0.01
+    assert by_type["F6V"]["correlation"] > 0.9  # correlation alone cannot tell them apart
+    assert by_type["F6V"]["rms"] > 0.15  # the score can
+
+
+def test_nearest_reference_type_reads_catalog_spectral_types():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify catalog spectral types map to a reference."""
+    assert nearest_reference_type("A0Va") == "A0V"
+    assert nearest_reference_type("K0") == "K0V"
+    assert nearest_reference_type("A5V+M3-4V") == "A5V"
+    assert nearest_reference_type("B7III") == "B8V"
+    assert nearest_reference_type("Unknown") is None
+    assert nearest_reference_type("") is None
+    assert nearest_reference_type(None) is None

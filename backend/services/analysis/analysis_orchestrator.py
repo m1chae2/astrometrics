@@ -16,6 +16,37 @@ from backend.services.infrastructure.base_service import BaseBackgroundService
 # spectroscopy extraction.
 
 
+# How many stars are measured in the master stacked spectral image. It has
+# the best signal-to-noise ratio of any spectral image, so the brightest
+# ten stars are enough to set the baseline without spending time on faint
+# detections that are mostly noise.
+MASTER_STACK_STAR_LIMIT = 10
+
+
+def _is_same_file(first_path: str, second_path: str) -> bool:
+    """Say whether two paths point at the same file.
+
+    Parameters
+    ----------
+    first_path : `str`
+        One path.
+    second_path : `str`
+        Another path.
+
+    Returns
+    -------
+    is_same : `bool`
+        `True` when the paths are the same once normalized (extra
+        slashes and ``..`` removed), or resolve to the same file.
+    """
+    if os.path.normpath(first_path) == os.path.normpath(second_path):
+        return True
+    try:
+        return os.path.samefile(first_path, second_path)
+    except OSError:
+        return False
+
+
 class AnalysisOrchestrator(BaseBackgroundService):
     """Service for managing background scientific analysis tasks.
 
@@ -413,6 +444,43 @@ class AnalysisOrchestrator(BaseBackgroundService):
 
         def _on_frame_complete(path, frame_result, completed_count, total_count):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
             self._update_job_progress(job_id, target_id, completed_count, total_count, filter_type="SPEC")
+
+        # Stage one: the master stacked spectral image. It is a generated
+        # file that lives outside `target.frames`, so it cannot be grouped
+        # into observing sessions. It is analyzed on its own, as one
+        # high-signal image, which sets the baseline (dispersion geometry,
+        # wavelengths, features, spectral type) that stage two relies on.
+        # Stage two (the raw per-session frames, below) then follows how
+        # the spectra change over time.
+        stacked_spectral_path = getattr(target, "stacked_spectral_target", None)
+        master_paths = [
+            path for path in paths if stacked_spectral_path and _is_same_file(path, stacked_spectral_path)
+        ]
+        paths = [path for path in paths if path not in master_paths]
+        for master_path in master_paths:
+            log.info(f"[{target_id}] Analyzing the master stacked spectral image: {master_path}")
+            with self.astrometrics.processing.acquire_analysis_slot():
+                master_result = self.astrometrics.processing.run_spectroscopy(
+                    target,
+                    path=master_path,
+                    limit=MASTER_STACK_STAR_LIMIT,
+                    catalog_access=self.astrometrics.catalog_access,
+                )
+            master_star_count = len((master_result or {}).get("stellar_objects") or [])
+            results["starsProcessed"] += master_star_count
+            results["spectraExtracted"] += master_star_count
+            self._update_job_progress(job_id, target_id, 1, results["totalImages"], filter_type="SPEC")
+
+        if not paths:
+            try:
+                self._target_service.save_targets()
+            except Exception as save_error:
+                log.error(f"[{target_id}] Failed to record target after master stack analysis: {save_error}")
+            log.info(
+                f"[{target_id}] Master stack analysis complete. "
+                f"{results['spectraExtracted']} spectra extracted from {results['starsProcessed']} stars."
+            )
+            return results
 
         # Resolve bare path strings back to their real FrameRecord, so
         # derive_target_sessions() can group them; a path with no

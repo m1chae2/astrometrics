@@ -8,6 +8,7 @@ uses those same stars for all the other images in the session.
 """
 
 import logging
+import math
 from collections.abc import Callable
 from typing import Any
 
@@ -17,6 +18,146 @@ from astrometricslib.utilities import parallel_batch
 from astrometricslib.utilities.concurrency import resolve_worker_counts
 
 logger = logging.getLogger(__name__)
+
+# The most stars followed in each raw frame. Following the spectrum of a
+# star over time only needs the target itself and a few well-known
+# reference stars, and every extra star is one more spectrum to extract
+# from every frame of every night. Ten matches the per-image limit the
+# other spectroscopy entry points already use.
+MAXIMUM_TRACKED_STARS_PER_FRAME = 10
+
+# A magnitude below this is an instrument reading, not a catalog
+# magnitude. Must match _BRIGHTEST_CATALOG_MAGNITUDE in
+# backend/services/data/stellar_service.py.
+_BRIGHTEST_CATALOG_MAGNITUDE = -2.0
+
+# Prefix of the id given to a star that was found in an image but never
+# matched to a catalog. Must match POSITION_ONLY_STAR_ID_PREFIX in
+# astrometricslib/drivers/catalog_access.py.
+_POSITION_ONLY_STAR_ID_PREFIX = "FIELD_J"
+
+
+def _is_verified_catalog_star(star: StellarObject) -> bool:
+    """Say whether a star's identity and properties are known from a catalog.
+
+    A star counts as verified when it was matched to a catalog entry (for
+    example SIMBAD or Gaia) and that entry gave both a real magnitude and
+    a spectral type. A star found only by its position in an image, or
+    matched but with no spectral type on record, is not verified.
+
+    Parameters
+    ----------
+    star : `StellarObject`
+        The star to check.
+
+    Returns
+    -------
+    is_verified : `bool`
+        `True` when the star is a catalog match with a magnitude and a
+        spectral type.
+    """
+    if not star.is_catalog_identified or star.id.startswith(_POSITION_ONLY_STAR_ID_PREFIX):
+        return False
+    magnitude = star.magnitude
+    has_magnitude = (
+        isinstance(magnitude, int | float)
+        and not isinstance(magnitude, bool)
+        and math.isfinite(magnitude)
+        and magnitude >= _BRIGHTEST_CATALOG_MAGNITUDE
+    )
+    spectral_type = (star.spectral_type or "").strip()
+    return has_magnitude and spectral_type not in ("", "Unknown")
+
+
+def select_temporal_tracking_stars(
+    stellar_objects: list[StellarObject],
+    center_ra: float | None,
+    center_dec: float | None,
+    limit: int = MAXIMUM_TRACKED_STARS_PER_FRAME,
+) -> list[StellarObject]:
+    """Choose the few stars whose spectra are followed across raw frames.
+
+    A noisy raw frame can show over a hundred detections, and most of them
+    are faint, unnamed, or not real stars. Extracting a spectrum for each
+    would cost a lot of time and mostly record noise. Following how a
+    spectrum changes over time only needs:
+
+    1. The primary target star: the identified star closest to the
+       target's coordinates.
+    2. Verified catalog stars (see `_is_verified_catalog_star`), brightest
+       first.
+
+    Stars known only by their position (ids starting with ``FIELD_J``)
+    are never chosen.
+
+    Parameters
+    ----------
+    stellar_objects : `list` [`StellarObject`]
+        The stars identified in the session's reference image.
+    center_ra : `float` or `None`
+        The target's right ascension in degrees, if known.
+    center_dec : `float` or `None`
+        The target's declination in degrees, if known.
+    limit : `int`, optional
+        The most stars to return.
+
+    Returns
+    -------
+    tracked_stars : `list` [`StellarObject`]
+        The primary target star first (when it can be found), then
+        verified catalog stars by increasing magnitude, at most `limit`.
+    """
+    candidates = [
+        star
+        for star in stellar_objects
+        if star.is_catalog_identified
+        and not star.id.startswith(_POSITION_ONLY_STAR_ID_PREFIX)
+        and star.right_ascension not in (None, "")
+        and star.declination not in (None, "")
+    ]
+
+    primary_star = None
+    if center_ra is not None and center_dec is not None and candidates:
+        primary_star = min(
+            candidates,
+            key=lambda star: _angular_separation_degrees(
+                float(star.right_ascension), float(star.declination), center_ra, center_dec
+            ),
+        )
+
+    verified_stars = sorted(
+        (star for star in candidates if star is not primary_star and _is_verified_catalog_star(star)),
+        key=lambda star: float(star.magnitude),
+    )
+    tracked_stars = ([primary_star] if primary_star is not None else []) + verified_stars
+    return tracked_stars[:limit]
+
+
+def _angular_separation_degrees(
+    ra_first: float, dec_first: float, ra_second: float, dec_second: float
+) -> float:
+    """Measure the angle between two points on the sky.
+
+    Parameters
+    ----------
+    ra_first, dec_first : `float`
+        The first point's right ascension and declination, in degrees.
+    ra_second, dec_second : `float`
+        The second point's right ascension and declination, in degrees.
+
+    Returns
+    -------
+    separation : `float`
+        The angle between the points, in degrees.
+    """
+    ra_first_rad, dec_first_rad = math.radians(ra_first), math.radians(dec_first)
+    ra_second_rad, dec_second_rad = math.radians(ra_second), math.radians(dec_second)
+    # The haversine formula stays accurate for very small angles, where a
+    # plain arccos of a dot product would lose precision.
+    half_delta_dec = math.sin((dec_second_rad - dec_first_rad) / 2.0)
+    half_delta_ra = math.sin((ra_second_rad - ra_first_rad) / 2.0)
+    haversine = half_delta_dec**2 + math.cos(dec_first_rad) * math.cos(dec_second_rad) * half_delta_ra**2
+    return math.degrees(2.0 * math.asin(min(1.0, math.sqrt(haversine))))
 
 
 def _process_single_spectroscopy_frame_worker(path: str, target_id: str) -> dict:
@@ -373,11 +514,23 @@ def process_spectroscopy_frames_by_session(
         session_results.append((session, identify_result))
 
         session_wcs_header = identify_result.wcs.to_header() if identify_result.wcs is not None else None
+        # Only follow the target star and a few verified catalog stars.
+        # Sending every detection would extract hundreds of unvetted
+        # spectra from every frame.
+        tracked_stars = select_temporal_tracking_stars(identify_result.stellar_objects, center_ra, center_dec)
+        logger.info(
+            "[%s] Following %d of %d identified stars across %d frame(s) of session %s.",
+            target.id,
+            len(tracked_stars),
+            len(identify_result.stellar_objects),
+            len(session.frame_paths),
+            session.id,
+        )
         session_summaries.append(
             parallel_batch.run_parallel_batch(
                 session.frame_paths,
                 _process_single_spectroscopy_frame_worker_v2,
-                worker_arguments=(target.id, identify_result.stellar_objects, session_wcs_header),
+                worker_arguments=(target.id, tracked_stars, session_wcs_header),
                 max_workers=max_workers,
                 niceness=api.config.get_worker_niceness(),
                 on_item_complete=on_item_complete,

@@ -47,6 +47,20 @@ class PeriodogramResult(BaseModel):
     # The chance this pattern is just random noise instead of a real
     # repeating cycle. Lower is more trustworthy.
     false_alarm_probability: float = Field(default=1.0, alias="falseAlarmProbability")
+    # What the search concluded: "detected", "possible", "not_detected" or
+    # "insufficient_data" (the measurements are too few or too short to
+    # test any repeat). Only "detected" and "possible" results say anything
+    # about the star; "best_period_days" of the others is just the
+    # strongest of many chance peaks.
+    verdict: str = Field(default="", alias="verdict")
+    # A sentence explaining a verdict that needs it (for example why the
+    # data was insufficient).
+    note: str = Field(default="", alias="note")
+    # How many full cycles of the best period fit in the observed time.
+    cycles_observed: float | None = Field(default=None, alias="cyclesObserved")
+    # The shortest and longest period the search could test.
+    searched_min_period_days: float | None = Field(default=None, alias="searchedMinPeriodDays")
+    searched_max_period_days: float | None = Field(default=None, alias="searchedMaxPeriodDays")
 
 
 class TransitCandidate(BaseModel):
@@ -76,6 +90,19 @@ class TransitCandidate(BaseModel):
     # means noise and confidence approaches 1 as the dip's SNR grows --
     # not a calibrated detection probability.
     transit_confidence: float = Field(default=0.0, alias="transitConfidence")
+    # The chance that shuffling the same measurements gives a dip pattern
+    # at least this strong. Lower is more trustworthy.
+    false_alarm_probability: float = Field(default=1.0, alias="falseAlarmProbability")
+    # How many separate dips were seen, and how many measurements fell
+    # inside them. One event is not a repeating pattern.
+    transit_count: int = Field(default=0, alias="transitCount")
+    points_in_transit: int = Field(default=0, alias="pointsInTransit")
+    # "detected", "possible", "not_detected" or "insufficient_data". Only
+    # "detected" and "possible" results say anything about the star.
+    verdict: str = Field(default="", alias="verdict")
+    note: str = Field(default="", alias="note")
+    searched_min_period_days: float | None = Field(default=None, alias="searchedMinPeriodDays")
+    searched_max_period_days: float | None = Field(default=None, alias="searchedMaxPeriodDays")
 
 
 class PhotometryResult(BaseModel):
@@ -157,6 +184,15 @@ class SpectroscopyResult(BaseModel):
     self_determined_spectral_type_confidence: float | None = Field(
         default=None, alias="selfDeterminedSpectralTypeConfidence"
     )
+    # How far the winning reference is from this spectrum: the root-mean-
+    # square difference of the two normalized curves. Lower is better;
+    # above about 0.15 the match is poor. `None` when no type was found.
+    self_determined_spectral_type_rms: float | None = Field(
+        default=None, alias="selfDeterminedSpectralTypeRms"
+    )
+    # Why no spectral type was determined (for example the trail left the
+    # image), or empty when one was.
+    self_determined_spectral_type_note: str = Field(default="", alias="selfDeterminedSpectralTypeNote")
     # Every reference type compared, most probable first -- each entry has
     # "spectral_type", "probability" (sums to 1 across the list, but is a
     # heuristic ranking rather than a calibrated probability), and
@@ -171,6 +207,25 @@ class SpectroscopyResult(BaseModel):
     probable_spectral_features: list[dict[str, Any]] = Field(
         default_factory=list, alias="probableSpectralFeatures"
     )
+    # Where the star's zero-order image sits, as an (x, y) pixel pair, in
+    # the spectroscopy image. `StellarObject.star_data` holds the star's
+    # position in the normal (astrometry) image, and the two pictures
+    # are different pixel grids, so the spectroscopy position is kept
+    # here instead. `rectangle` and `trail_centerline_px` below are in
+    # this same spectroscopy-image grid.
+    star_position_px: list[float] | None = Field(default=None, alias="starPositionPx")
+    # The wavelength range, [lowest, highest] in Angstroms, the extraction
+    # asked for before any samples were dropped. The spectrum arrays above
+    # only hold the part of it that was on the image and inside the
+    # camera's sensitive range, so comparing the two shows how much was lost.
+    requested_wavelength_range_angstrom: list[float] | None = Field(
+        default=None, alias="requestedWavelengthRangeAngstrom"
+    )
+    # The fraction (0 to 1) of the requested samples that were on the image
+    # and inside the camera's range. Below 1.0, part of the spectrum trail
+    # ran off the edge of the picture. `None` for a spectrum saved before
+    # this was recorded.
+    valid_fraction: float | None = Field(default=None, alias="validFraction")
     # The pixel box drawn around the star's spectrum trail in the
     # picture, used to redraw that box later without redetecting it.
     rectangle: Any | None = Field(default=None, alias="rectangle")

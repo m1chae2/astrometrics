@@ -2,7 +2,7 @@
  * @fileoverview Electron main process for the Astrometrics application.
  * Orchestrates application lifecycle, window management, and backend services.
  */
-import { app, BrowserWindow, Tray, Menu, nativeImage, session } from 'electron';
+import { app, BrowserWindow, Tray, Menu, nativeImage, session, nativeTheme } from 'electron';
 import squirrelStartup from 'electron-squirrel-startup';
 import path from 'path';
 import process from 'process';
@@ -19,10 +19,58 @@ if (squirrelStartup) {
   app.quit();
 }
 
+// Ensure application identity matches .desktop entry for Wayland app_id and dock grouping
+app.name = 'astrometrics';
+if (process.platform === 'linux' || process.platform === 'win32') {
+  app.setAppUserModelId('astrometrics');
+}
+
+/**
+ * Extracts a candidate file path from application launch arguments.
+ * Filters out Electron/Node binaries, switches, and current-directory tokens.
+ *
+ * @param {string[]} args Command-line arguments array.
+ * @returns {string|null} Resolved file path if found, otherwise null.
+ */
+function extractFilePath(args) {
+  if (!Array.isArray(args)) return null;
+  for (const arg of args) {
+    if (!arg || arg.startsWith('-') || arg === '.') continue;
+    if (arg.endsWith('electron') || arg.endsWith('electron.js') || arg.endsWith('main.js')) continue;
+    return path.resolve(arg);
+  }
+  return null;
+}
+
+let queuedFileToOpen = extractFilePath(process.argv);
+
 // Single Instance Lock
 if (!app.requestSingleInstanceLock()) {
   app.quit();
+} else {
+  app.on('second-instance', (_event, commandLine) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+
+      const filePath = extractFilePath(commandLine);
+      if (filePath && mainWindow.webContents) {
+        mainWindow.webContents.send('open-file', filePath);
+      }
+    }
+  });
 }
+
+// OS File Association listener (macOS and portal events)
+app.on('open-file', (event, filePath) => {
+  event.preventDefault();
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+    mainWindow.webContents.send('open-file', filePath);
+  } else {
+    queuedFileToOpen = filePath;
+  }
+});
 
 // Configure Logging
 log.transports.file.level = 'info';
@@ -119,6 +167,7 @@ const getWindowOptions = () => ({
   height: 800,
   minWidth: 1024,
   minHeight: 700,
+  backgroundColor: '#181818',
   icon: getAppPath('assets', 'orbit.png'),
   resizable: true,
   webPreferences: {
@@ -145,6 +194,14 @@ async function createMainWindow() {
   } else {
     mainWindow.loadFile(getAppPath('dist', 'index.html'));
   }
+
+  // Deliver any pending file association once the frontend is ready
+  mainWindow.webContents.once('did-finish-load', () => {
+    if (queuedFileToOpen) {
+      mainWindow.webContents.send('open-file', queuedFileToOpen);
+      queuedFileToOpen = null;
+    }
+  });
 
   registerIpcHandlers(mainWindow, createSecondaryWindow, backendManager);
 }
@@ -180,6 +237,9 @@ function createSecondaryWindow() {
 // App Initialization
 
 app.on('ready', () => {
+  // Ensure window manager uses dark frame background and widgets
+  nativeTheme.themeSource = 'dark';
+
   createSplashWindow();
 
   // ---------------------------------------------------------------------------
@@ -223,10 +283,17 @@ app.on('ready', () => {
 
   // System Tray
   try {
-    const trayIcon = nativeImage.createFromPath(getAppPath('assets', 'orbit.png')).resize({ width: 16, height: 16 });
+    const trayIcon = nativeImage.createFromPath(getAppPath('assets', 'orbit.png')).resize({ width: 24, height: 24 });
     tray = new Tray(trayIcon);
+    tray.setToolTip('Astrometrics');
     tray.setContextMenu(Menu.buildFromTemplate([
-      { label: 'Open Astrometrics', click: () => mainWindow && mainWindow.show() },
+      { label: 'Open Astrometrics', click: () => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          if (mainWindow.isMinimized()) mainWindow.restore();
+          mainWindow.show();
+          mainWindow.focus();
+        }
+      }},
       { type: 'separator' },
       { label: 'Quit', click: () => app.quit() }
     ]));

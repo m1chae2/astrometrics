@@ -133,7 +133,10 @@ def _apply_matches(
         if distance > max_match_distance_px:
             continue
         reference_star = reference_objs[reference_index]
-        spectral_obj.id = f"{reference_star.id}::spectroscopy"
+        # Same id as the reference star, so the catalog merge adds this
+        # spectrum to that star's existing row instead of creating a
+        # second row for the same star.
+        spectral_obj.id = reference_star.id
         spectral_obj.name = reference_star.name
         spectral_obj.right_ascension = reference_star.right_ascension
         spectral_obj.declination = reference_star.declination

@@ -1,4 +1,5 @@
-import { ipcMain, dialog, Notification, autoUpdater } from 'electron';
+import { ipcMain, dialog, Notification, autoUpdater, app } from 'electron';
+import path from 'path';
 
 /**
  * Registers all IPC handlers for the main process.
@@ -51,8 +52,29 @@ export function registerIpcHandlers(mainWindow, createSecondaryWindow, backendMa
   });
 
   // Notification Support
-  ipcMain.on('show-notification', (event, { title, body, icon }) => {
-    new Notification({ title, body, icon }).show();
+  ipcMain.on('show-notification', (_event, { title, body, icon, urgency }) => {
+    try {
+      if (!Notification.isSupported()) return;
+      const defaultIcon = path.join(app.getAppPath(), 'assets', 'orbit.png');
+      const notification = new Notification({
+        title: title || 'Astrometrics',
+        body: body || '',
+        icon: icon || defaultIcon,
+        urgency: urgency || 'normal',
+      });
+
+      notification.on('click', () => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          if (mainWindow.isMinimized()) mainWindow.restore();
+          mainWindow.show();
+          mainWindow.focus();
+        }
+      });
+
+      notification.show();
+    } catch (err) {
+      console.warn('Failed to display native notification:', err);
+    }
   });
 
   // Taskbar Progress

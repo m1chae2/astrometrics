@@ -137,11 +137,16 @@ def test_plot_target_dashboard_dynamic_layout_cases(monkeypatch):  # ruff: ignor
         lambda p: mock_img_instance,
     )
 
-    # 1. Star with both photometry and spectroscopy
+    # 1. One star row holding both photometry and spectroscopy
     star_catalog = MagicMock()
     star_catalog.id = "Gaia DR3 12345"
     star_catalog.target_ids = ["M 13"]
-    star_catalog.spectroscopy.dispersion_angle = None
+    star_catalog.stellar_spectral_type = "G2V"
+    star_catalog.spectroscopy = SpectroscopyResult(
+        wavelengths_angstrom=[4000.0, 5000.0],
+        intensities=[10.0, 20.0],
+        dispersion_angle=45.0,
+    )
     star_catalog.magnitude = 10.5
     star_catalog.name = "Gaia 12345"
     star_catalog.star_data = {"xcentroid": 100.0, "ycentroid": 100.0}
@@ -152,19 +157,8 @@ def test_plot_target_dashboard_dynamic_layout_cases(monkeypatch):  # ruff: ignor
     mock_light_curve.fluxes_normalized = [1.0, 1.1]
     star_catalog.photometry = mock_light_curve
 
-    star_spectral = MagicMock()
-    star_spectral.id = "Gaia DR3 12345::spectroscopy"
-    star_spectral.target_ids = ["M 13"]
-    star_spectral.name = "Gaia 12345 Spec"
-    star_spectral.stellar_spectral_type = "G2V"
-    star_spectral.spectroscopy = SpectroscopyResult(
-        wavelengths_angstrom=[4000.0, 5000.0],
-        intensities=[10.0, 20.0],
-        dispersion_angle=45.0,
-    )
-
     mock_astrometrics = MagicMock()
-    mock_astrometrics.stars.list_objects.return_value = [star_catalog, star_spectral]
+    mock_astrometrics.stars.list_objects.return_value = [star_catalog]
 
     # Both photometry + spectroscopy -> 3 axes
     fig_both = plot_target_dashboard(mock_target, mock_astrometrics.stars)

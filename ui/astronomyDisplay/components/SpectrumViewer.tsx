@@ -11,17 +11,8 @@ import { BasePlot } from '../../common/components/plotting/BasePlot';
 import '../styles/astronomyViewer.css';
 
 import { Spectrum, SpectralObservation } from '../../common/types/backendTypes';
-
-/**
- * Shortens a named feature's label for display on the plot.
- * Prefers the short form in trailing parentheses (e.g. "Hydrogen Balmer
- * series (H-alpha)" -> "H-alpha") since the full names are too long to
- * fit as a vertical axis label; falls back to the full name otherwise.
- */
-const shortenFeatureLabel = (name: string): string => {
-    const parenMatch = name.match(/\(([^)]+)\)\s*$/);
-    return parenMatch ? parenMatch[1] : name;
-};
+import { SpectralFeatureResult } from '../../common/types/spectralFeatureTypes';
+import { formatFalseAlarmProbability, shortFeatureName, significantFeatures } from '../utils/starDisplayFormat';
 
 interface Props {
     astronomyData: (Spectrum & { wavelength: number[]; spectrumFlux: number[] }) | null;
@@ -100,11 +91,16 @@ export const SpectrumViewer: React.FC<Props> = ({
     const [isOverlayingEpochs, setIsOverlayingEpochs] = useState<boolean>(true);
     const [showFeatures, setShowFeatures] = useState<boolean>(true);
 
-    // Named absorption features (Balmer series, Ca II H&K, etc.) the backend
-    // detected as plausible dips against the local continuum.
-    const probableSpectralFeatures = useMemo(
-        () => astronomyData?.spectroscopy?.probableSpectralFeatures ?? [],
+    // Every named absorption feature (Balmer series, Ca II H&K, etc.) the
+    // backend tested for. Only those it judged detected or possible are drawn
+    // on the plot; the rest are listed in the Stellar Analysis panel.
+    const testedSpectralFeatures = useMemo<SpectralFeatureResult[]>(
+        () => (astronomyData?.spectroscopy?.probableSpectralFeatures ?? []) as SpectralFeatureResult[],
         [astronomyData]
+    );
+    const probableSpectralFeatures = useMemo(
+        () => significantFeatures(testedSpectralFeatures),
+        [testedSpectralFeatures]
     );
 
     const plotData: PlotlyTrace[] = useMemo(() => {
@@ -187,38 +183,50 @@ export const SpectrumViewer: React.FC<Props> = ({
         }));
 
         const featureColor = getVar('--plot-green', '#00ff00');
+        // A detected feature is drawn as a solid line, a possible one as a
+        // dotted, fainter line. The line sits where the dip was actually found,
+        // which can differ a little from the feature's rest wavelength.
+        const featureX = (feature: SpectralFeatureResult) =>
+            feature.measured_wavelength_angstrom ?? feature.wavelength_angstrom;
         const featureShapes = showFeatures ? probableSpectralFeatures.map((f) => ({
             type: 'line',
-            x0: f.wavelength_angstrom,
+            x0: featureX(f),
             y0: 0,
-            x1: f.wavelength_angstrom,
+            x1: featureX(f),
             y1: 1,
             xref: 'x',
             yref: 'paper',
-            opacity: Math.max(0.35, Number(f.confidence) || 0),
+            opacity: f.verdict === 'detected' ? 0.9 : 0.5,
             line: {
                 color: featureColor,
                 width: 1,
-                dash: 'dot'
+                dash: f.verdict === 'detected' ? 'solid' : 'dot'
             }
         })) : [];
 
         base.shapes = [...selectionShapes, ...featureShapes];
 
         base.annotations = showFeatures ? probableSpectralFeatures.map((f) => {
-            const confidencePct = Number.isFinite(Number(f.confidence)) ? Math.round(Number(f.confidence) * 100) : null;
-            const label = shortenFeatureLabel(String(f.feature));
+            const label = shortFeatureName(String(f.feature));
+            const details = [
+                `${f.verdict === 'detected' ? 'Detected' : 'Possible'}`,
+                f.depth !== undefined ? `depth ${(f.depth * 100).toFixed(0)}%` : '',
+                f.p_value !== undefined ? `chance of noise doing this: ${formatFalseAlarmProbability(f.p_value)}` : '',
+                typeof f.probability_present === 'number' ? `model probability present: ${Math.round(f.probability_present * 100)}%` : '',
+            ].filter((part) => part !== '').join(', ');
             return {
-                x: f.wavelength_angstrom,
+                x: featureX(f),
                 y: 1,
                 xref: 'x',
                 yref: 'paper',
                 yanchor: 'bottom',
                 showarrow: false,
                 textangle: -90,
-                text: confidencePct !== null ? `${label} (${confidencePct}%)` : label,
+                text: label,
+                hovertext: details,
+                captureevents: true,
                 font: { color: featureColor, size: 10 },
-                opacity: Math.max(0.5, Number(f.confidence) || 0)
+                opacity: f.verdict === 'detected' ? 1 : 0.6
             };
         }) : [];
 
@@ -233,8 +241,25 @@ export const SpectrumViewer: React.FC<Props> = ({
         (astronomyData.spectraHistory && astronomyData.spectraHistory.length > 0)
     );
 
+    // Say so when part of the requested spectrum could not be measured (the
+    // trail ran off the picture or past the camera's range), so a spectrum that
+    // stops early is not mistaken for a star that goes dark.
+    const requestedRange = astronomyData?.spectroscopy?.requestedWavelengthRangeAngstrom;
+    const measuredWavelengths = astronomyData?.spectroscopy?.wavelengthsAngstrom ?? [];
+    let coverageNote = '';
+    if (requestedRange && requestedRange.length === 2 && measuredWavelengths.length > 0) {
+        const measuredLow = Math.min(...measuredWavelengths);
+        const measuredHigh = Math.max(...measuredWavelengths);
+        if (measuredHigh < requestedRange[1] - 50 || measuredLow > requestedRange[0] + 50) {
+            coverageNote =
+                `Measured ${Math.round(measuredLow).toLocaleString()}-${Math.round(measuredHigh).toLocaleString()} Å of the ` +
+                `${Math.round(requestedRange[0]).toLocaleString()}-${Math.round(requestedRange[1]).toLocaleString()} Å requested; ` +
+                `the rest ran off the image or past the camera's range.`;
+        }
+    }
+
     const hasEpochs = Array.isArray(astronomyData?.spectraHistory) && astronomyData.spectraHistory.length > 1;
-    const hasFeatures = probableSpectralFeatures.length > 0;
+    const hasFeatures = testedSpectralFeatures.length > 0;
 
     return (
         <div className="astronomy-viewer-root astronomy-viewer-root--full-height" ref={containerRef}>
@@ -279,6 +304,8 @@ export const SpectrumViewer: React.FC<Props> = ({
                 config={{ responsive: true, displayModeBar: false }}
                 onClick={handleChartClick}
             />
+
+            {coverageNote && <div className="astronomy-viewer__coverage-note">{coverageNote}</div>}
 
             {!hasData && (
                 <div className="astronomy-viewer-empty-overlay">

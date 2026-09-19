@@ -107,7 +107,7 @@ class ImageConverter:
             # Extract FITS headers to bundle them in the output
             headers = []
             try:
-                headers = get_fits_header(None, path)
+                headers = get_fits_header(path)
             except Exception as e:
                 logger.warning(f"Could not extract headers during PNG conversion: {e}")
 

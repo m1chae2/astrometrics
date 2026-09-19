@@ -12,6 +12,8 @@ need in full.
 import math
 from unittest.mock import MagicMock
 
+import pytest
+
 from astrometricslib import SpectroscopyResult, StellarObject
 from backend.services.data.stellar_service import (
     StellarService,
@@ -413,10 +415,12 @@ def test_get_displayable_stellar_object_summaries_category_filters() -> None:
     service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
 
     spectra_results = service.get_displayable_stellar_object_summaries(filter_type="With Spectra")
-    assert [s["id"] for s in spectra_results] == ["Star_Spectra_1", "Star_Both_1"]
+    # A filtered listing is sorted, and a star with photometry as well as a
+    # spectrum comes before one with only a spectrum.
+    assert [s["id"] for s in spectra_results] == ["Star_Both_1", "Star_Spectra_1"]
 
     phot_results = service.get_displayable_stellar_object_summaries(filter_type="With Photometry")
-    assert [s["id"] for s in phot_results] == ["Star_Phot_1", "Star_Both_1"]
+    assert [s["id"] for s in phot_results] == ["Star_Both_1", "Star_Phot_1"]
 
 
 def test_get_displayable_stellar_object_summaries_offset_pagination() -> None:
@@ -551,3 +555,110 @@ def test_get_sources_asks_the_library_only_for_catalog_magnitudes_when_uncatalog
     calls = service.wayfinder.planning.get_library_star_summaries.call_args_list
     assert calls[0].args == (10.0, 10.0, 5.0, (-2.0, 6.0))
     assert calls[1].args == (10.0, 10.0, 5.0, (-2.0, math.inf))
+
+
+def test_get_displayable_stellar_object_summaries_sorts_a_targets_stars_usefully() -> None:
+    """Verify a target's stars sort spectra, named, then brightest.
+
+    A position-only ``FIELD_J`` star with an instrumental (very negative)
+    magnitude must not sort ahead of a catalog star, and a star with no
+    magnitude sorts after every star that has one.
+    """
+    mock_stars = [
+        {"id": "FIELD_J10.0000+20.0000", "hasSpectra": False, "hasPhotometry": True, "magnitude": -16.4},
+        {"id": "Gaia DR3 2", "hasSpectra": False, "hasPhotometry": True, "magnitude": 11.0},
+        {"id": "Gaia DR3 1", "hasSpectra": False, "hasPhotometry": True, "magnitude": 8.0},
+        {"id": "Gaia DR3 3", "hasSpectra": False, "hasPhotometry": True, "magnitude": None},
+        {"id": "HD 5", "hasSpectra": True, "hasPhotometry": False, "magnitude": 9.0},
+        {"id": "Gaia DR3 4", "hasSpectra": False, "hasPhotometry": False, "magnitude": 5.0},
+    ]
+    astrometrics = MagicMock()
+    astrometrics.stars.list_object_summaries.return_value = mock_stars
+    service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
+
+    summaries = service.get_displayable_stellar_object_summaries(target_id="M 13")
+
+    assert [summary["id"] for summary in summaries] == [
+        "HD 5",
+        "Gaia DR3 1",
+        "Gaia DR3 2",
+        "Gaia DR3 3",
+        "Gaia DR3 4",
+        "FIELD_J10.0000+20.0000",
+    ]
+    astrometrics.stars.list_object_summaries.assert_called_once_with("M 13", None, apply_default_limit=False)
+
+
+def test_get_displayable_stellar_object_summaries_leaves_unfiltered_order_alone() -> None:
+    """Verify an unfiltered browse keeps database order for stable pages."""
+    mock_stars = [
+        {"id": "Gaia DR3 9", "hasSpectra": False, "hasPhotometry": False, "magnitude": 12.0},
+        {"id": "Gaia DR3 1", "hasSpectra": True, "hasPhotometry": True, "magnitude": 3.0},
+    ]
+    astrometrics = MagicMock()
+    astrometrics.stars.list_object_summaries.return_value = mock_stars
+    service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
+
+    summaries = service.get_displayable_stellar_object_summaries()
+
+    assert [summary["id"] for summary in summaries] == ["Gaia DR3 9", "Gaia DR3 1"]
+
+
+def test_analyze_periodicity_delegates_to_the_stars_api() -> None:
+    """Verify the RPC method hands the id to the library."""
+    astrometrics = MagicMock()
+    service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
+
+    result = service.analyze_periodicity("Gaia DR3 1")
+
+    astrometrics.stars.analyze_periodicity.assert_called_once_with("Gaia DR3 1")
+    assert result is astrometrics.stars.analyze_periodicity.return_value
+
+
+@pytest.mark.anyio
+async def test_rpc_registry_routes_analyze_periodicity_to_the_stellar_service(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify astronomy:analyze_periodicity reaches the stellar service."""
+    from backend.routers import rpc_router
+
+    stellar_service = MagicMock()
+    monkeypatch.setattr(rpc_router.container, "stellar_service", stellar_service, raising=False)
+
+    registry = rpc_router.RPCHandlerRegistry()
+    result = await registry.execute("astronomy:analyze_periodicity", {"object_id": "Gaia DR3 1"})
+
+    stellar_service.analyze_periodicity.assert_called_once_with(object_id="Gaia DR3 1")
+    assert result is stellar_service.analyze_periodicity.return_value
+
+
+def test_period_searches_are_limited_to_two_at_a_time() -> None:
+    """Verify a third search waits until one of the first two finishes."""
+    import threading
+
+    running = 0
+    peak = 0
+    lock = threading.Lock()
+    release = threading.Event()
+
+    def slow_search(_object_id: str) -> None:
+        nonlocal running, peak
+        with lock:
+            running += 1
+            peak = max(peak, running)
+        release.wait(timeout=2.0)
+        with lock:
+            running -= 1
+
+    astrometrics = MagicMock()
+    astrometrics.stars.analyze_periodicity.side_effect = slow_search
+    service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
+    threads = [threading.Thread(target=service.analyze_periodicity, args=(f"star {i}",)) for i in range(5)]
+    for thread in threads:
+        thread.start()
+    threading.Event().wait(0.3)
+    assert peak == 2
+    release.set()
+    for thread in threads:
+        thread.join(timeout=5.0)
+    assert peak == 2

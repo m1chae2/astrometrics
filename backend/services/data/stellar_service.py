@@ -3,6 +3,7 @@
 import logging
 import math
 import re
+import threading
 
 from astrometricslib import Astrometrics, StellarObject
 
@@ -42,6 +43,19 @@ def _is_per_frame_photometry_detection(object_id: str) -> bool:
 _BRIGHTEST_CATALOG_MAGNITUDE = -2.0
 
 
+# How many period searches may run at once. A search is a few seconds of
+# work on one processor core (a dip search shuffles the light curve 150 to
+# 300 times), so two at a time cannot swamp the computer, while a click
+# never waits behind a long stacking job the way it would if it shared the
+# heavy-job slots that stacking and image analysis use.
+_MAXIMUM_CONCURRENT_PERIOD_SEARCHES = 2
+
+# Prefix of an id given to a star that was found in an image but never
+# matched to a catalog. Must match POSITION_ONLY_STAR_ID_PREFIX in
+# astrometricslib/drivers/catalog_access.py.
+_POSITION_ONLY_STAR_ID_PREFIX = "FIELD_J"
+
+
 def _has_catalog_magnitude(magnitude: object) -> bool:
     """Say whether a star's magnitude is a real catalog magnitude.
 
@@ -62,6 +76,36 @@ def _has_catalog_magnitude(magnitude: object) -> bool:
         and not isinstance(magnitude, bool)
         and math.isfinite(magnitude)
         and magnitude >= _BRIGHTEST_CATALOG_MAGNITUDE
+    )
+
+
+def _summary_sort_key(summary: dict) -> tuple:
+    """Order star summaries so the most useful stars come first.
+
+    Parameters
+    ----------
+    summary : `dict`
+        One star summary from ``list_object_summaries``.
+
+    Returns
+    -------
+    sort_key : `tuple`
+        Sorts stars that have a spectrum first, then stars with a real
+        catalog name (not a ``FIELD_J`` position-only id), then stars
+        with photometry, then by catalog magnitude with the brightest
+        first. A star with no catalog magnitude sorts after every star
+        that has one. The id is the last part, so the order is the same
+        on every request and page boundaries never repeat or skip a star.
+    """
+    magnitude = summary.get("magnitude")
+    has_magnitude = _has_catalog_magnitude(magnitude)
+    return (
+        not summary.get("hasSpectra"),
+        str(summary.get("id") or "").startswith(_POSITION_ONLY_STAR_ID_PREFIX),
+        not summary.get("hasPhotometry"),
+        not has_magnitude,
+        magnitude if has_magnitude else 0.0,
+        str(summary.get("id") or ""),
     )
 
 
@@ -142,6 +186,7 @@ class StellarService:
         self.config = config
         self.astrometrics = astrometrics or Astrometrics(config)
         self._wayfinder = wayfinder
+        self._period_search_slots = threading.BoundedSemaphore(_MAXIMUM_CONCURRENT_PERIOD_SEARCHES)
 
     @property
     def wayfinder(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
@@ -248,11 +293,18 @@ class StellarService:
         -------
         summaries : `list` [`dict`]
             One dict per displayable star with keys ``id``, ``name``,
-            ``targetIds``, ``hasSpectra``, and ``hasPhotometry``,
-            optionally filtered by ``target_id``, ``search``, and
-            ``filter_type``, paginated by ``offset`` and ``limit``.
+            ``targetIds``, ``hasSpectra``, ``hasPhotometry``,
+            ``magnitude``, and ``spectralType``, optionally filtered by
+            ``target_id``, ``search``, and ``filter_type``, paginated by
+            ``offset`` and ``limit``. Results for a target, a search or
+            a filter are sorted with spectra first, then named stars,
+            then photometry, then brightest first (see
+            `_summary_sort_key`); an unfiltered listing keeps database
+            order.
         """
-        needs_full_scan = bool(search or filter_type or (offset and offset > 0))
+        # A target's own stars are cheap to read in full, and the sort below
+        # needs all of them, so they count as a full scan too.
+        needs_full_scan = bool(target_id or search or filter_type or (offset and offset > 0))
         effective_limit = None if needs_full_scan else limit
         # A search/filter/paginated request must see every row before its
         # own in-memory filtering below runs, or a real match past
@@ -294,6 +346,14 @@ class StellarService:
                     continue
 
             filtered.append(summary)
+
+        # Only a request that already reads its whole scope is sorted: a
+        # target's stars, or a search/filter over the catalog. Sorting an
+        # unfiltered browse would mean scanning all ~270,000 rows on every
+        # page (about 2 seconds), and sorting only its capped first page
+        # would make page 2 repeat or skip stars.
+        if target_id or search_needle or filter_type:
+            filtered.sort(key=_summary_sort_key)
 
         start_offset = max(0, offset or 0)
         if limit is not None and limit > 0:
@@ -368,6 +428,23 @@ class StellarService:
         if not term:
             raise ValueError("Missing search term or object_id")
         return self.get_object_fuzzy(term)
+
+    def analyze_periodicity(self, object_id: str) -> StellarObject | None:
+        """Search a star's light curve for a repeating pattern, and save it.
+
+        Parameters
+        ----------
+        object_id : `str`
+            The id of the star to analyze.
+
+        Returns
+        -------
+        result : `StellarObject` or `None`
+            The star with any new analysis saved, or `None` if no such
+            star exists.
+        """
+        with self._period_search_slots:
+            return self.astrometrics.stars.analyze_periodicity(object_id)
 
     def add_object(self, new_object: StellarObject):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Add or update a stellar object."""

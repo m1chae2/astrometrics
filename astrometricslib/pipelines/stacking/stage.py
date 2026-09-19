@@ -100,8 +100,10 @@ def stack_frames(
 
     # Validate that only homogeneous frame types are stacked (no mixed
     # spectral/standard frames)
-    has_spectral = any(getattr(f, "filter", None) in ("SPEC", FilterType.SPEC) for f in target_frames)
-    has_standard = any(getattr(f, "filter", None) not in ("SPEC", FilterType.SPEC) for f in target_frames)
+    from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
+
+    has_spectral = any(frame_is_spectral(f) for f in target_frames)
+    has_standard = any(not frame_is_spectral(f) for f in target_frames)
     if has_spectral and has_standard:
         raise ValueError(
             "Target contains a mixed set of spectral ('SPEC') and standard imaging frames. "

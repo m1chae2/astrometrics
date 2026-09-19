@@ -1709,6 +1709,11 @@ class ImageProcessing:
                     # Single-pass `register` applies its transforms as
                     # it goes and offers no separate filtering step, so
                     # this path's frame filters stay on `stack` below.
+                    # Dispersed star images have low roundness (< 0.5)
+                    # and smaller apparent core radii, so relax roundness
+                    # and radius to detect enough field stars (40-60+)
+                    # for robust pair matching against Frame 0.
+                    register_commands = ["setfindstar -relax=on -roundness=0.15 -radius=3"]
                     register_commands.append(f"register {seq} -transf=shift")
                     registered_seq = f"r_{seq}"
                     stack_filter_options = frame_filter_options

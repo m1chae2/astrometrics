@@ -45,6 +45,20 @@ export function emitToast(
     } catch {
       // Ignore event dispatch failures.
     }
+
+    // Forward to native desktop notification if window is hidden/blurred or for error alerts
+    try {
+      if (typeof window !== 'undefined' && window.astrometrics?.app?.showNotification) {
+        const isHidden = typeof document !== 'undefined' && (document.hidden || !document.hasFocus());
+        const isCritical = kind === 'error';
+        if (isHidden || isCritical) {
+          const title = source ? `Astrometrics: ${source}` : 'Astrometrics';
+          window.astrometrics.app.showNotification(title, text);
+        }
+      }
+    } catch {
+      // Ignore notification failures.
+    }
   } catch {
     // Ignore any failures in the notification path.
   }

@@ -9,6 +9,8 @@ import { StellarAnalysisDetails } from './components/StellarAnalysisDetails';
 import { SectionPanel } from '../common/components/SectionPanel';
 import { GenericDisplayLayout } from '../common/components/GenericDisplayLayout';
 import { TimelineRangeSelector } from './components/TimelineRangeSelector';
+import { analyzeStarPeriodicity } from '../common/services/astronomyService';
+import { selectLightCurveSeries } from './utils/starDisplayFormat';
 import './styles/astronomyDisplay.css';
 
 /**
@@ -46,7 +48,6 @@ export const AstronomyDisplay: React.FC = () => {
     setFilterOption,
     filterText,
     setFilterText,
-    highlightedIds,
     page,
     setPage,
     hasMore,
@@ -80,10 +81,44 @@ export const AstronomyDisplay: React.FC = () => {
     setPendingId('');
   }, []);
 
-  const { astronomyData, loading, error } = useSpectrumData(
+  const { astronomyData, loading, error, replaceAstronomyData } = useSpectrumData(
     pendingId,
     handleLoaded
   );
+
+  const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
+
+  // A failed period search belongs to the star it ran on, so it is cleared
+  // when a different star is shown.
+  useEffect(() => {
+    setAnalysisError(null);
+  }, [astronomyData?.id]);
+
+  /** Runs the period and transit search on the shown star and shows the result. */
+  const handleAnalyze = useCallback(async () => {
+    const starId = astronomyData?.id;
+    if (!starId) return;
+    setIsAnalyzing(true);
+    setAnalysisError(null);
+    try {
+      const analyzedStar = await analyzeStarPeriodicity(starId);
+      if (analyzedStar) replaceAstronomyData(analyzedStar);
+    } catch (analysisFailure) {
+      setAnalysisError(analysisFailure instanceof Error ? analysisFailure.message : String(analysisFailure));
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }, [astronomyData?.id, replaceAstronomyData]);
+
+  // A loaded star with nothing to plot gets a one-line note in place of a
+  // large empty plot, so the other plot can use the room.
+  const isStarLoaded = !!astronomyData && !loading && !error;
+  const hasSpectrum =
+    (astronomyData?.spectroscopy?.wavelengthsAngstrom?.length ?? 0) > 0 ||
+    (astronomyData?.wavelength?.length ?? 0) > 0 ||
+    (astronomyData?.spectraHistory?.length ?? 0) > 0;
+  const hasPhotometry = selectLightCurveSeries(astronomyData?.photometry).values.length > 0;
 
   // Extract all available timestamps from both photometry and spectroscopy
   // REQ: AST-1.3: The display SHALL present a timeline for time-series data.
@@ -139,7 +174,12 @@ export const AstronomyDisplay: React.FC = () => {
       // REQ: AST-1.2: The display SHALL allow filtering of the data list by text search.
       filterText={filterText}
       onFilterTextChange={setFilterText}
-      highlightedIds={highlightedIds}
+      legend={
+        <>
+          <span><span className="selectable-list__badge selectable-list__badge--spectra">S</span> spectrum</span>
+          <span><span className="selectable-list__badge selectable-list__badge--photometry">P</span> photometry</span>
+        </>
+      }
       page={page}
       onPageChange={setPage}
       hasMore={hasMore}
@@ -148,7 +188,7 @@ export const AstronomyDisplay: React.FC = () => {
 
   const rightPanel = (
     <div className="astronomy-display__right-column">
-      <SectionPanel title="Timeline">
+      <SectionPanel title="Timeline" className="astronomy-display__panel--compact">
         <div className="astronomy-display__timeline">
           <TimelineRangeSelector
             timestamps={availableTimestamps}
@@ -159,7 +199,12 @@ export const AstronomyDisplay: React.FC = () => {
         </div>
       </SectionPanel>
       <SectionPanel title="Stellar Analysis">
-        <StellarAnalysisDetails astronomyData={astronomyData} />
+        <StellarAnalysisDetails
+          astronomyData={astronomyData}
+          onAnalyze={handleAnalyze}
+          isAnalyzing={isAnalyzing}
+          analysisError={analysisError}
+        />
       </SectionPanel>
     </div>
   );
@@ -167,25 +212,37 @@ export const AstronomyDisplay: React.FC = () => {
   const centerPanel = (
     <div className="astronomy-display__plots">
       <StarSummaryCard astronomyData={astronomyData} starId={selectedSpectrum || pendingId} />
-      <SectionPanel title="Spectrum">
-        <SpectrumViewer
-          astronomyData={astronomyData}
-          loading={loading}
-          error={error}
-          active={!!selectedSpectrum}
-          selectedTimestamps={selectedTimestamps}
-        />
-      </SectionPanel>
+      {isStarLoaded && !hasSpectrum ? (
+        <SectionPanel title="Spectrum" className="astronomy-display__panel--collapsed">
+          <div className="astronomy-display__collapsed-note">No spectrum has been recorded for this star.</div>
+        </SectionPanel>
+      ) : (
+        <SectionPanel title="Spectrum">
+          <SpectrumViewer
+            astronomyData={astronomyData}
+            loading={loading}
+            error={error}
+            active={!!selectedSpectrum}
+            selectedTimestamps={selectedTimestamps}
+          />
+        </SectionPanel>
+      )}
 
-      <SectionPanel title="Photometry">
-        {/* REQ: AST-1.5: Selecting a star SHALL simultaneously display both plots. */}
-        <PhotometryViewer
-          astronomyData={astronomyData}
-          loading={loading}
-          error={error}
-          selectedTimestamps={selectedTimestamps}
-        />
-      </SectionPanel>
+      {isStarLoaded && !hasPhotometry ? (
+        <SectionPanel title="Photometry" className="astronomy-display__panel--collapsed">
+          <div className="astronomy-display__collapsed-note">No photometry has been recorded for this star.</div>
+        </SectionPanel>
+      ) : (
+        <SectionPanel title="Photometry">
+          {/* REQ: AST-1.5: Selecting a star SHALL simultaneously display both plots. */}
+          <PhotometryViewer
+            astronomyData={astronomyData}
+            loading={loading}
+            error={error}
+            selectedTimestamps={selectedTimestamps}
+          />
+        </SectionPanel>
+      )}
     </div>
   );
 

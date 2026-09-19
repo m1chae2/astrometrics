@@ -41,23 +41,45 @@ BACKEND_LAUNCHED_HERE=0
 # Default values
 CMD="foreground"
 PORT=5173
+OPEN_FILE=""
+APP_MODE=""
 
 # Parse arguments
-if [ $# -gt 0 ]; then
+while [ $# -gt 0 ]; do
     case "$1" in
         start|stop|restart|status|foreground)
             CMD="$1"
             shift
-            if [ $# -gt 0 ]; then PORT="$1"; fi
+            if [ $# -gt 0 ] && [[ "$1" =~ ^[0-9]+$ ]]; then
+                PORT="$1"
+                shift
+            fi
+            ;;
+        --mode=*)
+            APP_MODE="${1#*=}"
+            shift
+            ;;
+        --mode)
+            shift
+            if [ $# -gt 0 ]; then
+                APP_MODE="$1"
+                shift
+            fi
+            ;;
+        --lan)
+            export DEV_LAN=1
+            shift
             ;;
         *)
-            # Backward compatibility: if first arg is a number, it's a port, default to foreground
-            # If it's anything else, assume it might be a port or unknown, default to foreground
-            CMD="foreground"
-            PORT="$1"
+            if [[ "$1" =~ ^[0-9]+$ ]]; then
+                PORT="$1"
+            else
+                OPEN_FILE="$(realpath "$1" 2>/dev/null || echo "$1")"
+            fi
+            shift
             ;;
     esac
-fi
+done
 
 # Detect IP logic
 detect_lan_ip() {
@@ -92,6 +114,10 @@ else
   HOST=127.0.0.1
 fi
 VITE_URL="http://${HOST}:${PORT}"
+if [ -n "$APP_MODE" ]; then
+  encoded_mode=$(echo "$APP_MODE" | sed 's/ /%20/g')
+  VITE_URL="${VITE_URL}/?mode=${encoded_mode}"
+fi
 
 kill_port_pids() {
   local pids
@@ -112,22 +138,28 @@ kill_port_pids() {
   fi
 }
 
+# ---------------------------------------------------------------------------
+# check_and_fix_sandbox: checks whether chrome-sandbox has root setuid
+# permissions. If non-interactive sudo succeeds, it fixes permissions;
+# otherwise it safely sets FORCE_NO_SANDBOX=1 without blocking or prompting.
+# ---------------------------------------------------------------------------
 check_and_fix_sandbox() {
   local cs_path="$ROOT_DIR/node_modules/electron/dist/chrome-sandbox"
   [ ! -f "$cs_path" ] && return 0
   owner=$(stat -c '%u' "$cs_path" 2>/dev/null || echo "")
   mode=$(stat -c '%a' "$cs_path" 2>/dev/null || echo "")
   if [ "$owner" = "0" ] && [ "$mode" = "4755" ]; then return 0; fi
-  echo "Fixing chrome-sandbox permissions..."
-  if sudo chown root:root "$cs_path" && sudo chmod 4755 "$cs_path"; then
+  if sudo -n chown root:root "$cs_path" 2>/dev/null && sudo -n chmod 4755 "$cs_path" 2>/dev/null; then
     return 0
   else
-    echo "Failed to fix sandbox. Using --no-sandbox."
     FORCE_NO_SANDBOX=1
     return 1
   fi
 }
 
+# ---------------------------------------------------------------------------
+# check_frontend_deps: verifies that vite is available or runs npm install.
+# ---------------------------------------------------------------------------
 check_frontend_deps() {
   if [ -x "$ROOT_DIR/node_modules/.bin/vite" ]; then return 0; fi
   if command -v npm >/dev/null 2>&1; then
@@ -137,6 +169,15 @@ check_frontend_deps() {
   fi
   echo "npm not found."
   return 1
+}
+
+# ---------------------------------------------------------------------------
+# ensure_prerequisites: runs frontend dependency and sandbox checks prior
+# to starting the application services.
+# ---------------------------------------------------------------------------
+ensure_prerequisites() {
+  check_frontend_deps || exit 1
+  check_and_fix_sandbox || true
 }
 
 # --- Background execution functions ---
@@ -187,17 +228,28 @@ start_vite_bg() {
   echo $! > "$VITE_PID_FILE"
 }
 
+# ---------------------------------------------------------------------------
+# start_electron_bg: launches Electron against the active Vite URL.
+# If WATCH=1 is set, wraps execution with nodemon to restart on main/preload
+# changes. Otherwise launches Electron directly so that window closure
+# triggers immediate application shutdown.
+# ---------------------------------------------------------------------------
 start_electron_bg() {
-    echo "Starting Electron (nodemon) (logs: $LOG_DIR/electron.log)..."
-    local extra_args=""
-    [ "${FORCE_NO_SANDBOX:-0}" = "1" ] && extra_args="--no-sandbox"
+    local extra_args="--ozone-platform-hint=auto --enable-features=WaylandWindowDecorations"
+    [ "${FORCE_NO_SANDBOX:-0}" = "1" ] && extra_args+=" --no-sandbox"
+    local file_arg=""
+    [ -n "${OPEN_FILE:-}" ] && file_arg="\"${OPEN_FILE}\""
 
     cd "$ROOT_DIR" || return 1
     if command -v npx >/dev/null 2>&1; then
         set +e
-        # We use setsid to detach or just background it.
-        # Note: nodemon spawns electron.
-        npx nodemon --watch main.js --watch preload.js --delay 1 --exec "ELECTRON_RENDERER_URL=${VITE_URL} SKIP_BACKEND=1 NODE_ENV=development npx electron . --remote-debugging-port=9222 ${extra_args}" >"$LOG_DIR/electron.log" 2>&1 &
+        if [ "${WATCH:-0}" = "1" ]; then
+            echo "Starting Electron (nodemon watch) (logs: $LOG_DIR/electron.log)..."
+            npx nodemon --watch main.js --watch preload.js --delay 1 --exec "ELECTRON_RENDERER_URL=${VITE_URL} SKIP_BACKEND=1 NODE_ENV=development npx electron . --remote-debugging-port=9222 ${extra_args} ${file_arg}" >"$LOG_DIR/electron.log" 2>&1 &
+        else
+            echo "Starting Electron (logs: $LOG_DIR/electron.log)..."
+            ELECTRON_RENDERER_URL="${VITE_URL}" SKIP_BACKEND=1 NODE_ENV=development npx electron . --remote-debugging-port=9222 ${extra_args} ${file_arg} >"$LOG_DIR/electron.log" 2>&1 &
+        fi
         local pid=$!
         set -e
         echo "$pid" > "$ELECTRON_PID_FILE"
@@ -280,11 +332,9 @@ status_check() {
 
 # --- Main Logic ---
 
-check_frontend_deps || exit 1
-check_and_fix_sandbox || true
-
 case "$CMD" in
   start)
+    ensure_prerequisites
     # Stop a previous frontend, but leave any running backend alone
     stop_frontend
 
@@ -315,12 +365,9 @@ case "$CMD" in
     status_check
     ;;
   foreground)
-    # Original foreground logic
+    ensure_prerequisites
     echo "Starting in foreground..."
     kill_port_pids
-
-    # Start npm run dev:local logic inline or just use generic functions but wait?
-    # To keep exact behavior, we replicate the original logic
 
     trap 'stop_what_this_run_started' EXIT INT TERM
 
@@ -334,9 +381,6 @@ case "$CMD" in
         exit 1
     fi
 
-    # Run electron in foreground here?
-    # Original script ran nodemon in background and waited.
-    # We will run it in background and wait for it.
     start_electron_bg
 
     epid=$(cat "$ELECTRON_PID_FILE")

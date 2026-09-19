@@ -305,7 +305,7 @@ class SpectrumExtractor:
                     val = np.sum(data[curr_y, x_start:x_end])
                 pixels.append(val)
             else:
-                pixels.append(0.0)
+                pixels.append(np.nan)
 
         return np.array(pixels)
 
@@ -394,7 +394,7 @@ class SpectrumExtractor:
                         val = np.sum(data[int_y, x_start:x_end])
                     pixels.append(val)
                 else:
-                    pixels.append(0.0)
+                    pixels.append(np.nan)
                 trail_width_px.append(0.0)
                 continue
 
@@ -407,11 +407,13 @@ class SpectrumExtractor:
             if abs(vx) > abs(vy):
                 y_start = max(0, center_int_y - aperture_radius)
                 y_end = min(height, center_int_y + aperture_radius + 1)
-                val = np.sum(data[y_start:y_end, int_x]) if 0 <= int_x < width and y_start < y_end else 0.0
+                val = np.sum(data[y_start:y_end, int_x]) if 0 <= int_x < width and y_start < y_end else np.nan
             else:
                 x_start = max(0, center_int_x - aperture_radius)
                 x_end = min(width, center_int_x + aperture_radius + 1)
-                val = np.sum(data[int_y, x_start:x_end]) if 0 <= int_y < height and x_start < x_end else 0.0
+                val = (
+                    np.sum(data[int_y, x_start:x_end]) if 0 <= int_y < height and x_start < x_end else np.nan
+                )
             pixels.append(val)
             trail_width_px.append(sigma)
 
@@ -490,7 +492,7 @@ class SpectrumExtractor:
                     val = np.sum(data[y_low:y_high, x])
                     profile.append(val)
                 else:
-                    profile.append(0.0)
+                    profile.append(np.nan)
         else:  # vertical
             # Vertical dispersion: from anchor_y + flare_offset_pixels to
             # anchor_y + max_offset_pixels
@@ -510,7 +512,7 @@ class SpectrumExtractor:
                     val = np.sum(data[y, x_low:x_high])
                     profile.append(val)
                 else:
-                    profile.append(0.0)
+                    profile.append(np.nan)
 
         return np.array(profile), anchor_x, anchor_y
 
@@ -735,11 +737,11 @@ class SpectrumExtractor:
                 if is_horizontal:
                     y_low = max(0, int_step_y - radius)
                     y_high = min(h, int_step_y + radius + 1)
-                    val = np.sum(data[y_low:y_high, step]) if 0 <= step < w and y_low < y_high else 0.0
+                    val = np.sum(data[y_low:y_high, step]) if 0 <= step < w and y_low < y_high else np.nan
                 else:
                     x_low = max(0, int_step_x - radius)
                     x_high = min(w, int_step_x + radius + 1)
-                    val = np.sum(data[step, x_low:x_high]) if 0 <= step < h and x_low < x_high else 0.0
+                    val = np.sum(data[step, x_low:x_high]) if 0 <= step < h and x_low < x_high else np.nan
                 profile.append(val)
                 trail_width_px.append(0.0)
                 continue
@@ -753,12 +755,12 @@ class SpectrumExtractor:
                 center_int_y = round(true_y)
                 y_low = max(0, center_int_y - aperture_radius)
                 y_high = min(h, center_int_y + aperture_radius + 1)
-                val = np.sum(data[y_low:y_high, step]) if 0 <= step < w and y_low < y_high else 0.0
+                val = np.sum(data[y_low:y_high, step]) if 0 <= step < w and y_low < y_high else np.nan
             else:
                 center_int_x = round(true_x)
                 x_low = max(0, center_int_x - aperture_radius)
                 x_high = min(w, center_int_x + aperture_radius + 1)
-                val = np.sum(data[step, x_low:x_high]) if 0 <= step < h and x_low < x_high else 0.0
+                val = np.sum(data[step, x_low:x_high]) if 0 <= step < h and x_low < x_high else np.nan
             profile.append(val)
             trail_width_px.append(sigma)
 

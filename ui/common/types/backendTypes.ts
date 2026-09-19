@@ -239,8 +239,13 @@ export interface SpectroscopyResult {
   quantumEfficiencyCorrectedIntensities?: number[] | null;
   selfDeterminedSpectralType?: string;
   selfDeterminedSpectralTypeConfidence?: number | null;
+  selfDeterminedSpectralTypeRms?: number | null;
+  selfDeterminedSpectralTypeNote?: string;
   selfDeterminedSpectralTypeCandidates?: Record<string, any>[];
   probableSpectralFeatures?: Record<string, any>[];
+  starPositionPx?: number[] | null;
+  requestedWavelengthRangeAngstrom?: number[] | null;
+  validFraction?: number | null;
   rectangle?: any | null;
   detectedAngle?: number | null;
   dispersionAngle?: number | null;
@@ -261,6 +266,11 @@ export interface PeriodogramResult {
   bestPeriodDays?: number;
   power?: number;
   falseAlarmProbability?: number;
+  verdict?: string;
+  note?: string;
+  cyclesObserved?: number | null;
+  searchedMinPeriodDays?: number | null;
+  searchedMaxPeriodDays?: number | null;
 }
 
 /**
@@ -280,6 +290,13 @@ export interface TransitCandidate {
   epochT0?: number;
   transitSnr?: number;
   transitConfidence?: number;
+  falseAlarmProbability?: number;
+  transitCount?: number;
+  pointsInTransit?: number;
+  verdict?: string;
+  note?: string;
+  searchedMinPeriodDays?: number | null;
+  searchedMaxPeriodDays?: number | null;
 }
 
 /**

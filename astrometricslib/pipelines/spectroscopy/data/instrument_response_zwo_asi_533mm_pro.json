@@ -1,0 +1,14 @@
+{
+  "camera_name": "ZWO ASI 533MM Pro",
+  "coefficients": [
+    0.5144488090593899,
+    0.35745944281631725,
+    -0.8022454297924451,
+    -0.3318803202358373,
+    0.5308199895145816
+  ],
+  "minimum_wavelength_angstrom": 4200.0,
+  "maximum_wavelength_angstrom": 8000.0,
+  "reference_type": "A0V",
+  "source": "Vega master spectral stack Vega_SPEC_Stacked_ZWO_ASI_533MM_Pro_405mm.fits, brightest detection, derived 2026-09-19"
+}

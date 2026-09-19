@@ -7,9 +7,11 @@ defines API/WebSocket routes.
 
 import logging
 import os
+import socket
 import threading
 import time
 import warnings
+from typing import Any
 
 import uvicorn
 
@@ -27,6 +29,7 @@ warnings.filterwarnings("ignore", category=AstropyDeprecationWarning)
 warnings.filterwarnings("ignore", category=AstropyWarning, message=".*extra padding.*")
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 from astrometricslib import get_configuration
 from backend.container import container
@@ -132,9 +135,15 @@ origins = [
     "app://.",  # Electron
 ]
 
+lan_origin_regex = (
+    r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?$|"
+    r"^capacitor://localhost$"
+)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
+    allow_origin_regex=lan_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -243,6 +252,155 @@ async def session_token():  # ruff: ignore[missing-return-type-undocumented-publ
         WebSocket URLs.
     """
     return {"token": session_auth.SESSION_TOKEN}
+
+
+def _detect_lan_ip() -> str:
+    """Detect the active LAN IPv4 address for remote mobile companion clients.
+
+    Returns
+    -------
+    lan_ip : `str`
+        The local IPv4 address, or '127.0.0.1' if none can be resolved.
+    """
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("1.1.1.1", 80))
+        return str(s.getsockname()[0])
+    except Exception:
+        return "127.0.0.1"
+    finally:
+        s.close()
+
+
+@app.get("/api/pairing-info")
+async def pairing_info(request: Request) -> dict[str, Any]:
+    """Provide connection and authorization metadata for companion clients.
+
+    Facilitates zero-configuration pairing with mobile companion apps
+    or remote browser clients over the local network.
+
+    Parameters
+    ----------
+    request : `~fastapi.Request`
+        The incoming HTTP request.
+
+    Returns
+    -------
+    info : `dict`
+        Server metadata, host/port, endpoints, and the active session token.
+    """
+    host_header = request.headers.get("host", "")
+    host = host_header.split(":")[0] if host_header else _detect_lan_ip()
+    port = request.url.port or 5000
+
+    return {
+        "app": "Astrometrics",
+        "version": "0.2.0",
+        "host": host,
+        "port": port,
+        "lan_ip": _detect_lan_ip(),
+        "session_token": session_auth.SESSION_TOKEN,
+        "endpoints": {
+            "rpc": f"http://{host}:{port}/api/action",
+            "ws_events": f"ws://{host}:{port}/ws/events?token={session_auth.SESSION_TOKEN}",
+            "ws_terminal": f"ws://{host}:{port}/ws/terminal?token={session_auth.SESSION_TOKEN}",
+        },
+    }
+
+
+class HandoffStateUpdate(BaseModel):
+    """Payload for updating the active workspace handoff state."""
+
+    active_mode: str | None = Field(None, description="Active UI mode")
+    selected_target: str | None = Field(None, description="Selected target designation")
+    coordinates: dict[str, Any] | None = Field(None, description="RA/Dec coordinates and FOV")
+    telemetry: dict[str, Any] | None = Field(None, description="Mount or capture telemetry")
+    origin_device: str = Field("desktop", description="Device identifier")
+
+
+@app.get("/api/handoff/state")
+async def get_handoff_state() -> dict[str, Any]:
+    """Retrieve the workspace handoff state used for cross-device continuity.
+
+    Returns
+    -------
+    state : `dict`
+        Active workspace mode, selected target, coordinates, and telemetry.
+    """
+    if container.handoff_service:
+        return container.handoff_service.get_state()
+    return {}
+
+
+@app.post("/api/handoff/state")
+async def update_handoff_state(payload: HandoffStateUpdate) -> dict[str, Any]:
+    """Update the workspace handoff state and broadcast it to clients.
+
+    Parameters
+    ----------
+    payload : `HandoffStateUpdate`
+        State fields to update.
+
+    Returns
+    -------
+    state : `dict`
+        Updated active workspace state.
+    """
+    if container.handoff_service:
+        return container.handoff_service.update_state(
+            active_mode=payload.active_mode,
+            selected_target=payload.selected_target,
+            coordinates=payload.coordinates,
+            telemetry=payload.telemetry,
+            origin_device=payload.origin_device,
+        )
+    return {}
+
+
+@app.post("/api/handoff/beam")
+async def beam_to_device(target: str | None = None, mode: str | None = None) -> dict[str, Any]:
+    """Beam the current target or view to a paired phone via GSConnect.
+
+    Parameters
+    ----------
+    target : `str`, optional
+        Target designation to open on the mobile device.
+    mode : `str`, optional
+        Workspace view mode to display on the mobile device.
+
+    Returns
+    -------
+    result : `dict`
+        Status of the beam dispatch attempt.
+    """
+    import shutil
+    import subprocess  # ruff: ignore[suspicious-subprocess-import] -- runs the local KDE Connect command
+
+    kdeconnect_bin = shutil.which("kdeconnect-cli") or shutil.which("gsconnect-cli")
+    deep_link = f"astrometrics://handoff?mode={mode or 'Planetarium'}"
+    if target:
+        deep_link += f"&target={target}"
+
+    if not kdeconnect_bin:
+        return {
+            "success": False,
+            "message": "Neither gsconnect-cli nor kdeconnect-cli found in system PATH",
+            "deep_link": deep_link,
+        }
+
+    try:
+        cmd = [kdeconnect_bin, "--open-url", deep_link]
+        proc = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] -- fixed argv, no shell
+            cmd, capture_output=True, text=True, timeout=5
+        )
+        return {
+            "success": proc.returncode == 0,
+            "deep_link": deep_link,
+            "output": proc.stdout.strip(),
+        }
+    except Exception as exc:
+        logger.warning("Failed to beam to device: %s", exc)
+        return {"success": False, "error": str(exc), "deep_link": deep_link}
 
 
 @app.get("/api/ready")

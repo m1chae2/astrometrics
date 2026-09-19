@@ -11,6 +11,7 @@ from backend.services.analysis.analysis_orchestrator import AnalysisOrchestrator
 from backend.services.data.image_service import ImageService
 from backend.services.data.stellar_service import StellarService
 from backend.services.data.target_service import TargetService
+from backend.services.infrastructure.handoff_service import HandoffService
 from backend.services.infrastructure.maintenance_service import MaintenanceService
 from backend.services.infrastructure.notification_service import NotificationService
 from backend.services.infrastructure.sync_service import SyncService
@@ -46,6 +47,7 @@ class Container:
         self.socket_manager = None
         self.telescope_service = None
         self.notification_service = None
+        self.handoff_service = None
         self.scripting_service = None
         self.ingestion_service = None
         self.system_status_service = None
@@ -132,6 +134,7 @@ class Container:
 
         notification_path = os.path.join(os.path.dirname(__file__), "notifications.json")
         self.notification_service = NotificationService(storage_path=notification_path)
+        self.handoff_service = HandoffService(socket_manager=self.socket_manager)
 
         from backend.services.observatory.guiding_service import GuidingService
 

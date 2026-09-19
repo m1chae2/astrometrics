@@ -176,6 +176,7 @@ class RPCHandlerRegistry:
         self.register("astronomy:list", ("stellar_service", "get_displayable_stellar_object_summaries"))
         self.register("astronomy:get", ("stellar_service", "get_object_fuzzy_by_id"))
         self.register("astronomy:save", ("stellar_service", "save_objects"))
+        self.register("astronomy:analyze_periodicity", ("stellar_service", "analyze_periodicity"))
         self.register("astronomy:get_stellar_objects", ("stellar_service", "get_stellar_objects"))
         self.register("astronomy:get_target_status", ("stellar_service", "get_target_status"))
         self.register("astronomy:get_status", ("stellar_service", "get_target_status"))

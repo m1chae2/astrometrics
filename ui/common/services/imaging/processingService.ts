@@ -182,12 +182,22 @@ export async function streamJobLog(
 
     const poll = async () => {
         if (cancelled) return;
+        let isTerminal = false;
         try {
             const lines = await fetchJobLogTail(jobId, 2000);
             if (!cancelled && lines.length > 0) {
                 if (!lastSeenLine) {
                     for (const line of lines) {
                         onChunk(line);
+                        if (
+                            line.includes('analysis complete') ||
+                            line.includes('Analysis complete') ||
+                            line.includes('Stacking complete') ||
+                            line.includes('status: success stack') ||
+                            line.includes('FATAL ERROR')
+                        ) {
+                            isTerminal = true;
+                        }
                     }
                     lastSeenLine = lines[lines.length - 1];
                 } else {
@@ -195,6 +205,15 @@ export async function streamJobLog(
                     const newLines = idx !== -1 ? lines.slice(idx + 1) : lines;
                     for (const line of newLines) {
                         onChunk(line);
+                        if (
+                            line.includes('analysis complete') ||
+                            line.includes('Analysis complete') ||
+                            line.includes('Stacking complete') ||
+                            line.includes('status: success stack') ||
+                            line.includes('FATAL ERROR')
+                        ) {
+                            isTerminal = true;
+                        }
                     }
                     if (lines.length > 0) {
                         lastSeenLine = lines[lines.length - 1];
@@ -204,7 +223,7 @@ export async function streamJobLog(
         } catch {
             // Silently ignore log fetch failure during transient state
         }
-        if (!cancelled) {
+        if (!cancelled && !isTerminal) {
             setTimeout(poll, 1500);
         }
     };

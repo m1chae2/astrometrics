@@ -5,6 +5,7 @@
 
 import React from 'react';
 import '../styles/astronomyDisplay.css';
+import { describeTemplateMatch, formatCatalogMagnitude, formatCoordinateDegrees } from '../utils/starDisplayFormat';
 
 export interface StarSummaryCardProps {
     /** Detailed astronomy/stellar object data. */
@@ -14,16 +15,16 @@ export interface StarSummaryCardProps {
 }
 
 /**
- * Format numerical RA and DEC into standard degree, arcminute, arcsecond strings.
+ * Formats right ascension and declination as degrees rounded to five decimals.
  * @param ra RA coordinate in degrees or string.
  * @param dec DEC coordinate in degrees or string.
- * @returns Formatted coordinate string with dot separator.
+ * @returns Formatted coordinate string with dot separator, or empty if either is missing.
  */
 function formatCoordinates(ra?: any, dec?: any): string {
-    if (ra === undefined || dec === undefined || ra === null || dec === null || ra === '') {
-        return '';
-    }
-    return `${ra}° • ${dec}°`;
+    const rightAscensionText = formatCoordinateDegrees(ra);
+    const declinationText = formatCoordinateDegrees(dec);
+    if (rightAscensionText === '' || declinationText === '') return '';
+    return `${rightAscensionText}° • ${declinationText}°`;
 }
 
 /**
@@ -76,7 +77,8 @@ export const StarSummaryCard: React.FC<StarSummaryCardProps> = ({
     const raNum = typeof ra === 'number' ? ra : parseFloat(ra);
     const decNum = typeof dec === 'number' ? dec : parseFloat(dec);
     const canLocate = Number.isFinite(raNum) && Number.isFinite(decNum);
-    const mag = astronomyData?.magnitude ?? astronomyData?.mag;
+    const catalogMagnitudeText = formatCatalogMagnitude(astronomyData?.magnitude ?? astronomyData?.mag);
+    const templateMatch = describeTemplateMatch(astronomyData?.spectroscopy, spectralType);
     const meanFlux = astronomyData?.photometry?.meanFlux ?? astronomyData?.photometry?.mean_flux;
     const variabilityScore = astronomyData?.variabilityScore ?? astronomyData?.variability_score;
     const targetIds: string[] = Array.isArray(astronomyData?.targetIds) ? astronomyData.targetIds : [];
@@ -85,8 +87,22 @@ export const StarSummaryCard: React.FC<StarSummaryCardProps> = ({
         <div className="star-summary-card">
             <div className="star-summary-card__header">
                 <span className="star-summary-card__title">{name}</span>
-                {spectralType && (
-                    <span className="star-summary-card__badge spectral-badge">{spectralType}</span>
+                <span
+                    className="star-summary-card__badge spectral-badge"
+                    title="Spectral type from a catalog lookup"
+                >
+                    Catalog: {spectralType || 'Unknown'}
+                </span>
+                {templateMatch && (
+                    <span
+                        className={`star-summary-card__badge spectral-badge spectral-badge--measured${
+                            templateMatch.isPoor || templateMatch.differsFromCatalog ? ' spectral-badge--caution' : ''
+                        }`}
+                        title={templateMatch.hoverText}
+                    >
+                        {templateMatch.badgeText}
+                        {!templateMatch.isPoor && templateMatch.differsFromCatalog ? ' · differs from catalog' : ''}
+                    </span>
                 )}
                 {variabilityScore !== undefined && variabilityScore !== null && (
                     <span className="star-summary-card__badge variability-badge">
@@ -117,14 +133,17 @@ export const StarSummaryCard: React.FC<StarSummaryCardProps> = ({
                         <span className="item-label">Coords:</span> {formattedCoords}
                     </span>
                 )}
-                {mag !== undefined && mag !== null && mag !== '' && (
+                {catalogMagnitudeText !== null && (
                     <span className="star-summary-card__item">
-                        <span className="item-label">Mag:</span> {String(mag)}
+                        <span className="item-label">Mag:</span> {catalogMagnitudeText}
                     </span>
                 )}
                 {meanFlux !== undefined && meanFlux !== null && (
-                    <span className="star-summary-card__item">
-                        <span className="item-label">Mean Flux:</span> {Math.round(Number(meanFlux)).toLocaleString()} ADU
+                    <span
+                        className="star-summary-card__item"
+                        title="The star's flux divided by the reference flux of each frame, averaged over the light curve. It has no units."
+                    >
+                        <span className="item-label">Mean flux ratio:</span> {Number(meanFlux).toFixed(2)}
                     </span>
                 )}
                 {targetIds.length > 0 && (

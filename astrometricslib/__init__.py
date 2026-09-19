@@ -32,7 +32,11 @@ from astrometricslib.api.processing import (
     capture_job_logs,
     registered_job,
 )
-from astrometricslib.api.targets import classify_and_sort_fits_files, derive_target_sessions
+from astrometricslib.api.targets import (
+    classify_and_sort_fits_files,
+    derive_target_sessions,
+    frame_is_spectral,
+)
 from astrometricslib.models.moving_object import AsteroidDetectionCandidate
 from astrometricslib.models.moving_object_config import MovingObjectConfig
 from astrometricslib.models.quality_summary import (
@@ -123,12 +127,12 @@ class Astrometrics:
     star tracking, and data visualization) together in one place.
     """
 
-    def __init__(  # ruff: ignore[missing-return-type-special-method]
+    def __init__(
         self,
         config: AppConfiguration | None = None,
         app_config: AppConfiguration | None = None,
         catalog_access: AbstractCatalogAccess | None = None,
-    ):
+    ) -> None:
         """Set up the main Astrometrics tools.
 
         Parameters
@@ -239,6 +243,7 @@ __all__ = [
     "capture_job_logs",
     "classify_and_sort_fits_files",
     "derive_target_sessions",
+    "frame_is_spectral",
     "get_configuration",
     "parse_coordinate_string",
     "registered_job",

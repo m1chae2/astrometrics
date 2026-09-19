@@ -97,6 +97,61 @@ class TestRunSpectroscopyAnalysis:
         # TestAttachSpectroscopyQualitySummary for that coverage.
 
 
+class TestMasterSpectralStackAnalysis:
+    """Tests for stage one, the master stacked spectral image."""
+
+    def _make_setup(self, stacked_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+        frame = FrameRecord(path="/lib/a.fits", role="LIGHT", timestamp=1000.0)
+        target = Target(id="MasterStackTestTarget", frames=[frame], stacked_spectral_target=stacked_path)
+        session = _make_session("MasterStackTestTarget:2026-01-01:800:0", ["/lib/a.fits"])
+        summary = BatchRunSummary(
+            succeeded=["/lib/a.fits"], failed=[], results={"/lib/a.fits": {"stars_processed": 2}}
+        )
+        run_spectroscopy_by_session = MagicMock(
+            return_value=(summary, [(session, SimpleNamespace(wcs=None))])
+        )
+        run_spectroscopy = MagicMock(return_value={"stellar_objects": [object(), object(), object()]})
+        astrometrics = SimpleNamespace(
+            catalog_access=object(),
+            processing=SimpleNamespace(
+                run_spectroscopy=run_spectroscopy,
+                run_spectroscopy_by_session=run_spectroscopy_by_session,
+                acquire_analysis_slot=lambda: contextlib.nullcontext(),
+            ),
+        )
+        orchestrator = _make_orchestrator(astrometrics=astrometrics)
+        orchestrator._target_service.get_targets.return_value = target
+        return orchestrator, run_spectroscopy, run_spectroscopy_by_session
+
+    def test_analyzes_the_master_stack_on_its_own_without_session_grouping(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        """Verify the master stack is analyzed as one image."""
+        stacked_path = "/lib/Target_SPEC_Stacked.fits"
+        orchestrator, run_spectroscopy, run_by_session = self._make_setup(stacked_path)
+
+        results = orchestrator._run_spectroscopy_analysis(
+            "job1", "MasterStackTestTarget", [stacked_path], pipeline=MagicMock()
+        )
+
+        run_spectroscopy.assert_called_once()
+        assert run_spectroscopy.call_args.kwargs["path"] == stacked_path
+        run_by_session.assert_not_called()
+        assert results["starsProcessed"] == 3
+
+    def test_raw_frames_still_go_through_session_grouping(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        """Verify raw frames are grouped and the master stack is not."""
+        stacked_path = "/lib/Target_SPEC_Stacked.fits"
+        orchestrator, run_spectroscopy, run_by_session = self._make_setup(stacked_path)
+
+        results = orchestrator._run_spectroscopy_analysis(
+            "job1", "MasterStackTestTarget", [stacked_path, "/lib/a.fits"], pipeline=MagicMock()
+        )
+
+        run_spectroscopy.assert_called_once()
+        frame_records = run_by_session.call_args.args[2]
+        assert [frame.path for frame in frame_records] == ["/lib/a.fits"]
+        assert results["starsProcessed"] == 3 + 2
+
+
 class TestStartAnalysisTaskClassification:
     """Verify _start_analysis_task routes paths by real FrameRecord.filter."""
 

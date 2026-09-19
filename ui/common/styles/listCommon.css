@@ -95,6 +95,10 @@
   cursor: pointer;
 }
 
+.selectable-list__item--two-line {
+  min-height: 48px;
+}
+
 .selectable-list__label {
   display: inline-block;
   vertical-align: middle;
@@ -116,6 +120,24 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+}
+
+/* Label over a smaller subtitle, for lists whose rows carry a second line. */
+.selectable-list__label-stack {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1 1 auto;
+  line-height: 1.25;
+}
+
+.selectable-list__subtitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-height: 1.25em;
+  font-size: 11px;
+  color: var(--text-dim, #9aa5b5);
 }
 
 .selectable-list__badge,

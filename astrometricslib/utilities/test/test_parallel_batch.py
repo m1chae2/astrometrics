@@ -8,6 +8,7 @@ whatever the pipeline happened to `print`.
 """
 
 import logging
+from typing import Any
 
 from astrometricslib.utilities import parallel_batch
 
@@ -100,3 +101,78 @@ class TestWorkerOutputCapture:
             pass
 
         assert package_logger.handlers == handlers_before
+
+
+def _simple_batch_worker(item_id: str) -> dict[str, Any]:
+    """Process a simple test batch item.
+
+    Returns
+    -------
+    result : `dict`
+        Success status and processed item ID.
+    """
+    return {"status": "success", "processed_item": item_id}
+
+
+def _oom_simulating_worker(item_id: str) -> dict[str, Any]:
+    """Simulate a worker memory failure for targeted items.
+
+    Returns
+    -------
+    result : `dict`
+        Success status and processed item ID.
+
+    Raises
+    ------
+    MemoryError
+        Raised when processing item ID "OOM_TARGET".
+    """
+    if item_id == "OOM_TARGET":
+        raise MemoryError("Process virtual memory limit exceeded")
+    return {"status": "success", "processed_item": item_id}
+
+
+class TestParallelBatchResourceGovernors:
+    """Tests for resource controls and backpressure in run_parallel_batch."""
+
+    def test_initialize_worker_process_runs_safely(self) -> None:
+        """Initialize worker process with zero memory does not error."""
+        parallel_batch._initialize_worker_process(niceness=0, max_memory_mb=0)
+
+    def test_deprecated_set_worker_niceness_delegates_to_initializer(
+        self,
+    ) -> None:
+        """Verify deprecated niceness setter delegates properly."""
+        parallel_batch._set_worker_process_niceness(niceness=0)
+
+    def test_sliding_window_execution_and_recycling(self) -> None:
+        """Verify sliding-window dispatch processes items with recycling."""
+        items = [f"Item_{i}" for i in range(8)]
+        summary = parallel_batch.run_parallel_batch(
+            items,
+            _simple_batch_worker,
+            max_workers=2,
+            max_tasks_per_child=2,
+            max_worker_memory_mb=1024,
+        )
+
+        assert len(summary.succeeded) == 8
+        assert len(summary.failed) == 0
+        assert set(summary.succeeded) == set(items)
+
+    def test_worker_memory_error_is_caught_gracefully(self) -> None:
+        """Verify worker MemoryError fails only the offending item."""
+        items = ["Normal_1", "OOM_TARGET", "Normal_2"]
+        summary = parallel_batch.run_parallel_batch(
+            items,
+            _oom_simulating_worker,
+            max_workers=2,
+            max_worker_memory_mb=1024,
+        )
+
+        assert "Normal_1" in summary.succeeded
+        assert "Normal_2" in summary.succeeded
+        assert len(summary.failed) == 1
+        failed_item, failure_reason = summary.failed[0]
+        assert failed_item == "OOM_TARGET"
+        assert "memory limit" in failure_reason.lower()

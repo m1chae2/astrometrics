@@ -11,7 +11,12 @@ merge behavior directly, independent of running the full pipeline.
 
 from datetime import UTC, datetime
 
-from astrometricslib.models.stellar_source import SpectralObservation, StellarObject
+from astrometricslib.models.stellar_source import (
+    PhotometryResult,
+    SpectralObservation,
+    SpectroscopyResult,
+    StellarObject,
+)
 from astrometricslib.pipelines.shared.star_recording import (
     merge_spectra_history,
     merge_spectroscopy_stellar_object,
@@ -89,3 +94,33 @@ def test_merge_spectroscopy_stellar_object_with_no_existing_history_uses_the_upd
     merged = merge_spectroscopy_stellar_object(existing_star, session_star)
 
     assert [obs.timestamp.hour for obs in merged.spectra_history] == [3]
+
+
+def test_merge_spectroscopy_stellar_object_keeps_position_and_photometry():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify a spectrum lands in the star's own row, position unchanged.
+
+    The spectroscopy update's `star_data` is a position in the
+    spectroscopy image, a different pixel grid from the normal image the
+    existing row's `star_data` came from, so it must not overwrite it.
+    """
+    existing_star = StellarObject(
+        id="Vega",
+        star_data={"xcentroid": 100.0, "ycentroid": 200.0},
+        photometry=PhotometryResult(fluxes=[1.0, 2.0, 3.0]),
+    )
+    spectral_update = StellarObject(
+        id="Vega",
+        star_data={"xcentroid": 900.0, "ycentroid": 800.0},
+        spectroscopy=SpectroscopyResult(
+            wavelengths_angstrom=[4000.0], intensities=[1.0], star_position_px=[900.0, 800.0]
+        ),
+    )
+
+    merged = merge_spectroscopy_stellar_object(existing_star, spectral_update)
+
+    assert merged.star_data == {"xcentroid": 100.0, "ycentroid": 200.0}
+    assert merged.spectroscopy.star_position_px == [900.0, 800.0]
+    assert merged.spectroscopy.wavelengths_angstrom == [4000.0]
+    assert merged.photometry.fluxes == [1.0, 2.0, 3.0]
+    assert merged.has_spectra is True
+    assert merged.has_photometry is True

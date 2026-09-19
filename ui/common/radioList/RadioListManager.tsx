@@ -32,6 +32,8 @@ export interface RadioListManagerProps {
 
     // New
     highlightedIds?: Set<string>;
+    /** Optional key shown under the filters, explaining the badges on each row. */
+    legend?: React.ReactNode;
     noWrapper?: boolean;
     title?: string;
     actionsTitle?: string;
@@ -58,6 +60,7 @@ export const RadioListManager: React.FC<RadioListManagerProps> = ({
     onPageChange,
     hasMore = false,
     highlightedIds,
+    legend,
     noWrapper = false,
     title = 'List',
     actionsTitle = 'Controls',
@@ -77,6 +80,8 @@ export const RadioListManager: React.FC<RadioListManagerProps> = ({
                     placeholder={filterPlaceholder}
                 />
             )}
+
+            {legend && <div className="manager__legend">{legend}</div>}
 
             {/* List Section */}
             <SelectableList

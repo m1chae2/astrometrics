@@ -79,3 +79,18 @@ export async function fetchAstronomyData(
         throw err;
     }
 }
+
+/**
+ * Runs the period and transit search on a star's light curve and saves the result.
+ * @param objectId The id of the star to analyze.
+ * @return The star with any new analysis attached, or null if it does not exist.
+ */
+export async function analyzeStarPeriodicity(objectId: string): Promise<Spectrum | null> {
+    try {
+        const data = await callBackend("astronomy:analyze_periodicity", { object_id: objectId.trim() });
+        return (data as Spectrum | null) || null;
+    } catch (err: unknown) {
+        reportError(err instanceof Error ? err : new Error(String(err)), 'backend');
+        throw err;
+    }
+}

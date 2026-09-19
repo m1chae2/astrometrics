@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useTargetContext } from '../common/context/TargetContext';
 import { useTargetListLogic } from '../common/hooks/useTargetListLogic';
 import { useTargetActions } from '../common/hooks/useTargetActions';
@@ -72,7 +72,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
     allFiles, filteredFiles, exposureCounts, fileFilterText, setFileFilterText,
     selectedFile, setSelectedFile, filesToDelete, handleRequestDeleteFiles, confirmDeleteFiles,
     showFileDeleteConfirm, setShowFileDeleteConfirm,
-    checkedFiles, toggleFile, toggleAllFiles,
+    checkedFiles, setCheckedFiles, toggleFile, toggleAllFiles,
     stackedImage, stackedSpectralTarget, totalExposure
   } = files;
 
@@ -86,6 +86,17 @@ const ImageProcessingDisplayInner: React.FC = () => {
     loading, error, stretch, toggleStretch,
     setSelectedLightRow, selectedLightRow
   } = useViewerState(selectedTarget, lightFrames, selectedFile);
+
+  // The raw frames ticked for stacking must not stay ticked once stacking
+  // ends. A leftover selection would be sent to the next Analyze run in
+  // place of the stacked result that stacking just produced.
+  const wasProcessingRef = React.useRef(false);
+  useEffect(() => {
+    if (wasProcessingRef.current && !isProcessing) {
+      setCheckedFiles(new Set());
+    }
+    wasProcessingRef.current = isProcessing;
+  }, [isProcessing, setCheckedFiles]);
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);

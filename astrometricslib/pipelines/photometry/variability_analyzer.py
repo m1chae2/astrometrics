@@ -1268,116 +1268,71 @@ class VariabilityAnalyzer:
         A planet passing in front of its star and one star of an
         eclipsing binary passing in front of the other both produce
         this same box-shaped dip -- this search doesn't try to tell
-        the two apart.
+        the two apart. See `periodicity_search` for how the result is
+        judged: the strongest dip always exists, so the returned candidate
+        carries a verdict saying whether it stands out from noise.
 
         Returns
         -------
         candidate : `TransitCandidate` or `None`
-            The details of the possible transit or eclipse, or None if
-            nothing was found.
+            The search result (check its ``verdict``), or `None` if there
+            were fewer than 8 measurements.
         """
         if not star.photometry or len(star.photometry.timestamps) < 8:
             return None
 
-        from astropy.timeseries import BoxLeastSquares
+        from astrometricslib.pipelines.photometry.periodicity_search import box_search
 
-        from astrometricslib.models.stellar_source import TransitCandidate
-        from astrometricslib.pipelines.shared.quality.detection_confidence import (
-            significance_to_confidence,
-        )
-
-        t_sec = np.array([
-            (ts - star.photometry.timestamps[0]).total_seconds() for ts in star.photometry.timestamps
-        ])
-        t_days = t_sec / 86400.0
-
-        raw_fluxes = (
-            star.photometry.fluxes_detrended
-            if star.photometry.fluxes_detrended
-            else star.photometry.fluxes_normalized
-        )
-        fluxes = np.array(raw_fluxes)
-        if len(fluxes) < 8 or np.mean(fluxes) <= 0:
+        time_days, fluxes = self._light_curve_arrays(star)
+        if fluxes.size < 8 or np.mean(fluxes) <= 0:
             return None
-
-        norm_fluxes = fluxes / np.median(fluxes)
-        model = BoxLeastSquares(t_days, norm_fluxes)
-
-        duration_days = np.linspace(0.01, 0.05, 5)
-        max_p = max(0.2, float(t_days[-1] - t_days[0]) * 2.0)
-        results = model.autopower(duration_days, minimum_period=0.06, maximum_period=max_p)
-
-        best_idx = int(np.argmax(results.power))
-        best_period = float(results.period[best_idx])
-        best_depth = float(results.depth[best_idx])
-        best_duration = float(results.duration[best_idx]) * 24.0
-        best_t0 = float(results.transit_time[best_idx])
-
-        snr = float(best_depth / max(1e-4, np.std(norm_fluxes)))
-
-        candidate = TransitCandidate(
-            period_days=best_period,
-            transit_depth_mag=float(best_depth * 1.0857),
-            transit_duration_hours=best_duration,
-            epoch_t0=best_t0,
-            transit_snr=snr,
-            transit_confidence=significance_to_confidence(snr),
-        )
+        candidate = box_search(time_days, fluxes)
         star.photometry.transit_candidate = candidate
         return candidate
 
     def run_lomb_scargle_periodogram(self, star: StellarObject) -> Any | None:
         """Look for regular repeating patterns in the star's brightness.
 
+        See `periodicity_search` for how the result is judged: the
+        strongest cycle always exists, so the returned result carries a
+        verdict saying whether it stands out from noise.
+
         Returns
         -------
         periodogram : `PeriodogramResult` or `None`
-            The analysis results, or None if the math failed.
+            The search result (check its ``verdict``), or `None` if there
+            were fewer than 5 measurements.
         """
         if not star.photometry or len(star.photometry.timestamps) < 5:
             return None
 
-        from astropy.timeseries import LombScargle
+        from astrometricslib.pipelines.photometry.periodicity_search import lomb_scargle_search
 
-        from astrometricslib.models.stellar_source import PeriodogramResult
-
-        t_sec = np.array([
-            (ts - star.photometry.timestamps[0]).total_seconds() for ts in star.photometry.timestamps
-        ])
-        t_days = t_sec / 86400.0
-        raw_fluxes = (
-            star.photometry.fluxes_detrended
-            if star.photometry.fluxes_detrended
-            else star.photometry.fluxes_normalized
-        )
-        fluxes = np.array(raw_fluxes)
-
-        if len(fluxes) < 5:
+        time_days, fluxes = self._light_curve_arrays(star)
+        if fluxes.size < 5:
             return None
-
-        periodogram = LombScargle(t_days, fluxes)
-        frequency, power = periodogram.autopower()
-        best_idx = int(np.argmax(power))
-        best_period = float(1.0 / frequency[best_idx]) if frequency[best_idx] > 0 else 0.0
-        best_power = float(power[best_idx])
-
-        try:
-            false_alarm_probability = float(
-                periodogram.false_alarm_probability(
-                    min(best_power, 1.0),
-                    method="baluev",
-                    minimum_frequency=float(frequency.min()),
-                    maximum_frequency=float(frequency.max()),
-                )
-            )
-        except Exception as false_alarm_error:
-            logger.debug("Could not compute a false-alarm probability: %s", false_alarm_error)
-            false_alarm_probability = 1.0
-
-        result = PeriodogramResult(
-            best_period_days=best_period,
-            power=best_power,
-            false_alarm_probability=false_alarm_probability,
-        )
+        result = lomb_scargle_search(time_days, fluxes)
         star.photometry.periodogram = result
         return result
+
+    @staticmethod
+    def _light_curve_arrays(star: StellarObject) -> tuple[np.ndarray, np.ndarray]:
+        """Give a star's measurement times and brightness as arrays.
+
+        Returns
+        -------
+        time_days, fluxes : `tuple` [`np.ndarray`, `np.ndarray`]
+            Days since the first measurement, and the detrended brightness
+            (or the normalized brightness when no detrended one exists).
+        """
+        photometry = star.photometry
+        raw_fluxes = (
+            photometry.fluxes_detrended if photometry.fluxes_detrended else photometry.fluxes_normalized
+        )
+        fluxes = np.array(raw_fluxes, dtype=float)
+        count = min(len(photometry.timestamps), fluxes.size)
+        time_days = np.array([
+            (stamp - photometry.timestamps[0]).total_seconds() / 86400.0
+            for stamp in photometry.timestamps[:count]
+        ])
+        return time_days, fluxes[:count]

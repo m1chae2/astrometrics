@@ -488,7 +488,7 @@ def _load_target_stars(target: Any, stars: Any, limit: int) -> tuple[list, list,
             obj
             for obj in all_objects
             if target_id in getattr(obj, "target_ids", [])
-            and getattr(obj.spectroscopy, "dispersion_angle", None) is None
+            and getattr(obj, "stellar_spectral_type", "") != "Cluster"
             and not getattr(obj, "id", "").startswith("Star_")
         ),
         key=_magnitude_sort_key,
@@ -825,7 +825,7 @@ def plot_target_spectroscopy(
     def render_spectrum_panel(index: int) -> None:
         """Render spectrum panel for star at given index."""
         star = astrometry_stars[index]
-        spectral_star = spectral_by_id.get(f"{getattr(star, 'id', '')}::spectroscopy")
+        spectral_star = spectral_by_id.get(getattr(star, "id", ""))
         if spectral_star is not None:
             data = _extract_spectrum_data(spectral_star)
             spectrum_layer.render_spectrum(
@@ -965,7 +965,7 @@ def plot_target_dashboard(
             )
 
         if spectrum_layer is not None:
-            spectral_star = spectral_by_id.get(f"{getattr(star, 'id', '')}::spectroscopy")
+            spectral_star = spectral_by_id.get(getattr(star, "id", ""))
             if spectral_star is not None:
                 data = _extract_spectrum_data(spectral_star)
                 spectrum_layer.render_spectrum(

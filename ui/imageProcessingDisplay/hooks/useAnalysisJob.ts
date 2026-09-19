@@ -60,13 +60,21 @@ export function useAnalysisJob(
         setActiveAnalysisJobId(null);
     }, [selectedTarget]);
 
+    const selectedTargetRef = useRef(selectedTarget);
+    useEffect(() => {
+        selectedTargetRef.current = selectedTarget;
+    }, [selectedTarget]);
+
     const monitorAnalysis = useCallback((targetId: string) => {
-        if (analysisMonitorRef.current) window.clearInterval(analysisMonitorRef.current);
+        if (analysisMonitorRef.current) {
+            window.clearInterval(analysisMonitorRef.current);
+            analysisMonitorRef.current = null;
+        }
         analysisMonitorRef.current = window.setInterval(async () => {
             try {
                 const results = await fetchAnalysisResults(targetId);
                 if (results && (results.status === 'finished' || results.variableCandidates)) {
-                    if (selectedTarget === targetId) {
+                    if (selectedTargetRef.current === targetId) {
                         setAnalysisResults(results);
                         // Store this as the latest analyzed target for other views
                         localStorage.setItem('latestAnalysisTargetId', targetId);
@@ -97,7 +105,7 @@ export function useAnalysisJob(
                 }
             }
         }, 2000);
-    }, [selectedTarget]);
+    }, []);
 
     // Check analysis state on target switch, then keep polling: analysis
     // jobs aren't only started from this hook's own startAnalysis() (e.g. a
@@ -138,7 +146,10 @@ export function useAnalysisJob(
 
     useEffect(() => {
         return () => {
-            if (analysisMonitorRef.current) window.clearInterval(analysisMonitorRef.current);
+            if (analysisMonitorRef.current) {
+                window.clearInterval(analysisMonitorRef.current);
+                analysisMonitorRef.current = null;
+            }
         };
     }, []);
 

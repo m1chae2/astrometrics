@@ -122,6 +122,6 @@ keyed-record SQLite store shared with wayfindinglib:
 These top-level scripts orchestrate the pipeline across multiple targets and manage execution environments.
 - **Batch execution:** `run_all_target_processing.py`
 - **Catalog seeding:** `seed_local_star_catalog.py`
-- **Deep-star catalog download:** `build_deep_star_catalog.py`. Run once with `python -m astrometricslib.scripts.build_deep_star_catalog`. It downloads Gaia DR3 in about 3,000 small requests, can be stopped and resumed, and offers `--dry-run` (no network) and `--estimate` (counts a sample to guess the size on disk).
+- **Deep-star catalog download:** `build_deep_star_catalog.py`. Run once with `python -m astrometricslib.scripts.build_deep_star_catalog`. It downloads Gaia DR3 in about 3,000 small requests, can be stopped and resumed, and offers `--dry-run` (no network) and `--estimate` (counts a sample to guess the size on disk). `--near-targets` (or `--near RA DEC RADIUS`) downloads only the chunks around the imaged fields (about 200 of 3,072 chunks for the current library) so the Planetarium can use the catalog within minutes; a later run without options carries on with the rest of the sky.
 - **Concurrency benchmarking:** `benchmark_siril_concurrency.py`
 - **Data backfilling:** `backfill_focal_length.py`

@@ -203,3 +203,128 @@ def test_ctrl_c_stops_cleanly_and_says_how_to_resume(fake_environment, capsys, m
 def test_durations_are_written_the_way_a_person_would_say_them(seconds, expected):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """The time-left estimate is easy to read at a glance."""
     assert script._format_duration(seconds) == expected
+
+
+# A circle a bit bigger than one imaged field, in northern Cepheus.
+NEAR_ARGUMENTS = ["--near", "315.13", "68.57", "1.5"]
+
+
+def test_near_downloads_only_the_chunks_touching_the_circle(fake_environment, capsys):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """--near asks the archive for a few chunks, not the whole sky."""
+    exit_code = script.run_catalog_build([
+        "--healpix-level",
+        "4",
+        "--request-delay-seconds",
+        "0",
+        *NEAR_ARGUMENTS,
+    ])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert 1 <= len(fake_environment.queries) <= 4
+    assert "touch the 1 chosen place(s)" in output
+    assert "The chosen chunks are finished. Restart Astrometrics to use them." in output
+    assert "The catalog is complete" not in output
+
+
+def test_near_dry_run_counts_only_the_chosen_chunks_and_uses_no_internet(fake_environment, capsys):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """A dry run with --near says how many of the chosen chunks are missing."""
+    exit_code = script.run_catalog_build(["--dry-run", "--healpix-level", "4", *NEAR_ARGUMENTS])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "more of the" in output
+    assert "chosen chunks" in output
+    assert "Would download 3,072" not in output
+    assert fake_environment.queries == []
+
+
+def test_a_second_near_run_adds_new_places_and_skips_saved_chunks(fake_environment, capsys):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Running again with the same place downloads nothing new."""
+    arguments = ["--healpix-level", "4", "--request-delay-seconds", "0", *NEAR_ARGUMENTS]
+    script.run_catalog_build(arguments)
+    first_run_query_count = len(fake_environment.queries)
+
+    exit_code = script.run_catalog_build(arguments)
+
+    assert exit_code == 0
+    assert len(fake_environment.queries) == first_run_query_count
+
+
+def test_near_targets_uses_the_fields_the_library_has_imaged(fake_environment, monkeypatch, capsys):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """--near-targets draws a circle around every imaged field."""
+    fields = [
+        {"right_ascension_deg": 315.13, "declination_deg": 68.57, "target_ids": ["NGC 7023"]},
+        {"right_ascension_deg": 250.42, "declination_deg": 36.46, "target_ids": ["M 13"]},
+    ]
+    monkeypatch.setattr(script, "derive_field_centers", lambda _targets: fields)
+    monkeypatch.setattr(
+        script, "Astrometrics", lambda: types.SimpleNamespace(targets=types.SimpleNamespace(list=list))
+    )
+
+    exit_code = script.run_catalog_build([
+        "--healpix-level",
+        "4",
+        "--request-delay-seconds",
+        "0",
+        "--near-targets",
+        "--near-targets-radius-degrees",
+        "0.8",
+    ])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "Found 2 imaged field(s)" in output
+    assert "touch the 2 chosen place(s)" in output
+    assert 2 <= len(fake_environment.queries) <= 8
+
+
+def test_near_targets_with_no_imaged_fields_downloads_nothing(fake_environment, monkeypatch, capsys):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """An empty library gives a clear message, not a whole-sky download."""
+    monkeypatch.setattr(script, "derive_field_centers", lambda _targets: [])
+    monkeypatch.setattr(
+        script, "Astrometrics", lambda: types.SimpleNamespace(targets=types.SimpleNamespace(list=list))
+    )
+
+    exit_code = script.run_catalog_build(["--near-targets", "--healpix-level", "4"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 2
+    assert "No imaged fields were found" in output
+    assert fake_environment.queries == []
+
+
+def test_near_and_near_targets_can_be_combined(fake_environment, monkeypatch, capsys):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Both kinds of place add up."""
+    fields = [{"right_ascension_deg": 250.42, "declination_deg": 36.46, "target_ids": ["M 13"]}]
+    monkeypatch.setattr(script, "derive_field_centers", lambda _targets: fields)
+    monkeypatch.setattr(
+        script, "Astrometrics", lambda: types.SimpleNamespace(targets=types.SimpleNamespace(list=list))
+    )
+
+    script.run_catalog_build(["--dry-run", "--healpix-level", "4", "--near-targets", *NEAR_ARGUMENTS])
+
+    assert "touch the 2 chosen place(s)" in capsys.readouterr().out
+
+
+def test_a_failed_near_chunk_leaves_the_chosen_chunks_unfinished(fake_environment, monkeypatch, capsys):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """A chosen chunk that fails leaves a non-zero exit code and a hint."""
+
+    def always_fail(*_arguments: Any, **_keyword_arguments: Any) -> Any:
+        raise RuntimeError("Error 500: archive down")
+
+    monkeypatch.setattr(fake_environment, "launch_job_async", always_fail)
+
+    exit_code = script.run_catalog_build([
+        "--healpix-level",
+        "4",
+        "--request-delay-seconds",
+        "0",
+        "--max-attempts",
+        "1",
+        *NEAR_ARGUMENTS,
+    ])
+
+    output = capsys.readouterr().out
+    assert exit_code == 1
+    assert "The chosen chunks are not finished yet" in output

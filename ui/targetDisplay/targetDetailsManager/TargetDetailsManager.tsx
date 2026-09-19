@@ -280,7 +280,7 @@ export const TargetDetailsManager: React.FC<TargetDetailsManagerProps> = ({
 
   return (
     <div className="panel-group">
-      <SectionPanel title="Information" className="flex-fill">
+      <SectionPanel title="Information" className="flex-fill target-details-manager__panel">
         <TargetDetails
           catalogId={catalogId}
           commonName={commonName}

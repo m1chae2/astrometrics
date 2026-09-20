@@ -373,34 +373,13 @@ async def beam_to_device(target: str | None = None, mode: str | None = None) -> 
     result : `dict`
         Status of the beam dispatch attempt.
     """
-    import shutil
-    import subprocess  # ruff: ignore[suspicious-subprocess-import] -- runs the local KDE Connect command
-
-    kdeconnect_bin = shutil.which("kdeconnect-cli") or shutil.which("gsconnect-cli")
-    deep_link = f"astrometrics://handoff?mode={mode or 'Planetarium'}"
-    if target:
-        deep_link += f"&target={target}"
-
-    if not kdeconnect_bin:
-        return {
-            "success": False,
-            "message": "Neither gsconnect-cli nor kdeconnect-cli found in system PATH",
-            "deep_link": deep_link,
-        }
-
-    try:
-        cmd = [kdeconnect_bin, "--open-url", deep_link]
-        proc = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] -- fixed argv, no shell
-            cmd, capture_output=True, text=True, timeout=5
-        )
-        return {
-            "success": proc.returncode == 0,
-            "deep_link": deep_link,
-            "output": proc.stdout.strip(),
-        }
-    except Exception as exc:
-        logger.warning("Failed to beam to device: %s", exc)
-        return {"success": False, "error": str(exc), "deep_link": deep_link}
+    if container.handoff_service:
+        return container.handoff_service.beam_to_device(target=target, mode=mode)
+    return {
+        "success": False,
+        "message": "HandoffService is unavailable",
+        "deep_link": f"astrometrics://handoff?mode={mode or 'Planetarium'}",
+    }
 
 
 @app.get("/api/ready")

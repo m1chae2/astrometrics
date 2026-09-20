@@ -459,6 +459,10 @@ def test_has_catalog_magnitude_rejects_missing_and_instrumental_values():  # ruf
     assert _has_catalog_magnitude(-14.98) is False  # instrumental photometry
     assert _has_catalog_magnitude(float("nan")) is False
     assert _has_catalog_magnitude(True) is False
+    # Exactly 0 is what is saved when the catalog gave no magnitude; a real
+    # star (Vega, 0.03) is not exactly 0.
+    assert _has_catalog_magnitude(0) is False
+    assert _has_catalog_magnitude(0.0) is False
 
 
 def test_get_sources_thins_faint_and_uncataloged_stars():  # ruff: ignore[missing-return-type-undocumented-public-function]

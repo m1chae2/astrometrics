@@ -40,6 +40,15 @@ from scipy.ndimage import gaussian_filter1d
 # slitless grism to plausibly resolve as a distinct dip. window_angstrom is
 # the half-width of the feature's own core; the continuum is measured on
 # the bands just outside that core on each side.
+#
+# No core is narrower than 20 A. The two Na D lines are only 6 A apart, but
+# at this resolution they blur into one dip tens of Angstroms wide, and a
+# core narrower than the dip puts the continuum bands on the dip's own
+# wings. Measured on the Vega-field star TYC 3105-899-1 (which has a clear
+# dip there), a 15 A core gave depth 23% +/- 13% and a 48% chance of noise
+# ("not seen"), while cores of 20, 30 and 40 A gave 28% +/- 2% (0.0%),
+# 22% +/- 4% (1.7%) and 17% +/- 3% (2.0%). 20 A matches the narrowest of
+# the other features (H-gamma, H-delta, Mg b, G band).
 NAMED_FEATURES: tuple[dict[str, object], ...] = (
     {"name": "Hydrogen Balmer series (H-alpha)", "wavelength_angstrom": 6563.0, "window_angstrom": 25.0},
     {"name": "Hydrogen Balmer series (H-beta)", "wavelength_angstrom": 4861.0, "window_angstrom": 25.0},
@@ -47,13 +56,16 @@ NAMED_FEATURES: tuple[dict[str, object], ...] = (
     {"name": "Hydrogen Balmer series (H-delta)", "wavelength_angstrom": 4102.0, "window_angstrom": 20.0},
     {"name": "Calcium II H & K", "wavelength_angstrom": 3950.0, "window_angstrom": 35.0},
     {"name": "Magnesium b triplet", "wavelength_angstrom": 5175.0, "window_angstrom": 20.0},
-    {"name": "Sodium D doublet", "wavelength_angstrom": 5893.0, "window_angstrom": 15.0},
+    {"name": "Sodium D doublet", "wavelength_angstrom": 5893.0, "window_angstrom": 20.0},
     {"name": "Iron/titanium blend (G band)", "wavelength_angstrom": 4300.0, "window_angstrom": 20.0},
 )
 
-# The three answers this module gives for each feature.
+# The answers this module gives for each feature.
 VERDICT_DETECTED = "detected"
 VERDICT_POSSIBLE = "possible"
+# A dip is measured at the line and is more than most noise wiggles, but
+# this spectrum's noise is too large to call it real or rule it out.
+VERDICT_INCONCLUSIVE = "inconclusive"
 VERDICT_NOT_DETECTED = "not_detected"
 # The spectrum does not reach the feature (or has too few points there).
 VERDICT_NOT_COVERED = "not_covered"
@@ -105,6 +117,32 @@ MINIMUM_REPORTED_DEPTH = 0.01
 # validate_spectral_and_period_analysis.py measures the real rate.
 DETECTED_P_VALUE = 0.01
 POSSIBLE_P_VALUE = 0.05
+
+# A feature that is neither detected nor possible is still called
+# "inconclusive" (rather than "not detected") when its dip is at least
+# this deep and noise like this spectrum's gives a dip that strong no more
+# than this often. It means "worth a second look with more data", not
+# "probably there".
+#
+# The p-value cutoff, 0.25, is one noise wiggle in four: the dip stands
+# out from three quarters of the wiggles. A stricter cutoff would lose
+# features that are visible by eye (on TYC 3105-899-1, Mg b has p = 0.07
+# and Ca H & K p = 0.18). Because the p-values are calibrated, about a
+# quarter of the features in ANY pure-noise spectrum fall below it, so the
+# depth floor is what keeps quiet spectra clean. The depth floor, 5%, is a
+# little below the median depth (7%) the bundled reference spectra show
+# for the features that show a dip at all (>= 1%, 209 of the 272
+# type-and-feature pairs), after blurring to this instrument's resolution;
+# a shallower dip is below what a real star of most types shows.
+#
+# Measured with validate_spectral_and_period_analysis.py's synthetic
+# spectra: 0.4% of features are called inconclusive in pure noise of 2%,
+# 15% at 5%, 19% at 10% and 20% at 20% (about the p-value cutoff, reached
+# once the noise is large enough that the depth floor no longer matters).
+# On the 131 stored spectra, 17% of the 1,025 tested features are, and 95
+# of the stars have at least one.
+INCONCLUSIVE_P_VALUE = 0.25
+INCONCLUSIVE_MINIMUM_DEPTH = 0.05
 
 # Number of control positions needed before the noise width is measured
 # from them. With fewer, the width cannot be measured reliably, so the
@@ -429,8 +467,8 @@ def detect_named_features(
         One entry per named feature, most convincing first. Every entry
         has ``"feature"`` (name), ``"wavelength_angstrom"`` (its rest
         wavelength) and ``"verdict"`` (`VERDICT_DETECTED`,
-        `VERDICT_POSSIBLE`, `VERDICT_NOT_DETECTED` or
-        `VERDICT_NOT_COVERED`). A covered feature also has
+        `VERDICT_POSSIBLE`, `VERDICT_INCONCLUSIVE`, `VERDICT_NOT_DETECTED`
+        or `VERDICT_NOT_COVERED`). A covered feature also has
         ``"measured_wavelength_angstrom"`` (where the best dip is),
         ``"depth"``, ``"depth_uncertainty"``, ``"significance"``,
         ``"p_value"`` (the chance that noise like this spectrum's gives
@@ -553,6 +591,8 @@ def detect_named_features(
             verdict = VERDICT_DETECTED
         elif observed.depth >= MINIMUM_REPORTED_DEPTH and p_value <= POSSIBLE_P_VALUE:
             verdict = VERDICT_POSSIBLE
+        elif observed.depth >= INCONCLUSIVE_MINIMUM_DEPTH and p_value <= INCONCLUSIVE_P_VALUE:
+            verdict = VERDICT_INCONCLUSIVE
         else:
             verdict = VERDICT_NOT_DETECTED
 
@@ -569,6 +609,12 @@ def detect_named_features(
         })
         entries.append(entry)
 
-    verdict_rank = {VERDICT_DETECTED: 0, VERDICT_POSSIBLE: 1, VERDICT_NOT_DETECTED: 2, VERDICT_NOT_COVERED: 3}
+    verdict_rank = {
+        VERDICT_DETECTED: 0,
+        VERDICT_POSSIBLE: 1,
+        VERDICT_INCONCLUSIVE: 2,
+        VERDICT_NOT_DETECTED: 3,
+        VERDICT_NOT_COVERED: 4,
+    }
     entries.sort(key=lambda entry: (verdict_rank[str(entry["verdict"])], float(entry.get("p_value", 1.0))))
     return entries

@@ -113,3 +113,53 @@ class HandoffService:
             self._socket_manager.broadcast_ui_event_sync("handoff", snapshot)
 
         return snapshot
+
+    def beam_to_device(
+        self,
+        target: str | None = None,
+        mode: str | None = None,
+    ) -> dict[str, Any]:
+        """Beam current target or view to a paired phone via GSConnect.
+
+        Parameters
+        ----------
+        target : `str`, optional
+            Target designation to open on the mobile device.
+        mode : `str`, optional
+            Workspace view mode to display on the mobile device.
+
+        Returns
+        -------
+        result : `dict`
+            Status and metadata of the beam dispatch attempt.
+        """
+        import shutil
+        import subprocess
+
+        kdeconnect_bin = shutil.which("kdeconnect-cli") or shutil.which("gsconnect-cli")
+        deep_link = f"astrometrics://handoff?mode={mode or 'Planetarium'}"
+        if target:
+            deep_link += f"&target={target}"
+
+        if not kdeconnect_bin:
+            return {
+                "success": False,
+                "message": ("Neither gsconnect-cli nor kdeconnect-cli found in PATH"),
+                "deep_link": deep_link,
+            }
+
+        try:
+            cmd = [kdeconnect_bin, "--open-url", deep_link]
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=5, check=False)
+            return {
+                "success": proc.returncode == 0,
+                "message": ("Dispatched to GSConnect/KDE Connect" if proc.returncode == 0 else proc.stderr),
+                "deep_link": deep_link,
+            }
+        except Exception as exc:
+            logger.warning("Failed to beam to device: %s", exc)
+            return {
+                "success": False,
+                "message": str(exc),
+                "deep_link": deep_link,
+            }

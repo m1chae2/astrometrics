@@ -69,13 +69,17 @@ def _has_catalog_magnitude(magnitude: object) -> bool:
     -------
     has_catalog_magnitude : `bool`
         `True` for a finite number at or above the catalog floor; `False`
-        for a missing (`None`, `""`) or instrumental (very negative) value.
+        for a missing (`None`, `""`), instrumental (very negative) or
+        exactly zero value. Zero is what is saved for a star whose catalog
+        gave no magnitude (about 4,000 stars in the library), so it is
+        treated as unknown rather than as a very bright star.
     """
     return (
         isinstance(magnitude, int | float)
         and not isinstance(magnitude, bool)
         and math.isfinite(magnitude)
         and magnitude >= _BRIGHTEST_CATALOG_MAGNITUDE
+        and magnitude != 0
     )
 
 

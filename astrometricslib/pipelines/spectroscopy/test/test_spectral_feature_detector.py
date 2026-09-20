@@ -13,9 +13,15 @@ validate_spectral_and_period_analysis.py; these tests only pin the behavior.
 import numpy as np
 
 from astrometricslib.pipelines.spectroscopy.spectral_feature_detector import (
+    INCONCLUSIVE_MINIMUM_DEPTH,
+    INCONCLUSIVE_P_VALUE,
     NAMED_FEATURES,
+    POSSIBLE_P_VALUE,
     VERDICT_DETECTED,
+    VERDICT_INCONCLUSIVE,
     VERDICT_NOT_COVERED,
+    VERDICT_NOT_DETECTED,
+    VERDICT_POSSIBLE,
     detect_named_features,
     expected_feature_depth,
 )
@@ -135,3 +141,70 @@ def test_a_reference_type_adds_expected_depth_and_a_probability():  # ruff: igno
     assert with_type["probability_present"] > 0.5
     assert without_type["expected_depth"] is None
     assert without_type["probability_present"] is None
+
+
+def test_a_dip_the_noise_could_hide_is_inconclusive():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify a dip too big to ignore but too weak to call is inconclusive.
+
+    A 10% dip in 6% noise (seed 5) gives a p-value between the "possible"
+    and "inconclusive" cutoffs: too weak to call, too big to ignore.
+    """
+    h_alpha = next(f for f in NAMED_FEATURES if "H-alpha" in f["name"])
+    wavelength, intensity = _spectrum_with_dip(
+        center=h_alpha["wavelength_angstrom"],
+        depth=0.10,
+        half_width=h_alpha["window_angstrom"],
+        noise_fraction=0.06,
+        seed=5,
+    )
+
+    entry = _entry(detect_named_features(wavelength, intensity), "H-alpha")
+
+    assert entry["verdict"] == VERDICT_INCONCLUSIVE
+    assert POSSIBLE_P_VALUE < entry["p_value"] <= INCONCLUSIVE_P_VALUE
+    assert entry["depth"] >= INCONCLUSIVE_MINIMUM_DEPTH
+
+
+def test_a_quiet_spectrum_with_no_dip_has_no_inconclusive_features():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify a clean, featureless spectrum has no inconclusive features."""
+    wavelength, intensity = _spectrum_with_dip(
+        center=6563.0, depth=0.0, half_width=25.0, noise_fraction=0.002
+    )
+
+    features = detect_named_features(wavelength, intensity)
+
+    assert all(entry["verdict"] != VERDICT_INCONCLUSIVE for entry in features)
+
+
+def test_inconclusive_features_sort_between_possible_and_not_detected():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify the list runs most convincing first."""
+    h_alpha = next(f for f in NAMED_FEATURES if "H-alpha" in f["name"])
+    wavelength, intensity = _spectrum_with_dip(
+        center=h_alpha["wavelength_angstrom"],
+        depth=0.10,
+        half_width=h_alpha["window_angstrom"],
+        noise_fraction=0.06,
+        seed=5,
+    )
+    order = [
+        VERDICT_DETECTED,
+        VERDICT_POSSIBLE,
+        VERDICT_INCONCLUSIVE,
+        VERDICT_NOT_DETECTED,
+        VERDICT_NOT_COVERED,
+    ]
+
+    verdict_positions = [
+        order.index(entry["verdict"]) for entry in detect_named_features(wavelength, intensity)
+    ]
+
+    assert verdict_positions == sorted(verdict_positions)
+
+
+def test_no_feature_core_is_narrower_than_twenty_angstroms():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify every core is wide enough to keep the continuum off the dip.
+
+    Na D was 15 A and missed a 28% dip at 5900 A on a real spectrum; see
+    the comment on NAMED_FEATURES.
+    """
+    assert all(float(feature["window_angstrom"]) >= 20.0 for feature in NAMED_FEATURES)

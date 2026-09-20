@@ -83,6 +83,15 @@ def validate_feature_detector(trials: int) -> bool:
                 detected += entry["verdict"] == "detected"
     rate = detected / max(tested, 1)
     print(f"Feature test, pure noise ({trials} spectra, {tested} feature tests): {rate:.2%} called detected")
+    print("  pure noise called inconclusive (a dip worth a second look), by noise level:")
+    for noise_fraction in (0.02, 0.05, 0.10, 0.20):
+        tested_at_level = inconclusive = 0
+        for seed in range(trials):
+            for entry in detect_named_features(wavelength, _noise_spectrum(seed, wavelength, noise_fraction)):
+                if entry["verdict"] != "not_covered":
+                    tested_at_level += 1
+                    inconclusive += entry["verdict"] == "inconclusive"
+        print(f"    {noise_fraction:.0%} noise: {inconclusive / max(tested_at_level, 1):.1%}")
     print("  injected H-alpha dip of a given depth (FWHM 50 A, 2% noise) -> share detected:")
     for depth in (0.05, 0.10, 0.20):
         hits = 0

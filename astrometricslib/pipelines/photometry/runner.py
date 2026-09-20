@@ -14,6 +14,7 @@ from astrometricslib.models.target import Target
 from astrometricslib.pipelines.photometry.batch import (
     _match_and_merge_across_sessions,
     _run_variability_analysis_for_session,
+    search_periods_and_save,
 )
 from astrometricslib.pipelines.pipeline_base import (
     AnalysisPipeline,
@@ -309,6 +310,14 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             merge_function=merge_photometry_stellar_object,
             pipeline_name="photometry",
         )
+
+        # The light curves are saved now. Search the target's own star and
+        # its brightest stars for repeating patterns, in a step of its own so
+        # that a failure here can never cost a photometry result.
+        try:
+            search_periods_and_save(all_stellar_objects, target, catalog_access)
+        except Exception as search_error:
+            logger.warning("[%s] Period search step failed: %s", target.id, search_error)
 
         frames_processed = sum(len(session.frame_paths) for session in photometry_sessions) - len(
             all_rejected_files

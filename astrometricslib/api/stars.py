@@ -258,8 +258,9 @@ class StellarCatalog:
         Runs the Lomb-Scargle periodogram (needs at least 5 brightness
         measurements) and the box-fitting transit search (needs at least
         8), and saves whichever produced a result on the star's
-        photometry. The photometry pipeline does not run these itself, so
-        this is how a star gets its period and transit numbers.
+        photometry. The photometry pipeline already runs these for a
+        target's own star and its brightest stars; this is how any other
+        star gets its period and transit numbers.
 
         Parameters
         ----------

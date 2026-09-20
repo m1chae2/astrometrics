@@ -36,6 +36,11 @@ import numpy as np
 from scipy import stats
 from scipy.ndimage import gaussian_filter1d
 
+from astrometricslib.pipelines.spectroscopy.spectral_resolution import (
+    FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
+    blur_sigma_in_samples,
+)
+
 # Rest wavelengths of features broad or strong enough for a low-resolution
 # slitless grism to plausibly resolve as a distinct dip. window_angstrom is
 # the half-width of the feature's own core; the continuum is measured on
@@ -70,14 +75,6 @@ VERDICT_NOT_DETECTED = "not_detected"
 # The spectrum does not reach the feature (or has too few points there).
 VERDICT_NOT_COVERED = "not_covered"
 
-# How wide one independent measurement is, in Angstroms. A slitless grism
-# at R~100-300 has a resolution element of about lambda/R = 5000/150 =
-# ~33 A near the middle of the visible range, so 30 A is used. Two
-# samples closer together than this are not independent measurements, which
-# is why the depth's uncertainty is scaled by the number of resolution
-# elements in a feature's core, not by the number of samples.
-DEFAULT_RESOLUTION_ELEMENT_ANGSTROM = 30.0
-
 # How far from its rest wavelength a feature's dip may be centered and
 # still count. The wavelength calibration of the instrument is good to
 # about 3 nm (Vega's Balmer dips fit with 0.3 nm RMS after tuning, so 30 A
@@ -99,7 +96,7 @@ CONTINUUM_POLYNOMIAL_DEGREE = 2
 SHOULDER_OUTER_HALF_WINDOWS = 4.0
 
 # Fewest samples allowed in a continuum band (both bands together must
-# also give the line fit at least this many points) and in a core; below
+# also give the continuum fit at least this many points) and in a core; below
 # this the numbers are too noisy to trust.
 _MINIMUM_SHOULDER_POINTS = 8
 _MINIMUM_CORE_POINTS = 2
@@ -130,17 +127,21 @@ POSSIBLE_P_VALUE = 0.05
 # and Ca H & K p = 0.18). Because the p-values are calibrated, about a
 # quarter of the features in ANY pure-noise spectrum fall below it, so the
 # depth floor is what keeps quiet spectra clean. The depth floor, 5%, is a
-# little below the median depth (7%) the bundled reference spectra show
-# for the features that show a dip at all (>= 1%, 209 of the 272
-# type-and-feature pairs), after blurring to this instrument's resolution;
-# a shallower dip is below what a real star of most types shows.
+# little below the median depth (5.7%) the bundled reference spectra show
+# for the features that show a dip at all (>= 1%, 189 of the 272
+# type-and-feature pairs), after blurring to the fallback resolution of
+# 45 A (recomputed 2026-09-19; at the old 30 A it was 7.6%, 210 pairs). A
+# spectrum's own measured resolution moves this a little, but the floor
+# only needs to sit near the typical depth. A shallower dip is below what
+# a real star of most types shows.
 #
 # Measured with validate_spectral_and_period_analysis.py's synthetic
 # spectra: 0.4% of features are called inconclusive in pure noise of 2%,
 # 15% at 5%, 19% at 10% and 20% at 20% (about the p-value cutoff, reached
 # once the noise is large enough that the depth floor no longer matters).
 # On the 131 stored spectra, 17% of the 1,025 tested features are, and 95
-# of the stars have at least one.
+# of the stars have at least one. (Measured before the resolution changed
+# from 30 A to 45 A; not re-run since.)
 INCONCLUSIVE_P_VALUE = 0.25
 INCONCLUSIVE_MINIMUM_DEPTH = 0.05
 
@@ -216,11 +217,12 @@ def _measure_dip(
 ) -> _DipMeasurement | None:
     """Measure how deep the spectrum dips at one center.
 
-    A straight line is fitted through the bands on either side of the
-    core. That line is the continuum, the level the spectrum would have
-    without the feature. The dip is the core's average shortfall below it,
-    and its uncertainty comes from how far the band samples scatter about
-    the fitted line.
+    A gentle curve is fitted through the bands on either side of the
+    core: a polynomial of degree `CONTINUUM_POLYNOMIAL_DEGREE`, which is a
+    quadratic (a simple bend) by default. That curve is the continuum, the
+    level the spectrum would have without the feature. The dip is the
+    core's average shortfall below it, and its uncertainty comes from how
+    far the band samples scatter about the fitted curve.
 
     Parameters
     ----------
@@ -248,7 +250,7 @@ def _measure_dip(
 
     if in_core.sum() < _MINIMUM_CORE_POINTS or in_shoulder.sum() < _MINIMUM_SHOULDER_POINTS:
         return None
-    # Both sides must contribute, or the line would just extrapolate.
+    # Both sides must contribute, or the curve would just extrapolate.
     shoulder_wavelength = wavelength_angstrom[in_shoulder]
     if not ((shoulder_wavelength < center).any() and (shoulder_wavelength > center).any()):
         return None
@@ -385,7 +387,7 @@ def _normal_density(value: float, mean: float, standard_deviation: float) -> flo
 def expected_feature_depth(
     reference_spectral_type: str,
     feature_name: str,
-    resolution_element_angstrom: float = DEFAULT_RESOLUTION_ELEMENT_ANGSTROM,
+    resolution_element_angstrom: float = FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
 ) -> float | None:
     """Measure how deep a feature should be for a star of a given type.
 
@@ -400,7 +402,9 @@ def expected_feature_depth(
     feature_name : `str`
         A name from `NAMED_FEATURES`.
     resolution_element_angstrom : `float`, optional
-        The instrument's resolution element, in Angstroms.
+        The instrument's resolution element, in Angstroms. Defaults to
+        `FALLBACK_RESOLUTION_ELEMENT_ANGSTROM`; pass the spectrum's own
+        measured value when there is one (see `spectral_resolution`).
 
     Returns
     -------
@@ -415,8 +419,9 @@ def expected_feature_depth(
         return None
     template_wavelength, template_flux = templates[reference_spectral_type]
     sample_spacing = float(np.median(np.diff(template_wavelength)))
-    # A gaussian's width (sigma) is its FWHM divided by 2.355.
-    smoothed = gaussian_filter1d(template_flux, resolution_element_angstrom / 2.355 / sample_spacing)
+    smoothed = gaussian_filter1d(
+        template_flux, blur_sigma_in_samples(resolution_element_angstrom, sample_spacing)
+    )
 
     for feature in NAMED_FEATURES:
         if feature["name"] == feature_name:
@@ -438,7 +443,7 @@ def detect_named_features(
     wavelength_angstrom: np.ndarray,
     intensity: np.ndarray,
     reference_spectral_type: str | None = None,
-    resolution_element_angstrom: float = DEFAULT_RESOLUTION_ELEMENT_ANGSTROM,
+    resolution_element_angstrom: float = FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
 ) -> list[dict[str, object]]:
     """Test a spectrum for each named absorption feature.
 
@@ -459,7 +464,10 @@ def detect_named_features(
         the feature should be for that type and how likely the line is to
         be present. Leave `None` when the type is not known.
     resolution_element_angstrom : `float`, optional
-        The width of one independent measurement, in Angstroms.
+        The width of one independent measurement, in Angstroms: how much
+        the instrument blurs this spectrum. Defaults to
+        `FALLBACK_RESOLUTION_ELEMENT_ANGSTROM`; pass the spectrum's own
+        measured value when there is one (see `spectral_resolution`).
 
     Returns
     -------

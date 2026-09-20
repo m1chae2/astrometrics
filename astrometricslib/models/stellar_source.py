@@ -185,8 +185,10 @@ class SpectroscopyResult(BaseModel):
         default=None, alias="selfDeterminedSpectralTypeConfidence"
     )
     # How far the winning reference is from this spectrum: the root-mean-
-    # square difference of the two normalized curves. Lower is better;
-    # above about 0.15 the match is poor. `None` when no type was found.
+    # square difference between the spectrum and the reference scaled to
+    # its brightness, as a fraction of the spectrum's average brightness.
+    # Lower is better; above about 0.15 the match is poor. `None` when no
+    # type was found.
     self_determined_spectral_type_rms: float | None = Field(
         default=None, alias="selfDeterminedSpectralTypeRms"
     )
@@ -241,6 +243,12 @@ class SpectroscopyResult(BaseModel):
     # how wide the trail is at each point.
     trail_centerline_px: list[float] | None = Field(default=None, alias="trailCenterlinePx")
     trail_width_px: list[float] | None = Field(default=None, alias="trailWidthPx")
+    # How much the instrument blurred this spectrum, in Angstroms, worked
+    # out from the trail width above (see spectral_resolution). The
+    # classification and the feature tests were run at this width. `None`
+    # when the trail width was not available, in which case they used the
+    # fixed fallback resolution instead.
+    resolution_element_angstrom: float | None = Field(default=None, alias="resolutionElementAngstrom")
     # How many pixels out from the star's center to gather light from
     # when measuring its spectrum.
     extraction_radius: int | None = Field(default=None, alias="extractionRadius")

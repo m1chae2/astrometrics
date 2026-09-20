@@ -26,6 +26,8 @@ interface Props {
     error?: string | null;
     active?: boolean;
     selectedTimestamps?: Set<string>;
+    showFeatures?: boolean;
+    onToggleFeatures?: () => void;
 }
 
 interface Selection {
@@ -59,6 +61,8 @@ export const SpectrumViewer: React.FC<Props> = ({
     error,
     active = false,
     selectedTimestamps,
+    showFeatures: controlledShowFeatures,
+    onToggleFeatures,
 }) => {
     const containerRef = useRef<HTMLDivElement | null>(null);
     const [selections, setSelections] = useState<Selection[]>([]);
@@ -69,34 +73,26 @@ export const SpectrumViewer: React.FC<Props> = ({
         const wl = sd.wavelength;
         const first = wl.length ? wl[0] : NaN;
         const last = wl.length ? wl[wl.length - 1] : NaN;
-        return `${wl.length}:${Number(first).toFixed(6)}:${Number(last).toFixed(6)}`;
+        return `${wl.length}-${first.toFixed(2)}-${last.toFixed(2)}`;
     };
 
-    const signature = useMemo(() => generateSpectrumSignature(astronomyData), [astronomyData]);
+    const prevSigRef = useRef<string>('null');
     useEffect(() => {
-        setSelections([]);
-    }, [signature]);
-
-    const handleChartClick = useCallback((ev: any) => {
-        // REQ: AST-2.2: The display SHALL allow interactive selection of points on the spectrum.
-        // REQ: AST-2.4: The display SHALL allow multiple simultaneous selection markers on the plot.
-        if (!ev || !ev.points || ev.points.length === 0 || !astronomyData) return;
-
-        const point = ev.points[0];
-        const wl = astronomyData.wavelength;
-
-        const existingSel = selections.find(
-            (s) => Math.abs(s.x - point.x) < 1e-9
-        );
-
-        if (existingSel) {
-            setSelections((s) => s.filter((x) => x.id !== existingSel.id));
-            return;
+        const sig = generateSpectrumSignature(astronomyData);
+        if (sig !== prevSigRef.current) {
+            prevSigRef.current = sig;
+            setSelections([]);
         }
+    }, [astronomyData]);
 
-        const clientX = ev.event?.clientX ?? 0;
-        const clientY = ev.event?.clientY ?? 0;
-        const pos = computeTooltipPosition(containerRef.current, clientX, clientY);
+    const handleChartClick = useCallback((e: any) => {
+        if (!e || !e.points || !e.points.length) return;
+        const point = e.points[0];
+        const evt = e.event;
+        const container = containerRef.current;
+        const pos = computeTooltipPosition(container, evt?.clientX, evt?.clientY);
+
+        const wl = astronomyData?.wavelength || [];
         const idx = findNearestIndex(wl, point.x);
 
         const id = `${Date.now().toString(36)}-${Math.round(Math.random() * 1e9).toString(36)}`;
@@ -110,7 +106,9 @@ export const SpectrumViewer: React.FC<Props> = ({
     };
 
     const [isOverlayingEpochs, setIsOverlayingEpochs] = useState<boolean>(true);
-    const [showFeatures, setShowFeatures] = useState<boolean>(true);
+    const [internalShowFeatures, setInternalShowFeatures] = useState<boolean>(true);
+    const showFeatures = controlledShowFeatures !== undefined ? controlledShowFeatures : internalShowFeatures;
+    const handleToggleFeatures = onToggleFeatures || (() => setInternalShowFeatures((v) => !v));
 
     // Every named absorption feature (Balmer series, Ca II H&K, etc.) the
     // backend tested for. Those it judged detected or possible are drawn in
@@ -213,7 +211,7 @@ export const SpectrumViewer: React.FC<Props> = ({
             }
         }));
 
-        const detectedColor = getVar('--plot-green', '#00ff00');
+        const detectedColor = getVar('--slate-blue-light', '#4b8ec8');
         const inconclusiveColor = getVar('--plot-red', '#ff5252');
         const featureColor = (feature: SpectralFeatureResult) =>
             feature.verdict === 'inconclusive' ? inconclusiveColor : detectedColor;
@@ -324,22 +322,23 @@ export const SpectrumViewer: React.FC<Props> = ({
         }
     }
 
-    const hasEpochs = Array.isArray(astronomyData?.spectraHistory) && astronomyData.spectraHistory.length > 1;
+    const hasEpochs = Array.isArray(astronomyData?.spectraHistory) && (astronomyData?.spectraHistory?.length ?? 0) > 1;
     const hasFeatures = testedSpectralFeatures.length > 0;
+    const hasInternalFeaturesButton = hasFeatures && !onToggleFeatures;
+    const showToolbar = hasEpochs || hasInternalFeaturesButton;
 
     return (
         <div className="astronomy-viewer-root astronomy-viewer-root--full-height" ref={containerRef}>
-            {(hasEpochs || hasFeatures) && (
+            {showToolbar && (
                 <div className="astronomy-viewer__toolbar">
-                    {hasFeatures && (
+                    {hasInternalFeaturesButton && (
                         <div className="astronomy-viewer__segmented-control">
                             <button
                                 type="button"
-                                className={`segmented-btn ${showFeatures ? 'active' : ''}`}
-                                onClick={() => setShowFeatures((v) => !v)}
+                                className={`segmented-btn ${!showFeatures ? 'active' : ''}`}
+                                onClick={handleToggleFeatures}
                             >
-                                Features ({probableSpectralFeatures.length}
-                                {inconclusiveSpectralFeatures.length > 0 ? `, ${inconclusiveSpectralFeatures.length} unclear` : ''})
+                                Hide Feature Lines
                             </button>
                         </div>
                     )}
@@ -357,7 +356,7 @@ export const SpectrumViewer: React.FC<Props> = ({
                                 className={`segmented-btn ${isOverlayingEpochs ? 'active' : ''}`}
                                 onClick={() => setIsOverlayingEpochs(true)}
                             >
-                                Overlay All Epochs ({astronomyData.spectraHistory?.length ?? 0})
+                                Overlay All Epochs ({astronomyData?.spectraHistory?.length ?? 0})
                             </button>
                         </div>
                     )}

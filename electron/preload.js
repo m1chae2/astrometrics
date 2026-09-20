@@ -55,9 +55,64 @@ const api = {
 		 * Show a native notification.
 		 * @param {string} title
 		 * @param {string} body
+		 * @param {Object} [options]
+		 * @param {'normal' | 'critical'} [options.urgency]
+		 * @param {string[]} [options.actions]
 		 */
-		showNotification(title, body) {
-			ipcRenderer.send('show-notification', { title, body });
+		showNotification(title, body, options = {}) {
+			ipcRenderer.send('show-notification', { title, body, ...options });
+		},
+
+		/**
+		 * Update dynamic tray menu with live mount status and active workspace.
+		 * @param {Object} status
+		 * @param {string} [status.mountStatus]
+		 * @param {string} [status.activeTarget]
+		 * @param {string} [status.activeMode]
+		 */
+		updateTrayStatus(status) {
+			ipcRenderer.send('update-tray-status', status);
+		},
+
+		/**
+		 * Enable or disable power-save blocker to prevent system sleep during imaging/guiding.
+		 * @param {boolean} enable
+		 */
+		setPowerSaveBlocker(enable) {
+			ipcRenderer.send('set-power-save-blocker', { enable });
+		},
+
+		/**
+		 * Subscribe to mode navigation events triggered by OS jump lists, dock actions, or tray.
+		 * @param {Function} callback (mode: string) => void
+		 * @returns {Function} Unsubscribe function
+		 */
+		onNavigateMode(callback) {
+			const handler = (_event, mode) => callback(mode);
+			ipcRenderer.on('navigate-mode', handler);
+			return () => ipcRenderer.removeListener('navigate-mode', handler);
+		},
+
+		/**
+		 * Subscribe to OS theme change events (e.g. dark/light system mode toggle).
+		 * @param {Function} callback (isDark: boolean) => void
+		 * @returns {Function} Unsubscribe function
+		 */
+		onSystemThemeChanged(callback) {
+			const handler = (_event, isDark) => callback(isDark);
+			ipcRenderer.on('system-theme-changed', handler);
+			return () => ipcRenderer.removeListener('system-theme-changed', handler);
+		},
+
+		/**
+		 * Subscribe to notification action button clicks.
+		 * @param {Function} callback ({ index: number }) => void
+		 * @returns {Function} Unsubscribe function
+		 */
+		onNotificationAction(callback) {
+			const handler = (_event, data) => callback(data);
+			ipcRenderer.on('notification-action-clicked', handler);
+			return () => ipcRenderer.removeListener('notification-action-clicked', handler);
 		},
 
 		/**
@@ -109,11 +164,23 @@ const api = {
 		async openFile(options) {
 			return ipcRenderer.invoke('dialog-open-file', options);
 		}
+	},
+	tray: {
+		/**
+		 * Send a quick action from the tray popover to the main process.
+		 * Supported actions: 'park', 'navigate', 'open-app', 'quit'.
+		 * @param {string} action Action identifier.
+		 * @param {Object} [payload] Optional action-specific payload (e.g. { mode: 'Planetarium' }).
+		 */
+		sendAction(action, payload) {
+			ipcRenderer.send('tray-popover-action', { action, payload });
+		}
 	}
 };
 
 // Freeze surface to prevent tampering from renderer scripts.
 Object.freeze(api);
 Object.freeze(api.app);
+Object.freeze(api.tray);
 
 contextBridge.exposeInMainWorld('astrometrics', api);

@@ -137,20 +137,20 @@ export const buildLayout = (overrides?: {
     autosize: overrides?.autosize ?? true,
     paper_bgcolor: 'rgba(0,0,0,0)', // Transparent to blend with panel
     plot_bgcolor: 'rgba(0,0,0,0)',
-    font: { color: getVar('--plot-font', '#fff'), size: commonFontSize },
+    font: { color: getVar('--plot-font', '#eaeaea'), size: commonFontSize },
     xaxis: {
       title: { text: overrides?.xTitle ?? 'Val', font: { size: titleFontSize, ...overrides?.xTitleFont } },
-      color: getVar('--plot-font', '#ffffff'),
-      gridcolor: '#444',
-      zerolinecolor: '#444',
+      color: getVar('--plot-font', '#eaeaea'),
+      gridcolor: 'rgba(255, 255, 255, 0.06)',
+      zerolinecolor: 'rgba(255, 255, 255, 0.1)',
       tickfont: { size: tickFontSize },
       automargin: true
     },
     yaxis: {
       title: { text: overrides?.yTitle ?? 'Val', font: { size: titleFontSize, ...overrides?.yTitleFont } },
-      color: getVar('--plot-font', '#ffffff'),
-      gridcolor: '#444',
-      zerolinecolor: '#444',
+      color: getVar('--plot-font', '#eaeaea'),
+      gridcolor: 'rgba(255, 255, 255, 0.06)',
+      zerolinecolor: 'rgba(255, 255, 255, 0.1)',
       tickfont: { size: tickFontSize },
       automargin: true
     },

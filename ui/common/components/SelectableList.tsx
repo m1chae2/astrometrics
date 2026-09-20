@@ -110,7 +110,7 @@ export const SelectableList: React.FC<SelectableListProps> = ({
                         <label
                             key={`${item.id}-${idx}`}
                             htmlFor={radioId}
-                            className={`selectable-list__item${hasSubtitles ? ' selectable-list__item--two-line' : ''}`}
+                            className={`selectable-list__item${hasSubtitles ? ' selectable-list__item--two-line' : ''}${isSelected ? ' selectable-list__item--selected' : ''}${isHighlighted ? ' selectable-list__item--highlighted' : ''}`}
                             style={{ position: 'absolute', top: idx * rowHeightPx, left: 0, right: 0 }}
                             title={item.tooltip}
                         >

@@ -39,7 +39,7 @@ export const StatusHeader: React.FC = () => {
     }
   }, [modeOpen]);
 
-  // Mode Dropdown Logic (same as before)
+  // Mode Dropdown Logic
   useEffect(() => {
     if (!modeOpen) return;
     const onDocClick = (e: MouseEvent): void => {
@@ -58,19 +58,13 @@ export const StatusHeader: React.FC = () => {
     setModeOpen(false);
   };
 
-  // Render Helpers
-  const renderConnectionStatus = () => {
-    const modifier = connected === null ? 'unknown' : (connected ? 'connected' : 'disconnected');
-    const txt = connected === null ? 'Checking…' : (connected ? 'Connected' : 'Disconnected');
-    return <span className={`status-widget__value status-widget__value--${modifier}`}>{txt}</span>;
-  };
-
-  const renderTrackingStatus = () => {
-    const val = trackingStatus || 'Not Tracking';
-    const notTrackingRegex = /park|not track|not-tracking|not tracking/i;
-    const modifier = notTrackingRegex.test(String(val)) ? 'not-tracking' : (telescopeConnection ? 'connected' : 'disconnected');
-    return <span className={`status-widget__value status-widget__value--${modifier}`}>{val}</span>;
-  };
+  const connModifier = connected === null ? 'unknown' : (connected ? 'connected' : 'disconnected');
+  const connTxt = connected === null ? 'Checking…' : (connected ? 'Connected' : 'Disconnected');
+  const trackVal = trackingStatus || 'Not Tracking';
+  const notTrackingRegex = /park|not track|not-tracking|not tracking/i;
+  const trackModifier = notTrackingRegex.test(String(trackVal))
+    ? 'not-tracking'
+    : (telescopeConnection ? 'connected' : 'disconnected');
 
   const availableModes = [
     'Image Viewer',
@@ -83,7 +77,7 @@ export const StatusHeader: React.FC = () => {
 
   return (
     <>
-      <div className="header" role="status" aria-label="Application status">
+      <div className="header" role="banner" aria-label="Application header">
         <div className="header__widgets">
           <div className="header__left">
             <div className="header__settings">
@@ -132,56 +126,52 @@ export const StatusHeader: React.FC = () => {
           </div>
 
           <div className="header__right">
-            <div className="status-widget">
-              <span className="status-widget__label">Connection Status</span>
-              {renderConnectionStatus()}
-            </div>
-
-            <div className="status-widget">
-              <span className="status-widget__label">Tracking Status</span>
-              {renderTrackingStatus()}
-            </div>
-
-            <div className="status-widget">
-              <span className="status-widget__label">Current Temperature</span>
-              <span className="status-widget__value">
-                <svg className="status-widget__icon" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M12 2a3 3 0 0 0-3 3v7a5 5 0 1 0 6 0V5a3 3 0 0 0-3-3z" />
-                </svg>
-                {temperature} <span className="status-widget__unit">°C</span>
+            <div className="header__telemetry-item" title={`Mount: ${connTxt}, ${trackVal}`}>
+              <span className={`header__status-dot header__status-dot--${connModifier}`} aria-hidden="true" />
+              <span className={`header__telemetry-value header__telemetry-value--${trackModifier}`}>
+                {trackVal}
               </span>
             </div>
 
-            <div className="status-widget">
-              <span className="status-widget__label">Current Humidity</span>
-              <span className="status-widget__value">
-                <svg className="status-widget__icon" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z" />
-                </svg>
-                {humidity} <span className="status-widget__unit">%</span>
+            <span className="header__divider" aria-hidden="true" />
+
+            <div className="header__telemetry-item" title="Equatorial Coordinates">
+              <span className="header__telemetry-label">RA</span>
+              <span className="header__telemetry-value">{ra}</span>
+              <span className="header__telemetry-label" style={{ marginLeft: '4px' }}>DEC</span>
+              <span className="header__telemetry-value">{dec}</span>
+            </div>
+
+            <span className="header__divider hide-mobile" aria-hidden="true" />
+
+            <div className="header__telemetry-item hide-mobile" title="Horizontal Coordinates">
+              <span className="header__telemetry-label">ALT</span>
+              <span className="header__telemetry-value">{altitude}</span>
+              <span className="header__telemetry-label" style={{ marginLeft: '4px' }}>AZ</span>
+              <span className="header__telemetry-value">{azimuth}</span>
+            </div>
+
+            <span className="header__divider hide-mobile" aria-hidden="true" />
+
+            <div className="header__telemetry-item hide-mobile" title="Ambient Temperature">
+              <svg className="header__telemetry-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M12 2a3 3 0 0 0-3 3v7a5 5 0 1 0 6 0V5a3 3 0 0 0-3-3z" />
+              </svg>
+              <span className="header__telemetry-value">
+                {temperature}
+                <span className="header__telemetry-unit">°C</span>
               </span>
             </div>
 
-            <div className="status-widget status-widget--large hide-mobile">
-              <span className="status-widget__label">Altitude</span>
-              <span className="status-widget__value">{altitude}</span>
+            <div className="header__telemetry-item hide-mobile" title="Relative Humidity">
+              <svg className="header__telemetry-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z" />
+              </svg>
+              <span className="header__telemetry-value">
+                {humidity}
+                <span className="header__telemetry-unit">%</span>
+              </span>
             </div>
-
-            <div className="status-widget status-widget--large hide-mobile">
-              <span className="status-widget__label">Azimuth</span>
-              <span className="status-widget__value">{azimuth}</span>
-            </div>
-
-            <div className="status-widget status-widget--large hide-mobile">
-              <span className="status-widget__label">Current RA</span>
-              <span className="status-widget__value">{ra}</span>
-            </div>
-
-            <div className="status-widget status-widget--large hide-mobile">
-              <span className="status-widget__label">Current DEC</span>
-              <span className="status-widget__value">{dec}</span>
-            </div>
-
           </div>
         </div>
       </div>

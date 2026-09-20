@@ -137,6 +137,9 @@ export const AstronomyDisplay: React.FC = () => {
 
   const [startIdx, setStartIdx] = useState<number>(0);
   const [endIdx, setEndIdx] = useState<number>(0);
+  const [showFeatures, setShowFeatures] = useState<boolean>(true);
+
+  const hasFeatures = (astronomyData?.spectroscopy?.probableSpectralFeatures?.length ?? 0) > 0;
 
   // Reset the selected timestamp range whenever the underlying data
   // changes (e.g. a different star is picked). Gating this on "only if
@@ -217,13 +220,30 @@ export const AstronomyDisplay: React.FC = () => {
           <div className="astronomy-display__collapsed-note">No spectrum has been recorded for this star.</div>
         </SectionPanel>
       ) : (
-        <SectionPanel title="Spectrum">
+        <SectionPanel
+          title="Spectrum"
+          headerContent={
+            hasFeatures ? (
+              <div className="astronomy-viewer__segmented-control">
+                <button
+                  type="button"
+                  className={`segmented-btn ${!showFeatures ? 'active' : ''}`}
+                  onClick={() => setShowFeatures((v) => !v)}
+                >
+                  Hide Feature Lines
+                </button>
+              </div>
+            ) : null
+          }
+        >
           <SpectrumViewer
             astronomyData={astronomyData}
             loading={loading}
             error={error}
             active={!!selectedSpectrum}
             selectedTimestamps={selectedTimestamps}
+            showFeatures={showFeatures}
+            onToggleFeatures={() => setShowFeatures((v) => !v)}
           />
         </SectionPanel>
       )}

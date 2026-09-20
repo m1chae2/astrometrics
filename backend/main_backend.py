@@ -382,6 +382,84 @@ async def beam_to_device(target: str | None = None, mode: str | None = None) -> 
     }
 
 
+@app.get("/api/handoff/devices")
+async def list_companion_devices() -> list[dict[str, Any]]:
+    """Enumerate paired companion devices via GSConnect or KDE Connect.
+
+    Returns
+    -------
+    devices : `list` of `dict`
+        List of paired devices with identifiers and reachable states.
+    """
+    if container.handoff_service:
+        return container.handoff_service.list_paired_devices()
+    return []
+
+
+class DeviceAlertRequest(BaseModel):
+    """Request schema for dispatching an alert to companion hardware."""
+
+    title: str = Field(..., description="Short alert title or category")
+    message: str = Field(..., description="Descriptive alert text")
+    priority: str = Field("normal", description="Severity level")
+    ring_device: bool = Field(False, description="Trigger audible ring alarm")
+    device_id: str | None = Field(None, description="Optional target device ID")
+
+
+@app.post("/api/handoff/alert")
+async def dispatch_device_alert(payload: DeviceAlertRequest) -> dict[str, Any]:
+    """Dispatch an alert to companion devices and WebSocket subscribers.
+
+    Parameters
+    ----------
+    payload : `DeviceAlertRequest`
+        Alert details, severity, and optional ring flag.
+
+    Returns
+    -------
+    result : `dict`
+        Status and delivered communication channels.
+    """
+    if container.handoff_service:
+        return container.handoff_service.send_device_alert(
+            title=payload.title,
+            message=payload.message,
+            priority=payload.priority,
+            ring_device=payload.ring_device,
+            device_id=payload.device_id,
+        )
+    return {"success": False, "message": "HandoffService is unavailable"}
+
+
+class ShareFileRequest(BaseModel):
+    """Request schema for sharing a file to a companion device."""
+
+    file_path: str = Field(..., description="Absolute path of file to share")
+    device_id: str | None = Field(None, description="Optional target device ID")
+
+
+@app.post("/api/handoff/share-file")
+async def share_file_to_device(payload: ShareFileRequest) -> dict[str, Any]:
+    """Share an image or data file to a companion device via GSConnect.
+
+    Parameters
+    ----------
+    payload : `ShareFileRequest`
+        Path of file and optional target device ID.
+
+    Returns
+    -------
+    result : `dict`
+        Status of the file beam attempt.
+    """
+    if container.handoff_service:
+        return container.handoff_service.share_file_to_device(
+            file_path=payload.file_path,
+            device_id=payload.device_id,
+        )
+    return {"success": False, "message": "HandoffService is unavailable"}
+
+
 @app.get("/api/ready")
 async def readiness():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Report whether startup warm-up has finished.

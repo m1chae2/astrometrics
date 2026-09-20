@@ -13,6 +13,7 @@ import isDev from 'electron-is-dev';
 // Modularized logic
 import { registerIpcHandlers } from './ipc_handlers.js';
 import { BackendManager } from './backend_manager.js';
+import { createTrayPopoverWindow } from './tray_window.js';
 
 // Handle squirrel startup for Windows
 if (squirrelStartup) {
@@ -23,6 +24,11 @@ if (squirrelStartup) {
 app.name = 'astrometrics';
 if (process.platform === 'linux' || process.platform === 'win32') {
   app.setAppUserModelId('astrometrics');
+}
+
+// Ensure correct window decorations and sizing under Linux Wayland/X11
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('enable-features', 'WaylandWindowDecorations');
 }
 
 /**
@@ -42,7 +48,58 @@ function extractFilePath(args) {
   return null;
 }
 
+/**
+ * Extracts a requested workspace mode from --mode=<Name> command-line arguments.
+ *
+ * @param {string[]} args Command-line arguments array.
+ * @returns {string|null} The target mode name or null.
+ */
+function extractModeArg(args) {
+  if (!Array.isArray(args)) return null;
+  for (const arg of args) {
+    if (arg && arg.startsWith('--mode=')) {
+      return arg.slice(7).replace(/^['"]|['"]$/g, '');
+    }
+  }
+  return null;
+}
+
 let queuedFileToOpen = extractFilePath(process.argv);
+let queuedModeToOpen = extractModeArg(process.argv);
+
+// Configure Windows Jump List (app.setUserTasks)
+if (process.platform === 'win32') {
+  try {
+    app.setUserTasks([
+      {
+        program: process.execPath,
+        arguments: '--mode="Planetarium"',
+        title: 'Open Planetarium',
+        description: 'Navigate the celestial sphere',
+        iconPath: process.execPath,
+        iconIndex: 0
+      },
+      {
+        program: process.execPath,
+        arguments: '--mode="Observatory Manager"',
+        title: 'Observatory Manager',
+        description: 'Mount, guider, and equipment controls',
+        iconPath: process.execPath,
+        iconIndex: 0
+      },
+      {
+        program: process.execPath,
+        arguments: '--mode="Image Processing"',
+        title: 'Image Processing',
+        description: 'FITS stacking, astrometry, and spectroscopy',
+        iconPath: process.execPath,
+        iconIndex: 0
+      }
+    ]);
+  } catch (err) {
+    log.warn('Failed to set Windows user tasks / Jump List:', err);
+  }
+}
 
 // Single Instance Lock
 if (!app.requestSingleInstanceLock()) {
@@ -57,6 +114,11 @@ if (!app.requestSingleInstanceLock()) {
       const filePath = extractFilePath(commandLine);
       if (filePath && mainWindow.webContents) {
         mainWindow.webContents.send('open-file', filePath);
+      }
+
+      const modeArg = extractModeArg(commandLine);
+      if (modeArg && mainWindow.webContents) {
+        mainWindow.webContents.send('navigate-mode', modeArg);
       }
     }
   });
@@ -80,6 +142,7 @@ log.transports.file.resolvePathFn = () => path.join(app.getPath('userData'), 'lo
 let mainWindow = null;
 let secondaryWindow = null;
 let splashWindow = null;
+let trayPopoverWindow = null;
 let splashShownAt = 0;
 let isOpeningMainWindow = false;
 let tray = null;
@@ -167,15 +230,10 @@ const getWindowOptions = () => ({
   height: 800,
   minWidth: 1024,
   minHeight: 700,
+  frame: true,
   backgroundColor: '#181818',
-  icon: getAppPath('assets', 'orbit.png'),
+  icon: getAppPath('assets', 'orbit-smooth-256.png'),
   resizable: true,
-  titleBarStyle: 'hidden',
-  titleBarOverlay: {
-    color: '#222222',
-    symbolColor: '#eeeeee',
-    height: 38,
-  },
   webPreferences: {
     nodeIntegration: false,
     contextIsolation: true,
@@ -201,15 +259,19 @@ async function createMainWindow() {
     mainWindow.loadFile(getAppPath('dist', 'index.html'));
   }
 
-  // Deliver any pending file association once the frontend is ready
+  // Deliver any pending file association or workspace mode once the frontend is ready
   mainWindow.webContents.once('did-finish-load', () => {
     if (queuedFileToOpen) {
       mainWindow.webContents.send('open-file', queuedFileToOpen);
       queuedFileToOpen = null;
     }
+    if (queuedModeToOpen) {
+      mainWindow.webContents.send('navigate-mode', queuedModeToOpen);
+      queuedModeToOpen = null;
+    }
   });
 
-  registerIpcHandlers(mainWindow, createSecondaryWindow, backendManager);
+  registerIpcHandlers(mainWindow, createSecondaryWindow, backendManager, updateTrayMenu, () => trayPopoverWindow);
 }
 
 /**
@@ -240,11 +302,102 @@ function createSecondaryWindow() {
   });
 }
 
+/**
+ * Builds or refreshes the context menu for the system tray icon with live status.
+ *
+ * @param {Object} [status] Optional live observatory and workspace telemetry.
+ * @param {string} [status.mountStatus] e.g. "Tracking", "Parked", "Slewing"
+ * @param {string} [status.activeTarget] e.g. "M31 Andromeda Galaxy"
+ * @param {string} [status.activeMode] Current active workspace
+ */
+function updateTrayMenu(status = {}) {
+  if (!tray) return;
+
+  const navigateTo = (mode) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+      mainWindow.webContents.send('navigate-mode', mode);
+    }
+  };
+
+  const isTracking = status.mountStatus && /tracking/i.test(status.mountStatus);
+  const isSlewing = status.mountStatus && /slew/i.test(status.mountStatus);
+  const mountState = status.mountStatus || 'Ready';
+  const mountDot = isTracking ? '● ' : isSlewing ? '● ' : '○ ';
+  const targetName = status.activeTarget || 'None Selected';
+
+  const tooltipLines = ['Astrometrics', `Observatory: ${mountState}`, `Target: ${targetName}`];
+  tray.setToolTip(tooltipLines.join(' • '));
+
+  const menuTemplate = [
+    { label: 'Astrometrics', enabled: false },
+    { type: 'separator' },
+    { label: `${mountDot}Observatory: ${mountState}`, enabled: false },
+    { label: `  Target: ${targetName}`, enabled: false },
+    { type: 'separator' },
+    {
+      label: 'Switch Workspace',
+      submenu: [
+        { label: 'Image Viewer', click: () => navigateTo('Image Viewer') },
+        { label: 'Astronomy Manager', click: () => navigateTo('Astronomy Manager') },
+        { label: 'Planetarium', click: () => navigateTo('Planetarium') },
+        { label: 'Image Processing', click: () => navigateTo('Image Processing') },
+        { label: 'Observatory Manager', click: () => navigateTo('Observatory Manager') },
+        { label: 'Observation Manager', click: () => navigateTo('Observation Manager') }
+      ]
+    },
+    {
+      label: 'Open Window',
+      click: () => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          if (mainWindow.isMinimized()) mainWindow.restore();
+          mainWindow.show();
+          mainWindow.focus();
+        }
+      }
+    },
+    { type: 'separator' },
+    {
+      label: 'Emergency Park Telescope',
+      click: () => {
+        if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+          mainWindow.webContents.send('emergency-park-mount');
+        }
+      }
+    },
+    { type: 'separator' },
+    { label: 'Quit Astrometrics', click: () => app.quit() }
+  ];
+
+  try {
+    // Store the built menu for use by the right-click handler bound in the tray
+    // setup block. Do NOT call tray.setContextMenu() here — on Linux that call
+    // intercepts all tray-icon clicks (including left-click) and prevents the
+    // popover window's 'click' event from ever firing.
+    tray._builtContextMenu = Menu.buildFromTemplate(menuTemplate);
+  } catch (err) {
+    log.warn('Failed to build tray context menu:', err);
+  }
+}
+
 // App Initialization
 
 app.on('ready', () => {
   // Ensure window manager uses dark frame background and widgets
   nativeTheme.themeSource = 'dark';
+
+  // Listen to OS theme changes and notify open windows
+  nativeTheme.on('updated', () => {
+    const isDark = nativeTheme.shouldUseDarkColors;
+    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+      mainWindow.webContents.send('system-theme-changed', isDark);
+    }
+    if (secondaryWindow && !secondaryWindow.isDestroyed() && secondaryWindow.webContents) {
+      secondaryWindow.webContents.send('system-theme-changed', isDark);
+    }
+  });
 
   createSplashWindow();
 
@@ -289,20 +442,28 @@ app.on('ready', () => {
 
   // System Tray
   try {
-    const trayIcon = nativeImage.createFromPath(getAppPath('assets', 'orbit.png')).resize({ width: 24, height: 24 });
+    const trayIconPath = getAppPath('assets', 'tray-icon-22.png');
+    const trayIcon = nativeImage.createFromPath(trayIconPath);
     tray = new Tray(trayIcon);
     tray.setToolTip('Astrometrics');
-    tray.setContextMenu(Menu.buildFromTemplate([
-      { label: 'Open Astrometrics', click: () => {
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          if (mainWindow.isMinimized()) mainWindow.restore();
-          mainWindow.show();
-          mainWindow.focus();
-        }
-      }},
-      { type: 'separator' },
-      { label: 'Quit', click: () => app.quit() }
-    ]));
+    updateTrayMenu();
+
+    // Tray Popover — frameless popover window toggled by left-clicking the tray icon
+    trayPopoverWindow = createTrayPopoverWindow(
+      tray,
+      getAppPath,
+      isDev,
+      path.join(__dirname, 'preload.js'),
+    );
+
+    // Right-click shows the native fallback context menu.
+    // This is kept separate from setContextMenu() which would block left-click
+    // on Linux by intercepting all tray clicks before 'click' can fire.
+    tray.on('right-click', () => {
+      if (tray._builtContextMenu) {
+        tray.popUpContextMenu(tray._builtContextMenu);
+      }
+    });
   } catch (err) {
     log.warn('Tray creation failed:', err);
   }

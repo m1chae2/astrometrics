@@ -11,6 +11,7 @@ a loud error.
 """
 
 import numpy as np
+import pytest
 from scipy.ndimage import gaussian_filter1d
 
 from astrometricslib.models.stellar_source import SpectroscopyResult, StellarObject
@@ -222,12 +223,17 @@ def test_the_score_separates_types_that_correlation_cannot():  # ruff: ignore[mi
     spectrum correlates almost as well with an F6V reference as with A0V.
     """
     wavelength, flux = _get_reference_templates()["A0V"]
-    blurred = gaussian_filter1d(flux, 30.0 / 2.355 / 5.0)  # what the instrument would record
+    # This synthetic instrument blurs by 30 A, and the classifier is told so,
+    # the way the real pipeline tells it each spectrum's measured resolution.
+    synthetic_resolution_angstrom = 30.0
+    blurred = gaussian_filter1d(flux, synthetic_resolution_angstrom / 2.355 / 5.0)  # what it would record
     # The instrument response leaves only 4200-8000 A usable, so only that
     # part is compared in practice.
     blurred[(wavelength < 4200.0) | (wavelength > 8000.0)] = np.nan
 
-    result = classify_spectral_type(wavelength, blurred)
+    result = classify_spectral_type(
+        wavelength, blurred, resolution_element_angstrom=synthetic_resolution_angstrom
+    )
 
     by_type = {entry["spectral_type"]: entry for entry in result["ranked_types"]}
     assert result["spectral_type"] == "A0V"
@@ -245,3 +251,36 @@ def test_nearest_reference_type_reads_catalog_spectral_types():  # ruff: ignore[
     assert nearest_reference_type("Unknown") is None
     assert nearest_reference_type("") is None
     assert nearest_reference_type(None) is None
+
+
+def test_the_score_does_not_depend_on_the_overall_brightness():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify a spectrum five times brighter gets the same score."""
+    wavelength, flux = _get_reference_templates()["G0V"]
+    tilted = flux * (1.0 + 0.1 * np.sin(wavelength / 700.0))  # a shape that is not exactly G0V
+
+    faint = classify_spectral_type(wavelength, tilted)
+    bright = classify_spectral_type(wavelength, 5.0 * tilted)
+
+    assert bright["spectral_type"] == faint["spectral_type"]
+    assert bright["rms"] == pytest.approx(faint["rms"], rel=1e-6)
+
+
+def test_the_score_is_a_fraction_of_the_average_brightness():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify a wiggle 5% of the average in size scores about 0.035.
+
+    A sine wave of amplitude 0.05 has a root-mean-square size of
+    0.05 / sqrt(2) = 0.035, so a spectrum with such a wiggle added to a
+    reference should score close to that against the reference.
+    """
+    wavelength, flux = _get_reference_templates()["G0V"]
+    keep = (wavelength >= 4200.0) & (wavelength <= 8000.0)
+    wavelength, flux = wavelength[keep], flux[keep]
+    blurred = gaussian_filter1d(flux, 30.0 / 2.355 / float(np.median(np.diff(wavelength))))
+    wiggle = 0.05 * blurred.mean() * np.sin(wavelength / 150.0)
+
+    result = classify_spectral_type(
+        wavelength, blurred + wiggle, resolution_element_angstrom=30.0, exclude_atmospheric_bands=False
+    )
+
+    assert result["spectral_type"] == "G0V"
+    assert result["rms"] == pytest.approx(0.05 / np.sqrt(2.0), rel=0.15)

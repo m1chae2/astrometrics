@@ -8,10 +8,10 @@
   height: var(--control-btn-height);
   font-size: var(--control-font-size);
   font-weight: 500;
-  font-family: 'Noto Sans', sans-serif;
+  font-family: var(--font-family-base);
   background-color: var(--primary-blue);
   color: var(--white);
-  border: 1px solid rgba(75, 142, 200, 0.2);
+  border: 1px solid rgba(53, 132, 228, 0.25);
   border-radius: 6px;
   cursor: pointer;
   box-sizing: border-box;
@@ -25,17 +25,17 @@
 .btn:hover,
 .btn:focus {
   outline: none;
-  background-color: var(--slate-blue-hover, #295d86);
+  background-color: var(--adwaita-blue-hover, #2b5984);
   filter: brightness(1.08);
 }
 
 .btn:active {
   outline: none;
-  background-color: var(--slate-blue-active, #16364d);
+  background-color: var(--adwaita-blue, #244a70);
 }
 
 .btn:focus-visible {
-  box-shadow: 0 0 0 2px rgba(75, 142, 200, 0.4);
+  box-shadow: 0 0 0 2px rgba(53, 132, 228, 0.4);
 }
 
 .btn:disabled {

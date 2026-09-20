@@ -4,36 +4,22 @@
 
 /* Core Status Header Block */
 .header {
-  height: 64px;
-  flex: 0 0 64px;
+  height: 48px;
+  flex: 0 0 48px;
   width: 100%;
   box-sizing: border-box;
   background-color: var(--grey-dark);
   color: var(--white);
   display: flex;
   align-items: center;
-  padding: 0 140px 0 24px;
+  padding: 0 16px;
   border-bottom: 1px solid rgba(0, 0, 0, 0.6);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
   z-index: 100;
   opacity: 1;
   overflow: visible;
-  border-top-left-radius: 10px;
-  border-top-right-radius: 10px;
-  -webkit-app-region: drag;
-}
-
-/* Ensure interactive controls inside the header remain clickable */
-.header button,
-.header a,
-.header input,
-.header select,
-.header [role="button"],
-.mode-selector,
-.header__settings,
-.header__settings-button,
-.header__widgets > * {
-  -webkit-app-region: no-drag;
+  border-top-left-radius: 12px;
+  border-top-right-radius: 12px;
 }
 
 .header__widgets {
@@ -41,12 +27,12 @@
   justify-content: space-between;
   align-items: center;
   width: 100%;
-  gap: 32px; /* Ensure minimum spacing between left actions and right telemetry */
+  gap: 24px;
 }
 
 .header__left {
   display: flex;
-  gap: 24px;
+  gap: 16px;
   align-items: center;
   flex: 1 1 auto;
   min-width: 0;
@@ -54,16 +40,16 @@
 
 .header__right {
   display: flex;
-  gap: 14px;
+  gap: 12px;
   align-items: center;
   flex-wrap: nowrap;
-  overflow: visible; /* REQ: HDR-4.1 - Remove scrolling/fading to prevent shade artifacts */
+  overflow: visible;
 }
 
 .header__settings {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   position: relative;
 }
 
@@ -71,24 +57,25 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 44px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.04);
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   color: var(--white);
   cursor: pointer;
   padding: 0;
-  transition: background 0.2s;
+  transition: background 0.2s, border-color 0.2s;
 }
 
 .header__settings-button:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.1);
 }
 
 .header__settings-button svg {
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
   fill: currentColor;
 }
 
@@ -104,26 +91,32 @@
   align-items: center;
   justify-content: center;
   box-sizing: border-box;
-  height: 44px;
-  padding: 8px 14px;
+  height: 34px;
+  padding: 6px 14px;
   width: calc(20ch + 36px);
   white-space: nowrap;
   text-overflow: ellipsis;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   color: var(--white);
   cursor: pointer;
-  font-weight: 700;
-  font-size: 15px;
+  font-weight: 600;
+  font-size: 14px;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.mode-selector__button:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.1);
 }
 
 .mode-selector__button--active {
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .mode-selector__button--ai {
-  width: 44px !important;
+  width: 34px !important;
   padding: 0;
   display: flex;
   align-items: center;
@@ -159,6 +152,137 @@
   background: rgba(255, 255, 255, 0.04);
 }
 
+/* Unified Status Badge */
+.header__status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 9999px;
+  padding: 6px 14px;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--white);
+  user-select: none;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.header__status-badge:hover {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.header__status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.header__status-dot--connected {
+  background-color: var(--success-green, #4caf50);
+  box-shadow: 0 0 6px rgba(76, 175, 80, 0.5);
+}
+
+.header__status-dot--disconnected {
+  background-color: var(--danger-red, #f44336);
+}
+
+.header__status-dot--unknown {
+  background-color: var(--warning-amber, #ff9800);
+}
+
+.header__status-text {
+  font-weight: 600;
+  color: var(--white);
+  letter-spacing: -0.1px;
+}
+
+.header__status-separator {
+  color: rgba(255, 255, 255, 0.3);
+  font-weight: 400;
+}
+
+.header__status-tracking {
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.header__status-tracking--connected {
+  color: var(--success-green, #4caf50);
+}
+
+.header__status-tracking--not-tracking {
+  color: var(--warning-amber, #ff9800);
+}
+
+.header__status-tracking--disconnected {
+  color: var(--danger-red, #f44336);
+}
+
+/* Flat Inline Telemetry Readouts */
+.header__telemetry-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.header__telemetry-label {
+  color: rgba(255, 255, 255, 0.45);
+  font-weight: 600;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.header__telemetry-value {
+  color: var(--white, #ffffff);
+  font-family: var(--font-family-mono, monospace);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: -0.2px;
+}
+
+.header__telemetry-value--connected {
+  color: var(--success-green, #4caf50);
+}
+
+.header__telemetry-value--not-tracking {
+  color: var(--warning-amber, #ff9800);
+}
+
+.header__telemetry-value--disconnected {
+  color: var(--danger-red, #f44336);
+}
+
+.header__telemetry-unit {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.6);
+  margin-left: 1px;
+}
+
+.header__telemetry-icon {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+  opacity: 0.8;
+  vertical-align: middle;
+}
+
+.header__divider {
+  width: 1px;
+  height: 16px;
+  background-color: rgba(255, 255, 255, 0.12);
+  flex-shrink: 0;
+  margin: 0 4px;
+}
+
 .status-widget {
   display: flex;
   flex-direction: column;
@@ -167,6 +291,11 @@
   min-width: 140px; /* Base width for connection/tracking widgets to prevent shifting */
   flex-shrink: 0;
   white-space: nowrap;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  padding: 6px 12px;
+  box-sizing: border-box;
 }
 
 .status-widget--large {

@@ -147,7 +147,13 @@ class SpectroscopyPipeline:
             config = ConfigLoader.load_spectroscopy_config()
         self.config = config
         self.instrument = SpectroscopyInstrument(config)
-        self.extractor = SpectrumExtractor(radius=config.extraction_radius)
+        # The extractor also does the sky background subtraction stage:
+        # each brightness reading has the night-sky glow (measured in strips
+        # beside the streak) taken out of it, so everything after this point
+        # in the pipeline sees the star's light only.
+        self.extractor = SpectrumExtractor(
+            radius=config.extraction_radius, subtract_sky_background=config.subtract_sky_background
+        )
         self.calibrator = SpectrumCalibrator(self.instrument)
         # Keeps track of how many stars were too bright (saturated) in the
         # center. We save this list so other parts of the program can check
@@ -400,6 +406,7 @@ class SpectroscopyPipeline:
             self.config.camera.name,
             is_quantum_efficiency_corrected=quantum_efficiency_corrected_intensities is not None,
             catalog_spectral_type=star.spectral_type,
+            trail_width_px=result.get("trail_width_px"),
         )
         classification = analysis.classification
         probable_spectral_features = analysis.features
@@ -434,6 +441,9 @@ class SpectroscopyPipeline:
             dispersion_angle=dispersion_angle,
             trail_centerline_px=result.get("trail_centerline_px"),
             trail_width_px=result.get("trail_width_px"),
+            resolution_element_angstrom=(
+                analysis.resolution_element_angstrom if analysis.is_resolution_measured else None
+            ),
         )
 
         # Records this extraction as one more epoch in the star's own

@@ -33,12 +33,63 @@ const MINIMUM_POINTS_FOR_TRANSIT_SEARCH = 8;
  */
 const SIGNIFICANT_FALSE_ALARM_PROBABILITY = 0.01;
 
+import ReactDOM from 'react-dom';
+
 /** A small "i" that shows a longer explanation when hovered, so the panel itself can stay short. */
-const InfoTip: React.FC<{ text: string }> = ({ text }) => (
-    <span className="stellar-analysis-details__info" title={text} role="img" aria-label={text}>
-        ⓘ
-    </span>
-);
+const InfoTip: React.FC<{ text: string }> = ({ text }) => {
+    const [visible, setVisible] = useState(false);
+    const triggerRef = React.useRef<HTMLSpanElement | null>(null);
+    const [pos, setPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
+
+    const showTooltip = () => {
+        if (triggerRef.current) {
+            const rect = triggerRef.current.getBoundingClientRect();
+            // Position above the "i" button, aligned toward the left with viewport boundary protection
+            const tooltipWidth = Math.min(280, window.innerWidth - 32);
+            let left = rect.left + rect.width / 2 - tooltipWidth + 30;
+            if (left < 16) left = 16;
+            if (left + tooltipWidth > window.innerWidth - 16) {
+                left = window.innerWidth - tooltipWidth - 16;
+            }
+            setPos({
+                top: rect.top - 8,
+                left,
+            });
+        }
+        setVisible(true);
+    };
+
+    const hideTooltip = () => setVisible(false);
+
+    return (
+        <span
+            ref={triggerRef}
+            className="stellar-analysis-details__info"
+            onMouseEnter={showTooltip}
+            onMouseLeave={hideTooltip}
+            onFocus={showTooltip}
+            onBlur={hideTooltip}
+            tabIndex={0}
+            role="tooltip"
+            aria-label={text}
+        >
+            ⓘ
+            {visible &&
+                ReactDOM.createPortal(
+                    <span
+                        className="stellar-analysis-details__tooltip stellar-analysis-details__tooltip--portal"
+                        style={{
+                            top: `${pos.top}px`,
+                            left: `${pos.left}px`,
+                        }}
+                    >
+                        {text}
+                    </span>,
+                    document.body
+                )}
+        </span>
+    );
+};
 
 /** Number of closest spectral types listed under the best match. */
 const LISTED_SPECTRAL_TYPE_CANDIDATES = 3;

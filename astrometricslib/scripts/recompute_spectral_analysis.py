@@ -20,6 +20,9 @@ Check first, then apply::
 
     python -m astrometricslib.scripts.recompute_spectral_analysis --apply
 
+To work on only the stars of one target, add ``--target`` (for example
+``--target Vega``). Without it, every star with a spectrum is recomputed.
+
 ``--apply`` copies the catalog database to a timestamped ``.bak`` file in
 the same directory before writing anything. Running it again gives the
 same results.
@@ -209,6 +212,10 @@ def recompute_star(
         camera_name,
         is_quantum_efficiency_corrected=bool(spectroscopy.quantum_efficiency_corrected_intensities),
         catalog_spectral_type=star.spectral_type,
+        trail_width_px=spectroscopy.trail_width_px,
+    )
+    spectroscopy.resolution_element_angstrom = (
+        analysis.resolution_element_angstrom if analysis.is_resolution_measured else None
     )
     classification = analysis.classification
     spectroscopy.self_determined_spectral_type = str(classification["spectral_type"])
@@ -234,6 +241,11 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--apply", action="store_true", help="Write the results. Without this only a report is printed."
+    )
+    parser.add_argument(
+        "--target",
+        default=None,
+        help="Only recompute the stars of this target (for example Vega). Default: every star.",
     )
     parser.add_argument(
         "--dry-run", action="store_true", help="Explicitly request a preview. This is already the default."
@@ -266,11 +278,14 @@ def run_recompute(argv: list[str] | None = None) -> int:
 
     star_ids = [
         summary.id
-        for summary in astrometrics.catalog_access.list_star_summaries()
+        for summary in astrometrics.catalog_access.list_star_summaries(target_id=arguments.target)
         if summary.has_spectra and not summary.id.endswith("::spectroscopy")
     ]
     if not star_ids:
-        print("No stars with spectra found.")
+        print(
+            "No stars with spectra found"
+            + (f" for target {arguments.target!r}." if arguments.target else ".")
+        )
         return 0
 
     stars = astrometrics.catalog_access.get_by_ids("stellar_catalog", star_ids)

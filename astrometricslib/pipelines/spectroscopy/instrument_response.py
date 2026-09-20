@@ -27,6 +27,11 @@ from pathlib import Path
 import numpy as np
 from scipy.ndimage import gaussian_filter1d
 
+from astrometricslib.pipelines.spectroscopy.spectral_resolution import (
+    FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
+    blur_sigma_in_samples,
+)
+
 _DATA_DIR = Path(__file__).parent / "data"
 
 # Wavelengths of strong hydrogen lines and the Ca II H line, in Angstroms.
@@ -76,11 +81,6 @@ _RESPONSE_POLYNOMIAL_DEGREE = 4
 # 2000, so its coefficients stay of order one and the fit is stable.
 _WAVELENGTH_CENTER_ANGSTROM = 6000.0
 _WAVELENGTH_SCALE_ANGSTROM = 2000.0
-
-# Width of one resolution element, in Angstroms. The reference spectrum
-# is much sharper than a slitless grism spectrum, so it is blurred to
-# this width before being compared with observations.
-RESOLUTION_ELEMENT_ANGSTROM = 30.0
 
 
 @dataclass(frozen=True)
@@ -210,8 +210,15 @@ def derive_instrument_response(
     camera_name: str,
     source: str,
     wavelength_range_angstrom: tuple[float, float] = DEFAULT_RESPONSE_WAVELENGTH_RANGE_ANGSTROM,
+    resolution_element_angstrom: float = FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
 ) -> InstrumentResponse:
     """Fit the response from an observation of a star of known type.
+
+    The reference spectrum is much sharper than a slitless grism spectrum,
+    so it is blurred to the instrument's resolution before the two are
+    compared. Blurring it to the wrong width would leave a mismatch around
+    every line, and the fit would wrongly treat that as part of the
+    instrument's response.
 
     Parameters
     ----------
@@ -233,6 +240,11 @@ def derive_instrument_response(
         camera's range). The default leaves out the blue end and the red
         end where second-order light and low sensitivity spoil the spectrum;
         see `DEFAULT_RESPONSE_WAVELENGTH_RANGE_ANGSTROM`.
+    resolution_element_angstrom : `float`, optional
+        How much the instrument blurs this observation, in Angstroms.
+        Defaults to `FALLBACK_RESOLUTION_ELEMENT_ANGSTROM`; pass the
+        observation's own measured value when there is one (see
+        `spectral_resolution`).
 
     Returns
     -------
@@ -252,7 +264,8 @@ def derive_instrument_response(
         raise ValueError(f"No bundled reference spectrum for {reference_type!r}.")
     template_wavelength, template_flux = templates[reference_type]
     smoothed_template = gaussian_filter1d(
-        template_flux, RESOLUTION_ELEMENT_ANGSTROM / 2.355 / float(np.median(np.diff(template_wavelength)))
+        template_flux,
+        blur_sigma_in_samples(resolution_element_angstrom, float(np.median(np.diff(template_wavelength)))),
     )
 
     wavelength_angstrom = np.asarray(wavelength_angstrom, dtype=float)

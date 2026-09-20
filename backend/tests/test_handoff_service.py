@@ -5,6 +5,7 @@ event dispatching, GSConnect beam bridging, and the corresponding REST API
 endpoints used by desktop and mobile companion applications.
 """
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -124,3 +125,153 @@ def test_handoff_endpoints_via_testclient(client: TestClient) -> None:
     res_get = client.get("/api/handoff/state")
     assert res_get.status_code == 200
     assert res_get.json()["selected_target"] == "Vega"
+
+
+def test_list_paired_devices(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify paired companion device output parsing from KDE Connect CLI.
+
+    Tests that standard CLI list format is converted into structured objects
+    with name, id, and reachability.
+    """
+    monkeypatch.setattr("shutil.which", lambda _cmd: "/usr/bin/kdeconnect-cli")
+    mock_output = (
+        "- Samsung Galaxy Z Flip7: flip7_id_123 (reachable)\n"
+        "- Galaxy Tab S9: tab_id_456 (paired and reachable)\n"
+    )
+    mock_proc = MagicMock(returncode=0, stdout=mock_output, stderr="")
+    monkeypatch.setattr("subprocess.run", lambda *a, **kw: mock_proc)
+
+    service = HandoffService()
+    devices = service.list_paired_devices()
+
+    assert len(devices) == 2
+    assert devices[0]["name"] == "Samsung Galaxy Z Flip7"
+    assert devices[0]["id"] == "flip7_id_123"
+    assert devices[0]["reachable"] is True
+    assert devices[1]["name"] == "Galaxy Tab S9"
+
+
+def test_send_device_alert_dispatches_ws_and_ping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify alert emission over WebSocket and GSConnect notification ping.
+
+    Ensures that calling send_device_alert notifies both active socket
+    subscribers and executes the CLI notification command.
+    """
+    mock_socket_mgr = MagicMock()
+    service = HandoffService(socket_manager=mock_socket_mgr)
+
+    monkeypatch.setattr("shutil.which", lambda _cmd: "/usr/bin/kdeconnect-cli")
+    mock_proc = MagicMock(returncode=0, stdout="", stderr="")
+    mock_run = MagicMock(return_value=mock_proc)
+    monkeypatch.setattr("subprocess.run", mock_run)
+
+    result = service.send_device_alert(
+        title="Guiding Lost",
+        message="Guide star SNR dropped below threshold",
+        priority="high",
+        ring_device=False,
+        device_id="flip7_id_123",
+    )
+
+    assert result["success"] is True
+    assert "websocket" in result["channels"]
+    assert "gsconnect_ping" in result["channels"]
+    assert "gsconnect_ring" not in result["channels"]
+
+    mock_socket_mgr.broadcast_ui_event_sync.assert_called_once()
+    event_name, payload = mock_socket_mgr.broadcast_ui_event_sync.call_args[0]
+    assert event_name == "device_alert"
+    assert payload["title"] == "Guiding Lost"
+    assert payload["device_id"] == "flip7_id_123"
+
+    mock_run.assert_called_once()
+    cmd = mock_run.call_args[0][0]
+    assert "--ping-msg" in cmd
+    assert "Guiding Lost: Guide star SNR dropped below threshold" in cmd
+    assert "--device" in cmd
+    assert "flip7_id_123" in cmd
+
+
+def test_send_device_alert_with_ring(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify emergency device alert triggers audible ring alarm.
+
+    Validates that setting ring_device=True invokes kdeconnect-cli --ring.
+    """
+    service = HandoffService()
+    monkeypatch.setattr("shutil.which", lambda _cmd: "/usr/bin/kdeconnect-cli")
+    mock_run = MagicMock(return_value=MagicMock(returncode=0))
+    monkeypatch.setattr("subprocess.run", mock_run)
+
+    result = service.send_device_alert(
+        title="Meridian Limit Exceeded",
+        message="Mount reached mechanical stop",
+        priority="critical",
+        ring_device=True,
+    )
+
+    assert result["success"] is True
+    assert "gsconnect_ring" in result["channels"]
+    assert mock_run.call_count == 2  # 1 for ping-msg, 1 for ring
+
+
+def test_share_file_to_device(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Verify file sharing to a paired device via GSConnect CLI.
+
+    Checks non-existent file rejection and valid file invocation.
+    """
+    service = HandoffService()
+
+    # Reject missing file
+    missing = service.share_file_to_device("/nonexistent/photo.png")
+    assert missing["success"] is False
+
+    # Accept existing file and run CLI
+    sample_file = tmp_path / "stacked_m31.png"
+    sample_file.write_text("dummy-image-bytes")
+
+    monkeypatch.setattr("shutil.which", lambda _cmd: "/usr/bin/kdeconnect-cli")
+    mock_run = MagicMock(return_value=MagicMock(returncode=0))
+    monkeypatch.setattr("subprocess.run", mock_run)
+
+    result = service.share_file_to_device(str(sample_file), device_id="flip7_id")
+    assert result["success"] is True
+    mock_run.assert_called_once()
+    cmd = mock_run.call_args[0][0]
+    assert cmd == [
+        "/usr/bin/kdeconnect-cli",
+        "--share",
+        str(sample_file),
+        "--device",
+        "flip7_id",
+    ]
+
+
+def test_device_alert_endpoints_via_testclient(client: TestClient) -> None:
+    """Verify GET /devices and POST /alert endpoints via FastAPI TestClient.
+
+    Ensures the HTTP layer exposes device discovery and alert dispatching.
+    """
+    # GET /api/handoff/devices
+    res_devices = client.get("/api/handoff/devices")
+    assert res_devices.status_code == 200
+    assert isinstance(res_devices.json(), list)
+
+    # POST /api/handoff/alert
+    payload = {
+        "title": "Sequence Completed",
+        "message": "Target M42: 30 exposures stacked successfully",
+        "priority": "normal",
+        "ring_device": False,
+    }
+    res_alert = client.post("/api/handoff/alert", json=payload)
+    assert res_alert.status_code == 200
+    data = res_alert.json()
+    assert data["success"] is True
+    assert data["alert"]["title"] == "Sequence Completed"

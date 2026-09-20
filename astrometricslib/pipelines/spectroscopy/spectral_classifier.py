@@ -12,9 +12,19 @@ correlates 0.95 or better with every star and the "best" match is an
 accident of that tilt: a spectrum of Vega (A0V) matched F6V. So this
 module expects a spectrum that has already been corrected, compares it
 with the references blurred to the instrument's resolution, and scores
-each by the root-mean-square difference between the two normalized
-curves. It is a match score, not a probability that the star has that
-type.
+each by how far the observation is from the reference once the reference
+has been scaled to the same overall brightness (the best-fit scale). It is
+a match score, not a probability that the star has that type.
+
+The scale is a best fit, not a divide-by-the-median. An earlier version
+divided both spectra by their own median and compared them. The median of
+a spectrum that falls toward the red sits at one particular wavelength, and
+that wavelength moves whenever samples are left out (a different upper
+wavelength limit, or the atmospheric mask), so the score, and sometimes the
+type, changed for reasons that had nothing to do with the star. On the
+Vega-field A stars, leaving out the atmospheric bands moved the median from
+6130 A to 5940 A and flipped the best type from A0V to B9V. A best-fit scale
+does not depend on any one wavelength.
 """
 
 import csv
@@ -25,6 +35,12 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 from scipy.ndimage import gaussian_filter1d
+
+from astrometricslib.pipelines.spectroscopy.atmospheric_mask import atmospheric_band_mask
+from astrometricslib.pipelines.spectroscopy.spectral_resolution import (
+    FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
+    blur_sigma_in_samples,
+)
 
 if TYPE_CHECKING:
     from astrometricslib.models.stellar_source import StellarObject
@@ -97,25 +113,38 @@ CLASSIFICATION_WAVELENGTH_RANGE_ANGSTROM = (3000.0, 10000.0)
 # required.
 MINIMUM_CLASSIFICATION_COVERAGE_ANGSTROM = 2500.0
 
-# The instrument's resolution element, in Angstroms. The references are
-# much sharper than a grism spectrum, so they are blurred to this width
-# before being compared; comparing sharp references with a blurred
-# observation would add a mismatch that has nothing to do with the type.
-_RESOLUTION_ELEMENT_ANGSTROM = 30.0
-
 # Softmax temperature (in root-mean-square difference units) used to turn
-# match scores into a weight for each type. Neighboring types differ by
-# about 0.01 in this measure, so a temperature of 0.01 lets a near
-# neighbor keep a visible share instead of one type taking everything.
-_RANKING_SOFTMAX_TEMPERATURE = 0.01
+# match scores into a weight for each type. It has to be about as big as
+# the gap between neighboring types, so a near neighbor keeps a visible
+# share instead of one type taking everything.
+#
+# 0.005: when the score changed from median-normalized to best-fit scale,
+# the median gap between the best and second-best type fell from 0.0110 to
+# 0.0060, and the median gap between neighbors among the top six types fell
+# from 0.0284 to 0.0135 (14 stars with a known type or a standard, the
+# instrument response applied, atmospheric bands excluded, 2026-09-19; see
+# logs/spectral_score_calibration_20260919.json). The old temperature was
+# 0.01, so it is halved to keep the same spread of weights.
+_RANKING_SOFTMAX_TEMPERATURE = 0.005
 
 # A best match with a root-mean-square difference above this is poor.
-# Provisional value from the standard-star check in
-# validate_spectral_and_period_analysis.py: stars that matched their
-# known type had a difference of 0.07-0.11 (Alcor's second star,
-# HD 151023, Vega itself), while stars that matched the wrong type had
-# 0.19-0.36. 0.15 sits between them. It rests on only a handful of
-# stars and should be revisited as more standards are observed.
+# Provisional value. It rests on only a handful of stars and should be
+# revisited as more standards are observed.
+#
+# 0.15 sits between the two groups in the best-fit score (14 stars with a
+# known type or a standard, 2026-09-19; see
+# logs/spectral_score_calibration_20260919.json). Stars matched to within
+# three spectral-type steps of their catalog type: Alcor's second star
+# 0.049, g UMa 0.046, Vega 0.053, HD 151023 0.105. Stars matched to the
+# wrong type: BD+36 2764 0.283, HD 151086 0.218, HD 150293 0.205, BD+36 2775
+# 0.202, HD 150679 0.181. The same value fell between the two groups under
+# the old median-normalized score (0.064-0.113 against 0.196-0.375), so it
+# did not need to change.
+#
+# Two known-wrong matches score well below it and are NOT caught: HD 150998
+# (K2 matched as M0, 0.086) and the first star of the Alcor pair (A2 matched
+# as F2, 0.048, possibly saturated). A low score means the reference is close
+# to the spectrum, not that the type is right.
 POOR_MATCH_RMS_THRESHOLD = 0.15
 
 # The score reported as "confidence" is 1 minus the root-mean-square
@@ -128,7 +157,13 @@ LOW_CONFIDENCE_THRESHOLD = 1.0 - POOR_MATCH_RMS_THRESHOLD
 AMBIGUOUS_PROBABILITY_MARGIN = 0.15
 
 _reference_cache: dict[str, tuple[np.ndarray, np.ndarray]] = {}
-_blurred_cache: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+# Blurred references, kept for each resolution seen so far. The key is the
+# resolution rounded to a whole Angstrom: a spectrum's resolution is
+# measured from its own trail width, so it differs a little from one
+# spectrum to the next, and blurring 34 references again for every one
+# would be wasted work. A 0.5 A difference in blur is far below anything
+# the comparison can see.
+_blurred_cache: dict[int, dict[str, tuple[np.ndarray, np.ndarray]]] = {}
 
 
 _SPECTRAL_LETTER_ORDER = "OBAFGKM"
@@ -203,8 +238,18 @@ def _get_reference_templates() -> dict[str, tuple[np.ndarray, np.ndarray]]:
     return _reference_cache
 
 
-def _get_blurred_templates() -> dict[str, tuple[np.ndarray, np.ndarray]]:
-    """Give every reference spectrum blurred to the instrument's resolution.
+def _get_blurred_templates(resolution_element_angstrom: float) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    """Give every reference spectrum blurred to a given resolution.
+
+    The references are much sharper than a grism spectrum, so they are
+    blurred to the instrument's resolution before being compared.
+    Comparing sharp references with a blurred observation would add a
+    mismatch that has nothing to do with the star's type.
+
+    Parameters
+    ----------
+    resolution_element_angstrom : `float`
+        The resolution element to blur to, in Angstroms.
 
     Returns
     -------
@@ -212,11 +257,18 @@ def _get_blurred_templates() -> dict[str, tuple[np.ndarray, np.ndarray]]:
         Spectral type label mapped to `(wavelength_angstrom, flux)`, the
         flux blurred with a gaussian as wide as one resolution element.
     """
-    if not _blurred_cache:
-        for spectral_type, (wavelength, flux) in _get_reference_templates().items():
-            sigma_samples = _RESOLUTION_ELEMENT_ANGSTROM / 2.355 / float(np.median(np.diff(wavelength)))
-            _blurred_cache[spectral_type] = (wavelength, gaussian_filter1d(flux, sigma_samples))
-    return _blurred_cache
+    cache_key = round(resolution_element_angstrom)
+    if cache_key not in _blurred_cache:
+        _blurred_cache[cache_key] = {
+            spectral_type: (
+                wavelength,
+                gaussian_filter1d(
+                    flux, blur_sigma_in_samples(float(cache_key), float(np.median(np.diff(wavelength))))
+                ),
+            )
+            for spectral_type, (wavelength, flux) in _get_reference_templates().items()
+        }
+    return _blurred_cache[cache_key]
 
 
 def _rank_by_probability(
@@ -277,7 +329,12 @@ def unclassified_result(reason: str) -> dict[str, object]:
     }
 
 
-def classify_spectral_type(wavelength_angstrom: np.ndarray, intensity: np.ndarray) -> dict[str, object]:
+def classify_spectral_type(
+    wavelength_angstrom: np.ndarray,
+    intensity: np.ndarray,
+    resolution_element_angstrom: float = FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
+    exclude_atmospheric_bands: bool = True,
+) -> dict[str, object]:
     """Find the bundled reference spectrum a star's spectrum most resembles.
 
     The observed spectrum must already have had the instrument's response
@@ -287,8 +344,11 @@ def classify_spectral_type(wavelength_angstrom: np.ndarray, intensity: np.ndarra
 
     Each reference, blurred to the instrument's resolution, is compared
     with the observation over `CLASSIFICATION_WAVELENGTH_RANGE_ANGSTROM`.
-    Both are divided by their own median first, so only shape matters, and
-    the score is the root-mean-square difference between them.
+    The reference is first scaled to the observation's overall brightness
+    with the best-fit (least-squares) scale, so only shape matters. The
+    score is the root-mean-square difference between the observation and
+    the scaled reference, as a fraction of the observation's average
+    brightness: 0.05 means a typical sample is off by 5% of the average.
 
     Parameters
     ----------
@@ -298,6 +358,16 @@ def classify_spectral_type(wavelength_angstrom: np.ndarray, intensity: np.ndarra
         The observed spectrum's brightness at each wavelength, already
         corrected for the instrument. Arbitrary units are fine; only the
         shape is used.
+    resolution_element_angstrom : `float`, optional
+        How much the instrument blurs this spectrum, in Angstroms; the
+        references are blurred to this width. Defaults to
+        `FALLBACK_RESOLUTION_ELEMENT_ANGSTROM`; pass the spectrum's own
+        measured value when there is one (see `spectral_resolution`).
+    exclude_atmospheric_bands : `bool`, optional
+        Leave the wavelengths where Earth's air absorbs light out of the
+        comparison (see `atmospheric_mask`), so a dip that comes from the
+        air is not counted as a difference between the star and the
+        reference. Defaults to `True`.
 
     Returns
     -------
@@ -337,7 +407,9 @@ def classify_spectral_type(wavelength_angstrom: np.ndarray, intensity: np.ndarra
 
     rms_by_type: dict[str, float] = {}
     correlation_by_type: dict[str, float] = {}
-    for spectral_type, (template_wavelength, template_flux) in _get_blurred_templates().items():
+    for spectral_type, (template_wavelength, template_flux) in _get_blurred_templates(
+        resolution_element_angstrom
+    ).items():
         overlap_min = max(wavelength_angstrom.min(), template_wavelength.min(), low)
         overlap_max = min(wavelength_angstrom.max(), template_wavelength.max(), high)
         if overlap_max - overlap_min < MINIMUM_CLASSIFICATION_COVERAGE_ANGSTROM:
@@ -345,18 +417,27 @@ def classify_spectral_type(wavelength_angstrom: np.ndarray, intensity: np.ndarra
         common_grid = template_wavelength[
             (template_wavelength >= overlap_min) & (template_wavelength <= overlap_max)
         ]
+        if exclude_atmospheric_bands:
+            common_grid = common_grid[~atmospheric_band_mask(common_grid)]
         if len(common_grid) < _MINIMUM_OVERLAP_POINTS:
             continue
 
-        observed_norm = np.interp(common_grid, wavelength_angstrom, intensity)
-        template_norm = np.interp(common_grid, template_wavelength, template_flux)
-        observed_norm = observed_norm / np.median(observed_norm)
-        template_norm = template_norm / np.median(template_norm)
-        if np.std(observed_norm) == 0 or np.std(template_norm) == 0:
+        observed_on_grid = np.interp(common_grid, wavelength_angstrom, intensity)
+        template_on_grid = np.interp(common_grid, template_wavelength, template_flux)
+        if np.std(observed_on_grid) == 0 or np.std(template_on_grid) == 0:
+            continue
+        observed_average = float(np.mean(observed_on_grid))
+        template_power = float(np.dot(template_on_grid, template_on_grid))
+        if observed_average <= 0 or template_power <= 0:
             continue
 
-        rms_by_type[spectral_type] = float(np.sqrt(np.mean((observed_norm - template_norm) ** 2)))
-        correlation_by_type[spectral_type] = float(np.corrcoef(observed_norm, template_norm)[0, 1])
+        # The scale that brings the reference as close as possible to the
+        # observation (least squares). Unlike dividing each spectrum by its
+        # median, it does not depend on any one wavelength.
+        best_fit_scale = float(np.dot(observed_on_grid, template_on_grid)) / template_power
+        difference = observed_on_grid - best_fit_scale * template_on_grid
+        rms_by_type[spectral_type] = float(np.sqrt(np.mean(difference**2))) / observed_average
+        correlation_by_type[spectral_type] = float(np.corrcoef(observed_on_grid, template_on_grid)[0, 1])
 
     if not rms_by_type:
         return unclassified_result("no reference overlaps the spectrum enough to compare")

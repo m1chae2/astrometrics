@@ -90,6 +90,12 @@ class SpectroscopyConfig(BaseModel):
         Degree of the polynomial fit to the traced extraction's per-step
         raw centers, by default 2. Unused when extraction_method is
         "fixed".
+    subtract_sky_background : `bool`
+        Whether extraction measures the night-sky glow in strips beside
+        the spectrum and subtracts it from every reading, by default
+        `True`. See the module docstring of
+        ``spectrum_extractor`` for why. Turn it off only to compare
+        against the raw, un-subtracted spectrum.
     use_flare_mask_extraction : `bool`
         Whether to extract starting from an offset anchored past the
         star's own position, to avoid a bright flare/astigmatism
@@ -138,6 +144,10 @@ class SpectroscopyConfig(BaseModel):
     )
     centerline_polynomial_degree: int = Field(
         2, description="Polynomial degree for the traced-extraction trail centerline fit"
+    )
+    subtract_sky_background: bool = Field(
+        True,
+        description="Subtract the night-sky glow, measured in strips beside the spectrum, from every reading",
     )
     use_flare_mask_extraction: bool = Field(
         False,

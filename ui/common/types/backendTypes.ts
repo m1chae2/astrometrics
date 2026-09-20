@@ -251,6 +251,7 @@ export interface SpectroscopyResult {
   dispersionAngle?: number | null;
   trailCenterlinePx?: number[] | null;
   trailWidthPx?: number[] | null;
+  resolutionElementAngstrom?: number | null;
   extractionRadius?: number | null;
 }
 

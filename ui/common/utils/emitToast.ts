@@ -52,8 +52,10 @@ export function emitToast(
         const isHidden = typeof document !== 'undefined' && (document.hidden || !document.hasFocus());
         const isCritical = kind === 'error';
         if (isHidden || isCritical) {
-          const title = source ? `Astrometrics: ${source}` : 'Astrometrics';
-          window.astrometrics.app.showNotification(title, text);
+          const capitalizedSource = source ? source.charAt(0).toUpperCase() + source.slice(1) : 'Observatory Alert';
+          window.astrometrics.app.showNotification(capitalizedSource, text, {
+            urgency: isCritical ? 'critical' : 'normal',
+          });
         }
       }
     } catch {

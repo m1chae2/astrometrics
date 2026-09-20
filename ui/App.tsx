@@ -186,11 +186,37 @@ const AppContent: React.FC = () => {
     };
     window.addEventListener('astrometrics:modeChange', onModeChange);
 
+    // Native OS Integration: Listen to mode switches from Ubuntu dock / Windows Jump List / Tray
+    let removeNavMode: (() => void) | undefined;
+    if (window.astrometrics?.app?.onNavigateMode) {
+      removeNavMode = window.astrometrics.app.onNavigateMode((navMode: string) => {
+        if (navMode) {
+          setMode(navMode);
+          window.dispatchEvent(new CustomEvent('astrometrics:modeChange', { detail: navMode }));
+        }
+      });
+    }
+
+    // Native OS Integration: Emergency park telescope command from tray
+    const onEmergencyPark = (): void => {
+      fetch('/api/telescope/park', { method: 'POST' }).catch(() => {});
+    };
+    window.addEventListener('emergency-park-mount', onEmergencyPark);
+
     return () => {
       removeSocketAction?.();
+      removeNavMode?.();
       window.removeEventListener('astrometrics:modeChange', onModeChange);
+      window.removeEventListener('emergency-park-mount', onEmergencyPark);
     };
   }, []);
+
+  // Update dynamic tray menu when mode changes
+  useEffect(() => {
+    if (window.astrometrics?.app?.updateTrayStatus) {
+      window.astrometrics.app.updateTrayStatus({ activeMode: mode });
+    }
+  }, [mode]);
 
   return (
     <div className="app">

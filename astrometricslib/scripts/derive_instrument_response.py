@@ -30,6 +30,7 @@ from astrometricslib.pipelines.spectroscopy.instrument_response import (
     derive_instrument_response,
 )
 from astrometricslib.pipelines.spectroscopy.pipeline import SpectroscopyPipeline
+from astrometricslib.pipelines.spectroscopy.spectral_resolution import resolve_resolution_element_angstrom
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "pipelines" / "spectroscopy" / "data"
 
@@ -95,6 +96,16 @@ def run_derivation(argv: list[str] | None = None) -> int:
         max(arguments.minimum_wavelength, camera_range_angstrom[0]),
         min(arguments.maximum_wavelength, camera_range_angstrom[1]),
     )
+    # Blur the reference to how blurry this observation really is, measured
+    # from its own trail width, so the fitted response does not absorb a
+    # mismatch around every line.
+    resolution_element_angstrom, is_resolution_measured = resolve_resolution_element_angstrom(
+        np.array(spectroscopy.wavelengths_angstrom), spectroscopy.trail_width_px
+    )
+    print(
+        f"Resolution element {resolution_element_angstrom:.1f} A "
+        f"({'measured from the trail width' if is_resolution_measured else 'fallback, no trail width'})."
+    )
     response = derive_instrument_response(
         np.array(spectroscopy.wavelengths_angstrom),
         np.array(intensity),
@@ -105,6 +116,7 @@ def run_derivation(argv: list[str] | None = None) -> int:
             f"derived {datetime.now(UTC).date().isoformat()}"
         ),
         wavelength_range_angstrom=fit_range_angstrom,
+        resolution_element_angstrom=resolution_element_angstrom,
     )
     file_name = (
         "instrument_response_" + re.sub(r"[^a-z0-9]+", "_", response.camera_name.lower()).strip("_") + ".json"

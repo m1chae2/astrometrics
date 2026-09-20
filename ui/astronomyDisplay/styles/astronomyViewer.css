@@ -17,8 +17,8 @@
 }
 
 .astronomy-plot {
-  background: var(--grey-dark, #1e1e1e);
-  border-radius: 4px;
+  background: transparent;
+  border: none;
   align-self: center;
   width: 100%;
   max-width: none;

@@ -170,6 +170,12 @@ const getWindowOptions = () => ({
   backgroundColor: '#181818',
   icon: getAppPath('assets', 'orbit.png'),
   resizable: true,
+  titleBarStyle: 'hidden',
+  titleBarOverlay: {
+    color: '#222222',
+    symbolColor: '#eeeeee',
+    height: 38,
+  },
   webPreferences: {
     nodeIntegration: false,
     contextIsolation: true,

@@ -128,7 +128,7 @@ export const ExecutionQueue: React.FC<Props> = ({ queue, removeFromQueue, onEdit
             </div>
             <div className="execution-queue-footer">
                 <button
-                    className="btn btn--success btn--full-width"
+                    className="btn btn--primary btn--full-width"
                     onClick={handleStartSession}
                     disabled={isStarting || queue.length === 0}
                 >

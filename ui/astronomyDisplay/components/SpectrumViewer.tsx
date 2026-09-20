@@ -12,7 +12,13 @@ import '../styles/astronomyViewer.css';
 
 import { Spectrum, SpectralObservation } from '../../common/types/backendTypes';
 import { SpectralFeatureResult } from '../../common/types/spectralFeatureTypes';
-import { formatFalseAlarmProbability, shortFeatureName, significantFeatures } from '../utils/starDisplayFormat';
+import {
+    assignLabelRows,
+    formatFalseAlarmProbability,
+    inconclusiveFeatures,
+    shortFeatureName,
+    significantFeatures,
+} from '../utils/starDisplayFormat';
 
 interface Props {
     astronomyData: (Spectrum & { wavelength: number[]; spectrumFlux: number[] }) | null;
@@ -30,6 +36,21 @@ interface Selection {
     top: number;
     idx: number;
 }
+
+// Feature labels are printed horizontally above the plot, on rows that are stacked
+// when neighbors would overlap. These sizes are in pixels.
+const FEATURE_LABEL_FONT_SIZE = 12;
+// About the width of one character of 12 px text.
+const FEATURE_LABEL_CHARACTER_WIDTH = 7;
+const FEATURE_LABEL_GAP = 6;
+// The height of one row of labels, and the space between the top of the plot and the first row.
+const FEATURE_LABEL_ROW_HEIGHT = 17;
+const FEATURE_LABEL_FIRST_ROW_OFFSET = 10;
+// The plot is wider than this on most screens. A low estimate only makes labels use an extra row
+// where they would not have overlapped, and never lets two overlap.
+const ASSUMED_PLOT_WIDTH = 700;
+// Space kept above the plot for things other than labels, and the plot's normal top margin.
+const PLOT_TOP_MARGIN = 20;
 
 // REQ: AST-2: Spectroscopy Visualization
 export const SpectrumViewer: React.FC<Props> = ({
@@ -92,8 +113,9 @@ export const SpectrumViewer: React.FC<Props> = ({
     const [showFeatures, setShowFeatures] = useState<boolean>(true);
 
     // Every named absorption feature (Balmer series, Ca II H&K, etc.) the
-    // backend tested for. Only those it judged detected or possible are drawn
-    // on the plot; the rest are listed in the Stellar Analysis panel.
+    // backend tested for. Those it judged detected or possible are drawn in
+    // green; those with a dip too noisy to confirm are drawn in red; the rest
+    // are listed only in the Stellar Analysis panel.
     const testedSpectralFeatures = useMemo<SpectralFeatureResult[]>(
         () => (astronomyData?.spectroscopy?.probableSpectralFeatures ?? []) as SpectralFeatureResult[],
         [astronomyData]
@@ -101,6 +123,15 @@ export const SpectrumViewer: React.FC<Props> = ({
     const probableSpectralFeatures = useMemo(
         () => significantFeatures(testedSpectralFeatures),
         [testedSpectralFeatures]
+    );
+    const inconclusiveSpectralFeatures = useMemo(
+        () => inconclusiveFeatures(testedSpectralFeatures),
+        [testedSpectralFeatures]
+    );
+    // Green and red lines share one drawing path below; they differ only in color and wording.
+    const markedSpectralFeatures = useMemo(
+        () => [...probableSpectralFeatures, ...inconclusiveSpectralFeatures],
+        [probableSpectralFeatures, inconclusiveSpectralFeatures]
     );
 
     const plotData: PlotlyTrace[] = useMemo(() => {
@@ -182,13 +213,18 @@ export const SpectrumViewer: React.FC<Props> = ({
             }
         }));
 
-        const featureColor = getVar('--plot-green', '#00ff00');
-        // A detected feature is drawn as a solid line, a possible one as a
-        // dotted, fainter line. The line sits where the dip was actually found,
-        // which can differ a little from the feature's rest wavelength.
+        const detectedColor = getVar('--plot-green', '#00ff00');
+        const inconclusiveColor = getVar('--plot-red', '#ff5252');
+        const featureColor = (feature: SpectralFeatureResult) =>
+            feature.verdict === 'inconclusive' ? inconclusiveColor : detectedColor;
+        // A detected feature is drawn as a solid green line, a possible one as
+        // a dotted, fainter green line, and an inconclusive one (a dip the
+        // noise is too large to confirm) as a dotted red line. The line sits
+        // where the dip was actually found, which can differ a little from the
+        // feature's rest wavelength.
         const featureX = (feature: SpectralFeatureResult) =>
             feature.measured_wavelength_angstrom ?? feature.wavelength_angstrom;
-        const featureShapes = showFeatures ? probableSpectralFeatures.map((f) => ({
+        const featureShapes = showFeatures ? markedSpectralFeatures.map((f) => ({
             type: 'line',
             x0: featureX(f),
             y0: 0,
@@ -198,7 +234,7 @@ export const SpectrumViewer: React.FC<Props> = ({
             yref: 'paper',
             opacity: f.verdict === 'detected' ? 0.9 : 0.5,
             line: {
-                color: featureColor,
+                color: featureColor(f),
                 width: 1,
                 dash: f.verdict === 'detected' ? 'solid' : 'dot'
             }
@@ -206,10 +242,35 @@ export const SpectrumViewer: React.FC<Props> = ({
 
         base.shapes = [...selectionShapes, ...featureShapes];
 
-        base.annotations = showFeatures ? probableSpectralFeatures.map((f) => {
-            const label = shortFeatureName(String(f.feature));
+        // Horizontal labels above the plot. Neighbors that would overlap go on higher rows, joined to
+        // their line by a thin leader so it stays clear which line each name belongs to.
+        const labelTexts = markedSpectralFeatures.map((f) => {
+            const name = shortFeatureName(String(f.feature));
+            return { plain: name, shown: f.verdict === 'detected' ? `<b>${name}</b>` : name };
+        });
+        const wavelengths = (astronomyData?.wavelength ?? []).filter((value: number) => Number.isFinite(value));
+        const axisSpan = wavelengths.length > 1 ? Math.max(...wavelengths) - Math.min(...wavelengths) : 0;
+        const labelRows = assignLabelRows(
+            markedSpectralFeatures.map((f, index) => ({ x: featureX(f), text: labelTexts[index].plain })),
+            axisSpan,
+            ASSUMED_PLOT_WIDTH,
+            FEATURE_LABEL_CHARACTER_WIDTH,
+            FEATURE_LABEL_GAP
+        );
+        const rowsUsed = showFeatures && labelRows.length > 0 ? Math.max(...labelRows) + 1 : 0;
+        if (rowsUsed > 0) {
+            base.margin = {
+                ...base.margin,
+                t: PLOT_TOP_MARGIN + FEATURE_LABEL_FIRST_ROW_OFFSET + rowsUsed * FEATURE_LABEL_ROW_HEIGHT,
+            };
+        }
+
+        base.annotations = showFeatures ? markedSpectralFeatures.map((f, index) => {
+            const verdictText = { detected: 'Detected', possible: 'Possible', inconclusive: 'Inconclusive: too noisy to tell' }[
+                f.verdict as 'detected' | 'possible' | 'inconclusive'
+            ];
             const details = [
-                `${f.verdict === 'detected' ? 'Detected' : 'Possible'}`,
+                verdictText,
                 f.depth !== undefined ? `depth ${(f.depth * 100).toFixed(0)}%` : '',
                 f.p_value !== undefined ? `chance of noise doing this: ${formatFalseAlarmProbability(f.p_value)}` : '',
                 typeof f.probability_present === 'number' ? `model probability present: ${Math.round(f.probability_present * 100)}%` : '',
@@ -219,19 +280,24 @@ export const SpectrumViewer: React.FC<Props> = ({
                 y: 1,
                 xref: 'x',
                 yref: 'paper',
+                xanchor: 'center',
                 yanchor: 'bottom',
-                showarrow: false,
-                textangle: -90,
-                text: label,
+                // The label sits `ay` pixels above the top of the line, joined to it by a leader.
+                showarrow: true,
+                arrowhead: 0,
+                arrowwidth: 1,
+                arrowcolor: featureColor(f),
+                ax: 0,
+                ay: -(FEATURE_LABEL_FIRST_ROW_OFFSET + labelRows[index] * FEATURE_LABEL_ROW_HEIGHT),
+                text: labelTexts[index].shown,
                 hovertext: details,
                 captureevents: true,
-                font: { color: featureColor, size: 10 },
-                opacity: f.verdict === 'detected' ? 1 : 0.6
+                font: { color: featureColor(f), size: FEATURE_LABEL_FONT_SIZE },
             };
         }) : [];
 
         return base;
-    }, [selections, probableSpectralFeatures, showFeatures]);
+    }, [selections, markedSpectralFeatures, showFeatures, astronomyData]);
 
     if (loading) return <div className="astronomy-viewer-loading">Loading spectrum...</div>;
     if (error) return <div className="astronomy-viewer-error">{error}</div>;
@@ -272,7 +338,8 @@ export const SpectrumViewer: React.FC<Props> = ({
                                 className={`segmented-btn ${showFeatures ? 'active' : ''}`}
                                 onClick={() => setShowFeatures((v) => !v)}
                             >
-                                Features ({probableSpectralFeatures.length})
+                                Features ({probableSpectralFeatures.length}
+                                {inconclusiveSpectralFeatures.length > 0 ? `, ${inconclusiveSpectralFeatures.length} unclear` : ''})
                             </button>
                         </div>
                     )}

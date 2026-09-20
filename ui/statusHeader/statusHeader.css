@@ -12,12 +12,28 @@
   color: var(--white);
   display: flex;
   align-items: center;
-  padding: 0 24px;
+  padding: 0 140px 0 24px;
   border-bottom: 1px solid rgba(0, 0, 0, 0.6);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
   z-index: 100;
   opacity: 1;
   overflow: visible;
+  border-top-left-radius: 10px;
+  border-top-right-radius: 10px;
+  -webkit-app-region: drag;
+}
+
+/* Ensure interactive controls inside the header remain clickable */
+.header button,
+.header a,
+.header input,
+.header select,
+.header [role="button"],
+.mode-selector,
+.header__settings,
+.header__settings-button,
+.header__widgets > * {
+  -webkit-app-region: no-drag;
 }
 
 .header__widgets {

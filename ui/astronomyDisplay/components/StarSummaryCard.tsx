@@ -5,7 +5,12 @@
 
 import React from 'react';
 import '../styles/astronomyDisplay.css';
-import { describeTemplateMatch, formatCatalogMagnitude, formatCoordinateDegrees } from '../utils/starDisplayFormat';
+import {
+    describePatternBadges,
+    describeStarTypeBadges,
+    formatCatalogMagnitude,
+    formatCoordinateDegrees,
+} from '../utils/starDisplayFormat';
 
 export interface StarSummaryCardProps {
     /** Detailed astronomy/stellar object data. */
@@ -78,37 +83,28 @@ export const StarSummaryCard: React.FC<StarSummaryCardProps> = ({
     const decNum = typeof dec === 'number' ? dec : parseFloat(dec);
     const canLocate = Number.isFinite(raNum) && Number.isFinite(decNum);
     const catalogMagnitudeText = formatCatalogMagnitude(astronomyData?.magnitude ?? astronomyData?.mag);
-    const templateMatch = describeTemplateMatch(astronomyData?.spectroscopy, spectralType);
-    const meanFlux = astronomyData?.photometry?.meanFlux ?? astronomyData?.photometry?.mean_flux;
-    const variabilityScore = astronomyData?.variabilityScore ?? astronomyData?.variability_score;
+    const typeBadges = describeStarTypeBadges(spectralType, astronomyData?.spectroscopy);
+    const patternBadges = describePatternBadges(astronomyData?.photometry);
     const targetIds: string[] = Array.isArray(astronomyData?.targetIds) ? astronomyData.targetIds : [];
 
     return (
         <div className="star-summary-card">
             <div className="star-summary-card__header">
                 <span className="star-summary-card__title">{name}</span>
-                <span
-                    className="star-summary-card__badge spectral-badge"
-                    title="Spectral type from a catalog lookup"
-                >
-                    Catalog: {spectralType || 'Unknown'}
-                </span>
-                {templateMatch && (
+                {typeBadges.map((badge) => (
                     <span
-                        className={`star-summary-card__badge spectral-badge spectral-badge--measured${
-                            templateMatch.isPoor || templateMatch.differsFromCatalog ? ' spectral-badge--caution' : ''
-                        }`}
-                        title={templateMatch.hoverText}
+                        key={badge.text}
+                        className={`star-summary-card__badge spectral-badge spectral-badge--${badge.tone}`}
+                        title={badge.title}
                     >
-                        {templateMatch.badgeText}
-                        {!templateMatch.isPoor && templateMatch.differsFromCatalog ? ' · differs from catalog' : ''}
+                        {badge.text}
                     </span>
-                )}
-                {variabilityScore !== undefined && variabilityScore !== null && (
-                    <span className="star-summary-card__badge variability-badge">
-                        Var Score: {(Number(variabilityScore)).toFixed(2)}
+                ))}
+                {patternBadges.map((badge) => (
+                    <span key={badge.text} className="star-summary-card__badge variability-badge" title={badge.title}>
+                        {badge.text}
                     </span>
-                )}
+                ))}
                 {canLocate && (
                     <button
                         type="button"
@@ -129,21 +125,13 @@ export const StarSummaryCard: React.FC<StarSummaryCardProps> = ({
 
             <div className="star-summary-card__details">
                 {formattedCoords && (
-                    <span className="star-summary-card__item">
-                        <span className="item-label">Coords:</span> {formattedCoords}
+                    <span className="star-summary-card__item" title="Right ascension and declination, in degrees.">
+                        <span className="item-label">RA / Dec:</span> {formattedCoords}
                     </span>
                 )}
                 {catalogMagnitudeText !== null && (
-                    <span className="star-summary-card__item">
+                    <span className="star-summary-card__item" title="Brightness in magnitudes. A smaller number is brighter.">
                         <span className="item-label">Mag:</span> {catalogMagnitudeText}
-                    </span>
-                )}
-                {meanFlux !== undefined && meanFlux !== null && (
-                    <span
-                        className="star-summary-card__item"
-                        title="The star's flux divided by the reference flux of each frame, averaged over the light curve. It has no units."
-                    >
-                        <span className="item-label">Mean flux ratio:</span> {Number(meanFlux).toFixed(2)}
                     </span>
                 )}
                 {targetIds.length > 0 && (

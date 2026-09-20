@@ -8,8 +8,11 @@
  * because `backendTypes.ts` is regenerated and would drop them.
  */
 
-/** What the test for one named absorption feature concluded. */
-export type SpectralFeatureVerdict = 'detected' | 'possible' | 'not_detected' | 'not_covered';
+/**
+ * What the test for one named absorption feature concluded. "inconclusive" means a dip was
+ * measured but this spectrum's noise is too large to call it real or rule it out.
+ */
+export type SpectralFeatureVerdict = 'detected' | 'possible' | 'inconclusive' | 'not_detected' | 'not_covered';
 
 /** The result of testing one named absorption feature (such as H-alpha) in a spectrum. */
 export interface SpectralFeatureResult {

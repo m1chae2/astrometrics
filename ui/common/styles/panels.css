@@ -258,15 +258,15 @@
     cursor: wait;
 }
 
-/* Hardware Command Success/Green state */
+/* Hardware Command Action state mapped to System Slate-Blue */
 .btn--control.btn--success.btn--active {
-    background-color: var(--btn-green-active);
-    border: 1px solid var(--btn-green-active);
+    background-color: var(--slate-blue, #1f4868);
+    border: 1px solid var(--slate-blue-light, #4b8ec8);
 }
 
 .btn--control.btn--success.btn--pending {
-    background-color: var(--btn-green-pending);
-    border: 1px solid var(--btn-green-pending);
+    background-color: var(--slate-blue-light, #4b8ec8);
+    border: 1px solid var(--slate-blue-light, #4b8ec8);
 }
 
 /* Hardware Command Abort/Red state */

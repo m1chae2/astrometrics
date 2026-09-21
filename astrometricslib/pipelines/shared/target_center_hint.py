@@ -14,8 +14,13 @@ one place instead of four.
 """
 
 import logging
+import os
+import warnings
 from typing import Any
 
+from astropy.wcs import WCS, FITSFixedWarning
+
+from astrometricslib.drivers.fits_access import read_header
 from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
 
 logger = logging.getLogger(__name__)
@@ -73,3 +78,81 @@ def resolve_target_center_hint(target: Any) -> tuple[float | None, float | None]
         same condition as `center_ra`.
     """
     return resolve_center_hint(target.ra, target.dec)
+
+
+def resolve_solved_stack_center_hint(
+    target: Any, spectral_stack_path: str
+) -> tuple[float | None, float | None]:
+    """Read where the telescope really pointed from a plate-solved stack.
+
+    A spectral stack has no plate solution of its own, and the position in
+    its FITS header is only the mount's report, which can be far from the
+    truth: on the Vega session it named a spot 24 arcminutes from Vega, so
+    the star at the frame centre was labelled with a faint neighbour of that
+    spot (TYC 3105-827-1, magnitude 10.6) instead of Vega. The same target's
+    plate-solved standard stack, taken with the same camera and telescope,
+    knows where the frame centre is on the sky: Vega fell 13 pixels from the
+    solved centre and 3 pixels from the same star's zero order in the
+    spectral stack.
+
+    So the centre of the target's solved stack with the same camera and focal
+    length as the spectral stack is used as the hint. Nothing is guessed when
+    no such stack exists.
+
+    Parameters
+    ----------
+    target : `astrometricslib.models.target.Target`
+        The target whose standard stacks are searched.
+    spectral_stack_path : `str`
+        The spectral stack that needs the hint. Its ``INSTRUME`` and
+        ``FOCALLEN`` header entries say which camera and telescope took it.
+
+    Returns
+    -------
+    center_ra : `float` or `None`
+        The solved stack's centre right ascension in decimal degrees, or
+        `None` when there is no matching solved stack.
+    center_dec : `float` or `None`
+        The declination in decimal degrees, or `None` under the same
+        condition.
+    """
+    try:
+        spectral_header = read_header(spectral_stack_path)
+    except OSError:
+        return None, None
+    spectral_camera = spectral_header.get("INSTRUME")
+    spectral_focal_length = spectral_header.get("FOCALLEN")
+    if not spectral_camera or spectral_focal_length is None:
+        return None, None
+
+    candidate_paths = [target.stacked_image] + [
+        configuration.stacked_image for configuration in target.stacks_by_configuration.values()
+    ]
+    for candidate_path in dict.fromkeys(path for path in candidate_paths if path):
+        if not os.path.exists(candidate_path):
+            continue
+        try:
+            header = read_header(candidate_path)
+        except OSError:
+            continue
+        same_setup = (
+            header.get("INSTRUME") == spectral_camera
+            and header.get("FOCALLEN") is not None
+            and float(header["FOCALLEN"]) == float(spectral_focal_length)  # ruff: ignore[float-equality-comparison] -- a focal length copied from the same setup, not a measurement
+        )
+        if not same_setup or "CRVAL1" not in header:
+            continue
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", FITSFixedWarning)
+            wcs = WCS(header, naxis=2)
+        centre_x = header.get("NAXIS1", 0) / 2.0
+        centre_y = header.get("NAXIS2", 0) / 2.0
+        center_ra, center_dec = wcs.pixel_to_world_values(centre_x, centre_y)
+        logger.info(
+            "Using the centre of the solved stack %s as the spectral position hint: %.4f, %.4f.",
+            os.path.basename(candidate_path),
+            float(center_ra),
+            float(center_dec),
+        )
+        return float(center_ra), float(center_dec)
+    return None, None

@@ -771,4 +771,9 @@ def _build_stack_quality_summary(  # ruff: ignore[missing-return-type-private-fu
             _check_spectral_registration_quality(summary, stacked_path, diagnostics)
 
     _finalize_stack_quality_flags(summary)
+    clipped_groups = diagnostics.get("clipped_exposure_groups", [])
+    if clipped_groups:
+        exposures = ", ".join(f"{entry['exposure_seconds']:g} s" for entry in clipped_groups)
+        summary.flag_reasons.append(f"raw frames clipped at zero in the {exposures} exposure group(s)")
+        summary.flagged = True
     return summary

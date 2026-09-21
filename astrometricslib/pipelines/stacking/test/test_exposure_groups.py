@@ -17,6 +17,7 @@ from astropy.io import fits
 
 from astrometricslib.pipelines.stacking.exposure_groups import (
     CLIPPED_FRAME_ZERO_FRACTION,
+    FULL_SCALE_COUNTS,
     SATURATION_FRACTION_OF_FULL_SCALE,
     SATURATION_MASK_FRACTION_OF_CEILING,
     ExposureGroup,
@@ -27,6 +28,7 @@ from astrometricslib.pipelines.stacking.exposure_groups import (
     frame_exposure_seconds,
     group_frame_noises,
     measure_frame_noise,
+    measure_group_frames,
     merge_registration_sequences,
     merge_rejection_maps,
     split_frames_by_exposure,
@@ -483,3 +485,87 @@ def test_groups_with_different_scales_and_saturation_combine_to_one_spectrum() -
     # one here (0.7 of the truth); what matters is that it is the same
     # everywhere, core included.
     assert float(np.median(core)) == pytest.approx(float(np.median(edge)), rel=0.05)
+
+
+def test_measured_zero_fractions_say_which_groups_are_clipped(tmp_path) -> None:  # ruff: ignore[missing-type-function-argument]
+    """`measure_group_frames` returns the zero fraction beside the noise."""
+    clipped = ExposureGroup(0.5, _write_raw_frames(tmp_path, 2, mean=0.0, noise=8.0, seed=21))
+    clean = ExposureGroup(5.0, _write_raw_frames(tmp_path, 2, mean=100.0, noise=8.0, seed=22))
+
+    noises, zero_fractions = measure_group_frames([clipped, clean])
+
+    assert zero_fractions[0] > CLIPPED_FRAME_ZERO_FRACTION > zero_fractions[1]
+    assert noises[0] == pytest.approx(noises[1])
+
+
+def _clipped_and_clean_stacks(rate_counts_per_second: float) -> tuple[list[np.ndarray], list[float], float]:
+    """Stack simulated frames of a faint patch, a clipped and a clean group.
+
+    Returns
+    -------
+    images, exposures, noise_counts : `tuple`
+        The two stacked images (in units of full scale), their exposure
+        lengths, and the frame noise in counts.
+    """
+    generator = np.random.default_rng(31)
+    noise_counts = 8.4
+    exposures = [0.5, 5.0]
+    frame_counts = [100, 2]
+    images = []
+    for exposure, count in zip(exposures, frame_counts, strict=True):
+        mean_counts = rate_counts_per_second * exposure
+        frames = np.clip(generator.normal(mean_counts, noise_counts, (count, 80, 80)), 0, None)
+        images.append(frames.mean(axis=0) / FULL_SCALE_COUNTS)
+    return images, exposures, noise_counts
+
+
+def test_a_clipped_group_no_longer_biases_faint_pixels_upward() -> None:
+    """Averaged clipped frames read high near zero; the floor keeps them out.
+
+    A true 6 counts per second is 3 counts (0.36 noises) in the 0.5 s frames,
+    where clipping lifts the average by about two thirds, and 30 counts in
+    the 5 s frames, where it does not.
+    """
+    rate = 6.0
+    images, exposures, noise_counts = _clipped_and_clean_stacks(rate)
+    frame_counts = [100, 2]
+    expected = rate / FULL_SCALE_COUNTS * float(np.average(exposures, weights=frame_counts))
+
+    unaware = combine_exposure_group_images(images, exposures, frame_counts, frame_noises=[noise_counts] * 2)
+    aware = combine_exposure_group_images(
+        images,
+        exposures,
+        frame_counts,
+        frame_noises=[noise_counts] * 2,
+        frame_zero_fractions=[0.36, 0.0],
+    )
+
+    assert float(np.mean(unaware)) > 1.15 * expected
+    assert float(np.mean(aware)) == pytest.approx(expected, rel=0.06)
+
+
+def test_a_clipped_group_still_supplies_pixels_nothing_else_can() -> None:
+    """A clipped group still fills pixels that no other group can."""
+    clipped = np.full((30, 30), 5e-5)  # below its floor of 2 * 8.4 / 65535
+    saturated = np.full((30, 30), 1.0)
+
+    combined = combine_exposure_group_images(
+        [clipped, saturated],
+        [0.5, 5.0],
+        [10, 10],
+        frame_noises=[8.4, 8.4],
+        frame_zero_fractions=[0.7, 0.0],
+    )
+
+    assert np.all(np.isfinite(combined))
+    assert float(np.mean(combined)) == pytest.approx(5e-5 / 0.5 * 2.75, rel=1e-3)
+
+
+def test_zero_fractions_must_line_up_with_the_groups() -> None:
+    """A list of the wrong length is an error, not a silent mismatch."""
+    image = np.random.default_rng(32).normal(0.2, 0.01, (20, 20))
+
+    with pytest.raises(ValueError, match="zero fraction"):
+        combine_exposure_group_images(
+            [image, image], [1.0, 2.0], frame_noises=[1.0, 1.0], frame_zero_fractions=[0.0]
+        )

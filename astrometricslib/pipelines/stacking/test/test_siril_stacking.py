@@ -9,6 +9,7 @@ a fake Siril driver that writes small real FITS files, so the file handling
 """
 
 import logging
+import zlib
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -334,3 +335,69 @@ def test_a_failed_standard_run_is_reported_as_a_failure_not_a_percentage(
     assert path == str(tmp_path / "Vega_SPEC.fits")
     assert "failed with standard star detection; trying relaxed" in caplog.text
     assert "Only 100%" not in caplog.text
+
+
+def _raw_frame(folder: Path, exposure: str, name: str, mean: float) -> SimpleNamespace:
+    """Write a small raw frame and describe it like a frame record.
+
+    Values below zero are clipped, like a real 16-bit frame.
+
+    Returns
+    -------
+    frame : `types.SimpleNamespace`
+        A frame with a real file at `path`.
+    """
+    generator = np.random.default_rng(zlib.crc32(name.encode()))
+    data = np.clip(generator.normal(mean, 8.0, (64, 64)), 0, None)
+    path = folder / f"{name}.fits"
+    fits.writeto(path, np.round(data).astype(np.uint16))
+    return SimpleNamespace(
+        path=str(path),
+        name=name,
+        exposure=exposure,
+        model_dump=lambda path=str(path), exposure=exposure: {"path": path, "exposure": exposure},
+    )
+
+
+def test_clipped_groups_are_reported_and_flagged_in_the_diagnostics(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A bracketed session with a clipped short group says so, by exposure."""
+    frames = [_raw_frame(tmp_path, "0.5", f"s{i}", mean=0.0) for i in range(5)]
+    frames += [_raw_frame(tmp_path, "5.0", f"l{i}", mean=100.0) for i in range(5)]
+    driver = FakeSirilDriver(tmp_path, [{"registered": 5}, {"registered": 5}])
+
+    with caplog.at_level(logging.WARNING):
+        _, diagnostics = run_siril_stack(driver, frames, "Vega", "Vega_SPEC.fits", None, True)
+
+    clipped = diagnostics["clipped_exposure_groups"]
+    assert [entry["exposure_seconds"] for entry in clipped] == [0.5]
+    assert clipped[0]["frame_zero_fraction"] > 0.4
+    assert "The 0.5 s frames of 'Vega' are clipped at zero" in caplog.text
+    assert "Every exposure group" not in caplog.text
+
+
+def test_a_session_clipped_in_every_group_gets_the_stronger_warning(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """When no group can stand in for another, the warning says so."""
+    frames = [_raw_frame(tmp_path, "0.1", f"a{i}", mean=0.0) for i in range(5)]
+    frames += [_raw_frame(tmp_path, "0.25", f"b{i}", mean=1.0) for i in range(5)]
+    driver = FakeSirilDriver(tmp_path, [{"registered": 5}, {"registered": 5}])
+
+    with caplog.at_level(logging.WARNING):
+        _, diagnostics = run_siril_stack(driver, frames, "Alnath", "Alnath_SPEC.fits", None, True)
+
+    assert len(diagnostics["clipped_exposure_groups"]) == 2
+    assert "Every exposure group of 'Alnath' is clipped at zero" in caplog.text
+
+
+def test_an_unclipped_session_reports_no_clipped_groups(tmp_path: Path) -> None:
+    """Clean frames give an empty list, not a missing key."""
+    frames = [_raw_frame(tmp_path, "2.0", f"a{i}", mean=100.0) for i in range(5)]
+    frames += [_raw_frame(tmp_path, "5.0", f"b{i}", mean=200.0) for i in range(5)]
+    driver = FakeSirilDriver(tmp_path, [{"registered": 5}, {"registered": 5}])
+
+    _, diagnostics = run_siril_stack(driver, frames, "Vega", "Vega_SPEC.fits", None, True)
+
+    assert diagnostics["clipped_exposure_groups"] == []

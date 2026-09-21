@@ -71,6 +71,27 @@ MINIMUM_FRAMES_PER_EXPOSURE_GROUP = 5
 # offsets.
 CLIPPED_FRAME_ZERO_FRACTION = 0.2
 
+# What clipping does to a stack. A frame that cannot go below zero turns
+# every negative bit of noise into 0, so the average of many such frames sits
+# ABOVE the true value wherever the true value is close to zero. For noise
+# with a standard deviation s and a true value of m = k*s, the average is too
+# high by s * (pdf(k) - k * (1 - cdf(k))) of a standard normal curve: 3% of s
+# at k = 1.5, 0.9% of s at k = 2 (0.4% of the value) and under 0.1% of s at
+# k = 3. So a clipped group's pixels are trusted only where its stack is at
+# least CLIPPING_FLOOR_SIGMAS frame noises above zero, and the other groups
+# supply the fainter pixels. 2 leaves under half a percent of bias in what is
+# kept. On the Vega session this has been checked only by this arithmetic and
+# by the unit tests, not against a clean group.
+CLIPPING_FLOOR_SIGMAS = 2.0
+
+# The value a stack pixel has when the frames were full up, as Siril writes
+# it: the frames are 16-bit, so a count of 65535 is 1.0. Frame noise is
+# measured in counts and the stacks are in these units, so this number joins
+# the two. It matches the saturation comment above and holds for the ASI533MM
+# Pro frames of the Vega session (14-bit data stored as 16-bit would put every
+# value the same factor lower, and the floor with it).
+FULL_SCALE_COUNTS = 65535.0
+
 # How many raw frames of a group are read to measure the frame noise. The
 # noise of a frame hardly varies from one frame to the next (the spread over
 # three frames per exposure was under 0.01 counts on the Vega session), so a
@@ -344,6 +365,7 @@ def combine_exposure_group_images(
     frame_counts: list[int] | None = None,
     saturation_level: float = SATURATION_FRACTION_OF_FULL_SCALE,
     frame_noises: list[float] | None = None,
+    frame_zero_fractions: list[float] | None = None,
 ) -> np.ndarray:
     """Combine one stacked image per exposure group into a single image.
 
@@ -356,7 +378,10 @@ def combine_exposure_group_images(
     itself. Where a group's stack is saturated (above a ceiling measured from
     that stack, see `estimate_saturation_mask_level`), that group is left out
     at that pixel; if every group is saturated there, the shortest exposure is
-    used. Before averaging, each group is put on the same brightness scale as
+    used. A group whose raw frames are clipped at zero is likewise left out at
+    pixels too close to zero to be trusted (see `CLIPPING_FLOOR_SIGMAS`); if
+    that leaves no group at a pixel, the clipped group is used after all.
+    Before averaging, each group is put on the same brightness scale as
     the group with the most weight (see `estimate_group_gains`), because
     Siril leaves every group stack with its own overall scale.
 
@@ -376,8 +401,14 @@ def combine_exposure_group_images(
         The pixel value at or above which a group counts as saturated when
         its stack shows no measurable ceiling.
     frame_noises : `list` [`float`], optional
-        The noise of one raw frame of each group. When given, the weights
-        come from these and `frame_counts` instead of from the stack images.
+        The noise of one raw frame of each group, in counts. When given, the
+        weights come from these and `frame_counts` instead of from the stack
+        images.
+    frame_zero_fractions : `list` [`float`], optional
+        The fraction of pixels at zero in the raw frames of each group.
+        With `frame_noises`, a group above `CLIPPED_FRAME_ZERO_FRACTION` is
+        left out at pixels less than `CLIPPING_FLOOR_SIGMAS` frame noises
+        above zero, where clipping biases its average upward.
 
     Returns
     -------
@@ -421,6 +452,14 @@ def combine_exposure_group_images(
     # Each group is saturated above its own ceiling, which is not the same
     # for every group (see SATURATION_CEILING_SAMPLE_PIXELS).
     usable_masks = [np.asarray(raw) < estimate_saturation_mask_level(raw, saturation_level) for raw in images]
+    trusted_masks = list(usable_masks)
+    if frame_noises is not None and frame_zero_fractions is not None:
+        if len(frame_zero_fractions) != len(images):
+            raise ValueError("Each group needs one zero fraction.")
+        for index, (raw, zero_fraction) in enumerate(zip(images, frame_zero_fractions, strict=True)):
+            if zero_fraction > CLIPPED_FRAME_ZERO_FRACTION:
+                floor = CLIPPING_FLOOR_SIGMAS * frame_noises[index] / FULL_SCALE_COUNTS
+                trusted_masks[index] = usable_masks[index] & (np.asarray(raw) >= floor)
     # Put every group on the brightness scale of the group with the most
     # weight. The weights are left as they are: Siril's rescaling multiplies a
     # stack's signal and its noise alike, so a gain removes the same factor
@@ -438,9 +477,18 @@ def combine_exposure_group_images(
     numerator = np.zeros_like(per_second[0])
     denominator = np.zeros_like(per_second[0])
     for index, image in enumerate(per_second):
-        pixel_weight = weights[index] * usable_masks[index]
+        pixel_weight = weights[index] * trusted_masks[index]
         numerator += pixel_weight * image
         denominator += pixel_weight
+    # Where only clipped groups had a pixel below their floor, use them
+    # anyway (their value is biased but it is a measurement); saturation is
+    # dealt with after that.
+    nothing_trusted = denominator == 0
+    if nothing_trusted.any():
+        for index, image in enumerate(per_second):
+            pixel_weight = weights[index] * usable_masks[index]
+            numerator[nothing_trusted] += (pixel_weight * image)[nothing_trusted]
+            denominator[nothing_trusted] += pixel_weight[nothing_trusted]
     all_saturated = denominator == 0
     if all_saturated.any():
         numerator[all_saturated] = per_second[shortest][all_saturated]
@@ -493,6 +541,19 @@ def measure_frame_noise(frame_path: str) -> tuple[float, float]:
 def group_frame_noises(groups: list[ExposureGroup]) -> list[float]:
     """Work out the noise of one raw frame in each exposure group.
 
+    This is the first result of `measure_group_frames`; see it for details.
+
+    Returns
+    -------
+    noises : `list` [`float`]
+        The noise to use for one frame of each group, in counts.
+    """
+    return measure_group_frames(groups)[0]
+
+
+def measure_group_frames(groups: list[ExposureGroup]) -> tuple[list[float], list[float]]:
+    """Measure the noise and the clipping of the raw frames of each group.
+
     A few frames of each group are read. For a group whose frames are
     clipped at zero (see `CLIPPED_FRAME_ZERO_FRACTION`) the measured noise
     is too low, because the negative side of the noise was cut off. Read
@@ -513,6 +574,10 @@ def group_frame_noises(groups: list[ExposureGroup]) -> list[float]:
     -------
     noises : `list` [`float`]
         The noise to use for one frame of each group, in counts.
+    zero_fractions : `list` [`float`]
+        The average fraction of pixels at exactly zero in the sampled frames
+        of each group. Above `CLIPPED_FRAME_ZERO_FRACTION` means the group's
+        frames are clipped at zero.
     """
     measured = []
     for group in groups:
@@ -528,13 +593,15 @@ def group_frame_noises(groups: list[ExposureGroup]) -> list[float]:
         for noise, zero_fraction in measured
         if zero_fraction <= CLIPPED_FRAME_ZERO_FRACTION and noise > 0
     ]
+    zero_fractions = [zero_fraction for _, zero_fraction in measured]
     if not clean:
-        return [1.0] * len(groups)
+        return [1.0] * len(groups), zero_fractions
     reference = max(clean)
-    return [
+    noises = [
         noise if zero_fraction <= CLIPPED_FRAME_ZERO_FRACTION and noise > 0 else reference
         for noise, zero_fraction in measured
     ]
+    return noises, zero_fractions
 
 
 def merge_rejection_maps(

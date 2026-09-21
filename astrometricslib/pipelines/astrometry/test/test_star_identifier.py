@@ -78,6 +78,25 @@ def test_hint_based_identification_skips_closer_galaxy_and_uses_star(monkeypatch
     assert identified.name in ("Vega", "* alf Lyr")
 
 
+def test_hint_based_identification_stores_the_catalog_stars_own_position(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """The star gets SIMBAD's position, not the (slightly off) hint."""
+    identifier = _make_star_identifier()
+    identifier.stellar_objects = [_make_center_stellar_object(1000, 1000)]
+    monkeypatch.setattr(
+        star_identifier_module.simbad_interface, "query_region", MagicMock(return_value=_build_simbad_table())
+    )
+    # The Vega session's hint was the solved stack's centre, 22 arcsec away.
+    hint_ra, hint_dec = VEGA_RA_DEG + 0.0079, VEGA_DEC_DEG + 0.0032
+
+    identifier._identify_stars_with_simbad(
+        wcs=None, center_ra=hint_ra, center_dec=hint_dec, width=1000, height=1000
+    )
+
+    identified = identifier.stellar_objects[0]
+    assert identified.right_ascension == pytest.approx(VEGA_RA_DEG, abs=1e-6)
+    assert identified.declination == pytest.approx(VEGA_DEC_DEG, abs=1e-6)
+
+
 def test_wcs_based_identification_skips_closer_galaxy_and_uses_star(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """WCS path: nearest-neighbor matching must not consider galaxies."""
     identifier = _make_star_identifier()

@@ -25,6 +25,7 @@ from astrometricslib.pipelines.shared.star_recording import (
     merge_spectroscopy_stellar_object,
     record_pipeline_stars,
 )
+from astrometricslib.pipelines.shared.target_center_hint import resolve_solved_stack_center_hint
 
 
 def _registration_reference_candidates(target: Target, catalog_access: Any) -> list:
@@ -128,8 +129,14 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
         catalog_access = request.catalog_access
 
         # Use the AstrometryPipeline to identify the stars in the field
+        # The stack's own FITS position is only the mount's report and can be
+        # far off (see `resolve_solved_stack_center_hint`), so prefer the
+        # centre of this target's plate-solved stack when there is one.
+        hint_ra, hint_dec = resolve_solved_stack_center_hint(target, request.path)
         astrometry = AstrometryPipeline()
-        context = astrometry.process(request.path, attempt_plate_solving=False)
+        context = astrometry.process(
+            request.path, attempt_plate_solving=False, target_ra=hint_ra, target_dec=hint_dec
+        )
 
         # The spectral stack has no WCS of its own (see the module
         # docstring on spectral_star_registration), so these stars

@@ -23,6 +23,10 @@ from astrometricslib.pipelines.spectroscopy.spectral_classifier import (
 )
 from astrometricslib.pipelines.spectroscopy.spectral_feature_detector import detect_named_features
 from astrometricslib.pipelines.spectroscopy.spectral_resolution import resolve_resolution_element_angstrom
+from astrometricslib.pipelines.spectroscopy.spectrum_signal import (
+    MINIMUM_SPECTRUM_SIGNAL_TO_NOISE,
+    estimate_spectrum_signal_to_noise,
+)
 
 
 @dataclass(frozen=True)
@@ -44,6 +48,10 @@ class SpectrumAnalysis:
     is_resolution_measured : `bool`
         `True` when the resolution came from this spectrum's own trail
         width, `False` when the fixed fallback was used.
+    signal_to_noise : `float` or `None`
+        How strongly the spectrum stands out from its own scatter (see
+        `estimate_spectrum_signal_to_noise`), `None` when it could not be
+        judged.
     """
 
     classification: dict[str, object]
@@ -51,6 +59,7 @@ class SpectrumAnalysis:
     response_applied: bool
     resolution_element_angstrom: float
     is_resolution_measured: bool
+    signal_to_noise: float | None = None
 
 
 def analyze_spectrum(
@@ -102,6 +111,26 @@ def analyze_spectrum(
         wavelength_angstrom, trail_width_px
     )
 
+    # Before anything is compared with anything: is there a spectrum at all?
+    # A star too faint for the frames leaves only sky noise, and the
+    # classifier and the feature detector would still give it an answer.
+    signal_to_noise = estimate_spectrum_signal_to_noise(
+        wavelength_angstrom, intensity, resolution_element_angstrom
+    )
+    if signal_to_noise is not None and signal_to_noise < MINIMUM_SPECTRUM_SIGNAL_TO_NOISE:
+        return SpectrumAnalysis(
+            unclassified_result(
+                "no measurable spectrum: the star is too faint here, its signal-to-noise is "
+                f"{signal_to_noise:.1f} per resolution element and at least "
+                f"{MINIMUM_SPECTRUM_SIGNAL_TO_NOISE:g} is needed"
+            ),
+            [],
+            False,
+            resolution_element_angstrom,
+            is_resolution_measured,
+            signal_to_noise,
+        )
+
     response = load_instrument_response(camera_name) if is_quantum_efficiency_corrected else None
     if response is None:
         classification = unclassified_result(
@@ -133,5 +162,10 @@ def analyze_spectrum(
         resolution_element_angstrom=resolution_element_angstrom,
     )
     return SpectrumAnalysis(
-        classification, features, response is not None, resolution_element_angstrom, is_resolution_measured
+        classification,
+        features,
+        response is not None,
+        resolution_element_angstrom,
+        is_resolution_measured,
+        signal_to_noise,
     )

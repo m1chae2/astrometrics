@@ -37,6 +37,14 @@ from astrometricslib.utilities.exceptions import AstroLibError
 
 logger = logging.getLogger(__name__)
 
+# A centre star matched to a catalog star farther than this from the position
+# hint is reported as a probable mislabel. Only a warning, nothing is changed
+# by it. Unvalidated: 30 arcsec is about 16 pixels at this rig's 1.92 arcsec
+# per pixel. The correct Vega match is 25 arcsec from the solved stack's
+# centre, and the wrong one (TYC 3105-827-1) was 145 arcsec from the mount's
+# reported position, so 30 lies between the two cases seen.
+HINT_MATCH_WARNING_ARCSEC = 30.0
+
 # --- Preparing the Image for Star Detection ---------------------------------
 #
 # The star-finding algorithm assumes background noise is random for
@@ -1416,7 +1424,26 @@ class StarIdentifier:
             hint_coord = SkyCoord(center_ra * u.deg, center_dec * u.deg)
             idx, d2d, _ = hint_coord.match_to_catalog_sky(simbad_coords)
             logger.info(f"Nearest stellar SIMBAD entry to hint coordinates is {d2d.to(u.arcsec)} away.")
-            self._apply_simbad_match(center_star_obj, result_table[idx], center_ra, center_dec)
+            hint_offset_arcsec = float(np.atleast_1d(d2d.to(u.arcsec).value)[0])
+            if hint_offset_arcsec > HINT_MATCH_WARNING_ARCSEC:
+                logger.warning(
+                    "The nearest stellar SIMBAD entry is %.0f arcsec from the position hint, so the star at "
+                    "the frame centre may be labelled with the wrong catalog star. Check the hint: the FITS "
+                    "position is only the mount's report.",
+                    hint_offset_arcsec,
+                )
+            # The star gets the catalog star's own position. The hint is only
+            # where the telescope was thought to point, and on the Vega
+            # session it was 22 arcsec (13 pixels) from Vega itself, so
+            # stamping it on the star put the overlay marker in the wrong
+            # place.
+            matched_position = simbad_coords[idx]
+            self._apply_simbad_match(
+                center_star_obj,
+                result_table[idx],
+                float(matched_position.ra.deg),
+                float(matched_position.dec.deg),
+            )
         except Exception as e:
             logger.warning(f"Failed to match hint coordinates against SIMBAD results: {e}")
 

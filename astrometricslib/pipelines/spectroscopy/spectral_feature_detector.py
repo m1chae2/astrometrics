@@ -145,6 +145,19 @@ POSSIBLE_P_VALUE = 0.05
 INCONCLUSIVE_P_VALUE = 0.25
 INCONCLUSIVE_MINIMUM_DEPTH = 0.05
 
+# A feature measured with a depth uncertainty above this can be called no
+# better than "inconclusive", however small its p-value. The uncertainty is
+# the noise as a fraction of the continuum, so it is large where the
+# spectrum is faint (typically the blue end of a red star, where the
+# continuum falls toward zero). There a 2-sigma "possible" dip is more than
+# 22% deep, four times the 5.7% median depth of a real feature (see
+# INCONCLUSIVE_P_VALUE), and it is very unlikely to be a line. In the 160
+# features of the stored catalog-typed spectra, verdicts above this
+# uncertainty were both (2 of 2) for lines the catalog type does not expect,
+# against 10-33% below it. 0.11 is twice the median depth. A small sample:
+# not tested on a larger set.
+MAXIMUM_UNCERTAINTY_FOR_A_VERDICT = 0.11
+
 # Number of control positions needed before the noise width is measured
 # from them. With fewer, the width cannot be measured reliably, so the
 # depth's own uncertainty is trusted as it is and the p-value is labeled
@@ -604,6 +617,10 @@ def detect_named_features(
         else:
             verdict = VERDICT_NOT_DETECTED
 
+        limited_by_noise = observed.depth_uncertainty > MAXIMUM_UNCERTAINTY_FOR_A_VERDICT
+        if limited_by_noise and verdict in (VERDICT_DETECTED, VERDICT_POSSIBLE):
+            verdict = VERDICT_INCONCLUSIVE
+
         entry.update({
             "verdict": verdict,
             "measured_wavelength_angstrom": observed.center_angstrom,
@@ -614,6 +631,7 @@ def detect_named_features(
             "p_value_method": p_value_method,
             "expected_depth": expected_depth,
             "probability_present": probability_present,
+            "limited_by_noise": limited_by_noise,
         })
         entries.append(entry)
 

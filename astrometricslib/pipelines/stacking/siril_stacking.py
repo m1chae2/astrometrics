@@ -281,14 +281,18 @@ def _stack_exposure_groups(
         Where the combined image was written, or `None` if no group stacked.
     diagnostics : `dict`
         The groups' diagnostics joined in group order, with an
-        ``"exposure_groups"`` entry per group.
+        ``"exposure_groups"`` entry per group and a
+        ``"clipped_exposure_groups"`` list of the groups whose raw frames
+        are clipped at zero.
     """
     import numpy as np
 
     from astrometricslib.drivers.fits_access import read_data, read_header, write_image
     from astrometricslib.pipelines.stacking.exposure_groups import (
+        CLIPPED_FRAME_ZERO_FRACTION,
+        CLIPPING_FLOOR_SIGMAS,
         combine_exposure_group_images,
-        group_frame_noises,
+        measure_group_frames,
         merge_registration_sequences,
         merge_rejection_maps,
     )
@@ -330,7 +334,7 @@ def _stack_exposure_groups(
         counts.append(int(diagnostics.get("images_stacked") or len(group.frames)))
     kept_groups = [group for group, _, _ in results]
     try:
-        frame_noises = group_frame_noises(kept_groups)
+        frame_noises, frame_zero_fractions = measure_group_frames(kept_groups)
     except OSError as read_error:
         # The weights should never cost the stack: without frame noises every
         # group is treated as equally noisy per frame, which weights by
@@ -339,7 +343,30 @@ def _stack_exposure_groups(
             "Could not read frames to measure their noise (%s); weighting by exposure only.", read_error
         )
         frame_noises = [1.0] * len(kept_groups)
-    combined = combine_exposure_group_images(images, exposures, counts, frame_noises=frame_noises)
+        frame_zero_fractions = [0.0] * len(kept_groups)
+    clipped_groups = [
+        {"exposure_seconds": group.exposure_seconds, "frame_zero_fraction": round(float(zero_fraction), 3)}
+        for group, zero_fraction in zip(kept_groups, frame_zero_fractions, strict=True)
+        if zero_fraction > CLIPPED_FRAME_ZERO_FRACTION
+    ]
+    for entry in clipped_groups:
+        logger.warning(
+            "The %g s frames of '%s' are clipped at zero (%.0f%% of pixels): where a pixel is less than "
+            "%g frame noises above zero it is taken from the other exposure groups.",
+            entry["exposure_seconds"],
+            target_id,
+            100 * entry["frame_zero_fraction"],
+            CLIPPING_FLOOR_SIGMAS,
+        )
+    if clipped_groups and len(clipped_groups) == len(kept_groups):
+        logger.warning(
+            "Every exposure group of '%s' is clipped at zero, so its faint pixels read too high and no "
+            "other group can replace them. Longer exposures or a higher camera offset avoid this.",
+            target_id,
+        )
+    combined = combine_exposure_group_images(
+        images, exposures, counts, frame_noises=frame_noises, frame_zero_fractions=frame_zero_fractions
+    )
 
     directory = os.path.dirname(results[0][1])
     final_path = os.path.join(directory, output_file)
@@ -368,7 +395,9 @@ def _stack_exposure_groups(
             if os.path.exists(leftover) and leftover != final_path:
                 os.remove(leftover)
 
-    return final_path, _merge_diagnostics(results)
+    merged_diagnostics = _merge_diagnostics(results)
+    merged_diagnostics["clipped_exposure_groups"] = clipped_groups
+    return final_path, merged_diagnostics
 
 
 def _merge_diagnostics(results: list[tuple[Any, str, dict[str, Any]]]) -> dict[str, Any]:

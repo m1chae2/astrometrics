@@ -101,13 +101,13 @@
 
 .fits-renderer__overlay {
   display: block;
-  transform-origin: 0 0;
   position: absolute;
   top: 0;
   left: 0;
-  will-change: transform;
+  width: 100%;
+  height: 100%;
   pointer-events: none;
-  overflow: visible;
+  overflow: hidden;
 }
 
 .fits-renderer__star-group {
@@ -208,6 +208,40 @@
 
 .fits-renderer__star-group:hover .fits-renderer__badge-action {
   opacity: 1;
+}
+
+/* Selected Star States - Ubuntu Orange Accent */
+.fits-renderer__star-group--selected .fits-renderer__reticle-ring {
+  stroke: var(--ubuntu-orange, #e95420);
+  stroke-width: 2.5px;
+  filter: drop-shadow(0 0 7px rgba(233, 84, 32, 0.85));
+}
+
+.fits-renderer__star-group--selected .fits-renderer__reticle-ticks {
+  stroke: var(--ubuntu-orange, #e95420);
+  stroke-width: 2px;
+}
+
+.fits-renderer__star-group--selected .fits-renderer__reticle-center {
+  fill: var(--ubuntu-orange, #e95420);
+  opacity: 1;
+}
+
+.fits-renderer__star-group--selected .fits-renderer__badge-bg {
+  fill: rgba(38, 22, 16, 0.96);
+  stroke: var(--ubuntu-orange, #e95420);
+  stroke-width: 1.5px;
+  filter: drop-shadow(0 3px 10px rgba(233, 84, 32, 0.55));
+}
+
+.fits-renderer__star-group--selected .fits-renderer__badge-name {
+  fill: #ffffff;
+  font-weight: 700;
+}
+
+.fits-renderer__star-group--selected .fits-renderer__badge-action {
+  opacity: 1;
+  fill: var(--ubuntu-orange, #e95420);
 }
 
 .fits-renderer__status {

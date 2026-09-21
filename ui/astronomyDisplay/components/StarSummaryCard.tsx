@@ -66,29 +66,38 @@ function locateInPlanetarium(
 }
 
 /**
- * Switches the app to Image Processing Display with the specified target selected.
+ * Switches the app to Image Processing Display with the specified target selected,
+ * Astrometry overlay enabled, and the current star selected in the FITS viewer.
  *
  * @param targetId Target identifier to load in the Image Processing workspace.
  * @param setSelectedTarget Optional setter from TargetContext to directly set selectedTarget.
  * @param setPendingTarget Optional setter from TargetContext to directly set pendingTarget.
+ * @param selectedStarId Optional identifier of the star being handed off.
  */
 function navigateToTarget(
     targetId: string,
     setSelectedTarget?: (id: string) => void,
-    setPendingTarget?: (id: string) => void
+    setPendingTarget?: (id: string) => void,
+    selectedStarId?: string
 ): void {
     if (!targetId) return;
     try {
         window.localStorage.setItem('selectedTarget', targetId);
         window.localStorage.setItem('appMode', 'Image Processing');
+        if (selectedStarId) {
+            window.localStorage.setItem('astrometrics:imageProcessingSelectedStar', selectedStarId);
+        }
+        window.localStorage.setItem('astrometrics:enableAstrometryOverlay', 'true');
     } catch {
         // Ignore localStorage access failures (e.g. in private browsing)
     }
     setSelectedTarget?.(targetId);
     setPendingTarget?.(targetId);
-    window.dispatchEvent(new CustomEvent('astrometrics:targetSelected', { detail: targetId }));
+    window.dispatchEvent(new CustomEvent('astrometrics:targetSelected', {
+        detail: { targetId, starId: selectedStarId, enableAstrometry: true }
+    }));
     window.dispatchEvent(new CustomEvent('astrometrics:modeChange', { detail: 'Image Processing' }));
-    emitToast(`Opening ${targetId.replace(/_/g, ' ')} in Image Processing`, 'info', 'Targets');
+    emitToast(`Opening ${targetId.replace(/_/g, ' ')} in Image Processing with Astrometry`, 'info', 'Targets');
 }
 
 /**
@@ -172,8 +181,13 @@ export const StarSummaryCard: React.FC<StarSummaryCardProps> = ({
                                 key={t}
                                 type="button"
                                 className="target-tag-badge"
-                                title={`Open ${t} in Image Processing Display`}
-                                onClick={() => navigateToTarget(t, targetContext?.setSelectedTarget, targetContext?.setPendingTarget)}
+                                title={`Open ${t} in Image Processing Display with Astrometry enabled`}
+                                onClick={() => navigateToTarget(
+                                    t,
+                                    targetContext?.setSelectedTarget,
+                                    targetContext?.setPendingTarget,
+                                    String(astronomyData?.id || astronomyData?.name || starId || '')
+                                )}
                             >
                                 {t}
                             </button>

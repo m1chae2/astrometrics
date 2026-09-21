@@ -45,7 +45,7 @@ export const useCanvasInteraction = (
      * Applies the current pan and zoom values to the canvas and overlay transform styles.
      */
     const scheduleTransformWrite = useCallback(() => {
-        const elements = containerRef.current?.querySelectorAll<HTMLElement | SVGElement>('canvas, .fits-renderer__overlay');
+        const elements = containerRef.current?.querySelectorAll<HTMLElement | SVGElement>('canvas');
         if (!elements || elements.length === 0) return;
         const transform = `translate(${panRef.current.x}px, ${panRef.current.y}px) scale(${zoomRef.current})`;
         elements.forEach((el) => {

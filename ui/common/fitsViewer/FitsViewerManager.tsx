@@ -40,6 +40,8 @@ interface Props {
   showOverlay?: boolean;
   /** Callback when a star in the overlay is clicked. */
   onStarClick?: (star: AstrometryOverlayStar) => void;
+  /** Currently selected star identifier for overlay highlighting. */
+  selectedStarId?: string | null;
 }
 
 /**
@@ -58,7 +60,8 @@ export const FitsViewerManager = React.forwardRef<FitsRendererHandle, Props>(({
   stretch,
   overlayStars,
   showOverlay,
-  onStarClick
+  onStarClick,
+  selectedStarId
 }, ref) => {
   // REQ: IMG-3: Image Visualization
   // REQ: IMG-3.1: The display SHALL render FITS format images directly in the browser.
@@ -82,6 +85,7 @@ export const FitsViewerManager = React.forwardRef<FitsRendererHandle, Props>(({
         overlayStars={overlayStars}
         showOverlay={showOverlay}
         onStarClick={onStarClick}
+        selectedStarId={selectedStarId}
       />
     );
   }

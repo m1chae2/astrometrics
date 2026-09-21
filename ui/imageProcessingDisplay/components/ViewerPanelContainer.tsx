@@ -22,6 +22,7 @@ interface ViewerPanelContainerProps {
   onToggleAstrometryOverlay?: () => void;
   isLoadingOverlay?: boolean;
   onStarClick?: (star: AstrometryOverlayStar) => void;
+  selectedStarId?: string | null;
 
   // File Browser Props
   allFiles: any[];
@@ -47,6 +48,7 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
   fitsRendererRef, imageUrl, imageBlob, imageFrameInfo, loading, error, selectedTarget,
   autoPanTrigger, disableStretch, stretch, toggleStretch,
   overlayStars, showAstrometryOverlay, onToggleAstrometryOverlay, isLoadingOverlay, onStarClick,
+  selectedStarId,
   allFiles, filteredFiles, fileFilterText, setFileFilterText, fileBrowserCamera, setFileBrowserCamera,
   checkedFiles, handleRequestDeleteFiles, onOpenHeaderModal, onFileClick, selectedFile,
   toggleFile, toggleAllFiles, analysisResults
@@ -118,6 +120,7 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
           overlayStars={overlayStars}
           showOverlay={showAstrometryOverlay}
           onStarClick={onStarClick}
+          selectedStarId={selectedStarId}
         />
       </SectionPanel>
       <SectionPanel

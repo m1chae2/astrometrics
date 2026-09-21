@@ -22,6 +22,11 @@ import { formatStarListLabel } from '../../astronomyDisplay/utils/starDisplayFor
  */
 export function formatStarDisplayName(name: string): string {
   if (!name) return '';
+  // Strip verbose cluster member prefix: e.g. "CI* NGC 6205 KAD 656" -> "KAD 656"
+  const clusterMemberMatch = name.match(/^(?:CI\*|Cl\*)\s*(?:NGC\s*\d+|IC\s*\d+|M\s*\d+)\s+(.+)$/i);
+  if (clusterMemberMatch) {
+    name = clusterMemberMatch[1].trim();
+  }
   // 2MASS coordinate compression: 2MASS J16413289+3626285 -> 2MASS 1641+3626
   const massMatch = name.match(/2MASS\s*J?([0-9]{4})[0-9]*([+-][0-9]{4})[0-9]*/i);
   if (massMatch) {
@@ -40,6 +45,48 @@ export function formatStarDisplayName(name: string): string {
   return formatStarListLabel(name);
 }
 
+/**
+ * Checks if a given overlay star matches the currently selected star identifier.
+ *
+ * Compares primary identifiers, display names, and catalog substrings case-insensitively.
+ *
+ * @param star Astrometry overlay star item.
+ * @param selectedId Target selected star identifier string.
+ * @returns True if star matches the selection.
+ */
+export function isStarSelected(star: AstrometryOverlayStar, selectedId?: string | null): boolean {
+  if (!selectedId) return false;
+  const sId = selectedId.trim().toLowerCase();
+  const starId = (star.id || '').trim().toLowerCase();
+  const starName = (star.name || '').trim().toLowerCase();
+  if (starId === sId || starName === sId) return true;
+  if (starId && (sId.includes(starId) || starId.includes(sId))) return true;
+  if (starName && (sId.includes(starName) || starName.includes(sId))) return true;
+
+  // Compare formatted display names (e.g. "Cl* NGC 6205 KAD 656" vs "CI* NGC 6205 KAD 656" both normalize to "KAD 656")
+  const normSelected = formatStarDisplayName(selectedId).trim().toLowerCase();
+  const normStarName = formatStarDisplayName(star.name || star.id).trim().toLowerCase();
+  if (normSelected && normStarName && normSelected === normStarName) return true;
+  if (normSelected && normStarName && (normSelected.includes(normStarName) || normStarName.includes(normSelected))) return true;
+
+  return false;
+}
+
+/**
+ * Calculates badge horizontal offset (badgeX) relative to the star reticle.
+ * Defaults to placing the badge on the right side of the reticle (+20px) unless it
+ * would overflow the right edge of the container viewport, in which case it flips left.
+ *
+ * @param screenX Horizontal position of the star in screen/container pixels.
+ * @param badgeWidth Rendered width of the star label badge.
+ * @param containerW Width of the containing viewport element.
+ * @returns Offset in pixels from star center to badge origin.
+ */
+export function computeBadgePlacement(screenX: number, badgeWidth: number, containerW: number): number {
+  const placeLeft = (screenX + 20 + badgeWidth) > containerW;
+  return placeLeft ? -badgeWidth - 20 : 20;
+}
+
 export interface FitsRendererProps {
   imageUrl: string | null;
   imageBlob: Blob | null;
@@ -53,6 +100,7 @@ export interface FitsRendererProps {
   overlayStars?: AstrometryOverlayStar[];
   showOverlay?: boolean;
   onStarClick?: (star: AstrometryOverlayStar) => void;
+  selectedStarId?: string | null;
 }
 
 export interface FitsRendererHandle {
@@ -77,7 +125,8 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
     disableStretch,
     overlayStars,
     showOverlay,
-    onStarClick
+    onStarClick,
+    selectedStarId
   } = props;
 
   // Local State
@@ -99,16 +148,8 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
   const {
     zoom, panX, panY,
     resetView, zoomBy, zoomToFit, zoomToScale,
-    onPointerDown, onPointerMove, onPointerUp,
-    scheduleTransformWrite
+    onPointerDown, onPointerMove, onPointerUp
   } = useCanvasInteraction(containerRef, drawnSize);
-
-  // Sync transform to overlay whenever overlay is toggled on or size changes
-  useEffect(() => {
-    if (showOverlay) {
-      scheduleTransformWrite();
-    }
-  }, [showOverlay, scheduleTransformWrite, drawnSize]);
 
   // REQ: IMG-3.6: Disable automatic stretching for stacked images.
   const isStacked = disableStretch ?? (
@@ -134,7 +175,12 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
     if (autoPanTrigger) resetView();
   }, [autoPanTrigger, resetView]);
 
-  const invScale = zoom && zoom > 0 ? 1 / zoom : 1;
+  const refWidth = overlayStars && overlayStars[0]?.referenceWidth ? overlayStars[0].referenceWidth : (drawnSize.w || 1);
+  const refHeight = overlayStars && overlayStars[0]?.referenceHeight ? overlayStars[0].referenceHeight : (drawnSize.h || 1);
+  const effectiveZoom = zoom && zoom > 0 ? zoom : 1;
+  const scaleX = (drawnSize.w > 0 && refWidth > 0) ? (drawnSize.w / refWidth) * effectiveZoom : effectiveZoom;
+  const scaleY = (drawnSize.h > 0 && refHeight > 0) ? (drawnSize.h / refHeight) * effectiveZoom : effectiveZoom;
+  const containerW = containerRef.current?.clientWidth || (drawnSize.w * effectiveZoom);
 
   const effectiveLoading = parentLoading || status?.startsWith('Loading');
   const effectiveError = parentError || (status?.startsWith('Error') ? status : null);
@@ -157,41 +203,46 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
         {showOverlay && overlayStars && overlayStars.length > 0 && drawnSize.w > 0 && drawnSize.h > 0 && (
           <svg
             className="fits-renderer__overlay"
-            viewBox={`0 0 ${overlayStars[0]?.referenceWidth || drawnSize.w} ${overlayStars[0]?.referenceHeight || drawnSize.h}`}
             style={{
               position: 'absolute',
               top: 0,
               left: 0,
-              width: `${drawnSize.w}px`,
-              height: `${drawnSize.h}px`,
+              width: '100%',
+              height: '100%',
               pointerEvents: 'none',
-              transformOrigin: '0 0',
-              overflow: 'visible'
+              overflow: 'hidden'
             }}
           >
-            {/* Render unhovered stars first, hovered star last so it renders on top */}
+            {/* Render unselected/unhovered stars first, hovered and selected stars last so they render on top */}
             {[...overlayStars]
-              .sort((a, b) => (a.id === hoveredStarId ? 1 : b.id === hoveredStarId ? -1 : 0))
-              .map((star, index) => {
+              .sort((a, b) => {
+                const aSelected = isStarSelected(a, selectedStarId);
+                const bSelected = isStarSelected(b, selectedStarId);
+                const aHovered = a.id === hoveredStarId;
+                const bHovered = b.id === hoveredStarId;
+                const aScore = (aSelected ? 2 : 0) + (aHovered ? 1 : 0);
+                const bScore = (bSelected ? 2 : 0) + (bHovered ? 1 : 0);
+                return aScore - bScore;
+              })
+              .map((star) => {
+                const screenX = panX + star.x * scaleX;
+                const screenY = panY + star.y * scaleY;
                 const displayName = formatStarDisplayName(star.name);
                 const specText = (star.spectralType && star.spectralType !== 'Unknown') ? star.spectralType : '';
                 const hasSpec = specText.length > 0;
                 const nameLen = displayName.length;
-                const badgeWidth = Math.max(54, nameLen * 7.2 + (hasSpec ? specText.length * 6.5 + 14 : 0) + 24);
-                const badgeHeight = 22;
-                const refWidth = overlayStars[0]?.referenceWidth || drawnSize.w;
-                const isNearRightEdge = star.x > (refWidth - 160);
-                const isNearLeftEdge = star.x < 160;
-                const placeLeft = isNearRightEdge || (!isNearLeftEdge && (index % 2 === 1));
-                const badgeX = placeLeft ? -badgeWidth - 18 : 18;
-                const badgeY = -11;
+                const badgeWidth = Math.max(56, nameLen * 7.6 + (hasSpec ? specText.length * 6.8 + 14 : 0) + 26);
+                const badgeHeight = 24;
+                const badgeX = computeBadgePlacement(screenX, badgeWidth, containerW);
+                const badgeY = -12;
                 const isHovered = hoveredStarId === star.id;
+                const isSelected = isStarSelected(star, selectedStarId);
 
                 return (
                   <g
                     key={star.id}
-                    className={`fits-renderer__star-group ${isHovered ? 'fits-renderer__star-group--hovered' : ''}`}
-                    transform={`translate(${star.x}, ${star.y}) scale(${invScale})`}
+                    className={`fits-renderer__star-group ${isHovered ? 'fits-renderer__star-group--hovered' : ''} ${isSelected ? 'fits-renderer__star-group--selected' : ''}`}
+                    transform={`translate(${screenX}, ${screenY})`}
                     onPointerEnter={() => setHoveredStarId(star.id)}
                     onPointerLeave={() => setHoveredStarId(null)}
                     onClick={(e) => {
@@ -207,14 +258,14 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
                     <circle
                       cx={0}
                       cy={0}
-                      r={14}
+                      r={15}
                       className="fits-renderer__reticle-ring"
                     />
                     {/* Precision Reticle: Cardinal Ticks */}
-                    <line x1={0} y1={-19} x2={0} y2={-14} className="fits-renderer__reticle-ticks" />
-                    <line x1={0} y1={14} x2={0} y2={19} className="fits-renderer__reticle-ticks" />
-                    <line x1={-19} y1={0} x2={-14} y2={0} className="fits-renderer__reticle-ticks" />
-                    <line x1={14} y1={0} x2={19} y2={0} className="fits-renderer__reticle-ticks" />
+                    <line x1={0} y1={-21} x2={0} y2={-16} className="fits-renderer__reticle-ticks" />
+                    <line x1={0} y1={16} x2={0} y2={21} className="fits-renderer__reticle-ticks" />
+                    <line x1={-21} y1={0} x2={-16} y2={0} className="fits-renderer__reticle-ticks" />
+                    <line x1={16} y1={0} x2={21} y2={0} className="fits-renderer__reticle-ticks" />
                     {/* Precision Reticle: Center Point */}
                     <circle cx={0} cy={0} r={1.5} className="fits-renderer__reticle-center" />
 
@@ -242,7 +293,7 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
                     {/* Spectral Type Tag */}
                     {hasSpec && (
                       <text
-                        x={badgeX + 8 + nameLen * 7.2 + 5}
+                        x={badgeX + 8 + nameLen * 7.6 + 5}
                         y={0}
                         dominantBaseline="central"
                         className="fits-renderer__badge-type"
@@ -253,7 +304,7 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
 
                     {/* Navigation Arrow */}
                     <text
-                      x={badgeX + badgeWidth - 13}
+                      x={badgeX + badgeWidth - 14}
                       y={0}
                       dominantBaseline="central"
                       className="fits-renderer__badge-action"
@@ -301,6 +352,7 @@ export const FitsRenderer = React.memo(FitsRendererInternal, (prevProps, nextPro
     prevProps.disableStretch === nextProps.disableStretch &&
     prevProps.stretch === nextProps.stretch &&
     prevProps.showOverlay === nextProps.showOverlay &&
-    prevProps.overlayStars === nextProps.overlayStars
+    prevProps.overlayStars === nextProps.overlayStars &&
+    prevProps.selectedStarId === nextProps.selectedStarId
   );
 });

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useTargetContext } from '../common/context/TargetContext';
 import { useTargetListLogic } from '../common/hooks/useTargetListLogic';
 import { useTargetActions } from '../common/hooks/useTargetActions';
@@ -99,17 +99,49 @@ const ImageProcessingDisplayInner: React.FC = () => {
     wasProcessingRef.current = isProcessing;
   }, [isProcessing, setCheckedFiles]);
 
-  // Clear target search filter when navigated to a specific target
+  const fitsRendererRef = React.useRef<FitsRendererHandle>(null);
+
+  const [overlayStars, setOverlayStars] = useState<AstrometryOverlayStar[]>([]);
+  const [showAstrometryOverlay, setShowAstrometryOverlay] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('astrometrics:enableAstrometryOverlay') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [isLoadingOverlay, setIsLoadingOverlay] = useState(false);
+
+  const [selectedStarId, setSelectedStarId] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem('astrometrics:imageProcessingSelectedStar');
+    } catch {
+      return null;
+    }
+  });
+
+  const pendingEnableAstrometryRef = useRef<boolean>(false);
+
+  // Clear target search filter and pick up incoming star / overlay settings when navigated to a specific target
   useEffect(() => {
     const handleTargetSelected = (event: Event) => {
-      const targetId = (event as CustomEvent<string>).detail;
+      const raw = (event as CustomEvent).detail;
+      const targetId = typeof raw === 'string' ? raw : raw?.targetId;
       if (targetId) {
         setFilterText('');
+      }
+      if (raw && typeof raw === 'object') {
+        if (raw.enableAstrometry) {
+          pendingEnableAstrometryRef.current = true;
+          setShowAstrometryOverlay(true);
+        }
+        if (raw.starId) {
+          setSelectedStarId(raw.starId);
+        }
       }
     };
     window.addEventListener('astrometrics:targetSelected', handleTargetSelected);
     return () => window.removeEventListener('astrometrics:targetSelected', handleTargetSelected);
-  }, [setFilterText]);
+  }, [setFilterText, setShowAstrometryOverlay, setSelectedStarId]);
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -124,15 +156,25 @@ const ImageProcessingDisplayInner: React.FC = () => {
 
   const { saveTarget, confirmDeleteTarget, handleCreateTarget } = useTargetActions();
 
-  const fitsRendererRef = React.useRef<FitsRendererHandle>(null);
-
-  const [overlayStars, setOverlayStars] = useState<AstrometryOverlayStar[]>([]);
-  const [showAstrometryOverlay, setShowAstrometryOverlay] = useState(false);
-  const [isLoadingOverlay, setIsLoadingOverlay] = useState(false);
-
   useEffect(() => {
     let active = true;
-    setShowAstrometryOverlay(false);
+    let shouldEnable = pendingEnableAstrometryRef.current;
+    try {
+      if (localStorage.getItem('astrometrics:enableAstrometryOverlay') === 'true') {
+        shouldEnable = true;
+        localStorage.removeItem('astrometrics:enableAstrometryOverlay');
+      }
+    } catch {
+      // Ignore
+    }
+    pendingEnableAstrometryRef.current = false;
+
+    if (shouldEnable) {
+      setShowAstrometryOverlay(true);
+    } else {
+      setShowAstrometryOverlay(false);
+    }
+
     if (!selectedTarget) {
       setOverlayStars([]);
       return;
@@ -142,6 +184,9 @@ const ImageProcessingDisplayInner: React.FC = () => {
       .then((stars) => {
         if (active) {
           setOverlayStars(stars);
+          if (shouldEnable && stars.length > 0) {
+            setShowAstrometryOverlay(true);
+          }
         }
       })
       .catch((err: unknown) => {
@@ -190,7 +235,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
     } finally {
       setIsLoadingOverlay(false);
     }
-  }, [showAstrometryOverlay, overlayStars, selectedTarget]);
+  }, [showAstrometryOverlay, overlayStars, selectedTarget, setShowAstrometryOverlay]);
 
   /**
    * Handles clicking an astrometry star reticle or badge in the FITS viewer.
@@ -200,9 +245,14 @@ const ImageProcessingDisplayInner: React.FC = () => {
     const starId = star.id || star.name;
     if (!starId) return;
 
-    // Persist and broadcast star selection for AstronomyDisplay live handoff
-    localStorage.setItem('planetariumSelectedStar', starId);
-    localStorage.setItem('appMode', 'Astronomy Manager');
+    setSelectedStarId(starId);
+    try {
+      localStorage.setItem('astrometrics:imageProcessingSelectedStar', starId);
+      localStorage.setItem('planetariumSelectedStar', starId);
+      localStorage.setItem('appMode', 'Astronomy Manager');
+    } catch {
+      // Ignore
+    }
     window.dispatchEvent(new CustomEvent('astrometrics:astronomySelectStar', { detail: starId }));
     window.dispatchEvent(new CustomEvent('astrometrics:modeChange', { detail: 'Astronomy Manager' }));
     emitToast(`Opening ${star.name || starId} in Astronomy Manager`, 'info', 'Astrometry');
@@ -358,6 +408,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
       onToggleAstrometryOverlay={handleToggleAstrometryOverlay}
       isLoadingOverlay={isLoadingOverlay}
       onStarClick={handleStarClick}
+      selectedStarId={selectedStarId}
       allFiles={allFiles}
       filteredFiles={filteredFiles}
       fileFilterText={fileFilterText}

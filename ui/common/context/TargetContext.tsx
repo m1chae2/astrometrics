@@ -101,7 +101,8 @@ export const TargetProvider: React.FC<TargetProviderProps> = ({ children }) => {
     // Synchronize external target selection events (e.g. from Astronomy Manager, Planetarium, or WebSocket)
     useEffect(() => {
         const handleTargetSelected = (event: Event) => {
-            const targetId = (event as CustomEvent<string>).detail;
+            const raw = (event as CustomEvent).detail;
+            const targetId = typeof raw === 'string' ? raw : raw?.targetId;
             if (targetId) {
                 setSelectedTarget(targetId);
                 setPendingTarget(targetId);

@@ -14,6 +14,7 @@ from astrometricslib.drivers.job_logging import JobHandle, capture_job_logs, reg
 from astrometricslib.drivers.logger_interface import DbLogHandler, LoggerInterface
 from astrometricslib.drivers.siril_interface import ImageProcessing
 from astrometricslib.models.target import Target
+from astrometricslib.pipelines.stacking.siril_stacking import run_siril_stack
 from astrometricslib.utilities.config_loader import AppConfiguration
 
 __all__ = [
@@ -26,6 +27,7 @@ __all__ = [
     "QualityDiagnostics",
     "capture_job_logs",
     "registered_job",
+    "run_siril_stack",
 ]
 
 _CalibrationKind = Literal["dark", "bias", "flat"]

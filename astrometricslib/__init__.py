@@ -31,6 +31,7 @@ from astrometricslib.api.processing import (
     LoggerInterface,
     capture_job_logs,
     registered_job,
+    run_siril_stack,
 )
 from astrometricslib.api.targets import (
     classify_and_sort_fits_files,
@@ -249,4 +250,5 @@ __all__ = [
     "registered_job",
     "resolve_worker_counts",
     "run_parallel_batch",
+    "run_siril_stack",
 ]

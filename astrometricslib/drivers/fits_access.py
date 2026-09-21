@@ -75,6 +75,24 @@ def read_data(path: str):  # ruff: ignore[missing-return-type-undocumented-publi
         return hdu.data
 
 
+def write_image(path: str, data: np.ndarray, header: fits.Header | None = None) -> None:
+    """Write a 2D image to a new FITS file, with the pixels in HDU 0.
+
+    Every reader in this module finds the pixels in HDU 0 (or HDU 1 when
+    HDU 0 is empty), so writing to HDU 0 is always read back correctly.
+
+    Parameters
+    ----------
+    path : str
+        Where to write the file. An existing file is replaced.
+    data : numpy.ndarray
+        The pixel array to store.
+    header : astropy.io.fits.Header, optional
+        Keywords to store with the image.
+    """
+    fits.PrimaryHDU(data=data, header=header).writeto(path, overwrite=True)
+
+
 def frame_dimensions(path: str) -> tuple[int, int] | None:
     """Find the width and height of the image from its header.
 

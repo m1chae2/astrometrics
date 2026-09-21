@@ -21,6 +21,8 @@ from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
+from astrometricslib.drivers.siril_output_parsing import parse_registration_totals, parse_stacked_image_count
+
 # Declares this module's own public surface. Without it, sphinx-automodapi
 # documents every imported name too, which is what produced the
 # "stub file not found" warnings for re-exports and typing helpers.
@@ -41,6 +43,32 @@ _active_image_processing_instances: weakref.WeakSet = weakref.WeakSet()
 # Note: Only Siril itself is locked; other preparation steps still run
 # in parallel to save time.
 SIRIL_PROCESS_LOCK_PATH = os.path.join(tempfile.gettempdir(), "astrometricslib-siril.lock")
+
+# The two ways to find the stars that line spectroscopy frames up with one
+# another, keyed by the name `process_target` takes in
+# `spectral_star_detection`. Siril finds stars in every frame and matches
+# them against a reference frame, so the number of stars found in the
+# reference decides which frames can be matched at all.
+#
+# "standard" is what the pipeline used until 2026-09-19 (it is also the line
+# every other stack uses). On the Vega spectroscopy session (140 frames,
+# 0.5-5 s, 2026-05-24) it found 19 stars in the reference frame, matched 16
+# of them in every frame, and registered all 140 frames (the 2026-08-25
+# stack, logs/stack_Vega.log).
+#
+# "relaxed" accepts less round and smaller stars, to find more of them in
+# crowded fields. It was made the only setting on 2026-09-19. On the same
+# Vega frames it found 76 "stars" in the reference frame (a mix of real stars
+# and pieces of dispersed trails, with a typical size of 27 px against 3.6 px
+# for the standard setting) and could not match 46 of the 140 frames; the
+# frames it lost were mostly the short ones, which show fewer stars. It was
+# added for fields with many stars (the comment it came with mentions 99-125
+# stars per frame), and that case has not been re-tested here; that is why it
+# is kept as a fallback (see `stack_frames`) instead of removed.
+SPECTRAL_STAR_DETECTION_COMMANDS = {
+    "standard": "setfindstar -relax=on",
+    "relaxed": "setfindstar -relax=on -roundness=0.15 -radius=3",
+}
 
 # How long send_commands waits for one Siril command to report its own
 # completion before giving up on the whole script. This is a deadlock
@@ -1170,6 +1198,13 @@ class ImageProcessing:
             with pipe_context as pipe:
                 for line in pipe:
                     log(line.strip())
+                    registration_totals = parse_registration_totals(line)
+                    if registration_totals is not None:
+                        self.last_run_diagnostics["registration_failed_frames"] = registration_totals[0]
+                        self.last_run_diagnostics["registered_frames"] = registration_totals[1]
+                    stacked_count = parse_stacked_image_count(line)
+                    if stacked_count is not None:
+                        self.last_run_diagnostics["images_stacked"] = stacked_count
                     if status_queue is not None and ("status: success" in line or "status: error" in line):
                         status_queue.put(line)
                     if "status: success stack" in line:
@@ -1280,6 +1315,7 @@ class ImageProcessing:
         filter_round: str | None = None,
         stack_weight: str | None = None,
         generate_rejmap: bool | None = None,
+        spectral_star_detection: str = "standard",
     ) -> str | None:
         """Calibrate, register, and stack a target's frames via Siril.
 
@@ -1709,11 +1745,11 @@ class ImageProcessing:
                     # Single-pass `register` applies its transforms as
                     # it goes and offers no separate filtering step, so
                     # this path's frame filters stay on `stack` below.
-                    # Dispersed star images have low roundness (< 0.5)
-                    # and smaller apparent core radii, so relax roundness
-                    # and radius to detect enough field stars (40-60+)
-                    # for robust pair matching against Frame 0.
-                    register_commands = ["setfindstar -relax=on -roundness=0.15 -radius=3"]
+                    # Which stars register the frames is chosen by
+                    # `spectral_star_detection`; see
+                    # SPECTRAL_STAR_DETECTION_COMMANDS for the two
+                    # settings and why the standard one is the default.
+                    register_commands = [SPECTRAL_STAR_DETECTION_COMMANDS[spectral_star_detection]]
                     register_commands.append(f"register {seq} -transf=shift")
                     registered_seq = f"r_{seq}"
                     stack_filter_options = frame_filter_options

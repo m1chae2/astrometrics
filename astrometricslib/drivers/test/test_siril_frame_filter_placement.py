@@ -35,9 +35,9 @@ def captured_siril_script(tmp_path, monkeypatch):  # ruff: ignore[missing-type-f
     Returns
     -------
     run_process_target : `callable`
-        Called with ``is_spectral``, ``filter_wfwhm``, and
-        ``filter_round``; returns the list of Siril commands
-        `process_target` would have sent.
+        Called with ``is_spectral``, ``filter_wfwhm``, ``filter_round``
+        and, optionally, ``spectral_star_detection``; returns the list
+        of Siril commands `process_target` would have sent.
     """
     sent_commands: list[str] = []
 
@@ -80,7 +80,12 @@ def captured_siril_script(tmp_path, monkeypatch):  # ruff: ignore[missing-type-f
     monkeypatch.setattr(siril_interface, "_frames_use_color_filter_array", lambda path: False)
     monkeypatch.setattr(siril_interface, "siril_process_lock", lambda **kwargs: _NullContext())
 
-    def run_process_target(is_spectral: bool, filter_wfwhm, filter_round):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def run_process_target(
+        is_spectral: bool,
+        filter_wfwhm: str | None,
+        filter_round: str | None,
+        spectral_star_detection: str = "standard",
+    ) -> list[str]:
         mock_config = MagicMock()
         mock_config.get_siril_executable.return_value = "siril"
         mock_config.get_logs_path.return_value = str(tmp_path)
@@ -103,6 +108,7 @@ def captured_siril_script(tmp_path, monkeypatch):  # ruff: ignore[missing-type-f
             is_spectral=is_spectral,
             filter_wfwhm=filter_wfwhm,
             filter_round=filter_round,
+            spectral_star_detection=spectral_star_detection,
         )
         logging.getLogger("siril_FilterPlacement").handlers.clear()
         return list(sent_commands)
@@ -166,9 +172,10 @@ def test_spectral_path_filters_on_stack(captured_siril_script: Any) -> None:
 
     assert not [command for command in commands if command.startswith("seqapplyreg")]
 
+    # The standard detection is the default: it is the setting that
+    # registered all 140 Vega frames (2026-08-25).
     setfindstar_command = _find_command(commands, "setfindstar")
-    assert "-roundness=0.15" in setfindstar_command
-    assert "-radius=3" in setfindstar_command
+    assert setfindstar_command == "setfindstar -relax=on"
 
     register_command = _find_command(commands, "register")
     assert "-transf=shift" in register_command
@@ -176,6 +183,26 @@ def test_spectral_path_filters_on_stack(captured_siril_script: Any) -> None:
     stack_command = _find_command(commands, "stack r_")
     assert "-filter-wfwhm=90%" in stack_command
     assert "-filter-round=90%" in stack_command
+
+
+def test_spectral_path_can_use_the_relaxed_star_detection(captured_siril_script: Any) -> None:
+    """The relaxed detection is there for fields the standard misses."""
+    commands = captured_siril_script(
+        is_spectral=True, filter_wfwhm=None, filter_round=None, spectral_star_detection="relaxed"
+    )
+
+    setfindstar_command = _find_command(commands, "setfindstar")
+    assert "-roundness=0.15" in setfindstar_command
+    assert "-radius=3" in setfindstar_command
+
+
+def test_standard_imaging_ignores_the_spectral_star_detection(captured_siril_script: Any) -> None:
+    """Only spectral frames use the spectral detection setting."""
+    commands = captured_siril_script(
+        is_spectral=False, filter_wfwhm=None, filter_round=None, spectral_star_detection="relaxed"
+    )
+
+    assert _find_command(commands, "setfindstar") == "setfindstar -relax=on"
 
 
 def test_filters_are_never_applied_twice(captured_siril_script):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]

@@ -12,6 +12,49 @@ import re
 
 _REGISTRATION_LINE_PATTERN = re.compile(r"^R(\d+) ")
 
+# Siril reports how registration went as "Total: 46 failed, 94 registered."
+_REGISTRATION_TOTAL_PATTERN = re.compile(r"Total:\s*(\d+)\s+failed,\s*(\d+)\s+registered")
+
+# ... and how stacking went as "Rejection stacking complete. 94 images have
+# been stacked."
+_STACKED_COUNT_PATTERN = re.compile(r"stacking complete\.\s*(\d+)\s+images? have been stacked")
+
+
+def parse_registration_totals(line: str) -> tuple[int, int] | None:
+    """Read how many frames Siril failed and managed to register.
+
+    Parameters
+    ----------
+    line : `str`
+        One line of Siril's output.
+
+    Returns
+    -------
+    totals : `tuple` [`int`, `int`] or `None`
+        ``(failed, registered)`` when the line is Siril's registration
+        summary, otherwise `None`.
+    """
+    match = _REGISTRATION_TOTAL_PATTERN.search(line)
+    return (int(match.group(1)), int(match.group(2))) if match else None
+
+
+def parse_stacked_image_count(line: str) -> int | None:
+    """Read how many images Siril stacked.
+
+    Parameters
+    ----------
+    line : `str`
+        One line of Siril's output.
+
+    Returns
+    -------
+    count : `int` or `None`
+        The number of images stacked when the line is Siril's stacking
+        summary, otherwise `None`.
+    """
+    match = _STACKED_COUNT_PATTERN.search(line)
+    return int(match.group(1)) if match else None
+
 
 def parse_seq_file(seq_path: str) -> list[dict[str, float]]:
     """Read the registration results file from Siril.

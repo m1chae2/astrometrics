@@ -83,6 +83,7 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "registered_job",
     "resolve_worker_counts",
     "run_parallel_batch",
+    "run_siril_stack",
 })
 
 

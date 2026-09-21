@@ -230,22 +230,26 @@ def stack_frames(
             )
 
     from astrometricslib.drivers.siril_interface import ImageProcessing
+    from astrometricslib.pipelines.stacking.siril_stacking import run_siril_stack
 
     siril_driver = ImageProcessing()
-    stacked_path = siril_driver.process_target(
-        id=target.id,
-        image_files=[f.model_dump() for f in target_frames],
-        output_file=output_file,
-        log_file=log_file,
-        is_spectral=has_spectral,
+    # `run_siril_stack` adds two safeguards for spectroscopy: frames of
+    # different exposure lengths are stacked one length at a time and then
+    # combined, and a registration that loses too many frames is retried with
+    # a different star detection.
+    stacked_path, diagnostics = run_siril_stack(
+        siril_driver,
+        target_frames,
+        target.id,
+        output_file,
+        log_file,
+        has_spectral,
         rejection_sigma=rejection_sigma,
         filter_wfwhm=filter_wfwhm,
         filter_round=filter_round,
         stack_weight=stack_weight,
         generate_rejmap=generate_rejmap,
     )
-
-    diagnostics = siril_driver.last_run_diagnostics
     excluded_frames.extend(
         ExcludedFrame(path=path, reason="corrupt or unreadable FITS file")
         for path in diagnostics.get("corrupt_frames_skipped", [])

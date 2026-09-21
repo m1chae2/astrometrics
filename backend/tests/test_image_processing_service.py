@@ -43,12 +43,17 @@ def test_start_siril_processing_task_with_spectral_frames() -> None:
     )
 
     assert result == stacked_output_path
+    # The driver is reached through `run_siril_stack`, which names the
+    # stack after the target and, for spectral frames, says which star
+    # detection to use (the standard one is tried first).
     mock_siril.process_target.assert_called_once_with(
-        target_id,
-        image_files,
+        id=target_id,
+        image_files=image_files,
+        output_file="Arcturus_Stacked.fits",
         log_file=None,
-        job_id="test-job-spec",
         is_spectral=True,
+        job_id="test-job-spec",
+        spectral_star_detection="standard",
     )
     assert target.stacked_spectral_target == stacked_output_path
     assert target.stacked_image == ""
@@ -84,11 +89,12 @@ def test_start_siril_processing_task_with_standard_frames() -> None:
 
     assert result == stacked_output_path
     mock_siril.process_target.assert_called_once_with(
-        target_id,
-        image_files,
+        id=target_id,
+        image_files=image_files,
+        output_file="M_42_Stacked.fits",
         log_file=None,
-        job_id="test-job-lum",
         is_spectral=False,
+        job_id="test-job-lum",
     )
     assert target.stacked_image == stacked_output_path
     assert target.stacked_spectral_target == ""

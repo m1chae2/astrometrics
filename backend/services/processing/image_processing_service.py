@@ -276,15 +276,20 @@ def start_siril_processing_task(
     # whether they were started here or by the offline batch script
     # (pipeline_tasks.run_full_pipeline) -- an OS-level lock, respected
     # across processes.
-    from astrometricslib import ProcessingPipelines, get_configuration
+    from astrometricslib import ProcessingPipelines, get_configuration, run_siril_stack
 
     with ProcessingPipelines(get_configuration()).acquire_stacking_slot():
-        final_path = siril.process_target(
-            target_id,
+        # Goes through `run_siril_stack` so that spectral frames of different
+        # exposure lengths are stacked one length at a time, and a
+        # registration that loses too many frames is retried.
+        final_path, _diagnostics = run_siril_stack(
+            siril,
             image_files,
-            log_file=log_file_path,
+            target_id,
+            None,
+            log_file_path,
+            is_spectral,
             job_id=job_id,
-            is_spectral=is_spectral,
         )
 
     if notification_service:

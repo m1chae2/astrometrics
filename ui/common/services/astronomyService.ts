@@ -94,3 +94,32 @@ export async function analyzeStarPeriodicity(objectId: string): Promise<Spectrum
         throw err;
     }
 }
+
+export interface AstrometryOverlayStar {
+    id: string;
+    name: string;
+    x: number;
+    y: number;
+    spectralType?: string;
+    isCatalogIdentified: boolean;
+    referenceWidth?: number | null;
+    referenceHeight?: number | null;
+}
+
+/**
+ * Fetches identified stars and their pixel coordinates for astrometry overlay.
+ * @param targetId The target identifier to fetch stars for.
+ * @param limit Maximum number of stars to return (defaults to 35).
+ * @returns List of star overlay items with centroid coordinates and labels.
+ */
+export async function fetchAstrometryOverlayStars(
+    targetId: string,
+    limit = 35
+): Promise<AstrometryOverlayStar[]> {
+    if (!targetId || targetId.trim() === '') return [];
+    const data = await callBackend("astronomy:get_overlay_stars", {
+        target_id: targetId.trim(),
+        limit
+    });
+    return Array.isArray(data) ? (data as AstrometryOverlayStar[]) : [];
+}

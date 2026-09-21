@@ -178,6 +178,7 @@ class RPCHandlerRegistry:
         self.register("astronomy:save", ("stellar_service", "save_objects"))
         self.register("astronomy:analyze_periodicity", ("stellar_service", "analyze_periodicity"))
         self.register("astronomy:get_stellar_objects", ("stellar_service", "get_stellar_objects"))
+        self.register("astronomy:get_overlay_stars", ("stellar_service", "get_astrometry_overlay_stars"))
         self.register("astronomy:get_target_status", ("stellar_service", "get_target_status"))
         self.register("astronomy:get_status", ("stellar_service", "get_target_status"))
         self.register("astronomy:visible", ("stellar_service", "get_visible_targets"))

@@ -1,5 +1,10 @@
+/**
+ * @file useCanvasInteraction.ts
+ * @description Hook providing pan, zoom, wheel, and touch interactions for FITS and bitmap canvases.
+ * Maintains transform coordinates and viewport scaling.
+ */
 import { useState, useRef, useEffect, useCallback, RefObject } from 'react';
-import { clamp, screenToImage } from '../utils/transformUtils';
+import { clamp } from '../utils/transformUtils';
 
 interface InteractionState {
     zoom: number;
@@ -8,6 +13,14 @@ interface InteractionState {
     isPanning: boolean;
 }
 
+/**
+ * Hook to manage interactive pan and zoom manipulation on a canvas within a container.
+ *
+ * @param containerRef Reference to the parent container element.
+ * @param drawnSize Current dimensions of the drawn image on the canvas.
+ * @param onLevelChange Optional callback for level adjustment gestures.
+ * @returns Object with zoom, pan positions, transform helpers, and pointer event handlers.
+ */
 export const useCanvasInteraction = (
     containerRef: RefObject<HTMLDivElement | null>,
     drawnSize: { w: number; h: number },
@@ -28,10 +41,16 @@ export const useCanvasInteraction = (
     const initialPinchDistRef = useRef<number | null>(null);
     const initialZoomRef = useRef(1);
 
+    /**
+     * Applies the current pan and zoom values to the canvas and overlay transform styles.
+     */
     const scheduleTransformWrite = useCallback(() => {
-        const el = containerRef.current?.querySelector('canvas');
-        if (!el) return;
-        el.style.transform = `translate(${panRef.current.x}px, ${panRef.current.y}px) scale(${zoomRef.current})`;
+        const elements = containerRef.current?.querySelectorAll<HTMLElement | SVGElement>('canvas, .fits-renderer__overlay');
+        if (!elements || elements.length === 0) return;
+        const transform = `translate(${panRef.current.x}px, ${panRef.current.y}px) scale(${zoomRef.current})`;
+        elements.forEach((el) => {
+            el.style.transform = transform;
+        });
     }, [containerRef]);
 
     const clampPan = useCallback(() => {
@@ -156,6 +175,11 @@ export const useCanvasInteraction = (
         (e.target as HTMLElement).releasePointerCapture(e.pointerId);
     };
 
+    /**
+     * Zooms the viewport relative to its center by a multiplication factor.
+     *
+     * @param factor Zoom multiplier (e.g. 1.2 to zoom in, 0.8 to zoom out).
+     */
     const zoomBy = (factor: number) => {
         const container = containerRef.current;
         if (!container) return;
@@ -182,6 +206,11 @@ export const useCanvasInteraction = (
         setPanY(panRef.current.y);
     };
 
+    /**
+     * Sets the viewport scale to an absolute scale factor centered on the container.
+     *
+     * @param newScale Absolute scale value (e.g. 1.0 for 1:1 pixel mapping).
+     */
     const zoomToScale = (newScale: number) => {
         const container = containerRef.current;
         if (!container) return;
@@ -212,6 +241,9 @@ export const useCanvasInteraction = (
         setPanY(panRef.current.y);
     };
 
+    /**
+     * Resets the viewport scale and centers the image within the container.
+     */
     const zoomToFit = useCallback(() => {
         const container = containerRef.current;
         if (!container || drawnSize.w === 0 || drawnSize.h === 0) return;
@@ -236,20 +268,33 @@ export const useCanvasInteraction = (
         setZoom(fitScale);
         setPanX(panRef.current.x);
         setPanY(panRef.current.y);
-    }, [containerRef, drawnSize, scheduleTransformWrite]);
+    }, [containerRef, drawnSize.w, drawnSize.h, scheduleTransformWrite]);
 
+    /**
+     * Resets view to fit container.
+     */
     const resetView = useCallback(() => {
         // Default to Fit
         zoomToFit();
     }, [zoomToFit]);
 
-    // Reset view when image size changes (new image loaded)
+    const prevDrawnSizeRef = useRef({ w: 0, h: 0 });
+
+    // Reset view only when an image is first loaded or actual pixel dimensions change.
+    // Preserves pan and zoom when re-rendering or stretching an image of the same dimensions.
     useEffect(() => {
-        if (drawnSize.w > 0 && drawnSize.h > 0) {
-            // Short timeout to allow layout to settle if needed, or just run immediate
+        const prev = prevDrawnSizeRef.current;
+        const isFirstLoad = (prev.w === 0 || prev.h === 0) && drawnSize.w > 0 && drawnSize.h > 0;
+        const hasDimensionChanged = prev.w > 0 && prev.h > 0 && (prev.w !== drawnSize.w || prev.h !== drawnSize.h);
+
+        prevDrawnSizeRef.current = { w: drawnSize.w, h: drawnSize.h };
+
+        if (isFirstLoad || hasDimensionChanged) {
             resetView();
+        } else if (drawnSize.w > 0 && drawnSize.h > 0) {
+            scheduleTransformWrite();
         }
-    }, [drawnSize.w, drawnSize.h, resetView]);
+    }, [drawnSize.w, drawnSize.h, resetView, scheduleTransformWrite]);
 
     // zoomToFit reads container.clientWidth/clientHeight at call time. If an
     // image loads while this panel sits behind a `display: none` ancestor
@@ -286,7 +331,7 @@ export const useCanvasInteraction = (
         zoomToScale,
         onPointerDown,
         onPointerMove,
-        onPointerUp
-        // setZoom, setPan...
+        onPointerUp,
+        scheduleTransformWrite
     };
 };

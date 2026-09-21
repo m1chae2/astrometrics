@@ -33,12 +33,14 @@ function formatTelemetryValue(value: string): string {
   }
 
   // Handle celestial coordinate strings: [+-]XX° YY' ZZ.ZZ"
-  const coordRegex = /^([+-]?\d+°\s*\d+['′]\s*)(\d+(?:\.\d+)?)(["″])$/;
+  const coordRegex = /^([+-]?\d+°\s*)(\d+)['′]\s*(\d+(?:\.\d+)?)(["″])$/;
   const coordMatch = value.match(coordRegex);
   if (coordMatch) {
-    const [, prefix, seconds, suffix] = coordMatch;
-    const rounded = Math.round(parseFloat(seconds));
-    return `${prefix}${rounded}${suffix}`;
+    const [, degPrefix, minutes, seconds, suffix] = coordMatch;
+    const roundedSec = Math.round(parseFloat(seconds));
+    const padSec = String(roundedSec).padStart(2, '0');
+    const padMin = String(parseInt(minutes, 10)).padStart(2, '0');
+    return `${degPrefix}${padMin}' ${padSec}${suffix}`;
   }
 
   // Handle plain numeric strings (e.g. temperature or humidity)
@@ -87,20 +89,20 @@ export const StatusBar: React.FC = () => {
 
         <span className="status-bar__divider" aria-hidden="true" />
 
-        <div className="status-bar__item" title="Equatorial Coordinates">
+        <div className="status-bar__item status-bar__item--coords" title="Equatorial Coordinates">
           <span className="status-bar__label">RA</span>
-          <span className="status-bar__value">{ra}</span>
+          <span className="status-bar__value status-bar__value--coord">{ra}</span>
           <span className="status-bar__label" style={{ marginLeft: '6px' }}>DEC</span>
-          <span className="status-bar__value">{dec}</span>
+          <span className="status-bar__value status-bar__value--coord">{dec}</span>
         </div>
 
         <span className="status-bar__divider" aria-hidden="true" />
 
-        <div className="status-bar__item" title="Horizontal Coordinates">
+        <div className="status-bar__item status-bar__item--coords" title="Horizontal Coordinates">
           <span className="status-bar__label">ALT</span>
-          <span className="status-bar__value">{alt}</span>
+          <span className="status-bar__value status-bar__value--coord">{alt}</span>
           <span className="status-bar__label" style={{ marginLeft: '6px' }}>AZ</span>
-          <span className="status-bar__value">{az}</span>
+          <span className="status-bar__value status-bar__value--coord">{az}</span>
         </div>
       </div>
 

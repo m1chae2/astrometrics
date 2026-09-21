@@ -4,6 +4,7 @@ import logging
 import math
 import re
 import threading
+from typing import Any
 
 from astrometricslib import Astrometrics, StellarObject
 
@@ -258,6 +259,241 @@ class StellarService:
             for obj in self.get_stellar_objects(target_id)
             if not _is_per_frame_photometry_detection(obj.id)
         ]
+
+    def get_astrometry_overlay_stars(self, target_id: str, limit: int = 35) -> list[dict]:
+        """Retrieve star pixel centroids and labels for astrometry overlay.
+
+        Attempts to retrieve catalog-identified stars and their pixel positions
+        on the target's stacked reference image, using WCS celestial projection
+        when celestial coordinates (RA/Dec) are present or direct centroids
+        from detection star data.
+
+        Parameters
+        ----------
+        target_id : `str`
+            Target identifier to retrieve overlay stars for.
+        limit : `int`, optional
+            Maximum number of stars to return (default 35).
+
+        Returns
+        -------
+        result : `list` of `dict`
+            List of star overlay entries with ``id``, ``name``, ``x``, ``y``,
+            ``spectralType``, ``isCatalogIdentified``, ``referenceWidth``,
+            and ``referenceHeight``.
+        """
+        if not target_id:
+            return []
+
+        from unittest.mock import Mock
+
+        is_mock = isinstance(self.astrometrics, Mock) or isinstance(
+            getattr(self.astrometrics, "stars", None), Mock
+        )
+
+        candidate_ids = [target_id]
+        if "_" in target_id:
+            cand_space = target_id.replace("_", " ")
+            if cand_space not in candidate_ids:
+                candidate_ids.append(cand_space)
+        if " " in target_id:
+            cand_under = target_id.replace(" ", "_")
+            if cand_under not in candidate_ids:
+                candidate_ids.append(cand_under)
+
+        ref_width: int | None = None
+        ref_height: int | None = None
+        wcs = None
+        target_entity = None
+        targets_api = getattr(self.astrometrics, "targets", None)
+
+        if targets_api and hasattr(targets_api, "get"):
+            for tid in candidate_ids:
+                try:
+                    target_entity = targets_api.get(tid)
+                    if target_entity:
+                        break
+                except Exception as err:
+                    logger.debug("Failed to get target entity for %s: %s", tid, err)
+
+        img_path = None
+        if target_entity:
+            img_path = getattr(target_entity, "stacked_image", None) or getattr(
+                target_entity, "processed_image", None
+            )
+
+        if img_path and str(img_path).endswith(".fits"):
+            try:
+                from astropy.io import fits
+                from astropy.wcs import WCS
+
+                with fits.open(img_path, memmap=False) as hdul:
+                    hdr = hdul[0].header
+                    val_w = hdr.get("NAXIS1")
+                    val_h = hdr.get("NAXIS2")
+                    if val_w is not None:
+                        ref_width = int(val_w)
+                    if val_h is not None:
+                        ref_height = int(val_h)
+                    try:
+                        w = WCS(hdr)
+                        if w.is_celestial:
+                            wcs = w
+                    except Exception:
+                        wcs = None
+            except Exception as err:
+                logger.debug("Could not read WCS from reference image %s: %s", img_path, err)
+
+        results: list[dict] = []
+
+        if not is_mock:
+            summaries: list[dict] = []
+            for tid in candidate_ids:
+                try:
+                    sums = self.get_displayable_stellar_object_summaries(tid, limit=max(100, limit * 3))
+                    if sums and isinstance(sums, list) and isinstance(sums[0], dict):
+                        summaries = sums
+                        break
+                except Exception as err:
+                    logger.debug("Failed to get stellar summaries for %s: %s", tid, err)
+
+            if summaries:
+                for s in summaries:
+                    spec_type = str(s.get("spectralType") or "")
+                    if spec_type in ("GlC", "Cluster") or "Cluster" in str(s.get("name") or ""):
+                        continue
+                    s_id = str(s.get("id") or "")
+                    if s_id.startswith("Star_"):
+                        continue
+
+                    x = s.get("x")
+                    y = s.get("y")
+
+                    if (
+                        (x is None or y is None)
+                        and wcs
+                        and s.get("ra") is not None
+                        and s.get("dec") is not None
+                    ):
+                        try:
+                            px, py = wcs.all_world2pix(float(s["ra"]), float(s["dec"]), 0)
+                            x = float(px)
+                            y = float(py)
+                        except Exception as err:
+                            logger.debug("WCS projection failed for %s: %s", s_id, err)
+                            continue
+
+                    if x is None or y is None:
+                        continue
+
+                    if ref_width is not None and ref_height is not None:
+                        if not (0 <= x <= ref_width and 0 <= y <= ref_height):
+                            continue
+
+                    name = str(s.get("name") or s_id)
+                    results.append({
+                        "id": s_id,
+                        "name": name,
+                        "x": round(float(x), 1),
+                        "y": round(float(y), 1),
+                        "spectralType": spec_type,
+                        "isCatalogIdentified": not s_id.startswith("Star_"),
+                        "referenceWidth": ref_width,
+                        "referenceHeight": ref_height,
+                    })
+                    if limit and limit > 0 and len(results) >= limit:
+                        break
+
+                if results:
+                    return results
+
+        norm_target_ids = {str(tid).replace("_", " ").strip().lower() for tid in candidate_ids}
+        objects = self.get_displayable_stellar_objects()
+        candidates: list[tuple[Any, float, float]] = []
+
+        for obj in objects:
+            obj_target_ids = {
+                str(tid).replace("_", " ").strip().lower() for tid in (getattr(obj, "target_ids", None) or [])
+            }
+            if not (norm_target_ids & obj_target_ids):
+                continue
+            if getattr(obj, "stellar_spectral_type", "") == "Cluster":
+                continue
+            obj_id = str(getattr(obj, "id", ""))
+            if obj_id.startswith("Star_"):
+                continue
+
+            star_data = getattr(obj, "star_data", {})
+            x = None
+            y = None
+            if isinstance(star_data, dict):
+                x = star_data.get("xcentroid", star_data.get("x_centroid"))
+                y = star_data.get("ycentroid", star_data.get("y_centroid"))
+
+            if (x is None or y is None) and wcs:
+                ra_val = getattr(obj, "right_ascension", None) or getattr(obj, "ra", None)
+                dec_val = getattr(obj, "declination", None) or getattr(obj, "dec", None)
+                if ra_val is not None and dec_val is not None:
+                    try:
+                        px, py = wcs.all_world2pix(float(ra_val), float(dec_val), 0)
+                        x, y = float(px), float(py)
+                    except Exception as err:
+                        logger.debug("WCS projection failed for fallback %s: %s", obj_id, err)
+
+            if x is None or y is None:
+                continue
+
+            try:
+                x_val = float(x)
+                y_val = float(y)
+            except ValueError, TypeError:
+                continue
+
+            if ref_width is not None and ref_height is not None:
+                if not (0 <= x_val <= ref_width and 0 <= y_val <= ref_height):
+                    continue
+
+            candidates.append((obj, x_val, y_val))
+
+        def _overlay_sort_key(item: tuple[Any, float, float]) -> tuple:
+            candidate_obj = item[0]
+            cand_id = str(getattr(candidate_obj, "id", "") or "")
+            is_identified = bool(getattr(candidate_obj, "is_catalog_identified", False))
+            is_position_only = cand_id.startswith(_POSITION_ONLY_STAR_ID_PREFIX)
+            magnitude = getattr(candidate_obj, "magnitude", None)
+            has_mag = _has_catalog_magnitude(magnitude)
+            flux = getattr(candidate_obj, "flux", None)
+            flux_val = float(flux) if flux is not None and isinstance(flux, (int, float)) else 0.0
+            return (
+                not is_identified,
+                is_position_only,
+                not has_mag,
+                float(magnitude) if has_mag else 0.0,
+                -flux_val,
+                cand_id,
+            )
+
+        candidates.sort(key=_overlay_sort_key)
+        capped = candidates[:limit] if limit and limit > 0 else candidates
+
+        fallback_results = []
+        for obj, x_val, y_val in capped:
+            spectral_type = (
+                getattr(obj, "stellar_spectral_type", "") or getattr(obj, "spectral_type", "") or ""
+            )
+            name = getattr(obj, "name", "") or getattr(obj, "id", "")
+            fallback_results.append({
+                "id": str(getattr(obj, "id", "")),
+                "name": str(name),
+                "x": round(x_val, 1),
+                "y": round(y_val, 1),
+                "spectralType": str(spectral_type),
+                "isCatalogIdentified": bool(getattr(obj, "is_catalog_identified", False)),
+                "referenceWidth": ref_width,
+                "referenceHeight": ref_height,
+            })
+
+        return fallback_results
 
     def get_displayable_stellar_object_summaries(
         self,

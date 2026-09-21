@@ -61,10 +61,13 @@ export const StatusHeader: React.FC = () => {
   const connModifier = connected === null ? 'unknown' : (connected ? 'connected' : 'disconnected');
   const connTxt = connected === null ? 'Checking…' : (connected ? 'Connected' : 'Disconnected');
   const trackVal = trackingStatus || 'Not Tracking';
-  const notTrackingRegex = /park|not track|not-tracking|not tracking/i;
-  const trackModifier = notTrackingRegex.test(String(trackVal))
-    ? 'not-tracking'
-    : (telescopeConnection ? 'connected' : 'disconnected');
+  const isParked = /park/i.test(String(trackVal));
+  const notTrackingRegex = /not track|not-tracking|not tracking/i;
+  const trackModifier = isParked
+    ? 'parked'
+    : notTrackingRegex.test(String(trackVal))
+      ? 'not-tracking'
+      : (telescopeConnection ? 'connected' : 'disconnected');
 
   const availableModes = [
     'Image Viewer',
@@ -135,20 +138,20 @@ export const StatusHeader: React.FC = () => {
 
             <span className="header__divider" aria-hidden="true" />
 
-            <div className="header__telemetry-item" title="Equatorial Coordinates">
+            <div className="header__telemetry-item header__telemetry-item--coords" title="Equatorial Coordinates">
               <span className="header__telemetry-label">RA</span>
-              <span className="header__telemetry-value">{ra}</span>
+              <span className="header__telemetry-value header__telemetry-value--coord">{ra}</span>
               <span className="header__telemetry-label" style={{ marginLeft: '4px' }}>DEC</span>
-              <span className="header__telemetry-value">{dec}</span>
+              <span className="header__telemetry-value header__telemetry-value--coord">{dec}</span>
             </div>
 
             <span className="header__divider hide-mobile" aria-hidden="true" />
 
-            <div className="header__telemetry-item hide-mobile" title="Horizontal Coordinates">
+            <div className="header__telemetry-item header__telemetry-item--coords hide-mobile" title="Horizontal Coordinates">
               <span className="header__telemetry-label">ALT</span>
-              <span className="header__telemetry-value">{altitude}</span>
+              <span className="header__telemetry-value header__telemetry-value--coord">{altitude}</span>
               <span className="header__telemetry-label" style={{ marginLeft: '4px' }}>AZ</span>
-              <span className="header__telemetry-value">{azimuth}</span>
+              <span className="header__telemetry-value header__telemetry-value--coord">{azimuth}</span>
             </div>
 
             <span className="header__divider hide-mobile" aria-hidden="true" />

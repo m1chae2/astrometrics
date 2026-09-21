@@ -121,6 +121,32 @@ class ImageService:
 
         return FilterType.NONE
 
+    @staticmethod
+    def _resolve_mount_path(path: str) -> str:
+        """Resolve mount path differences between /run/media and /media.
+
+        Parameters
+        ----------
+        path : `str`
+            The candidate filesystem path.
+
+        Returns
+        -------
+        resolved_path : `str`
+            The existing filesystem path if an alternative mount prefix exists.
+        """
+        if not path or os.path.exists(path):
+            return path
+        if path.startswith("/run/media/"):
+            alt = path.replace("/run/media/", "/media/", 1)
+            if os.path.exists(alt):
+                return alt
+        elif path.startswith("/media/"):
+            alt = path.replace("/media/", "/run/media/", 1)
+            if os.path.exists(alt):
+                return alt
+        return path
+
     def create_frame_record(self, path: str, camera: str | None = None) -> FrameRecord:
         """Parse a file and returns a standard FrameRecord.
 
@@ -141,9 +167,10 @@ class ImageService:
         FileNotFoundError
             If ``path`` does not exist on disk.
         """
-        if not os.path.exists(path):
+        resolved = self._resolve_mount_path(path)
+        if not os.path.exists(resolved):
             raise FileNotFoundError(f"{path} not found")
-        return self.imaging_api.create_frame_record(path, camera)
+        return self.imaging_api.create_frame_record(resolved, camera)
 
     def add_frame_to_target(self, target: Target, path: str) -> None:
         """Parse the frame at path and add it to the Target's collections.
@@ -211,8 +238,9 @@ class ImageService:
             ``png_bytes`` is the encoded image and the min/max are the
             pixel statistics used for the stretch.
         """
+        resolved = self._resolve_mount_path(path)
         return self.visualization_api.convert_fits_to_png_with_stats(
-            path, max_dimensions=maxdim, center=center, width=width, cmap=cmap, stretch=stretch
+            resolved, max_dimensions=maxdim, center=center, width=width, cmap=cmap, stretch=stretch
         )
 
     def get_light_frame_data_by_id(
@@ -299,7 +327,8 @@ class ImageService:
             One dictionary per header card, with ``"key"``, ``"value"``,
             and ``"comment"`` entries.
         """
-        return self.target_registry_api.get_header(path)
+        resolved = self._resolve_mount_path(path)
+        return self.target_registry_api.get_header(resolved)
 
     def delete_images(self, paths: list[str], target_id: str | None = None) -> dict[str, Any]:
         """Delete files from disk and remove them from the target's frames.
@@ -317,7 +346,8 @@ class ImageService:
         result : `dict`
             Deletion result payload from the ImagingAPI astrometrics.
         """
-        return self.target_registry_api.delete_images(paths, target_id=target_id)
+        resolved_paths = [self._resolve_mount_path(p) for p in paths]
+        return self.target_registry_api.delete_images(resolved_paths, target_id=target_id)
 
     def get_last_image(self, stretch: bool = True) -> dict[str, Any] | None:
         """Find the most recently created FITS file and convert it to PNG.
@@ -332,7 +362,10 @@ class ImageService:
         result : `dict` or `None`
             Base64-encoded PNG payload, or `None` if no FITS file exists.
         """
-        return self.visualization_api.get_last_captured_image(stretch=stretch)
+        res = self.visualization_api.get_last_captured_image(stretch=stretch)
+        if res and "image_data" in res and "imageData" not in res:
+            res["imageData"] = res["image_data"]
+        return res
 
     def convert_fits(self, path: str, maxdim: int = 2000, stretch: bool = True) -> dict[str, Any] | None:
         """Convert FITS file by path to base64 PNG with min/max stats.
@@ -343,4 +376,8 @@ class ImageService:
             Base64-encoded PNG payload with min/max pixel statistics,
             or `None` if the FITS file could not be converted.
         """
-        return self.visualization_api.convert_fits_to_png(path, max_dimensions=maxdim, stretch=stretch)
+        resolved = self._resolve_mount_path(path)
+        res = self.visualization_api.convert_fits_to_png(resolved, max_dimensions=maxdim, stretch=stretch)
+        if res and "image_data" in res and "imageData" not in res:
+            res["imageData"] = res["image_data"]
+        return res

@@ -103,6 +103,7 @@ export interface ActionRegistry {
     "astronomy:update": { payload: { object_id: string; updates: Partial<Spectrum> }; response: Spectrum | null };
     "astronomy:create": { payload: { object_id: string; ra?: string; dec?: string }; response: Spectrum | null };
     "astronomy:get_audit": { payload: Record<string, never>; response: Record<string, any>[] };
+    "astronomy:get_overlay_stars": { payload: { target_id: string; limit?: number }; response: any[] };
     "planetarium:get_sources": { payload: { ra: number; dec: number; radius: number; limiting_magnitude?: number; include_stars_without_catalog_magnitude?: boolean }; response: PlanetariumSource[] };
     "planetarium:get_targets": { payload: Record<string, never>; response: PlanetariumTarget[] };
     "planetarium:get_visibility": { payload: { objects: Array<{ id: string; type?: string }>; time?: string }; response: PlanetariumVisibilityItem[] };
@@ -480,9 +481,9 @@ export async function withSessionToken(wsUrl: string): Promise<string> {
 export function resolveImageSrc(absolutePath: string | null | undefined): string {
     if (!absolutePath) return '';
 
-    // Check if running in Electron (window.astrometricsIPC is defined)
+    // Check if running in Electron (window.astrometrics is defined)
     // under the file:// protocol, and path is already an absolute system path
-    if (typeof window !== 'undefined' && (window as any).astrometricsIPC && window.location.protocol === 'file:' && /^[/\\]/.test(absolutePath)) {
+    if (typeof window !== 'undefined' && ((window as any).astrometrics || (window as any).astrometricsIPC) && window.location.protocol === 'file:' && /^[/\\]/.test(absolutePath)) {
         return `file://${absolutePath.replace(/\\/g, '/')}`;
     }
 
@@ -518,5 +519,6 @@ export function resolveImageSrc(absolutePath: string | null | undefined): string
     }
 
     const prefix = isFramePath ? '/static/frames/' : '/static/';
-    return `${base}${prefix}${relPath}`;
+    const rawUrl = `${base}${prefix}${relPath}`;
+    return encodeURI(decodeURI(rawUrl));
 }

@@ -205,11 +205,9 @@ launch_backend_bg() {
   BACKEND_LAUNCHED_HERE=1
 }
 
-# Stops the backend whenever a pidfile says one is running (explicit stop/restart).
+# Stops the backend whenever explicit stop/restart is requested.
 stop_backend() {
-  if [ -f "$BACKEND_PID_FILE" ]; then
-    "$BACKEND_LAUNCHER" stop
-  fi
+  "$BACKEND_LAUNCHER" stop
 }
 
 # Stops the backend only if this invocation launched it, so exiting or failing

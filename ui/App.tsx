@@ -82,6 +82,12 @@ const MODE_PANELS: { mode: string; id: string; Component: React.ComponentType }[
   { mode: 'Observation Manager', id: 'ObservationManager', Component: ObservationManager },
 ];
 
+const normalizeAppMode = (m: string): string => {
+  if (m === 'Astronomy Display') return 'Astronomy Manager';
+  if (m === 'Image Processing Display') return 'Image Processing';
+  return m;
+};
+
 /**
  * Internal layout wrapper that handles dynamic mode switching,
  * URL parameter parsing, and WebSocket action routing (e.g. forced navigation).
@@ -94,8 +100,8 @@ const AppContent: React.FC = () => {
     try {
       const params = new URLSearchParams(window.location.search);
       const urlMode = params.get('mode');
-      if (urlMode) return urlMode;
-      return window.localStorage.getItem('appMode') || 'Image Viewer';
+      if (urlMode) return normalizeAppMode(urlMode);
+      return normalizeAppMode(window.localStorage.getItem('appMode') || 'Image Viewer');
     } catch {
       return 'Image Viewer';
     }
@@ -176,7 +182,8 @@ const AppContent: React.FC = () => {
 
     /** Handles custom mode change events. */
     const onModeChange = (e: Event): void => {
-      const detail = (e as CustomEvent).detail;
+      const rawDetail = (e as CustomEvent).detail;
+      const detail = normalizeAppMode(rawDetail);
       setMode(detail);
       fetch('/api/handoff/state', {
         method: 'POST',
@@ -191,8 +198,9 @@ const AppContent: React.FC = () => {
     if (window.astrometrics?.app?.onNavigateMode) {
       removeNavMode = window.astrometrics.app.onNavigateMode((navMode: string) => {
         if (navMode) {
-          setMode(navMode);
-          window.dispatchEvent(new CustomEvent('astrometrics:modeChange', { detail: navMode }));
+          const detail = normalizeAppMode(navMode);
+          setMode(detail);
+          window.dispatchEvent(new CustomEvent('astrometrics:modeChange', { detail }));
         }
       });
     }

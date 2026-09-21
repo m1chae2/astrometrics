@@ -40,8 +40,11 @@ export async function fetchProcessedImage(
         const ext = imagePath.split('.').pop()?.toLowerCase();
         if (ext === 'fits' || ext === 'fit') {
             const result = await callBackend("images:convert_fits", { path: imagePath, stretch: true });
-            if (result && result.imageData) {
-                const res = await fetch(result.imageData, { signal });
+            // Some backend paths return the snake_case name; the generated
+            // `RenderedImage` type only knows `imageData`.
+            const dataUrl = result?.imageData || (result as { image_data?: string } | null)?.image_data;
+            if (dataUrl) {
+                const res = await fetch(dataUrl, { signal });
                 return res.blob();
             }
             return null;

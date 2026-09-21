@@ -11,6 +11,8 @@ import {
     formatCatalogMagnitude,
     formatCoordinateDegrees,
 } from '../utils/starDisplayFormat';
+import { useOptionalTargetContext } from '../../common/context/TargetContext';
+import { emitToast } from '../../common/utils/emitToast';
 
 export interface StarSummaryCardProps {
     /** Detailed astronomy/stellar object data. */
@@ -64,12 +66,40 @@ function locateInPlanetarium(
 }
 
 /**
+ * Switches the app to Image Processing Display with the specified target selected.
+ *
+ * @param targetId Target identifier to load in the Image Processing workspace.
+ * @param setSelectedTarget Optional setter from TargetContext to directly set selectedTarget.
+ * @param setPendingTarget Optional setter from TargetContext to directly set pendingTarget.
+ */
+function navigateToTarget(
+    targetId: string,
+    setSelectedTarget?: (id: string) => void,
+    setPendingTarget?: (id: string) => void
+): void {
+    if (!targetId) return;
+    try {
+        window.localStorage.setItem('selectedTarget', targetId);
+        window.localStorage.setItem('appMode', 'Image Processing');
+    } catch {
+        // Ignore localStorage access failures (e.g. in private browsing)
+    }
+    setSelectedTarget?.(targetId);
+    setPendingTarget?.(targetId);
+    window.dispatchEvent(new CustomEvent('astrometrics:targetSelected', { detail: targetId }));
+    window.dispatchEvent(new CustomEvent('astrometrics:modeChange', { detail: 'Image Processing' }));
+    emitToast(`Opening ${targetId.replace(/_/g, ' ')} in Image Processing`, 'info', 'Targets');
+}
+
+/**
  * Renders stellar metadata summary bar above astronomy plots.
  */
 export const StarSummaryCard: React.FC<StarSummaryCardProps> = ({
     astronomyData,
     starId,
 }) => {
+    const targetContext = useOptionalTargetContext();
+
     if (!starId && !astronomyData) {
         return null;
     }
@@ -138,9 +168,15 @@ export const StarSummaryCard: React.FC<StarSummaryCardProps> = ({
                     <span className="star-summary-card__item">
                         <span className="item-label">Targets:</span>{' '}
                         {targetIds.map((t) => (
-                            <span key={t} className="target-tag-badge">
+                            <button
+                                key={t}
+                                type="button"
+                                className="target-tag-badge"
+                                title={`Open ${t} in Image Processing Display`}
+                                onClick={() => navigateToTarget(t, targetContext?.setSelectedTarget, targetContext?.setPendingTarget)}
+                            >
                                 {t}
-                            </span>
+                            </button>
                         ))}
                     </span>
                 )}

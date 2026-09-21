@@ -102,4 +102,31 @@ describe('StatusHeader component', () => {
     const dashes = screen.getAllByText('-');
     expect(dashes.length).toBeGreaterThanOrEqual(4);
   });
+
+  /**
+   * Test rendering when telescope is in parked state.
+   */
+  it('renders parked state with parked modifier class', () => {
+    vi.mocked(useStatusData).mockReturnValue({
+      telemetry: {
+        altitude: "0° 00' 00\"",
+        azimuth: "0° 00' 00\"",
+        temperature: '20',
+        humidity: '35',
+        ra: '16h 00m 00s',
+        dec: "+00° 00' 00\"",
+      },
+      connected: true,
+      trackingStatus: 'Parked',
+      telescopeConnection: true,
+      selectedMode: 'Observatory Manager',
+      chooseMode: vi.fn(),
+    });
+
+    render(<StatusHeader />);
+
+    const parkedElement = screen.getByText('Parked');
+    expect(parkedElement).toBeTruthy();
+    expect(parkedElement.className).toContain('header__telemetry-value--parked');
+  });
 });

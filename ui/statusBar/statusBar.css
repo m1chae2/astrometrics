@@ -37,6 +37,12 @@
   white-space: nowrap;
 }
 
+.status-bar__item--coords {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .status-bar__label {
   color: rgba(255, 255, 255, 0.45);
   font-weight: 500;
@@ -52,6 +58,10 @@
   font-weight: 600;
   font-size: 11px;
   letter-spacing: -0.2px;
+}
+
+.status-bar__value--coord {
+  display: inline-block;
 }
 
 .status-bar__unit {

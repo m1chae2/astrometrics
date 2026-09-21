@@ -26,6 +26,17 @@ of the streak, and subtracts that sky level from the box total. This stage
 runs BEFORE wavelength calibration, so the calibrator and every later stage
 (feature detection, classification) only ever see star light.
 
+In a crowded field the "sky" beside a star is mostly the light of other
+stars: their spectra overlap, and the glow around each one adds up. That
+light is under our star's box as well, so subtracting it is right. On the
+M 13 stack it was large: for stars of magnitude 8.5-9, 50-90% of the raw
+spectrum was this background, growing toward the red, and K stars looked
+like M stars until it was removed (see
+logs/k_star_sky_investigation_20260919.json). The Vega frame, by contrast,
+is a bright star in a sparse field, and only 0.6% of its spectrum was sky.
+Check a fainter star in a busier field before trusting a change to this
+stage.
+
 What this stage does NOT do: it does not remove Earth's atmosphere
 absorption (telluric lines from oxygen and water vapour). Those are dips
 in the star's own light after it passes through the air, so they are not
@@ -106,9 +117,11 @@ _MINIMUM_FIT_SIGMA_PX = 0.5
 # 2 px gap to a 6 px gap dropped the amount "removed" from 2.05% to 0.57% of
 # the total flux, which is the wings leaving the band. Past 6 px the drop is
 # slower (0.46% at 8 px, 0.17% at 30 px), so the extra distance gains little
-# but risks reaching a neighbouring star's spectrum. This is a one-frame
-# result, and that frame was already background-flattened by stacking, so a
-# frame with strong sky glow has not been tested yet.
+# but risks reaching a neighbouring star's spectrum. That sweep is a
+# one-frame result on a sparse field. The same 6 px gap was later used on the
+# crowded M 13 stack, where it gave K0V for a K0 star and correct-side types
+# for most of the others (see logs/k_star_sky_investigation_20260919.json),
+# but no sweep of the gap was run there.
 SKY_BAND_GAP_PX = 6
 
 # Wider bands give a steadier median (more pixels, less noise). Narrower
@@ -120,10 +133,11 @@ SKY_BAND_GAP_PX = 6
 # frame. Same one-frame caveat as the gap.
 SKY_BAND_WIDTH_PX = 10
 
-# The fewest sky pixels we will trust. Near the edge of the image a band can
-# be cut off. If fewer than this many pixels are left, one or two noisy
-# pixels would decide the whole sky level, so we skip the subtraction for
-# that step instead of guessing.
+# The fewest sky pixels we will trust in one band. Near the edge of the image
+# a band can be cut off. If fewer than this many pixels are left in a band,
+# one or two noisy pixels would decide its sky level, so that band is not
+# used. If neither band has enough, we skip the subtraction for that step
+# instead of guessing.
 SKY_BAND_MINIMUM_SAMPLE_COUNT = 4
 
 
@@ -302,12 +316,20 @@ def measure_sky_level_per_pixel(
     This is the measuring half of the sky background subtraction stage
     (see the module docstring). It looks at one line of pixels running
     straight across the streak, ignores the reading box and the gap next
-    to it, and reports the typical brightness of the two sky bands beyond.
+    to it, and measures the two sky bands beyond. Each band gets its own
+    typical value, and the LOWER of the two is used.
 
-    The typical value is the median, not the average. The median is the
-    middle number once the pixels are sorted, so a few unusually bright
-    pixels (a hot pixel, a cosmic ray, or the edge of a neighbouring
-    star's spectrum) cannot pull it up.
+    Why the lower one: anything that is not sky (the trail of a
+    neighbouring star, or its glow) can only add light to a band. In a
+    crowded field such as a star cluster, a neighbour's spectrum often runs
+    alongside ours and fills one band. Pooling both bands would then give a
+    sky level far too high, and subtracting it would remove the star's own
+    light. The lower band is the one less likely to have a neighbour in it.
+    When the sky is smooth and both bands agree, this costs almost nothing.
+
+    Each band's typical value is its median, not its average. The median is
+    the middle number once the pixels are sorted, so a few unusually bright
+    pixels (a hot pixel or a cosmic ray) cannot pull it up.
 
     Parameters
     ----------
@@ -324,8 +346,9 @@ def measure_sky_level_per_pixel(
     Returns
     -------
     sky_level_per_pixel : `float`
-        The typical sky brightness of a single pixel. `0.0` when too few
-        sky pixels are on the image to measure it (subtract nothing).
+        The typical sky brightness of a single pixel. `0.0` when neither
+        band has enough pixels on the image to measure it (subtract
+        nothing).
     """
     nearest_band_edge = aperture_half_width + SKY_BAND_GAP_PX
     farthest_band_edge = nearest_band_edge + SKY_BAND_WIDTH_PX
@@ -340,11 +363,15 @@ def measure_sky_level_per_pixel(
         )
     ]
 
-    sky_pixels = np.concatenate([lower_band, upper_band]).astype(float)
-    sky_pixels = sky_pixels[np.isfinite(sky_pixels)]
-    if sky_pixels.size < SKY_BAND_MINIMUM_SAMPLE_COUNT:
+    band_levels = []
+    for band in (lower_band, upper_band):
+        sky_pixels = band.astype(float)
+        sky_pixels = sky_pixels[np.isfinite(sky_pixels)]
+        if sky_pixels.size >= SKY_BAND_MINIMUM_SAMPLE_COUNT:
+            band_levels.append(float(np.median(sky_pixels)))
+    if not band_levels:
         return 0.0
-    return float(np.median(sky_pixels))
+    return min(band_levels)
 
 
 class SpectrumExtractor:

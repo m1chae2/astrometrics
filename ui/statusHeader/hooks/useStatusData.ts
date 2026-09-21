@@ -56,12 +56,14 @@ export const useStatusData = () => {
             if (!v || v === '-') return v;
 
             // Handle coordinate strings: [+-]XX° YY' ZZ.ZZ"
-            const coordRegex = /^([+-]?\d+°\s*\d+['′]\s*)(\d+(?:\.\d+)?)(["″])$/;
+            const coordRegex = /^([+-]?\d+°\s*)(\d+)['′]\s*(\d+(?:\.\d+)?)(["″])$/;
             const coordMatch = v.match(coordRegex);
             if (coordMatch) {
-                const [_, prefix, seconds, suffix] = coordMatch;
-                const rounded = Math.round(parseFloat(seconds));
-                return `${prefix}${rounded}${suffix}`;
+                const [_, degPrefix, minutes, seconds, suffix] = coordMatch;
+                const roundedSec = Math.round(parseFloat(seconds));
+                const padSec = String(roundedSec).padStart(2, '0');
+                const padMin = String(parseInt(minutes, 10)).padStart(2, '0');
+                return `${degPrefix}${padMin}' ${padSec}${suffix}`;
             }
 
             // Handle plain numeric strings (for temp/humidity)

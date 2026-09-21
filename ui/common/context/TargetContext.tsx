@@ -1,3 +1,9 @@
+/**
+ * @file TargetContext.tsx
+ * @description Context provider and hooks for target selection and metadata sharing across application displays.
+ * Synchronizes selected targets with local storage and global application events.
+ */
+
 import React, { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
 import { on as onEvent } from '../utils/eventBus';
 
@@ -37,11 +43,41 @@ interface TargetProviderProps {
     children: ReactNode;
 }
 
+/**
+ * Top-level provider for active target selection state and metadata synchronization.
+ */
 export const TargetProvider: React.FC<TargetProviderProps> = ({ children }) => {
-    const [selectedTarget, setSelectedTarget] = useState<string>('');
-    const [pendingTarget, setPendingTarget] = useState<string>('');
+    const [selectedTarget, setSelectedTargetState] = useState<string>(() => {
+        try {
+            return window.localStorage.getItem('selectedTarget') || '';
+        } catch {
+            return '';
+        }
+    });
+    const [pendingTarget, setPendingTargetState] = useState<string>(() => {
+        try {
+            return window.localStorage.getItem('selectedTarget') || '';
+        } catch {
+            return '';
+        }
+    });
     const [reloadKey, setReloadKey] = useState<number>(0);
     const [framesReloadKey, setFramesReloadKey] = useState<number>(0);
+
+    const setSelectedTarget = useCallback((id: string) => {
+        setSelectedTargetState(id);
+        try {
+            if (id) {
+                window.localStorage.setItem('selectedTarget', id);
+            }
+        } catch {
+            // Ignore
+        }
+    }, []);
+
+    const setPendingTarget = useCallback((id: string) => {
+        setPendingTargetState(id);
+    }, []);
 
     // Shared editing state
     const [catalogId, setCatalogId] = useState<string>('');
@@ -61,6 +97,19 @@ export const TargetProvider: React.FC<TargetProviderProps> = ({ children }) => {
     const forceReload = useCallback(() => {
         invalidate('targets');
     }, [invalidate]);
+
+    // Synchronize external target selection events (e.g. from Astronomy Manager, Planetarium, or WebSocket)
+    useEffect(() => {
+        const handleTargetSelected = (event: Event) => {
+            const targetId = (event as CustomEvent<string>).detail;
+            if (targetId) {
+                setSelectedTarget(targetId);
+                setPendingTarget(targetId);
+            }
+        };
+        window.addEventListener('astrometrics:targetSelected', handleTargetSelected);
+        return () => window.removeEventListener('astrometrics:targetSelected', handleTargetSelected);
+    }, [setSelectedTarget, setPendingTarget]);
 
     useEffect(() => {
         const detach = onEvent('targetsUpdated', () => {
@@ -111,4 +160,12 @@ export const useTargetContext = (): TargetContextValue => {
         throw new Error('useTargetContext must be used within a TargetProvider');
     }
     return context;
+};
+
+/**
+ * Optional hook to consume TargetContext without throwing when unmounted in isolated tests.
+ * @returns TargetContextValue or undefined if outside a provider.
+ */
+export const useOptionalTargetContext = (): TargetContextValue | undefined => {
+    return useContext(TargetContext);
 };

@@ -578,17 +578,41 @@ class AppConfiguration:
     def get_frames_path(self) -> Path:
         """Return the absolute path to the frames directory.
 
-        Always a `"frames"` subfolder of the library path -- not
-        independently configurable, so the sandboxing check in
-        `mcp/tool_registry.py` only ever has one library root to reason
-        about.
+        Reads the ``"frames_path"`` entry from the ``[Image Library]`` section.
+        If omitted or empty, defaults to a `"frames"` subfolder of the library
+        path. Handles mount path resolution between ``/run/media`` and
+        ``/media`` if one is configured but the other is currently mounted.
 
         Returns
         -------
         frames_path : `Path`
-            Absolute path to the frames directory, nested under the
-            library path.
+            Absolute path to the resolved frames directory.
         """
+        try:
+            path_str = self.app_config.get("Image Library", "frames_path")
+            if path_str:
+                path = Path(path_str)
+                if not path.is_absolute():
+                    check_path = self.get_project_root() / "astrometricslib" / path
+                    if check_path.exists():
+                        path = check_path.absolute()
+                    else:
+                        path = (self.get_project_root() / path).absolute()
+                else:
+                    path = path.absolute()
+                if not path.exists():
+                    p_str = str(path)
+                    if p_str.startswith("/run/media/"):
+                        alt = Path(p_str.replace("/run/media/", "/media/", 1))
+                        if alt.exists():
+                            path = alt
+                    elif p_str.startswith("/media/"):
+                        alt = Path(p_str.replace("/media/", "/run/media/", 1))
+                        if alt.exists():
+                            path = alt
+                return path
+        except configparser.NoSectionError, configparser.NoOptionError, KeyError:
+            pass
         return self.get_library_path() / "frames"
 
     def get_library_file_path(self, filename: str) -> Path:

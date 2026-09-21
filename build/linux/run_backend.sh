@@ -184,23 +184,28 @@ start_foreground() {
 }
 
 stop_backend() {
-  if [ ! -f "$PID_FILE" ]; then
-    echo "No pidfile found at $PID_FILE; backend not running?"; return 0
-  fi
-  pid=$(cat "$PID_FILE")
-  if kill -0 "$pid" >/dev/null 2>&1; then
-    echo "Stopping backend pid $pid..."
-    kill "$pid"
-    sleep 1
+  if [ -f "$PID_FILE" ]; then
+    pid=$(cat "$PID_FILE")
     if kill -0 "$pid" >/dev/null 2>&1; then
-      echo "Backend did not exit; sending SIGKILL..."
-      kill -9 "$pid" || true
+      echo "Stopping backend pid $pid..."
+      kill "$pid"
+      sleep 1
+      if kill -0 "$pid" >/dev/null 2>&1; then
+        echo "Backend did not exit; sending SIGKILL..."
+        kill -9 "$pid" || true
+      fi
+    else
+      echo "Process $pid not running; removing stale pidfile."
     fi
     rm -f "$PID_FILE"
-    echo "Stopped."
-  else
-    echo "Process $pid not running; removing stale pidfile."; rm -f "$PID_FILE"
   fi
+
+  # Clean up any orphaned backend instances by module name or port 5000
+  pkill -f "python.*backend.main_backend" 2>/dev/null || true
+  if command -v fuser >/dev/null 2>&1; then
+    fuser -k 5000/tcp 2>/dev/null || true
+  fi
+  echo "Stopped."
 }
 
 status_backend() {

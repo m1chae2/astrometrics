@@ -222,6 +222,10 @@
   color: var(--danger-red, #f44336);
 }
 
+.header__status-tracking--parked {
+  color: var(--white, #ffffff);
+}
+
 /* Flat Inline Telemetry Readouts */
 .header__telemetry-item {
   display: inline-flex;
@@ -230,6 +234,12 @@
   white-space: nowrap;
   font-size: 12px;
   line-height: 1;
+}
+
+.header__telemetry-item--coords {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .header__telemetry-label {
@@ -259,6 +269,14 @@
 
 .header__telemetry-value--disconnected {
   color: var(--danger-red, #f44336);
+}
+
+.header__telemetry-value--parked {
+  color: var(--white, #ffffff);
+}
+
+.header__telemetry-value--coord {
+  display: inline-block;
 }
 
 .header__telemetry-unit {

@@ -213,6 +213,7 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
                     spectralPath={stackedSpectralTarget || ''}
                     exposureTime={totalExposure}
                     targetId={selectedTarget}
+                    selectedFile={selectedFile}
                     onView={handleSelectFile}
                     onShowHeader={onShowHeader}
                   />

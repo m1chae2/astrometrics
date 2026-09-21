@@ -142,6 +142,32 @@ def test_measure_sky_level_is_not_pulled_up_by_a_few_bright_pixels() -> None:
     assert sky_level == pytest.approx(SKY_PEDESTAL)
 
 
+def test_measure_sky_level_uses_the_cleaner_band_when_one_side_is_crowded() -> None:
+    """A neighbour's trail filling one band must not raise the sky level.
+
+    In a crowded field a neighbouring star's spectrum often runs alongside
+    ours and fills one whole band. Pooling both bands would put the sky
+    level halfway up that trail. The lower band is the one without it.
+    """
+    cross_section = np.full(120, SKY_PEDESTAL)
+    box_half_width = 5
+    first_upper_band_index = 60 + box_half_width + SKY_BAND_GAP_PX + 1
+    cross_section[first_upper_band_index : first_upper_band_index + SKY_BAND_WIDTH_PX] = 50.0 * SKY_PEDESTAL
+
+    sky_level = measure_sky_level_per_pixel(cross_section, 60, box_half_width)
+
+    assert sky_level == pytest.approx(SKY_PEDESTAL)
+
+
+def test_measure_sky_level_uses_the_only_band_left_at_the_image_edge() -> None:
+    """With one band cut off by the edge, the other still gives a level."""
+    cross_section = np.full(60, SKY_PEDESTAL)
+    box_half_width = 5
+    center = 3  # the lower band is off the image
+
+    assert measure_sky_level_per_pixel(cross_section, center, box_half_width) == pytest.approx(SKY_PEDESTAL)
+
+
 def test_measure_sky_level_returns_zero_when_too_few_sky_pixels_are_on_the_image() -> None:
     """Near the image edge we subtract nothing rather than guess."""
     box_half_width = 2

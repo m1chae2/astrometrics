@@ -126,7 +126,17 @@ class ToolRegistry:
 
             for key, val in list(arguments.items()):
                 if "path" in key.lower() and isinstance(val, str):
-                    real_val = os.path.realpath(val)
+                    check_val = val
+                    if not os.path.exists(check_val):
+                        if check_val.startswith("/run/media/"):
+                            alt = check_val.replace("/run/media/", "/media/", 1)
+                            if os.path.exists(alt):
+                                check_val = alt
+                        elif check_val.startswith("/media/"):
+                            alt = check_val.replace("/media/", "/run/media/", 1)
+                            if os.path.exists(alt):
+                                check_val = alt
+                    real_val = os.path.realpath(check_val)
                     # Allow validation if it starts with either of
                     # our valid sandbox roots
                     is_under_lib = os.path.commonpath([lib_path, real_val]) == lib_path

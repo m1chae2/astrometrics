@@ -17,8 +17,14 @@ resolve_directories() {
   ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
   LAUNCHER_SCRIPT="$ROOT_DIR/astrometrics.sh"
   ICON_SOURCE="$ROOT_DIR/assets/orbit.png"
+  MIME_SOURCE="$ROOT_DIR/build/linux/astrometrics-mime.xml"
+  THUMBNAILER_SOURCE="$ROOT_DIR/build/linux/astrometrics-fits.thumbnailer"
+  METAINFO_SOURCE="$ROOT_DIR/build/linux/astrometrics.metainfo.xml"
   APPS_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
   ICONS_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/512x512/apps"
+  MIME_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/mime/packages"
+  THUMBNAILERS_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/thumbnailers"
+  METAINFO_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/metainfo"
   DESKTOP_TARGET="$APPS_DIR/astrometrics.desktop"
 }
 
@@ -45,6 +51,43 @@ install_icon_asset() {
   echo "Installing icon to $ICONS_DIR..."
   mkdir -p "$ICONS_DIR"
   cp "$ICON_SOURCE" "$ICONS_DIR/astrometrics.png"
+}
+
+# ------------------------------------------------------------------------------
+# install_mime_definition: copies FreeDesktop XML and updates user mime database.
+# ------------------------------------------------------------------------------
+install_mime_definition() {
+  if [ -f "$MIME_SOURCE" ]; then
+    echo "Installing FITS MIME definition to $MIME_DIR..."
+    mkdir -p "$MIME_DIR"
+    cp "$MIME_SOURCE" "$MIME_DIR/astrometrics.xml"
+    if command -v update-mime-database >/dev/null 2>&1; then
+      echo "Updating MIME database..."
+      update-mime-database "${XDG_DATA_HOME:-$HOME/.local/share}/mime"
+    fi
+  fi
+}
+
+# ------------------------------------------------------------------------------
+# install_thumbnailer: installs GNOME Files / Nautilus FITS thumbnailer.
+# ------------------------------------------------------------------------------
+install_thumbnailer() {
+  if [ -f "$THUMBNAILER_SOURCE" ]; then
+    echo "Installing Nautilus FITS thumbnailer to $THUMBNAILERS_DIR..."
+    mkdir -p "$THUMBNAILERS_DIR"
+    cp "$THUMBNAILER_SOURCE" "$THUMBNAILERS_DIR/astrometrics-fits.thumbnailer"
+  fi
+}
+
+# ------------------------------------------------------------------------------
+# install_metainfo: installs AppStream software catalog metadata.
+# ------------------------------------------------------------------------------
+install_metainfo() {
+  if [ -f "$METAINFO_SOURCE" ]; then
+    echo "Installing AppStream metadata to $METAINFO_DIR..."
+    mkdir -p "$METAINFO_DIR"
+    cp "$METAINFO_SOURCE" "$METAINFO_DIR/astrometrics.metainfo.xml"
+  fi
 }
 
 # ------------------------------------------------------------------------------
@@ -143,6 +186,9 @@ main() {
   resolve_directories
   verify_prerequisites
   install_icon_asset
+  install_mime_definition
+  install_thumbnailer
+  install_metainfo
   write_desktop_entry
   validate_and_update_database
   pin_to_gnome_favorites

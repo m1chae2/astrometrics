@@ -58,6 +58,20 @@ export const StatusHeader: React.FC = () => {
     setModeOpen(false);
   };
 
+  /**
+   * Spawns a new display window initialized to the selected mode.
+   *
+   * @param modeToOpen - The display mode to launch in the new window.
+   * @param event - Mouse click event.
+   */
+  const handleOpenInNewWindow = (modeToOpen: string, event: React.MouseEvent) => {
+    event.stopPropagation();
+    if (window.astrometrics?.app?.openDisplayWindow) {
+      window.astrometrics.app.openDisplayWindow(modeToOpen);
+    }
+    setModeOpen(false);
+  };
+
   const connModifier = connected === null ? 'unknown' : (connected ? 'connected' : 'disconnected');
   const connTxt = connected === null ? 'Checking…' : (connected ? 'Connected' : 'Disconnected');
   const trackVal = trackingStatus || 'Not Tracking';
@@ -111,15 +125,31 @@ export const StatusHeader: React.FC = () => {
                     className="mode-selector__menu"
                     style={menuPosition}
                   >
-                    {availableModes.map(m => (
-                      <button
-                        key={m}
-                        className={`mode-selector__item ${selectedMode === m ? 'mode-selector__item--selected' : ''}`}
-                        onClick={() => handleModeSelect(m)}
-                        type="button"
-                      >
-                        {m}
-                      </button>
+                    {availableModes.map((m) => (
+                      <div className="mode-selector__row" key={m}>
+                        <button
+                          className={`mode-selector__item ${selectedMode === m ? 'mode-selector__item--selected' : ''}`}
+                          onClick={() => handleModeSelect(m)}
+                          type="button"
+                        >
+                          {m}
+                        </button>
+                        {window.astrometrics?.app?.openDisplayWindow && (
+                          <button
+                            className="mode-selector__popout"
+                            onClick={(e) => handleOpenInNewWindow(m, e)}
+                            title={`Open ${m} in new window`}
+                            aria-label={`Open ${m} in new window`}
+                            type="button"
+                          >
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                              <polyline points="15 3 21 3 21 9" />
+                              <line x1="10" y1="14" x2="21" y2="3" />
+                            </svg>
+                          </button>
+                        )}
+                      </div>
                     ))}
                   </div>,
                   document.body

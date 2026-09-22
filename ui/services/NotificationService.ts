@@ -6,6 +6,9 @@
 
 export interface NotificationOptions {
     urgency?: 'normal' | 'critical';
+    tag?: string;
+    silent?: boolean;
+    timeoutType?: 'default' | 'never';
     actions?: string[];
 }
 

@@ -18,7 +18,7 @@ interface Window {
       onLoadTargetManager: (callback: (event: any, ...args: any[]) => void) => () => void;
       toggleSecondaryWindow: (enable: boolean) => void;
       onSecondaryWindowClosed: (callback: (event: any, ...args: any[]) => void) => () => void;
-      showNotification: (title: string, body: string, options?: { urgency?: 'normal' | 'critical'; actions?: string[] }) => void;
+      showNotification: (title: string, body: string, options?: { urgency?: 'normal' | 'critical'; tag?: string; silent?: boolean; timeoutType?: 'default' | 'never'; actions?: string[] }) => void;
       updateTrayStatus: (status: { mountStatus?: string; activeTarget?: string; activeMode?: string }) => void;
       setPowerSaveBlocker: (enable: boolean) => void;
       onNavigateMode: (callback: (mode: string) => void) => () => void;
@@ -26,6 +26,10 @@ interface Window {
       onNotificationAction: (callback: (data: { index: number }) => void) => () => void;
       setProgress: (progress: number, mode: 'normal' | 'error' | 'none' | 'indeterminate' | 'paused') => void;
       onOpenFile: (callback: (path: string) => void) => () => void;
+      openDisplayWindow?: (options?: string | { mode?: string; displayIndex?: number }) => Promise<{ windowId: number } | null>;
+      reportWindowMode?: (mode: string) => void;
+      routeDisplayAction?: (intent: any) => Promise<{ handledRemotely: boolean; targetWindowId?: number }>;
+      onRemoteAction?: (callback: (data: { action: string; payload: any; intent?: any }) => void) => () => void;
     };
     backend: {
       ping: (targetUrl?: string) => Promise<{ ok: boolean; status: number; statusText: string }>;

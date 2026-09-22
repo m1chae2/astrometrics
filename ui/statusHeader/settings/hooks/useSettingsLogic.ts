@@ -149,7 +149,8 @@ export const useSettingsLogic = (open: boolean, closing: boolean, onClose: () =>
         setSecondaryWindowEnabled(enabled);
         const app = (window as any).astrometrics?.app;
         if (app?.toggleSecondaryWindow) {
-            app.toggleSecondaryWindow(enabled);
+            const preferredMode = configData['Frontend']?.['secondary_window_mode'] || 'Image Processing';
+            app.toggleSecondaryWindow(enabled, preferredMode);
         } else {
             showToast('Multi-window not supported in this environment', 'error');
         }

@@ -119,6 +119,21 @@ class RPCHandlerRegistry:
         self.register("system:filters", ("config_service", "get_available_filters"))
         self.register("system:pulse", ("system_status_service", "get_pulse"))
         self.register("system:save", lambda: container.astrometrics.targets.save())
+        self.register("terminal:execute", ("scripting_service", "execute_structured"))
+        self.register("terminal:get_workspace", ("scripting_service", "get_workspace_manifest"))
+        self.register("terminal:completions", ("scripting_service", "get_completions"))
+        self.register(
+            "ui:navigate",
+            lambda mode, target=None: container.socket_manager.broadcast_ui_event_sync(
+                "navigate-mode", {"mode": mode, "target": target}
+            ),
+        )
+        self.register(
+            "ui:inspect_variable",
+            lambda variable_name: container.socket_manager.broadcast_ui_event_sync(
+                "inspect-variable", {"variable_name": variable_name}
+            ),
+        )
 
         # --- Guiding (Infrastructure level) ---
         self.register("guiding:status", ("guiding_service", "get_status"))

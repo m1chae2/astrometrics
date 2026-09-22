@@ -53,8 +53,11 @@ export function emitToast(
         const isCritical = kind === 'error';
         if (isHidden || isCritical) {
           const capitalizedSource = source ? source.charAt(0).toUpperCase() + source.slice(1) : 'Observatory Alert';
+          const tag = source ? `${source.toLowerCase()}-status` : 'app-alert';
           window.astrometrics.app.showNotification(capitalizedSource, text, {
             urgency: isCritical ? 'critical' : 'normal',
+            tag,
+            timeoutType: isCritical ? 'never' : 'default',
           });
         }
       }

@@ -613,6 +613,12 @@ export const CelestialSkyMap: React.FC<Props> = ({
     if (!context) return;
 
     const renderLoop = () => {
+      // 0. Power efficiency: Pause render work if document is hidden or canvas is not visible
+      if (document.hidden || canvas.offsetParent === null) {
+        animFrameId = requestAnimationFrame(renderLoop);
+        return;
+      }
+
       // 1. Advance tracking target position for current sidereal time
       const currentFrameLST = calculateLST(timeOffsetMinutesRef.current, observerLon);
 

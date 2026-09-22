@@ -2,7 +2,7 @@
  * @fileoverview Electron main process for the Astrometrics application.
  * Orchestrates application lifecycle, window management, and backend services.
  */
-import { app, BrowserWindow, Tray, Menu, nativeImage, session, nativeTheme } from 'electron';
+import { app, BrowserWindow, Tray, Menu, nativeImage, session, nativeTheme, screen, dialog, powerMonitor } from 'electron';
 import squirrelStartup from 'electron-squirrel-startup';
 import path from 'path';
 import process from 'process';
@@ -14,22 +14,25 @@ import isDev from 'electron-is-dev';
 import { registerIpcHandlers } from './ipc_handlers.js';
 import { BackendManager } from './backend_manager.js';
 import { createTrayPopoverWindow } from './tray_window.js';
+import { getPlatform } from './platforms/index.js';
+import { PythonTerminalManager } from './python_terminal_manager.js';
+
+const platform = getPlatform();
+const pythonTerminalManager = new PythonTerminalManager({ platform });
 
 // Handle squirrel startup for Windows
 if (squirrelStartup) {
   app.quit();
 }
 
-// Ensure application identity matches .desktop entry for Wayland app_id and dock grouping
-app.name = 'astrometrics';
-if (process.platform === 'linux' || process.platform === 'win32') {
-  app.setAppUserModelId('astrometrics');
-}
+// Early platform command-line arguments (e.g. Wayland window decorations)
+platform.initCommandLine(app);
 
-// Ensure correct window decorations and sizing under Linux Wayland/X11
-if (process.platform === 'linux') {
-  app.commandLine.appendSwitch('enable-features', 'WaylandWindowDecorations');
-}
+// Enforce resource constraints: cap V8 JavaScript heap size to 2GB to prevent memory bloat
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=2048');
+
+// Application identity and taskbar grouping
+platform.configureIdentity(app);
 
 /**
  * Extracts a candidate file path from application launch arguments.
@@ -64,42 +67,75 @@ function extractModeArg(args) {
   return null;
 }
 
-let queuedFileToOpen = extractFilePath(process.argv);
-let queuedModeToOpen = extractModeArg(process.argv);
+/**
+ * Extracts a custom URL protocol string (astrometrics://...) from command line arguments.
+ *
+ * @param {string[]} args Command-line arguments array.
+ * @returns {string|null} The URL string if found, otherwise null.
+ */
+function extractUrlArg(args) {
+  if (!Array.isArray(args)) return null;
+  for (const arg of args) {
+    if (arg && typeof arg === 'string' && arg.startsWith('astrometrics://')) {
+      return arg;
+    }
+  }
+  return null;
+}
 
-// Configure Windows Jump List (app.setUserTasks)
-if (process.platform === 'win32') {
+/**
+ * Parses an astrometrics:// protocol URL and dispatches the action to the frontend.
+ * Examples:
+ *   astrometrics://mode/Planetarium
+ *   astrometrics://target/M31?mode=Planetarium
+ *
+ * @param {string} rawUrl
+ * @param {Electron.BrowserWindow} win
+ */
+function handleProtocolUrl(rawUrl, win) {
+  if (!rawUrl || !win || win.isDestroyed() || !win.webContents) return;
   try {
-    app.setUserTasks([
-      {
-        program: process.execPath,
-        arguments: '--mode="Planetarium"',
-        title: 'Open Planetarium',
-        description: 'Navigate the celestial sphere',
-        iconPath: process.execPath,
-        iconIndex: 0
-      },
-      {
-        program: process.execPath,
-        arguments: '--mode="Observatory Manager"',
-        title: 'Observatory Manager',
-        description: 'Mount, guider, and equipment controls',
-        iconPath: process.execPath,
-        iconIndex: 0
-      },
-      {
-        program: process.execPath,
-        arguments: '--mode="Image Processing"',
-        title: 'Image Processing',
-        description: 'FITS stacking, astrometry, and spectroscopy',
-        iconPath: process.execPath,
-        iconIndex: 0
+    const parsed = new URL(rawUrl);
+    // Path routing: astrometrics://mode/<modeName> or astrometrics://target/<targetName>
+    const host = parsed.hostname || parsed.host;
+    const pathname = parsed.pathname.replace(/^\/+/, '');
+    const searchParams = parsed.searchParams;
+
+    if (host === 'mode' || pathname.startsWith('mode/')) {
+      const mode = host === 'mode' ? decodeURIComponent(pathname) : decodeURIComponent(pathname.replace(/^mode\//, ''));
+      if (mode) {
+        win.webContents.send('navigate-mode', mode);
       }
-    ]);
+    } else if (host === 'target' || pathname.startsWith('target/')) {
+      const targetName = host === 'target' ? decodeURIComponent(pathname) : decodeURIComponent(pathname.replace(/^target\//, ''));
+      const mode = searchParams.get('mode');
+      if (mode) {
+        win.webContents.send('navigate-mode', mode);
+      }
+      if (targetName) {
+        win.webContents.send('remote-action', { action: 'targetSelected', payload: targetName });
+      }
+    }
   } catch (err) {
-    log.warn('Failed to set Windows user tasks / Jump List:', err);
+    log.warn('Failed to parse protocol URL:', rawUrl, err);
   }
 }
+
+let queuedFileToOpen = extractFilePath(process.argv);
+let queuedModeToOpen = extractModeArg(process.argv);
+let queuedUrlToOpen = extractUrlArg(process.argv);
+
+// Register Custom URL Protocol (astrometrics://)
+if (process.defaultApp) {
+  if (process.argv.length >= 2) {
+    app.setAsDefaultProtocolClient('astrometrics', process.execPath, [path.resolve(process.argv[1])]);
+  }
+} else {
+  app.setAsDefaultProtocolClient('astrometrics');
+}
+
+// Configure OS user tasks / Jump Lists / Dock
+platform.setupUserTasks(app);
 
 // Single Instance Lock
 if (!app.requestSingleInstanceLock()) {
@@ -111,9 +147,15 @@ if (!app.requestSingleInstanceLock()) {
       mainWindow.show();
       mainWindow.focus();
 
+      const urlArg = extractUrlArg(commandLine);
+      if (urlArg) {
+        handleProtocolUrl(urlArg, mainWindow);
+      }
+
       const filePath = extractFilePath(commandLine);
       if (filePath && mainWindow.webContents) {
         mainWindow.webContents.send('open-file', filePath);
+        app.addRecentDocument(filePath);
       }
 
       const modeArg = extractModeArg(commandLine);
@@ -124,23 +166,35 @@ if (!app.requestSingleInstanceLock()) {
   });
 }
 
+// OS Deep Linking listener (macOS and Linux portal/desktop events)
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+    handleProtocolUrl(url, mainWindow);
+  } else {
+    queuedUrlToOpen = url;
+  }
+});
+
 // OS File Association listener (macOS and portal events)
 app.on('open-file', (event, filePath) => {
   event.preventDefault();
   if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
     mainWindow.webContents.send('open-file', filePath);
+    app.addRecentDocument(filePath);
   } else {
     queuedFileToOpen = filePath;
   }
 });
 
-// Configure Logging
-log.transports.file.level = 'info';
-log.transports.file.resolvePathFn = () => path.join(app.getPath('userData'), 'logs', 'main.log');
+// Configure Logging via platform adapter
+platform.configureLogging(app, log);
 
 // Define global references
 let mainWindow = null;
 let secondaryWindow = null;
+const auxiliaryWindows = new Map();
+const windowModes = new Map();
 let splashWindow = null;
 let trayPopoverWindow = null;
 let splashShownAt = 0;
@@ -234,6 +288,7 @@ const getWindowOptions = () => ({
   backgroundColor: '#181818',
   icon: getAppPath('assets', 'orbit-smooth-256.png'),
   resizable: true,
+  ...platform.getWindowOptions(),
   webPreferences: {
     nodeIntegration: false,
     contextIsolation: true,
@@ -269,37 +324,175 @@ async function createMainWindow() {
       mainWindow.webContents.send('navigate-mode', queuedModeToOpen);
       queuedModeToOpen = null;
     }
+    if (queuedUrlToOpen) {
+      handleProtocolUrl(queuedUrlToOpen, mainWindow);
+      queuedUrlToOpen = null;
+    }
   });
 
-  registerIpcHandlers(mainWindow, createSecondaryWindow, backendManager, updateTrayMenu, () => trayPopoverWindow);
+    registerIpcHandlers(
+    mainWindow,
+    createSecondaryWindow,
+    backendManager,
+    updateTrayMenu,
+    () => trayPopoverWindow,
+    {
+      createDisplayWindow,
+      closeSecondaryWindow,
+      setWindowMode,
+      windowModes,
+    },
+    platform,
+    pythonTerminalManager
+  );
+
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+
+    // Check if any auxiliary user windows remain
+    const hasRemainingUserWindows = auxiliaryWindows.size > 0;
+    if (!hasRemainingUserWindows) {
+      log.info('Last application window closed. Cleaning up tray and terminating app...');
+      if (trayPopoverWindow && !trayPopoverWindow.isDestroyed()) {
+        trayPopoverWindow.destroy();
+        trayPopoverWindow = null;
+      }
+      if (tray && !tray.isDestroyed()) {
+        tray.destroy();
+        tray = null;
+      }
+      if (platform.shouldQuitOnWindowAllClosed()) {
+        app.quit();
+      }
+    }
+  });
 }
 
 /**
- * Creates the secondary window for dual-screen setups.
+ * Creates an auxiliary display window for multi-screen and multi-window workflows.
+ *
+ * Automatically detects available secondary monitors and positions the new
+ * window on the secondary display when present.
+ *
+ * @param {Object} [options]
+ * @param {string} [options.mode] Target display mode to open with (e.g. 'Image Processing').
+ * @param {number} [options.displayIndex] Optional specific monitor index.
+ * @returns {BrowserWindow} The created window.
+ */
+function createDisplayWindow(options = {}) {
+  const { mode = '', displayIndex } = options;
+  const windowOptions = { ...getWindowOptions() };
+
+  // If multiple displays exist, target a secondary monitor
+  const allDisplays = screen.getAllDisplays();
+  if (allDisplays.length > 1) {
+    const primaryDisplay = screen.getPrimaryDisplay();
+    let targetDisplay = null;
+    if (typeof displayIndex === 'number' && allDisplays[displayIndex]) {
+      targetDisplay = allDisplays[displayIndex];
+    } else {
+      targetDisplay = allDisplays.find((d) => d.id !== primaryDisplay.id) || allDisplays[1];
+    }
+
+    if (targetDisplay) {
+      windowOptions.x = targetDisplay.bounds.x + 50;
+      windowOptions.y = targetDisplay.bounds.y + 50;
+      windowOptions.width = Math.min(windowOptions.width, targetDisplay.bounds.width - 100);
+      windowOptions.height = Math.min(windowOptions.height, targetDisplay.bounds.height - 100);
+    }
+  }
+
+  const win = new BrowserWindow(windowOptions);
+  win.setMenuBarVisibility(false);
+  const winId = win.id;
+  auxiliaryWindows.set(winId, win);
+
+  if (mode) {
+    windowModes.set(win.webContents.id, mode);
+  }
+
+  const queryParams = new URLSearchParams();
+  if (mode) queryParams.set('mode', mode);
+  queryParams.set('windowId', String(winId));
+  const queryString = queryParams.toString() ? `?${queryParams.toString()}` : '';
+
+  if (isDev) {
+    const baseUrl = process.env.ELECTRON_RENDERER_URL || 'http://127.0.0.1:5173';
+    win.loadURL(`${baseUrl}${queryString}`);
+  } else {
+    win.loadFile(getAppPath('dist', 'index.html'), { search: queryString });
+  }
+
+  win.on('closed', () => {
+    auxiliaryWindows.delete(winId);
+    windowModes.delete(win.webContents.id);
+    if (secondaryWindow === win) {
+      secondaryWindow = null;
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('secondary-window-closed');
+      }
+    }
+
+    // If main window was already closed and this was the last auxiliary window
+    if ((!mainWindow || mainWindow.isDestroyed()) && auxiliaryWindows.size === 0) {
+      log.info('Last auxiliary window closed. Cleaning up tray and terminating app...');
+      if (trayPopoverWindow && !trayPopoverWindow.isDestroyed()) {
+        trayPopoverWindow.destroy();
+        trayPopoverWindow = null;
+      }
+      if (tray && !tray.isDestroyed()) {
+        tray.destroy();
+        tray = null;
+      }
+      if (platform.shouldQuitOnWindowAllClosed()) {
+        app.quit();
+      }
+    }
+  });
+
+  return win;
+}
+
+/**
+ * Creates or focuses the secondary window for dual-screen setups.
  *
  * Functions identically to the main window but doesn't handle the backend
  * lifecycle. Useful for separating the Planetarium from the Processing views.
+ *
+ * @param {string} [mode] Optional initial mode for the secondary window.
+ * @returns {BrowserWindow}
  */
-function createSecondaryWindow() {
+function createSecondaryWindow(mode) {
   if (secondaryWindow && !secondaryWindow.isDestroyed()) {
     secondaryWindow.focus();
-    return;
+    return secondaryWindow;
   }
-  secondaryWindow = new BrowserWindow(getWindowOptions());
-  secondaryWindow.setMenuBarVisibility(false);
+  secondaryWindow = createDisplayWindow({ mode });
+  return secondaryWindow;
+}
 
-  if (isDev) {
-    secondaryWindow.loadURL(process.env.ELECTRON_RENDERER_URL || 'http://127.0.0.1:5173');
-  } else {
-    secondaryWindow.loadFile(getAppPath('dist', 'index.html'));
-  }
-
-  secondaryWindow.on('closed', () => {
+/**
+ * Closes the secondary window if currently open.
+ */
+function closeSecondaryWindow() {
+  if (secondaryWindow && !secondaryWindow.isDestroyed()) {
+    secondaryWindow.close();
     secondaryWindow = null;
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('secondary-window-closed');
-    }
-  });
+  }
+}
+
+/**
+ * Updates the tracked active mode for a window's webContents.
+ *
+ * @param {number} webContentsId The sender webContents ID.
+ * @param {string} mode The active workspace display mode.
+ */
+function setWindowMode(webContentsId, mode) {
+  if (mode) {
+    windowModes.set(webContentsId, mode);
+  } else {
+    windowModes.delete(webContentsId);
+  }
 }
 
 /**
@@ -391,12 +584,11 @@ app.on('ready', () => {
   // Listen to OS theme changes and notify open windows
   nativeTheme.on('updated', () => {
     const isDark = nativeTheme.shouldUseDarkColors;
-    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
-      mainWindow.webContents.send('system-theme-changed', isDark);
-    }
-    if (secondaryWindow && !secondaryWindow.isDestroyed() && secondaryWindow.webContents) {
-      secondaryWindow.webContents.send('system-theme-changed', isDark);
-    }
+    BrowserWindow.getAllWindows().forEach((win) => {
+      if (!win.isDestroyed() && win.webContents) {
+        win.webContents.send('system-theme-changed', isDark);
+      }
+    });
   });
 
   createSplashWindow();
@@ -435,6 +627,64 @@ app.on('ready', () => {
     });
   });
 
+  // Setup platform application menu with standard desktop accelerators (Ctrl+O, Ctrl+Q, F11)
+  platform.setupApplicationMenu(app, {
+    onOpenFile: async () => {
+      const targetWindow = BrowserWindow.getFocusedWindow() || mainWindow;
+      if (!targetWindow || targetWindow.isDestroyed()) return;
+      try {
+        const result = await dialog.showOpenDialog(targetWindow, {
+          title: 'Open FITS Image',
+          filters: [
+            { name: 'FITS Images', extensions: ['fits', 'fit', 'fts'] },
+            { name: 'All Files', extensions: ['*'] }
+          ],
+          properties: ['openFile']
+        });
+        if (!result.canceled && result.filePaths && result.filePaths.length > 0) {
+          const filePath = result.filePaths[0];
+          targetWindow.webContents.send('open-file', filePath);
+          app.addRecentDocument(filePath);
+        }
+      } catch (err) {
+        log.warn('Open file accelerator failed:', err);
+      }
+    },
+    isDev,
+    menuModule: Menu
+  });
+
+  // System Resource Guardian: Automatically pause background compute pipelines
+  // (Siril stacking, plate solvers) when switching to battery power or locking screen,
+  // preserving battery life and telescope tracking stability without requiring user action.
+  try {
+    powerMonitor.on('on-battery', () => {
+      log.info('System switched to battery power: auto-pausing heavy background compute pipelines.');
+      platform.pauseBackgroundPipelines();
+      pythonTerminalManager.pause();
+    });
+
+    powerMonitor.on('on-ac', () => {
+      log.info('System connected to AC power: auto-resuming background compute pipelines.');
+      platform.resumeBackgroundPipelines();
+      pythonTerminalManager.resume();
+    });
+
+    powerMonitor.on('lock-screen', () => {
+      log.info('Screen locked: auto-pausing heavy background compute pipelines.');
+      platform.pauseBackgroundPipelines();
+      pythonTerminalManager.pause();
+    });
+
+    powerMonitor.on('unlock-screen', () => {
+      log.info('Screen unlocked: auto-resuming background compute pipelines.');
+      platform.resumeBackgroundPipelines();
+      pythonTerminalManager.resume();
+    });
+  } catch (err) {
+    log.debug('Power monitor initialization skipped:', err);
+  }
+
   // Start backend and transition to UI once it has finished warming up. The
   // splash stays up until then (it is only dismissed by the main window's
   // ready-to-show), so nothing opens onto an empty Planetarium.
@@ -454,6 +704,7 @@ app.on('ready', () => {
       getAppPath,
       isDev,
       path.join(__dirname, 'preload.js'),
+      platform
     );
 
     // Right-click shows the native fallback context menu.
@@ -470,11 +721,23 @@ app.on('ready', () => {
 });
 
 app.on('window-all-closed', () => {
+  pythonTerminalManager.stopAll();
   backendManager.stop();
-  if (process.platform !== 'darwin') app.quit();
+  if (platform.shouldQuitOnWindowAllClosed()) app.quit();
 });
 
-app.on('before-quit', () => backendManager.stop());
+app.on('before-quit', () => {
+  pythonTerminalManager.stopAll();
+  if (trayPopoverWindow && !trayPopoverWindow.isDestroyed()) {
+    trayPopoverWindow.destroy();
+    trayPopoverWindow = null;
+  }
+  if (tray && !tray.isDestroyed()) {
+    tray.destroy();
+    tray = null;
+  }
+  backendManager.stop();
+});
 
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) createMainWindow();

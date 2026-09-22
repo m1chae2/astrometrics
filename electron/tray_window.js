@@ -23,12 +23,13 @@
 
 import { BrowserWindow } from 'electron';
 import log from 'electron-log';
+import { getPlatform } from './platforms/index.js';
 
 /** Width of the popover window in logical pixels. */
-const POPOVER_WIDTH = 340;
+export const POPOVER_WIDTH = 340;
 
 /** Height of the popover window in logical pixels. */
-const POPOVER_HEIGHT = 460;
+export const POPOVER_HEIGHT = 460;
 
 /**
  * Minimum interval (ms) between successive toggle calls. Guards against Linux
@@ -40,17 +41,19 @@ const TOGGLE_DEBOUNCE_MS = 500;
  * Creates the tray popover BrowserWindow and binds a debounced click-toggle
  * to the provided tray instance.
  *
- * Dismissal is explicit — via tray re-click, in-popover action buttons, or the
- * Escape key (handled in the renderer) — rather than via the blur event, which
- * is unreliable on Wayland.
+ * Positioning and blur dismissal are delegated to the Platform Adapter:
+ * - On Windows and macOS, the window docks precisely relative to the tray icon
+ *   and automatically dismisses on blur.
+ * - On Linux (Wayland), coordinates are compositor-managed and dismissal is explicit.
  *
  * @param {Electron.Tray} tray - The application system tray instance.
  * @param {(...parts: string[]) => string} getAppPath - Resolver for app-root paths.
  * @param {boolean} isDev - Whether the app is running in development mode.
  * @param {string} preloadPath - Absolute path to the shared preload script.
+ * @param {BasePlatform} [platform] - Host OS platform adapter.
  * @returns {BrowserWindow} The created (hidden) popover window.
  */
-export function createTrayPopoverWindow(tray, getAppPath, isDev, preloadPath) {
+export function createTrayPopoverWindow(tray, getAppPath, isDev, preloadPath, platform = getPlatform()) {
   const win = new BrowserWindow({
     width: POPOVER_WIDTH,
     height: POPOVER_HEIGHT,
@@ -72,6 +75,29 @@ export function createTrayPopoverWindow(tray, getAppPath, isDev, preloadPath) {
   // 'pop-up-menu' level ensures the popover floats above the main maximised
   // Astrometrics window, which is the default BrowserWindow 'normal' level.
   win.setAlwaysOnTop(true, 'pop-up-menu');
+
+  // Platform-specific auto-dismiss on blur (Windows 11 and macOS desktop convention)
+  if (platform.shouldDismissTrayOnBlur()) {
+    win.on('blur', () => {
+      if (!win.isDestroyed() && win.isVisible()) {
+        log.info('[TrayPopover] blur event -> hiding');
+        win.hide();
+      }
+    });
+  }
+
+  // Notify renderer of visibility transitions to pause/resume background timers
+  win.on('show', () => {
+    if (!win.isDestroyed() && win.webContents) {
+      win.webContents.send('tray-visibility-changed', true);
+    }
+  });
+
+  win.on('hide', () => {
+    if (!win.isDestroyed() && win.webContents) {
+      win.webContents.send('tray-visibility-changed', false);
+    }
+  });
 
   if (isDev) {
     const devUrl = process.env.ELECTRON_RENDERER_URL || 'http://127.0.0.1:5173';
@@ -104,8 +130,19 @@ export function createTrayPopoverWindow(tray, getAppPath, isDev, preloadPath) {
       log.info('[TrayPopover] hiding');
       win.hide();
     } else {
+      // Delegate positioning calculation to platform adapter
+      const position = platform.getTrayPopoverPosition(tray, {
+        width: POPOVER_WIDTH,
+        height: POPOVER_HEIGHT
+      });
+
+      if (position && typeof position.x === 'number' && typeof position.y === 'number') {
+        win.setPosition(position.x, position.y, false);
+      }
+
       log.info('[TrayPopover] showing');
       win.show();
+      win.focus();
     }
   };
 

@@ -72,6 +72,24 @@ export const SystemForm: React.FC<SystemFormProps> = ({
                     />
                     <span>Enable Secondary Window</span>
                 </label>
+                {secondaryWindowEnabled && (
+                    <label className="settings__field" style={{ marginTop: '8px' }}>
+                        <span className="settings__label">Secondary Window Display</span>
+                        <select
+                            className="settings__input"
+                            value={String(configData['Frontend']?.['secondary_window_mode'] || 'Image Processing')}
+                            onChange={(e) => handleConfigChange('Frontend', 'secondary_window_mode', e.target.value)}
+                            aria-label="Secondary Window Default Display"
+                        >
+                            <option value="Image Processing">Image Processing</option>
+                            <option value="Astronomy Manager">Astronomy Manager</option>
+                            <option value="Planetarium">Planetarium</option>
+                            <option value="Observatory Manager">Observatory Manager</option>
+                            <option value="Observation Manager">Observation Manager</option>
+                            <option value="Image Viewer">Image Viewer</option>
+                        </select>
+                    </label>
+                )}
             </div>
 
             <div className="settings__divider">

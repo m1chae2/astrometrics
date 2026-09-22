@@ -6,12 +6,77 @@ services.
 
 import code
 import contextlib
+import inspect
 import io
 import logging
 import rlcompleter
+import sys
 import traceback
+from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+def inspect_api(obj_or_path: Any) -> dict[str, Any]:
+    """Return API introspection details for an object or dotted path.
+
+    Parameters
+    ----------
+    obj_or_path : `Any`
+        An object, function, class, or module to inspect.
+
+    Returns
+    -------
+    info : `dict[str, Any]`
+        Structured dictionary containing name, docstring, type, and
+        callable method signatures.
+    """
+    if obj_or_path is None:
+        return {"error": "Target object is None"}
+
+    obj = obj_or_path
+    obj_name = getattr(obj, "__name__", str(obj))
+    doc = inspect.getdoc(obj) or ""
+    summary = doc.split("\n\n")[0] if "\n\n" in doc else doc
+
+    methods: list[dict[str, Any]] = []
+    if not callable(obj):
+        for attr_name in sorted(dir(obj)):
+            if attr_name.startswith("_"):
+                continue
+            try:
+                attr = getattr(obj, attr_name)
+            except Exception as exc:
+                logger.debug("Attribute '%s' inaccessible during inspect_api: %s", attr_name, exc)
+                continue
+            if callable(attr):
+                method_doc = inspect.getdoc(attr) or ""
+                method_summary = method_doc.split("\n\n")[0] if "\n\n" in method_doc else method_doc
+                sig_str = "(*args, **kwargs)"
+                try:
+                    sig_str = str(inspect.signature(attr))
+                except Exception as exc:
+                    logger.debug("Signature inaccessible for '%s': %s", attr_name, exc)
+                methods.append({
+                    "name": attr_name,
+                    "signature": sig_str,
+                    "summary": method_summary[:120],
+                })
+
+    sig = ""
+    if callable(obj):
+        try:
+            sig = str(inspect.signature(obj))
+        except Exception:
+            sig = "(*args, **kwargs)"
+
+    return {
+        "name": obj_name,
+        "type": type(obj).__name__,
+        "signature": sig,
+        "summary": summary[:200],
+        "methods": methods,
+    }
 
 
 class ScriptingService:
@@ -85,7 +150,10 @@ class ScriptingService:
         local_scope = {
             "help": help_obj,
             "list_commands": help_obj,
-            "astrometrics": self.container.astrometrics,
+            "astrometrics": getattr(self.container, "astrometrics", None),
+            "wayfinder": getattr(self.container, "wayfinder", None),
+            "inspect_api": inspect_api,
+            "doc": inspect_api,
         }
 
         # Dynamically expose all services from container
@@ -244,6 +312,140 @@ class ScriptingService:
                 logger.debug("Failed to introspect methods for one console object: %s", exc)
             objects.append(obj_info)
         return objects
+
+    def get_workspace_manifest(self) -> list[dict[str, Any]]:
+        """Return a structured manifest of active objects in console scope.
+
+        Returns
+        -------
+        variables : `list` of `dict`
+            List of variable summaries including name, type, shape,
+            size in bytes, and human-friendly string preview.
+        """
+        manifest = []
+        ignored_names = {
+            "help",
+            "list_commands",
+            "inspect_api",
+            "doc",
+            "astrometrics",
+            "wayfinder",
+            "telescope",
+            "image_processing",
+            "target",
+            "sync",
+            "guiding",
+            "imaging",
+            "alignment",
+            "observatory",
+            "planner",
+            "executor",
+            "mosaic",
+            "ingestion",
+            "config",
+            "system",
+        }
+
+        local_scope = self.console.locals
+        for name, val in local_scope.items():
+            if name.startswith("_") or name in ignored_names:
+                continue
+
+            type_name = type(val).__name__
+            shape = getattr(val, "shape", None)
+            size_bytes = getattr(val, "nbytes", sys.getsizeof(val))
+
+            summary = str(val)
+            if len(summary) > 80:
+                summary = summary[:77] + "..."
+
+            manifest.append({
+                "name": name,
+                "type": type_name,
+                "shape": str(shape) if shape is not None else None,
+                "size_bytes": int(size_bytes) if isinstance(size_bytes, (int, float)) else 0,
+                "summary": summary,
+            })
+        return manifest
+
+    def execute_structured(self, code_str: str) -> dict[str, Any]:
+        """Execute code and return a structured result envelope.
+
+        Parameters
+        ----------
+        code_str : `str`
+            The Python code snippet to execute.
+
+        Returns
+        -------
+        envelope : `dict[str, Any]`
+            Contains status, stdout, stderr, result, plots, and
+            updated workspace manifest.
+        """
+        import time
+
+        start_time = time.time()
+        stdout_buf = io.StringIO()
+        stderr_buf = io.StringIO()
+        plots: list[str] = []
+        result: Any = None
+        status = "success"
+
+        # Auto-export matplotlib plots if figures exist
+        with contextlib.redirect_stdout(stdout_buf), contextlib.redirect_stderr(stderr_buf):
+            try:
+                # Set matplotlib backend to Agg to prevent headless GUI errors
+                try:
+                    import matplotlib
+
+                    matplotlib.use("Agg")
+                    import matplotlib.pyplot as plt
+                except Exception:
+                    plt = None
+
+                if "\n" in code_str.strip():
+                    exec(code_str, self.console.locals)  # ruff: ignore[exec-builtin]
+                else:
+                    self.console.push(code_str)
+
+                # Capture explicit 'result' variable if assigned
+                if "result" in self.console.locals:
+                    raw_res = self.console.locals["result"]
+                    # Basic JSON-serializability check
+                    try:
+                        import json
+
+                        json.dumps(raw_res)
+                        result = raw_res
+                    except TypeError, OverflowError:
+                        result = str(raw_res)
+
+                # Export active matplotlib figures to temporary PNGs
+                if plt and plt.get_fignums():
+                    import tempfile
+
+                    for fignum in plt.get_fignums():
+                        fig = plt.figure(fignum)
+                        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_file:
+                            fig.savefig(tmp_file.name, bbox_inches="tight", dpi=100)
+                            plots.append(tmp_file.name)
+                    plt.close("all")
+
+            except Exception:
+                status = "error"
+                traceback.print_exc(file=stderr_buf)
+
+        execution_time_ms = int((time.time() - start_time) * 1000)
+
+        return {
+            "status": status,
+            "stdout": stdout_buf.getvalue(),
+            "stderr": stderr_buf.getvalue(),
+            "result": result,
+            "plots": plots,
+            "execution_time_ms": execution_time_ms,
+            "workspace": self.get_workspace_manifest(),
+        }
 
     def run_repl_command(self, command: str) -> str:
         """Run `command` through the interactive console and return output.

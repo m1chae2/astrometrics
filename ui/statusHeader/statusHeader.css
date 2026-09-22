@@ -4,8 +4,8 @@
 
 /* Core Status Header Block */
 .header {
-  height: 48px;
-  flex: 0 0 48px;
+  height: env(titlebar-area-height, 48px);
+  flex: 0 0 env(titlebar-area-height, 48px);
   width: 100%;
   box-sizing: border-box;
   background-color: var(--grey-dark);
@@ -13,6 +13,7 @@
   display: flex;
   align-items: center;
   padding: 0 16px;
+  padding-right: calc(16px + env(titlebar-area-width, 0px));
   border-bottom: 1px solid rgba(0, 0, 0, 0.6);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
   z-index: 100;
@@ -20,6 +21,15 @@
   overflow: visible;
   border-top-left-radius: 12px;
   border-top-right-radius: 12px;
+  -webkit-app-region: drag;
+}
+
+/* Ensure interactive controls inside the header remain clickable */
+.header button,
+.header input,
+.header select,
+.header a {
+  -webkit-app-region: no-drag;
 }
 
 .header__widgets {
@@ -134,6 +144,35 @@
   flex-direction: column;
   gap: 6px;
   z-index: 10000;
+}
+
+.mode-selector__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.mode-selector__row .mode-selector__item {
+  flex: 1;
+}
+
+.mode-selector__popout {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--grey-light, #888);
+  padding: 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.mode-selector__popout:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--white, #fff);
 }
 
 .mode-selector__item {

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="image/fits">
+    <comment>Flexible Image Transport System (FITS) Image</comment>
+    <acronym>FITS</acronym>
+    <expanded-acronym>Flexible Image Transport System</expanded-acronym>
+    <generic-icon name="image-x-generic"/>
+    <glob pattern="*.fits"/>
+    <glob pattern="*.fit"/>
+    <glob pattern="*.fts"/>
+    <glob pattern="*.FITS"/>
+    <glob pattern="*.FIT"/>
+    <glob pattern="*.FTS"/>
+    <sub-class-of type="application/octet-stream"/>
+  </mime-type>
+</mime-info>

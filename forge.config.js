@@ -95,7 +95,12 @@ export default {
         description: 'A clean modern looking visualization app for astrophotography images and spectroscopy',
         productName: 'Astrometrics',
         productDescription: 'A clean modern looking visualization app for astrophotography images and spectroscopy',
-        depends: ['libnotify4', 'xdg-utils'], // Ensure notification and open support
+        depends: [
+          'libnotify4',
+          'xdg-utils',
+          'shared-mime-info',
+          'libayatana-appindicator3-1'
+        ], // Ensure notifications, mime-types, file-open, and top-panel AppIndicator support
         desktop: {
           Name: 'Astrometrics',
           GenericName: 'Astronomy Application',

@@ -101,6 +101,8 @@ const AppContent: React.FC = () => {
       const params = new URLSearchParams(window.location.search);
       const urlMode = params.get('mode');
       if (urlMode) return normalizeAppMode(urlMode);
+      const isAuxWindow = Boolean(params.get('windowId'));
+      if (isAuxWindow) return 'Image Processing';
       return normalizeAppMode(window.localStorage.getItem('appMode') || 'Image Viewer');
     } catch {
       return 'Image Viewer';
@@ -162,10 +164,8 @@ const AppContent: React.FC = () => {
             window.dispatchEvent(new CustomEvent('astrometrics:modeChange', { detail: payload.mode }));
           }
         } else if (action === 'handoff') {
-          if (payload.active_mode) {
-            setMode(payload.active_mode);
-            window.dispatchEvent(new CustomEvent('astrometrics:modeChange', { detail: payload.active_mode }));
-          }
+          // Sync domain state (e.g. active target selection) across clients without
+          // forcefully overriding individual window layouts or display modes.
           if (payload.selected_target) {
             window.dispatchEvent(new CustomEvent('astrometrics:targetSelected', { detail: payload.selected_target }));
           }
@@ -185,6 +185,14 @@ const AppContent: React.FC = () => {
       const rawDetail = (e as CustomEvent).detail;
       const detail = normalizeAppMode(rawDetail);
       setMode(detail);
+      try {
+        const isAuxWindow = Boolean(new URLSearchParams(window.location.search).get('windowId'));
+        if (!isAuxWindow) {
+          window.localStorage.setItem('appMode', detail);
+        }
+      } catch {
+        // Ignore localStorage access failures
+      }
       fetch('/api/handoff/state', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -205,6 +213,20 @@ const AppContent: React.FC = () => {
       });
     }
 
+    // Native OS Integration: Listen to remote actions routed from other windows
+    let removeRemoteAction: (() => void) | undefined;
+    if (window.astrometrics?.app?.onRemoteAction) {
+      removeRemoteAction = window.astrometrics.app.onRemoteAction((data: any) => {
+        const { action, payload, intent } = data || {};
+        if (action) {
+          window.dispatchEvent(new CustomEvent(`astrometrics:${action}`, { detail: payload }));
+        }
+        if (intent) {
+          window.dispatchEvent(new CustomEvent('astrometrics:navigationIntent', { detail: intent }));
+        }
+      });
+    }
+
     // Native OS Integration: Emergency park telescope command from tray
     const onEmergencyPark = (): void => {
       fetch('/api/telescope/park', { method: 'POST' }).catch(() => {});
@@ -214,15 +236,19 @@ const AppContent: React.FC = () => {
     return () => {
       removeSocketAction?.();
       removeNavMode?.();
+      removeRemoteAction?.();
       window.removeEventListener('astrometrics:modeChange', onModeChange);
       window.removeEventListener('emergency-park-mount', onEmergencyPark);
     };
   }, []);
 
-  // Update dynamic tray menu when mode changes
+  // Update dynamic tray menu and report active mode to Electron main process
   useEffect(() => {
     if (window.astrometrics?.app?.updateTrayStatus) {
       window.astrometrics.app.updateTrayStatus({ activeMode: mode });
+    }
+    if (window.astrometrics?.app?.reportWindowMode) {
+      window.astrometrics.app.reportWindowMode(mode);
     }
   }, [mode]);
 

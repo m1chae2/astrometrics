@@ -72,3 +72,14 @@ Domain queries and operations MUST use the reflected MCP tools first. Do NOT fal
   `call_mcp_tool(ServerName="wayfindinglib-core", ToolName="observatory_slew_to_target", Arguments={"target_name": "<name>"})`
 - **Run UI tests**:
   `call_mcp_tool(ServerName="astrometrics-ui", ToolName="ui_run_tests", Arguments={})`
+
+## 6. Supervised Python Scripting & Terminal Environment (MANDATORY)
+When executing custom calculations, testing algorithms, exploring datasets, or interacting with `astrometricslib` and `wayfindinglib` public APIs directly:
+- **ALWAYS** route execution through the supervised terminal engine using the `electron_run_python` MCP tool (or UI terminal execution).
+- **NEVER** spawn ad-hoc bash subprocesses (`python -c "..."` or shell scripts) to interact with the domain libraries.
+- The supervised environment provides:
+  - **Live Shared State**: Direct access to `astrometrics` and `wayfinder` instances connected to active telescope hardware and catalogs.
+  - **Resource & Power Guardian**: Enforces thread quotas (75% cores) and automatically freezes background compute (`SIGSTOP`) on battery/screen lock.
+  - **MATLAB-style Workspace**: Inspect active variables and array dimensions using `terminal_get_workspace`.
+  - **Introspection**: Query signatures and parameter docs using `terminal_inspect_api` or `inspect_api(...)`.
+  - **Visual Feedback**: Automatically intercepts Matplotlib figures into saved PNG artifacts returned in the result envelope.

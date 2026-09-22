@@ -133,10 +133,98 @@ class ToolRegistry:
             if isinstance(result, list) and len(result) > 0 and isinstance(result[0], TextContent):
                 return result
 
-            # Otherwise, wrap it in TextContent
-            return [TextContent(type="text", text=json.dumps(result, indent=2))]
+            # Enrich error dictionaries with actionable remediation hints
+            if isinstance(result, dict) and result.get("status") == "error":
+                result = self._enrich_error_remediation(name, result)
+
+            # Token budget safeguard: truncate oversized lists/payloads
+            result_str = json.dumps(result, indent=2)
+            max_bytes = 40000  # Cap output to ~10k tokens to prevent context blowout
+            if len(result_str) > max_bytes:
+                truncated_note = (
+                    f"\n\n... [Output truncated: payload exceeded {max_bytes} bytes. "
+                    "Use specific filtering arguments or limit queries to avoid context blowout.]"
+                )
+                result_str = result_str[:max_bytes] + truncated_note
+
+            return [TextContent(type="text", text=result_str)]
         except Exception as e:
-            return [TextContent(type="text", text=f"Error during tool execution: {e!s}")]
+            remediation = self._get_generic_remediation(name, str(e))
+            error_payload = {
+                "status": "error",
+                "tool": name,
+                "error_type": type(e).__name__,
+                "message": str(e),
+                "remediation": remediation,
+            }
+            return [TextContent(type="text", text=json.dumps(error_payload, indent=2))]
+
+    def _enrich_error_remediation(self, tool_name: str, result: dict[str, Any]) -> dict[str, Any]:
+        """Attach actionable recovery hints to tool error envelopes.
+
+        Parameters
+        ----------
+        tool_name : `str`
+            Name of the executing tool.
+        result : `dict[str, Any]`
+            The raw error result payload.
+
+        Returns
+        -------
+        enriched : `dict[str, Any]`
+            Error dictionary augmented with remediation tips.
+        """
+        msg = str(result.get("message", "")).lower()
+        remediation: dict[str, Any] = {}
+
+        if "target" in msg and "not found" in msg:
+            remediation = {
+                "suggestion": "Target names are case-sensitive. Verify exact catalog identifier.",
+                "recommended_tool": "call_mcp_tool('astrometricslib-core', 'target_list', {})",
+            }
+        elif "disconnected" in msg or "not connected" in msg or "indi" in msg:
+            remediation = {
+                "suggestion": "Hardware driver is currently offline or disconnected.",
+                "recommended_tool": "call_mcp_tool('wayfindinglib-core', 'observatory_connect', {})",
+            }
+        elif "filter" in msg:
+            remediation = {
+                "suggestion": "Requested filter wheel slot is unknown or unconfigured.",
+                "recommended_tool": "call_mcp_tool('wayfindinglib-core', 'observatory_get_filter_names', {})",
+            }
+        elif "syntax" in msg or "unexpected" in msg:
+            remediation = {
+                "suggestion": "Check input arguments against parameter schema or query inspect_api.",
+                "recommended_tool": (
+                    "call_mcp_tool('astrometrics-backend', 'terminal_inspect_api', {'target': '...'})"
+                ),
+            }
+
+        if remediation:
+            result["remediation"] = remediation
+        return result
+
+    def _get_generic_remediation(self, tool_name: str, err_str: str) -> dict[str, Any]:
+        """Return fallback recovery guidance for uncaught exceptions.
+
+        Parameters
+        ----------
+        tool_name : `str`
+            Name of the executing tool.
+        err_str : `str`
+            The exception string message.
+
+        Returns
+        -------
+        remediation : `dict[str, Any]`
+            Remediation dictionary with suggestion and inspection command.
+        """
+        return {
+            "suggestion": (f"Tool '{tool_name}' encountered an unhandled exception: {err_str}"),
+            "inspect_tool": (
+                f"call_mcp_tool('astrometrics-backend', 'terminal_inspect_api', {{'target': '{tool_name}'}})"
+            ),
+        }
 
 
 registry = ToolRegistry()
@@ -479,7 +567,274 @@ def register_reflected_tools():  # ruff: ignore[missing-return-type-undocumented
             registry.register(tool_name, description, schema)(execute_reflected)
 
 
-# Import static tools first
-
 # Run dynamic reflection registration
 register_reflected_tools()
+
+
+# ---------------------------------------------------------------------------
+# AI Agent Desktop Control Tools
+# ---------------------------------------------------------------------------
+
+
+@registry.register(
+    "ui_show_notification",
+    "Post a native desktop toast notification to inform or alert the user.",
+    {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string", "description": "Notification headline."},
+            "body": {"type": "string", "description": "Notification details."},
+            "urgency": {
+                "type": "string",
+                "enum": ["low", "normal", "critical"],
+                "description": "Urgency level.",
+                "default": "normal",
+            },
+        },
+        "required": ["title", "body"],
+    },
+)
+async def tool_ui_show_notification(title: str, body: str, urgency: str = "normal") -> dict[str, Any]:
+    """Post native desktop notification via backend WebSocket/event dispatch.
+
+    Parameters
+    ----------
+    title : `str`
+        Notification title or summary.
+    body : `str`
+        Detailed notification message body.
+    urgency : `str`, optional
+        Notification urgency level ('low', 'normal', 'critical').
+
+    Returns
+    -------
+    result : `dict[str, Any]`
+        Dictionary containing dispatch status and notification details.
+    """
+    import logging
+
+    logging.getLogger("mcp.ui").info("AI Notification: %s - %s (urgency=%s)", title, body, urgency)
+    await execute_rpc(
+        "events:broadcast",
+        {
+            "event": "notification",
+            "data": {"title": title, "body": body, "urgency": urgency},
+        },
+    )
+    return {"status": "success", "posted": True, "title": title}
+
+
+@registry.register(
+    "ui_pause_pipelines",
+    "Pause active background processing and stacking pipelines (e.g. Siril).",
+    {"type": "object", "properties": {}},
+)
+async def tool_ui_pause_pipelines() -> dict[str, Any]:  # ruff: ignore[unused-async] -- awaited by ToolRegistry.execute
+    """Freeze compute subprocesses via POSIX SIGSTOP.
+
+    Returns
+    -------
+    result : `dict[str, Any]`
+        Dictionary containing operation status and paused state.
+    """
+    import shutil
+    import subprocess
+
+    pkill_path = shutil.which("pkill") or "/usr/bin/pkill"
+    try:
+        subprocess.run([pkill_path, "-STOP", "-f", "siril-cli"], check=False)
+        subprocess.run([pkill_path, "-STOP", "-f", "solve-field"], check=False)
+        return {"status": "success", "paused": True}
+    except Exception as err:
+        return {"status": "error", "message": str(err)}
+
+
+@registry.register(
+    "ui_resume_pipelines",
+    "Resume previously paused background processing and stacking pipelines.",
+    {"type": "object", "properties": {}},
+)
+async def tool_ui_resume_pipelines() -> dict[str, Any]:  # ruff: ignore[unused-async] -- awaited by ToolRegistry.execute
+    """Thaw compute subprocesses via POSIX SIGCONT.
+
+    Returns
+    -------
+    result : `dict[str, Any]`
+        Dictionary containing operation status and resumed state.
+    """
+    import shutil
+    import subprocess
+
+    pkill_path = shutil.which("pkill") or "/usr/bin/pkill"
+    try:
+        subprocess.run([pkill_path, "-CONT", "-f", "siril-cli"], check=False)
+        subprocess.run([pkill_path, "-CONT", "-f", "solve-field"], check=False)
+        return {"status": "success", "resumed": True}
+    except Exception as err:
+        return {"status": "error", "message": str(err)}
+
+
+@registry.register(
+    "electron_run_python",
+    "Execute Python code against astrometrics and wayfinder public APIs inside the supervised runtime.",
+    {
+        "type": "object",
+        "properties": {
+            "code": {
+                "type": "string",
+                "description": "Python code snippet or script to execute.",
+            },
+        },
+        "required": ["code"],
+    },
+)
+async def tool_electron_run_python(code: str) -> dict[str, Any]:
+    """Execute Python code in the supervised Astrometrics backend environment.
+
+    Parameters
+    ----------
+    code : `str`
+        Python code snippet to execute.
+
+    Returns
+    -------
+    result : `dict[str, Any]`
+        Execution envelope containing status, stdout, stderr, result,
+        plots, execution time in milliseconds, and active workspace
+        manifest.
+    """
+    res = await execute_rpc("terminal:execute", {"code_str": code})
+    if res.get("status") == "success" and "data" in res:
+        return res["data"]
+    return res
+
+
+@registry.register(
+    "terminal_get_workspace",
+    "Inspect active user variables in the Python workspace (MATLAB-style Workspace viewer).",
+    {"type": "object", "properties": {}},
+)
+async def tool_terminal_get_workspace() -> dict[str, Any]:
+    """Return manifest of user variables currently resident in memory.
+
+    Returns
+    -------
+    result : `dict[str, Any]`
+        List of variable descriptors with name, type, shape, and
+        byte size.
+    """
+    res = await execute_rpc("terminal:get_workspace", {})
+    if res.get("status") == "success" and "data" in res:
+        return {"status": "success", "variables": res["data"]}
+    return res
+
+
+@registry.register(
+    "terminal_inspect_api",
+    "Inspect signatures, arguments, and docstrings of an object or API branch.",
+    {
+        "type": "object",
+        "properties": {
+            "target": {
+                "type": "string",
+                "description": (
+                    "Object or attribute name to introspect "
+                    "(e.g. 'astrometrics.targets', 'wayfinder.control')."
+                ),
+            },
+        },
+        "required": ["target"],
+    },
+)
+async def tool_terminal_inspect_api(target: str) -> dict[str, Any]:
+    """Introspect an Astrometrics or Wayfinder public API component.
+
+    Parameters
+    ----------
+    target : `str`
+        The name of the component or method to inspect.
+
+    Returns
+    -------
+    result : `dict[str, Any]`
+        Method signatures and numpydoc summaries.
+    """
+    code = f"result = inspect_api({target})"
+    res = await execute_rpc("terminal:execute", {"code_str": code})
+    if res.get("status") == "success" and "data" in res:
+        return res["data"].get("result", res["data"])
+    return res
+
+
+@registry.register(
+    "ui_navigate_mode",
+    "Navigate the UI workspace to a specific view (e.g. 'Planetarium', 'Image Processing') and target.",
+    {
+        "type": "object",
+        "properties": {
+            "mode": {
+                "type": "string",
+                "enum": [
+                    "Planetarium",
+                    "Observatory",
+                    "Image Processing",
+                    "Observation Manager",
+                ],
+                "description": "Target workspace mode.",
+            },
+            "target": {
+                "type": "string",
+                "description": "Optional target name to select (e.g. 'M31', 'NGC 7000').",
+            },
+        },
+        "required": ["mode"],
+    },
+)
+async def tool_ui_navigate_mode(mode: str, target: str | None = None) -> dict[str, Any]:
+    """Switch active UI workspace mode and optionally select a target.
+
+    Parameters
+    ----------
+    mode : `str`
+        Target view mode name.
+    target : `str`, optional
+        Target object to select in the new view.
+
+    Returns
+    -------
+    result : `dict[str, Any]`
+        Dispatch status.
+    """
+    await execute_rpc("ui:navigate", {"mode": mode, "target": target})
+    return {"status": "success", "mode": mode, "target": target}
+
+
+@registry.register(
+    "ui_inspect_variable",
+    "Open the UI Variable Inspector panel to display a specific workspace variable (MATLAB Variable Editor).",
+    {
+        "type": "object",
+        "properties": {
+            "variable_name": {
+                "type": "string",
+                "description": "Name of the variable in the workspace to inspect.",
+            },
+        },
+        "required": ["variable_name"],
+    },
+)
+async def tool_ui_inspect_variable(variable_name: str) -> dict[str, Any]:
+    """Command UI to open Variable Inspector for a workspace variable.
+
+    Parameters
+    ----------
+    variable_name : `str`
+        Variable name in the active Python session.
+
+    Returns
+    -------
+    result : `dict[str, Any]`
+        Dispatch status.
+    """
+    await execute_rpc("ui:inspect_variable", {"variable_name": variable_name})
+    return {"status": "success", "variable_name": variable_name}

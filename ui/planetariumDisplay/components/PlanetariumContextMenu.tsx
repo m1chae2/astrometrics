@@ -12,6 +12,7 @@ import React, { useEffect, useRef } from 'react';
 import { PlanetariumSource } from '../../common/types/planetariumTypes';
 import { slewTelescope } from '../../common/services/telescopeService';
 import { emitToast } from '../../common/utils/emitToast';
+import { navigateToElement } from '../../common/utils/displayCoordinator';
 
 /**
  * Props for PlanetariumContextMenu.
@@ -68,12 +69,29 @@ export const PlanetariumContextMenu: React.FC<Props> = ({ source, x, y, telescop
   const handleOpenInAstronomyManager = () => {
     try {
       window.localStorage.setItem('planetariumSelectedStar', source.id);
-      window.localStorage.setItem('appMode', 'Astronomy Manager');
     } catch {
       // Ignore localStorage access failures (e.g. in private browsing)
     }
-    window.dispatchEvent(new CustomEvent('astrometrics:modeChange', { detail: 'Astronomy Manager' }));
-    window.dispatchEvent(new CustomEvent('astrometrics:astronomySelectStar', { detail: source.id }));
+
+    navigateToElement({
+      targetDisplay: 'Astronomy Manager',
+      targetElement: 'spectrumViewer',
+      action: 'astronomySelectStar',
+      payload: source.id,
+      toast: {
+        message: `Opening ${source.name || source.id} in Astronomy Manager`,
+        type: 'info',
+        title: 'Planetarium',
+      },
+    }).then((result) => {
+      if (!result.handledRemotely) {
+        try {
+          window.localStorage.setItem('appMode', 'Astronomy Manager');
+        } catch {
+          // Ignore
+        }
+      }
+    });
     onClose();
   };
 

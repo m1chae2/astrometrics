@@ -52,11 +52,52 @@ const api = {
 		},
 
 		/**
+		 * Open a new display window with an optional initial workspace mode.
+		 * @param {string|Object} [options] Requested mode string or options object.
+		 * @returns {Promise<{ windowId: number } | null>}
+		 */
+		openDisplayWindow(options) {
+			const payload = typeof options === 'string' ? { mode: options } : (options || {});
+			return ipcRenderer.invoke('open-display-window', payload);
+		},
+
+		/**
+		 * Report the current window's active workspace mode to the main process.
+		 * @param {string} mode Current mode name.
+		 */
+		reportWindowMode(mode) {
+			ipcRenderer.send('window-mode-changed', mode);
+		},
+
+		/**
+		 * Route a cross-display navigation action to another window presenting the target display.
+		 * @param {Object} intent The navigation intent object.
+		 * @returns {Promise<{ handledRemotely: boolean, targetWindowId?: number }>}
+		 */
+		routeDisplayAction(intent) {
+			return ipcRenderer.invoke('route-display-action', intent);
+		},
+
+		/**
+		 * Subscribe to remote actions forwarded from other application windows.
+		 * @param {Function} callback Receives { action, payload, intent }.
+		 * @returns {Function} Unsubscribe function.
+		 */
+		onRemoteAction(callback) {
+			const handler = (_event, data) => callback(data);
+			ipcRenderer.on('remote-action', handler);
+			return () => ipcRenderer.removeListener('remote-action', handler);
+		},
+
+		/**
 		 * Show a native notification.
 		 * @param {string} title
 		 * @param {string} body
 		 * @param {Object} [options]
 		 * @param {'normal' | 'critical'} [options.urgency]
+		 * @param {string} [options.tag]
+		 * @param {boolean} [options.silent]
+		 * @param {'default' | 'never'} [options.timeoutType]
 		 * @param {string[]} [options.actions]
 		 */
 		showNotification(title, body, options = {}) {
@@ -174,6 +215,79 @@ const api = {
 		 */
 		sendAction(action, payload) {
 			ipcRenderer.send('tray-popover-action', { action, payload });
+		},
+
+		/**
+		 * Subscribe to visibility changes of the tray popover window.
+		 * Used to pause background animations and timers when hidden.
+		 * @param {Function} callback (isVisible: boolean) => void
+		 * @returns {Function} Unsubscribe function
+		 */
+		onVisibilityChange(callback) {
+			const handler = (_event, isVisible) => callback(isVisible);
+			ipcRenderer.on('tray-visibility-changed', handler);
+			return () => ipcRenderer.removeListener('tray-visibility-changed', handler);
+		}
+	},
+	terminal: {
+		/**
+		 * Execute Python script in supervised terminal environment.
+		 * @param {string} code Python code snippet.
+		 * @param {Object} [options] Execution options.
+		 * @returns {Promise<Object>} Execution envelope with status, stdout, stderr, result, plots, workspace.
+		 */
+		async executeScript(code, options = {}) {
+			return ipcRenderer.invoke('python-terminal-execute', { code, ...options });
+		},
+
+		/**
+		 * Fetch current active workspace variable manifest.
+		 * @returns {Promise<Array<Object>>}
+		 */
+		async getWorkspace() {
+			return ipcRenderer.invoke('python-terminal-get-workspace');
+		},
+
+		/**
+		 * Query completions for an input prefix.
+		 * @param {string} text Prefix string.
+		 * @returns {Promise<string[]>}
+		 */
+		async getCompletions(text) {
+			return ipcRenderer.invoke('python-terminal-completions', { text });
+		},
+
+		/**
+		 * Subscribe to streaming stdout/stderr chunks from execution.
+		 * @param {Function} callback ({ stdout, stderr }) => void
+		 * @returns {Function} Unsubscribe function
+		 */
+		onOutput(callback) {
+			const handler = (_event, chunk) => callback(chunk);
+			ipcRenderer.on('python-terminal-output', handler);
+			return () => ipcRenderer.removeListener('python-terminal-output', handler);
+		},
+
+		/**
+		 * Subscribe to figures/plots emitted by matplotlib.
+		 * @param {Function} callback (plotPath: string) => void
+		 * @returns {Function} Unsubscribe function
+		 */
+		onFigure(callback) {
+			const handler = (_event, plotPath) => callback(plotPath);
+			ipcRenderer.on('python-terminal-figure', handler);
+			return () => ipcRenderer.removeListener('python-terminal-figure', handler);
+		},
+
+		/**
+		 * Subscribe to workspace variable manifest updates.
+		 * @param {Function} callback (workspace: Array<Object>) => void
+		 * @returns {Function} Unsubscribe function
+		 */
+		onWorkspaceUpdated(callback) {
+			const handler = (_event, workspace) => callback(workspace);
+			ipcRenderer.on('python-terminal-workspace-updated', handler);
+			return () => ipcRenderer.removeListener('python-terminal-workspace-updated', handler);
 		}
 	}
 };
@@ -182,5 +296,6 @@ const api = {
 Object.freeze(api);
 Object.freeze(api.app);
 Object.freeze(api.tray);
+Object.freeze(api.terminal);
 
 contextBridge.exposeInMainWorld('astrometrics', api);

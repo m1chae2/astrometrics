@@ -16,6 +16,7 @@ import { fetchAstrometryOverlayStars, AstrometryOverlayStar } from '../common/se
 import { emit as emitEvent } from '../common/utils/eventBus';
 import { emitToast } from '../common/utils/emitToast';
 import { reportError } from '../common/utils/reportError';
+import { navigateToElement } from '../common/utils/displayCoordinator';
 
 /**
  * Main component for the image processing view.
@@ -249,13 +250,29 @@ const ImageProcessingDisplayInner: React.FC = () => {
     try {
       localStorage.setItem('astrometrics:imageProcessingSelectedStar', starId);
       localStorage.setItem('planetariumSelectedStar', starId);
-      localStorage.setItem('appMode', 'Astronomy Manager');
     } catch {
       // Ignore
     }
-    window.dispatchEvent(new CustomEvent('astrometrics:astronomySelectStar', { detail: starId }));
-    window.dispatchEvent(new CustomEvent('astrometrics:modeChange', { detail: 'Astronomy Manager' }));
-    emitToast(`Opening ${star.name || starId} in Astronomy Manager`, 'info', 'Astrometry');
+
+    navigateToElement({
+      targetDisplay: 'Astronomy Manager',
+      targetElement: 'spectrumViewer',
+      action: 'astronomySelectStar',
+      payload: starId,
+      toast: {
+        message: `Opening ${star.name || starId} in Astronomy Manager`,
+        type: 'info',
+        title: 'Astrometry',
+      },
+    }).then((result) => {
+      if (!result.handledRemotely) {
+        try {
+          localStorage.setItem('appMode', 'Astronomy Manager');
+        } catch {
+          // Ignore
+        }
+      }
+    });
   }, []);
 
   // Merge remote targets into the list if they don't exist locally

@@ -13,6 +13,7 @@ import {
 } from '../utils/starDisplayFormat';
 import { useOptionalTargetContext } from '../../common/context/TargetContext';
 import { emitToast } from '../../common/utils/emitToast';
+import { navigateToElement } from '../../common/utils/displayCoordinator';
 
 export interface StarSummaryCardProps {
     /** Detailed astronomy/stellar object data. */
@@ -83,7 +84,6 @@ function navigateToTarget(
     if (!targetId) return;
     try {
         window.localStorage.setItem('selectedTarget', targetId);
-        window.localStorage.setItem('appMode', 'Image Processing');
         if (selectedStarId) {
             window.localStorage.setItem('astrometrics:imageProcessingSelectedStar', selectedStarId);
         }
@@ -93,11 +93,26 @@ function navigateToTarget(
     }
     setSelectedTarget?.(targetId);
     setPendingTarget?.(targetId);
-    window.dispatchEvent(new CustomEvent('astrometrics:targetSelected', {
-        detail: { targetId, starId: selectedStarId, enableAstrometry: true }
-    }));
-    window.dispatchEvent(new CustomEvent('astrometrics:modeChange', { detail: 'Image Processing' }));
-    emitToast(`Opening ${targetId.replace(/_/g, ' ')} in Image Processing with Astrometry`, 'info', 'Targets');
+
+    navigateToElement({
+        targetDisplay: 'Image Processing',
+        targetElement: 'fitsViewer',
+        action: 'targetSelected',
+        payload: { targetId, starId: selectedStarId, enableAstrometry: true },
+        toast: {
+            message: `Opening ${targetId.replace(/_/g, ' ')} in Image Processing with Astrometry`,
+            type: 'info',
+            title: 'Targets',
+        },
+    }).then((result) => {
+        if (!result.handledRemotely) {
+            try {
+                window.localStorage.setItem('appMode', 'Image Processing');
+            } catch {
+                // Ignore
+            }
+        }
+    });
 }
 
 /**

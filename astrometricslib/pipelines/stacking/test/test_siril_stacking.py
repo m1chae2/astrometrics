@@ -8,6 +8,7 @@ a fake Siril driver that writes small real FITS files, so the file handling
 (names, cleanup, merged registration files, headers) is exercised too.
 """
 
+import json
 import logging
 import zlib
 from pathlib import Path
@@ -22,6 +23,27 @@ from astrometricslib.pipelines.stacking.siril_stacking import (
     MINIMUM_REGISTERED_FRACTION,
     run_siril_stack,
 )
+
+
+def _shared_star_field(size: int = 64) -> np.ndarray:
+    """Build the star field every fake group stack shows.
+
+    Real group stacks of one field show the same stars; the exposure-group
+    stacker lines them up before combining, and refuses stacks that do not
+    share a field.
+
+    Returns
+    -------
+    field : `numpy.ndarray`
+        A ``size`` x ``size`` image of Gaussian stars.
+    """
+    generator = np.random.default_rng(123)
+    y, x = np.mgrid[0:size, 0:size].astype(np.float64)
+    field = np.zeros((size, size))
+    for _ in range(14):
+        cx, cy = generator.uniform(6, size - 6, 2)
+        field += generator.uniform(0.1, 0.4) * np.exp(-((x - cx) ** 2 + (y - cy) ** 2) / (2 * 1.3**2))
+    return field
 
 
 class FakeSirilDriver:
@@ -70,11 +92,11 @@ class FakeSirilDriver:
         if not outcome.get("ok", True):
             return None
         generator = np.random.default_rng(len(self.calls))
-        image = outcome.get("fill", 0.2) + generator.normal(0.0, 0.002, (32, 32))
+        image = outcome.get("fill", 0.2) + _shared_star_field() + generator.normal(0.0, 0.002, (64, 64))
         stack_path = self.library / kwargs["output_file"]
         fits.writeto(stack_path, image.astype(np.float32), overwrite=True)
         stem = stack_path.with_suffix("")
-        fits.writeto(f"{stem}_RejMap.fits", np.full((32, 32), 0.02, np.float32), overwrite=True)
+        fits.writeto(f"{stem}_RejMap.fits", np.full((64, 64), 0.02, np.float32), overwrite=True)
         Path(f"{stem}_Registration.seq").write_text(
             "".join(f"R{index} 3.0 3.0 0.9 0 8e-05 19 H 1 0 0 0 1 0 0 0 1\n" for index in range(registered))
         )
@@ -248,6 +270,13 @@ def test_a_bracketed_session_is_stacked_per_exposure_and_combined(tmp_path: Path
         "Vega_SPEC.fits",
         "Vega_SPEC_Registration.seq",
         "Vega_SPEC_RejMap.fits",
+        "groups",
+    ]
+    # Each group's own stack is kept, with a manifest describing the groups.
+    assert sorted(entry.name for entry in (tmp_path / "groups").iterdir()) == [
+        "Vega_SPEC_exp0p5s.fits",
+        "Vega_SPEC_exp5s.fits",
+        "Vega_SPEC_manifest.json",
     ]
     assert len((tmp_path / "Vega_SPEC_Registration.seq").read_text().splitlines()) == 12
 
@@ -401,3 +430,114 @@ def test_an_unclipped_session_reports_no_clipped_groups(tmp_path: Path) -> None:
     _, diagnostics = run_siril_stack(driver, frames, "Vega", "Vega_SPEC.fits", None, True)
 
     assert diagnostics["clipped_exposure_groups"] == []
+
+
+def test_imaging_frames_of_different_lengths_are_also_stacked_per_exposure(
+    tmp_path: Path,
+) -> None:
+    """Images are grouped by exposure like spectra, each with its own dark."""
+    frames = [_frame("60.0", f"short_{i}") for i in range(6)] + [
+        _frame("300.0", f"long_{i}") for i in range(6)
+    ]
+    driver = FakeSirilDriver(
+        tmp_path,
+        [{"registered": 6, "fill": 0.02}, {"registered": 6, "fill": 0.2}],
+    )
+
+    path, diagnostics = run_siril_stack(driver, frames, "NGC 2403", "NGC_2403_L_Stacked.fits", None, False)
+
+    assert [len(call["image_files"]) for call in driver.calls] == [6, 6]
+    assert [call["is_spectral"] for call in driver.calls] == [False, False]
+    assert "spectral_star_detection" not in driver.calls[0]
+    assert path == str(tmp_path / "NGC_2403_L_Stacked.fits")
+    assert [entry["exposure_seconds"] for entry in diagnostics["exposure_group_summaries"]] == [60.0, 300.0]
+
+
+def test_each_group_reports_its_frames_dark_and_where_its_stack_is_kept(
+    tmp_path: Path,
+) -> None:
+    """Group entries give the frames stacked, dark use and kept path."""
+    frames = [_frame("0.5", f"short_{i}") for i in range(6)] + [_frame("5.0", f"long_{i}") for i in range(6)]
+    driver = FakeSirilDriver(tmp_path, [{"registered": 6}, {"registered": 6}])
+
+    _, diagnostics = run_siril_stack(driver, frames, "Vega", "Vega_SPEC.fits", None, True)
+
+    entries = diagnostics["exposure_group_summaries"]
+    assert [entry["frames_submitted"] for entry in entries] == [6, 6]
+    assert [entry["frames_stacked"] for entry in entries] == [6, 6]
+    assert [entry["dark_applied"] for entry in entries] == [False, False]
+    assert entries[0]["stack_path"] == str(tmp_path / "groups" / "Vega_SPEC_exp0p5s.fits")
+    assert entries[0]["left_out_reason"] is None
+    manifest = json.loads((tmp_path / "groups" / "Vega_SPEC_manifest.json").read_text())
+    assert manifest["combined_stack"] == "Vega_SPEC.fits"
+    assert [group["exposure_seconds"] for group in manifest["groups"]] == [0.5, 5.0]
+    assert "weight" in manifest["groups"][0]
+
+
+def test_a_group_that_shares_no_field_with_the_others_is_left_out(tmp_path: Path) -> None:
+    """A group stack that cannot be lined up is named and left out."""
+
+    class StrangerDriver(FakeSirilDriver):
+        """Writes a different star field for the second call."""
+
+        def process_target(self, **kwargs: Any) -> str | None:
+            """Write a stack, then swap the second call's image for a stranger.
+
+            Returns
+            -------
+            path : `str` or `None`
+                The stack path.
+            """
+            path = super().process_target(**kwargs)
+            if len(self.calls) == 2 and path:
+                generator = np.random.default_rng(999)
+                y, x = np.mgrid[0:64, 0:64].astype(np.float64)
+                field = 0.2 + generator.normal(0.0, 0.002, (64, 64))
+                for _ in range(14):
+                    cx, cy = generator.uniform(6, 58, 2)
+                    field += 0.3 * np.exp(-((x - cx) ** 2 + (y - cy) ** 2) / (2 * 1.3**2))
+                fits.writeto(path, field.astype(np.float32), overwrite=True)
+            return path
+
+    frames = [_frame("0.5", f"short_{i}") for i in range(6)] + [_frame("5.0", f"long_{i}") for i in range(6)]
+    driver = StrangerDriver(tmp_path, [{"registered": 6}, {"registered": 6}])
+
+    path, diagnostics = run_siril_stack(driver, frames, "Vega", "Vega_SPEC.fits", None, True)
+
+    assert path is not None
+    entries = diagnostics["exposure_group_summaries"]
+    left_out = [entry for entry in entries if entry["left_out_reason"]]
+    assert len(left_out) == 1
+    assert "could not be lined up" in left_out[0]["left_out_reason"]
+    assert fits.getheader(path)["STACKCNT"] == 6
+
+
+def test_a_group_that_cannot_be_stacked_still_appears_in_the_summaries(tmp_path: Path) -> None:
+    """A group Siril could not stack is listed as left out."""
+    frames = [_frame("0.5", f"short_{i}") for i in range(6)] + [_frame("5.0", f"long_{i}") for i in range(6)]
+    # A spectral group that produces nothing is retried once with the relaxed
+    # star detection, so it takes two scripted failures.
+    driver = FakeSirilDriver(tmp_path, [{"ok": False}, {"ok": False}, {"registered": 6}])
+
+    _, diagnostics = run_siril_stack(driver, frames, "Vega", "Vega_SPEC.fits", None, True)
+
+    entries = diagnostics["exposure_group_summaries"]
+    assert [(entry["exposure_seconds"], entry["left_out_reason"]) for entry in entries] == [
+        (5.0, None),
+        (0.5, "could not be stacked"),
+    ]
+
+
+def test_a_stack_of_one_length_still_describes_its_single_group(tmp_path: Path) -> None:
+    """A one-length stack reports one group entry and a recommendation."""
+    frames = [_frame("30.0", f"light_{i}") for i in range(6)]
+    driver = FakeSirilDriver(tmp_path, [{"registered": 6}])
+
+    _, diagnostics = run_siril_stack(driver, frames, "M 13", "M_13_Stacked.fits", None, False)
+
+    entries = diagnostics["exposure_group_summaries"]
+    assert len(entries) == 1
+    assert entries[0]["exposure_seconds"] == pytest.approx(30.0)
+    assert entries[0]["frames_stacked"] == 6
+    assert "recommended_exposure_seconds" in diagnostics
+    assert not (tmp_path / "groups").exists()

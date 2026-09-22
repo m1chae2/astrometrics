@@ -19,6 +19,11 @@ _REGISTRATION_TOTAL_PATTERN = re.compile(r"Total:\s*(\d+)\s+failed,\s*(\d+)\s+re
 # been stacked."
 _STACKED_COUNT_PATTERN = re.compile(r"stacking complete\.\s*(\d+)\s+images? have been stacked")
 
+# After subtracting the dark master Siril warns, once per frame, when the
+# result is mostly below zero: "After dark subtraction, the image contains
+# many negative pixels (99%), calibration frames are probably incorrect".
+_NEGATIVE_PIXELS_PATTERN = re.compile(r"contains many negative pixels \((\d+)%\)")
+
 
 def parse_registration_totals(line: str) -> tuple[int, int] | None:
     """Read how many frames Siril failed and managed to register.
@@ -36,6 +41,24 @@ def parse_registration_totals(line: str) -> tuple[int, int] | None:
     """
     match = _REGISTRATION_TOTAL_PATTERN.search(line)
     return (int(match.group(1)), int(match.group(2))) if match else None
+
+
+def parse_negative_pixel_percentage(line: str) -> int | None:
+    """Read the share of negative pixels Siril warns about.
+
+    Parameters
+    ----------
+    line : `str`
+        One line of Siril's output.
+
+    Returns
+    -------
+    percentage : `int` or `None`
+        The percentage of pixels below zero when the line is Siril's
+        "many negative pixels" warning, otherwise `None`.
+    """
+    match = _NEGATIVE_PIXELS_PATTERN.search(line)
+    return int(match.group(1)) if match else None
 
 
 def parse_stacked_image_count(line: str) -> int | None:

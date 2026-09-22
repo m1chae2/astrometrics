@@ -47,6 +47,7 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "CalibrationCatalog",
     "CatalogAccess",
     "DbLogHandler",
+    "ExposureGroupSummary",
     "FileItem",
     "FilterType",
     "FitsHeaderEntry",

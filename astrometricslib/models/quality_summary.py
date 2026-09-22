@@ -22,6 +22,39 @@ class ExcludedFrame(BaseModel):
     reason: str = Field(alias="reason")
 
 
+class ExposureGroupSummary(BaseModel):
+    """What happened to the frames of one exposure length in a stack.
+
+    Frames taken with different exposure lengths are stacked one length at a
+    time (each with the dark frames of its own length) and the results are
+    combined. This records, for each length, how it went. A group left out of
+    the combined image says why in `left_out_reason`.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    exposure_seconds: float = Field(alias="exposureSeconds")
+    frames_submitted: int = Field(alias="framesSubmitted")
+    frames_stacked: int = Field(alias="framesStacked")
+    # False when no dark frames of this exposure length exist: the group was
+    # stacked without a dark, and its frames are not mixed with darked ones.
+    dark_applied: bool = Field(alias="darkApplied")
+    # Whether a star is clipped at the camera's ceiling at this exposure
+    # length (see `pipelines/stacking/exposure_saturation.py`).
+    saturated: bool = Field(default=False, alias="saturated")
+    # Whether this group's raw frames are clipped at zero (the sky sits below
+    # the camera's read noise), so their faint pixels read too high.
+    clipped_at_zero: bool = Field(default=False, alias="clippedAtZero")
+    # Where this group's own stack is kept (the ``groups`` folder next to the
+    # combined stack), or `None` when the group could not be stacked.
+    stack_path: str | None = Field(default=None, alias="stackPath")
+    # How far this group's stack was moved to line up with the reference
+    # group, as [rows, columns] in pixels; `None` for the reference group.
+    alignment_shift_pixels: list[float] | None = Field(default=None, alias="alignmentShiftPixels")
+    # Why the group is not in the combined image, or `None` if it is.
+    left_out_reason: str | None = Field(default=None, alias="leftOutReason")
+
+
 class TargetSessionContribution(BaseModel):
     """Tracks how many pictures from a single observing session were used."""
 
@@ -87,7 +120,7 @@ class PipelineQualitySummaryBase(BaseModel):
 # ---------------------------------------------------------------------------
 
 # Bumped whenever StackingPipelineQualityMetrics's shape changes meaningfully.
-STACKING_PIPELINE_VERSION = "1.1.0"
+STACKING_PIPELINE_VERSION = "1.2.0"
 
 
 class StackingPipelineQualityMetrics(BaseModel):
@@ -114,6 +147,24 @@ class StackingPipelineQualityMetrics(BaseModel):
 
     saturated_pixel_fraction: float | None = Field(default=None, alias="saturatedPixelFraction")
     saturation_flagged: bool = Field(default=False, alias="saturationFlagged")
+
+    # One entry per exposure length in the stack (a single entry when every
+    # frame has the same length).
+    exposure_groups: list[ExposureGroupSummary] = Field(default_factory=list, alias="exposureGroups")
+    # The exposure length, in seconds, that would keep the brightest star
+    # below the camera's ceiling; `None` when it cannot be worked out (for
+    # example a star clipped too heavily to estimate).
+    recommended_exposure_seconds: float | None = Field(default=None, alias="recommendedExposureSeconds")
+
+    # The share of the stack's pixels that are exactly zero. A stack that is
+    # mostly zero has been over-subtracted (its calibration removed more than
+    # the sky), and is blank.
+    zero_pixel_fraction: float | None = Field(default=None, alias="zeroPixelFraction")
+    zero_fraction_flagged: bool = Field(default=False, alias="zeroFractionFlagged")
+    # Siril warns when calibration leaves a large share of a frame below zero;
+    # this is the worst percentage it reported, or `None` if it did not warn.
+    negative_pixel_max_percent: int | None = Field(default=None, alias="negativePixelMaxPercent")
+    negative_pixels_flagged: bool = Field(default=False, alias="negativePixelsFlagged")
 
     # Standard-imaging-only.
     stacked_fwhm_px: float | None = Field(default=None, alias="stackedFwhmPx")

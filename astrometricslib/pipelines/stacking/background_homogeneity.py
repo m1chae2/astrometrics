@@ -123,3 +123,52 @@ def find_dominant_background_subset(
     excluded_ids = {id(frame) for frame in excluded}
     dominant_subset = [frame for frame in frames if id(frame) not in excluded_ids]
     return dominant_subset, excluded, split_summary
+
+
+def find_dominant_background_subset_by_exposure(
+    frames: list[Any], gap_ratio_threshold: float = DEFAULT_GAP_RATIO_THRESHOLD
+) -> tuple[list[Any], list[Any], list[dict[str, Any]]]:
+    """Check for a sky-background split within each exposure length.
+
+    The sky background of a frame grows with its exposure length, so frames of
+    different lengths cannot be compared with each other. Checked together, a
+    60 s group and a 300 s group of the NGC 2403 session (backgrounds of 480
+    and 2256 counts, a gap ratio of 8.0) looked like a change of sky, and all
+    fourteen 60 s frames were excluded (measured 2026-09-21). Each exposure
+    length is therefore checked on its own.
+
+    Parameters
+    ----------
+    frames : `list` [`Any`]
+        The images to check.
+    gap_ratio_threshold : `float`, optional
+        The threshold to decide if conditions changed within a group.
+
+    Returns
+    -------
+    dominant_subset : `list` [`Any`]
+        The images to keep, in their original order.
+    excluded : `list` [`Any`]
+        The images rejected because they look different from the rest of their
+        own exposure length.
+    split_summaries : `list` [`dict`]
+        One entry per exposure length in which a split was found, as returned
+        by `find_dominant_background_subset` with an ``"exposure_seconds"``
+        entry added.
+    """
+    from astrometricslib.pipelines.stacking.exposure_groups import split_frames_by_exposure
+
+    if not frames:
+        return [], [], []
+    kept_ids: set[int] = set()
+    excluded: list[Any] = []
+    split_summaries: list[dict[str, Any]] = []
+    for group in split_frames_by_exposure(frames):
+        dominant, group_excluded, split_summary = find_dominant_background_subset(
+            group.frames, gap_ratio_threshold
+        )
+        kept_ids.update(id(frame) for frame in dominant)
+        excluded.extend(group_excluded)
+        if split_summary:
+            split_summaries.append({**split_summary, "exposure_seconds": group.exposure_seconds})
+    return [frame for frame in frames if id(frame) in kept_ids], excluded, split_summaries

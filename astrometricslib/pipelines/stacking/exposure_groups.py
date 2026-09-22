@@ -366,6 +366,7 @@ def combine_exposure_group_images(
     saturation_level: float = SATURATION_FRACTION_OF_FULL_SCALE,
     frame_noises: list[float] | None = None,
     frame_zero_fractions: list[float] | None = None,
+    covered_masks: list[np.ndarray] | None = None,
 ) -> np.ndarray:
     """Combine one stacked image per exposure group into a single image.
 
@@ -409,6 +410,12 @@ def combine_exposure_group_images(
         With `frame_noises`, a group above `CLIPPED_FRAME_ZERO_FRACTION` is
         left out at pixels less than `CLIPPING_FLOOR_SIGMAS` frame noises
         above zero, where clipping biases its average upward.
+    covered_masks : `list` [`numpy.ndarray`], optional
+        For each group, a 2-D mask of the pixels that hold real data. When the
+        group stacks have been moved to line up (see
+        `pipelines/stacking/group_alignment.py`), the border the move filled
+        with zeros is left out. A group is left out at pixels its mask marks
+        as empty.
 
     Returns
     -------
@@ -452,6 +459,10 @@ def combine_exposure_group_images(
     # Each group is saturated above its own ceiling, which is not the same
     # for every group (see SATURATION_CEILING_SAMPLE_PIXELS).
     usable_masks = [np.asarray(raw) < estimate_saturation_mask_level(raw, saturation_level) for raw in images]
+    if covered_masks is not None:
+        if len(covered_masks) != len(images):
+            raise ValueError("Each group needs one covered mask.")
+        usable_masks = [usable & covered for usable, covered in zip(usable_masks, covered_masks, strict=True)]
     trusted_masks = list(usable_masks)
     if frame_noises is not None and frame_zero_fractions is not None:
         if len(frame_zero_fractions) != len(images):
@@ -473,7 +484,6 @@ def combine_exposure_group_images(
     )
     per_second = [image / gain for image, gain in zip(per_second, gains, strict=True)]
 
-    shortest = int(np.argmin(exposures_seconds))
     numerator = np.zeros_like(per_second[0])
     denominator = np.zeros_like(per_second[0])
     for index, image in enumerate(per_second):
@@ -491,8 +501,20 @@ def combine_exposure_group_images(
             denominator[nothing_trusted] += pixel_weight[nothing_trusted]
     all_saturated = denominator == 0
     if all_saturated.any():
-        numerator[all_saturated] = per_second[shortest][all_saturated]
-        denominator[all_saturated] = 1.0
+        # Every group is saturated (or not covered) here: use the shortest
+        # exposure that has data at the pixel.
+        for index in np.argsort(exposures_seconds):
+            covered = (
+                np.ones(all_saturated.shape[-2:], dtype=bool)
+                if covered_masks is None
+                else covered_masks[index]
+            )
+            fill = all_saturated & (denominator == 0) & covered
+            numerator[fill] = per_second[index][fill]
+            denominator[fill] = 1.0
+        # Nothing at all covers these pixels (only possible outside every
+        # group's field): leave them at zero.
+        denominator[denominator == 0] = 1.0
 
     mean_exposure = float(np.average(exposures_seconds, weights=frame_counts))
     return (numerator / denominator * mean_exposure).astype(np.float32)
@@ -605,7 +627,11 @@ def measure_group_frames(groups: list[ExposureGroup]) -> tuple[list[float], list
 
 
 def merge_rejection_maps(
-    map_paths: list[str], frame_counts: list[int], output_path: str, header: Any | None = None
+    map_paths: list[str],
+    frame_counts: list[int],
+    output_path: str,
+    header: Any | None = None,
+    shifts: list[tuple[float, float] | None] | None = None,
 ) -> bool:
     """Combine each group's rejection map into one map.
 
@@ -625,18 +651,28 @@ def merge_rejection_maps(
         Where to write the combined map.
     header : `astropy.io.fits.Header`, optional
         A FITS header to give the combined map.
+    shifts : `list` [`tuple` [`float`, `float`] or `None`], optional
+        For each group, the (rows, columns) shift that lined its stack up with
+        the reference group. The group's map is moved the same way, so the
+        maps line up with the combined image. `None` for a group that was not
+        moved.
 
     Returns
     -------
     written : `bool`
         `True` when a map was written, `False` if no group had one.
     """
+    from astrometricslib.pipelines.stacking.group_alignment import apply_shift
+
     total = None
     weight_sum = 0.0
-    for path, count in zip(map_paths, frame_counts, strict=True):
+    for position, (path, count) in enumerate(zip(map_paths, frame_counts, strict=True)):
         if not path or not os.path.exists(path):
             continue
         data = np.asarray(read_data(path), dtype=np.float64)
+        shift = shifts[position] if shifts is not None else None
+        if shift is not None:
+            data = apply_shift(data, shift[0], shift[1], order=1)[0].astype(np.float64)
         total = data * count if total is None else total + data * count
         weight_sum += count
     if total is None or weight_sum == 0:

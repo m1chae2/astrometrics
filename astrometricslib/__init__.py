@@ -43,6 +43,7 @@ from astrometricslib.models.moving_object_config import MovingObjectConfig
 from astrometricslib.models.quality_summary import (
     AstrometryPipelineQualityMetrics,
     AstrometryQualitySummary,
+    ExposureGroupSummary,
     TargetSessionContribution,
 )
 from astrometricslib.models.stellar_source import (
@@ -214,6 +215,7 @@ __all__ = [
     "CalibrationCatalog",
     "CatalogAccess",
     "DbLogHandler",
+    "ExposureGroupSummary",
     "FileItem",
     "FilterType",
     "FitsHeaderEntry",

@@ -628,6 +628,26 @@ export interface TargetSessionContribution {
 }
 
 /**
+ * What happened to the frames of one exposure length in a stack.
+ *
+ * Frames taken with different exposure lengths are stacked one length at a
+ * time (each with the dark frames of its own length) and the results are
+ * combined. This records, for each length, how it went. A group left out of
+ * the combined image says why in `left_out_reason`.
+ */
+export interface ExposureGroupSummary {
+  exposureSeconds: number;
+  framesSubmitted: number;
+  framesStacked: number;
+  darkApplied: boolean;
+  saturated?: boolean;
+  clippedAtZero?: boolean;
+  stackPath?: string | null;
+  alignmentShiftPixels?: number[] | null;
+  leftOutReason?: string | null;
+}
+
+/**
  * Measurements recorded when combining (stacking) multiple images.
  *
  * This tracks how many images were successfully combined and records details
@@ -645,6 +665,12 @@ export interface StackingPipelineQualityMetrics {
   calibrationMismatchFlags?: string[];
   saturatedPixelFraction?: number | null;
   saturationFlagged?: boolean;
+  exposureGroups?: ExposureGroupSummary[];
+  recommendedExposureSeconds?: number | null;
+  zeroPixelFraction?: number | null;
+  zeroFractionFlagged?: boolean;
+  negativePixelMaxPercent?: number | null;
+  negativePixelsFlagged?: boolean;
   stackedFwhmPx?: number | null;
   medianInputFwhmPx?: number | null;
   fwhmDegraded?: boolean;

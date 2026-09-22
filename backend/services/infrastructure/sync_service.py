@@ -6,7 +6,7 @@ import threading
 from typing import Any
 
 from backend.services.infrastructure import thread_management
-from backend.services.infrastructure.remote_service import RemoteService
+from wayfindinglib.drivers.stellarmate_interface import StellarMateInterface
 
 
 class SyncService:
@@ -15,14 +15,14 @@ class SyncService:
     external imaging computers (e.g. Astroberry/Raspberry Pi).
     """
 
-    def __init__(self, remote_service: RemoteService = None, config_service=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, stellarmate: StellarMateInterface = None, config_service=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
         """Initialize the SyncService.
 
         Args:
-            remote_service: Injected RemoteService instance.
+            stellarmate: Injected StellarMateInterface instance.
             config_service: Injected AppConfiguration instance.
         """
-        self._remote = remote_service
+        self._remote = stellarmate
         self._config = config_service
 
     def _get_camera_name(self):  # ruff: ignore[missing-return-type-private-function]
@@ -119,10 +119,10 @@ class SyncService:
         -------
         summary : `dict`
             The sync task summary, or an error status if no
-            `RemoteService` is configured.
+            `StellarMateInterface` is configured.
         """
         if not self._remote:
-            return {"status": "error", "message": "RemoteService not available"}
+            return {"status": "error", "message": "StellarMateInterface not available"}
 
         target_list = self._remote.list_remote_targets()
         target_list = [t for t in target_list if t not in ["Bias", "Dark", "Flat"]]

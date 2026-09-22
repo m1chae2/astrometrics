@@ -31,6 +31,27 @@ const getFilename = (path: string): string => {
 };
 
 /**
+ * The calibration frame types the "Calibration" meta-target can ingest.
+ * Matches the folder names the backend looks for on the telescope
+ * (see IngestionService._list_calibration_files).
+ */
+const CALIBRATION_FRAME_TYPES = ['Dark', 'Bias', 'Flat'] as const;
+
+/**
+ * Selects only the remote files belonging to one calibration frame type.
+ * Calibration files are listed prefixed with their folder, e.g.
+ * "Dark/foo.fits", so this matches on that prefix.
+ *
+ * @param remoteFiles All remote files currently listed for the target.
+ * @param frameType The calibration frame type to select, e.g. "Dark".
+ * @returns The subset of `remoteFiles` belonging to `frameType`.
+ */
+const selectCalibrationFrameType = (remoteFiles: string[], frameType: string): string[] => {
+    const prefix = `${frameType}/`;
+    return remoteFiles.filter(file => file.startsWith(prefix));
+};
+
+/**
  * IngestFramesModal renders the file selection and status monitoring modal during ingestion.
  *
  * @param props The props for configuring the modal window, ingestion state, and close callback.
@@ -107,6 +128,7 @@ export const IngestFramesModal: React.FC<IngestFramesModalProps> = ({
     if (!isOpen) return null;
 
     const isRunning = isActive;
+    const isCalibrationTarget = targetName.trim().toLowerCase() === 'calibration';
 
     const footerButtons = (
         <>
@@ -201,6 +223,26 @@ export const IngestFramesModal: React.FC<IngestFramesModalProps> = ({
                                         {selectedFiles.size === remoteFiles.length ? 'Deselect All' : 'Select All'}
                                     </button>
                                 </div>
+                                {isCalibrationTarget && (
+                                    <div className="ingest-modal__calibration-type-row">
+                                        {CALIBRATION_FRAME_TYPES.map(frameType => {
+                                            const framesOfType = selectCalibrationFrameType(remoteFiles, frameType);
+                                            if (framesOfType.length === 0) return null;
+                                            return (
+                                                <button
+                                                    key={frameType}
+                                                    type="button"
+                                                    className="btn-link"
+                                                    onClick={() => setSelectedFiles(new Set(framesOfType))}
+                                                    disabled={isRunning}
+                                                    title={`Select only the ${framesOfType.length} ${frameType} frame(s)`}
+                                                >
+                                                    {frameType} Only
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                )}
                                 <div className="modal-list-container ingest-modal__list-container">
                                     {remoteFiles.map(file => (
                                         <label key={file} className={`ingest-modal__file-row ${isRunning ? 'ingest-modal__file-row--default' : 'ingest-modal__file-row--clickable'}`}>

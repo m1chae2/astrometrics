@@ -376,7 +376,7 @@ class StellarMateInterface:
 
         logger.info(f"Starting rsync download: {self.host_alias}:{remote_path} -> {local_target_path}")
         if log_callback:
-            log_callback(f"Starting robust download for {remote_target_name}...")
+            log_callback(f"Starting download for {remote_target_name}...")
 
         try:
             process = subprocess.Popen(

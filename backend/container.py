@@ -43,7 +43,7 @@ class Container:
         self.image_service = None
         self.image_processing_service = None
         self.sync_service = None
-        self.remote_service = None
+        self.stellarmate_interface = None
         self.socket_manager = None
         self.telescope_service = None
         self.notification_service = None
@@ -120,9 +120,14 @@ class Container:
         self.wayfinder.control.driver = self.indi_driver
 
         # 4. Initialize Infrastructure Services
-        from backend.services.infrastructure.remote_service import RemoteService
+        from wayfindinglib.drivers.stellarmate_interface import StellarMateInterface
 
-        self.remote_service = RemoteService(config_service=self.config_service)
+        remote_pictures_path = self.config_service.get_remote_pictures_path() or "/home/stellarmate/Pictures"
+        self.stellarmate_interface = StellarMateInterface(
+            host_alias=self.config_service.get_telescope_hostname() or "stellarmate",
+            remote_pictures_path=remote_pictures_path,
+            frames_path=self.config_service.get_frames_path(),
+        )
 
         from backend.services.infrastructure.socket_manager import SocketManager
 
@@ -176,7 +181,7 @@ class Container:
             astrometrics=self.astrometrics,
         )
 
-        self.sync_service = SyncService(remote_service=self.remote_service)
+        self.sync_service = SyncService(stellarmate=self.stellarmate_interface)
 
         from backend.services.observatory.imaging_service import ImagingService
 

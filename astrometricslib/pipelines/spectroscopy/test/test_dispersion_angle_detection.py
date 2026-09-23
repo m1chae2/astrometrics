@@ -252,7 +252,9 @@ def test_flare_mask_extraction_follows_a_real_tilted_trace(orientation: str, tru
 
 def test_roi_half_width_is_unchanged_with_no_close_neighbour() -> None:
     """A neighbour far beyond the ROI leaves the default half-width alone."""
-    half_width = _safe_dispersion_angle_roi_half_width_px((100.0, 100.0), [(500.0, 100.0)], "vertical")
+    half_width = _safe_dispersion_angle_roi_half_width_px(
+        (100.0, 100.0), [(500.0, 100.0)], "vertical", trail_length_px=600.0
+    )
 
     assert half_width == DISPERSION_ANGLE_ROI_HALF_WIDTH_PX
 
@@ -260,15 +262,21 @@ def test_roi_half_width_is_unchanged_with_no_close_neighbour() -> None:
 def test_roi_half_width_shrinks_to_the_midpoint_of_a_close_neighbour() -> None:
     """A close neighbour shrinks the ROI to stop exactly at its midpoint."""
     # 10 px away in x, "vertical" orientation reads the x axis: half-width
-    # must stop at 5 px so the ROI's edge never reaches the neighbour.
-    half_width = _safe_dispersion_angle_roi_half_width_px((100.0, 100.0), [(110.0, 100.0)], "vertical")
+    # must stop at 5 px so the ROI's edge never reaches the neighbour. Its
+    # y is identical to the star's own, well inside one trail length, so
+    # its own trail really could reach into this star's strip.
+    half_width = _safe_dispersion_angle_roi_half_width_px(
+        (100.0, 100.0), [(110.0, 100.0)], "vertical", trail_length_px=600.0
+    )
 
     assert half_width == pytest.approx(5.0)
 
 
 def test_roi_half_width_never_shrinks_below_the_floor() -> None:
     """An extremely close neighbour still leaves a usable minimum width."""
-    half_width = _safe_dispersion_angle_roi_half_width_px((100.0, 100.0), [(102.0, 100.0)], "vertical")
+    half_width = _safe_dispersion_angle_roi_half_width_px(
+        (100.0, 100.0), [(102.0, 100.0)], "vertical", trail_length_px=600.0
+    )
 
     assert half_width == DISPERSION_ANGLE_ROI_MINIMUM_HALF_WIDTH_PX
 
@@ -276,14 +284,45 @@ def test_roi_half_width_never_shrinks_below_the_floor() -> None:
 def test_roi_half_width_reads_the_axis_matching_orientation() -> None:
     """Horizontal dispersion measures neighbour distance along y, not x."""
     # Same neighbour: far in x (would not shrink "vertical"), close in y
-    # (must shrink "horizontal").
+    # (must shrink "horizontal"). Its position on the other axis (108 for
+    # "vertical"'s y-overlap check, 500 for "horizontal"'s x-overlap
+    # check) is well within one trail length of the star's own, so its
+    # trail really could reach into this star's strip either way.
     neighbor = [(500.0, 108.0)]
 
-    vertical_half_width = _safe_dispersion_angle_roi_half_width_px((100.0, 100.0), neighbor, "vertical")
-    horizontal_half_width = _safe_dispersion_angle_roi_half_width_px((100.0, 100.0), neighbor, "horizontal")
+    vertical_half_width = _safe_dispersion_angle_roi_half_width_px(
+        (100.0, 100.0), neighbor, "vertical", trail_length_px=600.0
+    )
+    horizontal_half_width = _safe_dispersion_angle_roi_half_width_px(
+        (100.0, 100.0), neighbor, "horizontal", trail_length_px=600.0
+    )
 
     assert vertical_half_width == DISPERSION_ANGLE_ROI_HALF_WIDTH_PX
     assert horizontal_half_width == pytest.approx(4.0)
+
+
+def test_roi_half_width_ignores_a_neighbour_whose_trail_cannot_reach_here() -> None:
+    """A neighbour whose own trail cannot reach this strip must not narrow it.
+
+    Reproduces a real incident: reprocessing a standard star (Vega)
+    measured its own dispersion angle at 2.11 degrees in isolation, but
+    only 0.92 degrees as part of a real multi-star batch that happened to
+    include an unrelated field star -- close to it in projection along the
+    perpendicular axis, but far along the dispersion axis. Every star's
+    trail is the same length, so that neighbour's own trail could never
+    reach anywhere near this star's strip. The previous, perpendicular-
+    axis-only distance check treated it as a contamination risk anyway,
+    needlessly narrowing the ROI and degrading the standard star's own
+    angle measurement (and the spectral classification that depends on
+    it) for no real reason.
+    """
+    close_in_x_far_in_y = [(105.0, 5000.0)]
+
+    half_width = _safe_dispersion_angle_roi_half_width_px(
+        (100.0, 100.0), close_in_x_far_in_y, "vertical", trail_length_px=600.0
+    )
+
+    assert half_width == DISPERSION_ANGLE_ROI_HALF_WIDTH_PX
 
 
 def _add_tilted_trace(

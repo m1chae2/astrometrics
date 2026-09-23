@@ -48,6 +48,7 @@ def _safe_dispersion_angle_roi_half_width_px(
     star_pos: tuple[float, float],
     neighbor_positions: list[tuple[float, float]],
     orientation: str,
+    trail_length_px: float,
     default_half_width_px: float = DISPERSION_ANGLE_ROI_HALF_WIDTH_PX,
 ) -> float:
     """Shrink the angle-detection ROI so it can never reach a close neighbour.
@@ -63,6 +64,22 @@ def _safe_dispersion_angle_roi_half_width_px(
     noise on one. Stopping the ROI at or before the midpoint to the nearest
     neighbour means it can never include that neighbour's own trail centre.
 
+    Only a neighbour whose own dispersed trail could actually reach into
+    this star's trail is a real contamination risk. Every star shares the
+    same offset and length, so two trails can only overlap along the
+    dispersion axis when the stars themselves are within one trail length
+    of each other there -- the shared offset cancels out of that
+    comparison entirely. An earlier version of this compared only the
+    perpendicular-axis distance, treating any star at a similar x (for a
+    vertical grating) as a contamination risk regardless of how far away
+    it sat along y, which does not require its trail to go anywhere near
+    this one. That unnecessarily narrowed the ROI (degrading the angle
+    measurement) for a target with an unrelated field star nearby in
+    projection but nowhere near its dispersed trail: a real reprocessing
+    run measured a standard star's own angle at 2.11 degrees in isolation
+    but only 0.92 degrees as part of a real multi-star batch, degrading
+    its later spectral classification for no real contamination reason.
+
     Parameters
     ----------
     star_pos : `tuple` [`float`, `float`]
@@ -72,18 +89,30 @@ def _safe_dispersion_angle_roi_half_width_px(
     orientation : `str`
         `config.dispersion_orientation`: "vertical" means the fixed
         half-width applies across the x axis, "horizontal" across y.
+    trail_length_px : `float`
+        How long a dispersed trail is, along the dispersion axis --
+        `instrument.expected_length_px`. Two same-length trails can only
+        overlap when the stars themselves are closer than this along
+        that axis.
     default_half_width_px : `float`, optional
-        The half-width to use when there is no close neighbour.
+        The half-width to use when there is no close, relevant neighbour.
 
     Returns
     -------
     half_width_px : `float`
-        `default_half_width_px`, or less when a neighbour is closer than
-        twice that, never below `DISPERSION_ANGLE_ROI_MINIMUM_HALF_WIDTH_PX`.
+        `default_half_width_px`, or less when a relevant neighbour is
+        closer than twice that, never below
+        `DISPERSION_ANGLE_ROI_MINIMUM_HALF_WIDTH_PX`.
     """
     axis_index = 0 if orientation == "vertical" else 1
+    dispersion_axis_index = 1 - axis_index
+    relevant_neighbor_positions = [
+        neighbor
+        for neighbor in neighbor_positions
+        if abs(neighbor[dispersion_axis_index] - star_pos[dispersion_axis_index]) < trail_length_px
+    ]
     nearest_distance = min(
-        (abs(star_pos[axis_index] - neighbor[axis_index]) for neighbor in neighbor_positions),
+        (abs(star_pos[axis_index] - neighbor[axis_index]) for neighbor in relevant_neighbor_positions),
         default=float("inf"),
     )
     return max(DISPERSION_ANGLE_ROI_MINIMUM_HALF_WIDTH_PX, min(default_half_width_px, nearest_distance / 2.0))
@@ -404,7 +433,7 @@ class SpectroscopyPipeline:
         if best_star_pos is not None:
             neighbor_positions = [pos for pos in all_positions if pos != best_star_pos]
             roi_half_width_px = _safe_dispersion_angle_roi_half_width_px(
-                best_star_pos, neighbor_positions, orient
+                best_star_pos, neighbor_positions, orient, length_px
             )
             global_angle = self.detect_dispersion_angle(image, best_star_pos, roi_half_width_px)
             logger.info(

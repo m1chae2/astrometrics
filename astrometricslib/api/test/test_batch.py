@@ -13,7 +13,7 @@ from astrometricslib.api import batch
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines import tasks
 from astrometricslib.pipelines.shared import frame_grouping
-from astrometricslib.utilities import parallel_batch
+from astrometricslib.utilities import concurrency, parallel_batch
 
 
 def _patch_astrometrics(monkeypatch, target) -> MagicMock:  # ruff: ignore[missing-type-function-argument]
@@ -138,10 +138,25 @@ class TestProcessAllTargets:
         api.targets.list.assert_not_called()
 
     def test_forwards_resolved_worker_counts_and_niceness(self, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-        """Verify config settings reach run_parallel_batch resolved."""
+        """Verify config settings reach run_parallel_batch resolved.
+
+        resolve_worker_counts is monkeypatched to a deterministic stub so
+        this test only verifies the forwarding contract -- that the values
+        returned by resolve_worker_counts are passed through correctly --
+        without being affected by real system memory constraints on CI
+        runners. Memory-based capping logic is tested separately in the
+        concurrency module's own unit tests.
+        """
         api = self._make_api(["M13"])
         api.config.get_target_workers.return_value = "2"
         api.config.get_photometry_workers.return_value = "3"
+        monkeypatch.setattr(
+            batch,
+            "resolve_worker_counts",
+            lambda outer, inner: concurrency.WorkerCounts(
+                outer_worker_count=int(outer), inner_worker_count=int(inner)
+            ),
+        )
         run_mock = MagicMock(return_value="a summary")
         monkeypatch.setattr(parallel_batch, "run_parallel_batch", run_mock)
 

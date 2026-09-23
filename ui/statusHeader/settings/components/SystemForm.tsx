@@ -10,6 +10,7 @@ interface SystemFormProps {
     handleConfigChange: (section: string, key: string, value: string) => void;
     agentShortcut: string;
     setAgentShortcutInput: (v: string) => void;
+    loadingConfig?: boolean;
 }
 
 export const SystemForm: React.FC<SystemFormProps> = ({
@@ -21,7 +22,8 @@ export const SystemForm: React.FC<SystemFormProps> = ({
     configData,
     handleConfigChange,
     agentShortcut,
-    setAgentShortcutInput
+    setAgentShortcutInput,
+    loadingConfig = false
 }) => {
     const allowCommands = configData['Observatory.Telescope']?.['allow_commands'] === 'true' ||
         configData['Telescope']?.['allow_commands'] === 'true';
@@ -94,39 +96,48 @@ export const SystemForm: React.FC<SystemFormProps> = ({
 
             <div className="settings__divider">
                 <h4>Displays</h4>
+                {loadingConfig && (
+                    <div style={{ fontSize: '12px', opacity: 0.7, marginBottom: '8px' }}>
+                        Loading display preferences...
+                    </div>
+                )}
                 <label className="settings__field settings__field--row">
                     <input
                         type="checkbox"
-                        checked={configData['Frontend']?.['enable_planetarium'] === 'true'}
+                        checked={configData['Frontend']?.['enable_planetarium'] !== 'false'}
                         onChange={(e) => handleConfigChange('Frontend', 'enable_planetarium', e.target.checked ? 'true' : 'false')}
                         className="settings__checkbox"
+                        disabled={loadingConfig}
                     />
                     <span>Planetarium Display</span>
                 </label>
                 <label className="settings__field settings__field--row">
                     <input
                         type="checkbox"
-                        checked={configData['Frontend']?.['enable_astronomy'] === 'true'}
+                        checked={configData['Frontend']?.['enable_astronomy'] !== 'false'}
                         onChange={(e) => handleConfigChange('Frontend', 'enable_astronomy', e.target.checked ? 'true' : 'false')}
                         className="settings__checkbox"
+                        disabled={loadingConfig}
                     />
                     <span>Astronomy Manager</span>
                 </label>
                 <label className="settings__field settings__field--row">
                     <input
                         type="checkbox"
-                        checked={configData['Frontend']?.['enable_observatory'] === 'true'}
+                        checked={configData['Frontend']?.['enable_observatory'] !== 'false'}
                         onChange={(e) => handleConfigChange('Frontend', 'enable_observatory', e.target.checked ? 'true' : 'false')}
                         className="settings__checkbox"
+                        disabled={loadingConfig}
                     />
                     <span>Observatory Manager</span>
                 </label>
                 <label className="settings__field settings__field--row">
                     <input
                         type="checkbox"
-                        checked={configData['Frontend']?.['enable_observation'] === 'true'}
+                        checked={configData['Frontend']?.['enable_observation'] !== 'false'}
                         onChange={(e) => handleConfigChange('Frontend', 'enable_observation', e.target.checked ? 'true' : 'false')}
                         className="settings__checkbox"
+                        disabled={loadingConfig}
                     />
                     <span>Observation Manager</span>
                 </label>
@@ -143,6 +154,7 @@ export const SystemForm: React.FC<SystemFormProps> = ({
                             handleConfigChange(section, 'allow_commands', e.target.checked ? 'true' : 'false');
                         }}
                         className="settings__checkbox"
+                        disabled={loadingConfig}
                     />
                     <span>Allow Telescope Commands (Disable Safe Mode)</span>
                 </label>

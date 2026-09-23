@@ -39,13 +39,18 @@ class Sky:
         (1600.0).
     """
 
-    def __init__(  # ruff: ignore[missing-return-type-special-method]
+    def __init__(
         self,
         config: Any | None = None,
         latitude: float | None = None,
         longitude: float | None = None,
         elevation: float | None = None,
-    ):
+    ) -> None:
+        from astropy.utils import iers
+
+        iers.conf.auto_download = False
+        iers.conf.auto_max_age = None
+
         self._config = config
 
         # Read from config if available and args are None

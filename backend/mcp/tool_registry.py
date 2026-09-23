@@ -6,9 +6,7 @@ external MCP server process. REQ: AGENT-1.1, AGENT-3.1
 
 import inspect
 import json
-import re
-import typing
-from typing import Any, Union
+from typing import Any
 
 from mcp.types import TextContent, Tool
 
@@ -304,271 +302,112 @@ async def execute_rpc(method: str, params: dict | None = None) -> dict:
 
         payload = {"jsonrpc": "2.0", "method": method, "params": params, "id": "mcp-proxy"}
         res = await post_to_backend("/api/rpc", payload)
+        if not isinstance(res, dict):
+            return {"status": "error", "message": f"Malformed response: {res!r}"}
+        if res.get("status") == "error":
+            return {"status": "error", "message": str(res.get("error", "Backend communication error"))}
         if "error" in res:
-            return {"status": "error", "message": res["error"].get("message", "Unknown RPC error")}
-        return res.get("result", {"status": "error", "message": "Malformed RPC response"})
-
-
-# --- Dynamic Tool Reflection ---
-
-
-def parse_docstring_params(doc: str) -> dict[str, str]:
-    """Parse Google-style docstring parameters.
-
-    Parameters
-    ----------
-    doc : `str`
-        Docstring text to parse.
-
-    Returns
-    -------
-    result : `dict`
-        Mapping of parameter name to its parsed description.
-    """
-    if not doc:
-        return {}
-    param_desc = {}
-    lines = doc.splitlines()
-    in_params = False
-    for line in lines:
-        if "Parameters" in line or "Args:" in line:
-            in_params = True
-            continue
-        if in_params:
-            line.strip().startswith("###") or (line.strip() == "" and param_desc)
-            match = re.match(r"\s*-\s*([a-zA-Z0-9_]+)\s*:\s*(.*)", line)
-            if match:
-                param_desc[match.group(1)] = match.group(2).strip()
+            error_val = res["error"]
+            if isinstance(error_val, dict):
+                msg = error_val.get("message", "Unknown RPC error")
             else:
-                match_args = re.match(r"\s*([a-zA-Z0-9_]+)\s*:\s*(.*)", line)
-                if match_args:
-                    param_desc[match_args.group(1)] = match_args.group(2).strip()
-    return param_desc
+                msg = str(error_val)
+            return {"status": "error", "message": msg}
+        return {"status": "success", "data": res.get("result")}
 
 
-def get_json_type(py_type) -> str:  # ruff: ignore[missing-type-function-argument]
-    """Map a Python PEP-484 type to a JSON Schema type name.
-
-    Parameters
-    ----------
-    py_type : `type`
-        Python type, or typing construct (e.g. `Union`), to map.
-
-    Returns
-    -------
-    result : `str`
-        JSON Schema type name. Defaults to ``"string"`` for
-        unrecognized types.
-    """
-    if py_type is str:
-        return "string"
-    elif py_type is int:
-        return "integer"
-    elif py_type is float:
-        return "number"
-    elif py_type is bool:
-        return "boolean"
-    elif py_type in (list, list):
-        return "array"
-    elif py_type in (dict, dict):
-        return "object"
-
-    origin = typing.get_origin(py_type)
-    if origin is Union:
-        args = typing.get_args(py_type)
-        non_none = [a for a in args if a is not type(None)]
-        if non_none:
-            return get_json_type(non_none[0])
-
-    return "string"
+# ---------------------------------------------------------------------------
+# Backend JSON-RPC & Diagnostics Tools
+# ---------------------------------------------------------------------------
 
 
-def generate_tool_schema(func) -> dict[str, Any]:  # ruff: ignore[missing-type-function-argument]
-    """Generate a JSON Schema for a function's parameters.
-
-    Derives property types from `func`'s type hints and parameter
-    descriptions from its docstring.
+@registry.register(
+    "backend_call_rpc",
+    (
+        "Execute any backend JSON-RPC 2.0 method directly against the running "
+        "FastAPI /api/rpc endpoint to isolate backend vs frontend issues."
+    ),
+    {
+        "type": "object",
+        "properties": {
+            "method": {
+                "type": "string",
+                "description": (
+                    "The exact JSON-RPC method name registered on the backend "
+                    "(e.g. 'astronomy:visible', 'target:list', 'images:last')."
+                ),
+            },
+            "params": {
+                "type": "object",
+                "description": "Optional parameters dictionary to pass to the RPC method.",
+            },
+        },
+        "required": ["method"],
+    },
+)
+async def tool_backend_call_rpc(method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Execute a JSON-RPC 2.0 method directly against the backend.
 
     Parameters
     ----------
-    func : `Callable`
-        Function to introspect.
+    method : `str`
+        The exact JSON-RPC method name.
+    params : `dict[str, Any]`, optional
+        Parameters passed to the RPC method. Defaults to empty dict.
 
     Returns
     -------
-    result : `dict`
-        JSON Schema object with ``"type"``, ``"properties"``, and
-        ``"required"`` keys.
+    result : `dict[str, Any]`
+        Standardized RPC response containing execution status, returned data,
+        or error details with elapsed time in milliseconds.
     """
-    sig = inspect.signature(func)
-    try:
-        type_hints = typing.get_type_hints(func)
-    except Exception:
-        type_hints = {}
-    doc = inspect.getdoc(func) or ""
-    param_descs = parse_docstring_params(doc)
+    import time
 
-    properties = {}
-    required = []
+    start_time = time.perf_counter()
+    res = await execute_rpc(method, params or {})
+    elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
 
-    for name, param in sig.parameters.items():
-        if name in ("self", "args", "kwargs"):
-            continue
-
-        py_type = type_hints.get(name, str)
-        js_type = get_json_type(py_type)
-
-        properties[name] = {"type": js_type, "description": param_descs.get(name, f"Parameter {name}")}
-
-        if param.default == inspect.Parameter.empty:
-            required.append(name)
-
-    return {"type": "object", "properties": properties, "required": required}
-
-
-def make_reflected_executor(branch_name: str, sub_api_name: str, method_name: str):  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Create an async execution wrapper for a reflected tool.
-
-    Parameters
-    ----------
-    branch_name : `str`
-        Name of the high-level interface branch (e.g. ``"observatory"``).
-    sub_api_name : `str`
-        Name of the sub-API within the branch.
-    method_name : `str`
-        Name of the method to invoke via RPC.
-
-    Returns
-    -------
-    result : `Callable`
-        Async function that executes the RPC and returns its data,
-        raising `RuntimeError` on failure.
-    """
-
-    async def execute_reflected(**kwargs):  # ruff: ignore[missing-type-kwargs, missing-return-type-private-function]
-        method_key = f"{branch_name}:{sub_api_name}:{method_name}"
-        res = await execute_rpc(method_key, kwargs)
-        if res.get("status") == "success":
-            return res.get("data")
-        raise RuntimeError(res.get("message", f"Execution failed for {method_key}"))
-
-    return execute_reflected
-
-
-def register_reflected_tools():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Dynamically registers all astrometrics methods as reflected tools."""
-    astrometrics = get_astrometrics()
-    if not astrometrics:
-        return
-
-    mapping = {
-        "observatory.slew_to_target": "slew_to_target",
-        "observatory.set_filter": "set_filter",
-        "observatory.get_telescope_status": "get_telescope_status",
-        "observatory.park": "park_telescope",
-        "observatory.unpark": "unpark_telescope",
-        "observatory.set_tracking": "set_tracking",
-        "observatory.focus_move": "focus_move",
-        "observatory.get_focuser_position": "get_focuser_position",
-        "observatory.connect": "control_connect",
-        "astronomy.list": "astronomy_list",
-        "system.save": "system_save",
-        "targets.list": "list_targets",
+    return {
+        "status": res.get("status", "error"),
+        "method": method,
+        "elapsed_ms": elapsed_ms,
+        "data": res.get("data"),
+        "message": res.get("message"),
     }
 
-    for branch_name in ["observatory", "observation", "astronomy", "analysis", "system", "targets"]:
-        branch = getattr(astrometrics, branch_name, None)
-        if not branch and branch_name == "targets":
 
-            class DummyTargetsBranch:
-                """Fallback target management branch for reflection."""
+@registry.register(
+    "backend_health_check",
+    "Check health and connectivity of the running Astrometrics backend server.",
+    {"type": "object", "properties": {}},
+)
+async def tool_backend_health_check() -> dict[str, Any]:
+    """Probe the backend API listener and report status.
 
-                def list(self) -> list[Any]:
-                    """Retrieve the list of all registered targets.
+    Returns
+    -------
+    result : `dict[str, Any]`
+        Dictionary containing connection status, container state, and latency.
+    """
+    import time
 
-                    Returns
-                    -------
-                    targets : `list`
-                        All target indices currently registered.
-                    """
-                    return astrometrics.targets.list()
+    start_time = time.perf_counter()
+    container_inst = get_container()
+    container_active = bool(container_inst and container_inst.initialized)
 
-                def get(self, target_id: str) -> Any:
-                    """Retrieve a specific target by its ID.
+    # Probe backend JSON-RPC via execute_rpc with lightweight target:list
+    probe_res = await execute_rpc("target:list", {})
+    elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
 
-                    Returns
-                    -------
-                    target : `Any`
-                        The target matching `target_id`.
-                    """
-                    return astrometrics.targets.get(target_id)
+    is_online = probe_res.get("status") == "success"
 
-                def create(self, target_id: str) -> Any:
-                    """Create a new target index.
-
-                    Returns
-                    -------
-                    target : `Any`
-                        The newly created target index.
-                    """
-                    return astrometrics.targets.create(target_id)
-
-                def delete(self, target_id: str) -> bool:
-                    """Delete a target index.
-
-                    Returns
-                    -------
-                    deleted : `bool`
-                        `True` if the target index was deleted.
-                    """
-                    return astrometrics.targets.delete(target_id)
-
-                def save(self) -> None:
-                    """Save all target indices."""
-                    astrometrics.targets.save()
-
-            branch = DummyTargetsBranch()
-
-        if not branch:
-            continue
-
-        for method_name in dir(branch):
-            if method_name.startswith("_"):
-                continue
-            method = getattr(branch, method_name)
-            if not callable(method):
-                continue
-
-            dotted_name = f"{branch_name}.{method_name}"
-            raw_tool_name = mapping.get(dotted_name)
-
-            if not raw_tool_name:
-                raw_tool_name = f"{branch_name}_{method_name}"
-
-            tool_name = f"backend_{raw_tool_name}"
-
-            if tool_name in registry.tools and dotted_name not in mapping:
-                continue
-
-            doc = inspect.getdoc(method) or ""
-            description = doc.split("\n\n")[0] if "\n\n" in doc else doc
-            if not description:
-                description = f"Dynamically reflected tool {tool_name}"
-            schema = generate_tool_schema(method)
-
-            # Helper executor that routes to the correct flat method
-            async def execute_reflected(b=branch_name, m=method_name, **kwargs):  # ruff: ignore[missing-type-function-argument, missing-type-kwargs, missing-return-type-private-function]
-                method_key = f"{b}:{m}"
-                res = await execute_rpc(method_key, kwargs)
-                if res.get("status") == "success":
-                    return res.get("data")
-                raise RuntimeError(res.get("message", f"Execution failed for {method_key}"))
-
-            registry.register(tool_name, description, schema)(execute_reflected)
-
-
-# Run dynamic reflection registration
-register_reflected_tools()
+    return {
+        "status": "healthy" if is_online else "degraded",
+        "backend_online": is_online,
+        "in_process_container": container_active,
+        "latency_ms": elapsed_ms,
+        "details": probe_res.get("message") if not is_online else "Backend responding normally",
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -23,6 +23,12 @@ import matplotlib
 
 matplotlib.use("Agg")
 
+# 3. Configure Astropy to use bundled earth orientation tables, not downloads
+from astropy.utils import iers
+
+iers.conf.auto_download = False
+iers.conf.auto_max_age = None
+
 # 3. Setup a global temporary directory for tests
 _test_tmp_dir = tempfile.TemporaryDirectory()
 TEST_TEMP_DIR = Path(_test_tmp_dir.name)

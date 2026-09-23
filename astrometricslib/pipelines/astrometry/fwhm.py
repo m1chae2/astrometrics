@@ -10,18 +10,53 @@ tool.
 """
 
 import logging
+from typing import Any
 
 import numpy as np
 from astropy.io import fits
-from astropy.stats import sigma_clipped_stats
+from astropy.stats import gaussian_sigma_to_fwhm, sigma_clipped_stats
 
 from astrometricslib.drivers.fits_access import collapse_to_2d
 from astrometricslib.pipelines.astrometry.source_detection import SourceDetector
 
 logger = logging.getLogger(__name__)
 
+# The constant factor between a Gaussian's standard deviation and its
+# FWHM (2*sqrt(2*ln(2))), spelled out here because `semiminor_axis` is
+# reported as a standard deviation but every other number in this
+# module is a FWHM.
+GAUSSIAN_SIGMA_TO_FWHM = gaussian_sigma_to_fwhm
+
 FWHM_MEASUREMENT_BOX_RADIUS_PX = 15
 FWHM_MEASUREMENT_STAR_COUNT = 15
+
+# How stretched out a measured "star" is allowed to look before it is
+# treated as contaminated rather than a genuinely soft-focus point
+# source. A star's own image is round -- elongation near 1.0 -- even
+# when it is badly out of focus, so a normal image never needs this.
+# It matters for a slitless spectrograph image, where every star sits
+# at one end of its own dispersed trail: measured on a real session
+# (Albireo, 2026-09-22, a K3II primary and a fainter B star only 34
+# arcsec apart), a star's own trail crept into the measurement box and
+# pushed elongation from about 1.2 up to 2.8, which in turn pushed the
+# ordinary whole-blob FWHM from ~4px (correct) to ~9px (the trail's
+# length, not the star's width) -- see
+# `test_measure_fwhm_from_data_ignores_a_trail_attached_to_a_star`.
+# 1.5 sits above the noise-driven wobble a round star shows in real
+# data but below the elongation a trail or a chance-aligned neighbour
+# introduces.
+FWHM_MEASUREMENT_MAX_ELONGATION = 1.5
+
+# A candidate is skipped unless its flux is at least this fraction of
+# the single brightest candidate in the image. A field with only one
+# or two real stars (as in the Albireo session that motivated this)
+# otherwise fills the rest of its brightest-15 sample with ordinary
+# noise peaks -- flux a hundredth of the real stars', but photutils
+# still reports a (meaningless, noise-shaped) FWHM for each one, and
+# those numbers dominate the median. A real star field's brightest 15
+# stars are usually within a couple of magnitudes of each other, well
+# inside this ratio, so this does not thin out a normal image.
+FWHM_MEASUREMENT_MIN_RELATIVE_FLUX = 0.05
 
 
 def measure_image_fwhm(path: str, n_stars: int = FWHM_MEASUREMENT_STAR_COUNT) -> float | None:
@@ -74,9 +109,13 @@ def measure_fwhm_from_data(data: np.ndarray, n_stars: int = FWHM_MEASUREMENT_STA
     if not sources:
         return None
 
+    brightest_flux = sources[0].get("flux", 0.0)
+    minimum_flux = brightest_flux * FWHM_MEASUREMENT_MIN_RELATIVE_FLUX
+    bright_sources = [source for source in sources if source.get("flux", 0.0) >= minimum_flux]
+
     box = FWHM_MEASUREMENT_BOX_RADIUS_PX
     fwhms = []
-    for source in sources[:n_stars]:
+    for source in bright_sources[:n_stars]:
         x = source.get("x_centroid", source.get("xcentroid"))
         y = source.get("y_centroid", source.get("ycentroid"))
         if x is None or y is None:
@@ -89,7 +128,8 @@ def measure_fwhm_from_data(data: np.ndarray, n_stars: int = FWHM_MEASUREMENT_STA
             continue
         try:
             _, median, _ = sigma_clipped_stats(cutout, sigma=3.0)
-            fwhm = float(data_properties(cutout - median).fwhm.value)
+            properties = data_properties(cutout - median)
+            fwhm = _star_fwhm_from_properties(properties)
             if np.isfinite(fwhm) and fwhm > 0:
                 fwhms.append(fwhm)
         except Exception as exc:
@@ -97,3 +137,35 @@ def measure_fwhm_from_data(data: np.ndarray, n_stars: int = FWHM_MEASUREMENT_STA
             continue
 
     return float(np.median(fwhms)) if fwhms else None
+
+
+def _star_fwhm_from_properties(properties: Any) -> float:
+    """Turn one star's shape measurement into a single FWHM number.
+
+    A normal star's image is round, so its whole-blob FWHM and its
+    narrow-axis FWHM are almost the same number. When something other
+    than the star reaches into the measurement box -- most often
+    another star's dispersed trail in a slitless spectrograph image,
+    but also a chance-aligned neighbour or a bit of nebulosity -- the
+    blob stretches out along one axis and the whole-blob FWHM balloons
+    to the size of that contamination instead of the star. The narrow
+    axis is barely touched by contamination running mostly along the
+    other axis, so it is used instead whenever the blob looks
+    stretched. See `FWHM_MEASUREMENT_MAX_ELONGATION` for how stretched
+    is too stretched.
+
+    Parameters
+    ----------
+    properties : `photutils.morphology.SourceCatalog` properties row
+        The shape measurement for one star's cutout, from
+        `photutils.morphology.data_properties`.
+
+    Returns
+    -------
+    fwhm : `float`
+        The whole-blob FWHM, or the narrower axis's own FWHM when the
+        blob is more stretched out than a real star should be.
+    """
+    if properties.elongation.value <= FWHM_MEASUREMENT_MAX_ELONGATION:
+        return float(properties.fwhm.value)
+    return float(properties.semiminor_axis.value * GAUSSIAN_SIGMA_TO_FWHM)

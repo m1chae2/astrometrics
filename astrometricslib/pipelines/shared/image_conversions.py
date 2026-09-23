@@ -5,7 +5,6 @@ into standard pictures (PNGs) that can be shown on a webpage or app.
 """
 
 import base64
-import glob
 import logging
 import os
 from io import BytesIO
@@ -344,14 +343,38 @@ def get_last_captured_image(config: Any, stretch: bool = True) -> dict[str, Any]
         images could be found.
     """
     frames_path = config.get_frames_path()
-    pattern = os.path.join(frames_path, "**", "*.fit*")
-    files = glob.glob(pattern, recursive=True)
-
-    if not files:
+    if not frames_path or not os.path.isdir(frames_path):
         return None
 
-    files.sort(key=os.path.getmtime, reverse=True)
-    latest_path = files[0]
+    latest_path: str | None = None
+    latest_mtime: float = -1.0
+
+    try:
+        stack = [frames_path]
+        while stack:
+            current_dir = stack.pop()
+            try:
+                with os.scandir(current_dir) as entries:
+                    for entry in entries:
+                        try:
+                            if entry.is_dir(follow_symlinks=False):
+                                stack.append(entry.path)
+                            elif entry.is_file(follow_symlinks=False):
+                                name_lower = entry.name.lower()
+                                if name_lower.endswith((".fits", ".fit", ".fts")):
+                                    mtime = entry.stat().st_mtime
+                                    if mtime > latest_mtime:
+                                        latest_mtime = mtime
+                                        latest_path = entry.path
+                        except OSError:
+                            continue
+            except OSError:
+                continue
+    except Exception as scan_error:
+        logger.warning("Error scanning frames directory for last image: %s", scan_error)
+
+    if not latest_path:
+        return None
 
     try:
         png_bytes, vmin, vmax = convert_fits_to_png_with_stats(

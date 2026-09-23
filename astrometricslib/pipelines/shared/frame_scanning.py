@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Any
 
 from astrometricslib.drivers.filter_detection import get_filter_type
+from astrometricslib.drivers.fits_access import read_header
 from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.utilities.enums import FilterType
@@ -289,8 +290,6 @@ def classify_and_sort_fits_files(scan_list: list[str], target_id: str, config, t
     """
     import shutil
 
-    from astropy.io import fits
-
     processed_count = 0
     fits_files = []
 
@@ -309,35 +308,32 @@ def classify_and_sort_fits_files(scan_list: list[str], target_id: str, config, t
     for file_path, file in fits_files:
         try:
             dest_path = ""
-            with fits.open(file_path, memmap=False) as hdul:
-                header = hdul[0].header
-                frame_type = header.get("FRAME", header.get("IMAGETYP", "Light")).replace(" ", "").lower()
-                camera = header.get("INSTRUME", header.get("CAMERA", "Unknown"))
-                camera = camera.replace("ZWO CCD", "ZWO").replace("ASI533", "ASI 533")
-                if camera == "Unknown":
-                    camera = "ZWO ASI 533MM Pro"
+            header = read_header(file_path)
+            frame_type = header.get("FRAME", header.get("IMAGETYP", "Light")).replace(" ", "").lower()
+            camera = header.get("INSTRUME", header.get("CAMERA", "Unknown"))
+            camera = camera.replace("ZWO CCD", "ZWO").replace("ASI533", "ASI 533")
+            if camera == "Unknown":
+                camera = "ZWO ASI 533MM Pro"
 
-                if "light" in frame_type:
-                    if target_id:
-                        dest_path = os.path.join(frames_path, "lights", target_id, telescope_name, camera)
-                    else:
-                        continue
-                elif "dark" in frame_type:
-                    exposure = float(header.get("EXPTIME", 0))
-                    gain = str(header.get("ISOSPEED", header.get("GAIN", "0")))
-                    dest_path = os.path.join(frames_path, "darks", camera, str(gain), str(exposure))
-                elif "bias" in frame_type:
-                    gain = str(header.get("ISOSPEED", header.get("GAIN", "0")))
-                    dest_path = os.path.join(frames_path, "biases", camera, str(gain))
-                elif "flat" in frame_type:
-                    filter_enum = get_filter_type(header)
-                    filter_name = filter_enum.name if hasattr(filter_enum, "name") else str(filter_enum)
-                    gain = str(header.get("ISOSPEED", header.get("GAIN", "0")))
-                    dest_path = os.path.join(
-                        frames_path, "flats", telescope_name, camera, filter_name, str(gain)
-                    )
+            if "light" in frame_type:
+                if target_id:
+                    dest_path = os.path.join(frames_path, "lights", target_id, telescope_name, camera)
                 else:
-                    dest_path = os.path.join(frames_path, "others")
+                    continue
+            elif "dark" in frame_type:
+                exposure = float(header.get("EXPTIME", 0))
+                gain = str(header.get("ISOSPEED", header.get("GAIN", "0")))
+                dest_path = os.path.join(frames_path, "darks", camera, str(gain), str(exposure))
+            elif "bias" in frame_type:
+                gain = str(header.get("ISOSPEED", header.get("GAIN", "0")))
+                dest_path = os.path.join(frames_path, "biases", camera, str(gain))
+            elif "flat" in frame_type:
+                filter_enum = get_filter_type(header)
+                filter_name = filter_enum.name if hasattr(filter_enum, "name") else str(filter_enum)
+                gain = str(header.get("ISOSPEED", header.get("GAIN", "0")))
+                dest_path = os.path.join(frames_path, "flats", telescope_name, camera, filter_name, str(gain))
+            else:
+                dest_path = os.path.join(frames_path, "others")
 
             if dest_path:
                 os.makedirs(dest_path, exist_ok=True)

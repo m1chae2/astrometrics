@@ -283,6 +283,41 @@ def test_download_remote_targets_transfers_only_files_not_held_locally(tmp_path)
     ]
 
 
+def test_download_remote_targets_incremental_filters_explicit_selected_files(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify explicit selected_files list is also filtered.
+
+    Already-held frames must be excluded even if selected_files is passed.
+    """
+    fake_astrometrics = _FakeAstrometrics()
+    darks_dir = tmp_path / "darks" / "ZWO ASI 533MM Pro" / "100" / "60.0"
+    darks_dir.mkdir(parents=True)
+    (darks_dir / "Dark_001.fits").write_text("existing dark content")
+
+    with (
+        patch(
+            "astrometricslib.get_configuration",
+            return_value=_patched_config(frames_path=str(tmp_path)),
+        ),
+        patch("astrometricslib.Astrometrics", return_value=fake_astrometrics),
+        patch("wayfindinglib.drivers.stellarmate_interface.StellarMateInterface") as mock_driver,
+        patch("astrometricslib.classify_and_sort_fits_files"),
+    ):
+        mock_driver.return_value.resolve_remote_folder_name.return_value = "Dark"
+        mock_driver.return_value.list_remote_files_with_sizes.return_value = [
+            ("Dark_001.fits", len("existing dark content")),
+            ("Dark_002.fits", 1234),
+        ]
+        mock_driver.return_value.download_target_folder.return_value = True
+        success = remote_operations.download_remote_targets(
+            "Dark", selected_files=["Dark_001.fits", "Dark_002.fits"]
+        )
+
+    assert success is True
+    assert mock_driver.return_value.download_target_folder.call_args.kwargs["selected_files"] == [
+        "Dark_002.fits"
+    ]
+
+
 def test_download_remote_targets_skips_transfer_when_nothing_is_new(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify a fully-synced target transfers nothing but still reindexes."""
     fake_astrometrics = _FakeAstrometrics()

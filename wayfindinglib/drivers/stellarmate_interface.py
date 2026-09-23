@@ -388,16 +388,17 @@ class StellarMateInterface:
                 universal_newlines=True,
             )
 
-            for line in process.stdout:
-                line = line.strip()
-                if not line:
-                    continue
+            if process.stdout:
+                for line in iter(process.stdout.readline, ""):
+                    line = line.strip()
+                    if not line:
+                        continue
 
-                if line.endswith((".fits", ".fit", ".jpg", ".png")):
-                    if log_callback:
-                        log_callback(f"Downloading: {line}")
+                    if line.endswith((".fits", ".fit", ".jpg", ".png")):
+                        if log_callback:
+                            log_callback(f"Downloading: {line}")
 
-                logger.debug(f"rsync: {line}")
+                    logger.debug(f"rsync: {line}")
 
             return_code = process.wait()
             if files_from_path:

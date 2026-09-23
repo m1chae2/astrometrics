@@ -160,7 +160,15 @@ class ToolRegistry:
                 return result
 
             serialized = _serialize_result(result)
-            return [TextContent(type="text", text=json.dumps(serialized, indent=2, default=str))]
+            result_str = json.dumps(serialized, indent=2, default=str)
+            max_bytes = 40000  # Cap output to ~10k tokens to prevent transport and context blowout
+            if len(result_str) > max_bytes:
+                truncated_note = (
+                    f"\n\n... [Output truncated: payload exceeded {max_bytes} bytes. "
+                    "Use specific filtering arguments or limit queries to avoid context blowout.]"
+                )
+                result_str = result_str[:max_bytes] + truncated_note
+            return [TextContent(type="text", text=result_str)]
         except Exception as e:
             return [TextContent(type="text", text=f"Error during tool execution: {e!s}")]
 

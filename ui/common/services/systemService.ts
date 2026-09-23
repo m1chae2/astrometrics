@@ -4,7 +4,7 @@
  * Aligns with the Google TypeScript Style Guide.
  */
 
-import { callBackend } from './backendApi';
+import { callBackend, CallBackendOptions } from './backendApi';
 import { reportError } from '../utils/reportError';
 
 export interface IntrospectionObject {
@@ -53,13 +53,15 @@ export async function fetchSystemCompletions(text: string): Promise<string[]> {
     }
 }
 
+
 /**
  * Fetches the entire application configuration from the backend.
+ * @param options Optional CallBackendOptions such as timeoutMs or abort signal.
  * @return Configuration dictionary mapped by sections.
  */
-export async function getSystemConfig(): Promise<Record<string, Record<string, unknown>>> {
+export async function getSystemConfig(options?: CallBackendOptions): Promise<Record<string, Record<string, unknown>>> {
     try {
-        const data = await callBackend("system:get_config", {});
+        const data = await callBackend("system:get_config", {}, options);
         return data || {};
     } catch (err: unknown) {
         reportError(err instanceof Error ? err : new Error(String(err)), 'backend');

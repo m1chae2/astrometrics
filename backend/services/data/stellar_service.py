@@ -1253,8 +1253,28 @@ class StellarService:
             sorted by descending altitude.
         """
         wayfinder = self.wayfinder
-        targets = wayfinder.planning.get_sources(0.0, 0.0, 180.0, include_catalog=False)
+        targets = wayfinder.planning.get_sources(0.0, 0.0, 180.0, include_catalog=False, include_stars=False)
         visibility_results = wayfinder.planning.get_visibility(targets)
         visible = [entry for entry in visibility_results if entry.get("above_horizon", False)]
+        for entry in visible:
+            if "altitude" in entry:
+                alt_float = float(entry["altitude"])
+                entry["altitude"] = alt_float
+                entry.setdefault("alt", f"{alt_float:.1f}°")
+                entry.setdefault("alt_deg", alt_float)
+            if "azimuth" in entry:
+                az_float = float(entry["azimuth"])
+                entry["azimuth"] = az_float
+                entry.setdefault("az", f"{az_float:.1f}°")
+            if "id" in entry:
+                entry.setdefault("target_id", str(entry["id"]))
+            if "flip_required" in entry:
+                entry["flip_required"] = bool(entry["flip_required"])
+            if "above_horizon" in entry:
+                entry["above_horizon"] = bool(entry["above_horizon"])
+            if "time_to_flip_seconds" in entry and entry["time_to_flip_seconds"] is not None:
+                entry["time_to_flip_seconds"] = float(entry["time_to_flip_seconds"])
+            if "hour_angle" in entry and entry["hour_angle"] is not None:
+                entry["hour_angle"] = float(entry["hour_angle"])
         visible.sort(key=lambda entry: entry["altitude"], reverse=True)
         return visible

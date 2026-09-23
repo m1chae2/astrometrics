@@ -261,7 +261,7 @@ def download_remote_targets(
 
         files_to_transfer = selected_files
         nothing_new_to_transfer = False
-        if files_to_transfer is None and incremental:
+        if incremental:
             remote_files = list(driver.list_remote_files_with_sizes(resolved_folder_name))
             if remote_files:
                 # The classified library lives under the target's own id
@@ -281,22 +281,40 @@ def download_remote_targets(
                         os.path.join(frames_path, "flats"),
                     })
                 )
-                files_to_transfer = [
-                    remote_file
-                    for remote_file, remote_size in remote_files
-                    if (os.path.basename(remote_file), remote_size) not in already_held
-                ]
+                if files_to_transfer is not None:
+                    # When specific files were requested, filter that list
+                    # against already_held frames using exact path or
+                    # basename paired with byte size.
+                    size_map = dict(remote_files)
+                    basename_size_map = {os.path.basename(rf): rsize for rf, rsize in remote_files}
+                    candidate_files = []
+                    for f in files_to_transfer:
+                        f_base = os.path.basename(f)
+                        f_size = size_map.get(f, basename_size_map.get(f_base))
+                        if f_size is not None and (f_base, f_size) in already_held:
+                            continue
+                        candidate_files.append(f)
+                    files_to_transfer = candidate_files
+                    total_candidate_count = len(selected_files)
+                else:
+                    files_to_transfer = [
+                        remote_file
+                        for remote_file, remote_size in remote_files
+                        if (os.path.basename(remote_file), remote_size) not in already_held
+                    ]
+                    total_candidate_count = len(remote_files)
+
                 nothing_new_to_transfer = not files_to_transfer
                 if log_callback:
                     if nothing_new_to_transfer:
                         log_callback(
                             f"{resolved_folder_name}: already up to date "
-                            f"({len(remote_files)} remote file(s) present locally)."
+                            f"({total_candidate_count} remote file(s) present locally)."
                         )
                     else:
                         log_callback(
                             f"{resolved_folder_name}: transferring {len(files_to_transfer)} new "
-                            f"of {len(remote_files)} remote file(s)."
+                            f"of {total_candidate_count} remote file(s)."
                         )
 
         if nothing_new_to_transfer:

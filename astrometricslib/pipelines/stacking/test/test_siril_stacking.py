@@ -182,10 +182,14 @@ def test_a_poor_registration_is_retried_and_the_better_run_is_kept(tmp_path: Pat
 
 
 def test_the_standard_run_is_kept_when_it_registered_more(tmp_path: Path) -> None:
-    """If relaxed detection does worse, the standard run's files are kept."""
+    """If the other detections do worse, the standard run's files are kept."""
     driver = FakeSirilDriver(
         tmp_path,
-        [{"failed": 30, "registered": 70, "fill": 0.2}, {"failed": 50, "registered": 50, "fill": 0.7}],
+        [
+            {"failed": 30, "registered": 70, "fill": 0.2},
+            {"failed": 50, "registered": 50, "fill": 0.7},
+            {"failed": 80, "registered": 20, "fill": 0.9},
+        ],
     )
 
     path, diagnostics = run_siril_stack(driver, [_frame("30")] * 4, "Vega", "Vega_SPEC.fits", None, True)
@@ -199,8 +203,15 @@ def test_the_standard_run_is_kept_when_it_registered_more(tmp_path: Path) -> Non
 def test_frames_lost_after_every_attempt_are_reported(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """If both detections lose too many frames, a warning says so."""
-    driver = FakeSirilDriver(tmp_path, [{"failed": 40, "registered": 60}, {"failed": 30, "registered": 70}])
+    """If every detection loses too many frames, a warning says so."""
+    driver = FakeSirilDriver(
+        tmp_path,
+        [
+            {"failed": 40, "registered": 60},
+            {"failed": 30, "registered": 70},
+            {"failed": 50, "registered": 50},
+        ],
+    )
 
     with caplog.at_level(logging.WARNING):
         run_siril_stack(driver, [_frame("30")] * 4, "Vega", "Vega_SPEC.fits", None, True)
@@ -220,8 +231,8 @@ def test_a_run_that_produces_nothing_falls_back_to_the_next_detection(tmp_path: 
 
 
 def test_when_every_attempt_fails_there_is_no_stack(tmp_path: Path) -> None:
-    """Nothing produced by either detection means `None`."""
-    driver = FakeSirilDriver(tmp_path, [{"ok": False}, {"ok": False}])
+    """Nothing produced by any detection means `None`."""
+    driver = FakeSirilDriver(tmp_path, [{"ok": False}, {"ok": False}, {"ok": False}])
 
     path, _ = run_siril_stack(driver, [_frame("30")] * 4, "Vega", "Vega_SPEC.fits", None, True)
 
@@ -324,7 +335,8 @@ def test_a_group_that_cannot_be_stacked_is_left_out_with_a_warning(
     """One failed group does not sink the whole stack."""
     frames = [_frame("0.5", f"s{i}") for i in range(5)] + [_frame("5.0", f"l{i}") for i in range(5)]
     driver = FakeSirilDriver(
-        tmp_path, [{"ok": False}, {"ok": False}, {"registered": 5, "failed": 0, "fill": 0.2}]
+        tmp_path,
+        [{"ok": False}, {"ok": False}, {"ok": False}, {"registered": 5, "failed": 0, "fill": 0.2}],
     )
 
     with caplog.at_level(logging.WARNING):
@@ -339,7 +351,7 @@ def test_a_group_that_cannot_be_stacked_is_left_out_with_a_warning(
 def test_when_no_group_can_be_stacked_there_is_no_result(tmp_path: Path) -> None:
     """If every group fails, the result is `None`."""
     frames = [_frame("0.5", f"s{i}") for i in range(5)] + [_frame("5.0", f"l{i}") for i in range(5)]
-    driver = FakeSirilDriver(tmp_path, [{"ok": False}] * 4)
+    driver = FakeSirilDriver(tmp_path, [{"ok": False}] * 6)
 
     path, _ = run_siril_stack(driver, frames, "Vega", "Vega_SPEC.fits", None, True)
 
@@ -515,9 +527,10 @@ def test_a_group_that_shares_no_field_with_the_others_is_left_out(tmp_path: Path
 def test_a_group_that_cannot_be_stacked_still_appears_in_the_summaries(tmp_path: Path) -> None:
     """A group Siril could not stack is listed as left out."""
     frames = [_frame("0.5", f"short_{i}") for i in range(6)] + [_frame("5.0", f"long_{i}") for i in range(6)]
-    # A spectral group that produces nothing is retried once with the relaxed
-    # star detection, so it takes two scripted failures.
-    driver = FakeSirilDriver(tmp_path, [{"ok": False}, {"ok": False}, {"registered": 6}])
+    # A spectral group that produces nothing is retried with relaxed
+    # detection and then phase correlation, so it takes three scripted
+    # failures before the other group's single success.
+    driver = FakeSirilDriver(tmp_path, [{"ok": False}, {"ok": False}, {"ok": False}, {"registered": 6}])
 
     _, diagnostics = run_siril_stack(driver, frames, "Vega", "Vega_SPEC.fits", None, True)
 

@@ -346,6 +346,10 @@ export interface CallBackendOptions {
      * `AbortError` and shows no error toast, since cancelling is deliberate.
      */
     signal?: AbortSignal;
+    /**
+     * Milliseconds to wait before aborting the request. Defaults to 15000ms.
+     */
+    timeoutMs?: number;
 }
 
 /**
@@ -357,6 +361,28 @@ export async function callBackend<A extends keyof ActionRegistry>(
     params: ActionRegistry[A]["payload"],
     options?: CallBackendOptions
 ): Promise<ActionRegistry[A]["response"]> {
+    const timeoutMs = options?.timeoutMs ?? 15000;
+    const controller = new AbortController();
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let didTimeout = false;
+
+    if (timeoutMs > 0) {
+        timeoutId = setTimeout(() => {
+            didTimeout = true;
+            controller.abort(new Error(`Request timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+    }
+
+    if (options?.signal) {
+        if (options.signal.aborted) {
+            controller.abort(options.signal.reason);
+        } else {
+            options.signal.addEventListener('abort', () => {
+                controller.abort(options.signal?.reason);
+            });
+        }
+    }
+
     try {
         const url = getBackendUrl('/api/rpc');
         const requestId = Math.floor(Math.random() * 1000000).toString();
@@ -372,7 +398,7 @@ export async function callBackend<A extends keyof ActionRegistry>(
                 params: params,
                 id: requestId
             }),
-            signal: options?.signal
+            signal: controller.signal
         });
 
         if (!response.ok) {
@@ -393,6 +419,11 @@ export async function callBackend<A extends keyof ActionRegistry>(
 
         throw new Error('Malformed RPC response envelope');
     } catch (error: any) {
+        if (didTimeout) {
+            const msg = `Request timed out for ${action}`;
+            emitToast(msg, 'error', `API:${action}`);
+            throw new Error(msg);
+        }
         // A deliberate cancel is not a failure worth telling the user about.
         if (error?.name === 'AbortError') {
             throw error;
@@ -400,6 +431,10 @@ export async function callBackend<A extends keyof ActionRegistry>(
         const msg = error?.message || String(error);
         emitToast(msg, 'error', `API:${action}`);
         throw error;
+    } finally {
+        if (timeoutId) {
+            clearTimeout(timeoutId);
+        }
     }
 }
 

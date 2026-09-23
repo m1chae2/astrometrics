@@ -74,6 +74,17 @@ SPECTRAL_STAR_DETECTION_COMMANDS = {
     "relaxed": "setfindstar -relax=on -roundness=0.15 -radius=3",
 }
 
+# Siril's own two per-frame `stack -weight=` modes ("nbstars" and "wfwhm")
+# both read numbers that only exist because Siril's own registration step
+# measured them for every frame. The phase-correlation path never runs
+# that step (see `_stack_phase_correlation_aligned_spectral_frames`), so
+# asking for either one aborts the stack outright with "Sequence does not
+# have registration info" -- confirmed against a real Albireo run, where
+# the configured default of "wfwhm" did exactly that. "noise" is measured
+# straight from each frame's own pixels and needs no registration data.
+WEIGHT_MODES_NEEDING_REGISTRATION_DATA = frozenset({"nbstars", "wfwhm"})
+PHASE_CORRELATION_FALLBACK_WEIGHT_MODE = "noise"
+
 # How long send_commands waits for one Siril command to report its own
 # completion before giving up on the whole script. This is a deadlock
 # guard, not a per-command budget: it has to exceed the slowest single
@@ -1766,6 +1777,12 @@ class ImageProcessing:
             # only set in the multi-frame branch below; single-frame
             # stacks skip registration entirely
             seq = None
+            # Read below and in the tail of this method, past the
+            # num_lights branch, so it needs to exist either way -- a
+            # single-frame "stack" never has more than one frame to align.
+            use_phase_correlation_alignment = (
+                num_lights > 1 and is_spectral and spectral_star_detection == "phase_correlation"
+            )
             if num_lights == 1:
                 # Siril's 'convert' does not create a .seq file for
                 # a single input frame, so sequence-based
@@ -1779,7 +1796,15 @@ class ImageProcessing:
                     "save result_stacked",
                 ]
             else:
-                script += ["convert light_source -out=../process -fitseq", "cd ../process"]
+                # -fitseq stores the whole sequence as one file, which is
+                # fine when Siril also does the registration -- but the
+                # phase-correlation path (see
+                # `_stack_phase_correlation_aligned_spectral_frames`)
+                # reads each calibrated frame back out in Python, which a
+                # loose per-frame FITS file (Siril's other convert format)
+                # makes trivial and a packed fitseq file does not.
+                convert_flags = "" if use_phase_correlation_alignment else " -fitseq"
+                script += [f"convert light_source -out=../process{convert_flags}", "cd ../process"]
 
                 has_cal = num_darks > 0 or num_biases > 0 or num_flats > 0
                 if has_cal:
@@ -1846,7 +1871,14 @@ class ImageProcessing:
                 if filter_round:
                     frame_filter_options.append(f"-filter-round={filter_round}")
 
-                if is_spectral:
+                if use_phase_correlation_alignment:
+                    # No register/stack commands go into this script at
+                    # all: `_stack_phase_correlation_aligned_spectral_frames`
+                    # sends what has been built so far (calibration only)
+                    # as its own complete run, then drives a second Siril
+                    # run itself once the frames are aligned in Python.
+                    pass
+                elif is_spectral:
                     # Multi-frame Stacking
                     # Spectroscopy frames need a shift-only transform: a
                     # diffraction grating disperses every star's light,
@@ -1913,40 +1945,67 @@ class ImageProcessing:
                     # compounding to 81% of the input for a 90% setting.
                     stack_filter_options = []
 
-                stack_options = [f"rej {rejection_sigma_low:.4f} {rejection_sigma_high:.4f}"]
-                stack_options += stack_filter_options
-                if stack_weight:
-                    stack_options.append(f"-weight={stack_weight}")
-                if generate_rejmap:
-                    stack_options.append("-rejmap")
-                stack_options += ["-norm=addscale", "-out=result_stacked"]
+                if not use_phase_correlation_alignment:
+                    stack_options = [f"rej {rejection_sigma_low:.4f} {rejection_sigma_high:.4f}"]
+                    stack_options += stack_filter_options
+                    if stack_weight:
+                        stack_options.append(f"-weight={stack_weight}")
+                    if generate_rejmap:
+                        stack_options.append("-rejmap")
+                    stack_options += ["-norm=addscale", "-out=result_stacked"]
 
-                script += [
-                    *register_commands,
-                    f"stack {registered_seq} " + " ".join(stack_options),
-                ]
+                    script += [
+                        *register_commands,
+                        f"stack {registered_seq} " + " ".join(stack_options),
+                    ]
 
-            def write_commands():  # ruff: ignore[missing-return-type-private-function]
-                self.send_commands(
-                    command_pipe, script, job_logger=job_logger, status_queue=status_queue, process=process
+            if use_phase_correlation_alignment:
+                res = self._stack_phase_correlation_aligned_spectral_frames(
+                    command_pipe=command_pipe,
+                    output_pipe=output_pipe,
+                    process=process,
+                    status_queue=status_queue,
+                    calibration_script=script,
+                    seq=seq,
+                    target_folder=target_folder,
+                    output_file=output_file,
+                    library_dest=library_dest,
+                    generate_rejmap=generate_rejmap,
+                    rejection_sigma_low=rejection_sigma_low,
+                    rejection_sigma_high=rejection_sigma_high,
+                    stack_weight=stack_weight,
+                    job_logger=job_logger,
+                )
+            else:
+
+                def write_commands():  # ruff: ignore[missing-return-type-private-function]
+                    self.send_commands(
+                        command_pipe,
+                        script,
+                        job_logger=job_logger,
+                        status_queue=status_queue,
+                        process=process,
+                    )
+
+                writer = threading.Thread(target=write_commands)
+                writer.daemon = True
+                writer.start()
+
+                res = self.read_output(
+                    output_pipe,
+                    target_folder,
+                    id,
+                    output_file=output_file,
+                    library_dest=library_dest,
+                    job_logger=job_logger,
+                    generate_rejmap=generate_rejmap,
+                    registered_seq_name=seq,
+                    status_queue=status_queue,
+                    process=process,
                 )
 
-            writer = threading.Thread(target=write_commands)
-            writer.daemon = True
-            writer.start()
-
-            res = self.read_output(
-                output_pipe,
-                target_folder,
-                id,
-                output_file=output_file,
-                library_dest=library_dest,
-                job_logger=job_logger,
-                generate_rejmap=generate_rejmap,
-                registered_seq_name=seq,
-                status_queue=status_queue,
-                process=process,
-            )
+                writer.join(timeout=5)
+                self._kill_process_tree(process, job_logger=job_logger, workdir=target_folder)
 
             self.last_run_diagnostics["stacking_duration_seconds"] = round(
                 time.monotonic() - siril_started_at, 1
@@ -1964,8 +2023,11 @@ class ImageProcessing:
             # exists, before the finally block's cleanup) rather
             # than preserving the raw .lst files out, since
             # stacking_operations.py only needs the parsed values,
-            # not the files themselves.
-            if is_spectral and seq and res:
+            # not the files themselves. Not available for the
+            # phase-correlation path: those .lst files are Siril's own
+            # star-detection registration output, and that path never
+            # runs Siril's register command.
+            if is_spectral and seq and res and not use_phase_correlation_alignment:
                 import glob as _glob
 
                 from astrometricslib.drivers.siril_output_parsing import parse_zero_order_star
@@ -2001,9 +2063,6 @@ class ImageProcessing:
                         job_logger.info(f"Updated stacked header: EXPTIME={total_exp}s")
                 except Exception as e:
                     job_logger.error(f"Failed to update stacked header EXPTIME: {e}")
-
-            writer.join(timeout=5)
-            self._kill_process_tree(process, job_logger=job_logger, workdir=target_folder)
 
             # Wait for log reader thread to finish reading all output
             log_reader_thread.join(timeout=10)
@@ -2045,6 +2104,199 @@ class ImageProcessing:
                 # to 1.1MB. Dropping only the intermediates keeps every
                 # artifact that has ever been useful.
                 self._discard_stacking_intermediates(target_folder, job_logger)
+
+    def _stack_phase_correlation_aligned_spectral_frames(
+        self,
+        command_pipe: str,
+        output_pipe: str,
+        process: subprocess.Popen,
+        status_queue: queue.Queue[str],
+        calibration_script: list[str],
+        seq: str,
+        target_folder: str,
+        output_file: str,
+        library_dest: str | None,
+        generate_rejmap: bool,
+        rejection_sigma_low: float,
+        rejection_sigma_high: float,
+        stack_weight: str | None,
+        job_logger: logging.Logger,
+    ) -> str | None:
+        """Calibrate with Siril, align in Python, then stack with Siril again.
+
+        Used in place of Siril's own star-detection registration for a
+        spectral batch whose frames don't give Siril's star finder enough
+        real point sources to register reliably -- a close visual double
+        star's field, for instance, where every star (not just the
+        target's) is smeared into a trail rather than a compact dot. See
+        `spectral_frame_alignment` for the alignment itself.
+
+        `calibration_script` (everything `process_target` built up
+        through the ``calibrate`` command, with no ``register``/``stack``
+        appended) is sent through the Siril process already running on
+        `command_pipe`. Once it finishes, the calibrated frames it wrote
+        are read back, aligned in Python, and handed to a second,
+        separate Siril process for a plain rejection stack with no
+        registration step at all -- Siril's own ``stack`` command does
+        not require one; the bias, dark and flat master steps earlier in
+        `process_target` already rely on exactly that.
+
+        Parameters
+        ----------
+        command_pipe : `str`
+            The command FIFO of the Siril process already running,
+            reused to send `calibration_script`.
+        output_pipe : `str`
+            That same process's output FIFO.
+        process : `subprocess.Popen`
+            That already-running Siril process.
+        status_queue : `queue.Queue`
+            The queue `process`'s paired `read_output` call publishes
+            command status lines to, reused so `send_commands` can pace
+            the calibration script the same way `process_target` always
+            does.
+        calibration_script : `list` [`str`]
+            The commands to run before alignment: `setext`, master
+            calibration generation, `convert`, and `calibrate`.
+        seq : `str`
+            The calibrated sequence's name (``"pp_light_source"``, or
+            plain ``"light_source"`` when there were no calibration
+            masters to apply), used to find the frames `calibrate` wrote.
+        target_folder : `str`
+            This run's working directory.
+        output_file : `str`
+            The stacked file's name.
+        library_dest : `str` or `None`
+            Where to copy the stacked file, forwarded to `read_output`.
+        generate_rejmap : `bool`
+            Whether to also produce a rejection map.
+        rejection_sigma_low, rejection_sigma_high : `float`
+            The stack's sigma-clipping rejection bounds.
+        stack_weight : `str` or `None`
+            Siril's ``-weight`` value, if any.
+        job_logger : `logging.Logger`
+            Logger for this run.
+
+        Returns
+        -------
+        stacked_path : `str` or `None`
+            The path to the copied-out stacked file, or `None` if either
+            Siril run, or the alignment step in between, produced nothing
+            to stack.
+        """
+        from astrometricslib.pipelines.stacking.spectral_frame_alignment import (
+            ALIGNED_SIRIL_SEQUENCE_NAME,
+            align_calibrated_frames,
+            find_calibrated_frame_paths,
+        )
+
+        def write_calibration_commands():  # ruff: ignore[missing-return-type-private-function]
+            self.send_commands(
+                command_pipe,
+                calibration_script,
+                job_logger=job_logger,
+                status_queue=status_queue,
+                process=process,
+            )
+
+        calibration_writer = threading.Thread(target=write_calibration_commands, daemon=True)
+        calibration_writer.start()
+        # No stack command was sent, so this only ever reaches Siril's
+        # own exit and returns None; it is read for its side effect of
+        # keeping status_queue fed while calibration_writer paces itself
+        # against it, and for blocking until Siril has actually written
+        # every calibrated frame to disk.
+        self.read_output(
+            output_pipe,
+            target_folder,
+            os.path.basename(target_folder),
+            job_logger=job_logger,
+            status_queue=status_queue,
+            process=process,
+        )
+        calibration_writer.join(timeout=5)
+        self._kill_process_tree(process, job_logger=job_logger, workdir=target_folder)
+
+        process_directory = os.path.join(target_folder, "process")
+        calibrated_paths = find_calibrated_frame_paths(process_directory, seq)
+        if not calibrated_paths:
+            job_logger.error(
+                "No calibrated frames were found in %s after Siril's calibration run; cannot align.",
+                process_directory,
+            )
+            return None
+
+        aligned_directory = os.path.join(process_directory, "aligned")
+        aligned_paths, counts = align_calibrated_frames(calibrated_paths, aligned_directory)
+        self.last_run_diagnostics["registered_frames"] = counts["registered"]
+        self.last_run_diagnostics["registration_failed_frames"] = counts["failed"]
+        if not aligned_paths:
+            job_logger.error("No frames could be aligned by phase correlation; nothing to stack.")
+            return None
+
+        if stack_weight in WEIGHT_MODES_NEEDING_REGISTRATION_DATA:
+            job_logger.warning(
+                "Configured stack weight %r needs registration data this run never produces; "
+                "using %r instead.",
+                stack_weight,
+                PHASE_CORRELATION_FALLBACK_WEIGHT_MODE,
+            )
+            stack_weight = PHASE_CORRELATION_FALLBACK_WEIGHT_MODE
+
+        stack_options = [f"rej {rejection_sigma_low:.4f} {rejection_sigma_high:.4f}"]
+        if stack_weight:
+            stack_options.append(f"-weight={stack_weight}")
+        if generate_rejmap:
+            stack_options.append("-rejmap")
+        # `-out=../result_stacked`, not the bare name every other stack in
+        # this file uses: this run's `cd` below puts Siril's working
+        # directory in the "aligned" subfolder (kept separate from
+        # `process/` itself so `convert` below only picks up this run's
+        # own aligned frames, not the calibrated frames or masters already
+        # sitting in `process/`), but `read_output` always looks for
+        # `result_stacked.fits` directly in `process/`. The extra `../`
+        # writes it where `read_output` expects it without moving
+        # `read_output` itself.
+        stack_options += ["-norm=addscale", "-out=../result_stacked"]
+
+        stack_command_pipe, stack_output_pipe = self.create_named_pipes(target_folder)
+        stack_process = self.run_siril_headless(stack_command_pipe, stack_output_pipe, job_logger=job_logger)
+        stack_status_queue: queue.Queue[str] = queue.Queue()
+        stack_script = [
+            "setext fits",
+            f"cd {aligned_directory}",
+            f"convert {ALIGNED_SIRIL_SEQUENCE_NAME} -out=.",
+            f"stack {ALIGNED_SIRIL_SEQUENCE_NAME} " + " ".join(stack_options),
+        ]
+
+        def write_stack_commands():  # ruff: ignore[missing-return-type-private-function]
+            self.send_commands(
+                stack_command_pipe,
+                stack_script,
+                job_logger=job_logger,
+                status_queue=stack_status_queue,
+                process=stack_process,
+            )
+
+        stack_writer = threading.Thread(target=write_stack_commands, daemon=True)
+        stack_writer.start()
+        res = self.read_output(
+            stack_output_pipe,
+            target_folder,
+            os.path.basename(target_folder),
+            output_file=output_file,
+            library_dest=library_dest,
+            job_logger=job_logger,
+            generate_rejmap=generate_rejmap,
+            # No Siril registration ran, so there is no .seq file of
+            # per-frame registration data to preserve.
+            registered_seq_name=None,
+            status_queue=stack_status_queue,
+            process=stack_process,
+        )
+        stack_writer.join(timeout=5)
+        self._kill_process_tree(stack_process, job_logger=job_logger, workdir=target_folder)
+        return res
 
     def _discard_stacking_intermediates(
         self, target_folder: str, job_logger: logging.Logger | None = None

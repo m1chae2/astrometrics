@@ -8,6 +8,10 @@ brackets a usable night against
 
 from astropy.coordinates import AltAz, EarthLocation, get_sun
 from astropy.time import Time
+from astropy.utils import iers
+
+iers.conf.auto_download = False
+iers.conf.auto_max_age = None
 
 
 def solar_altitude_deg(location: EarthLocation, obstime: Time) -> float:

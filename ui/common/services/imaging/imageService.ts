@@ -171,7 +171,7 @@ export async function deleteFiles(paths: string[], targetId?: string): Promise<{
  */
 export async function fetchLastImage(stretch: boolean = true): Promise<{ id: string; min: number; max: number; image_data: string; path: string } | null> {
     try {
-        const result = await callBackend("images:last", { stretch });
+        const result = await callBackend("images:last", { stretch }, { timeoutMs: 30000 });
         return result;
     } catch (err) {
         reportError(err instanceof Error ? err : new Error(String(err)), 'backend');

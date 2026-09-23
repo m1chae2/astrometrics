@@ -14,6 +14,10 @@ from contextlib import contextmanager
 
 import numpy as np
 from astropy.io import fits
+from astropy.utils import iers
+
+iers.conf.auto_download = False
+iers.conf.auto_max_age = None
 
 logger = logging.getLogger(__name__)
 

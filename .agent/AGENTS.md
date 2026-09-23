@@ -28,9 +28,9 @@ Maintain clean unidirectional dependency boundaries across layers:
 - Thin delivery layer delegating business logic to services.
 - ❌ NEVER contain business logic or import directly from `astrometrics/`.
 
-### `backend/mcp/` & Dynamic Reflection
-- All MCP tools reflect directly from the dual-branch `Astrometrics` astrometrics signatures (`imaging_and_processing` and `control_and_planning`) to ensure parity across UI, Python CLI, and AI Agent personas.
-- ❌ NEVER retain dead, overridden, or redundant static MCP tool definitions.
+### `backend/mcp/` & Running API Layer
+- Exposes direct live backend diagnostics (`backend_call_rpc`, `backend_health_check`) and desktop/pipeline automation controls (`electron_run_python`, `ui_show_notification`, etc.).
+- ❌ NEVER recreate synthetic or duplicate domain library reflection wrappers (`backend_targets_*`). Domain math belongs in `astrometricslib-core` and `wayfindinglib-core`.
 
 ## 3. Data & Resource Safety
 - **FITS Access**: ALWAYS use `memmap=False` (or `AstrometricsImage`) to prevent file handle / memory leaks.
@@ -38,11 +38,11 @@ Maintain clean unidirectional dependency boundaries across layers:
 - **Target Multi-Modal Frame Support**: A single `Target` entity represents the celestial object and holds all light frame types (`L`, `R`, `G`, `B`, `Ha`, `SPEC`). Frame differentiation is handled at processing/stacking via `filter_type` and separate master properties (`stacked_image` and `stacked_spectral_target`), rather than creating artificial target entities.
 
 ## 4. Script Usage (MANDATORY)
-ALWAYS prefer executing pre-existing lifecycle scripts under `scripts/` instead of ad-hoc bash commands:
-- **Backend Management**: `scripts/linux/run_backend.sh [start|stop|restart|status]`
-- **Full Application / Electron UI**: `scripts/linux/run_astrometrics.sh [start|stop|restart|status]`
-- **Builds & Packaging**: `scripts/linux/build_astrometrics.sh`
-- **Environment Setup**: `scripts/linux/setup_venv.sh`
+ALWAYS prefer executing pre-existing lifecycle scripts under `build/linux/` instead of ad-hoc bash commands:
+- **Backend Management**: `build/linux/run_backend.sh [start|stop|restart|status]`
+- **Full Application / Electron UI**: `build/linux/run_astrometrics.sh [start|stop|restart|status]`
+- **Builds & Packaging**: `build/linux/build_astrometrics.sh`
+- **Environment Setup**: `build/linux/setup_venv.sh`
 
 ## 5. MCP Tool Usage Guidelines (MANDATORY)
 Domain queries and operations MUST use the reflected MCP tools first. Do NOT fall back to ad-hoc `curl`, exploratory python snippets, or filesystem inspection unless the MCP call fails or returns an explicit connection error.
@@ -50,7 +50,7 @@ Domain queries and operations MUST use the reflected MCP tools first. Do NOT fal
 ### Server Selection Hierarchy
 - `astrometricslib-core`: Domain library functions (catalog targets, image processing, stacking, astrometry, photometry, spectroscopy, and star catalogs).
 - `wayfindinglib-core`: Observatory control, telescope status, tracking, slewing, focusing, guiding, and observation planning.
-- `astrometrics-backend`: Backend session/persistence operations and direct state queries.
+- `astrometrics-backend`: Backend session/persistence operations, direct `/api/rpc` probing via `backend_call_rpc`, health checks via `backend_health_check`, and desktop pipeline controls.
 - `astrometrics-ui`: UI diagnostic, build, test, and accessibility verification suites.
 
 ### Common Invocations Cheat Sheet
@@ -58,6 +58,10 @@ Domain queries and operations MUST use the reflected MCP tools first. Do NOT fal
   `call_mcp_tool(ServerName="astrometricslib-core", ToolName="target_list", Arguments={})`
 - **Get specific target**:
   `call_mcp_tool(ServerName="astrometricslib-core", ToolName="target_get", Arguments={"target_name": "<name>"})`
+- **Probe backend RPC method**:
+  `call_mcp_tool(ServerName="astrometrics-backend", ToolName="backend_call_rpc", Arguments={"method": "astronomy:visible", "params": {}})`
+- **Check backend API health**:
+  `call_mcp_tool(ServerName="astrometrics-backend", ToolName="backend_health_check", Arguments={})`
 - **Add target frame**:
   `call_mcp_tool(ServerName="astrometricslib-core", ToolName="target_add_frame", Arguments={"target_name": "<name>", "frame_path": "<path>"})`
 - **Run astrometry / plate-solving**:

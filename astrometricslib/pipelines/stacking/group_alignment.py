@@ -56,6 +56,20 @@ MINIMUM_ALIGNMENT_CORRELATION = 0.3
 # makes the border pixels partial values.)
 COVERED_PIXEL_THRESHOLD = 0.999
 
+# For a spectral target, the offset between two group stacks is measured on
+# only the central share of each dimension, not the whole frame. A slitless
+# spectrum's dispersed trail can run at any angle (see
+# `SpectroscopyConfig.dispersion_orientation`/`dispersion_angle_degrees`), so
+# its position within the frame cannot be predicted from the pipeline here,
+# but the star that casts it is framed near the centre of the field the same
+# way any target is. On a real stacked Albireo frame (3008 x 3008 px, see
+# `logs/stack_AlbireoPhaseCorrTest4...log`) essentially all of the signal --
+# the star's zero order and the brightest part of its trail -- fell within
+# the central 50% of the frame; the rest was empty sky, whose noise pattern
+# differs between exposure groups and would otherwise be free to dominate the
+# correlation. Not yet validated on other spectral sessions.
+SPECTRAL_ALIGNMENT_CENTER_CROP_FRACTION = 0.5
+
 
 @dataclass
 class AlignmentResult:
@@ -102,6 +116,29 @@ def _to_plane(image: np.ndarray) -> np.ndarray:
     return array if array.ndim == 2 else array.mean(axis=0)
 
 
+def _center_crop(plane: np.ndarray, crop_fraction: float) -> np.ndarray:
+    """Take the central share of a 2-D array, along each axis separately.
+
+    Parameters
+    ----------
+    plane : `numpy.ndarray`
+        A 2-D array. It does not need to be square.
+    crop_fraction : `float`
+        The share of each dimension to keep, from 0 (exclusive) to 1. A
+        value of 0.5 keeps the central half of the rows and the central half
+        of the columns.
+
+    Returns
+    -------
+    cropped : `numpy.ndarray`
+        A view onto the central region of `plane`.
+    """
+    height, width = plane.shape
+    row_margin = round(height * (1.0 - crop_fraction) / 2.0)
+    column_margin = round(width * (1.0 - crop_fraction) / 2.0)
+    return plane[row_margin : height - row_margin, column_margin : width - column_margin]
+
+
 def _filtered(plane: np.ndarray) -> np.ndarray:
     """Remove wide structure and tame the brightest stars.
 
@@ -118,7 +155,9 @@ def _filtered(plane: np.ndarray) -> np.ndarray:
     return filtered
 
 
-def measure_alignment(reference: np.ndarray, image: np.ndarray) -> AlignmentResult:
+def measure_alignment(
+    reference: np.ndarray, image: np.ndarray, crop_fraction: float | None = None
+) -> AlignmentResult:
     """Find the shift that puts `image` onto `reference`.
 
     Parameters
@@ -127,6 +166,13 @@ def measure_alignment(reference: np.ndarray, image: np.ndarray) -> AlignmentResu
         The stack to line up with, 2-D or colour (channels first).
     image : `numpy.ndarray`
         The stack to move, the same shape as `reference`.
+    crop_fraction : `float` or `None`, optional
+        When given, only the central share of each dimension (see
+        `_center_crop`) is used to measure the offset, though the offset
+        found still applies to the whole image. Cropping to the same window
+        in both images does not change the offset between them; it only
+        keeps frame edges and empty sky from influencing it. `None` measures
+        on the whole frame, as before.
 
     Returns
     -------
@@ -140,8 +186,13 @@ def measure_alignment(reference: np.ndarray, image: np.ndarray) -> AlignmentResu
     """
     if np.shape(reference) != np.shape(image):
         raise ValueError("The images to align must have the same shape.")
-    fixed = _filtered(_to_plane(reference))
-    moving = _filtered(_to_plane(image))
+    reference_plane = _to_plane(reference)
+    image_plane = _to_plane(image)
+    if crop_fraction is not None:
+        reference_plane = _center_crop(reference_plane, crop_fraction)
+        image_plane = _center_crop(image_plane, crop_fraction)
+    fixed = _filtered(reference_plane)
+    moving = _filtered(image_plane)
     shift, _, _ = phase_cross_correlation(
         fixed, moving, upsample_factor=ALIGNMENT_UPSAMPLE_FACTOR, normalization=None
     )
@@ -204,7 +255,7 @@ def apply_shift(
 
 
 def align_images_to_reference(
-    images: list[np.ndarray], reference_index: int
+    images: list[np.ndarray], reference_index: int, crop_fraction: float | None = None
 ) -> tuple[list[np.ndarray | None], list[np.ndarray | None], list[AlignmentResult | None]]:
     """Line up every image with the reference image.
 
@@ -214,6 +265,10 @@ def align_images_to_reference(
         The group stacks, all the same shape.
     reference_index : `int`
         Which image the others are moved onto. It is returned unchanged.
+    crop_fraction : `float` or `None`, optional
+        Passed to `measure_alignment` for every pair; see there. The images
+        themselves are never cropped, only the region used to measure the
+        offset between them.
 
     Returns
     -------
@@ -235,7 +290,7 @@ def align_images_to_reference(
             covered_masks.append(np.ones(np.shape(image)[-2:], dtype=bool))
             results.append(None)
             continue
-        result = measure_alignment(images[reference_index], image)
+        result = measure_alignment(images[reference_index], image, crop_fraction=crop_fraction)
         results.append(result)
         if not result.trusted:
             aligned.append(None)

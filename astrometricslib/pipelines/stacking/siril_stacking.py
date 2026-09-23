@@ -6,8 +6,12 @@ Siril driver directly. It adds two things the driver alone does not do:
 1. Registration fallback. Spectral frames are lined up by matching stars
    against a reference frame. If the standard star detection cannot match
    enough frames, the stack is tried again with a more relaxed detection,
-   and the better of the two is kept. Losing frames used to happen silently;
-   now it is retried and, if it still happens, logged as a warning.
+   and if that still is not enough, with phase correlation in Python instead
+   of star matching at all (see `spectral_frame_alignment`, and
+   `siril_interface._stack_phase_correlation_aligned_spectral_frames`) --
+   the better of the three attempts is kept. Losing frames used to happen
+   silently; now it is retried and, if it still happens, logged as a
+   warning.
 2. Exposure groups. A spectral session shot at several exposure lengths is
    stacked one exposure length at a time and the results are combined (see
    `exposure_groups` for why the usual all-at-once recipe wastes the light).
@@ -30,8 +34,16 @@ logger = logging.getLogger(__name__)
 MINIMUM_REGISTERED_FRACTION = 0.9
 
 # The star-detection settings to try for spectral frames, in order (see
-# `siril_interface.SPECTRAL_STAR_DETECTION_COMMANDS`).
-SPECTRAL_STAR_DETECTION_ORDER = ("standard", "relaxed")
+# `siril_interface.SPECTRAL_STAR_DETECTION_COMMANDS`). "phase_correlation"
+# is not a detection setting at all -- it tells `process_target` to skip
+# Siril's own star-based registration entirely and align the frames in
+# Python instead (see `spectral_frame_alignment`). It is tried last, not
+# first, because it is unvalidated against the wide, star-rich fields
+# "standard" already handles well (99-125 stars/frame in a real SA200
+# session), and because it cannot benefit from Siril's own two-pass
+# reference selection or frame filtering the way star-based registration
+# can.
+SPECTRAL_STAR_DETECTION_ORDER = ("standard", "relaxed", "phase_correlation")
 
 
 def run_siril_stack(
@@ -357,7 +369,10 @@ def _stack_exposure_groups(
         merge_registration_sequences,
         merge_rejection_maps,
     )
-    from astrometricslib.pipelines.stacking.group_alignment import align_images_to_reference
+    from astrometricslib.pipelines.stacking.group_alignment import (
+        SPECTRAL_ALIGNMENT_CENTER_CROP_FRACTION,
+        align_images_to_reference,
+    )
 
     logger.info(
         "Stacking '%s' as %d exposure groups (%s s) and combining them.",
@@ -438,7 +453,10 @@ def _stack_exposure_groups(
         for count, exposure, noise in zip(counts, exposures, frame_noises, strict=True)
     ]
     reference_index = int(np.argmax(weights))
-    aligned_images, covered_masks, alignments = align_images_to_reference(images, reference_index)
+    crop_fraction = SPECTRAL_ALIGNMENT_CENTER_CROP_FRACTION if is_spectral else None
+    aligned_images, covered_masks, alignments = align_images_to_reference(
+        images, reference_index, crop_fraction=crop_fraction
+    )
     left_out_reasons: dict[int, str] = {}
     for index, aligned in enumerate(aligned_images):
         if aligned is None:

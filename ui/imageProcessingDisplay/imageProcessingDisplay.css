@@ -1145,6 +1145,12 @@
   padding-top: 4px;
 }
 
+.frame-analysis-table-container {
+  max-height: 280px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
 .analysis-results-content {
   margin-bottom: 8px;
 }

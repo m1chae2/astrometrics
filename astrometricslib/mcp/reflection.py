@@ -208,16 +208,38 @@ def register_astrometrics_tools(
 
             schema = generate_tool_schema(method)
 
-            # Create closure for invocation
-            def make_executor(target_callable: Callable[..., Any]):  # ruff: ignore[missing-return-type-private-function]
+            try:
+                type_hints = typing.get_type_hints(method)
+            except Exception:
+                type_hints = {}
+
+            # Create closure for invocation with domain model identifier
+            # resolution
+            def make_executor(target_callable: Callable[..., Any], hints: dict[str, Any]):  # ruff: ignore[missing-return-type-private-function]
                 async def execute_reflected(**kwargs: Any) -> Any:
+                    # Auto-resolve target string IDs to Target domain
+                    # instances if expected
+                    from astrometricslib.models.target import Target
+
+                    for param_k, param_v in list(kwargs.items()):
+                        expected_type = hints.get(param_k)
+                        if expected_type is not None:
+                            # Handle Target or Target | None
+                            type_args = typing.get_args(expected_type) or (expected_type,)
+                            if Target in type_args and isinstance(param_v, str):
+                                targets_api = getattr(astrometrics_instance, "targets", None)
+                                if targets_api and hasattr(targets_api, "get"):
+                                    resolved = targets_api.get(param_v)
+                                    if resolved:
+                                        kwargs[param_k] = resolved
+
                     if inspect.iscoroutinefunction(target_callable):
                         return await target_callable(**kwargs)
                     return target_callable(**kwargs)
 
                 return execute_reflected
 
-            registry.register(tool_name, summary, schema)(make_executor(method))
+            registry.register(tool_name, summary, schema)(make_executor(method, type_hints))
             count += 1
 
     return count

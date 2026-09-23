@@ -122,6 +122,97 @@ def test_a_negligible_shift_leaves_the_image_untouched() -> None:
     assert covered.all()
 
 
+def make_center_confined_star_field(seed: int, size: int = 256, stars: int = 60) -> np.ndarray:
+    """Build a star field with every star kept within the central half.
+
+    This stands in for a spectral group stack, where the target star and its
+    dispersed trail sit near the centre of the field and the rest of the
+    frame is empty sky (see `SPECTRAL_ALIGNMENT_CENTER_CROP_FRACTION`).
+
+    Returns
+    -------
+    field : `numpy.ndarray`
+        A ``size`` x ``size`` float32 image.
+    """
+    rng = np.random.default_rng(seed)
+    y, x = np.mgrid[0:size, 0:size].astype(np.float32)
+    image = np.zeros((size, size), dtype=np.float32)
+    quarter = size // 4
+    for _ in range(stars):
+        cx, cy = rng.uniform(quarter, size - quarter, 2)
+        amplitude = rng.uniform(0.2, 1.0)
+        image = image + amplitude * np.exp(-((x - cx) ** 2 + (y - cy) ** 2) / (2 * 1.3**2))
+    return image.astype(np.float32)
+
+
+def make_unrelated_clutter(seed: int, size: int = 256, count: int = 300) -> np.ndarray:
+    """Build faint, independently-random points spread over the whole frame.
+
+    Two frames built from different seeds share no true offset. This stands
+    in for the empty-sky pixels of a spectral frame, whose pattern (read
+    noise, dark residuals) is unrelated between two group stacks and would
+    otherwise be free to dominate a whole-frame correlation, since a
+    spectral target's real signal covers only a small share of the frame.
+
+    Returns
+    -------
+    clutter : `numpy.ndarray`
+        A ``size`` x ``size`` float32 image of faint, scattered points.
+    """
+    rng = np.random.default_rng(seed)
+    y, x = np.mgrid[0:size, 0:size].astype(np.float32)
+    image = np.zeros((size, size), dtype=np.float32)
+    for _ in range(count):
+        cx, cy = rng.uniform(0, size, 2)
+        amplitude = rng.uniform(0.1, 0.5)
+        image = image + amplitude * np.exp(-((x - cx) ** 2 + (y - cy) ** 2) / (2 * 1.3**2))
+    return image.astype(np.float32)
+
+
+def test_a_center_crop_still_recovers_a_known_shift() -> None:
+    """Cropping to the centre does not change the offset that is found."""
+    field = make_center_confined_star_field(10)
+    moved, _ = apply_shift(field, 2.0, -1.5)
+
+    result = measure_alignment(field, moved, crop_fraction=0.5)
+
+    assert result.shift_rows_pixels == pytest.approx(-2.0, abs=0.1)
+    assert result.shift_columns_pixels == pytest.approx(1.5, abs=0.1)
+    assert result.trusted
+
+
+def test_a_center_crop_ignores_clutter_that_defeats_whole_frame_alignment() -> None:
+    """Clutter with no true offset can spoil whole-frame alignment.
+
+    A centre crop that excludes most of it still finds the true shift.
+    """
+    center_field = make_center_confined_star_field(11)
+    moved_center, _ = apply_shift(center_field, 3.0, 2.0)
+    reference = center_field + make_unrelated_clutter(101)
+    moving = moved_center + make_unrelated_clutter(202)
+
+    whole_frame = measure_alignment(reference, moving)
+    cropped = measure_alignment(reference, moving, crop_fraction=0.5)
+
+    assert not whole_frame.trusted
+    assert cropped.trusted
+    assert cropped.shift_rows_pixels == pytest.approx(-3.0, abs=0.15)
+    assert cropped.shift_columns_pixels == pytest.approx(-2.0, abs=0.15)
+
+
+def test_align_images_to_reference_passes_the_crop_fraction_through() -> None:
+    """`align_images_to_reference` measures each pair with the same crop."""
+    center_field = make_center_confined_star_field(12)
+    moved_center, _ = apply_shift(center_field, -1.0, 4.0)
+    reference = center_field + make_unrelated_clutter(303)
+    moving = moved_center + make_unrelated_clutter(404)
+
+    aligned, _, results = align_images_to_reference([reference, moving], 0, crop_fraction=0.5)
+
+    assert results[1].trusted
+    assert aligned[1] is not None
+
+
 def test_align_images_moves_each_group_onto_the_reference_and_flags_a_stranger() -> None:
     """The reference stays, a shifted group is lined up, a stranger is out."""
     reference = make_star_field(8)

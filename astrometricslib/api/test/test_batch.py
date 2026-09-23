@@ -93,7 +93,33 @@ class TestProcessSingleTargetWorker:
         result = batch._process_single_target_worker("M13", 2, "ASI294")
 
         assert result["status"] == "failed"
-        assert result["error"] == "pipeline blew up"
+        assert "RuntimeError" in result["error"]
+        assert "pipeline blew up" in result["error"]
+
+    def test_reports_the_exception_type_even_when_its_message_is_empty(self, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+        """A messageless exception must not collapse to a blank error.
+
+        `str(exc)` is empty for an exception raised with no arguments
+        (e.g. a bare Rust panic pyo3 converts into a Python exception),
+        and `run_parallel_batch` treats a falsy "error" as "Unknown
+        failure" -- discarding the only clue to what actually broke. This
+        reproduces a real production incident where every target in a
+        batch run came back as an undiagnosable "Unknown failure".
+        """
+        target = Target(id="M13")
+        _patch_astrometrics(monkeypatch, target=target)
+        monkeypatch.setattr(frame_grouping, "select_frames_for_camera", lambda t, c: ["a frame"])
+
+        def _explode_with_no_message(*args: object, **kwargs: object) -> object:
+            raise RuntimeError
+
+        monkeypatch.setattr(tasks, "run_full_pipeline", _explode_with_no_message)
+
+        result = batch._process_single_target_worker("M13", 2, "ASI294")
+
+        assert result["status"] == "failed"
+        assert result["error"]
+        assert "RuntimeError" in result["error"]
 
 
 class TestProcessAllTargets:

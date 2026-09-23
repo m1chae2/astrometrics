@@ -6,11 +6,31 @@ never interleave console output, and BrokenProcessPool recovery. Has no
 knowledge of what any particular worker function actually does, so any
 future heavy per-item pipeline can reuse it directly rather than
 re-deriving this machinery.
+
+Worker processes are always started with the "spawn" method, never
+"fork". A forked child inherits whatever native/Rust extension state
+(thread pools, allocator locks, TLS runtimes) the parent process had
+already initialized -- e.g. from an earlier network call -- and that
+state does not reliably survive being forked into several worker
+processes at once. This was the root cause of a real crash: reprocessing
+three targets with the outer worker pool spawned via "fork" caused two
+workers to abort immediately with pyo3 panics ("PyObject pointer is
+null", "memory allocation ... failed") before doing any real work, and
+all three targets came back as an unlabelled "Unknown failure" with zero
+useful diagnostics. "spawn" re-imports everything fresh in each child,
+avoiding this whole class of crash, at the cost of slower worker
+startup. On top of that, if a worker still crashes the process outright
+(a segfault or native abort, not a catchable Python exception) while
+running with more than one concurrent worker, the pool is rebuilt with
+concurrency forced down to a single worker for the retry -- ruling out a
+concurrency-triggered crash before spending the run's other pool-restart
+attempts on it.
 """
 
 import contextlib
 import io
 import logging
+import multiprocessing
 import os
 import time
 from collections.abc import Callable
@@ -39,7 +59,7 @@ class BatchRunSummary:
     results: dict[str, Any] = field(default_factory=dict)
 
 
-def _initialize_worker_process(niceness: int = 10, max_memory_mb: int = 3072) -> None:
+def _initialize_worker_process(niceness: int = 10, max_memory_mb: int = 20480) -> None:
     """Initialize a worker process with priority and memory limits.
 
     Runs once per worker process at pool startup. Lowers scheduling priority
@@ -50,13 +70,29 @@ def _initialize_worker_process(niceness: int = 10, max_memory_mb: int = 3072) ->
     `MemoryError` inside the worker instead of triggering the kernel
     Out-Of-Memory (OOM) killer and freezing the host operating system.
 
+    The default used to be 3072 MB (3 GB), sized for several target
+    workers running at once. A real production run showed that was too
+    tight even for a single target: `RLIMIT_AS` bounds total *virtual*
+    address space, not just resident memory, and numpy/scipy/astropy
+    plus an external Siril process (which inherits this same limit)
+    can reserve several gigabytes of address space well before a
+    single real stacking run is memory-constrained in any way that
+    should actually fail it -- that run died silently (no Python
+    exception, no traceback) purely from hitting this ceiling while
+    still loading calibration frames, before stacking even started.
+    Now that `resolve_worker_counts` only ever runs one target's
+    pipeline at a time (see its docstring), this ceiling no longer
+    needs to be divided across concurrent workers, so it can afford to
+    be a generous safety net against a genuine runaway leak rather
+    than a routine limit real workloads bump into.
+
     Parameters
     ----------
     niceness : int, optional
         OS niceness level (default 10). 0 leaves priority unchanged.
     max_memory_mb : int, optional
         Maximum virtual memory in megabytes allowed for this process
-        (default 3072 MB = 3 GB). Set to 0 or None to disable.
+        (default 20480 MB = 20 GB). Set to 0 or None to disable.
     """
     if niceness:
         os.nice(niceness)
@@ -205,7 +241,7 @@ def run_parallel_batch(
     niceness: int = 10,
     max_pool_restarts: int = 2,
     on_item_complete: Callable[[str, dict, int, int], None] | None = None,
-    max_worker_memory_mb: int = 3072,
+    max_worker_memory_mb: int = 20480,
     max_tasks_per_child: int = 5,
     max_memory_percent_throttle: float = 85.0,
 ) -> BatchRunSummary:
@@ -234,7 +270,11 @@ def run_parallel_batch(
       - BrokenProcessPool recovery: if a worker process crashes outright
         (e.g. a segfault), the pool is rebuilt and the still-pending items
         are resubmitted, up to max_pool_restarts, so one crashed item
-        degrades the run instead of aborting it entirely.
+        degrades the run instead of aborting it entirely. If the crash
+        happened with more than one concurrent worker, the rebuilt pool's
+        concurrency is forced down to 1 for the remaining pending items,
+        so a crash triggered by running several workers at once (rather
+        than by the item's own data) does not just repeat on retry.
       - Progress reporting via on_item_complete, invoked once per item at
         whichever of the four terminal points it reaches (success, soft
         failure, worker exception, or pool-exhausted-after-restarts), so a
@@ -266,7 +306,8 @@ def run_parallel_batch(
         are caught and ignored so a bug in progress reporting cannot
         fail an otherwise-successful item.
     max_worker_memory_mb : `int`, optional
-        Maximum virtual memory in MB allowed per worker process (default 3072).
+        Maximum virtual memory in MB allowed per worker process
+        (default 20480).
     max_tasks_per_child : `int`, optional
         Number of items processed before a worker process is recycled
         (default 5).
@@ -285,8 +326,10 @@ def run_parallel_batch(
     summary = BatchRunSummary()
     pending_item_ids = list(item_ids)
     pool_restart_count = 0
+    current_max_workers = max_workers
     total_item_count = len(item_ids)
     completed_item_count = 0
+    spawn_context = multiprocessing.get_context("spawn")
 
     def report_item_complete(item_id: str, result: dict) -> None:
         nonlocal completed_item_count
@@ -304,7 +347,8 @@ def run_parallel_batch(
         processed_item_ids = set()
 
         executor = ProcessPoolExecutor(
-            max_workers=max_workers,
+            max_workers=current_max_workers,
+            mp_context=spawn_context,
             initializer=_initialize_worker_process,
             initargs=(niceness, max_worker_memory_mb),
             max_tasks_per_child=max_tasks_per_child,
@@ -313,14 +357,14 @@ def run_parallel_batch(
         unsubmitted_items = list(item_ids_for_this_pass)
         active_futures: dict[Any, str] = {}
 
-        # Initial queue fill up to max_workers
+        # Initial queue fill up to current_max_workers
         _dispatch_pending_batch_items(
             unsubmitted_items,
             active_futures,
             executor,
             worker_function,
             worker_arguments,
-            max_workers,
+            current_max_workers,
             max_memory_percent_throttle,
         )
 
@@ -382,7 +426,7 @@ def run_parallel_batch(
                     executor,
                     worker_function,
                     worker_arguments,
-                    max_workers,
+                    current_max_workers,
                     max_memory_percent_throttle,
                 )
 
@@ -415,6 +459,16 @@ def run_parallel_batch(
                     report_item_complete(item_id, crash_result)
             else:
                 pool_restart_count += 1
+                if current_max_workers > 1:
+                    logger.warning(
+                        "Worker pool crashed while running %d items concurrently (%s); "
+                        "retrying the %d still-pending item(s) one at a time to rule out "
+                        "a concurrency-triggered crash.",
+                        current_max_workers,
+                        broken_pool_error,
+                        len(still_pending_item_ids),
+                    )
+                    current_max_workers = 1
                 pending_item_ids = still_pending_item_ids
         finally:
             executor.shutdown(wait=False)

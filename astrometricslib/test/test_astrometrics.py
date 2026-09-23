@@ -38,6 +38,50 @@ def test_astrometrics_target_access(tmp_path):  # ruff: ignore[missing-type-func
         config.update_config({"Image Library": {"path": original_path}})
 
 
+def test_stellar_objects_is_not_loaded_until_first_accessed(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify the local star catalog loads lazily, not at construction.
+
+    Reproduces a real production incident: `Astrometrics.__init__` used
+    to load the entire local star catalog eagerly. On a real catalog of
+    about 270,000 stars, that meant parsing roughly 550MB of stored JSON
+    on every construction -- enough to OOM a memory-capped batch worker
+    before it did any real work, even though target processing never
+    reads `stellar_objects` at all. This checks that constructing
+    `Astrometrics` triggers no "stellar_catalog" read, that the first
+    real access triggers exactly one, and that a second access reuses
+    the cached result instead of reading again.
+    """
+    config = AppConfiguration()
+    library_path = tmp_path / "library"
+    library_path.mkdir()
+    (library_path / "targets").mkdir()
+    original_path = config.get_value("Image Library", "path", fallback="./libraryIndex")
+    config.update_config({"Image Library": {"path": str(library_path)}})
+
+    try:
+        astrometrics = Astrometrics(app_config=config)
+
+        dataset_types_read: list[str] = []
+        original_get = astrometrics.catalog_access.get
+
+        def _counting_get(dataset_type, selector):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+            dataset_types_read.append(dataset_type)
+            return original_get(dataset_type, selector)
+
+        monkeypatch.setattr(astrometrics.catalog_access, "get", _counting_get)
+
+        assert "stellar_catalog" not in dataset_types_read
+
+        first_read = astrometrics.stellar_objects
+        assert dataset_types_read.count("stellar_catalog") == 1
+
+        second_read = astrometrics.stellar_objects
+        assert dataset_types_read.count("stellar_catalog") == 1
+        assert second_read is first_read
+    finally:
+        config.update_config({"Image Library": {"path": original_path}})
+
+
 def test_astrometry_pulls_solved_coordinates_when_unpopulated(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verifies target RA/Dec are backfilled from the WCS center when unset.
 

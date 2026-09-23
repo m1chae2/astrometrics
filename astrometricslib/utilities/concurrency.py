@@ -42,10 +42,17 @@ def resolve_worker_counts(
 
     Accepts either an explicit integer (as a string, matching how
     configparser values are read) or the string "auto" for each of
-    outer_worker_setting and inner_worker_setting. When both are
-    "auto", reserves roughly one core of headroom for the OS/desktop
-    and splits the remainder three ways between outer and inner
-    workers.
+    outer_worker_setting and inner_worker_setting. "auto" outer workers
+    always resolves to processing one target at a time: a single
+    target's own pipeline (stacking, astrometry, photometry,
+    spectroscopy) is memory-heavy enough on its own -- real production
+    data has needed well over the old default per-worker memory
+    ceiling just for one target's stacking step -- that running several
+    targets' pipelines at once is a reliability risk this application
+    is not willing to take for the sake of finishing a multi-target
+    batch faster. "auto" inner workers still reserves roughly one core
+    of headroom for the OS/desktop and splits the rest across the
+    (single) active target's own internal parallelism.
 
     Crucially, this also calculates a memory-based concurrency ceiling
     from real-time available physical memory. Even when CPU core count
@@ -82,7 +89,7 @@ def resolve_worker_counts(
 
     # 1. Resolve CPU-based candidate worker counts
     if str(outer_worker_setting).strip().lower() == "auto":
-        outer_worker_count = max(1, min(4, usable_cpu_count // 3))
+        outer_worker_count = 1
     else:
         outer_worker_count = max(1, int(outer_worker_setting))
 

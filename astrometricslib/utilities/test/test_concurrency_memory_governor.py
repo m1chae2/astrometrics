@@ -92,6 +92,37 @@ class TestConcurrencyMemoryGovernor:
         assert counts.inner_worker_count == 1
         assert "exceeds safe system memory capacity" in caplog.text
 
+    def test_auto_outer_workers_always_resolves_to_one_target_at_a_time(self) -> None:
+        """The "auto" outer-worker setting always means one target at a time.
+
+        A single target's own pipeline (stacking, astrometry,
+        photometry, spectroscopy) is memory-heavy enough on its own --
+        a real production run needed well over the old default
+        per-worker memory ceiling just for one target's stacking step
+        -- that running several targets concurrently is a reliability
+        risk this application no longer takes, regardless of how many
+        CPU cores are available. This also verifies "auto" inner
+        workers then scales to use every usable core for that one
+        active target, rather than splitting cores across targets that
+        no longer run concurrently.
+        """
+        total_ram = 64 * 1024 * 1024 * 1024
+        available_ram = 48 * 1024 * 1024 * 1024
+
+        counts = resolve_worker_counts(
+            outer_worker_setting="auto",
+            inner_worker_setting="auto",
+            cpu_count=12,
+            available_ram_bytes=available_ram,
+            total_ram_bytes=total_ram,
+            estimated_mb_per_worker=1536,
+        )
+
+        assert counts.outer_worker_count == 1
+        # 12 cores - 1 OS core = 11 usable cores, all given to the one
+        # active target instead of being split three ways.
+        assert counts.inner_worker_count == 11
+
     def test_live_system_resolution_runs_without_error(self) -> None:
         """Querying live system resources via psutil executes safely."""
         counts = resolve_worker_counts(

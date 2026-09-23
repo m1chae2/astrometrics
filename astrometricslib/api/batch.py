@@ -5,10 +5,14 @@ allowing the computer to process multiple targets simultaneously without
 freezing.
 """
 
+import logging
+import traceback
 from typing import Any
 
 from astrometricslib.utilities import parallel_batch
 from astrometricslib.utilities.concurrency import resolve_worker_counts
+
+logger = logging.getLogger(__name__)
 
 
 def _process_single_target_worker(
@@ -63,7 +67,18 @@ def _process_single_target_worker(
         )
         result["status"] = "success"
     except Exception as processing_error:
-        result["error"] = str(processing_error)
+        # `str(processing_error)` alone can be an empty string -- some
+        # exceptions (a bare `raise SomeError()`, or a Rust panic pyo3
+        # converts into a catchable `PanicException`) carry no message,
+        # only a type. An empty "error" is falsy, so the batch summary's
+        # `result.get("error") or "Unknown failure"` fallback silently
+        # discarded it, leaving a real target failure completely
+        # undiagnosable. `repr` always includes the exception's type name,
+        # and the full traceback is logged (captured per-target by
+        # `parallel_batch._run_worker_with_captured_output`) so the actual
+        # cause is visible instead of a bare "Unknown failure".
+        logger.exception("Target '%s' failed during processing", target_id)
+        result["error"] = f"{processing_error!r}\n{traceback.format_exc()}"
 
     return result
 

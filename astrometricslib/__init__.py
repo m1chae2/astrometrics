@@ -159,15 +159,43 @@ class Astrometrics:
         self.config = config or app_config or get_configuration()
         self.catalog_access = catalog_access or CatalogAccess(self.config)
 
-        # Load the known stars from storage here; a target's own data is
-        # loaded separately, since TargetCatalog owns that (see its docstring).
-        self.stellar_objects: list[StellarObject] = self.catalog_access.get("stellar_catalog", {}) or []
+        # `stellar_objects` is loaded lazily -- see the property below --
+        # rather than here at construction. A target's own data is loaded
+        # separately, since TargetCatalog owns that (see its docstring).
+        self._stellar_objects_cache: list[StellarObject] | None = None
 
         self.targets = TargetCatalog(self.config, self.catalog_access)
         self.stars = StellarCatalog(self.config, catalog_access=self.catalog_access)
         self.moving_objects = MovingObjectRecovery()
         self.processing = ProcessingPipelines(self.config)
         self.visualization = Visualization(self)
+
+    @property
+    def stellar_objects(self) -> list[StellarObject]:
+        """The full local star catalog, loaded from storage on first use.
+
+        This used to load unconditionally in `__init__`. On a real
+        catalog of about 270,000 stars, that means parsing roughly
+        550MB of stored JSON into `StellarObject` instances every time
+        an `Astrometrics` is constructed -- including inside a
+        batch-processing worker process, which is deliberately capped
+        at a few gigabytes of memory (see
+        `parallel_batch._initialize_worker_process`) and would run out
+        of memory before doing any real work. Target processing never
+        touches this attribute -- it reads the catalog through
+        `self.stars` and `self.catalog_access` directly -- so loading it
+        lazily means that cost is only ever paid by the callers (such as
+        `wayfindinglib`'s telescope-pointing lookups) that actually need
+        the full list.
+
+        Returns
+        -------
+        stellar_objects : `list` [`StellarObject`]
+            Every known star in the local catalog.
+        """
+        if self._stellar_objects_cache is None:
+            self._stellar_objects_cache = self.catalog_access.get("stellar_catalog", {}) or []
+        return self._stellar_objects_cache
 
     def process_all_targets(
         self,

@@ -7,7 +7,10 @@ raised inside a worker was silently discarded and batch runs showed only
 whatever the pipeline happened to `print`.
 """
 
+import itertools
 import logging
+import os
+import time
 from typing import Any
 
 from astrometricslib.utilities import parallel_batch
@@ -132,6 +135,37 @@ def _oom_simulating_worker(item_id: str) -> dict[str, Any]:
     return {"status": "success", "processed_item": item_id}
 
 
+def _crash_once_then_record_worker(item_id: str, marker_dir: str) -> dict[str, Any]:
+    """Crash the whole worker process on an item's first attempt.
+
+    Simulates a real worker-process crash (a native segfault or Rust
+    panic, not a catchable Python exception): the first time an item
+    runs, it writes a marker file and calls `os._exit`, which kills the
+    process outright and poisons the whole pool for
+    `concurrent.futures.process`. On the item's second attempt (after
+    `run_parallel_batch` rebuilds the pool), it instead sleeps briefly
+    and records its start/end time, so a test can check whether that
+    retry ran one item at a time or several at once.
+
+    Returns
+    -------
+    result : `dict`
+        Success status and processed item ID.
+    """
+    marker_path = os.path.join(marker_dir, f"{item_id}.done")
+    if not os.path.exists(marker_path):
+        with open(marker_path, "w") as marker_file:
+            marker_file.write("crashed once")
+        os._exit(1)
+
+    start_time = time.time()
+    time.sleep(0.3)
+    end_time = time.time()
+    with open(os.path.join(marker_dir, "timings.log"), "a") as timings_file:
+        timings_file.write(f"{item_id},{start_time},{end_time}\n")
+    return {"status": "success", "processed_item": item_id}
+
+
 class TestParallelBatchResourceGovernors:
     """Tests for resource controls and backpressure in run_parallel_batch."""
 
@@ -176,3 +210,43 @@ class TestParallelBatchResourceGovernors:
         failed_item, failure_reason = summary.failed[0]
         assert failed_item == "OOM_TARGET"
         assert "memory limit" in failure_reason.lower()
+
+    def test_broken_process_pool_falls_back_to_serial_retry(self, tmp_path) -> None:  # ruff: ignore[missing-type-function-argument]
+        """A real worker-process crash under concurrency retries serially.
+
+        Reproduces the real production failure this guards against: three
+        outer workers crashed at once with native pyo3 panics, and every
+        target came back as an unlabelled "Unknown failure". All three
+        items here crash the same way on their first attempt; once the
+        pool is rebuilt, this verifies concurrency was forced down to one
+        worker rather than just blindly repeating the same crash.
+        """
+        marker_dir = str(tmp_path)
+        items = ["A", "B", "C"]
+
+        summary = parallel_batch.run_parallel_batch(
+            items,
+            _crash_once_then_record_worker,
+            worker_arguments=(marker_dir,),
+            max_workers=3,
+            # Generous budget: under real scheduling variance, an item that
+            # never actually got dispatched to a worker before the pool
+            # broke still hasn't had its "crash once" attempt yet, so it
+            # can still trigger its own restart during the serial retry.
+            # This test is about the downgrade-to-serial behavior, not
+            # about how tightly max_pool_restarts can be bounded.
+            max_pool_restarts=10,
+        )
+
+        assert set(summary.succeeded) == set(items)
+        assert len(summary.failed) == 0
+
+        timing_lines = (tmp_path / "timings.log").read_text().strip().splitlines()
+        assert len(timing_lines) == len(items)
+        windows = sorted(
+            (float(start), float(end)) for _item_id, start, end in (line.split(",") for line in timing_lines)
+        )
+        for (_earlier_start, earlier_end), (later_start, _later_end) in itertools.pairwise(windows):
+            assert later_start >= earlier_end, (
+                "items retried after a worker-process crash must run one at a time, not concurrently"
+            )

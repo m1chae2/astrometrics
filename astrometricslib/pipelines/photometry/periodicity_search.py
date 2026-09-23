@@ -51,6 +51,25 @@ _MINIMUM_PERIOD_CADENCES = 3.0
 # period to be searched. One cycle cannot show that anything repeats.
 _MINIMUM_CYCLES_IN_SPAN = 2.0
 
+# The largest ratio allowed between the longest and shortest period this
+# search will try. Both lomb_scargle_search's frequency grid and
+# box_search's internal per-period binning cost scale with this ratio,
+# and nothing before this constant bounded it: cadence_days (below) is
+# the median gap between *all* measurements, however they were taken,
+# so a target combining a fine within-session cadence (a burst of quick
+# exposures, a few seconds apart) with a wide cross-session baseline
+# (sessions weeks or months apart) can reach a ratio in the hundreds of
+# thousands purely from how it happened to be observed, not from
+# anything astrophysically meaningful about it. A real production run
+# hit a ratio of about 604,000 this way: over 12 million Lomb-Scargle
+# frequency samples, and a single box_search period-grid evaluation
+# that alone took 7+ minutes -- both per star, before even reaching the
+# shuffle loop that repeats the same evaluation 150 times. Capping the
+# ratio, by never letting the effective cadence used for grid sizing be
+# finer than the span allows, bounds both regardless of how tightly
+# spaced any one burst of real measurements happens to be.
+_MAXIMUM_PERIOD_RATIO = 2000.0
+
 # Cycles that must have been observed for a result to be called
 # "detected" rather than "possible".
 _CYCLES_FOR_DETECTION = 3.0
@@ -95,6 +114,24 @@ _DURATION_COUNT = 5
 # longest period searched.
 _LONGEST_DIP_CADENCES = 12.0
 
+# The search grid (frequencies for Lomb-Scargle, periods for the box
+# search) is otherwise sized from minimum_period_days/maximum_period_days
+# alone, with no bound on how wide that range can be. A star combining a
+# multi-month observing baseline (a wide maximum_period_days, from
+# sessions taken weeks or months apart) with a cadence of a few seconds
+# (a tiny minimum_period_days, from rapid burst exposures within one of
+# those sessions) can need a period ratio in the hundreds of thousands --
+# a real Vega run hit a ratio of about 604,000 and a resulting Lomb-Scargle
+# frequency grid of over 12 million points, which made a single star's
+# significance test (150 shuffles, one full periodogram evaluation each)
+# run for hours instead of the "several seconds per star" this search was
+# designed for. Thinning an oversized grid down to this many points keeps
+# worst-case runtime bounded regardless of any future target's span/cadence
+# ratio, at the cost of coarser period resolution only in that pathological
+# case -- a well-behaved grid (like the 1,133-point one a same-night search
+# produces) is never touched.
+_MAXIMUM_SEARCH_GRID_POINTS = 20_000
+
 
 @dataclass(frozen=True)
 class SearchGrid:
@@ -105,7 +142,9 @@ class SearchGrid:
     span_days : `float`
         Time from the first to the last measurement, in days.
     cadence_days : `float`
-        The typical gap between measurements, in days.
+        The typical gap between measurements, in days. Never smaller
+        than `span_days` allows -- see `_MAXIMUM_PERIOD_RATIO` -- so
+        this can be larger than the actual measured median gap.
     minimum_period_days : `float`
         The shortest period worth searching.
     maximum_period_days : `float`
@@ -140,11 +179,45 @@ def build_search_grid(time_days: np.ndarray) -> SearchGrid | None:
         return None
     cadence = float(np.median(gaps))
     span = float(ordered[-1] - ordered[0])
-    minimum_period = _MINIMUM_PERIOD_CADENCES * cadence
     maximum_period = span / _MINIMUM_CYCLES_IN_SPAN
+    # See _MAXIMUM_PERIOD_RATIO: never let the cadence used for grid
+    # sizing be finer than the span allows, so a burst of tightly-spaced
+    # measurements within an otherwise widely-spaced dataset cannot
+    # blow up the search grid on its own.
+    minimum_cadence = maximum_period / (_MAXIMUM_PERIOD_RATIO * _MINIMUM_PERIOD_CADENCES)
+    cadence = max(cadence, minimum_cadence)
+    minimum_period = _MINIMUM_PERIOD_CADENCES * cadence
     if maximum_period <= minimum_period:
         return None
     return SearchGrid(span, cadence, minimum_period, maximum_period)
+
+
+def _cap_grid_size(grid_values: np.ndarray, maximum_points: int = _MAXIMUM_SEARCH_GRID_POINTS) -> np.ndarray:
+    """Thin a search grid down to a safe maximum size, if it is oversized.
+
+    Keeps the grid's own first and last values and picks evenly-spaced
+    indices between them, rather than changing how the grid itself is
+    built -- so a well-behaved, already-reasonable grid is returned
+    completely unchanged.
+
+    Parameters
+    ----------
+    grid_values : `np.ndarray`
+        The frequency or period grid to thin.
+    maximum_points : `int`, optional
+        The largest size to allow, by default `_MAXIMUM_SEARCH_GRID_POINTS`.
+
+    Returns
+    -------
+    thinned : `np.ndarray`
+        `grid_values` unchanged if it was already within the limit,
+        otherwise an evenly-thinned subset of at most `maximum_points`
+        values.
+    """
+    if grid_values.size <= maximum_points:
+        return grid_values
+    keep_indices = np.linspace(0, grid_values.size - 1, maximum_points).round().astype(int)
+    return grid_values[keep_indices]
 
 
 def _verdict_from(
@@ -225,9 +298,21 @@ def lomb_scargle_search(time_days: np.ndarray, flux: np.ndarray) -> PeriodogramR
 
     minimum_frequency = 1.0 / grid.maximum_period_days
     maximum_frequency = 1.0 / grid.minimum_period_days
-    frequency, power = LombScargle(time_days, flux).autopower(
-        minimum_frequency=minimum_frequency, maximum_frequency=maximum_frequency, samples_per_peak=10
+    model = LombScargle(time_days, flux)
+    frequency = _cap_grid_size(
+        model.autofrequency(
+            minimum_frequency=minimum_frequency, maximum_frequency=maximum_frequency, samples_per_peak=10
+        )
     )
+    # autofrequency() always returns an evenly-spaced grid (thinning it
+    # in _cap_grid_size keeps that even spacing, just coarser), so this
+    # is safe to assert. Without it, power() defaults to
+    # assume_regular_frequency=False and falls back to a much slower
+    # O[N^2] method instead of the O[N log N] fast method -- the same
+    # slowdown autopower() avoids by asserting this internally, and
+    # this matters even more here since the same fallback applies to
+    # each of the (possibly hundreds of) shuffle iterations below.
+    power = model.power(frequency, assume_regular_frequency=True)
     best_index = int(np.argmax(power))
     best_period = float(1.0 / frequency[best_index])
     best_power = float(power[best_index])
@@ -241,7 +326,9 @@ def lomb_scargle_search(time_days: np.ndarray, flux: np.ndarray) -> PeriodogramR
     )
     at_least_as_strong = 0
     for _ in range(shuffles):
-        shuffled_power = LombScargle(time_days, random_generator.permutation(flux)).power(frequency)
+        shuffled_power = LombScargle(time_days, random_generator.permutation(flux)).power(
+            frequency, assume_regular_frequency=True
+        )
         at_least_as_strong += int(np.max(shuffled_power) >= best_power)
     false_alarm = (1 + at_least_as_strong) / (1 + shuffles)
 
@@ -311,12 +398,23 @@ def box_search(time_days: np.ndarray, flux: np.ndarray) -> TransitCandidate:
 
     point_scatter = _robust_point_scatter(normalized)
     model = BoxLeastSquares(time_days, normalized, dy=np.full_like(normalized, point_scatter))
-    results = model.autopower(
-        durations,
-        minimum_period=minimum_period,
-        maximum_period=grid.maximum_period_days,
-        objective="snr",
-    )
+    try:
+        # BoxLeastSquares.autoperiod's own resolution heuristic scales
+        # with the transit duration and observing baseline, and unlike
+        # LombScargle.autofrequency it eagerly allocates its full period
+        # array up front rather than building it lazily -- for the same
+        # wide-span/fine-cadence shape that drove the Lomb-Scargle grid
+        # to 12 million points, this tried to allocate a 3.9-trillion
+        # element (28 TiB) array and raised MemoryError immediately,
+        # before there was any array here to cap. A manually built,
+        # already-capped grid sidesteps that allocation entirely.
+        periods = model.autoperiod(
+            durations, minimum_period=minimum_period, maximum_period=grid.maximum_period_days
+        )
+    except MemoryError, OverflowError:
+        periods = np.geomspace(minimum_period, grid.maximum_period_days, _MAXIMUM_SEARCH_GRID_POINTS)
+    periods = _cap_grid_size(periods)
+    results = model.power(periods, durations, objective="snr")
     best_index = int(np.argmax(results.power))
     best_period = float(results.period[best_index])
     best_duration = float(results.duration[best_index])

@@ -8,13 +8,17 @@ curves is checked in validate_spectral_and_period_analysis.py;
 these tests pin the behavior on fixed cases.
 """
 
+import time as time_module
+
 import numpy as np
 import pytest
 
 from astrometricslib.pipelines.photometry.periodicity_search import (
+    _MAXIMUM_PERIOD_RATIO,
     VERDICT_DETECTED,
     VERDICT_INSUFFICIENT_DATA,
     VERDICT_NOT_DETECTED,
+    _cap_grid_size,
     box_search,
     build_search_grid,
     lomb_scargle_search,
@@ -126,3 +130,58 @@ def test_a_seventeen_minute_light_curve_is_not_called_a_detection():  # ruff: ig
 
     assert lomb_scargle_search(times, flux).verdict != VERDICT_DETECTED
     assert box_search(times, flux).verdict in (VERDICT_NOT_DETECTED, VERDICT_INSUFFICIENT_DATA)
+
+
+def test_cap_grid_size_leaves_a_grid_within_the_limit_unchanged():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify a grid already at or under the cap is returned as-is."""
+    grid = np.linspace(0.0, 1.0, 500)
+
+    result = _cap_grid_size(grid, maximum_points=500)
+
+    assert result is grid
+
+
+def test_cap_grid_size_thins_an_oversized_grid_to_the_limit():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify an oversized grid is thinned to the cap, keeping its range."""
+    grid = np.linspace(0.0, 1.0, 1_000_000)
+
+    result = _cap_grid_size(grid, maximum_points=100)
+
+    assert result.size == 100
+    assert result[0] == pytest.approx(0.0)
+    assert result[-1] == pytest.approx(1.0)
+
+
+def test_a_wide_span_with_fine_cadence_does_not_stall_the_period_search():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify a pathological span/cadence ratio does not stall a search.
+
+    A real incident: Vega's light curve spanned ~121 days across two
+    sessions but had ~3-second cadence within a session -- a raw period
+    ratio (maximum_period_days / (3 * measured cadence)) of about
+    600,000. That produced an unbounded Lomb-Scargle frequency grid of
+    over 12 million points, and a single box_search period-grid
+    evaluation alone took 7+ minutes, before even reaching the shuffle
+    loop that repeats the same evaluation 150 times. Two tightly-spaced
+    bursts of measurements 121 days apart reproduce that same
+    wide-span/fine-cadence shape; both searches must still return
+    promptly now that build_search_grid bounds the ratio at its source.
+    """
+    burst_1 = np.linspace(0.0, 0.0005, 50)
+    burst_2 = np.linspace(121.0, 121.0005, 50)
+    times = np.concatenate([burst_1, burst_2])
+    flux = 1.0 + np.random.default_rng(5).normal(0.0, 0.01, times.size)
+
+    raw_cadence_days = float(np.median(np.diff(np.sort(times))))
+    span_days = float(times.max() - times.min())
+    raw_period_ratio = (span_days / 2.0) / (3.0 * raw_cadence_days)
+    assert raw_period_ratio > 100_000, "this scenario should reproduce the real incident's ratio"
+
+    grid = build_search_grid(times)
+    assert grid.maximum_period_days / grid.minimum_period_days <= _MAXIMUM_PERIOD_RATIO * 1.0001
+
+    started_at = time_module.monotonic()
+    lomb_scargle_search(times, flux)
+    box_search(times, flux)
+    elapsed_seconds = time_module.monotonic() - started_at
+
+    assert elapsed_seconds < 30.0

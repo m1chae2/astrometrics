@@ -43,6 +43,19 @@ DISPERSION_ANGLE_ROI_HALF_WIDTH_PX = 20
 # found" check already refuses cleanly instead of fitting noise.
 DISPERSION_ANGLE_ROI_MINIMUM_HALF_WIDTH_PX = 3.0
 
+# Below this DAOStarFinder "sharpness" value, a detection is not compact
+# enough to trust as a real point source. Found on real data: a bright
+# star's own dispersed trail can contain a locally bright pixel (a strong
+# spectral feature) that DAOStarFinder reports as a separate "star" sitting
+# right on the trail. On Vega's master stack, two such trail-only
+# detections measured sharpness 0.268 and 0.262, while every genuine field
+# star detected in the same frame measured between 0.88 and 0.99, and
+# Albireo's own real companion star -- only ~17px from its primary --
+# measured 0.72. 0.5 sits roughly in the middle of that gap: comfortably
+# above the trail artifacts seen so far, comfortably below every real star
+# seen so far.
+TRAIL_CONTAMINATION_MAXIMUM_SHARPNESS = 0.5
+
 
 def _safe_dispersion_angle_roi_half_width_px(
     star_pos: tuple[float, float],
@@ -165,6 +178,134 @@ def _star_pixel_position(star: Any) -> tuple[bool, tuple[Any, Any]]:
     return is_stellar_obj, _read_xy_source_position(source)
 
 
+def _star_sharpness(star: Any) -> float | None:
+    """Read a detected source's DAOStarFinder "sharpness" value, if it has one.
+
+    A plain `(x, y)` tuple (a caller-supplied position with no detection
+    metadata behind it) has no sharpness at all, so this returns `None`
+    for it rather than guessing.
+
+    Returns
+    -------
+    sharpness : `float` or `None`
+        How compact and point-like the detection looked, or `None` if
+        `star` carries no such measurement.
+    """
+    source = star.star_data if hasattr(star, "star_data") else star
+    sharpness = source.get("sharpness") if hasattr(source, "get") else None
+    return float(sharpness) if sharpness is not None else None
+
+
+def _is_inside_dispersion_trail(
+    candidate_pos: tuple[float, float],
+    trail_owner_pos: tuple[float, float],
+    dispersion_vector: np.ndarray,
+    offset_px: float,
+    length_px: float,
+    perpendicular_tolerance_px: float,
+) -> bool:
+    """Check whether a position falls inside another star's own trail.
+
+    A trail runs from `trail_owner_pos + offset_px * dispersion_vector` to
+    `trail_owner_pos + (offset_px + length_px) * dispersion_vector` -- a
+    thin rectangle `perpendicular_tolerance_px` wide on each side of that
+    line. `candidate_pos` is projected onto the dispersion axis to get its
+    position along the trail and its distance off to the side of it.
+
+    Returns
+    -------
+    is_inside : `bool`
+        Whether `candidate_pos` falls within that rectangle.
+    """
+    delta = np.array([candidate_pos[0] - trail_owner_pos[0], candidate_pos[1] - trail_owner_pos[1]])
+    along_trail = float(np.dot(delta, dispersion_vector))
+    off_trail = float(np.linalg.norm(delta - along_trail * dispersion_vector))
+    return offset_px <= along_trail <= offset_px + length_px and off_trail <= perpendicular_tolerance_px
+
+
+def _drop_spurious_trail_detections(
+    stars: list[Any],
+    dispersion_vector: np.ndarray,
+    offset_px: float,
+    length_px: float,
+    perpendicular_tolerance_px: float,
+    maximum_sharpness: float = TRAIL_CONTAMINATION_MAXIMUM_SHARPNESS,
+) -> list[Any]:
+    """Drop candidates that are just a bright point in a brighter star's trail.
+
+    `stars` is checked brightest-first (its natural detection order), so a
+    candidate is only ever compared against stars already accepted as
+    real -- never against another candidate still waiting to be judged
+    itself. A candidate is dropped only when both things are true: it
+    isn't compact enough to trust as a real point source (see
+    `TRAIL_CONTAMINATION_MAXIMUM_SHARPNESS`), and it sits inside an
+    already-accepted star's own dispersed trail. Either fact alone is not
+    enough -- a real, faint star can legitimately be less sharp than a
+    bright one, and a real close binary companion (Albireo's, for
+    instance) can legitimately sit inside its primary's trail region.
+
+    Parameters
+    ----------
+    stars : `list`
+        Candidate stars, brightest first.
+    dispersion_vector : `numpy.ndarray`
+        Unit vector `(x, y)` pointing along the grating's dispersion axis.
+    offset_px : `float`
+        How far a star's own trail starts from its position --
+        `instrument.zero_order_offset_px`.
+    length_px : `float`
+        How long a trail runs from that start --
+        `instrument.expected_length_px`.
+    perpendicular_tolerance_px : `float`
+        How far to each side of the trail's centre line still counts as
+        part of it -- `config.extraction_radius`.
+    maximum_sharpness : `float`, optional
+        The sharpness floor below which a detection is treated as
+        possibly spurious.
+
+    Returns
+    -------
+    kept_stars : `list`
+        `stars`, with spurious trail detections removed.
+    """
+    kept: list[Any] = []
+    kept_positions: list[tuple[float, float]] = []
+    for star in stars:
+        _, pos = _star_pixel_position(star)
+        sharpness = _star_sharpness(star)
+        if (
+            pos[0] is not None
+            and pos[1] is not None
+            and sharpness is not None
+            and sharpness < maximum_sharpness
+            and any(
+                _is_inside_dispersion_trail(
+                    (float(pos[0]), float(pos[1])),
+                    owner_pos,
+                    dispersion_vector,
+                    offset_px,
+                    length_px,
+                    perpendicular_tolerance_px,
+                )
+                for owner_pos in kept_positions
+            )
+        ):
+            logger.info(
+                "Dropping candidate star at (%.1f, %.1f): sharpness %.3f is below the real-star floor "
+                "(%.2f) and it sits inside an already-accepted star's own dispersed trail -- likely a "
+                "bright point on that trail, not a separate star.",
+                pos[0],
+                pos[1],
+                sharpness,
+                maximum_sharpness,
+            )
+            continue
+        kept.append(star)
+        if pos[0] is not None and pos[1] is not None:
+            kept_positions.append((float(pos[0]), float(pos[1])))
+    return kept
+
+
 def keep_usable_samples(
     wavelengths_nm: np.ndarray,
     intensities: np.ndarray,
@@ -266,8 +407,18 @@ class SpectroscopyPipeline:
         processed_stellar_objects : `List[StellarObject]`
             The list of stars, now updated with their color data (spectra).
         """
+        # Filter before slicing to `limit`: a spurious trail detection
+        # sitting near the top of the brightness-sorted list would
+        # otherwise take a slot a real, fainter star should have had.
+        candidate_stars = _drop_spurious_trail_detections(
+            context.stellar_objects,
+            self.instrument.get_dispersion_vector(),
+            self.instrument.zero_order_offset_px,
+            self.instrument.expected_length_px,
+            self.config.extraction_radius,
+        )
         results = self.process_image(
-            context.image, target_stars=context.stellar_objects[:limit], auto_detect_angle=auto_detect_angle
+            context.image, target_stars=candidate_stars[:limit], auto_detect_angle=auto_detect_angle
         )
         self.last_run_zero_order_saturation_fractions = [
             res["zero_order_saturated_pixel_fraction"]

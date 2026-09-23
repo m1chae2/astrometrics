@@ -30,10 +30,13 @@ import numpy as np
 import pytest
 
 from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.spectroscopy.pipeline import (
     DISPERSION_ANGLE_ROI_HALF_WIDTH_PX,
     DISPERSION_ANGLE_ROI_MINIMUM_HALF_WIDTH_PX,
     SpectroscopyPipeline,
+    _drop_spurious_trail_detections,
+    _is_inside_dispersion_trail,
     _safe_dispersion_angle_roi_half_width_px,
 )
 from astrometricslib.utilities import CameraConfig, SpectroscopyConfig
@@ -390,3 +393,131 @@ def test_a_close_neighbour_no_longer_biases_the_shared_angle() -> None:
     implied_slope = vec[0] / vec[1]
 
     assert implied_slope == pytest.approx(true_slope_a, abs=0.02)
+
+
+def _star(x: float, y: float, sharpness: float | None = None) -> StellarObject:
+    """Build a minimal `StellarObject` carrying only a position and sharpness.
+
+    Returns
+    -------
+    star : `StellarObject`
+        A stand-in for a detected source, as `_drop_spurious_trail_detections`
+        and `_is_inside_dispersion_trail` read it.
+    """
+    star = StellarObject()
+    star.star_data = {"xcentroid": x, "ycentroid": y}
+    if sharpness is not None:
+        star.star_data["sharpness"] = sharpness
+    return star
+
+
+def test_is_inside_dispersion_trail_true_for_a_point_on_the_trail() -> None:
+    """A point along the trail axis, within its length, is inside it."""
+    is_inside = _is_inside_dispersion_trail(
+        (1479.0, 1894.0),
+        (1492.8, 1501.9),
+        np.array([0.0, 1.0]),
+        offset_px=120.0,
+        length_px=630.0,
+        perpendicular_tolerance_px=20.0,
+    )
+
+    assert is_inside
+
+
+def test_is_inside_dispersion_trail_false_beyond_the_trail_length() -> None:
+    """A point past where the trail ends is not inside it."""
+    is_inside = _is_inside_dispersion_trail(
+        (1492.8, 3000.0),
+        (1492.8, 1501.9),
+        np.array([0.0, 1.0]),
+        offset_px=120.0,
+        length_px=630.0,
+        perpendicular_tolerance_px=20.0,
+    )
+
+    assert not is_inside
+
+
+def test_is_inside_dispersion_trail_false_off_to_the_side() -> None:
+    """A point far to the side of the trail's line is not inside it."""
+    is_inside = _is_inside_dispersion_trail(
+        (1600.0, 1800.0),
+        (1492.8, 1501.9),
+        np.array([0.0, 1.0]),
+        offset_px=120.0,
+        length_px=630.0,
+        perpendicular_tolerance_px=20.0,
+    )
+
+    assert not is_inside
+
+
+def test_drop_spurious_trail_detections_drops_a_dim_point_in_a_bright_stars_trail() -> None:
+    """A low-sharpness point sitting in Vega's own trail is dropped.
+
+    Reproduces the real incident: Vega's master stack contains a bright,
+    localized spectral feature ~392 px along its own trail that
+    DAOStarFinder reported as a separate "star" (sharpness 0.268), which
+    then legitimately narrowed the dispersion-angle ROI as if it were a
+    real, close neighbour -- degrading Vega's own angle measurement and
+    spectral classification for a neighbour that was never really there.
+    """
+    vega = _star(1492.8, 1501.9, sharpness=0.36)
+    trail_artifact = _star(1479.0, 1894.0, sharpness=0.268)
+
+    kept = _drop_spurious_trail_detections(
+        [vega, trail_artifact],
+        dispersion_vector=np.array([0.0, 1.0]),
+        offset_px=120.0,
+        length_px=630.0,
+        perpendicular_tolerance_px=20.0,
+    )
+
+    assert kept == [vega]
+
+
+def test_drop_spurious_trail_detections_keeps_a_sharp_real_companion() -> None:
+    """A real, sharp star inside a brighter star's trail region is kept.
+
+    Reproduces Albireo: its two real components are only ~17 px apart,
+    so the fainter one's position legitimately falls inside the primary's
+    trail region. Its detection is compact and star-like (sharpness 0.72
+    on real data), unlike a spurious point on a trail, so it must survive
+    this filter -- geometry inside a trail is not enough by itself to drop
+    a candidate.
+    """
+    primary = _star(400.0, 400.0, sharpness=0.69)
+    companion = _star(415.0, 400.0, sharpness=0.72)
+
+    kept = _drop_spurious_trail_detections(
+        [primary, companion],
+        dispersion_vector=np.array([1.0, 0.0]),
+        offset_px=120.0,
+        length_px=630.0,
+        perpendicular_tolerance_px=20.0,
+    )
+
+    assert kept == [primary, companion]
+
+
+def test_drop_spurious_trail_detections_keeps_a_dim_star_outside_any_trail() -> None:
+    """A low-sharpness star far from any brighter star's trail is kept.
+
+    Low sharpness alone must not be enough to drop a candidate -- a real,
+    faint field star can legitimately be less sharp than a bright one.
+    Only the combination of low sharpness *and* sitting inside a brighter
+    star's own trail is treated as likely spurious.
+    """
+    bright_star = _star(1492.8, 1501.9, sharpness=0.36)
+    faint_unrelated_star = _star(80.1, 1994.8, sharpness=0.30)
+
+    kept = _drop_spurious_trail_detections(
+        [bright_star, faint_unrelated_star],
+        dispersion_vector=np.array([0.0, 1.0]),
+        offset_px=120.0,
+        length_px=630.0,
+        perpendicular_tolerance_px=20.0,
+    )
+
+    assert kept == [bright_star, faint_unrelated_star]

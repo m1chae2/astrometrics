@@ -30,7 +30,12 @@ import numpy as np
 import pytest
 
 from astrometricslib.drivers.image import AstrometricsImage
-from astrometricslib.pipelines.spectroscopy.pipeline import SpectroscopyPipeline
+from astrometricslib.pipelines.spectroscopy.pipeline import (
+    DISPERSION_ANGLE_ROI_HALF_WIDTH_PX,
+    DISPERSION_ANGLE_ROI_MINIMUM_HALF_WIDTH_PX,
+    SpectroscopyPipeline,
+    _safe_dispersion_angle_roi_half_width_px,
+)
 from astrometricslib.utilities import CameraConfig, SpectroscopyConfig
 
 
@@ -243,3 +248,106 @@ def test_flare_mask_extraction_follows_a_real_tilted_trace(orientation: str, tru
     # followed trace (peak ~150 over an 11px window) should average
     # well above that.
     assert intensities.mean() > 300.0
+
+
+def test_roi_half_width_is_unchanged_with_no_close_neighbour() -> None:
+    """A neighbour far beyond the ROI leaves the default half-width alone."""
+    half_width = _safe_dispersion_angle_roi_half_width_px((100.0, 100.0), [(500.0, 100.0)], "vertical")
+
+    assert half_width == DISPERSION_ANGLE_ROI_HALF_WIDTH_PX
+
+
+def test_roi_half_width_shrinks_to_the_midpoint_of_a_close_neighbour() -> None:
+    """A close neighbour shrinks the ROI to stop exactly at its midpoint."""
+    # 10 px away in x, "vertical" orientation reads the x axis: half-width
+    # must stop at 5 px so the ROI's edge never reaches the neighbour.
+    half_width = _safe_dispersion_angle_roi_half_width_px((100.0, 100.0), [(110.0, 100.0)], "vertical")
+
+    assert half_width == pytest.approx(5.0)
+
+
+def test_roi_half_width_never_shrinks_below_the_floor() -> None:
+    """An extremely close neighbour still leaves a usable minimum width."""
+    half_width = _safe_dispersion_angle_roi_half_width_px((100.0, 100.0), [(102.0, 100.0)], "vertical")
+
+    assert half_width == DISPERSION_ANGLE_ROI_MINIMUM_HALF_WIDTH_PX
+
+
+def test_roi_half_width_reads_the_axis_matching_orientation() -> None:
+    """Horizontal dispersion measures neighbour distance along y, not x."""
+    # Same neighbour: far in x (would not shrink "vertical"), close in y
+    # (must shrink "horizontal").
+    neighbor = [(500.0, 108.0)]
+
+    vertical_half_width = _safe_dispersion_angle_roi_half_width_px((100.0, 100.0), neighbor, "vertical")
+    horizontal_half_width = _safe_dispersion_angle_roi_half_width_px((100.0, 100.0), neighbor, "horizontal")
+
+    assert vertical_half_width == DISPERSION_ANGLE_ROI_HALF_WIDTH_PX
+    assert horizontal_half_width == pytest.approx(4.0)
+
+
+def _add_tilted_trace(
+    data: np.ndarray,
+    orientation: str,
+    star_pos: tuple[float, float],
+    offset_px: float,
+    length_px: float,
+    true_slope: float,
+    seed: int,
+) -> None:
+    """Draw one more tilted trace onto an existing synthetic image, in place.
+
+    Returns nothing; `data` is modified directly.
+    """
+    rng = np.random.default_rng(seed)
+    x_star, y_star = star_pos
+    if orientation == "horizontal":
+        for x in range(int(x_star + offset_px), int(x_star + offset_px + length_px)):
+            y = round(y_star + true_slope * (x - (x_star + offset_px)))
+            if 5 <= y < data.shape[0] - 6:
+                data[y - 5 : y + 6, x] = 100.0 + rng.normal(0, 2, size=11)
+    else:
+        for y in range(int(y_star + offset_px), int(y_star + offset_px + length_px)):
+            x = round(x_star + true_slope * (y - (y_star + offset_px)))
+            if 5 <= x < data.shape[1] - 6:
+                data[y, x - 5 : x + 6] = 100.0 + rng.normal(0, 2, size=11)
+
+
+def test_a_close_neighbour_no_longer_biases_the_shared_angle() -> None:
+    """Two close, differently-tilted traces must not blend into one angle.
+
+    Reproduces the real Albireo bug: two stars closer together (15 px)
+    than the previous fixed 20 px ROI half-width, each with its own
+    dispersed trace. Before the ROI was shrunk to respect a close
+    neighbour, `detect_dispersion_angle`'s single line fit mixed pixels
+    from both traces and returned neither star's true angle. With the fix,
+    the angle resolved for the primary star must match its own trace, not
+    some value pulled toward its neighbour's very different slope.
+    """
+    pipeline = _build_pipeline("vertical")
+    star_a_pos = (400.0, 400.0)
+    star_b_pos = (415.0, 400.0)  # 15 px away: inside the old fixed 20 px half-width.
+    offset_px = pipeline.instrument.zero_order_offset_px
+    length_px = pipeline.instrument.expected_length_px
+    # A small, realistic tilt (matching the few degrees seen on real data):
+    # large enough to detect, small enough that it stays inside the
+    # narrowed ROI for most of the trace's length, the same way the
+    # existing round-trip tests need their trace to stay inside a (wider)
+    # ROI for theirs.
+    true_slope_a = 0.02
+    # Untilted, so B's trace never drifts toward A's strip and this test
+    # isolates the ROI-width bug from any incidental trail crossing.
+    true_slope_b = 0.0
+
+    rng = np.random.default_rng(0)
+    data = 10.0 + rng.normal(0, 0.5, size=(900, 900))
+    _add_tilted_trace(data, "vertical", star_a_pos, offset_px, length_px, true_slope_a, seed=1)
+    _add_tilted_trace(data, "vertical", star_b_pos, offset_px, length_px, true_slope_b, seed=2)
+    image = MockAstrometricsImage(data)
+
+    pipeline.process_image(image, target_stars=[star_a_pos, star_b_pos], auto_detect_angle=True)
+
+    vec = pipeline.instrument.get_dispersion_vector()
+    implied_slope = vec[0] / vec[1]
+
+    assert implied_slope == pytest.approx(true_slope_a, abs=0.02)

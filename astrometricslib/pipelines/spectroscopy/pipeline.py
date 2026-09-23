@@ -31,6 +31,63 @@ from astrometricslib.utilities import SpectroscopyConfig
 
 logger = logging.getLogger(__name__)
 
+# How far `detect_dispersion_angle` looks to each side of a star, across the
+# dispersion axis, when it fits a line through the brightest pixels to
+# measure the grating's tilt. Unvalidated beyond visual inspection of the
+# streaks it was written for.
+DISPERSION_ANGLE_ROI_HALF_WIDTH_PX = 20
+
+# The least `DISPERSION_ANGLE_ROI_HALF_WIDTH_PX` is ever shrunk to, so a very
+# close neighbour still leaves enough width to catch a few pixels per row.
+# Below this, `detect_dispersion_angle`'s own "fewer than 10 bright pixels
+# found" check already refuses cleanly instead of fitting noise.
+DISPERSION_ANGLE_ROI_MINIMUM_HALF_WIDTH_PX = 3.0
+
+
+def _safe_dispersion_angle_roi_half_width_px(
+    star_pos: tuple[float, float],
+    neighbor_positions: list[tuple[float, float]],
+    orientation: str,
+    default_half_width_px: float = DISPERSION_ANGLE_ROI_HALF_WIDTH_PX,
+) -> float:
+    """Shrink the angle-detection ROI so it can never reach a close neighbour.
+
+    `detect_dispersion_angle` fits one straight line through the brightest
+    pixels in a strip beside a star. If another star's own dispersed trail
+    falls inside that strip, its pixels get mixed into the same fit and bias
+    the angle. This was found on real data: Albireo's two components are
+    only about 17 px apart on the sensor, well inside the previous fixed
+    20 px half-width, and the shared angle it produced swung by several
+    degrees between exposures instead of converging as more frames were
+    stacked -- a sign the fit was measuring two overlapping streaks, not
+    noise on one. Stopping the ROI at or before the midpoint to the nearest
+    neighbour means it can never include that neighbour's own trail centre.
+
+    Parameters
+    ----------
+    star_pos : `tuple` [`float`, `float`]
+        The star the angle is about to be measured for, `(x, y)`.
+    neighbor_positions : `list` [`tuple` [`float`, `float`]]
+        Every other star being processed alongside it.
+    orientation : `str`
+        `config.dispersion_orientation`: "vertical" means the fixed
+        half-width applies across the x axis, "horizontal" across y.
+    default_half_width_px : `float`, optional
+        The half-width to use when there is no close neighbour.
+
+    Returns
+    -------
+    half_width_px : `float`
+        `default_half_width_px`, or less when a neighbour is closer than
+        twice that, never below `DISPERSION_ANGLE_ROI_MINIMUM_HALF_WIDTH_PX`.
+    """
+    axis_index = 0 if orientation == "vertical" else 1
+    nearest_distance = min(
+        (abs(star_pos[axis_index] - neighbor[axis_index]) for neighbor in neighbor_positions),
+        default=float("inf"),
+    )
+    return max(DISPERSION_ANGLE_ROI_MINIMUM_HALF_WIDTH_PX, min(default_half_width_px, nearest_distance / 2.0))
+
 
 def _read_xy_source_position(source: Any) -> tuple[Any, Any]:
     """Read an `(x, y)` pixel position off a source, whatever form it's in.
@@ -298,15 +355,14 @@ class SpectroscopyPipeline:
         direc = self.config.dispersion_direction
         h, w = image.data.shape
 
-        best_star_pos = None
+        all_positions: list[tuple[float, float]] = []
         for star in target_stars:
             _, pos = _star_pixel_position(star)
+            if pos[0] is not None and pos[1] is not None:
+                all_positions.append((float(pos[0]), float(pos[1])))
 
-            if pos[0] is None or pos[1] is None:
-                continue
-
-            x_star, y_star = float(pos[0]), float(pos[1])
-
+        best_star_pos = None
+        for x_star, y_star in all_positions:
             if orient == "vertical":
                 if direc == "positive":
                     y_start = y_star + offset_px
@@ -315,7 +371,12 @@ class SpectroscopyPipeline:
                     y_start = y_star - offset_px - length_px
                     y_end = y_start + length_px
 
-                if y_start >= 0 and y_end <= h and x_star - 20 >= 0 and x_star + 20 <= w:
+                if (
+                    y_start >= 0
+                    and y_end <= h
+                    and x_star - DISPERSION_ANGLE_ROI_HALF_WIDTH_PX >= 0
+                    and x_star + DISPERSION_ANGLE_ROI_HALF_WIDTH_PX <= w
+                ):
                     best_star_pos = (x_star, y_star)
                     break
             else:
@@ -326,16 +387,30 @@ class SpectroscopyPipeline:
                     x_start = x_star - offset_px - length_px
                     x_end = x_start + length_px
 
-                if x_start >= 0 and x_end <= w and y_star - 20 >= 0 and y_star + 20 <= h:
+                if (
+                    x_start >= 0
+                    and x_end <= w
+                    and y_star - DISPERSION_ANGLE_ROI_HALF_WIDTH_PX >= 0
+                    and y_star + DISPERSION_ANGLE_ROI_HALF_WIDTH_PX <= h
+                ):
                     best_star_pos = (x_star, y_star)
                     break
 
         if best_star_pos is None:
-            _, best_star_pos = _star_pixel_position(target_stars[0])
+            _, fallback_pos = _star_pixel_position(target_stars[0])
+            if fallback_pos[0] is not None and fallback_pos[1] is not None:
+                best_star_pos = (float(fallback_pos[0]), float(fallback_pos[1]))
 
         if best_star_pos is not None:
-            global_angle = self.detect_dispersion_angle(image, best_star_pos)
-            logger.info(f"Globally resolved grating dispersion angle: {global_angle:.2f} degrees")
+            neighbor_positions = [pos for pos in all_positions if pos != best_star_pos]
+            roi_half_width_px = _safe_dispersion_angle_roi_half_width_px(
+                best_star_pos, neighbor_positions, orient
+            )
+            global_angle = self.detect_dispersion_angle(image, best_star_pos, roi_half_width_px)
+            logger.info(
+                f"Globally resolved grating dispersion angle: {global_angle:.2f} degrees "
+                f"(angle-detection half-width {roi_half_width_px:.1f}px)"
+            )
             self.config.dispersion_angle_degrees = global_angle
             self.instrument.config.dispersion_angle_degrees = global_angle
 
@@ -746,11 +821,29 @@ class SpectroscopyPipeline:
         dispersion_angle_deg = float(np.degrees(np.arctan2(vec[1], vec[0])))
         return rectangle, dispersion_angle_deg
 
-    def detect_dispersion_angle(self, image: AstrometricsImage, star_pos: tuple[float, float]) -> float:
+    def detect_dispersion_angle(
+        self,
+        image: AstrometricsImage,
+        star_pos: tuple[float, float],
+        roi_half_width_px: float = DISPERSION_ANGLE_ROI_HALF_WIDTH_PX,
+    ) -> float:
         """Figure out exactly how much the camera is tilted.
 
         It looks at the bright streak of the spectrum and calculates its exact
         angle.
+
+        Parameters
+        ----------
+        image : `AstrometricsImage`
+            The picture to measure the streak in.
+        star_pos : `tuple` [`float`, `float`]
+            Where the star is, `(x, y)`.
+        roi_half_width_px : `float`, optional
+            How far to each side of `star_pos`, across the dispersion axis,
+            the measuring strip reaches. Shrink this (see
+            `_safe_dispersion_angle_roi_half_width_px`) when another star's
+            own trail could otherwise fall inside the same strip and bias
+            the fit.
 
         Returns
         -------
@@ -769,14 +862,14 @@ class SpectroscopyPipeline:
         if orient == "vertical":
             y_start = int(y_star + (offset_px if direc == "positive" else -offset_px - length_px))
             y_end = int(y_start + length_px)
-            x_start = int(x_star - 20)
-            x_end = int(x_star + 20)
+            x_start = int(x_star - roi_half_width_px)
+            x_end = int(x_star + roi_half_width_px)
             fit_axis = "y"
         else:
             x_start = int(x_star + (offset_px if direc == "positive" else -offset_px - length_px))
             x_end = int(x_start + length_px)
-            y_start = int(y_star - 20)
-            y_end = int(y_star + 20)
+            y_start = int(y_star - roi_half_width_px)
+            y_end = int(y_star + roi_half_width_px)
             fit_axis = "x"
 
         # Clamp ROI

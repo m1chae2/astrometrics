@@ -138,3 +138,21 @@ def resolve_camera_profile(camera_name: str | None, directory: Path | None = Non
 
     _warn_once_about_unlisted_camera(camera_name)
     return generic_profile
+
+
+def record_name_for_camera(camera_name: str) -> str:
+    """Give the spelling of a camera's name that frame records use.
+
+    Parameters
+    ----------
+    camera_name : `str`
+        The camera's name as written in an image header.
+
+    Returns
+    -------
+    record_name : `str`
+        The profile's ``record_name`` when the camera has a profile that sets
+        one, otherwise `camera_name` unchanged.
+    """
+    profile = resolve_camera_profile(camera_name)
+    return profile.record_name or camera_name

@@ -4,6 +4,7 @@
   "name_aliases": [
     "ZWO CCD ASI533MM Pro"
   ],
+  "record_name": "ZWO ASI 533MM Pro",
   "is_generic_fallback": false,
   "clip_ceiling_adu": {
     "value": 65532.0,

@@ -130,6 +130,12 @@ class CameraProfile(BaseModel):
         Other spellings this camera appears under, for example in FITS
         headers. Case, spaces and punctuation are ignored when names are
         compared, so only genuinely different spellings are listed.
+    record_name : `str` or `None`
+        The spelling of this camera's name used in frame records and in the
+        names of library folders, when it differs from the spelling in the
+        image header. For example the ASI533's header says
+        ``ZWO CCD ASI533MM Pro`` but the library has always used
+        ``ZWO ASI 533MM Pro``. `None` means the header's own text is used.
     is_generic_fallback : `bool`
         `True` only for the stand-in profile used when a camera is not
         listed. It carries cautious numbers that suit any 16-bit camera,
@@ -157,6 +163,7 @@ class CameraProfile(BaseModel):
     schema_version: int = Field(default=1, ge=1, le=1)
     camera_name: str = Field(min_length=1)
     name_aliases: tuple[str, ...] = ()
+    record_name: str | None = Field(default=None, min_length=1)
     is_generic_fallback: bool = False
     clip_ceiling_adu: ProvenancedValue
     saturation_threshold_adu: ProvenancedValue

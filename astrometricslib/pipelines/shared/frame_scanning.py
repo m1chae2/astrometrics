@@ -11,13 +11,23 @@ import re
 from datetime import datetime
 from typing import Any
 
+from astrometricslib.drivers.camera_profile_store import record_name_for_camera, resolve_camera_profile
 from astrometricslib.drivers.filter_detection import get_filter_type
 from astrometricslib.drivers.fits_access import read_header
 from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.models.target import FrameRecord, Target
+from astrometricslib.pipelines.shared.frame_optics import resolve_frame_telescope
 from astrometricslib.utilities.enums import FilterType
+from astrometricslib.utilities.warn_once import warn_once
 
 logger = logging.getLogger(__name__)
+
+# The ISO or gain written on a record when the image header gives none, the
+# camera's config section gives no `default_iso`, and so nothing is known.
+# These are stand-ins, not measurements. They are the values this module used
+# before `default_iso` existed. A warning is logged whenever one is used.
+PLACEHOLDER_RECORD_ISO = "800"
+PLACEHOLDER_FOLDER_ISO = "0"
 
 
 def _coerce_header_number(value: Any, cast: type) -> Any:
@@ -90,7 +100,105 @@ def _populate_acquisition_conditions(record: FrameRecord, header: Any) -> None:
     record.focuser_temperature_c = _coerce_header_number(header.get("FOCUSTEM"), float)
 
 
-def create_frame_record_from_fits(path: str, camera: str | None = None) -> FrameRecord:
+def _camera_default_iso(camera_name: str, config: Any) -> str | None:
+    """Look up the ISO or gain configured for a camera whose header lacks one.
+
+    Parameters
+    ----------
+    camera_name : `str`
+        The camera's name, written in any spelling.
+    config : `AppConfiguration`
+        The application settings.
+
+    Returns
+    -------
+    default_iso : `str` or `None`
+        The camera's ``default_iso`` from the config, or `None` when it has
+        none. Every known spelling of the camera is tried, because the config
+        section may be named differently from the image header.
+    """
+    profile = resolve_camera_profile(camera_name)
+    names = [camera_name]
+    if not profile.is_generic_fallback:
+        names += [profile.camera_name, *profile.name_aliases]
+        if profile.record_name:
+            names.append(profile.record_name)
+    for name in names:
+        configured = config.get_camera_default_iso(name)
+        if configured:
+            return configured
+    return None
+
+
+def read_iso_or_gain(header: Any, camera_name: str, config: Any, placeholder: str) -> str:
+    """Read the ISO (or gain) an image was taken at.
+
+    The header's ``ISOSPEED`` is used first, then its ``GAIN``. If it has
+    neither, the camera's ``default_iso`` from the config is used, and if
+    there is none of those either, `placeholder` is used with a warning.
+
+    Parameters
+    ----------
+    header : `Any`
+        The image header.
+    camera_name : `str`
+        The camera's name, used to find its ``default_iso``.
+    config : `AppConfiguration`
+        The application settings.
+    placeholder : `str`
+        The stand-in to use when nothing else gives a value.
+
+    Returns
+    -------
+    iso : `str`
+        The ISO or gain, as text.
+    """
+    value = header.get("ISOSPEED", header.get("GAIN"))
+    if value is not None:
+        return str(value)
+    configured = _camera_default_iso(camera_name, config)
+    if configured is not None:
+        return configured
+    warn_once(
+        logger,
+        f"Images from camera {camera_name!r} carry no ISO or gain, and its config section has no "
+        f"default_iso; assuming {placeholder!r}. Add default_iso to the camera's section.",
+    )
+    return placeholder
+
+
+def _record_camera_name(header_camera_name: str, config: Any) -> str:
+    """Give the camera name spelling that records and folders use.
+
+    Parameters
+    ----------
+    header_camera_name : `str`
+        The camera as written in the image header, or ``"Unknown"`` when the
+        header has none.
+    config : `AppConfiguration`
+        The application settings.
+
+    Returns
+    -------
+    camera_name : `str`
+        The camera's ``record_name`` from its profile, or the header's text
+        when it has none. When the header names no camera, the configured
+        primary camera is used, or ``"Unknown"`` if none is configured.
+    """
+    if header_camera_name and header_camera_name != "Unknown":
+        return record_name_for_camera(header_camera_name)
+    primary_camera_name = config.get_primary_camera_name()
+    if primary_camera_name:
+        return record_name_for_camera(primary_camera_name)
+    warn_once(
+        logger,
+        "An image header names no camera and no default_primary_camera is configured; "
+        "the camera is recorded as 'Unknown'.",
+    )
+    return "Unknown"
+
+
+def create_frame_record_from_fits(path: str, camera: str | None = None, config: Any = None) -> FrameRecord:
     """Read an image file and create a record for it.
 
     This function opens a telescope image, reads its settings (like exposure
@@ -103,12 +211,20 @@ def create_frame_record_from_fits(path: str, camera: str | None = None) -> Frame
         The full file path to the image.
     camera : `str`, optional
         The name of the camera, if it needs to be forced to a specific value.
+    config : `AppConfiguration`, optional
+        The application settings, used to find the camera's default ISO and
+        the optic that took the frame. The system configuration is loaded
+        when this is left out.
 
     Returns
     -------
     record : `FrameRecord`
         The record containing the image's information.
     """
+    if config is None:
+        from astrometricslib.utilities.config_loader import get_configuration
+
+        config = get_configuration()
     filename = os.path.basename(path)
     record = FrameRecord(
         path=path,
@@ -125,7 +241,6 @@ def create_frame_record_from_fits(path: str, camera: str | None = None) -> Frame
         image = AstrometricsImage(path)
         header = image.header
         record.filter = image.filter_type
-        record.iso = str(header.get("ISOSPEED", header.get("GAIN", "800")))
         record.offset = str(header.get("OFFSET", header.get("BLKLEVEL", "0")))
         record.exposure = str(header.get("EXPTIME", "1.0"))
         record.timestamp = image.timestamp
@@ -143,23 +258,18 @@ def create_frame_record_from_fits(path: str, camera: str | None = None) -> Frame
                 record.date = f"{d_part} {t_part}"
 
         if not camera:
-            record.camera = (
-                str(header.get("INSTRUME", header.get("CAMERA", "Unknown")))
-                .replace("ZWO CCD", "ZWO")
-                .replace("ASI533", "ASI 533")
+            record.camera = _record_camera_name(
+                str(header.get("INSTRUME", header.get("CAMERA", "Unknown"))), config
             )
 
-        # Assume ISO 800 for Nikon cameras if not correctly identified
-        if "Nikon" in record.camera:
-            record.iso = "800"
+        record.iso = read_iso_or_gain(header, record.camera, config, PLACEHOLDER_RECORD_ISO)
 
-        # Heuristic for telescope mapping
-        if "Nikkor 300mm" in path:
-            record.telescope = "Nikkor 300mm"
-        else:
-            record.telescope = "Apertura 75Q"
-
+        # The focal length is read here, before the optic is chosen, because
+        # the optic is chosen by matching it.
         _populate_acquisition_conditions(record, header)
+        record.telescope = resolve_frame_telescope(
+            record.camera, record.focal_length_mm, path, config.get_observatory_setups()
+        ).telescope_name
     except Exception as e:
         logger.warning(f"Failed to parse FITS header for {filename}: {e}")
 
@@ -310,10 +420,7 @@ def classify_and_sort_fits_files(scan_list: list[str], target_id: str, config, t
             dest_path = ""
             header = read_header(file_path)
             frame_type = header.get("FRAME", header.get("IMAGETYP", "Light")).replace(" ", "").lower()
-            camera = header.get("INSTRUME", header.get("CAMERA", "Unknown"))
-            camera = camera.replace("ZWO CCD", "ZWO").replace("ASI533", "ASI 533")
-            if camera == "Unknown":
-                camera = "ZWO ASI 533MM Pro"
+            camera = _record_camera_name(header.get("INSTRUME", header.get("CAMERA", "Unknown")), config)
 
             if "light" in frame_type:
                 if target_id:
@@ -322,15 +429,15 @@ def classify_and_sort_fits_files(scan_list: list[str], target_id: str, config, t
                     continue
             elif "dark" in frame_type:
                 exposure = float(header.get("EXPTIME", 0))
-                gain = str(header.get("ISOSPEED", header.get("GAIN", "0")))
+                gain = read_iso_or_gain(header, camera, config, PLACEHOLDER_FOLDER_ISO)
                 dest_path = os.path.join(frames_path, "darks", camera, str(gain), str(exposure))
             elif "bias" in frame_type:
-                gain = str(header.get("ISOSPEED", header.get("GAIN", "0")))
+                gain = read_iso_or_gain(header, camera, config, PLACEHOLDER_FOLDER_ISO)
                 dest_path = os.path.join(frames_path, "biases", camera, str(gain))
             elif "flat" in frame_type:
                 filter_enum = get_filter_type(header)
                 filter_name = filter_enum.name if hasattr(filter_enum, "name") else str(filter_enum)
-                gain = str(header.get("ISOSPEED", header.get("GAIN", "0")))
+                gain = read_iso_or_gain(header, camera, config, PLACEHOLDER_FOLDER_ISO)
                 dest_path = os.path.join(frames_path, "flats", telescope_name, camera, filter_name, str(gain))
             else:
                 dest_path = os.path.join(frames_path, "others")

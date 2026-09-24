@@ -4,6 +4,7 @@
   "name_aliases": [
     "Nikon DSLR DSC D5300"
   ],
+  "record_name": "Nikon DSLR DSC D5300",
   "is_generic_fallback": false,
   "clip_ceiling_adu": {
     "value": 16383.0,

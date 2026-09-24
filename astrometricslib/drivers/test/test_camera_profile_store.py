@@ -16,6 +16,7 @@ from astrometricslib.drivers import camera_profile_store
 from astrometricslib.drivers.camera_profile_store import (
     CAMERA_PROFILE_DIRECTORY,
     load_camera_profiles,
+    record_name_for_camera,
     resolve_camera_profile,
 )
 
@@ -222,3 +223,25 @@ def test_the_profile_folder_constant_points_at_the_shipped_files() -> None:
     """Check that the folder the loader uses exists and holds JSON files."""
     assert CAMERA_PROFILE_DIRECTORY.is_dir()
     assert list(CAMERA_PROFILE_DIRECTORY.glob("*.json"))
+
+
+@pytest.mark.parametrize(
+    ("header_name", "expected_record_name"),
+    [
+        ("ZWO CCD ASI533MM Pro", "ZWO ASI 533MM Pro"),
+        ("ZWO ASI533MM Pro", "ZWO ASI 533MM Pro"),
+        ("Nikon DSLR DSC D5300", "Nikon DSLR DSC D5300"),
+        ("Nikon D5300", "Nikon DSLR DSC D5300"),
+    ],
+)
+def test_the_record_name_is_the_spelling_the_library_has_always_used(
+    header_name: str, expected_record_name: str
+) -> None:
+    """Check the two names that the old string replacements produced."""
+    assert record_name_for_camera(header_name) == expected_record_name
+
+
+def test_a_camera_without_a_record_name_keeps_its_header_text() -> None:
+    """Check that cameras with no record name keep their header text."""
+    assert record_name_for_camera("ZWO CCD ASI120MC-S") == "ZWO CCD ASI120MC-S"
+    assert record_name_for_camera("Acme Imager 9000") == "Acme Imager 9000"

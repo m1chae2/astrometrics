@@ -17,6 +17,15 @@ misspelled key fails loudly instead of being ignored.
 
 A value lives in exactly one of the two places.
 
+## Names
+
+`camera_name` is the name the profile is filed under. `name_aliases` lists
+other spellings that appear in image headers. `record_name`, when it is set,
+is the spelling that frame records and library folder names use. It exists so
+that the library keeps the names it has always had (for example
+`ZWO ASI 533MM Pro`, although the header says `ZWO CCD ASI533MM Pro`).
+Leave it out to use the header's own text.
+
 ## Provenance
 
 Every number says where it came from:

@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 
 from .enums import FilterType
+from .observatory_setups import ObservatorySetups, load_observatory_setups
 
 _instance = None
 
@@ -503,6 +504,45 @@ class AppConfiguration:
         camera_name = self.app_config.get("Observatory.Camera", "default_primary_camera", fallback="")
         camera_name = (camera_name or "").strip()
         return camera_name or None
+
+    def get_observatory_setups(self) -> ObservatorySetups:
+        """Return the optics and the camera-and-optic pairings in the config.
+
+        The pairings say which cameras are really used with which optics.
+        They are read from the ``[Observatory.Optics]``,
+        ``[Observatory.Optic.<name>]``, ``[Observatory.Setups]`` and
+        ``[Observatory.Setup.<name>]`` sections (see
+        `astrometricslib.utilities.observatory_setups`).
+
+        Returns
+        -------
+        observatory_setups : `ObservatorySetups`
+            The optics and setups. Both are empty when the config has none.
+        """
+        return load_observatory_setups(self)
+
+    def get_camera_default_iso(self, camera_name: str | None) -> str | None:
+        """Return the ISO or gain to assume for a camera whose header has none.
+
+        Read from the ``default_iso`` key of the camera's section. It is used
+        only when an image's header records neither ``ISOSPEED`` nor ``GAIN``.
+
+        Parameters
+        ----------
+        camera_name : `str` or `None`
+            The camera, written in any spelling that matches its section.
+
+        Returns
+        -------
+        default_iso : `str` or `None`
+            The configured value, or `None` when the camera's section does
+            not give one.
+        """
+        if not camera_name:
+            return None
+        value = self.get_camera_config(camera_name).get("default_iso")
+        value = (value or "").strip()
+        return value or None
 
     def get_focal_ratio(self) -> float:
         """Return the telescope focal ratio from the configuration.

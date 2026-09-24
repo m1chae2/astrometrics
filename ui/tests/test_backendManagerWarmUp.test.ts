@@ -84,4 +84,32 @@ describe('BackendManager.waitUntilWarm', () => {
     await manager.waitUntilWarm({ timeoutMs: 5000, ...FAST_POLL });
     expect(fetchMock.mock.calls[0][0]).toBe('http://127.0.0.1:5123/api/ready');
   });
+
+  it('gives up early and reports "unreachable" when nothing ever answers', async () => {
+    fetchMock.mockRejectedValue(new Error('ECONNREFUSED'));
+
+    const manager = new BackendManager({});
+    expect(await manager.waitUntilWarm({ timeoutMs: 5000, unreachableTimeoutMs: 20, ...FAST_POLL })).toBe(false);
+    expect(manager.warmUpFailureReason).toBe('unreachable');
+  });
+
+  it('reports "timeout" when the backend answers but never becomes ready', async () => {
+    fetchMock.mockResolvedValue(readyResponse(503));
+
+    const manager = new BackendManager({});
+    await manager.waitUntilWarm({ timeoutMs: 30, ...FAST_POLL });
+    expect(manager.warmUpFailureReason).toBe('timeout');
+  });
+
+  it('reports "exited" and clears the reason again on a later successful wait', async () => {
+    const manager = new BackendManager({});
+    manager.backendExited = true;
+    await manager.waitUntilWarm({ timeoutMs: 5000, ...FAST_POLL });
+    expect(manager.warmUpFailureReason).toBe('exited');
+
+    manager.backendExited = false;
+    fetchMock.mockResolvedValue(readyResponse(200));
+    expect(await manager.waitUntilWarm({ timeoutMs: 5000, ...FAST_POLL })).toBe(true);
+    expect(manager.warmUpFailureReason).toBeNull();
+  });
 });

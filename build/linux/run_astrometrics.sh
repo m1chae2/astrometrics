@@ -256,6 +256,24 @@ start_electron_bg() {
     fi
 }
 
+# wait_for_backend_alive: confirms the backend answers HTTP before Electron is
+# launched. Electron runs with SKIP_BACKEND=1, so with no backend behind it the
+# app would sit on the splash screen. Catalog warm-up is covered by the splash
+# itself, so this only waits for the server to start listening.
+wait_for_backend_alive() {
+  echo "Waiting for backend to answer..."
+  local tries=0
+  local max=120
+  while [ $tries -lt $max ]; do
+    if curl -s -o /dev/null --max-time 2 "$BACKEND_URL"; then return 0; fi
+    sleep 0.5
+    tries=$((tries+1))
+  done
+  echo "Backend is not answering at $BACKEND_URL."
+  tail -n 20 "$LOG_DIR/backend.log" 2>/dev/null
+  return 1
+}
+
 wait_for_vite() {
   echo "Waiting for Vite..."
   local tries=0
@@ -348,6 +366,11 @@ case "$CMD" in
         stop_what_this_run_started
         exit 1
     fi
+    if ! wait_for_backend_alive; then
+        echo "Backend is not running; not launching Electron."
+        stop_what_this_run_started
+        exit 1
+    fi
     start_electron_bg
     echo "Astrometrics started. The splash screen stays up until the backend is ready."
     ;;
@@ -379,6 +402,10 @@ case "$CMD" in
         exit 1
     fi
 
+    if ! wait_for_backend_alive; then
+        echo "Backend is not running; not launching Electron."
+        exit 1
+    fi
     start_electron_bg
 
     epid=$(cat "$ELECTRON_PID_FILE")

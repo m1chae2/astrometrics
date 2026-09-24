@@ -27,6 +27,13 @@ export class BackendManager {
 
     /** Set once a backend this manager spawned has exited, so waiting on it can stop early. */
     this.backendExited = false;
+
+    /**
+     * Why the last `waitUntilWarm` call returned false: 'exited' (spawned backend died),
+     * 'unreachable' (nothing answered for `unreachableTimeoutMs`) or 'timeout'
+     * (answered but never reported ready). Null when it returned true.
+     */
+    this.warmUpFailureReason = null;
   }
 
   /**
@@ -104,24 +111,30 @@ export class BackendManager {
    * spawned the backend or `SKIP_BACKEND` pointed it at one started elsewhere.
    *
    * Never blocks the app indefinitely: it gives up after `timeoutMs`, when a
-   * spawned backend has exited, or if the backend has no `/api/ready` route
-   * (an older build), and the caller opens the window anyway.
+   * spawned backend has exited, when nothing has answered at all for
+   * `unreachableTimeoutMs` (no backend is running), or if the backend has no
+   * `/api/ready` route (an older build). The reason for giving up is left in
+   * `warmUpFailureReason` so the caller can tell a missing backend from a slow one.
    *
-   * @param {{timeoutMs?: number, pollIntervalMs?: number}} [options] - Polling limits.
+   * @param {{timeoutMs?: number, pollIntervalMs?: number, unreachableTimeoutMs?: number}} [options] - Polling limits.
    * @return {Promise<boolean>} True if the backend reported ready, false if it gave up waiting.
    */
-  async waitUntilWarm({ timeoutMs = 180000, pollIntervalMs = 500 } = {}) {
+  async waitUntilWarm({ timeoutMs = 180000, pollIntervalMs = 500, unreachableTimeoutMs = 45000 } = {}) {
     const port = process.env.ASTROMETRICS_PORT || '5000';
     const readyUrl = `http://127.0.0.1:${port}/api/ready`;
     const deadline = Date.now() + timeoutMs;
+    let lastAnsweredAt = Date.now();
+    this.warmUpFailureReason = null;
 
     while (Date.now() < deadline) {
       if (this.backendExited) {
         log.warn('Backend exited before finishing warm-up; not waiting any longer.');
+        this.warmUpFailureReason = 'exited';
         return false;
       }
       try {
         const response = await fetch(readyUrl, { signal: AbortSignal.timeout(2000) });
+        lastAnsweredAt = Date.now();
         if (response.ok) {
           log.info('Backend finished warm-up.');
           return true;
@@ -131,12 +144,19 @@ export class BackendManager {
           return true;
         }
       } catch {
-        // Not listening yet, or too busy loading the catalog to answer in time; keep polling.
+        // Not listening yet, or too busy loading the catalog to answer in time; keep polling,
+        // but give up if nothing has answered for so long that no backend is running.
+        if (Date.now() - lastAnsweredAt >= unreachableTimeoutMs) {
+          log.error(`No backend answered at ${readyUrl} for ${unreachableTimeoutMs}ms.`);
+          this.warmUpFailureReason = 'unreachable';
+          return false;
+        }
       }
       await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
     }
 
     log.warn(`Backend did not report ready within ${timeoutMs}ms; opening the window anyway.`);
+    this.warmUpFailureReason = 'timeout';
     return false;
   }
 

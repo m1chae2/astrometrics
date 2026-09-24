@@ -22,6 +22,7 @@ export const CommandConsole: React.FC = () => {
   const [pipelineRuns, setPipelineRuns] = useState<ProcessingJob[]>([]);
   const [selectedRun, setSelectedRun] = useState<ProcessingJob | null>(null);
   const [workspaceVariables, setWorkspaceVariables] = useState<WorkspaceVariable[]>([]);
+  const [activeSidebarTab, setActiveSidebarTab] = useState<'scripts' | 'runs' | 'docs'>('scripts');
 
   // Center Column State (Editor)
   const [editorCode, setEditorCode] = useState<string>('# Astrometrics Scripting Workbench\nprint("Welcome to Astrometrics Command Console")\n');
@@ -296,9 +297,17 @@ export const CommandConsole: React.FC = () => {
                   userScripts={userScripts}
                   pipelineRuns={pipelineRuns}
                   selectedRunId={selectedRun?.id || null}
+                  docTopics={docTopics}
+                  selectedDocId={selectedDocId}
+                  activeSidebarTab={activeSidebarTab}
+                  onTabChange={setActiveSidebarTab}
                   onSelectRecipe={handleSelectRecipe}
                   onSelectUserScript={handleSelectUserScript}
                   onSelectRun={handleSelectRun}
+                  onSelectDocTopic={(topicId) => {
+                    handleSelectDoc(topicId);
+                    setRightTab('docs');
+                  }}
                   onRefreshRuns={async () => {
                     const jobs = await callBackend('processing:list_jobs', { limit: 25 });
                     setPipelineRuns(jobs || []);
@@ -360,7 +369,10 @@ export const CommandConsole: React.FC = () => {
                   </button>
                   <button
                     className={`console-sidebar__tab ${rightTab === 'docs' ? 'console-sidebar__tab--active' : ''}`}
-                    onClick={() => setRightTab('docs')}
+                    onClick={() => {
+                      setRightTab('docs');
+                      setActiveSidebarTab('docs');
+                    }}
                     type="button"
                   >
                     Documentation

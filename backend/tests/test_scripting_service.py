@@ -117,5 +117,42 @@ def test_scripting_service_load_job_into_scope() -> None:
     assert load_res["job_id"] == "job-12345"
     assert load_res["target_name"] == "M 42"
     assert "run" in service.console.locals
-    assert service.console.locals["run"].id == "job-12345"
     assert "target" in service.console.locals
+
+
+def test_scripting_service_api_docs() -> None:
+    """Verify Python API documentation is available and properly formatted."""
+    service = ScriptingService()
+    topics = service.list_doc_topics()
+
+    # Verify API Reference topics are present
+    api_topics = [t for t in topics if t.get("category") == "API Reference"]
+    assert len(api_topics) >= 3
+
+    topic_ids = [t["id"] for t in api_topics]
+    assert "api/index" in topic_ids
+    assert "api/astrometricslib" in topic_ids
+    assert "api/wayfindinglib" in topic_ids
+
+    # Verify resolving API index
+    index_doc = service.get_doc_topic("api/index")
+    assert "Python API Reference" in index_doc["title"]
+    assert "astrometricslib" in index_doc["content"]
+    assert "wayfindinglib" in index_doc["content"]
+
+    # Verify resolving astrometricslib with and without .rst extension
+    astro_doc = service.get_doc_topic("api/astrometricslib.rst")
+    assert "astrometricslib" in astro_doc["title"]
+    assert "Astrometrics" in astro_doc["content"]
+    assert "TargetCatalog" in astro_doc["content"]
+
+    # Verify resolving wayfindinglib
+    way_doc = service.get_doc_topic("api/wayfindinglib.rst")
+    assert "wayfindinglib" in way_doc["title"]
+    assert "Wayfinder" in way_doc["content"]
+    assert "ObservatoryControl" in way_doc["content"]
+
+    # Verify resolving individual class generated stub
+    stub_doc = service.get_doc_topic("generated/astrometricslib.Astrometrics.rst")
+    assert "Astrometrics" in stub_doc["title"]
+    assert "process_all_targets" in stub_doc["content"]

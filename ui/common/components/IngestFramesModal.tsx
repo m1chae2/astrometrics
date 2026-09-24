@@ -84,12 +84,17 @@ export const IngestFramesModal: React.FC<IngestFramesModalProps> = ({
         isActive
     } = ingestionState;
 
-    // Auto-scan on open if needed
+    // Auto-refresh file list and scan remote folders whenever the modal is opened
     useEffect(() => {
-        if (isOpen && ingestionState.remoteFolders.length === 0) {
-            scanRemote();
+        if (isOpen) {
+            if (ingestionState.refreshFiles) {
+                ingestionState.refreshFiles();
+            }
+            if (ingestionState.remoteFolders.length === 0) {
+                scanRemote();
+            }
         }
-    }, [isOpen, ingestionState.remoteFolders.length, scanRemote]);
+    }, [isOpen, ingestionState.remoteFolders.length, scanRemote, ingestionState.refreshFiles]);
 
     // Cleanup Only on COMPLETE success + Close?
     // User requested persistence, so we do NOT reset on close.
@@ -209,19 +214,30 @@ export const IngestFramesModal: React.FC<IngestFramesModalProps> = ({
                             <div className="ingest-modal__file-selection-container">
                                 <div className="ingest-modal__file-selection-header">
                                     <label className="ingest-modal__label-zero-margin">Select Files ({selectedFiles.size} / {remoteFiles.length})</label>
-                                    <button
-                                        className="btn-link"
-                                        onClick={() => {
-                                            if (selectedFiles.size === remoteFiles.length) {
-                                                setSelectedFiles(new Set());
-                                            } else {
-                                                setSelectedFiles(new Set(remoteFiles));
-                                            }
-                                        }}
-                                        disabled={isRunning}
-                                    >
-                                        {selectedFiles.size === remoteFiles.length ? 'Deselect All' : 'Select All'}
-                                    </button>
+                                    <div className="ingest-modal__file-selection-actions">
+                                        <button
+                                            type="button"
+                                            className="ingest-modal__refresh-btn"
+                                            onClick={() => ingestionState.refreshFiles && ingestionState.refreshFiles()}
+                                            disabled={isRunning || isLoadingStats}
+                                            title="Refresh file list from telescope"
+                                        >
+                                            ↻ Refresh
+                                        </button>
+                                        <button
+                                            className="btn-link"
+                                            onClick={() => {
+                                                if (selectedFiles.size === remoteFiles.length) {
+                                                    setSelectedFiles(new Set());
+                                                } else {
+                                                    setSelectedFiles(new Set(remoteFiles));
+                                                }
+                                            }}
+                                            disabled={isRunning}
+                                        >
+                                            {selectedFiles.size === remoteFiles.length ? 'Deselect All' : 'Select All'}
+                                        </button>
+                                    </div>
                                 </div>
                                 {isCalibrationTarget && (
                                     <div className="ingest-modal__calibration-type-row">

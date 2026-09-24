@@ -30,6 +30,38 @@
     padding: 0 8px;
 }
 
+.ingest-modal__file-selection-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.ingest-modal__refresh-btn {
+    background: transparent;
+    border: 1px solid var(--grey-light, #444);
+    color: var(--text-muted, #aaa);
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 11px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    line-height: 1.2;
+    transition: all 0.15s ease;
+}
+
+.ingest-modal__refresh-btn:hover:not(:disabled) {
+    color: var(--text-light, #fff);
+    border-color: var(--adwaita-blue, #1c71d8);
+    background: rgba(28, 113, 216, 0.15);
+}
+
+.ingest-modal__refresh-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
 .ingest-modal__calibration-type-row {
     display: flex;
     gap: 12px;

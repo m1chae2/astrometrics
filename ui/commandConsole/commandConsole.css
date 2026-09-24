@@ -428,33 +428,149 @@
 }
 
 /* Documentation Viewer */
-.doc-viewer {
-  padding: 16px 20px;
-  line-height: 1.6;
-  color: var(--text-lighter, #ddd);
+.doc-viewer-container {
+  display: flex;
+  height: 100%;
+  width: 100%;
+  overflow-y: auto;
+  background-color: var(--cmd-bg-dark, #181818);
 }
 
-.doc-viewer h1,
-.doc-viewer h2,
-.doc-viewer h3 {
+.doc-viewer {
+  width: 100%;
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 24px 32px;
+  line-height: 1.7;
+  color: var(--text-lighter, #ddd);
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.doc-viewer h1 {
+  font-size: 24px;
+  color: var(--text-primary, #ffffff);
+  border-bottom: 1px solid var(--term-border, #2e2e2e);
+  padding-bottom: 8px;
+  margin-top: 12px;
+  margin-bottom: 16px;
+}
+
+.doc-viewer h2 {
+  font-size: 18px;
   color: var(--text-primary, #eaeaea);
   border-bottom: 1px solid var(--term-border, #2e2e2e);
   padding-bottom: 6px;
-  margin-top: 18px;
+  margin-top: 24px;
+  margin-bottom: 12px;
+}
+
+.doc-viewer h3 {
+  font-size: 15px;
+  color: var(--text-primary, #eaeaea);
+  margin-top: 20px;
+  margin-bottom: 8px;
+}
+
+.doc-viewer p {
+  margin: 10px 0;
+}
+
+.doc-viewer a {
+  color: var(--adwaita-blue-light, #3584e4);
+  text-decoration: none;
+  cursor: pointer;
+  border-bottom: 1px dotted rgba(53, 132, 228, 0.4);
+  transition: all 0.15s ease;
+}
+
+.doc-viewer a:hover {
+  color: #62a0ea;
+  border-bottom-color: #62a0ea;
+  text-decoration: underline;
 }
 
 .doc-viewer code {
   background-color: var(--cmd-bg-medium, #1e1e1e);
   padding: 2px 6px;
-  border-radius: 3px;
+  border-radius: 4px;
   font-family: var(--font-family-mono);
   font-size: 12px;
+  color: var(--term-cyan, #33c7de);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .doc-viewer pre {
-  background-color: var(--cmd-bg-medium, #1e1e1e);
-  padding: 12px;
+  background-color: var(--cmd-bg-darkest, #121212);
+  padding: 14px 16px;
   border-radius: 6px;
   overflow-x: auto;
   border: 1px solid var(--term-border, #2e2e2e);
+  margin: 14px 0;
+}
+
+.doc-viewer pre code {
+  background-color: transparent;
+  padding: 0;
+  border: none;
+  color: var(--text-light, #f0f0f0);
+}
+
+.doc-viewer ul,
+.doc-viewer ol {
+  padding-left: 24px;
+  margin: 10px 0;
+}
+
+.doc-viewer li {
+  margin-bottom: 6px;
+}
+
+.doc-viewer blockquote {
+  border-left: 4px solid var(--adwaita-blue, #1c71d8);
+  margin: 16px 0;
+  padding: 8px 16px;
+  background-color: rgba(28, 113, 216, 0.08);
+  border-radius: 0 4px 4px 0;
+}
+
+.doc-admonition {
+  border-left: 4px solid var(--adwaita-blue-light, #3584e4);
+  background-color: rgba(53, 132, 228, 0.08);
+  border-radius: 0 6px 6px 0;
+  padding: 12px 16px;
+  margin: 16px 0;
+}
+
+.doc-admonition__title {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--adwaita-blue-light, #3584e4);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.doc-viewer table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 16px 0;
+  font-size: 13px;
+}
+
+.doc-viewer th,
+.doc-viewer td {
+  padding: 8px 12px;
+  border: 1px solid var(--term-border, #2e2e2e);
+  text-align: left;
+}
+
+.doc-viewer th {
+  background-color: var(--cmd-bg-medium, #1e1e1e);
+  color: var(--text-primary, #ffffff);
+  font-weight: 600;
+}
+
+.doc-viewer tr:nth-child(even) td {
+  background-color: rgba(255, 255, 255, 0.02);
 }

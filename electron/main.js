@@ -2,9 +2,10 @@
  * @fileoverview Electron main process for the Astrometrics application.
  * Orchestrates application lifecycle, window management, and backend services.
  */
-import { app, BrowserWindow, Tray, Menu, nativeImage, session, nativeTheme, screen, dialog, powerMonitor } from 'electron';
+import { app, BrowserWindow, Tray, Menu, nativeImage, session, nativeTheme, screen, dialog, powerMonitor, shell } from 'electron';
 import squirrelStartup from 'electron-squirrel-startup';
 import path from 'path';
+import fs from 'fs';
 import process from 'process';
 import os from 'os';
 import log from 'electron-log';
@@ -267,7 +268,29 @@ function dismissSplashAndShowMainWindow() {
 async function openMainWindowWhenBackendIsWarm() {
   if (mainWindow || isOpeningMainWindow) return;
   isOpeningMainWindow = true;
-  await backendManager.waitUntilWarm();
+  let isWarm = await backendManager.waitUntilWarm();
+  // A backend that is missing or dead cannot be fixed by opening the window
+  // anyway, so say so and offer a retry instead of showing an empty app.
+  while (!isWarm && ['unreachable', 'exited'].includes(backendManager.warmUpFailureReason)) {
+    if (splashWindow && !splashWindow.isDestroyed()) splashWindow.hide();
+    const { response } = await dialog.showMessageBox({
+      type: 'error',
+      title: 'Astrometrics backend not running',
+      message: 'The Astrometrics backend is not running.',
+      detail:
+        'Nothing answered on http://127.0.0.1:5000. Start it with ' +
+        'build/linux/run_backend.sh start (check .run_logs/backend.log if it stops), then retry.',
+      buttons: ['Retry', 'Quit'],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (response !== 0) {
+      app.quit();
+      return;
+    }
+    if (splashWindow && !splashWindow.isDestroyed()) splashWindow.show();
+    isWarm = await backendManager.waitUntilWarm();
+  }
   createMainWindow();
 }
 
@@ -462,8 +485,8 @@ function createDisplayWindow(options = {}) {
  */
 function createFigureWindow(plotPath) {
   const figureWin = new BrowserWindow({
-    width: 720,
-    height: 560,
+    width: 760,
+    height: 600,
     title: 'Astrometrics Figure',
     backgroundColor: '#0a0d14',
     icon: getAppPath('assets', 'orbit.png'),
@@ -474,7 +497,19 @@ function createFigureWindow(plotPath) {
   });
 
   figureWin.setMenuBarVisibility(false);
-  const fileUrl = `file://${plotPath}`;
+
+  let imageSrc = '';
+  try {
+    if (fs.existsSync(plotPath)) {
+      const imgBuffer = fs.readFileSync(plotPath);
+      imageSrc = `data:image/png;base64,${imgBuffer.toString('base64')}`;
+    } else {
+      log.warn(`Figure path does not exist: ${plotPath}`);
+    }
+  } catch (err) {
+    log.error(`Failed to read figure image at ${plotPath}:`, err);
+  }
+
   const htmlContent = `
     <!DOCTYPE html>
     <html>
@@ -483,13 +518,14 @@ function createFigureWindow(plotPath) {
         <style>
           body {
             margin: 0;
-            padding: 0;
+            padding: 16px;
             background-color: #0a0d14;
             display: flex;
             align-items: center;
             justify-content: center;
-            height: 100vh;
+            height: calc(100vh - 32px);
             overflow: auto;
+            box-sizing: border-box;
           }
           img {
             max-width: 100%;
@@ -501,11 +537,19 @@ function createFigureWindow(plotPath) {
         </style>
       </head>
       <body>
-        <img src="${fileUrl}" alt="Figure" />
+        ${imageSrc ? `<img src="${imageSrc}" alt="Figure" />` : '<div style="color: #e95420; font-family: monospace;">Figure image not found</div>'}
       </body>
     </html>
   `;
   figureWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
+
+  const windowId = `figure-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  auxiliaryWindows.set(windowId, figureWin);
+
+  figureWin.on('closed', () => {
+    auxiliaryWindows.delete(windowId);
+  });
+
   return figureWin;
 }
 
@@ -681,6 +725,33 @@ app.on('ready', () => {
         ...details.responseHeaders,
         'Content-Security-Policy': [isDev ? devCsp : prodCsp],
       },
+    });
+  });
+
+  // Intercept window.open and top-level navigation on all webContents
+  // Ensures external links (http/https) open in the user's OS browser and
+  // internal links cannot cause accidental top-level app navigations or reloads.
+  app.on('web-contents-created', (_event, contents) => {
+    contents.setWindowOpenHandler(({ url }) => {
+      if (url.startsWith('http:') || url.startsWith('https:')) {
+        shell.openExternal(url).catch((err) => log.warn('Failed opening external URL:', err));
+        return { action: 'deny' };
+      }
+      return { action: 'allow' };
+    });
+
+    contents.on('will-navigate', (event, navigationUrl) => {
+      // Allow Vite HMR / dev server and initial file:// root
+      const parsedUrl = new URL(navigationUrl);
+      if (parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:') {
+        if (!isDev || (parsedUrl.hostname !== '127.0.0.1' && parsedUrl.hostname !== 'localhost')) {
+          event.preventDefault();
+          shell.openExternal(navigationUrl).catch((err) => log.warn('Failed opening external URL:', err));
+        }
+      } else if (parsedUrl.protocol === 'file:' && !navigationUrl.endsWith('index.html')) {
+        // Prevent navigating the main webContents to local markdown/docs files directly
+        event.preventDefault();
+      }
     });
   });
 

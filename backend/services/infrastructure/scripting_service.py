@@ -12,6 +12,7 @@ import inspect
 import io
 import json
 import logging
+import os
 import rlcompleter
 import sys
 import tempfile
@@ -182,8 +183,33 @@ class ScriptingService:
         try:
             import matplotlib
 
-            matplotlib.use("Agg")
+            has_display = bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+            use_tk = False
+            if has_display:
+                try:
+                    import tkinter
+
+                    test_tk = tkinter.Tk()
+                    test_tk.destroy()
+                    use_tk = True
+                except Exception:
+                    use_tk = False
+
+            if use_tk:
+                try:
+                    matplotlib.use("TkAgg")
+                except Exception:
+                    matplotlib.use("Agg")
+            else:
+                matplotlib.use("Agg")
+
             import matplotlib.pyplot as plt
+
+            # If using interactive GUI backend, plt.ion() allows
+            # non-blocking display while keeping figures alive and
+            # interactive for mouse/click events.
+            if plt.get_backend().lower() != "agg":
+                plt.ion()
 
             local_scope["plt"] = plt
         except ImportError:
@@ -496,13 +522,7 @@ class ScriptingService:
 
         with contextlib.redirect_stdout(stdout_buf), contextlib.redirect_stderr(stderr_buf):
             try:
-                try:
-                    import matplotlib
-
-                    matplotlib.use("Agg")
-                    import matplotlib.pyplot as plt
-                except Exception:
-                    plt = None
+                plt = self.console.locals.get("plt")
 
                 if "\n" in code_str.strip():
                     exec(code_str, self.console.locals)  # ruff: ignore[exec-builtin]
@@ -517,13 +537,22 @@ class ScriptingService:
                     except TypeError, OverflowError:
                         result = str(raw_res)
 
-                if plt and plt.get_fignums():
+                # Only capture to snapshot images if headless Agg backend
+                # is being used
+                if plt and plt.get_backend().lower() == "agg" and plt.get_fignums():
                     for fignum in plt.get_fignums():
                         fig = plt.figure(fignum)
                         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_file:
                             fig.savefig(tmp_file.name, bbox_inches="tight", dpi=100)
                             plots.append(tmp_file.name)
                     plt.close("all")
+                elif plt and plt.get_backend().lower() != "agg" and plt.get_fignums():
+                    # For interactive GUI backends, flush GUI events to
+                    # display the interactive windows
+                    for fignum in plt.get_fignums():
+                        fig = plt.figure(fignum)
+                        fig.canvas.draw_idle()
+                        fig.canvas.flush_events()
 
             except Exception:
                 status = "error"
@@ -801,7 +830,9 @@ class ScriptingService:
             List of documentation topics with ID, title, and relative path.
         """
         doc_root = self._get_doc_root()
-        topics = []
+        from .api_doc_generator import get_api_topics
+
+        topics: list[dict[str, Any]] = [dict(t) for t in get_api_topics()]
         for doc_file in sorted(doc_root.rglob("*.md")):
             # Ignore build artifacts
             rel_parts = doc_file.relative_to(doc_root).parts
@@ -818,6 +849,9 @@ class ScriptingService:
                 logger.debug("Failed reading title for doc topic %s: %s", doc_file, exc)
 
             topic_id = str(doc_file.relative_to(doc_root).as_posix())
+            if any(t["id"] == topic_id for t in topics):
+                continue
+
             topics.append({
                 "id": topic_id,
                 "title": title,
@@ -844,9 +878,24 @@ class ScriptingService:
         FileNotFoundError
             If the requested documentation file does not exist.
         """
+        from .api_doc_generator import get_api_topic_content
+
+        # 1. Check virtual / generated API documentation
+        api_topic = get_api_topic_content(topic_id)
+        if api_topic is not None:
+            return api_topic
+
+        # 2. Check filesystem documentation
         doc_root = self._get_doc_root()
         safe_path = (doc_root / topic_id).resolve()
-        if not safe_path.exists() or not safe_path.is_file() or not str(safe_path).startswith(str(doc_root)):
+        if not safe_path.exists() or not safe_path.is_file():
+            fallback_md = (doc_root / f"{topic_id}.md").resolve()
+            if fallback_md.exists() and fallback_md.is_file():
+                safe_path = fallback_md
+            else:
+                raise FileNotFoundError(f"Documentation topic {topic_id!r} not found.")
+
+        if not str(safe_path).startswith(str(doc_root)):
             raise FileNotFoundError(f"Documentation topic {topic_id!r} not found.")
 
         content = safe_path.read_text(encoding="utf-8")

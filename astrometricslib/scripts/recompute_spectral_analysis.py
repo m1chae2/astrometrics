@@ -169,6 +169,7 @@ def recompute_star(
         spectroscopy.quantum_efficiency_corrected_intensities = corrected[measured].tolist()
     spectroscopy.trail_centerline_px = trim(spectroscopy.trail_centerline_px)
     spectroscopy.trail_width_px = trim(spectroscopy.trail_width_px)
+    spectroscopy.second_order_blue_to_red_ratio = trim(spectroscopy.second_order_blue_to_red_ratio)
 
     trimmed_history = []
     for observation in star.spectra_history:

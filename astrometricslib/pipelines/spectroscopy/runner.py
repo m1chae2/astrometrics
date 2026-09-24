@@ -25,7 +25,69 @@ from astrometricslib.pipelines.shared.star_recording import (
     merge_spectroscopy_stellar_object,
     record_pipeline_stars,
 )
-from astrometricslib.pipelines.shared.target_center_hint import resolve_solved_stack_center_hint
+from astrometricslib.pipelines.shared.target_center_hint import (
+    resolve_solved_stack_center_hint,
+    resolve_solved_stack_wcs,
+)
+
+
+def _recover_extended_source_hint(
+    astrometry: Any,
+    context: Any,
+    target: Target,
+    spectral_stack_path: str,
+    reference_stellar_objects: list,
+    hint_ra: float | None,
+    hint_dec: float | None,
+) -> None:
+    """Find where an extended target (a nebula, say) sits in a spectral stack.
+
+    A spectral stack has no plate solution, so `AstrometryPipeline.process`
+    cannot turn the target's catalog position into a pixel position, and
+    without one no extended target is extracted (an old stored record for it
+    then keeps a position from some earlier run). The target's solved
+    standard stack has a plate solution, and star registration has just
+    measured how far the two stacks are shifted apart. Shifting the solution
+    by that amount gives one for the spectral stack, good to a few pixels
+    (on M 57 the ring nebula fell about 6 pixels from where its zero order
+    really is).
+
+    Does nothing when the hint already exists, there is no matching solved
+    stack, or the star fields are not related by a single shift.
+
+    Parameters
+    ----------
+    astrometry : `AstrometryPipeline`
+        The pipeline that built `context`; it looks the target up.
+    context : `AnalysisContext`
+        The spectral stack's context. Its `extended_source_hint` is filled in.
+    target : `Target`
+        The target being analyzed.
+    spectral_stack_path : `str`
+        Path of the spectral stack.
+    reference_stellar_objects : `list` [`StellarObject`]
+        The named stars the spectral field was just registered against.
+    hint_ra : `float` or `None`
+        The position hint's right ascension in decimal degrees.
+    hint_dec : `float` or `None`
+        The position hint's declination in decimal degrees.
+    """
+    if context.extended_source_hint is not None:
+        return
+
+    from astrometricslib.pipelines.astrometry.spectral_star_registration import (
+        estimate_registration_offset,
+        shift_wcs_to_frame,
+    )
+
+    reference_wcs = resolve_solved_stack_wcs(target, spectral_stack_path)
+    offset = estimate_registration_offset(context.stellar_objects, reference_stellar_objects)
+    if reference_wcs is None or offset is None:
+        return
+    spectral_wcs = shift_wcs_to_frame(reference_wcs, offset)
+    context.extended_source_hint = astrometry.build_extended_source_hint(
+        context.image, spectral_wcs, hint_ra, hint_dec
+    )
 
 
 def _registration_reference_candidates(target: Target, catalog_access: Any) -> list:
@@ -164,6 +226,9 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
             )
 
             identify_spectral_stars_via_registration(context.stellar_objects, reference_stellar_objects)
+            _recover_extended_source_hint(
+                astrometry, context, target, request.path, reference_stellar_objects, hint_ra, hint_dec
+            )
 
         spectroscopy = SpectroscopyPipeline()
         limit = request.options.get("limit", 10)

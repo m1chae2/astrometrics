@@ -104,6 +104,8 @@ export interface AstrometryOverlayStar {
     isCatalogIdentified: boolean;
     referenceWidth?: number | null;
     referenceHeight?: number | null;
+    /** Measured star radius in reference-image pixels, if available. */
+    radiusPx?: number | null;
 }
 
 /**

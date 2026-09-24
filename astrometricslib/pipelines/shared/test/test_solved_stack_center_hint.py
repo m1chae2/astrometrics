@@ -14,7 +14,10 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from astrometricslib.pipelines.shared.target_center_hint import resolve_solved_stack_center_hint
+from astrometricslib.pipelines.shared.target_center_hint import (
+    resolve_solved_stack_center_hint,
+    resolve_solved_stack_wcs,
+)
 
 CAMERA = "ZWO CCD ASI533MM Pro"
 
@@ -103,3 +106,23 @@ def test_a_target_with_no_stacks_or_an_unreadable_spectral_file_gives_no_hint(tm
 
     assert resolve_solved_stack_center_hint(_target(), spectral) == (None, None)
     assert resolve_solved_stack_center_hint(_target(), str(tmp_path / "missing.fits")) == (None, None)
+
+
+def test_the_solved_stacks_plate_solution_is_returned(tmp_path: Path) -> None:
+    """The reference pixel of the matching solved stack maps to its CRVAL."""
+    spectral = _write_stack(tmp_path / "spec.fits", solved=False)
+    solved = _write_stack(tmp_path / "L.fits")
+
+    wcs = resolve_solved_stack_wcs(_target(solved), spectral)
+
+    center_ra, center_dec = wcs.wcs_pix2world(49.0, 49.0, 0)
+    assert center_ra == pytest.approx(279.2414, abs=1e-3)
+    assert center_dec == pytest.approx(38.7530, abs=1e-3)
+
+
+def test_no_plate_solution_is_returned_without_a_matching_solved_stack(tmp_path: Path) -> None:
+    """Another telescope's solved stack must not be used."""
+    spectral = _write_stack(tmp_path / "spec.fits", solved=False)
+    other_scope = _write_stack(tmp_path / "L.fits", focal_length=1000.0)
+
+    assert resolve_solved_stack_wcs(_target(other_scope), spectral) is None

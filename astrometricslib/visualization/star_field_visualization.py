@@ -18,6 +18,7 @@ from .layers import (
     SpectrumOverlay,
     StarOverlay,
     StarSelectionOverlay,
+    resolve_star_radius,
 )
 from .spectroscopy_field_access import get_spectroscopy_field as _get_spectroscopy_field
 from .visualization_config import VisualizationConfig
@@ -222,9 +223,10 @@ class _AnalysisView:
                 else obj.get("ycentroid", obj.get("y_centroid", 0.0))
             )
 
+            radius = resolve_star_radius(obj, self.config.fixed_radius)
             dx = event_x - x
             dy = event_y - y
-            if (dx * dx + dy * dy) <= (self.config.fixed_radius * self.config.fixed_radius):
+            if (dx * dx + dy * dy) <= radius * radius:
                 return i
 
             if self.mode == "spectroscopy":

@@ -181,6 +181,29 @@ def _serialize_target_for_planetarium(target, local_target_ids: set | None = Non
     }
 
 
+def _stored_star_radius_px(astrometrics: Any, star_id: str) -> float | None:
+    """Look up the detected radius saved on a star's record.
+
+    Parameters
+    ----------
+    astrometrics : `Any`
+        The high-level astrometrics interface.
+    star_id : `str`
+        Identifier of the star to look up.
+
+    Returns
+    -------
+    radius_px : `float` or `None`
+        `StellarObject.radius_px`, or `None` if the star or radius is missing.
+    """
+    try:
+        star = astrometrics.stars.get_object(star_id)
+    except Exception as err:
+        logger.debug("Could not load %s for its radius: %s", star_id, err)
+        return None
+    return getattr(star, "radius_px", None) if star else None
+
+
 class StellarService:
     """Manages StellarObject lifecycle (e.
 
@@ -280,7 +303,8 @@ class StellarService:
         result : `list` of `dict`
             List of star overlay entries with ``id``, ``name``, ``x``, ``y``,
             ``spectralType``, ``isCatalogIdentified``, ``referenceWidth``,
-            and ``referenceHeight``.
+            ``referenceHeight``, and ``radiusPx`` (the star's detected
+            radius in reference-image pixels, or `None` when unrecorded).
         """
         if not target_id:
             return []
@@ -400,6 +424,7 @@ class StellarService:
                         "isCatalogIdentified": not s_id.startswith("Star_"),
                         "referenceWidth": ref_width,
                         "referenceHeight": ref_height,
+                        "radiusPx": _stored_star_radius_px(self.astrometrics, s_id),
                     })
                     if limit and limit > 0 and len(results) >= limit:
                         break
@@ -491,6 +516,7 @@ class StellarService:
                 "isCatalogIdentified": bool(getattr(obj, "is_catalog_identified", False)),
                 "referenceWidth": ref_width,
                 "referenceHeight": ref_height,
+                "radiusPx": getattr(obj, "radius_px", None),
             })
 
         return fallback_results

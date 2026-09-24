@@ -277,6 +277,8 @@ def _rescale_source_centroids(sources: list[dict], factor: int) -> None:
                 source[x_key] = source[x_key] * factor + offset
             if y_key in source and source[y_key] is not None:
                 source[y_key] = source[y_key] * factor + offset
+        if source.get("radius_px") is not None:
+            source["radius_px"] = source["radius_px"] * factor
 
 
 def _read_catalog_magnitude(match: Any, column_names: list[str]) -> float | None:
@@ -379,6 +381,8 @@ class StarIdentifier:
                 cleaned_src = src
 
             obj.star_data = cleaned_src
+            radius_px = cleaned_src.get("radius_px") if isinstance(cleaned_src, dict) else None
+            obj.radius_px = float(radius_px) if radius_px is not None else None
             obj.flux = float(cleaned_src.get("flux", 0.0)) if isinstance(cleaned_src, dict) else 0.0
             # Give every object a unique, non-empty placeholder id so
             # it is addressable before catalog identification runs.

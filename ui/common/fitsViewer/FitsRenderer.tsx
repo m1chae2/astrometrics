@@ -237,6 +237,11 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
                 const badgeY = -12;
                 const isHovered = hoveredStarId === star.id;
                 const isSelected = isStarSelected(star, selectedStarId);
+                // Size the reticle to the detected star (falls back to the old fixed size).
+                const measuredRadius = star.radiusPx ? star.radiusPx * Math.min(scaleX, scaleY) : 0;
+                const ringRadius = measuredRadius > 0 ? Math.min(Math.max(measuredRadius + 4, 8), 60) : 15;
+                const tickInner = ringRadius + 1;
+                const tickOuter = ringRadius + 6;
 
                 return (
                   <g
@@ -258,14 +263,14 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
                     <circle
                       cx={0}
                       cy={0}
-                      r={15}
+                      r={ringRadius}
                       className="fits-renderer__reticle-ring"
                     />
                     {/* Precision Reticle: Cardinal Ticks */}
-                    <line x1={0} y1={-21} x2={0} y2={-16} className="fits-renderer__reticle-ticks" />
-                    <line x1={0} y1={16} x2={0} y2={21} className="fits-renderer__reticle-ticks" />
-                    <line x1={-21} y1={0} x2={-16} y2={0} className="fits-renderer__reticle-ticks" />
-                    <line x1={16} y1={0} x2={21} y2={0} className="fits-renderer__reticle-ticks" />
+                    <line x1={0} y1={-tickOuter} x2={0} y2={-tickInner} className="fits-renderer__reticle-ticks" />
+                    <line x1={0} y1={tickInner} x2={0} y2={tickOuter} className="fits-renderer__reticle-ticks" />
+                    <line x1={-tickOuter} y1={0} x2={-tickInner} y2={0} className="fits-renderer__reticle-ticks" />
+                    <line x1={tickInner} y1={0} x2={tickOuter} y2={0} className="fits-renderer__reticle-ticks" />
                     {/* Precision Reticle: Center Point */}
                     <circle cx={0} cy={0} r={1.5} className="fits-renderer__reticle-center" />
 

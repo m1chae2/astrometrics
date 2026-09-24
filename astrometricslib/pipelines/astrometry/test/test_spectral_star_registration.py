@@ -10,10 +10,13 @@ side to register.
 
 import numpy as np
 import pytest
+from astropy.wcs import WCS
 
 from astrometricslib.models.stellar_source import SpectroscopyResult, StellarObject
 from astrometricslib.pipelines.astrometry.spectral_star_registration import (
+    estimate_registration_offset,
     identify_spectral_stars_via_registration,
+    shift_wcs_to_frame,
 )
 
 
@@ -154,3 +157,54 @@ def test_identify_spectral_stars_via_registration_no_position_data_returns_zero(
     matched_count = identify_spectral_stars_via_registration(spectral_stars, reference_stars)
 
     assert matched_count == 0
+
+
+def test_estimate_registration_offset_recovers_the_shift_between_the_images():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """After matching, the median position difference is the image shift."""
+    rng = np.random.default_rng(3)
+    reference_stars, spectral_stars, _ = _build_matched_fields(
+        rng, count=25, rotation_deg=0.0, translation=(-4.0, 6.0), jitter_px=0.5
+    )
+    identify_spectral_stars_via_registration(spectral_stars, reference_stars)
+
+    dx, dy = estimate_registration_offset(spectral_stars, reference_stars)
+
+    assert dx == pytest.approx(-4.0, abs=0.5)
+    assert dy == pytest.approx(6.0, abs=0.5)
+
+
+def test_estimate_registration_offset_refuses_a_rotated_field():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """A rotation makes the stars disagree about the shift; report none."""
+    rng = np.random.default_rng(4)
+    reference_stars, spectral_stars, _ = _build_matched_fields(
+        rng, count=25, rotation_deg=3.0, translation=(0.0, 0.0), jitter_px=0.5
+    )
+    for spectral_star, reference_star in zip(spectral_stars, reference_stars, strict=True):
+        spectral_star.id = reference_star.id
+
+    assert estimate_registration_offset(spectral_stars, reference_stars) is None
+
+
+def test_estimate_registration_offset_needs_enough_pairs():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Three identified stars are too few to trust a median."""
+    reference_stars = [_reference_star(f"HD{i}", 100.0 * i, 50.0 * i) for i in range(3)]
+    spectral_stars = [_spectral_star(f"HD{i}", 100.0 * i + 2.0, 50.0 * i) for i in range(3)]
+
+    assert estimate_registration_offset(spectral_stars, reference_stars) is None
+
+
+def test_shift_wcs_to_frame_moves_a_sky_position_by_the_offset():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """A sky position lands `offset` pixels away in the shifted solution."""
+    reference_wcs = WCS(naxis=2)
+    reference_wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+    reference_wcs.wcs.crpix = [1500.0, 1500.0]
+    reference_wcs.wcs.crval = [283.4, 33.0]
+    reference_wcs.wcs.cd = [[-5e-4, 0.0], [0.0, 5e-4]]
+
+    shifted_wcs = shift_wcs_to_frame(reference_wcs, (-6.0, 2.5))
+
+    x_reference, y_reference = reference_wcs.wcs_world2pix(283.41, 33.02, 0)
+    x_shifted, y_shifted = shifted_wcs.wcs_world2pix(283.41, 33.02, 0)
+    assert x_shifted - x_reference == pytest.approx(-6.0)
+    assert y_shifted - y_reference == pytest.approx(2.5)
+    assert reference_wcs.wcs.crpix[0] == pytest.approx(1500.0)

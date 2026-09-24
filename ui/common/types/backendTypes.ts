@@ -196,6 +196,7 @@ export interface Spectrum {
   photometry?: PhotometryResult | null;
   spectraHistory?: SpectralObservation[];
   starData?: any;
+  radiusPx?: number | null;
   spectroscopy?: SpectroscopyResult | null;
   stellarSpectralType?: string;
   targetIds?: string[];
@@ -251,6 +252,7 @@ export interface SpectroscopyResult {
   dispersionAngle?: number | null;
   trailCenterlinePx?: number[] | null;
   trailWidthPx?: number[] | null;
+  secondOrderBlueToRedRatio?: number[] | null;
   resolutionElementAngstrom?: number | null;
   extractionRadius?: number | null;
 }

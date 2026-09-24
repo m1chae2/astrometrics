@@ -243,6 +243,15 @@ class SpectroscopyResult(BaseModel):
     # how wide the trail is at each point.
     trail_centerline_px: list[float] | None = Field(default=None, alias="trailCenterlinePx")
     trail_width_px: list[float] | None = Field(default=None, alias="trailWidthPx")
+    # An audit warning, one value per sample of the spectrum above: how many
+    # times brighter this star is at half that wavelength. Second-order light
+    # from the blue can add to a red wavelength, and a large ratio means
+    # even a small amount would matter (see second_order_risk). It changes
+    # nothing in the spectrum. 0.0 where half the wavelength was not
+    # measured. `None` for a spectrum saved before this was recorded.
+    second_order_blue_to_red_ratio: list[float] | None = Field(
+        default=None, alias="secondOrderBlueToRedRatio"
+    )
     # How much the instrument blurred this spectrum, in Angstroms, worked
     # out from the trail width above (see spectral_resolution). The
     # classification and the feature tests were run at this width. `None`
@@ -297,6 +306,10 @@ class StellarObject(BaseModel):
     # pictures. Defaults to an empty dict, not a list -- every real
     # consumer treats this as a dict (`.get("xcentroid", ...)`).
     star_data: Any = Field(default_factory=dict, alias="starData")
+    # How big the star looks in the image it was detected in, as a radius in
+    # pixels (measured by source detection). Used to size the on-screen
+    # circle drawn around the star. `None` until detection has measured it.
+    radius_px: float | None = Field(default=None, alias="radiusPx")
     # This star's own extracted spectrum and what it suggests about the
     # star -- see SpectroscopyResult. Mirrors photometry above: one
     # nested result per domain, instead of that domain's fields loose

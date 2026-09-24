@@ -7,7 +7,7 @@ Guidelines and operational rules for Claude Code operating on the `astrometrics`
 - **Linting**: ALWAYS run `.venv/bin/ruff check` (and `ruff format` if needed) after modifying Python code.
 - **Testing**: ALWAYS run `.venv/bin/pytest` on affected test suites after Python changes.
 - **Frontend Checks**: Run `npm run type-check` and `npm test` after modifying files under `ui/`.
-- **Git Safety**: NEVER run `git commit`, `git push`, or modify git history. Focus solely on code edits within the repository.
+- **Git Safety**: You MAY run `git commit` when the user asks. NEVER run `git push`, amend, rebase, reset, force-anything, or otherwise modify existing git history. Stage files explicitly and review `git status` first.
 - **Docstrings & Clean Code**:
   - Every file must have a description block at the top defining its purpose.
   - Every class, function, method, and test block must have a docstring describing its purpose.

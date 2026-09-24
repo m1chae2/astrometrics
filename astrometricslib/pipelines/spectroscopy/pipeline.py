@@ -21,6 +21,7 @@ from astrometricslib.pipelines.spectroscopy.quantum_efficiency_correction import
 from astrometricslib.pipelines.spectroscopy.quantum_efficiency_curves import (
     get_quantum_efficiency_curve,
 )
+from astrometricslib.pipelines.spectroscopy.second_order_risk import compute_second_order_blue_to_red_ratio
 from astrometricslib.pipelines.spectroscopy.spectroscopy_instrument import (
     SpectroscopyInstrument,
 )
@@ -55,6 +56,122 @@ DISPERSION_ANGLE_ROI_MINIMUM_HALF_WIDTH_PX = 3.0
 # above the trail artifacts seen so far, comfortably below every real star
 # seen so far.
 TRAIL_CONTAMINATION_MAXIMUM_SHARPNESS = 0.5
+
+
+# The steepest tilt, in degrees, the angle fit will accept. The strip that
+# follows a streak can only reach this far from the star's own line, and a
+# fit that wants more is following something other than the trail (a
+# neighbour, or noise). Trails measured so far lean between 2 and 3 degrees
+# (Vega 2.1, Albireo 2.7, M 57 about 2.5), so 10 leaves a wide margin.
+# Not validated beyond those three stacks.
+DISPERSION_ANGLE_MAXIMUM_TILT_DEGREES = 10.0
+
+# How many times the angle fit re-centres its strip on the previous fit
+# before stopping. The fit moves less each time; on the Albireo, Vega and
+# M 57 stacks it settled within 3 rounds, so 8 is a safe upper limit.
+DISPERSION_ANGLE_MAXIMUM_REFIT_COUNT = 8
+
+# How many pixels along the trail each band spans when the streak's sideways
+# position is measured. 40 rows average out pixel noise (a bright streak's
+# centre moves by well under a pixel per band) while keeping about 15 bands
+# along a 630 px trail so the tilt is well constrained. Chosen by judgement,
+# then checked against direct centroids on the Albireo, Vega and M 57 stacks.
+DISPERSION_ANGLE_BAND_LENGTH_PX = 40
+
+# The brightness, in noise sigmas of a band's averaged profile, its peak must
+# reach for the band to count. Pure noise peaks at about 2 sigma across the
+# few dozen pixels of a profile, so 3 keeps noise bands out. A judgement, not
+# tuned on data.
+DISPERSION_ANGLE_MINIMUM_BAND_SIGMA = 3.0
+
+# How many candidate tilts the search tries before it starts following the
+# trail. 41 across plus or minus 10 degrees is a step of 0.5 degrees, well
+# inside what one strip half-width of 3 px can still follow over the first
+# bands. Chosen by judgement.
+DISPERSION_ANGLE_SEED_SLOPE_COUNT = 41
+
+# The fewest bands that must show the streak for an angle to be reported.
+# Fewer than this and one odd band could set the whole slope.
+DISPERSION_ANGLE_MINIMUM_BAND_COUNT = 4
+
+# The change in slope (across-pixels per along-pixel) below which the fit
+# counts as settled. 0.001 is 0.06 degrees, far below the 0.1 degree scatter
+# seen between stars in the same stack. Chosen by judgement.
+DISPERSION_ANGLE_REFIT_TOLERANCE = 0.001
+
+# The least trail contrast, in noise sigmas, a star's angle measurement needs
+# before the batch-wide dispersion angle will trust it. Contrast is the
+# typical height of the streak above the background across the bands that
+# show it, in units of the background noise of a band's averaged profile
+# (see `DISPERSION_ANGLE_MINIMUM_BAND_SIGMA`, which a band must reach just
+# to count, and which pure noise almost never does over four bands). On the
+# Albireo stack the star the old first-in-the-list rule picked had no visible
+# trail and scored 2.8 by the previous, differently defined contrast, while
+# the star with a real trail scored 150 on that scale. On the current scale
+# the trails on the Albireo, Vega and M 57 stacks score in the hundreds to
+# thousands, and pure noise returns no measurement at all. 5.0 is a wide
+# margin either way. Validated on those three stacks only.
+DISPERSION_ANGLE_MINIMUM_TRAIL_CONTRAST_SIGMA = 5.0
+
+
+# The smallest extraction radius a star's aperture is ever shrunk to when a
+# neighbour's trail runs alongside. Below this the aperture (2 * radius + 1
+# wide) is too narrow to hold a trail whose own width is a few pixels.
+# Not tuned beyond that geometric reasoning.
+EXTRACTION_RADIUS_MINIMUM_PX = 3
+
+
+def _capped_extraction_radius_px(
+    star_pos: tuple[float, float],
+    neighbor_positions: list[tuple[float, float]],
+    dispersion_vector: np.ndarray,
+    trail_length_px: float,
+    default_radius_px: int,
+) -> int:
+    """Shrink a star's extraction radius so its box cannot touch a neighbour's.
+
+    Every star's box is `2 * radius + 1` pixels wide, laid along the same
+    dispersion direction. Two stars whose trails run side by side closer
+    than that width share pixels, so the brighter star's light leaks into
+    the fainter star's spectrum (on Albireo, two stars 16.7 px apart with
+    21 px boxes overlapped by about 4 px). Trails are parallel, so the
+    distance between them is measured across the dispersion direction, and
+    only a neighbour whose trail overlaps this one along the dispersion
+    direction (closer than one trail length) can matter.
+
+    Parameters
+    ----------
+    star_pos : `tuple` [`float`, `float`]
+        The star being extracted, `(x, y)`.
+    neighbor_positions : `list` [`tuple` [`float`, `float`]]
+        Every other star extracted alongside it.
+    dispersion_vector : `numpy.ndarray`
+        Unit vector `(x, y)` along the dispersion direction.
+    trail_length_px : `float`
+        How long a dispersed trail is, along the dispersion direction.
+    default_radius_px : `int`
+        The configured radius, used when no neighbour is close enough.
+
+    Returns
+    -------
+    radius_px : `int`
+        `default_radius_px`, or less when a neighbour's trail is closer
+        than the full box width, never below `EXTRACTION_RADIUS_MINIMUM_PX`.
+        A box `2 * radius + 1` wide just fits when `2 * radius + 1` is at
+        most the separation.
+    """
+    along = np.asarray(dispersion_vector, dtype=float)
+    across = np.array([-along[1], along[0]])
+    nearest_separation = float("inf")
+    for neighbor in neighbor_positions:
+        offset = np.array([neighbor[0] - star_pos[0], neighbor[1] - star_pos[1]], dtype=float)
+        if abs(float(offset @ along)) >= trail_length_px:
+            continue
+        nearest_separation = min(nearest_separation, abs(float(offset @ across)))
+    if not np.isfinite(nearest_separation):
+        return default_radius_px
+    fitting_radius = int(np.floor((nearest_separation - 1.0) / 2.0))
+    return max(EXTRACTION_RADIUS_MINIMUM_PX, min(default_radius_px, fitting_radius))
 
 
 def _safe_dispersion_angle_roi_half_width_px(
@@ -462,8 +579,14 @@ class SpectroscopyPipeline:
                 wide_pipeline = SpectroscopyPipeline(
                     config=self.config.with_overrides(extraction_radius=ext_radius)
                 )
+                # The tilt is never re-detected here: a nebula has no single
+                # streak to measure (its "trail" is a chain of ring images), so
+                # a fit on it returns a meaningless angle (on M 57, -3 degrees
+                # where the real tilt is about +2). `wide_pipeline` already
+                # holds the angle measured from the stars above, or the
+                # configured one when no star gave a clear streak.
                 ext_results = wide_pipeline.process_image(
-                    context.image, target_stars=[context.extended_target], auto_detect_angle=auto_detect_angle
+                    context.image, target_stars=[context.extended_target], auto_detect_angle=False
                 )
                 if ext_results and "error" not in ext_results[0]:
                     # Insert the successfully extracted extended
@@ -522,13 +645,18 @@ class SpectroscopyPipeline:
     def _resolve_global_dispersion_angle(self, image: AstrometricsImage, target_stars: list[Any]) -> None:
         """Auto-detect the grating dispersion angle once for a whole batch.
 
-        Picks the first target star whose full dispersion box fits
-        inside the image (falling back to the first star if none do),
-        measures the angle from it, and updates `self.config` /
-        `self.instrument.config` in place so every star in this batch
-        uses the same angle.
+        Measures the streak angle from every target star whose full
+        dispersion box fits inside the image (or from the first star if
+        none do) and keeps the measurement with the clearest streak, then
+        updates `self.config` / `self.instrument.config` in place so every
+        star in this batch uses the same angle. Choosing by streak
+        contrast, not list order, matters: the first star in a list can
+        have no visible trail at all (a real Albireo run picked such a
+        star, fitted noise, and drew every box tilted the wrong way).
+        If no candidate shows a streak clearer than
+        `DISPERSION_ANGLE_MINIMUM_TRAIL_CONTRAST_SIGMA`, the configured
+        angle is left unchanged instead of adopting a noise fit.
         """
-        global_angle = self.config.dispersion_angle_degrees
         offset_px = self.instrument.zero_order_offset_px
         length_px = self.instrument.expected_length_px
         orient = self.config.dispersion_orientation
@@ -541,7 +669,7 @@ class SpectroscopyPipeline:
             if pos[0] is not None and pos[1] is not None:
                 all_positions.append((float(pos[0]), float(pos[1])))
 
-        best_star_pos = None
+        candidate_positions: list[tuple[float, float]] = []
         for x_star, y_star in all_positions:
             if orient == "vertical":
                 if direc == "positive":
@@ -557,8 +685,7 @@ class SpectroscopyPipeline:
                     and x_star - DISPERSION_ANGLE_ROI_HALF_WIDTH_PX >= 0
                     and x_star + DISPERSION_ANGLE_ROI_HALF_WIDTH_PX <= w
                 ):
-                    best_star_pos = (x_star, y_star)
-                    break
+                    candidate_positions.append((x_star, y_star))
             else:
                 if direc == "positive":
                     x_start = x_star + offset_px
@@ -573,26 +700,41 @@ class SpectroscopyPipeline:
                     and y_star - DISPERSION_ANGLE_ROI_HALF_WIDTH_PX >= 0
                     and y_star + DISPERSION_ANGLE_ROI_HALF_WIDTH_PX <= h
                 ):
-                    best_star_pos = (x_star, y_star)
-                    break
+                    candidate_positions.append((x_star, y_star))
 
-        if best_star_pos is None:
+        if not candidate_positions:
             _, fallback_pos = _star_pixel_position(target_stars[0])
             if fallback_pos[0] is not None and fallback_pos[1] is not None:
-                best_star_pos = (float(fallback_pos[0]), float(fallback_pos[1]))
+                candidate_positions.append((float(fallback_pos[0]), float(fallback_pos[1])))
 
-        if best_star_pos is not None:
-            neighbor_positions = [pos for pos in all_positions if pos != best_star_pos]
+        best_measurement: tuple[float, float, tuple[float, float], float] | None = None
+        for candidate_pos in candidate_positions:
+            neighbor_positions = [pos for pos in all_positions if pos != candidate_pos]
             roi_half_width_px = _safe_dispersion_angle_roi_half_width_px(
-                best_star_pos, neighbor_positions, orient, length_px
+                candidate_pos, neighbor_positions, orient, length_px
             )
-            global_angle = self.detect_dispersion_angle(image, best_star_pos, roi_half_width_px)
-            logger.info(
-                f"Globally resolved grating dispersion angle: {global_angle:.2f} degrees "
-                f"(angle-detection half-width {roi_half_width_px:.1f}px)"
+            angle, contrast_sigma = self.measure_dispersion_trail(image, candidate_pos, roi_half_width_px)
+            if best_measurement is None or contrast_sigma > best_measurement[1]:
+                best_measurement = (angle, contrast_sigma, candidate_pos, roi_half_width_px)
+
+        if best_measurement is None:
+            return
+
+        global_angle, contrast_sigma, best_star_pos, roi_half_width_px = best_measurement
+        if contrast_sigma < DISPERSION_ANGLE_MINIMUM_TRAIL_CONTRAST_SIGMA:
+            logger.warning(
+                f"No star showed a clear dispersion streak (best contrast {contrast_sigma:.1f} sigma "
+                f"< {DISPERSION_ANGLE_MINIMUM_TRAIL_CONTRAST_SIGMA:.1f}); keeping the configured angle "
+                f"{self.config.dispersion_angle_degrees:.2f} degrees"
             )
-            self.config.dispersion_angle_degrees = global_angle
-            self.instrument.config.dispersion_angle_degrees = global_angle
+            return
+        logger.info(
+            f"Globally resolved grating dispersion angle: {global_angle:.2f} degrees "
+            f"(from the star at {best_star_pos}, contrast {contrast_sigma:.1f} sigma, "
+            f"angle-detection half-width {roi_half_width_px:.1f}px)"
+        )
+        self.config.dispersion_angle_degrees = global_angle
+        self.instrument.config.dispersion_angle_degrees = global_angle
 
     def _process_target_stars(
         self,
@@ -610,10 +752,27 @@ class SpectroscopyPipeline:
             carrying its original `star_source` object.
         """
         results = []
-        for star in target_stars[:limit]:
+        batch = target_stars[:limit]
+        batch_positions = [_star_pixel_position(star)[1] for star in batch]
+        dispersion_vector = self.instrument.get_dispersion_vector()
+        for star_index, star in enumerate(batch):
             is_stellar_obj, pos = _star_pixel_position(star)
 
-            result = self._process_single_star(image, pos, auto_detect_angle=auto_detect_angle)
+            neighbor_positions = [
+                (float(other[0]), float(other[1]))
+                for other_index, other in enumerate(batch_positions)
+                if other_index != star_index and other[0] is not None and other[1] is not None
+            ]
+            extraction_radius = _capped_extraction_radius_px(
+                (float(pos[0]), float(pos[1])),
+                neighbor_positions,
+                dispersion_vector,
+                self.instrument.expected_length_px,
+                int(self.config.extraction_radius),
+            )
+            result = self._process_single_star(
+                image, pos, auto_detect_angle=auto_detect_angle, extraction_radius=extraction_radius
+            )
             if "error" not in result:
                 # Attach the original star object if possible for reference
                 result["star_source"] = star
@@ -670,7 +829,7 @@ class SpectroscopyPipeline:
         # dispersion angle
         rectangle, dispersion_angle = self._dispersion_overlay_geometry(
             result["target_pos"],
-            self.config.extraction_radius,
+            result.get("extraction_radius", self.config.extraction_radius),
             dispersion_angle_degrees=result["detected_angle"],
         )
 
@@ -696,6 +855,9 @@ class SpectroscopyPipeline:
             dispersion_angle=dispersion_angle,
             trail_centerline_px=result.get("trail_centerline_px"),
             trail_width_px=result.get("trail_width_px"),
+            second_order_blue_to_red_ratio=compute_second_order_blue_to_red_ratio(
+                np.array(wavelengths_angstrom), np.array(intensities)
+            ).tolist(),
             resolution_element_angstrom=(
                 analysis.resolution_element_angstrom if analysis.is_resolution_measured else None
             ),
@@ -724,7 +886,11 @@ class SpectroscopyPipeline:
             star.star_data["ycentroid"] = result["target_pos"][1]
 
     def _process_single_star(
-        self, image: AstrometricsImage, pos: tuple[float, float], auto_detect_angle: bool = True
+        self,
+        image: AstrometricsImage,
+        pos: tuple[float, float],
+        auto_detect_angle: bool = True,
+        extraction_radius: int | None = None,
     ) -> dict[str, Any]:
         """Process just one star.
 
@@ -736,6 +902,10 @@ class SpectroscopyPipeline:
             Where the star is `(x, y)`.
         auto_detect_angle : `bool`, optional
             Whether to automatically find the camera tilt.
+        extraction_radius : `int`, optional
+            This star's own aperture radius, in pixels, when it must be
+            smaller than the configured one to keep clear of a neighbour's
+            trail. Defaults to `config.extraction_radius`.
 
         Returns
         -------
@@ -744,6 +914,15 @@ class SpectroscopyPipeline:
             intensities)
             and other math details about the extraction.
         """
+        radius = (
+            int(extraction_radius) if extraction_radius is not None else int(self.config.extraction_radius)
+        )
+        extractor = self.extractor
+        if radius != self.extractor.radius:
+            extractor = SpectrumExtractor(
+                radius=radius, subtract_sky_background=self.config.subtract_sky_background
+            )
+
         # 1. Auto-detect angle if requested
         detected_angle = self.config.dispersion_angle_degrees
         if auto_detect_angle:
@@ -757,11 +936,11 @@ class SpectroscopyPipeline:
 
         if use_flare_mask:
             wavelengths, intensities, target_pos, trail_centerline_px, trail_width_px = (
-                self._extract_via_flare_mask(image, pos, detected_angle, is_traced)
+                self._extract_via_flare_mask(image, pos, detected_angle, is_traced, extractor, radius)
             )
         else:
             wavelengths, intensities, target_pos, trail_centerline_px, trail_width_px = (
-                self._extract_via_dispersion_line(image, pos, is_traced)
+                self._extract_via_dispersion_line(image, pos, is_traced, extractor)
             )
 
         zero_order_saturated_pixel_fraction = self._measure_zero_order_saturation(image, target_pos)
@@ -797,6 +976,7 @@ class SpectroscopyPipeline:
             "intensities": intensities.tolist(),
             "target_pos": target_pos,
             "detected_angle": detected_angle,
+            "extraction_radius": radius,
             "config_summary": self.instrument.config.model_dump(),
             "zero_order_saturated_pixel_fraction": zero_order_saturated_pixel_fraction,
             "trail_centerline_px": trail_centerline_px,
@@ -806,9 +986,30 @@ class SpectroscopyPipeline:
         }
 
     def _extract_via_flare_mask(
-        self, image: AstrometricsImage, pos: tuple[float, float], detected_angle: float, is_traced: bool
+        self,
+        image: AstrometricsImage,
+        pos: tuple[float, float],
+        detected_angle: float,
+        is_traced: bool,
+        extractor: SpectrumExtractor,
+        extraction_radius: int,
     ) -> tuple[np.ndarray, np.ndarray, tuple[float, float], list | None, list | None]:
         """Extract a spectrum using the flare-masking method.
+
+        Parameters
+        ----------
+        image : `AstrometricsImage`
+            The picture to read from.
+        pos : `tuple` [`float`, `float`]
+            Where the star is `(x, y)`.
+        detected_angle : `float`
+            The dispersion tilt to follow, in degrees.
+        is_traced : `bool`
+            Whether to use the traced extraction method.
+        extractor : `SpectrumExtractor`
+            The extractor to use, built for this star's aperture radius.
+        extraction_radius : `int`
+            This star's aperture radius, in pixels.
 
         Returns
         -------
@@ -848,24 +1049,24 @@ class SpectroscopyPipeline:
         trail_width_px: list | None = None
         if is_traced:
             spectrum_1d, anchor_x, anchor_y, trail_centerline_px, trail_width_px = (
-                self.extractor.extract_with_flare_mask_traced(
+                extractor.extract_with_flare_mask_traced(
                     image,
                     base_pos,
                     flare_offset_pixels,
                     max_offset_pixels,
-                    self.config.extraction_radius,
+                    extraction_radius,
                     self.config.dispersion_orientation,
                     angle_degrees=flare_mask_angle,
                     centerline_polynomial_degree=self.config.centerline_polynomial_degree,
                 )
             )
         else:
-            spectrum_1d, anchor_x, anchor_y = self.extractor.extract_with_flare_mask(
+            spectrum_1d, anchor_x, anchor_y = extractor.extract_with_flare_mask(
                 image,
                 base_pos,
                 flare_offset_pixels,
                 max_offset_pixels,
-                self.config.extraction_radius,
+                extraction_radius,
                 self.config.dispersion_orientation,
                 angle_degrees=flare_mask_angle,
             )
@@ -877,9 +1078,24 @@ class SpectroscopyPipeline:
         return wavelengths, intensities, (anchor_x, anchor_y), trail_centerline_px, trail_width_px
 
     def _extract_via_dispersion_line(
-        self, image: AstrometricsImage, pos: tuple[float, float], is_traced: bool
+        self,
+        image: AstrometricsImage,
+        pos: tuple[float, float],
+        is_traced: bool,
+        extractor: SpectrumExtractor,
     ) -> tuple[np.ndarray, np.ndarray, tuple[float, float], list | None, list | None]:
         """Extract a spectrum along the instrument's default dispersion line.
+
+        Parameters
+        ----------
+        image : `AstrometricsImage`
+            The picture to read from.
+        pos : `tuple` [`float`, `float`]
+            Where the star is `(x, y)`.
+        is_traced : `bool`
+            Whether to use the traced extraction method.
+        extractor : `SpectrumExtractor`
+            The extractor to use, built for this star's aperture radius.
 
         Returns
         -------
@@ -907,7 +1123,7 @@ class SpectroscopyPipeline:
         trail_width_px: list | None = None
         # Extract only the dispersion region
         if is_traced:
-            spectrum_1d, trail_centerline_px, trail_width_px = self.extractor.extract_line_traced(
+            spectrum_1d, trail_centerline_px, trail_width_px = extractor.extract_line_traced(
                 image,
                 extraction_start,
                 vector,
@@ -915,7 +1131,7 @@ class SpectroscopyPipeline:
                 centerline_polynomial_degree=self.config.centerline_polynomial_degree,
             )
         else:
-            spectrum_1d = self.extractor.extract_line(image, extraction_start, vector, length)
+            spectrum_1d = extractor.extract_line(image, extraction_start, vector, length)
 
         # We start from offset_px relative to zero order
         wavelengths, intensities = self.calibrator.calibrate(spectrum_1d, offset_px)
@@ -1001,16 +1217,17 @@ class SpectroscopyPipeline:
         dispersion_angle_deg = float(np.degrees(np.arctan2(vec[1], vec[0])))
         return rectangle, dispersion_angle_deg
 
-    def detect_dispersion_angle(
+    def measure_dispersion_trail(
         self,
         image: AstrometricsImage,
         star_pos: tuple[float, float],
         roi_half_width_px: float = DISPERSION_ANGLE_ROI_HALF_WIDTH_PX,
-    ) -> float:
-        """Figure out exactly how much the camera is tilted.
+    ) -> tuple[float, float]:
+        """Measure the tilt of a star's spectrum streak and how clear it is.
 
         It looks at the bright streak of the spectrum and calculates its exact
-        angle.
+        angle, plus a contrast score saying whether there was really a
+        streak there to measure.
 
         Parameters
         ----------
@@ -1028,7 +1245,13 @@ class SpectroscopyPipeline:
         Returns
         -------
         angle_degrees : `float`
-            The tilt of the camera, in degrees.
+            The tilt of the camera, in degrees (0.0 when it could not be
+            measured).
+        contrast_sigma : `float`
+            The typical height of the streak above the background, in noise
+            sigmas, across the bands along the trail that show it. A visible
+            streak scores in the hundreds; 0.0 when no streak could be
+            followed (pure noise returns 0.0).
         """
         data = image.data
         x_star, y_star = star_pos
@@ -1038,56 +1261,161 @@ class SpectroscopyPipeline:
         orient = self.config.dispersion_orientation
         direc = self.config.dispersion_direction
 
-        # Define ROI for detection
+        # Work in "along the trail" and "across the trail" coordinates so the
+        # vertical and horizontal cases share one code path: for a vertical
+        # trail rows run along it, for a horizontal one the image is
+        # transposed so its columns do.
         if orient == "vertical":
-            y_start = int(y_star + (offset_px if direc == "positive" else -offset_px - length_px))
-            y_end = int(y_start + length_px)
-            x_start = int(x_star - roi_half_width_px)
-            x_end = int(x_star + roi_half_width_px)
-            fit_axis = "y"
+            image_array = data
+            along_star, across_star = y_star, x_star
         else:
-            x_start = int(x_star + (offset_px if direc == "positive" else -offset_px - length_px))
-            x_end = int(x_start + length_px)
-            y_start = int(y_star - roi_half_width_px)
-            y_end = int(y_star + roi_half_width_px)
-            fit_axis = "x"
+            image_array = data.T
+            along_star, across_star = x_star, y_star
+        along_start = int(along_star + (offset_px if direc == "positive" else -offset_px - length_px))
+        along_end = int(along_start + length_px)
 
-        # Clamp ROI
-        y_start, y_end = max(0, y_start), min(data.shape[0], y_end)
-        x_start, x_end = max(0, x_start), min(data.shape[1], x_end)
+        along_start, along_end = max(0, along_start), min(image_array.shape[0], along_end)
+        if along_end <= along_start:
+            return 0.0, 0.0
 
-        if y_end <= y_start or x_end <= x_start:
-            return 0.0
+        # The strip that follows the trail can wander this far from the star's
+        # own line, so the pixel block is cut wide enough to hold any of them.
+        maximum_slope = float(np.tan(np.radians(DISPERSION_ANGLE_MAXIMUM_TILT_DEGREES)))
+        reach_px = int(np.ceil(roi_half_width_px + maximum_slope * length_px))
+        across_start = max(0, int(across_star - reach_px))
+        across_end = min(image_array.shape[1], int(across_star + reach_px) + 1)
+        if across_end <= across_start:
+            return 0.0, 0.0
 
-        roi = data[y_start:y_end, x_start:x_end]
+        along_coordinates = np.arange(along_start, along_end)
+        pixel_block = image_array[along_start:along_end, across_start:across_end]
 
-        # Threshold top 5% to isolate streak
-        threshold = np.percentile(roi, 95)
-        y_indices, x_indices = np.where(roi > threshold)
+        # Follow the streak with a line (across = slope * along + intercept).
+        # The block is cut into bands along the trail; in each band the
+        # streak's
+        # sideways position is the brightness-weighted centre of the pixels
+        # within `roi_half_width_px` of the current line, and the line is then
+        # refitted through those centres and the strips re-centred on it, until
+        # it stops moving. A strip fixed on the star's own vertical line loses
+        # a leaning trail (on M 57 it gave 1.6 degrees where the trail leans
+        # about 2.9), and picking the brightest 5% of pixels in a strip that
+        # follows the trail is biased by which pixels happen to be brightest
+        # (+0.2 to +0.4 degrees on the Albireo and Vega stacks).
+        background_level = float(np.median(pixel_block))
+        noise_sigma = float(np.median(np.abs(pixel_block - background_level))) * 1.4826
+        if noise_sigma <= 0.0:
+            noise_sigma = float(np.std(pixel_block))
+        if noise_sigma <= 0.0:
+            return 0.0, 0.0
 
-        if len(x_indices) < 10:
-            return 0.0
+        band_edges = np.arange(0, along_coordinates.size, DISPERSION_ANGLE_BAND_LENGTH_PX)
+        offsets = np.arange(-int(np.ceil(roi_half_width_px)), int(np.ceil(roi_half_width_px)) + 1)
+        # A narrow strip can only follow a trail it already overlaps, so the
+        # search starts from the best of a few lines through the star, one per
+        # candidate tilt (a real trail leans about the star's zero order).
+        candidate_slopes = np.linspace(-maximum_slope, maximum_slope, DISPERSION_ANGLE_SEED_SLOPE_COUNT)
+        seed_offsets = np.arange(-1, 2)
+        seed_scores = []
+        for candidate_slope in candidate_slopes:
+            seed_centre = np.rint(across_star + candidate_slope * (along_coordinates - along_star)).astype(
+                int
+            )
+            seed_columns = seed_centre[:, None] + seed_offsets[None, :] - across_start
+            is_seed_inside = ((seed_columns >= 0) & (seed_columns < pixel_block.shape[1])).all(axis=1)
+            if is_seed_inside.sum() < along_coordinates.size // 2:
+                seed_scores.append(-np.inf)
+                continue
+            seed_rows = np.arange(along_coordinates.size)[is_seed_inside]
+            seed_scores.append(float(pixel_block[seed_rows[:, None], seed_columns[is_seed_inside]].mean()))
+        slope = float(candidate_slopes[int(np.argmax(seed_scores))])
+        intercept = float(across_star - slope * along_star)
+        band_contrasts: list[float] = []
+        for _ in range(DISPERSION_ANGLE_MAXIMUM_REFIT_COUNT):
+            band_middles = []
+            band_centres = []
+            band_signals = []
+            band_contrasts = []
+            for band_start in band_edges:
+                rows = np.arange(
+                    band_start, min(band_start + DISPERSION_ANGLE_BAND_LENGTH_PX, along_coordinates.size)
+                )
+                if rows.size < DISPERSION_ANGLE_BAND_LENGTH_PX // 2:
+                    continue
+                line_centre = np.rint(intercept + slope * along_coordinates[rows]).astype(int)
+                columns = line_centre[:, None] + offsets[None, :] - across_start
+                is_inside_block = (columns >= 0) & (columns < pixel_block.shape[1])
+                if not is_inside_block.all():
+                    continue
+                profile = pixel_block[rows[:, None], columns].mean(axis=0) - background_level
+                band_noise = noise_sigma / np.sqrt(rows.size)
+                if profile.max() < DISPERSION_ANGLE_MINIMUM_BAND_SIGMA * band_noise:
+                    continue
+                weights = np.clip(profile, 0.0, None)
+                sideways_position = float((offsets * weights).sum() / weights.sum())
+                band_middles.append(float(along_coordinates[rows].mean()))
+                band_centres.append(float(line_centre.mean() + sideways_position))
+                band_signals.append(float(weights.sum()))
+                band_contrasts.append(float(profile.max() / band_noise))
+            if len(band_middles) < DISPERSION_ANGLE_MINIMUM_BAND_COUNT:
+                return 0.0, 0.0
+            try:
+                fitted_slope, fitted_intercept = np.polyfit(
+                    band_middles, band_centres, 1, w=np.sqrt(band_signals)
+                )
+            except Exception:
+                return 0.0, 0.0
+            fitted_slope = float(np.clip(fitted_slope, -maximum_slope, maximum_slope))
+            middle = float(along_coordinates.mean())
+            centre_shift = abs((fitted_slope * middle + fitted_intercept) - (slope * middle + intercept))
+            has_converged = (
+                abs(fitted_slope - slope) < DISPERSION_ANGLE_REFIT_TOLERANCE and centre_shift < 0.5
+            )
+            slope, intercept = fitted_slope, float(fitted_intercept)
+            if has_converged:
+                break
 
-        try:
-            if fit_axis == "y":
-                # Vertical: slope is dx/dy. get_dispersion_vector()'s
-                # 90-degree base angle for "vertical" means a positive
-                # measured dx/dy slope must map to a *negative* angle
-                # to reproduce that same slope -- unlike the horizontal
-                # case below, this negation is required, not a bug.
-                slope, _ = np.polyfit(y_indices, x_indices, 1)
-                angle = -np.degrees(np.arctan(slope))
-            else:
-                # Horizontal: slope is dy/dx, and get_dispersion_vector()'s
-                # 0-degree base angle for "horizontal" means the angle
-                # must equal +arctan(slope) (no negation) to reproduce
-                # this same measured slope when fed back through it.
-                slope, _ = np.polyfit(x_indices, y_indices, 1)
-                angle = np.degrees(np.arctan(slope))
-            logger.debug(f"Auto-detected angle for star at {star_pos}: {angle:.2f} degrees")
-            return angle
-        except Exception:
-            return 0.0
+        contrast_sigma = float(np.median(band_contrasts)) if band_contrasts else 0.0
+
+        if orient == "vertical":
+            # Vertical: slope is dx/dy. get_dispersion_vector()'s
+            # 90-degree base angle for "vertical" means a positive
+            # measured dx/dy slope must map to a *negative* angle
+            # to reproduce that same slope -- unlike the horizontal
+            # case below, this negation is required, not a bug.
+            angle = -np.degrees(np.arctan(slope))
+        else:
+            # Horizontal: slope is dy/dx, and get_dispersion_vector()'s
+            # 0-degree base angle for "horizontal" means the angle
+            # must equal +arctan(slope) (no negation) to reproduce
+            # this same measured slope when fed back through it.
+            angle = np.degrees(np.arctan(slope))
+        logger.debug(f"Auto-detected angle for star at {star_pos}: {angle:.2f} degrees")
+        return float(angle), contrast_sigma
+
+    def detect_dispersion_angle(
+        self,
+        image: AstrometricsImage,
+        star_pos: tuple[float, float],
+        roi_half_width_px: float = DISPERSION_ANGLE_ROI_HALF_WIDTH_PX,
+    ) -> float:
+        """Figure out exactly how much the camera is tilted.
+
+        Parameters
+        ----------
+        image : `AstrometricsImage`
+            The picture to measure the streak in.
+        star_pos : `tuple` [`float`, `float`]
+            Where the star is, `(x, y)`.
+        roi_half_width_px : `float`, optional
+            How far to each side of `star_pos` the measuring strip reaches;
+            see `measure_dispersion_trail`.
+
+        Returns
+        -------
+        angle_degrees : `float`
+            The tilt of the camera, in degrees.
+        """
+        return self.measure_dispersion_trail(image, star_pos, roi_half_width_px)[0]
 
     def create_extended_target_object(
         self, extraction_center: tuple[float, float], object_name: str, otype: str, extraction_radius: int

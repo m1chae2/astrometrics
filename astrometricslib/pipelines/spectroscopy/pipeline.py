@@ -15,11 +15,10 @@ from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.models.stellar_source import SpectralObservation, SpectroscopyResult, StellarObject
 from astrometricslib.pipelines.shared.analysis_context import AnalysisContext
 from astrometricslib.pipelines.shared.quality.saturation import compute_saturated_pixel_fraction
+from astrometricslib.pipelines.spectroscopy.instrument_response import load_instrument_response
 from astrometricslib.pipelines.spectroscopy.quantum_efficiency_correction import (
     apply_quantum_efficiency_correction,
-)
-from astrometricslib.pipelines.spectroscopy.quantum_efficiency_curves import (
-    get_quantum_efficiency_curve,
+    curve_from_profile_record,
 )
 from astrometricslib.pipelines.spectroscopy.second_order_risk import compute_second_order_blue_to_red_ratio
 from astrometricslib.pipelines.spectroscopy.spectroscopy_instrument import (
@@ -496,6 +495,14 @@ class SpectroscopyPipeline:
         # What we know about this camera model (for example, the value at
         # which its pixels count as saturated), looked up once here.
         self.camera_profile = resolve_camera_profile(config.camera.name)
+        self.quantum_efficiency_curve = (
+            curve_from_profile_record(self.camera_profile.quantum_efficiency)
+            if self.camera_profile.quantum_efficiency is not None
+            else None
+        )
+        # The stored correction for this setup's grating and sensor, or
+        # `None` when none has been derived. Read once here, not per star.
+        self.instrument_response = load_instrument_response(config.camera.name)
         self.instrument = SpectroscopyInstrument(config)
         # The extractor also does the sky background subtraction stage:
         # each brightness reading has the night-sky glow (measured in strips
@@ -809,12 +816,11 @@ class SpectroscopyPipeline:
         intensities = result["intensities"]
 
         quantum_efficiency_corrected_intensities = None
-        quantum_efficiency_curve = get_quantum_efficiency_curve(self.config.camera.name)
-        if quantum_efficiency_curve is not None:
+        if self.quantum_efficiency_curve is not None:
             quantum_efficiency_corrected_intensities = apply_quantum_efficiency_correction(
                 wavelength_nm=np.array(result["wavelengths"]),
                 intensity=np.array(result["intensities"]),
-                curve=quantum_efficiency_curve,
+                curve=self.quantum_efficiency_curve,
             ).tolist()
 
         # Compute the visual overlay rectangle and total rotated
@@ -835,7 +841,7 @@ class SpectroscopyPipeline:
                 if quantum_efficiency_corrected_intensities is not None
                 else intensities
             ),
-            self.config.camera.name,
+            self.instrument_response,
             is_quantum_efficiency_corrected=quantum_efficiency_corrected_intensities is not None,
             catalog_spectral_type=star.spectral_type,
             is_extended_target=star.stellar_spectral_type == EXTENDED_TARGET_SPECTRAL_TYPE,

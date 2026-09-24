@@ -93,7 +93,9 @@ def test_analysis_recovers_the_type_of_a_spectrum_the_instrument_would_record():
     response = load_instrument_response("ZWO ASI 533MM Pro")
     recorded = flux * response.value_at(wavelength)
 
-    analysis = analyze_spectrum(wavelength, recorded, "ZWO ASI 533MM Pro", True, catalog_spectral_type="K2")
+    analysis = analyze_spectrum(
+        wavelength, recorded, load_instrument_response("ZWO ASI 533MM Pro"), True, catalog_spectral_type="K2"
+    )
 
     assert analysis.response_applied is True
     assert analysis.classification["spectral_type"] == "K2V"
@@ -105,7 +107,7 @@ def test_analysis_without_a_response_does_not_classify_but_still_tests_features(
     """Verify an unknown camera gets features but no spectral type."""
     wavelength, flux = _blurred("A0V")
 
-    analysis = analyze_spectrum(wavelength, flux, "Some Other Camera", True)
+    analysis = analyze_spectrum(wavelength, flux, load_instrument_response("Some Other Camera"), True)
 
     assert analysis.response_applied is False
     assert analysis.classification["spectral_type"] == "Unknown"

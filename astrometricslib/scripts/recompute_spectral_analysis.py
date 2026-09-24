@@ -36,6 +36,10 @@ import numpy as np
 
 from astrometricslib import Astrometrics
 from astrometricslib.models.stellar_source import SpectralObservation, StellarObject
+from astrometricslib.pipelines.spectroscopy.instrument_response import (
+    InstrumentResponse,
+    load_instrument_response,
+)
 from astrometricslib.pipelines.spectroscopy.spectrum_analysis import (
     EXTENDED_TARGET_SPECTRAL_TYPE,
     analyze_spectrum,
@@ -107,7 +111,7 @@ def find_measured_samples(
 
 def recompute_star(
     star: StellarObject,
-    camera_name: str,
+    instrument_response: InstrumentResponse | None,
     minimum_wavelength_angstrom: float,
     maximum_wavelength_angstrom: float,
 ) -> bool:
@@ -117,8 +121,9 @@ def recompute_star(
     ----------
     star : `StellarObject`
         The star, changed in place.
-    camera_name : `str`
-        The camera the spectrum was taken with.
+    instrument_response : `InstrumentResponse` or `None`
+        The stored correction for the camera the spectrum was taken with,
+        or `None` when none has been derived.
     minimum_wavelength_angstrom : `float`
         The shortest wavelength the camera can see, in Angstroms.
     maximum_wavelength_angstrom : `float`
@@ -215,7 +220,7 @@ def recompute_star(
             if spectroscopy.quantum_efficiency_corrected_intensities
             else spectroscopy.intensities
         ),
-        camera_name,
+        instrument_response,
         is_quantum_efficiency_corrected=bool(spectroscopy.quantum_efficiency_corrected_intensities),
         catalog_spectral_type=star.spectral_type,
         is_extended_target=star.stellar_spectral_type == EXTENDED_TARGET_SPECTRAL_TYPE,
@@ -290,6 +295,7 @@ def run_recompute(argv: list[str] | None = None) -> int:
     camera_config = astrometrics.config.get_camera_config(camera_name)
     minimum_wavelength_angstrom = float(camera_config.get("sensor_min_wavelength", 300.0)) * 10.0
     maximum_wavelength_angstrom = float(camera_config.get("sensor_max_wavelength", 1000.0)) * 10.0
+    instrument_response = load_instrument_response(camera_name)
 
     star_ids = [
         summary.id
@@ -312,7 +318,9 @@ def run_recompute(argv: list[str] | None = None) -> int:
     for star in stars:
         before_samples = len(star.spectroscopy.wavelengths_angstrom)
         before_type = star.spectroscopy.self_determined_spectral_type
-        if not recompute_star(star, camera_name, minimum_wavelength_angstrom, maximum_wavelength_angstrom):
+        if not recompute_star(
+            star, instrument_response, minimum_wavelength_angstrom, maximum_wavelength_angstrom
+        ):
             continue
         changed_stars.append(star)
         spectroscopy = star.spectroscopy

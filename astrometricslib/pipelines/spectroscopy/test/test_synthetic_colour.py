@@ -135,7 +135,12 @@ def test_analysis_flags_a_colour_far_from_the_catalog() -> None:
     wavelength, recorded = _recorded_k2v()
 
     analysis = analyze_spectrum(
-        wavelength, recorded, "ZWO ASI 533MM Pro", True, catalog_spectral_type="K2", catalog_b_minus_v=-0.13
+        wavelength,
+        recorded,
+        load_instrument_response("ZWO ASI 533MM Pro"),
+        True,
+        catalog_spectral_type="K2",
+        catalog_b_minus_v=-0.13,
     )
 
     assert analysis.classification["spectral_type"] == "K2V"
@@ -147,7 +152,12 @@ def test_analysis_stays_quiet_when_the_colour_agrees() -> None:
     wavelength, recorded = _recorded_k2v()
 
     analysis = analyze_spectrum(
-        wavelength, recorded, "ZWO ASI 533MM Pro", True, catalog_spectral_type="K2", catalog_b_minus_v=0.91
+        wavelength,
+        recorded,
+        load_instrument_response("ZWO ASI 533MM Pro"),
+        True,
+        catalog_spectral_type="K2",
+        catalog_b_minus_v=0.91,
     )
 
     assert analysis.classification["reason"] is None
@@ -157,6 +167,8 @@ def test_analysis_without_a_catalog_colour_is_unchanged() -> None:
     """A star with no catalog colour behaves exactly as before."""
     wavelength, recorded = _recorded_k2v()
 
-    analysis = analyze_spectrum(wavelength, recorded, "ZWO ASI 533MM Pro", True, catalog_spectral_type="K2")
+    analysis = analyze_spectrum(
+        wavelength, recorded, load_instrument_response("ZWO ASI 533MM Pro"), True, catalog_spectral_type="K2"
+    )
 
     assert analysis.classification["reason"] is None

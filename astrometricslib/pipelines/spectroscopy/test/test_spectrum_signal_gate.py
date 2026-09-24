@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 
 import astrometricslib.pipelines.spectroscopy.spectral_feature_detector as feature_detector
+from astrometricslib.pipelines.spectroscopy.instrument_response import load_instrument_response
 from astrometricslib.pipelines.spectroscopy.spectral_feature_detector import (
     MAXIMUM_UNCERTAINTY_FOR_A_VERDICT,
     VERDICT_INCONCLUSIVE,
@@ -23,7 +24,7 @@ from astrometricslib.pipelines.spectroscopy.spectrum_signal import (
 )
 
 WAVELENGTHS = np.arange(3800.0, 8000.0, 11.0)
-CAMERA = "ZWO ASI 533MM Pro"
+RESPONSE = load_instrument_response("ZWO ASI 533MM Pro")
 
 
 def _noise_only_spectrum(seed: int = 1) -> np.ndarray:
@@ -81,7 +82,7 @@ def test_a_noiseless_positive_spectrum_has_unlimited_signal() -> None:
 def test_the_analysis_declines_a_spectrum_that_is_only_noise() -> None:
     """No classification and no feature tests, and the reason says why."""
     analysis = analyze_spectrum(
-        WAVELENGTHS, _noise_only_spectrum(), CAMERA, is_quantum_efficiency_corrected=True
+        WAVELENGTHS, _noise_only_spectrum(), RESPONSE, is_quantum_efficiency_corrected=True
     )
 
     assert analysis.classification["spectral_type"] == "Unknown"
@@ -94,7 +95,7 @@ def test_the_analysis_declines_a_spectrum_that_is_only_noise() -> None:
 def test_the_analysis_still_runs_on_a_real_spectrum() -> None:
     """A spectrum with a continuum is analysed as before."""
     analysis = analyze_spectrum(
-        WAVELENGTHS, _star_spectrum(20.0), CAMERA, is_quantum_efficiency_corrected=True
+        WAVELENGTHS, _star_spectrum(20.0), RESPONSE, is_quantum_efficiency_corrected=True
     )
 
     assert "no measurable spectrum" not in str(analysis.classification.get("reason"))

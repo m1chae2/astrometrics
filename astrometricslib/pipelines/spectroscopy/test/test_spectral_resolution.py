@@ -15,7 +15,10 @@ import numpy as np
 import pytest
 
 from astrometricslib.models.stellar_source import StellarObject
-from astrometricslib.pipelines.spectroscopy.instrument_response import derive_instrument_response
+from astrometricslib.pipelines.spectroscopy.instrument_response import (
+    derive_instrument_response,
+    load_instrument_response,
+)
 from astrometricslib.pipelines.spectroscopy.pipeline import SpectroscopyPipeline
 from astrometricslib.pipelines.spectroscopy.spectral_classifier import (
     _get_blurred_templates,
@@ -193,10 +196,8 @@ def test_analysis_measures_the_resolution_from_the_trail_width() -> None:
     wavelength_angstrom, widths = _trail(2.5)
     flux = np.ones(SAMPLE_COUNT)
 
-    measured = analyze_spectrum(
-        wavelength_angstrom, flux, "Some Other Camera", True, trail_width_px=widths.tolist()
-    )
-    fallback = analyze_spectrum(wavelength_angstrom, flux, "Some Other Camera", True)
+    measured = analyze_spectrum(wavelength_angstrom, flux, None, True, trail_width_px=widths.tolist())
+    fallback = analyze_spectrum(wavelength_angstrom, flux, None, True)
 
     assert measured.is_resolution_measured is True
     assert measured.resolution_element_angstrom == pytest.approx(FWHM_PER_SIGMA * 2.5 * ANGSTROM_PER_PIXEL)
@@ -214,7 +215,7 @@ def test_analysis_expects_shallower_lines_for_a_blurrier_spectrum() -> None:
     def expected_h_beta(sigma_px: float) -> float:
         widths = np.full(wavelength_angstrom.size, sigma_px)
         analysis = analyze_spectrum(
-            wavelength_angstrom, flux, "Some Other Camera", True, "A0V", trail_width_px=widths.tolist()
+            wavelength_angstrom, flux, None, True, "A0V", trail_width_px=widths.tolist()
         )
         entry = next(feature for feature in analysis.features if "H-beta" in str(feature["feature"]))
         return float(entry["expected_depth"])
@@ -242,7 +243,7 @@ def test_analysis_gives_the_classifier_the_measured_resolution(monkeypatch) -> N
     analyze_spectrum(
         wavelength_angstrom,
         np.ones(SAMPLE_COUNT),
-        "ZWO ASI 533MM Pro",
+        load_instrument_response("ZWO ASI 533MM Pro"),
         True,
         trail_width_px=widths.tolist(),
     )

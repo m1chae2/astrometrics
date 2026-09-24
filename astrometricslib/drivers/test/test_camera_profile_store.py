@@ -10,7 +10,6 @@ import json
 import logging
 from pathlib import Path
 
-import numpy as np
 import pytest
 
 from astrometricslib.drivers import camera_profile_store
@@ -19,7 +18,6 @@ from astrometricslib.drivers.camera_profile_store import (
     load_camera_profiles,
     resolve_camera_profile,
 )
-from astrometricslib.pipelines.spectroscopy.quantum_efficiency_curves import get_quantum_efficiency_curve
 
 
 def write_profile(
@@ -200,22 +198,24 @@ def test_only_the_asi533_has_a_linearity_limit() -> None:
     assert limits["ZWO ASI533MM Pro"].value == pytest.approx(60000.0)
 
 
-@pytest.mark.parametrize(
-    "camera_name",
-    ["ZWO ASI533MM Pro", "ZWO ASI 533MM Pro", "Nikon D5300", "ZWO ASI120MC-S", "Acme Imager 9000"],
-)
-def test_the_quantum_efficiency_curve_matches_the_old_lookup(camera_name: str) -> None:
-    """Check that the profile has the same curve, or also has none."""
-    old_curve = get_quantum_efficiency_curve(camera_name)
-    new_curve = resolve_camera_profile(camera_name).quantum_efficiency
-    if old_curve is None:
-        assert new_curve is None
-        return
-    assert new_curve is not None
-    np.testing.assert_array_equal(np.array(new_curve.wavelength_nm), old_curve.wavelength_nm)
-    np.testing.assert_array_equal(
-        np.array(new_curve.quantum_efficiency_fraction), old_curve.quantum_efficiency_fraction
-    )
+def test_the_asi533_quantum_efficiency_curve_is_the_one_read_off_the_zwo_graph() -> None:
+    """Pin the curve that used to live in quantum_efficiency_curves.py."""
+    for spelling in ("ZWO ASI533MM Pro", "ZWO ASI 533MM Pro", "ZWO CCD ASI533MM Pro"):
+        curve = resolve_camera_profile(spelling).quantum_efficiency
+        assert curve is not None
+        assert len(curve.wavelength_nm) == 17
+        assert curve.wavelength_nm[0] == pytest.approx(400.0)
+        assert curve.wavelength_nm[-1] == pytest.approx(1000.0)
+        assert curve.quantum_efficiency_fraction[0] == pytest.approx(0.70)
+        assert max(curve.quantum_efficiency_fraction) == pytest.approx(0.92)
+        assert curve.quantum_efficiency_fraction[-1] == pytest.approx(0.06)
+        assert sum(curve.quantum_efficiency_fraction) == pytest.approx(9.87)
+
+
+@pytest.mark.parametrize("camera_name", ["Nikon D5300", "ZWO ASI120MC-S", "Acme Imager 9000"])
+def test_only_the_asi533_has_a_quantum_efficiency_curve(camera_name: str) -> None:
+    """Check that every other camera has no curve, so none is applied."""
+    assert resolve_camera_profile(camera_name).quantum_efficiency is None
 
 
 def test_the_profile_folder_constant_points_at_the_shipped_files() -> None:

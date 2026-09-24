@@ -18,8 +18,8 @@ from astrometricslib.pipelines.spectroscopy.emission_line_detector import (
     line_half_width_angstrom,
 )
 from astrometricslib.pipelines.spectroscopy.instrument_response import (
+    InstrumentResponse,
     apply_instrument_response,
-    load_instrument_response,
 )
 from astrometricslib.pipelines.spectroscopy.spectral_classifier import (
     GIANT_REFERENCE_SPECTRAL_TYPES,
@@ -86,7 +86,7 @@ EXTENDED_TARGET_SPECTRAL_TYPE = "Cluster"
 def analyze_spectrum(
     wavelength_angstrom: np.ndarray,
     intensity: np.ndarray,
-    camera_name: str,
+    instrument_response: InstrumentResponse | None,
     is_quantum_efficiency_corrected: bool,
     catalog_spectral_type: str | None = None,
     trail_width_px: Sequence[float] | None = None,
@@ -103,9 +103,10 @@ def analyze_spectrum(
     intensity : `np.ndarray`
         The spectrum's brightness. Corrected for the sensor's quantum
         efficiency when one is known (see `is_quantum_efficiency_corrected`).
-    camera_name : `str`
-        The camera that took the spectrum, used to find its instrument
-        response.
+    instrument_response : `InstrumentResponse` or `None`
+        The stored correction for the camera and grating that took the
+        spectrum, or `None` when none has been derived. The caller finds it
+        (see `load_instrument_response`).
     is_quantum_efficiency_corrected : `bool`
         Whether `intensity` has had the sensor's quantum efficiency
         removed. The instrument response was derived from corrected
@@ -220,7 +221,7 @@ def analyze_spectrum(
             False,
         )
 
-    response = load_instrument_response(camera_name) if is_quantum_efficiency_corrected else None
+    response = instrument_response if is_quantum_efficiency_corrected else None
     corrected_intensity = None
     if response is None:
         classification = unclassified_result(

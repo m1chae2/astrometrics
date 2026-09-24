@@ -4,13 +4,52 @@ Camera sensors aren't equally sensitive to all colors (they usually see
 green better than deep red). This math boosts the signal for the colors
 the camera is bad at seeing, so the final graph shows the true shape of
 the star's light.
+
+The sensitivity data itself is not kept here. It is stored in each camera's
+profile (see `astrometricslib.models.camera_profile`), and the caller turns
+it into a `QuantumEfficiencyCurve` with `curve_from_profile_record`.
 """
+
+from typing import NamedTuple
 
 import numpy as np
 
-from astrometricslib.pipelines.spectroscopy.quantum_efficiency_curves import (
-    QuantumEfficiencyCurve,
-)
+from astrometricslib.models.camera_profile import QuantumEfficiencyRecord
+
+
+class QuantumEfficiencyCurve(NamedTuple):
+    """The sensitivity data for a specific camera, as arrays.
+
+    Attributes
+    ----------
+    wavelength_nm : `np.ndarray`
+        The list of colors (in nanometers).
+    quantum_efficiency_fraction : `np.ndarray`
+        How sensitive the camera is to that color (0.0 means completely blind,
+        1.0 means perfect).
+    """
+
+    wavelength_nm: np.ndarray
+    quantum_efficiency_fraction: np.ndarray
+
+
+def curve_from_profile_record(record: QuantumEfficiencyRecord) -> QuantumEfficiencyCurve:
+    """Turn a camera profile's stored sensitivity data into arrays.
+
+    Parameters
+    ----------
+    record : `QuantumEfficiencyRecord`
+        The sensitivity data from a `CameraProfile`.
+
+    Returns
+    -------
+    curve : `QuantumEfficiencyCurve`
+        The same numbers as arrays, ready for interpolation.
+    """
+    return QuantumEfficiencyCurve(
+        wavelength_nm=np.array(record.wavelength_nm, dtype=float),
+        quantum_efficiency_fraction=np.array(record.quantum_efficiency_fraction, dtype=float),
+    )
 
 
 def interpolate_quantum_efficiency(wavelength_nm: np.ndarray, curve: QuantumEfficiencyCurve) -> np.ndarray:

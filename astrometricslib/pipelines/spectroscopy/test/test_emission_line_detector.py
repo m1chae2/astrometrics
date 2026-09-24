@@ -126,7 +126,7 @@ def test_analysis_replaces_classification_for_glowing_extended_target() -> None:
     analysis = analyze_spectrum(
         WAVELENGTHS,
         _nebula_spectrum(0.3, 9),
-        "any camera",
+        None,
         is_quantum_efficiency_corrected=False,
         catalog_spectral_type="PN",
         is_extended_target=True,
@@ -144,7 +144,7 @@ def test_analysis_gives_no_stellar_type_to_an_extended_target_without_confirmed_
     analysis = analyze_spectrum(
         WAVELENGTHS,
         1.0 + 0.05 * rng.normal(size=WAVELENGTHS.size),
-        "any camera",
+        None,
         is_quantum_efficiency_corrected=False,
         catalog_spectral_type="GlC",
         is_extended_target=True,
@@ -161,7 +161,7 @@ def test_analysis_never_replaces_classification_of_an_ordinary_star() -> None:
     analysis = analyze_spectrum(
         WAVELENGTHS,
         _nebula_spectrum(0.3, 9),
-        "any camera",
+        None,
         is_quantum_efficiency_corrected=False,
         catalog_spectral_type="G2V",
         extraction_box_width_px=2.0 * HALF_WIDTH / 11.0,

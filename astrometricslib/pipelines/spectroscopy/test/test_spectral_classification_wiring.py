@@ -11,13 +11,14 @@ from types import SimpleNamespace
 
 import numpy as np
 
+from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.spectroscopy.instrument_response import load_instrument_response
 from astrometricslib.pipelines.spectroscopy.pipeline import SpectroscopyPipeline
 from astrometricslib.pipelines.spectroscopy.quantum_efficiency_correction import (
+    curve_from_profile_record,
     interpolate_quantum_efficiency,
 )
-from astrometricslib.pipelines.spectroscopy.quantum_efficiency_curves import get_quantum_efficiency_curve
 from astrometricslib.pipelines.spectroscopy.spectral_classifier import _get_reference_templates
 from astrometricslib.utilities import CameraConfig, SpectroscopyConfig
 
@@ -66,7 +67,7 @@ def _as_the_instrument_would_record(spectral_type: str) -> tuple[np.ndarray, np.
         The reference wavelengths and the simulated raw counts.
     """
     wavelength_angstrom, flux = _get_reference_templates()[spectral_type]
-    curve = get_quantum_efficiency_curve("ZWO ASI 533MM Pro")
+    curve = curve_from_profile_record(resolve_camera_profile("ZWO ASI 533MM Pro").quantum_efficiency)
     response = load_instrument_response("ZWO ASI 533MM Pro")
     quantum_efficiency = interpolate_quantum_efficiency(wavelength_angstrom / 10.0, curve)
     return wavelength_angstrom, flux * quantum_efficiency * response.value_at(wavelength_angstrom)
@@ -181,3 +182,16 @@ def test_apply_result_to_stellar_object_falls_back_to_now_without_a_frame_date()
 
     assert len(star.spectra_history) == 1
     assert star.spectra_history[0].timestamp is not None
+
+
+def test_the_pipeline_finds_its_camera_data_once_when_it_is_built():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify the curve, response and profile are resolved at construction."""
+    known = _build_pipeline()
+    assert known.camera_profile.camera_name == "ZWO ASI533MM Pro"
+    assert known.quantum_efficiency_curve is not None
+    assert known.instrument_response is not None
+
+    unlisted = _build_pipeline(camera_name="TestCam")
+    assert unlisted.camera_profile.is_generic_fallback
+    assert unlisted.quantum_efficiency_curve is None
+    assert unlisted.instrument_response is None

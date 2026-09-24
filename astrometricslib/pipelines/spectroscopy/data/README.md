@@ -1,8 +1,9 @@
 # Reference spectra for spectral classification
 
-Thirty-four main-sequence reference spectra used by `spectral_classifier.py`
-to guess a star's broad spectral type by comparing an observed spectrum's
-shape against these known ones.
+Ninety reference spectra used by `spectral_classifier.py` to guess a star's
+broad spectral type by comparing an observed spectrum's shape against these
+known ones: 34 main-sequence stars and 56 giants, bright giants and
+supergiants (see "Giant and supergiant references" below).
 
 ## Source
 
@@ -60,13 +61,37 @@ in the quality summary. With every rung present, that same star usually
 has one clearly-closer template to land on.
 
 The full Pickles library also has metal-weak/metal-rich variants of
-several F-K dwarf types (e.g. `wg5v.dat`, `rk0v.dat`) and giant/supergiant
-luminosity classes; those aren't bundled here; two library types are also
+several F-K dwarf types (e.g. `wg5v.dat`, `rk0v.dat`) and subgiants
+(luminosity class IV); those aren't bundled here; two library types are also
 skipped that already fall on the seams of the standard rungs above
 (`b57v.dat`, a merged B5-7V spectrum, and `m2p5v.dat`, halfway between M2V
 and M3V). None of that adds resolving power for this classifier's actual
-job -- placing an unknown dwarf star on the O-B-A-F-G-K-M sequence -- and
-would just mean more reference correlations to compute per star.
+job -- placing an unknown star on the O-B-A-F-G-K-M sequence -- and would
+just mean more reference correlations to compute per star.
+
+## Giant and supergiant references
+
+Fifty-six standard-abundance spectra of luminosity classes I, II and III from
+the same catalog, downloaded on 2026-09-24 (58 files of about 30 KB each,
+1.7 MB in all, from
+<https://cdsarc.cds.unistra.fr/ftp/J/PASP/110/863/>) and converted exactly
+as described under "Processing". They let a giant be matched to a giant
+instead of to the dwarf that looks most alike (on 2026-09-24, HD 183753,
+catalog K3II, was matched K7V and Arcturus, catalog K1.5III, also K7V).
+
+Labels are the library's own: `b12iii` is B1-2 III, `k01ii` is K0-1 II,
+`k34ii` is K3-4 II. Two of the 58 downloads were left out: `m9iii` and
+`m10iii` have small negative fluxes near 4700-4800 A in the source (down to
+-0.13), which the well-formed-template test does not allow and which the
+"keep it as the source gives it" rule above cannot fix by inventing values.
+No star observed here is that late.
+
+Coverage is uneven: 30 class III, 18 class I and 8 class II spectra,
+against 34 dwarfs. Class II in particular has only a few rungs, so a bright
+giant can land several subclasses from its true type. The list is `GIANT_REFERENCE_SPECTRAL_TYPES` in `spectral_classifier.py`.
+The main-sequence ladder (`REFERENCE_SPECTRAL_TYPES`) is what the instrument
+response and the catalog-type lookup for dwarfs are built on, and it is
+unchanged.
 
 ## Instrument response
 

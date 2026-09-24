@@ -243,3 +243,18 @@ def test_estimate_registration_offset_with_a_solution_ignores_stored_positions_a
 
     assert dx == pytest.approx(-5.0, abs=0.01)
     assert dy == pytest.approx(43.0, abs=0.01)
+
+
+def test_registration_carries_the_reference_stars_catalog_colour():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """A spectral star matched to a reference star takes on its B-V too."""
+    rng = np.random.default_rng(6)
+    reference_stars, spectral_stars, _ = _build_matched_fields(
+        rng, count=25, rotation_deg=0.0, translation=(2.0, -1.0)
+    )
+    for star in reference_stars:
+        star.b_minus_v = 0.47
+
+    identify_spectral_stars_via_registration(spectral_stars, reference_stars)
+
+    assert all(star.b_minus_v == pytest.approx(0.47) for star in spectral_stars if star.is_catalog_identified)
+    assert any(star.is_catalog_identified for star in spectral_stars)

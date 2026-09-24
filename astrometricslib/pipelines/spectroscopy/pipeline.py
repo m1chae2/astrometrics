@@ -836,6 +836,7 @@ class SpectroscopyPipeline:
             is_quantum_efficiency_corrected=quantum_efficiency_corrected_intensities is not None,
             catalog_spectral_type=star.spectral_type,
             is_extended_target=star.stellar_spectral_type == EXTENDED_TARGET_SPECTRAL_TYPE,
+            catalog_b_minus_v=star.b_minus_v,
             trail_width_px=result.get("trail_width_px"),
             extraction_box_width_px=float(rectangle[3]) if rectangle is not None else None,
         )

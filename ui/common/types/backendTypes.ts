@@ -192,6 +192,7 @@ export interface Spectrum {
   dec?: any;
   flux?: any;
   magnitude?: any;
+  bMinusV?: any;
   spectralType?: string;
   photometry?: PhotometryResult | null;
   spectraHistory?: SpectralObservation[];

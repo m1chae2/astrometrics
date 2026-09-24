@@ -547,6 +547,7 @@ def merge_astrometry_stellar_object(existing_stellar_object, updated_stellar_obj
     existing_stellar_object.right_ascension = updated_stellar_object.right_ascension
     existing_stellar_object.declination = updated_stellar_object.declination
     existing_stellar_object.magnitude = updated_stellar_object.magnitude
+    existing_stellar_object.b_minus_v = updated_stellar_object.b_minus_v
     existing_stellar_object.spectral_type = updated_stellar_object.spectral_type
     existing_stellar_object.stellar_spectral_type = updated_stellar_object.stellar_spectral_type
     return existing_stellar_object
@@ -603,6 +604,7 @@ def merge_spectroscopy_stellar_object(existing_stellar_object, updated_stellar_o
     existing_stellar_object.spectral_type = updated_stellar_object.spectral_type
     existing_stellar_object.stellar_spectral_type = updated_stellar_object.stellar_spectral_type
     existing_stellar_object.magnitude = updated_stellar_object.magnitude
+    existing_stellar_object.b_minus_v = updated_stellar_object.b_minus_v
     existing_stellar_object.is_catalog_identified = updated_stellar_object.is_catalog_identified
     # Carries the trail geometry (rectangle, dispersion_angle, etc.)
     # along for free -- it lives on SpectroscopyResult now, so a full

@@ -144,6 +144,7 @@ def _apply_matches(
         spectral_obj.spectral_type = reference_star.spectral_type
         spectral_obj.stellar_spectral_type = reference_star.stellar_spectral_type
         spectral_obj.magnitude = reference_star.magnitude
+        spectral_obj.b_minus_v = reference_star.b_minus_v
         spectral_obj.is_catalog_identified = reference_star.is_catalog_identified
         matched_count += 1
     return matched_count

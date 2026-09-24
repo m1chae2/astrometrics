@@ -219,6 +219,7 @@ def recompute_star(
         is_quantum_efficiency_corrected=bool(spectroscopy.quantum_efficiency_corrected_intensities),
         catalog_spectral_type=star.spectral_type,
         is_extended_target=star.stellar_spectral_type == EXTENDED_TARGET_SPECTRAL_TYPE,
+        catalog_b_minus_v=star.b_minus_v,
         trail_width_px=spectroscopy.trail_width_px,
         extraction_box_width_px=(
             float(spectroscopy.rectangle[3])

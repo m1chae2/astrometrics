@@ -512,3 +512,38 @@ def test_gaia_match_without_g_magnitude_leaves_magnitude_unknown():  # ruff: ign
 
     assert stellar_object.magnitude is None
     assert stellar_object.is_catalog_identified is True
+
+
+def _apply_simbad_match_for_colour(b_values, b_mask, v_values, v_mask):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    """Run `_apply_simbad_match` on a one-row table with the given B and V.
+
+    Returns
+    -------
+    stellar_object : `StellarObject`
+        The star after the SIMBAD match was applied to it.
+    """
+    table = Table({
+        "main_id": Column(["* alf Lyr"], dtype=object),
+        "ids": Column(["NAME Vega|* alf Lyr"], dtype=object),
+        "sp_type": MaskedColumn(["A0Va"], mask=[False], dtype=object),
+        "V": MaskedColumn(v_values, mask=v_mask),
+        "B": MaskedColumn(b_values, mask=b_mask),
+    })
+    stellar_object = StellarObject()
+    _make_star_identifier()._apply_simbad_match(stellar_object, table[0], VEGA_RA_DEG, VEGA_DEC_DEG)
+    return stellar_object
+
+
+def test_simbad_match_records_the_catalog_colour():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """B minus V is stored when SIMBAD has both."""
+    stellar_object = _apply_simbad_match_for_colour([0.03], [False], [0.03], [False])
+    assert stellar_object.b_minus_v == pytest.approx(0.0)
+
+    stellar_object = _apply_simbad_match_for_colour([12.05], [False], [11.58], [False])
+    assert stellar_object.b_minus_v == pytest.approx(0.47)
+
+
+def test_simbad_match_without_b_or_v_leaves_the_colour_unknown():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """A missing B or V gives `None`, never a made-up colour."""
+    assert _apply_simbad_match_for_colour([12.05], [True], [11.58], [False]).b_minus_v is None
+    assert _apply_simbad_match_for_colour([12.05], [False], [11.58], [True]).b_minus_v is None

@@ -11,6 +11,8 @@ merge behavior directly, independent of running the full pipeline.
 
 from datetime import UTC, datetime
 
+import pytest
+
 from astrometricslib.models.stellar_source import (
     PhotometryResult,
     SpectralObservation,
@@ -18,6 +20,7 @@ from astrometricslib.models.stellar_source import (
     StellarObject,
 )
 from astrometricslib.pipelines.shared.star_recording import (
+    merge_astrometry_stellar_object,
     merge_spectra_history,
     merge_spectroscopy_stellar_object,
 )
@@ -124,3 +127,15 @@ def test_merge_spectroscopy_stellar_object_keeps_position_and_photometry():  # r
     assert merged.photometry.fluxes == [1.0, 2.0, 3.0]
     assert merged.has_spectra is True
     assert merged.has_photometry is True
+
+
+def test_the_merges_carry_the_catalog_colour():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Both the astrometry and spectroscopy merges bring the B-V along."""
+    for merge in (merge_astrometry_stellar_object, merge_spectroscopy_stellar_object):
+        existing_star = StellarObject(id="Vega")
+        updated_star = StellarObject(id="Vega")
+        updated_star.b_minus_v = 0.47
+
+        merged = merge(existing_star, updated_star)
+
+        assert merged.b_minus_v == pytest.approx(0.47)

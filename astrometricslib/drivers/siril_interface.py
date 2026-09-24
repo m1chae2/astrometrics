@@ -959,6 +959,7 @@ class ImageProcessing:
                 tel = f.get("telescope") if isinstance(f, dict) else getattr(f, "telescope", "Unknown")
                 cam = f.get("camera") if isinstance(f, dict) else getattr(f, "camera", camera_filter)
                 iso = f.get("iso") if isinstance(f, dict) else getattr(f, "iso", "800")
+                offset = f.get("offset") if isinstance(f, dict) else getattr(f, "offset", "0")
                 # The dark frames are chosen by exposure length. Take the
                 # length most of the batch has, not the first frame's: a
                 # batch that holds a few frames of another length (small
@@ -1000,6 +1001,7 @@ class ImageProcessing:
 
                     from astrometricslib.drivers.calibration_library import (
                         is_calibration_gain_compatible,
+                        is_calibration_offset_compatible,
                         is_dark_calibration_metadata_compatible,
                     )
 
@@ -1007,6 +1009,7 @@ class ImageProcessing:
                         with fits.open(master_paths[0], memmap=False) as hdul:
                             header = hdul[0].header
                         master_iso = str(header.get("ISOSPEED", header.get("GAIN", iso)))
+                        master_offset = header.get("OFFSET", header.get("BLKLEVEL", "0"))
                         master_exp = float(header.get("EXPTIME", exp))
                     except Exception:
                         return
@@ -1023,20 +1026,25 @@ class ImageProcessing:
                             light_gain=str(iso), master_gain=master_iso
                         )
 
-                    if not compatible:
+                    # The camera offset is the baseline added to every pixel;
+                    # a master taken at another offset shifts every pixel of
+                    # the lights it is applied to.
+                    offset_compatible = is_calibration_offset_compatible(offset, master_offset)
+                    if not compatible or not offset_compatible:
                         exposure_note = (
                             f" exposure={master_exp}s vs light frames'... exposure={exp}s"
                             if check_exposure
                             else ""
                         )
                         message = (
-                            f"{master_kind} master '{master_paths[0]}' has gain={master_iso} vs "
-                            f"light frames' gain={iso}.{exposure_note}"
+                            f"{master_kind} master '{master_paths[0]}' has gain={master_iso} "
+                            f"offset={master_offset} vs light frames' gain={iso} offset={offset}."
+                            f"{exposure_note}"
                         )
                         log(f"Calibration metadata mismatch (soft flag, master still applied): {message}")
                         self.last_run_diagnostics.setdefault("calibration_mismatch_flags", []).append(message)
 
-                dark_frame_paths = library.get_dark_frames(camera=cam, iso=iso, exposure=exp)
+                dark_frame_paths = library.get_dark_frames(camera=cam, iso=iso, offset=offset, exposure=exp)
                 soft_flag_calibration_mismatch(dark_frame_paths, "dark", check_exposure=True)
                 readable_dark_paths = find_readable_paths(dark_frame_paths)
                 for item in dark_frame_paths:
@@ -1049,7 +1057,7 @@ class ImageProcessing:
                     except Exception as e:
                         log(f"Error symlinking dark {item}: {e}")
 
-                bias_frame_paths = library.get_bias_frames(camera=cam, iso=iso)
+                bias_frame_paths = library.get_bias_frames(camera=cam, iso=iso, offset=offset)
                 soft_flag_calibration_mismatch(bias_frame_paths, "bias", check_exposure=False)
                 readable_bias_paths = find_readable_paths(bias_frame_paths)
                 for item in bias_frame_paths:
@@ -1063,7 +1071,7 @@ class ImageProcessing:
                         log(f"Error symlinking bias {item}: {e}")
 
                 flat_frame_paths = library.get_flat_frames(
-                    telescope=tel, camera=cam, filter_type=filt, iso=iso
+                    telescope=tel, camera=cam, filter_type=filt, iso=iso, offset=offset
                 )
                 soft_flag_calibration_mismatch(flat_frame_paths, "flat", check_exposure=False)
                 readable_flat_paths = find_readable_paths(flat_frame_paths)

@@ -295,6 +295,12 @@ class StellarObject(BaseModel):
     # `None` means not yet known, not "magnitude zero" -- same `Any`
     # tolerance as flux above.
     magnitude: Any = Field(default=None, alias="magnitude")
+    # The star's catalog colour: its blue (B) magnitude minus its visual (V)
+    # magnitude, from SIMBAD. Bluer (hotter) stars have lower values. It comes
+    # from a different instrument than ours, so it is an independent check on
+    # a spectrum (see `synthetic_colour`). `None` when the catalog has no B or
+    # no V, or the star was identified from Gaia, which is not read for this.
+    b_minus_v: Any = Field(default=None, alias="bMinusV")
     # spectral_type and stellar_spectral_type are normally kept equal --
     # both hold the star's classification (like "G2V" for a Sun-like
     # star). The one exception is a synthetic entry used to represent a

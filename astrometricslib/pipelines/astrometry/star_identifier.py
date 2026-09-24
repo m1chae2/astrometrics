@@ -728,7 +728,7 @@ class StarIdentifier:
                 coord,
                 radius=f"{radius_deg}d",
                 # "ids" carries the common names used to label a star.
-                votable_fields=("flux(V)", "sp_type", "ids", "ra(d)", "dec(d)", "otype"),
+                votable_fields=("flux(V)", "flux(B)", "sp_type", "ids", "ra(d)", "dec(d)", "otype"),
                 row_limit=5000,  # Prevent massive result sets
             )
         except Exception as e:
@@ -1581,12 +1581,16 @@ class StarIdentifier:
 
         # Map SIMBAD flux (magnitude); stays None when SIMBAD has no V value.
         magnitude = _read_catalog_magnitude(match, ["V", "FLUX_V", "flux_v", "flux(V)"])
+        blue_magnitude = _read_catalog_magnitude(match, ["B", "FLUX_B", "flux_b", "flux(B)"])
 
         stellar_object.name = common_name if common_name else str(main_id)
         stellar_object.id = str(main_id)
         stellar_object.spectral_type = str(spectral_type)
         stellar_object.stellar_spectral_type = str(spectral_type)
         stellar_object.magnitude = magnitude
+        stellar_object.b_minus_v = (
+            blue_magnitude - magnitude if blue_magnitude is not None and magnitude is not None else None
+        )
         stellar_object.right_ascension = float(ra)
         stellar_object.declination = float(dec)
         stellar_object.is_catalog_identified = True

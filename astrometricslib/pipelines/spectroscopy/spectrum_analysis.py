@@ -36,6 +36,10 @@ from astrometricslib.pipelines.spectroscopy.spectrum_signal import (
     MINIMUM_SPECTRUM_SIGNAL_TO_NOISE,
     estimate_spectrum_signal_to_noise,
 )
+from astrometricslib.pipelines.spectroscopy.synthetic_colour import (
+    colour_disagreement_note,
+    synthetic_b_minus_v,
+)
 
 
 @dataclass(frozen=True)
@@ -88,6 +92,7 @@ def analyze_spectrum(
     trail_width_px: Sequence[float] | None = None,
     extraction_box_width_px: float | None = None,
     is_extended_target: bool = False,
+    catalog_b_minus_v: float | None = None,
 ) -> SpectrumAnalysis:
     """Classify a spectrum and test it for the named absorption features.
 
@@ -119,6 +124,10 @@ def analyze_spectrum(
         It sets how wide the emission lines are expected to be (see
         `line_half_width_angstrom`); without it the lines are taken to be
         as narrow as the instrument blur, which suits a point source.
+    catalog_b_minus_v : `float`, optional
+        The star's catalog B-V colour. When given, and the colour the
+        spectrum implies (see `synthetic_colour`) is more than half a
+        magnitude away, the classification's note says so.
     is_extended_target : `bool`, optional
         Whether the catalog says this is an extended object (its
         `stellar_spectral_type` is `EXTENDED_TARGET_SPECTRAL_TYPE`). Only
@@ -212,6 +221,7 @@ def analyze_spectrum(
         )
 
     response = load_instrument_response(camera_name) if is_quantum_efficiency_corrected else None
+    corrected_intensity = None
     if response is None:
         classification = unclassified_result(
             "no instrument response is available for this camera, so the spectrum cannot be compared"
@@ -238,9 +248,15 @@ def analyze_spectrum(
             )
             if giant_result["spectral_type"] != "Unknown":
                 closest_giant = (str(giant_result["spectral_type"]), float(giant_result["rms"]))  # type: ignore[arg-type]
+        colour_note = ""
+        if corrected_intensity is not None:
+            colour_note = colour_disagreement_note(
+                catalog_b_minus_v, synthetic_b_minus_v(wavelength_angstrom, corrected_intensity)
+            )
         notes = [
             note
             for note in (
+                colour_note,
                 catalog_disagreement_note(catalog_spectral_type, str(classification["spectral_type"])),
                 luminosity_class_note(
                     catalog_spectral_type, str(classification["spectral_type"]), closest_giant

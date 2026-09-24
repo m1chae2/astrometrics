@@ -499,7 +499,9 @@ class SpectroscopyPipeline:
         # beside the streak) taken out of it, so everything after this point
         # in the pipeline sees the star's light only.
         self.extractor = SpectrumExtractor(
-            radius=config.extraction_radius, subtract_sky_background=config.subtract_sky_background
+            radius=config.extraction_radius,
+            subtract_sky_background=config.subtract_sky_background,
+            reject_narrow_contaminants=config.reject_narrow_contaminants,
         )
         self.calibrator = SpectrumCalibrator(self.instrument)
         # Keeps track of how many stars were too bright (saturated) in the
@@ -580,7 +582,9 @@ class SpectroscopyPipeline:
                 )
 
                 wide_pipeline = SpectroscopyPipeline(
-                    config=self.config.with_overrides(extraction_radius=ext_radius)
+                    config=self.config.with_overrides(
+                        extraction_radius=ext_radius, reject_narrow_contaminants=True
+                    )
                 )
                 # The tilt is never re-detected here: a nebula has no single
                 # streak to measure (its "trail" is a chain of ring images), so
@@ -927,7 +931,9 @@ class SpectroscopyPipeline:
         extractor = self.extractor
         if radius != self.extractor.radius:
             extractor = SpectrumExtractor(
-                radius=radius, subtract_sky_background=self.config.subtract_sky_background
+                radius=radius,
+                subtract_sky_background=self.config.subtract_sky_background,
+                reject_narrow_contaminants=self.config.reject_narrow_contaminants,
             )
 
         # 1. Auto-detect angle if requested

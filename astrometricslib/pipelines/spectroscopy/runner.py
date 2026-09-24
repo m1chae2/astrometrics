@@ -47,10 +47,12 @@ def _recover_extended_source_hint(
     without one no extended target is extracted (an old stored record for it
     then keeps a position from some earlier run). The target's solved
     standard stack has a plate solution, and star registration has just
-    measured how far the two stacks are shifted apart. Shifting the solution
-    by that amount gives one for the spectral stack, good to a few pixels
-    (on M 57 the ring nebula fell about 6 pixels from where its zero order
-    really is).
+    measured how far the two stacks are shifted apart (against the reference
+    stars' sky positions run through that same solution, since the target's
+    stored stars may come from stacks with other pixel frames). Shifting the
+    solution by that amount gives one for the spectral stack, good to a few
+    pixels (on M 57 the ring nebula fell about 6 pixels from where its zero
+    order really is).
 
     Does nothing when the hint already exists, there is no matching solved
     stack, or the star fields are not related by a single shift.
@@ -81,8 +83,10 @@ def _recover_extended_source_hint(
     )
 
     reference_wcs = resolve_solved_stack_wcs(target, spectral_stack_path)
-    offset = estimate_registration_offset(context.stellar_objects, reference_stellar_objects)
-    if reference_wcs is None or offset is None:
+    if reference_wcs is None:
+        return
+    offset = estimate_registration_offset(context.stellar_objects, reference_stellar_objects, reference_wcs)
+    if offset is None:
         return
     spectral_wcs = shift_wcs_to_frame(reference_wcs, offset)
     context.extended_source_hint = astrometry.build_extended_source_hint(

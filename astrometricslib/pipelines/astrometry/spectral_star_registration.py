@@ -240,9 +240,38 @@ def identify_spectral_stars_via_registration(
 _MINIMUM_OFFSET_PAIR_COUNT = 4
 
 
+def _positions_through_wcs(stellar_objects: list[StellarObject], wcs: Any) -> dict[str, tuple[float, float]]:
+    """Find where a plate solution puts each star that has a sky position.
+
+    Parameters
+    ----------
+    stellar_objects : `list` [`StellarObject`]
+        The stars to place. Stars without a right ascension and declination
+        are skipped.
+    wcs : `astropy.wcs.WCS`
+        The plate solution that turns a sky position into a pixel position.
+
+    Returns
+    -------
+    positions : `dict` [`str`, `tuple` [`float`, `float`]]
+        Each placed star's `(x, y)` pixel position, keyed by star id.
+    """
+    positions = {}
+    for stellar_object in stellar_objects:
+        right_ascension = stellar_object.right_ascension
+        declination = stellar_object.declination
+        if not stellar_object.id or right_ascension is None or declination is None:
+            continue
+        x, y = wcs.all_world2pix(float(right_ascension), float(declination), 0)
+        if np.isfinite(x) and np.isfinite(y):
+            positions[stellar_object.id] = (float(x), float(y))
+    return positions
+
+
 def estimate_registration_offset(
     spectral_stellar_objects: list[StellarObject],
     reference_stellar_objects: list[StellarObject],
+    reference_wcs: Any | None = None,
 ) -> tuple[float, float] | None:
     """Measure how far the spectroscopy image sits from the reference image.
 
@@ -261,6 +290,17 @@ def estimate_registration_offset(
         The stars found in the spectroscopy image, after identification.
     reference_stellar_objects : `list` [`StellarObject`]
         The named stars of the reference image.
+    reference_wcs : `astropy.wcs.WCS`, optional
+        The plate solution that will be shifted by the result. When given,
+        the star identities are not used at all. Every reference star's
+        pixel position is worked out from its sky position with this
+        solution, and the shift is the one most (spectral star, reference
+        star) pairs agree on. A target's stored stars can come from several
+        stacks (a different camera, say) whose pixel frames differ by
+        hundreds of pixels, and identities carried over by registration can
+        repeat one star many times (M 27 gave one name to eight points on a
+        bright star's trail), which would drag a median to the wrong place.
+        Counting agreeing pairs is not fooled by either.
 
     Returns
     -------
@@ -269,6 +309,25 @@ def estimate_registration_offset(
         matching spectroscopy-image position, or `None` when there are too
         few pairs or they do not agree on a single shift.
     """
+    if reference_wcs is not None:
+        reference_points = np.array(
+            list(_positions_through_wcs(reference_stellar_objects, reference_wcs).values())
+        )
+        spectral_points = np.array(
+            list({pos for obj in spectral_stellar_objects if (pos := _pixel_position(obj))})
+        )
+        if (
+            len(reference_points) < _MINIMUM_OFFSET_PAIR_COUNT
+            or len(spectral_points) < _MINIMUM_OFFSET_PAIR_COUNT
+        ):
+            return None
+        return _estimate_translation_offset(
+            reference_points,
+            spectral_points,
+            _DEFAULT_MAX_TRANSLATION_OFFSET_PX,
+            _TRANSLATION_BIN_PX,
+        )
+
     reference_positions = {
         obj.id: pos for obj in reference_stellar_objects if obj.id and (pos := _pixel_position(obj))
     }

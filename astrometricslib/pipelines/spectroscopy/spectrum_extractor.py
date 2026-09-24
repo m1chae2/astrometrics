@@ -48,6 +48,7 @@ import warnings
 
 import numpy as np
 from astropy.modeling import fitting, models
+from scipy.ndimage import binary_dilation, median_filter
 
 from astrometricslib.drivers.image import AstrometricsImage
 
@@ -308,6 +309,80 @@ def fit_trail_centerline_polynomial(raw_centers: list[float | None], degree: int
     return [float(value) for value in np.polyval(coefficients, all_indices)]
 
 
+# A line of pixels across a nebula's box is smooth on the scale of tens of
+# pixels, but another star's trail crossing it is a narrow spike. To tell them
+# apart, each line is compared with a median-smoothed copy of itself. A
+# running median ignores anything narrower than half its window, so the window
+# must be wider than twice a trail and narrower than the nebula's own
+# structure. Measured on the M 27 spectral stack (2026-09-24), the flagged
+# spikes were a median 7 pixels wide (5-11 for the middle 80%, including the
+# dilation below), so 31 pixels is comfortably wide enough. It is a first
+# choice, checked only on M 27 and M 57 and not tuned.
+CONTAMINANT_BASELINE_WIDTH_PX = 31
+
+# A pixel counts as part of a contaminating spike when it stands this many
+# noise-widths above the smoothed copy. 4 is the usual "clearly not noise"
+# cut: with Gaussian noise fewer than 1 pixel in 15,000 passes by chance.
+CONTAMINANT_THRESHOLD_SIGMA = 4.0
+
+# Each side of a flagged spike is also replaced, because a trail's faint
+# edges sit below the threshold but still carry its light. Two pixels is a
+# judgement, not a measurement: on M 27 it leaves 5.9% of the box replaced.
+CONTAMINANT_DILATION_PX = 2
+
+
+def replace_narrow_spikes(cross_section: np.ndarray) -> np.ndarray:
+    """Swap narrow bright spikes in one line of pixels for the smooth level.
+
+    This is the measuring half of the contaminant rejection stage. It is
+    meant for a nebula's wide reading box, where the trails and zero-order
+    points of ordinary stars cross the box and would otherwise be added to
+    the nebula's spectrum as fake bumps (on M 27 the strongest, near 6100
+    Angstroms, was 0.32 in units where the nebula's hump is 0.1).
+
+    Steps:
+    1. Smooth the line with a running median. A median ignores a spike
+       that is narrower than half the window, so the result follows the
+       nebula and the sky but not the trails.
+    2. Subtract the smoothed line. What is left is noise plus the spikes.
+    3. Measure the noise from the middle value of the leftovers' distance
+       from their own middle (the median absolute deviation, times 1.4826 to
+       match a Gaussian's spread). Spikes are too few to move it.
+    4. Any pixel more than `CONTAMINANT_THRESHOLD_SIGMA` noise-widths above
+       the smoothed line is a spike (on a line with no noise at all, any
+       excess is a spike). It and its neighbours within
+       `CONTAMINANT_DILATION_PX` are replaced by the smoothed value.
+
+    Only bright spikes are replaced. A dark dip (a dead pixel, a gap) is
+    left alone because other stars can only add light, never remove it.
+
+    Parameters
+    ----------
+    cross_section : `numpy.ndarray`
+        One line of pixels across the box.
+
+    Returns
+    -------
+    cleaned : `numpy.ndarray`
+        A copy of the line with spikes replaced. The input is not changed.
+        A line shorter than the smoothing window comes back unchanged.
+    """
+    values = np.asarray(cross_section, dtype=float)
+    if values.size < CONTAMINANT_BASELINE_WIDTH_PX:
+        return values.copy()
+    finite = np.isfinite(values)
+    if not finite.all():
+        return values.copy()
+    baseline = median_filter(values, size=CONTAMINANT_BASELINE_WIDTH_PX, mode="nearest")
+    residual = values - baseline
+    noise_width = 1.4826 * float(np.median(np.abs(residual - np.median(residual))))
+    is_spike = residual > CONTAMINANT_THRESHOLD_SIGMA * noise_width
+    if not is_spike.any():
+        return values.copy()
+    is_spike = binary_dilation(is_spike, iterations=CONTAMINANT_DILATION_PX)
+    return np.where(is_spike, baseline, values)
+
+
 def measure_sky_level_per_pixel(
     cross_section: np.ndarray, aperture_center: int, aperture_half_width: int
 ) -> float:
@@ -387,10 +462,16 @@ class SpectrumExtractor:
         How wide of a box to draw around the spectrum (in pixels).
     subtract_sky_background : `bool`
         Whether each reading has the sky glow taken out of it.
+    reject_narrow_contaminants : `bool`
+        Whether narrow bright spikes in the reading box (other stars'
+        trails) are replaced by the smooth level before adding up.
     """
 
     def __init__(  # ruff: ignore[missing-return-type-special-method]
-        self, radius: int = 10, subtract_sky_background: bool = True
+        self,
+        radius: int = 10,
+        subtract_sky_background: bool = True,
+        reject_narrow_contaminants: bool = False,
     ):
         """Set up the extractor.
 
@@ -402,9 +483,15 @@ class SpectrumExtractor:
             Take the night-sky glow out of every reading (default is
             `True`). Turn this off only to compare against the raw,
             un-subtracted spectrum.
+        reject_narrow_contaminants : `bool`, optional
+            Replace narrow bright spikes in the box by the smooth level
+            (see `replace_narrow_spikes`), default `False`. Meant for a
+            nebula's wide box; a star's own narrow box would lose its
+            light to this.
         """
         self.radius = radius
         self.subtract_sky_background = subtract_sky_background
+        self.reject_narrow_contaminants = reject_narrow_contaminants
 
     def _sum_aperture_minus_sky(
         self,
@@ -456,7 +543,15 @@ class SpectrumExtractor:
         if box_start >= box_end:
             return np.nan
 
-        box_total = float(np.sum(cross_section[box_start:box_end]))
+        box_pixels = cross_section[box_start:box_end]
+        if self.reject_narrow_contaminants:
+            # Clean with a margin of real pixels beyond each box edge, so a
+            # trail at the edge still has neighbours to be compared with.
+            margin_start = max(0, box_start - CONTAMINANT_BASELINE_WIDTH_PX)
+            margin_end = min(cross_section.size, box_end + CONTAMINANT_BASELINE_WIDTH_PX)
+            cleaned_with_margin = replace_narrow_spikes(cross_section[margin_start:margin_end])
+            box_pixels = cleaned_with_margin[box_start - margin_start : box_end - margin_start]
+        box_total = float(np.sum(box_pixels))
         if not self.subtract_sky_background:
             return box_total
 

@@ -96,6 +96,11 @@ class SpectroscopyConfig(BaseModel):
         `True`. See the module docstring of
         ``spectrum_extractor`` for why. Turn it off only to compare
         against the raw, un-subtracted spectrum.
+    reject_narrow_contaminants : `bool`
+        Whether extraction replaces narrow bright spikes in the reading box
+        (other stars' trails and zero orders) by the smooth level, by
+        default `False`. The pipeline turns it on for a nebula's wide box
+        only.
     use_flare_mask_extraction : `bool`
         Whether to extract starting from an offset anchored past the
         star's own position, to avoid a bright flare/astigmatism
@@ -148,6 +153,10 @@ class SpectroscopyConfig(BaseModel):
     subtract_sky_background: bool = Field(
         True,
         description="Subtract the night-sky glow, measured in strips beside the spectrum, from every reading",
+    )
+    reject_narrow_contaminants: bool = Field(
+        False,
+        description="Replace narrow bright spikes (other stars' trails) in the box by the smooth level",
     )
     use_flare_mask_extraction: bool = Field(
         False,

@@ -208,3 +208,38 @@ def test_shift_wcs_to_frame_moves_a_sky_position_by_the_offset():  # ruff: ignor
     assert x_shifted - x_reference == pytest.approx(-6.0)
     assert y_shifted - y_reference == pytest.approx(2.5)
     assert reference_wcs.wcs.crpix[0] == pytest.approx(1500.0)
+
+
+def test_estimate_registration_offset_with_a_solution_ignores_stored_positions_and_repeated_names():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Stored pixel positions and repeated names must not skew the offset.
+
+    Regression for M 27: the target's stars came from a second camera whose
+    pixel frame was ~120 px away from the solved stack's, and registration
+    gave one star's name to eight trail points, so the median shift moved the
+    solved stack's WCS about 125 px from where the nebula really was.
+    """
+    reference_wcs = WCS(naxis=2)
+    reference_wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+    reference_wcs.wcs.crpix = [1500.0, 1500.0]
+    reference_wcs.wcs.crval = [300.0, 22.0]
+    reference_wcs.wcs.cd = [[-5e-4, 0.0], [0.0, 5e-4]]
+    rng = np.random.default_rng(5)
+    reference_stars = []
+    spectral_stars = []
+    for index in range(12):
+        right_ascension = 300.0 + rng.uniform(-0.3, 0.3)
+        declination = 22.0 + rng.uniform(-0.3, 0.3)
+        x_true, y_true = reference_wcs.wcs_world2pix(right_ascension, declination, 0)
+        # Stored position from another stack's pixel frame.
+        star = _reference_star(f"HD{index}", float(x_true) + 120.0, float(y_true) - 4.0)
+        star.right_ascension = right_ascension
+        star.declination = declination
+        reference_stars.append(star)
+        spectral_stars.append(_spectral_star(f"HD{index}", float(x_true) - 5.0, float(y_true) + 43.0))
+    # One star name wrongly given to several unrelated detections.
+    spectral_stars.extend(_spectral_star("HD0", 1919.0 + 3.0 * copy, 1243.0) for copy in range(8))
+
+    dx, dy = estimate_registration_offset(spectral_stars, reference_stars, reference_wcs)
+
+    assert dx == pytest.approx(-5.0, abs=0.01)
+    assert dy == pytest.approx(43.0, abs=0.01)

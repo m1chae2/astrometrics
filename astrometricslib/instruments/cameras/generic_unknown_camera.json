@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "camera_name": "Generic unlisted camera",
+  "name_aliases": [],
+  "is_generic_fallback": true,
+  "clip_ceiling_adu": {
+    "value": 65535.0,
+    "provenance": {
+      "kind": "assumed",
+      "source": "The top of a 16-bit range. It is DEFAULT_CEILING_ADU in pipelines/stacking/exposure_saturation.py, used when a camera is not in the table."
+    }
+  },
+  "saturation_threshold_adu": {
+    "value": 65000.0,
+    "provenance": {
+      "kind": "assumed",
+      "source": "Pipeline default: just under the 16-bit maximum of 65535."
+    }
+  },
+  "photometric_linearity_limit_adu": null,
+  "quantum_efficiency": null,
+  "notes": "Used for any camera without its own file. Results computed with this profile rest on assumptions about the sensor and should be treated with care."
+}

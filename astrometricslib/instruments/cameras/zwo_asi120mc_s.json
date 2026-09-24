@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "camera_name": "ZWO ASI120MC-S",
+  "name_aliases": ["ZWO CCD ASI120MC-S"],
+  "is_generic_fallback": false,
+  "clip_ceiling_adu": {
+    "value": 65532.0,
+    "provenance": {
+      "kind": "assumed",
+      "source": "Never measured on this camera. It is the value the pipeline has always used for any camera whose name contains ZWO (CAMERA_CEILING_ADU in pipelines/stacking/exposure_saturation.py), kept so that behaviour does not change."
+    }
+  },
+  "saturation_threshold_adu": {
+    "value": 65000.0,
+    "provenance": {
+      "kind": "assumed",
+      "source": "Pipeline default: just under the 16-bit maximum of 65535, applied to every camera. See measure_saturated_pixel_fraction in pipelines/shared/quality/quality_metrics.py."
+    }
+  },
+  "photometric_linearity_limit_adu": null,
+  "quantum_efficiency": null,
+  "notes": "The alias ZWO CCD ASI120MC-S follows the way the ASI533's FITS header spells its name. It has not been seen in a real ASI120MC-S header."
+}

@@ -1,11 +1,11 @@
 """Batch processing script that runs the full pipeline on every target.
 
 Runs stacking, astrometry, photometry, and spectroscopy (where
-applicable) in two sequential passes: first every target's ZWO
-ASI533MM Pro (monochrome) frames, then every *remaining* target's
-Nikon DSLR DSC D5300 (color) frames -- see `run_full_processing`'s
-docstring for why the second pass excludes targets the first pass
-already covered.
+applicable) in one pass per camera. The cameras, and their order, come from
+the setups listed in the config file: the primary camera first, then the
+others. Each target is processed by the first camera that has frames of it --
+see `run_full_processing`'s docstring for why later passes skip targets an
+earlier pass already covered.
 
 A failure in any single target's pipeline -- including a real
 worker-process crash -- is caught and recorded rather than
@@ -27,11 +27,8 @@ from typing import Any
 os.environ["HEADLESS"] = "1"
 
 from astrometricslib import Astrometrics
-from astrometricslib.pipelines.shared.frame_grouping import select_frames_for_camera
+from astrometricslib.pipelines.shared.camera_passes import assign_targets_to_cameras, camera_pass_order
 from astrometricslib.utilities.parallel_batch import BatchRunSummary
-
-ASI_CAMERA_NAME = "ZWO ASI 533MM Pro"
-NIKON_CAMERA_NAME = "Nikon DSLR DSC D5300"
 
 
 def _print_pass_summary(camera_name: str, summary: BatchRunSummary) -> None:
@@ -283,17 +280,18 @@ def _read_target_ids_from_file(path: str) -> list[str]:
 def run_full_processing(argv: list[str] | None = None) -> None:
     """Run the full processing pipeline for every target in the catalog.
 
-    Runs the ASI533MM (monochrome) pass first, across every target
-    with frames for that camera. The Nikon DSLR (color) pass then runs
-    second, but only across targets the ASI533MM pass did *not* touch
+    Runs one pass per camera, in the order given by the config's setups
+    (the primary camera first; see `camera_pass_order`). A later pass runs
+    only across targets no earlier pass touched
     -- `Target.stacked_image`, `processed_image`, and every quality-
     summary field are single-valued, not per-camera, so running a
-    second camera's pass on a target the first pass already processed
-    would silently overwrite that target's ASI533MM stack reference
-    and quality summaries with the DSLR-camera results (the ASI533MM
-    FITS files themselves stay on disk; the target record would simply
-    stop pointing at them). Some targets have frames from both cameras;
-    excluding them from the second pass keeps their first-pass results intact.
+    second camera's pass on a target an earlier pass already processed
+    would silently overwrite that target's first-camera stack reference
+    and quality summaries with the second camera's results (the first
+    camera's FITS files themselves stay on disk; the target record would
+    simply stop pointing at them). Some targets have frames from several
+    cameras; giving each to the first camera that has frames of it keeps
+    the earlier pass's results intact.
     """
     arguments = _build_argument_parser().parse_args(argv)
     logging.basicConfig(
@@ -355,6 +353,21 @@ def run_full_processing(argv: list[str] | None = None) -> None:
     # whose files are not currently readable, and this library lives on
     # an external drive. A drive that is slow to mount would silently
     # erase real frame history rather than fail loudly.
+    # Which cameras to process, and which targets each one gets, come from the
+    # setups in the config file. Ids are passed explicitly to every pass:
+    # omitting them makes `process_all_targets` walk the entire catalog, which
+    # would silently ignore a --target selection and reprocess everything.
+    camera_names = camera_pass_order(
+        astrometrics.config.get_observatory_setups(), astrometrics.config.get_primary_camera_name()
+    )
+    if not camera_names:
+        print(
+            "The config lists no [Observatory.Setups], so there are no cameras to process. "
+            "Add the camera-and-optic pairings you use (see astrometrics.config.example)."
+        )
+        return
+    assignments = assign_targets_to_cameras(targets, camera_names)
+
     # Reclaim scratch space left by earlier failed or interrupted runs before
     # this one starts staging its own files. A successful stack removes its own
     # work directory, so anything old enough to be swept here belongs to
@@ -382,18 +395,16 @@ def run_full_processing(argv: list[str] | None = None) -> None:
                     and round(float(f.focal_length_mm)) == round(focal_length_mm)
                 )
                 print(f"  optic {focal_length_mm:g}mm -> {matching} frame(s) in this selection")
-        asi_ids = [t.id for t in targets if select_frames_for_camera(t, ASI_CAMERA_NAME)]
-        nikon_ids = [
-            t.id
-            for t in targets
-            if select_frames_for_camera(t, NIKON_CAMERA_NAME)
-            and not select_frames_for_camera(t, ASI_CAMERA_NAME)
-        ]
-        neither = [t.id for t in targets if t.id not in asi_ids and t.id not in nikon_ids]
-        print(f"\nPass 1 ({ASI_CAMERA_NAME}) would process {len(asi_ids)}: {', '.join(asi_ids) or '-'}")
-        print(f"Pass 2 ({NIKON_CAMERA_NAME}) would process {len(nikon_ids)}: {', '.join(nikon_ids) or '-'}")
-        if neither:
-            print(f"No frames for either camera ({len(neither)}): {', '.join(neither)}")
+        for pass_number, camera_name in enumerate(camera_names, start=1):
+            camera_target_ids = assignments[camera_name]
+            print(
+                f"\nPass {pass_number} ({camera_name}) would process {len(camera_target_ids)}: "
+                f"{', '.join(camera_target_ids) or '-'}"
+            )
+        assigned_ids = {target_id for ids in assignments.values() for target_id in ids}
+        unassigned = [t.id for t in targets if t.id not in assigned_ids]
+        if unassigned:
+            print(f"No frames for any configured camera ({len(unassigned)}): {', '.join(unassigned)}")
         print("\nDry run: nothing was processed.")
         return
 
@@ -404,23 +415,6 @@ def run_full_processing(argv: list[str] | None = None) -> None:
 
     print("Running the full pipeline (stacking, astrometry, photometry, spectroscopy) for each target...")
 
-    # `camera_name` is a required, keyword-only argument on
-    # `process_all_targets` (no default). The full camera name is used
-    # rather than a partial match like "533mm", since `run_full_pipeline`
-    # matches it as a case-insensitive substring against each frame's
-    # camera -- a partial string risks matching more than one camera if
-    # the catalog ever grows a similarly-named one.
-    # Ids are passed explicitly for both passes. Omitting them makes
-    # `process_all_targets` walk the entire catalog, which would silently
-    # ignore a --target selection and reprocess everything.
-    asi_target_ids = [target.id for target in targets if select_frames_for_camera(target, ASI_CAMERA_NAME)]
-    nikon_only_target_ids = [
-        target.id
-        for target in targets
-        if select_frames_for_camera(target, NIKON_CAMERA_NAME)
-        and not select_frames_for_camera(target, ASI_CAMERA_NAME)
-    ]
-
     # Which optic(s) to run. Defaults to the observatory's primary --
     # frames of different focal length image at different scales and must
     # never share a stack, so processing every optic at once is not an
@@ -429,27 +423,27 @@ def run_full_processing(argv: list[str] | None = None) -> None:
 
     for focal_length_mm in focal_lengths:
         optic_label = f" @ {focal_length_mm:g}mm" if focal_length_mm else ""
-        print(f"\n--- Pass 1: {ASI_CAMERA_NAME}{optic_label} ---")
-        if asi_target_ids:
-            asi_summary = astrometrics.process_all_targets(
-                target_ids=asi_target_ids,
-                camera_name=ASI_CAMERA_NAME,
+        for pass_number, camera_name in enumerate(camera_names, start=1):
+            earlier_note = (
+                f" (targets without frames from {', '.join(camera_names[: pass_number - 1])} only)"
+                if pass_number > 1
+                else ""
+            )
+            print(f"\n--- Pass {pass_number}: {camera_name}{optic_label}{earlier_note} ---")
+            camera_target_ids = assignments[camera_name]
+            if not camera_target_ids:
+                print(f"No targets assigned to {camera_name} in this selection; skipping this pass.")
+                continue
+            # The full camera name is passed rather than a partial match:
+            # `process_all_targets` matches it as a case-insensitive substring
+            # against each frame's camera, so a partial string risks matching
+            # more than one camera.
+            summary = astrometrics.process_all_targets(
+                target_ids=camera_target_ids,
+                camera_name=camera_name,
                 focal_length_mm=focal_length_mm,
             )
-            _print_pass_summary(f"{ASI_CAMERA_NAME}{optic_label}", asi_summary)
-        else:
-            print("No targets with ASI533MM frames in this selection; skipping this pass.")
-
-        print(f"\n--- Pass 2: {NIKON_CAMERA_NAME}{optic_label} (targets without ASI533MM only) ---")
-        if not nikon_only_target_ids:
-            print("No Nikon-only targets found; skipping this pass.")
-            continue
-        nikon_summary = astrometrics.process_all_targets(
-            target_ids=nikon_only_target_ids,
-            camera_name=NIKON_CAMERA_NAME,
-            focal_length_mm=focal_length_mm,
-        )
-        _print_pass_summary(f"{NIKON_CAMERA_NAME}{optic_label}", nikon_summary)
+            _print_pass_summary(f"{camera_name}{optic_label}", summary)
 
 
 # This guard is REQUIRED, not stylistic boilerplate: `process_all_targets`

@@ -52,7 +52,7 @@ class TelescopeResolution:
     reason: str
 
 
-def _camera_identity(camera_name: str) -> str:
+def camera_identity(camera_name: str) -> str:
     """Reduce a camera name to text that is the same for every spelling of it.
 
     Parameters
@@ -133,10 +133,10 @@ def resolve_frame_telescope(
     if not camera_name:
         return TelescopeResolution(UNKNOWN_TELESCOPE_NAME, REASON_UNRESOLVED)
 
-    camera_identity = _camera_identity(camera_name)
+    frame_camera_identity = camera_identity(camera_name)
     candidate_optics: list[OpticConfig] = []
     for setup in observatory_setups.setups:
-        if _camera_identity(setup.camera_name) != camera_identity:
+        if camera_identity(setup.camera_name) != frame_camera_identity:
             continue
         optic = observatory_setups.optic_named(setup.optic_name)
         if optic is not None and optic not in candidate_optics:

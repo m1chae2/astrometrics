@@ -122,3 +122,23 @@ def test_max_extraction_length_none_when_star_already_past_the_edge():  # ruff: 
     )
 
     assert cap is None
+
+
+def test_the_spectrum_start_offset_uses_the_configs_start_wavelength():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """The spectrum start moves when the config sets another wavelength."""
+    from astrometricslib.pipelines.spectroscopy.optics_physics import calculate_pixel_offset
+    from astrometricslib.utilities import CameraConfig, SpectroscopyConfig
+
+    camera = CameraConfig(name="TestCam", pixel_size_μm=3.76, sensor_width_px=3008, sensor_height_px=3008)
+    default_config = SpectroscopyConfig(camera=camera, grating_lines_per_mm=200.0, grating_distance_mm=16.5)
+    later_config = default_config.with_overrides(extraction_start_wavelength_nm=400.0)
+
+    default_offset = SpectroscopyCalibrationTuner._spectrum_start_offset_px(default_config, 16.5)
+    later_offset = SpectroscopyCalibrationTuner._spectrum_start_offset_px(later_config, 16.5)
+
+    assert default_offset == pytest.approx(
+        calculate_pixel_offset(
+            wavelength_nm=380.0, grating_distance_mm=16.5, lines_per_mm=200.0, pixel_size_um=3.76
+        )
+    )
+    assert later_offset > default_offset

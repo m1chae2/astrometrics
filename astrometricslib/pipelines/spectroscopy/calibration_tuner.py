@@ -26,6 +26,7 @@ from astrometricslib.pipelines.spectroscopy.pipeline import (
     _read_xy_source_position,
 )
 from astrometricslib.pipelines.spectroscopy.spectroscopy_instrument import SpectroscopyInstrument
+from astrometricslib.utilities.spectroscopy_models import SpectroscopyConfig
 
 logger = logging.getLogger(__name__)
 
@@ -122,13 +123,8 @@ class SpectroscopyCalibrationTuner:
         )
 
         # Now that we know the distance (L), calculate exactly where the
-        # visible spectrum starts (380 nm) in pixels.
-        best_x0 = calculate_pixel_offset(
-            wavelength_nm=380.0,
-            grating_distance_mm=best_grating_distance_mm,
-            lines_per_mm=spec_pipeline.config.grating_lines_per_mm,
-            pixel_size_um=spec_pipeline.config.camera.pixel_size_um,
-        )
+        # spectrum starts in pixels.
+        best_x0 = self._spectrum_start_offset_px(spec_pipeline.config, best_grating_distance_mm)
 
         use_flare_mask_extraction, max_extraction_length_px = self._detect_extraction_geometry_quirks(
             image, spec_pipeline, star_pos, best_grating_distance_mm, best_x0
@@ -154,6 +150,31 @@ class SpectroscopyCalibrationTuner:
             spec_pipeline,
             use_flare_mask_extraction,
             max_extraction_length_px,
+        )
+
+    @staticmethod
+    def _spectrum_start_offset_px(config: SpectroscopyConfig, grating_distance_mm: float) -> float:
+        """Work out how many pixels from the star the spectrum starts.
+
+        Parameters
+        ----------
+        config : `SpectroscopyConfig`
+            The camera and grating settings. The wavelength that counts as
+            the start of the spectrum is its `extraction_start_wavelength_nm`
+            (380 nm unless the config file says otherwise).
+        grating_distance_mm : `float`
+            The distance from the grating to the sensor, in millimeters.
+
+        Returns
+        -------
+        offset_px : `float`
+            The distance, in pixels, from the star to the start wavelength.
+        """
+        return calculate_pixel_offset(
+            wavelength_nm=config.extraction_start_wavelength_nm,
+            grating_distance_mm=grating_distance_mm,
+            lines_per_mm=config.grating_lines_per_mm,
+            pixel_size_um=config.camera.pixel_size_um,
         )
 
     @staticmethod

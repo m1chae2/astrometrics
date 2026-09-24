@@ -57,6 +57,9 @@ dispersion_orientation = vertical
 dispersion_direction = positive
 grating_lines_per_mm = 200
 dispersion_offset_x = 0.0
+# Optional. The wavelength, in nm, that calibration treats as the start of
+# the spectrum. Leave it out to use the default of 380.
+# extraction_start_wavelength_nm = 380
 # CALCULATED -- everything below this line, and only what's below this
 # line, is fitted from a calibration frame by
 # SpectroscopyCalibrationTuner.tune_calibration()

@@ -180,6 +180,7 @@ def stack_frames(
 
     background_split = None
     if get_configuration().get_background_homogeneity_check_enabled():
+        from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
         from astrometricslib.pipelines.shared.quality.background_measurement import (
             measure_frame_background_level,
             measure_frame_saturated_pixel_fraction,
@@ -196,7 +197,10 @@ def stack_frames(
                 if frame.background_level is None:
                     frame.background_level = measure_frame_background_level(frame.path)
                 if frame.saturated_pixel_fraction is None:
-                    frame.saturated_pixel_fraction = measure_frame_saturated_pixel_fraction(frame.path)
+                    camera_profile = resolve_camera_profile(frame.camera)
+                    frame.saturated_pixel_fraction = measure_frame_saturated_pixel_fraction(
+                        frame.path, camera_profile.saturation_threshold_adu.value
+                    )
             except Exception as exc:
                 logger.debug("Skipping background/saturation measurement for '%s': %s", frame.path, exc)
                 continue

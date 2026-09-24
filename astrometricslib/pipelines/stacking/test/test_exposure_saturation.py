@@ -13,12 +13,10 @@ import numpy as np
 import pytest
 
 from astrometricslib.pipelines.stacking.exposure_saturation import (
-    DEFAULT_CEILING_ADU,
     MAXIMUM_RELIABLE_PEAK_TO_ROOM_RATIO,
     SATURATED_BLOB_MINIMUM_PIXELS,
     TARGET_PEAK_FRACTION,
     FrameSaturation,
-    camera_ceiling_adu,
     group_is_saturated,
     measure_frame_saturation,
     recommend_exposure_seconds,
@@ -48,7 +46,7 @@ def star_frame(
 
 def test_an_unclipped_star_is_not_saturated_and_its_peak_is_measured() -> None:
     """A star peaking 6000 above the sky is below the ceiling, measured."""
-    result = measure_frame_saturation(star_frame(6000.0), camera="Nikon DSLR DSC D5300")
+    result = measure_frame_saturation(star_frame(6000.0), ceiling_adu=CEILING)
 
     assert not result.saturated
     assert not result.peak_is_estimated
@@ -60,7 +58,9 @@ def test_an_unclipped_star_is_not_saturated_and_its_peak_is_measured() -> None:
 
 def test_a_clipped_star_is_saturated_and_the_frame_gives_its_own_ceiling() -> None:
     """A far brighter star clips a blob and the frame gives the ceiling."""
-    result = measure_frame_saturation(star_frame(40000.0), camera="something unknown")
+    # The camera's ceiling passed in is deliberately different from the
+    # frame's own, to show that the clipped frame's own value is used.
+    result = measure_frame_saturation(star_frame(40000.0), ceiling_adu=65535.0)
 
     assert result.saturated
     assert result.ceiling_adu == CEILING
@@ -69,7 +69,7 @@ def test_a_clipped_star_is_saturated_and_the_frame_gives_its_own_ceiling() -> No
 
 def test_a_hot_pixel_at_the_ceiling_is_not_a_saturated_star() -> None:
     """One isolated pixel at the ceiling is below the blob size, not a star."""
-    result = measure_frame_saturation(star_frame(3000.0, hot_pixel=True), camera="Nikon DSLR DSC D5300")
+    result = measure_frame_saturation(star_frame(3000.0, hot_pixel=True), ceiling_adu=CEILING)
 
     assert not result.saturated
     # And the hot pixel is not taken as the star's peak.
@@ -80,25 +80,11 @@ def test_the_minimum_blob_size_separates_hot_pixels_from_stars() -> None:
     """A 2 x 2 patch at the ceiling is saturated; a lone pixel is not."""
     frame = np.full((40, 40), SKY, dtype=np.float32)
     frame[20, 20] = CEILING
-    assert not measure_frame_saturation(frame).saturated
+    assert not measure_frame_saturation(frame, CEILING).saturated
 
     frame[20:22, 20:22] = CEILING
     assert SATURATED_BLOB_MINIMUM_PIXELS == 4
-    assert measure_frame_saturation(frame).saturated
-
-
-@pytest.mark.parametrize(
-    ("camera", "expected"),
-    [
-        ("ZWO CCD ASI533MM Pro", 65532.0),
-        ("Nikon DSLR DSC D5300", 16383.0),
-        ("Unknown camera", DEFAULT_CEILING_ADU),
-        (None, DEFAULT_CEILING_ADU),
-    ],
-)
-def test_the_camera_ceiling_is_looked_up_by_family(camera: str | None, expected: float) -> None:
-    """The clipping value comes from the camera family, else 16-bit."""
-    assert camera_ceiling_adu(camera) == expected
+    assert measure_frame_saturation(frame, CEILING).saturated
 
 
 def make(saturated: bool, peak: float | None, sky: float = SKY, ceiling: float = CEILING) -> FrameSaturation:
@@ -143,7 +129,7 @@ def test_no_recommendation_without_a_peak() -> None:
 
 def test_a_star_clipped_far_beyond_the_estimate_limit_gives_no_peak() -> None:
     """A huge clipped core is too heavy to estimate, so it gives no peak."""
-    result = measure_frame_saturation(star_frame(5.0e6, size=200, sigma=6.0), camera="Nikon DSLR DSC D5300")
+    result = measure_frame_saturation(star_frame(5.0e6, size=200, sigma=6.0), ceiling_adu=CEILING)
 
     assert result.saturated
     assert result.peak_above_sky_adu is None

@@ -13,13 +13,6 @@ from astropy.stats import sigma_clipped_stats
 from astrometricslib.drivers.fits_access import collapse_to_2d
 from astrometricslib.pipelines.shared.quality.saturation import compute_saturated_pixel_fraction
 
-# Just under the raw 16-bit unsigned max -- same convention as
-# quality_metrics.DEFAULT_SATURATION_ADU_THRESHOLD and
-# photometry's _SATURATION_ADU_THRESHOLD, not reused directly to keep
-# this module's import surface matching
-# measure_frame_background_level's existing minimal footprint.
-_SATURATION_ADU_THRESHOLD = 65000.0
-
 
 def measure_frame_background_level(path: str) -> float | None:
     """Calculate the average brightness of the sky background in an image.
@@ -48,7 +41,7 @@ def measure_frame_background_level(path: str) -> float | None:
     return float(median)
 
 
-def measure_frame_saturated_pixel_fraction(path: str) -> float | None:
+def measure_frame_saturated_pixel_fraction(path: str, saturation_threshold_adu: float) -> float | None:
     """Calculate what percentage of the image is completely blown out (white).
 
     Cameras can only record so much light before a pixel maxes out and
@@ -59,6 +52,9 @@ def measure_frame_saturated_pixel_fraction(path: str) -> float | None:
     ----------
     path : `str`
         The file path to the image to check.
+    saturation_threshold_adu : `float`
+        A pixel at or above this value counts as saturated. Take it from
+        the camera's profile.
 
     Returns
     -------
@@ -72,4 +68,4 @@ def measure_frame_saturated_pixel_fraction(path: str) -> float | None:
         return None
     data = np.asarray(data, dtype=float)
     data = collapse_to_2d(data)
-    return compute_saturated_pixel_fraction(data, _SATURATION_ADU_THRESHOLD)
+    return compute_saturated_pixel_fraction(data, saturation_threshold_adu)

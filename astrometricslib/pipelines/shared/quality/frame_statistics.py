@@ -105,6 +105,7 @@ def measure_frame_input_quality(
         A dictionary showing how many images were "measured", "skipped",
         or "failed" (because they couldn't be read).
     """
+    from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
     from astrometricslib.pipelines.shared.quality.quality_metrics import (
         measure_frame_input_quality as measure_one_frame,
     )
@@ -118,7 +119,10 @@ def measure_frame_input_quality(
             counts["skipped"] += 1
             continue
 
-        metrics = measure_one_frame(frame.path, include_fwhm=include_fwhm)
+        saturation_threshold_adu = resolve_camera_profile(frame.camera).saturation_threshold_adu.value
+        metrics = measure_one_frame(
+            frame.path, include_fwhm=include_fwhm, saturation_threshold_adu=saturation_threshold_adu
+        )
         if metrics["background_level"] is None:
             counts["failed"] += 1
             continue

@@ -18,6 +18,7 @@ from astropy.stats import mad_std, sigma_clip
 from photutils.aperture import CircularAnnulus, CircularAperture
 from photutils.centroids import centroid_com
 
+from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib.drivers.fits_access import collapse_to_2d
 from astrometricslib.models.quality_summary import FrameEnsembleComposition
 from astrometricslib.models.stellar_source import PhotometryResult, StellarObject
@@ -28,13 +29,6 @@ from astrometricslib.pipelines.shared.quality.saturation import (
 )
 
 logger = logging.getLogger(__name__)
-
-# The maximum brightness value a pixel can record before it maxes out
-# ("saturates")
-# and stops measuring light accurately. Because our cameras save 16-bit images,
-# the absolute maximum is 65,535. We set our threshold just below that at
-# 65,000.
-_SATURATION_ADU_THRESHOLD = 65000.0
 
 # --- Choosing Reference Stars for Comparison --------------------------------
 #
@@ -197,6 +191,8 @@ def _measure_aperture_flux(
     annulus_outer: float = 12.0,
     cutout_radius: int = 15,
     fallback_background: float | None = None,
+    *,
+    saturation_threshold_adu: float,
 ) -> tuple[float, bool]:
     """Measure the brightness of a star inside a small circle.
 
@@ -204,6 +200,10 @@ def _measure_aperture_flux(
     glow to get the star's true brightness. This is the one place that
     actually does the aperture math -- every other function in this file
     that needs a star's flux calls this one, so the math only lives here.
+
+    The saturation threshold is a required keyword argument: it is a
+    property of the camera, so the caller takes it from the camera's
+    profile.
 
     Returns
     -------
@@ -257,25 +257,34 @@ def _measure_aperture_flux(
         background_level = np.median(local_cutout)
 
     net_flux = star_flux_sum - aperture.area * background_level
-    saturated_fraction = compute_saturated_pixel_fraction(star_raw_values, _SATURATION_ADU_THRESHOLD)
+    saturated_fraction = compute_saturated_pixel_fraction(star_raw_values, saturation_threshold_adu)
     is_saturated = is_saturation_significant(saturated_fraction)
 
     return max(0.0, float(net_flux)), is_saturated
 
 
-def _process_single_frame_worker(args):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _process_single_frame_worker(
+    args: tuple[str, list[tuple[str, float, float]], list[tuple[str, float, float]], float],
+) -> tuple[str, tuple[Any, ...] | None]:
     """Analyze a single picture.
 
     This aligns the picture and measures the brightness of every star.
     We measure brightness in "light per second" so we can compare a
     3-minute exposure fairly against a 5-minute exposure.
 
+    Parameters
+    ----------
+    args : `tuple`
+        The picture's path, the reference stars as (id, x, y), the
+        brightest reference stars used to line the picture up, and the
+        camera's saturation threshold in ADU.
+
     Returns
     -------
     result : `tuple`
         The results, including star brightnesses and picture details.
     """
-    path, reference_stars_list, reference_top_refs_minimal = args
+    path, reference_stars_list, reference_top_refs_minimal, saturation_threshold_adu = args
 
     try:
         # 1. Load Header & Data
@@ -303,12 +312,15 @@ def _process_single_frame_worker(args):  # ruff: ignore[missing-type-function-ar
 
         for reference_id, reference_x, reference_y in reference_stars_list:
             target_x, target_y = reference_x + delta_x_shift, reference_y + delta_y_shift
-            # Saturation is judged from raw ADU pixel values (against
-            # _SATURATION_ADU_THRESHOLD, itself a raw-ADU constant) inside
-            # _measure_aperture_flux, so it happens before the ADU/second
-            # conversion below.
+            # Saturation is judged from raw ADU pixel values (against the
+            # camera's saturation threshold) inside _measure_aperture_flux,
+            # so it happens before the ADU/second conversion below.
             net_flux, is_saturated = _measure_aperture_flux(
-                data, target_x, target_y, fallback_background=global_background
+                data,
+                target_x,
+                target_y,
+                fallback_background=global_background,
+                saturation_threshold_adu=saturation_threshold_adu,
             )
             fluxes_dict[reference_id] = (net_flux / exposure_seconds, is_saturated)
 
@@ -528,13 +540,13 @@ class VariabilityAnalyzer:
         """
         return []
 
-    def process(  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def process(
         self,
         image_paths: list[str],
         max_workers: int | None = None,
         id_prefix: str = "",
         seed_stars: list[StellarObject] | None = None,
-    ):
+    ) -> None:
         """Measure the brightness of all stars across a sequence of images.
 
         Parameters
@@ -559,6 +571,13 @@ class VariabilityAnalyzer:
         with fits.open(reference_path) as fits_handle:
             reference_data = collapse_to_2d(fits_handle[0].data.astype(float))
             reference_header = fits_handle[0].header
+            # Every later frame is lined up with this one pixel for pixel,
+            # so they are assumed to come from the same camera. That makes
+            # the reference frame's camera decide the saturation threshold.
+            camera_profile = resolve_camera_profile(
+                reference_header.get("INSTRUME", reference_header.get("CAMERA"))
+            )
+            saturation_threshold_adu = camera_profile.saturation_threshold_adu.value
             reference_date = reference_header.get("DATE-OBS", datetime.now().isoformat())
             try:
                 reference_timestamp = datetime.fromisoformat(reference_date)
@@ -649,7 +668,9 @@ class VariabilityAnalyzer:
                 # Divided by exposure time (ADU/second, not raw ADU
                 # counts) for the same reason as the per-frame worker
                 # below -- see _read_exposure_seconds.
-                flux, is_saturated = self._measure_flux_numpy(reference_data, x_ref, y_ref)
+                flux, is_saturated = self._measure_flux_numpy(
+                    reference_data, x_ref, y_ref, saturation_threshold_adu=saturation_threshold_adu
+                )
                 flux = flux / reference_exposure_seconds
                 if flux <= 0:
                     seed_stars_without_signal += 1
@@ -679,7 +700,9 @@ class VariabilityAnalyzer:
                 # for consistency. Divided by exposure time (ADU/second)
                 # for the same reason as the per-frame worker -- see
                 # _read_exposure_seconds.
-                flux, is_saturated = self._measure_flux_numpy(reference_data, x_ref, y_ref)
+                flux, is_saturated = self._measure_flux_numpy(
+                    reference_data, x_ref, y_ref, saturation_threshold_adu=saturation_threshold_adu
+                )
                 flux = flux / reference_exposure_seconds
                 new_star.flux = flux
                 new_star.photometry = PhotometryResult(
@@ -702,7 +725,8 @@ class VariabilityAnalyzer:
                 f"using {max_workers} workers..."
             )
             worker_arguments = [
-                (path, reference_stars_minimal, reference_top_refs_minimal) for path in image_paths[1:]
+                (path, reference_stars_minimal, reference_top_refs_minimal, saturation_threshold_adu)
+                for path in image_paths[1:]
             ]
 
             # Explicit 'fork' context: Python 3.14 changed the default
@@ -746,7 +770,9 @@ class VariabilityAnalyzer:
 
             logger.info("Parallel processing complete.")
 
-    def _measure_flux_numpy(self, data, x, y, radius=4.0):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def _measure_flux_numpy(
+        self, data: np.ndarray, x: float, y: float, radius: float = 4.0, *, saturation_threshold_adu: float
+    ) -> tuple[float, bool]:
         """Measure the brightness of a star inside a small circle.
 
         We add up all the light inside the circle, then subtract the background
@@ -754,13 +780,27 @@ class VariabilityAnalyzer:
         `_measure_aperture_flux`, which is the module-level function every flux
         measurement in this file actually goes through.
 
+        Parameters
+        ----------
+        data : `np.ndarray`
+            The picture, as a 2-D array.
+        x, y : `float`
+            The star's position in pixels.
+        radius : `float`, optional
+            The radius of the circle, in pixels.
+        saturation_threshold_adu : `float`
+            A pixel at or above this value counts as saturated. Take it from
+            the camera's profile.
+
         Returns
         -------
         result : `tuple[float, bool]`
             The total brightness, and a True/False flag if the star was
             too bright (saturated).
         """
-        return _measure_aperture_flux(data, x, y, radius=radius)
+        return _measure_aperture_flux(
+            data, x, y, radius=radius, saturation_threshold_adu=saturation_threshold_adu
+        )
 
     def normalize_light_curves(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Perform differential photometry using ensemble normalization.

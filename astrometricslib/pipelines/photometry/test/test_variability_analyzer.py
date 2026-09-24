@@ -25,7 +25,7 @@ def test_measure_flux_numpy_unsaturated_star():  # ruff: ignore[missing-return-t
     data[45:55, 45:55] += 3000.0  # bright but unsaturated star
 
     analyzer = VariabilityAnalyzer()
-    flux, is_saturated = analyzer._measure_flux_numpy(data, 50, 50)
+    flux, is_saturated = analyzer._measure_flux_numpy(data, 50, 50, saturation_threshold_adu=65000.0)
     assert flux > 0
     assert is_saturated is False
 
@@ -36,15 +36,27 @@ def test_measure_flux_numpy_saturated_star():  # ruff: ignore[missing-return-typ
     data[46:54, 46:54] = 65535.0  # saturated core within the 4px-radius aperture
 
     analyzer = VariabilityAnalyzer()
-    _flux, is_saturated = analyzer._measure_flux_numpy(data, 50, 50)
+    _flux, is_saturated = analyzer._measure_flux_numpy(data, 50, 50, saturation_threshold_adu=65000.0)
     assert is_saturated is True
+
+
+def test_measure_flux_numpy_uses_the_threshold_it_is_given():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verifies a low threshold flags the star and a high one does not."""
+    data = np.full((100, 100), 500.0)
+    data[46:54, 46:54] = 16000.0  # a 14-bit camera's clipped core
+
+    analyzer = VariabilityAnalyzer()
+    _flux, saturated_for_low = analyzer._measure_flux_numpy(data, 50, 50, saturation_threshold_adu=15000.0)
+    _flux, saturated_for_high = analyzer._measure_flux_numpy(data, 50, 50, saturation_threshold_adu=65000.0)
+    assert saturated_for_low is True
+    assert saturated_for_high is False
 
 
 def test_measure_flux_numpy_out_of_bounds_returns_unsaturated_zero():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verifies an out-of-bounds star returns (0.0, False), not raises."""
     data = np.full((20, 20), 500.0)
     analyzer = VariabilityAnalyzer()
-    flux, is_saturated = analyzer._measure_flux_numpy(data, 1, 1)
+    flux, is_saturated = analyzer._measure_flux_numpy(data, 1, 1, saturation_threshold_adu=65000.0)
     assert flux == pytest.approx(0.0)
     assert is_saturated is False
 
@@ -67,7 +79,7 @@ def test_measure_aperture_flux_pins_sum_method_exact():  # ruff: ignore[missing-
     data = np.full((100, 100), 500.0)
     data[46:54, 46:54] = 1000.0  # hard-edged square, not a soft star glow
 
-    flux, is_saturated = _measure_aperture_flux(data, 50, 50)
+    flux, is_saturated = _measure_aperture_flux(data, 50, 50, saturation_threshold_adu=65000.0)
     assert flux == pytest.approx(23824.693920034817)
     assert is_saturated is False
 
@@ -83,7 +95,7 @@ def test_measure_aperture_flux_empty_annulus_uses_local_median():  # ruff: ignor
     data = np.full((9, 9), 500.0)
     data[2:7, 2:7] = 1000.0  # star block big enough that the local median is still background (500)
 
-    flux, is_saturated = _measure_aperture_flux(data, 4, 4, cutout_radius=4)
+    flux, is_saturated = _measure_aperture_flux(data, 4, 4, cutout_radius=4, saturation_threshold_adu=65000.0)
     assert flux == pytest.approx(12500.0)
     assert is_saturated is False
 
@@ -99,7 +111,9 @@ def test_measure_aperture_flux_empty_annulus_honors_explicit_fallback():  # ruff
     data = np.full((9, 9), 500.0)
     data[2:7, 2:7] = 1000.0
 
-    flux, is_saturated = _measure_aperture_flux(data, 4, 4, cutout_radius=4, fallback_background=100.0)
+    flux, is_saturated = _measure_aperture_flux(
+        data, 4, 4, cutout_radius=4, fallback_background=100.0, saturation_threshold_adu=65000.0
+    )
     assert flux == pytest.approx(32606.192982974677)
     assert is_saturated is False
 

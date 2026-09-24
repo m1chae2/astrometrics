@@ -6,6 +6,8 @@ These tests verify that we now measure frame quality independently, so we can
 judge how good a frame is before we even try to stack it.
 """
 
+import json
+
 import numpy as np
 import pytest
 from astropy.io import fits
@@ -50,7 +52,7 @@ def test_measures_background_from_a_real_frame(tmp_path):  # ruff: ignore[missin
     """The measured background matches the frame's actual level."""
     path = _write_frame(tmp_path / "frame.fits", background=1234.0)
 
-    metrics = measure_frame_input_quality(path)
+    metrics = measure_frame_input_quality(path, saturation_threshold_adu=65000.0)
 
     assert metrics["background_level"] == pytest.approx(1234.0)
     assert metrics["saturated_pixel_fraction"] == pytest.approx(0.0)
@@ -60,7 +62,7 @@ def test_detects_saturated_pixels(tmp_path):  # ruff: ignore[missing-type-functi
     """Clipped pixels are reported as a fraction of the frame."""
     path = _write_frame(tmp_path / "frame.fits", background=500.0, saturated_pixels=64)
 
-    metrics = measure_frame_input_quality(path)
+    metrics = measure_frame_input_quality(path, saturation_threshold_adu=65000.0)
 
     assert metrics["saturated_pixel_fraction"] == pytest.approx(64 / (64 * 64))
 
@@ -69,7 +71,7 @@ def test_fwhm_is_off_by_default(tmp_path):  # ruff: ignore[missing-type-function
     """FWHM costs ~50x the other metrics, so it must be opt-in."""
     path = _write_frame(tmp_path / "frame.fits")
 
-    assert measure_frame_input_quality(path)["fwhm_px"] is None
+    assert measure_frame_input_quality(path, saturation_threshold_adu=65000.0)["fwhm_px"] is None
 
 
 def test_unreadable_frame_yields_all_none(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
@@ -77,7 +79,7 @@ def test_unreadable_frame_yields_all_none(tmp_path):  # ruff: ignore[missing-typ
     broken = tmp_path / "broken.fits"
     broken.write_bytes(b"not a FITS file at all")
 
-    metrics = measure_frame_input_quality(str(broken))
+    metrics = measure_frame_input_quality(str(broken), saturation_threshold_adu=65000.0)
 
     assert metrics == {
         "background_level": None,
@@ -88,7 +90,9 @@ def test_unreadable_frame_yields_all_none(tmp_path):  # ruff: ignore[missing-typ
 
 def test_missing_file_yields_all_none(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """A frame record pointing at a deleted file measures as unknown."""
-    metrics = measure_frame_input_quality(str(tmp_path / "does_not_exist.fits"))
+    metrics = measure_frame_input_quality(
+        str(tmp_path / "does_not_exist.fits"), saturation_threshold_adu=65000.0
+    )
 
     assert metrics["background_level"] is None
 
@@ -176,3 +180,44 @@ def test_measured_fwhm_is_kept_apart_from_registration_fwhm(tmp_path):  # ruff: 
 
     assert target.frames[0].registration_fwhm_x_px == pytest.approx(3.2)
     assert target.frames[0].registration_fwhm_y_px == pytest.approx(3.4)
+
+
+def test_each_frames_saturation_uses_its_own_cameras_threshold(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """A frame is judged against the threshold in its camera's profile."""
+    from astrometricslib.drivers import camera_profile_store
+
+    profile_folder = tmp_path / "profiles"
+    profile_folder.mkdir()
+    source = {"kind": "assumed", "source": "a test"}
+
+    def write_profile(file_name, camera_name, threshold_adu, generic=False):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+        """Write one profile file into the temporary profile folder."""
+        (profile_folder / file_name).write_text(
+            json.dumps({
+                "camera_name": camera_name,
+                "is_generic_fallback": generic,
+                "clip_ceiling_adu": {"value": 65535.0, "provenance": source},
+                "saturation_threshold_adu": {"value": threshold_adu, "provenance": source},
+            })
+        )
+
+    write_profile("generic.json", "Generic", 65000.0, generic=True)
+    write_profile("fourteen_bit.json", "Fourteen Bit Camera", 15000.0)
+    monkeypatch.setattr(camera_profile_store, "CAMERA_PROFILE_DIRECTORY", profile_folder)
+
+    data = np.full((64, 64), 500.0, dtype=np.float32)
+    data[:8, :] = 16000.0
+    frame_path = str(tmp_path / "clipped.fits")
+    fits.PrimaryHDU(data).writeto(frame_path)
+    target = Target(
+        id="TwoCameras",
+        frames=[
+            FrameRecord(path=frame_path, role="LIGHT", camera="Fourteen Bit Camera", exposure="30.0"),
+            FrameRecord(path=frame_path, role="LIGHT", camera="Unlisted Camera", exposure="30.0"),
+        ],
+    )
+
+    frame_statistics.measure_frame_input_quality(target)
+
+    assert target.frames[0].saturated_pixel_fraction == pytest.approx(0.125)
+    assert target.frames[1].saturated_pixel_fraction == pytest.approx(0.0)

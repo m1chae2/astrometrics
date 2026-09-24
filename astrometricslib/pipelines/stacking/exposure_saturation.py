@@ -8,7 +8,8 @@ about one raw frame, so a user can adjust an imaging session:
 * is a star saturated at this exposure length (a yes or no per exposure), and
 * what exposure length would keep the brightest star below the ceiling.
 
-Everything here works on arrays. Reading frames is left to the caller.
+Everything here works on arrays. Reading frames, and finding the camera's
+clipping value (its `CameraProfile.clip_ceiling_adu`), is left to the caller.
 
 The older whole-image check (`is_saturation_significant`, a fixed 65000 ADU and
 0.1% of pixels) is not used here: it never fires on a 14-bit camera such as
@@ -20,17 +21,6 @@ from dataclasses import dataclass
 
 import numpy as np
 from scipy.ndimage import binary_dilation, label, minimum_filter
-
-# The value at which each camera family's frames clip, in ADU. Measured as the
-# maximum of real raw frames from this library: the ZWO ASI533 (a 14-bit sensor
-# written as 16-bit, in steps of 4) reaches 65532 in every saturated frame, and
-# the Nikon D5300 (14-bit) reaches 16383. Used only when a frame is not itself
-# clipped, so no ceiling can be read from its pixels; a clipped frame's own
-# maximum is used instead.
-CAMERA_CEILING_ADU = {"ZWO": 65532.0, "Nikon": 16383.0}
-
-# Used when the camera is not in the table above: the top of a 16-bit range.
-DEFAULT_CEILING_ADU = 65535.0
 
 # A star counts as saturated when at least this many connected pixels sit at
 # the frame's ceiling. Single pixels at the ceiling are common and are not
@@ -122,28 +112,6 @@ class FrameSaturation:
     peak_is_estimated: bool
 
 
-def camera_ceiling_adu(camera: str | None) -> float:
-    """Look up the clipping value of a camera.
-
-    Parameters
-    ----------
-    camera : `str` or `None`
-        The camera name from the frame header, such as
-        ``"ZWO CCD ASI533MM Pro"``.
-
-    Returns
-    -------
-    ceiling : `float`
-        The value from `CAMERA_CEILING_ADU` for the first family name found in
-        the camera name, otherwise `DEFAULT_CEILING_ADU`.
-    """
-    name = (camera or "").lower()
-    for family, ceiling in CAMERA_CEILING_ADU.items():
-        if family.lower() in name:
-            return ceiling
-    return DEFAULT_CEILING_ADU
-
-
 def _clipped_blobs(frame: np.ndarray, ceiling: float) -> tuple[np.ndarray, np.ndarray]:
     """Label the groups of connected pixels that sit at the ceiling.
 
@@ -225,7 +193,7 @@ def _estimated_peak_from_wings(
 
 
 def measure_frame_saturation(
-    frame: np.ndarray, camera: str | None = None, fwhm_pixels: float = DEFAULT_STAR_FWHM_PIXELS
+    frame: np.ndarray, ceiling_adu: float, fwhm_pixels: float = DEFAULT_STAR_FWHM_PIXELS
 ) -> FrameSaturation:
     """Measure how close the brightest star of a raw frame is to the ceiling.
 
@@ -233,9 +201,10 @@ def measure_frame_saturation(
     ----------
     frame : `numpy.ndarray`
         One raw frame, 2-D (a colour frame is read from its first plane).
-    camera : `str`, optional
-        The camera name, used to find the ceiling when the frame itself is not
-        clipped.
+    ceiling_adu : `float`
+        The value at which this camera's frames clip, in ADU. It is used when
+        the frame itself is not clipped, so no ceiling can be read from its
+        pixels. Take it from the camera's profile.
     fwhm_pixels : `float`, optional
         The FWHM of a star in this frame, used to estimate a clipped star's
         peak.
@@ -260,8 +229,7 @@ def measure_frame_saturation(
             peak = None
         return FrameSaturation(True, ceiling, sky, peak, True)
     # Not clipped: the ceiling comes from the camera, and the peak is measured.
-    ceiling = camera_ceiling_adu(camera)
-    return FrameSaturation(False, ceiling, sky, _measured_peak_above_sky(data, sky), False)
+    return FrameSaturation(False, ceiling_adu, sky, _measured_peak_above_sky(data, sky), False)
 
 
 def group_is_saturated(frames: list[FrameSaturation]) -> bool:

@@ -10,10 +10,10 @@ from typing import Any
 
 import numpy as np
 
+from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.models.stellar_source import SpectralObservation, SpectroscopyResult, StellarObject
 from astrometricslib.pipelines.shared.analysis_context import AnalysisContext
-from astrometricslib.pipelines.shared.quality.quality_metrics import DEFAULT_SATURATION_ADU_THRESHOLD
 from astrometricslib.pipelines.shared.quality.saturation import compute_saturated_pixel_fraction
 from astrometricslib.pipelines.spectroscopy.quantum_efficiency_correction import (
     apply_quantum_efficiency_correction,
@@ -493,6 +493,9 @@ class SpectroscopyPipeline:
 
             config = ConfigLoader.load_spectroscopy_config()
         self.config = config
+        # What we know about this camera model (for example, the value at
+        # which its pixels count as saturated), looked up once here.
+        self.camera_profile = resolve_camera_profile(config.camera.name)
         self.instrument = SpectroscopyInstrument(config)
         # The extractor also does the sky background subtraction stage:
         # each brightness reading has the night-sky glow (measured in strips
@@ -1175,7 +1178,9 @@ class SpectroscopyPipeline:
         y_start, y_end = max(0, y_center - aperture_radius), min(height, y_center + aperture_radius + 1)
         x_start, x_end = max(0, x_center - aperture_radius), min(width, x_center + aperture_radius + 1)
         zero_order_cutout = np.asarray(data[y_start:y_end, x_start:x_end], dtype=float)
-        return compute_saturated_pixel_fraction(zero_order_cutout, DEFAULT_SATURATION_ADU_THRESHOLD)
+        return compute_saturated_pixel_fraction(
+            zero_order_cutout, self.camera_profile.saturation_threshold_adu.value
+        )
 
     def _dispersion_overlay_geometry(
         self,

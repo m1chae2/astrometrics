@@ -18,18 +18,21 @@ from astrometricslib.pipelines.shared.quality.saturation import compute_saturate
 
 logger = logging.getLogger(__name__)
 
-# Just under the raw 16-bit unsigned max (65535) -- see
-# measure_saturated_pixel_fraction's docstring for how this was chosen and its
-# caveats.
+# The value at or above which a pixel of a STACKED image counts as saturated.
+# It is used by `measure_saturated_pixel_fraction`, which is given a stack.
+# It is not a property of one camera, so it is not read from a camera profile.
+# For a raw frame, use the camera profile's `saturation_threshold_adu`.
+#
+# WARNING: Siril writes stacks as 32-bit floats whose brightest value is 1.0
+# (checked on the M 13 stacks), so no pixel of a stack can reach 65000 and
+# this check reports no saturation. That is how it behaved before the camera
+# profiles were added; it is recorded here, not fixed.
 DEFAULT_SATURATION_ADU_THRESHOLD = 65000.0
 
-# Photometric linearity threshold for 14-bit CMOS sensors mapped to 16-bit ADC
-# (e.g. ZWO ASI533MM Pro). Non-linear compression begins above ~60,000 ADU at
-# Gain 0 / Offset 10 before hard clipping (Antonov 2026).
-DEFAULT_PHOTOMETRIC_LINEARITY_ADU_THRESHOLD = 60000.0
 
-
-def measure_frame_input_quality(path: str, include_fwhm: bool = False) -> dict[str, float | None]:
+def measure_frame_input_quality(
+    path: str, include_fwhm: bool = False, *, saturation_threshold_adu: float
+) -> dict[str, float | None]:
     """Measure the basic quality of an image before trying to stack it.
 
     This checks the background noise level and how much of the image is
@@ -43,6 +46,9 @@ def measure_frame_input_quality(path: str, include_fwhm: bool = False) -> dict[s
     include_fwhm : `bool`, optional
         If True, it also measures star blurriness (which is slow).
         Defaults to False.
+    saturation_threshold_adu : `float`
+        A pixel at or above this value counts as saturated. Take it from
+        the camera's profile.
 
     Returns
     -------
@@ -79,9 +85,7 @@ def measure_frame_input_quality(path: str, include_fwhm: bool = False) -> dict[s
         logger.debug("Background measurement failed for %s: %s", path, background_error)
 
     try:
-        metrics["saturated_pixel_fraction"] = compute_saturated_pixel_fraction(
-            data, DEFAULT_SATURATION_ADU_THRESHOLD
-        )
+        metrics["saturated_pixel_fraction"] = compute_saturated_pixel_fraction(data, saturation_threshold_adu)
     except Exception as saturation_error:
         logger.debug("Saturation measurement failed for %s: %s", path, saturation_error)
 

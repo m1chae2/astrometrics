@@ -19,6 +19,7 @@ from typing import Any
 
 import numpy as np
 
+from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib.drivers.fits_access import read_data
 from astrometricslib.pipelines.stacking.exposure_groups import FRAMES_SAMPLED_PER_GROUP
 from astrometricslib.pipelines.stacking.exposure_saturation import (
@@ -82,7 +83,8 @@ def measure_group_saturation(
         except OSError as read_error:
             logger.warning("Could not read %s to measure saturation: %s", path, read_error)
             continue
-        measurements.append(measure_frame_saturation(data, _attribute(frame, "camera"), float(fwhm)))
+        ceiling_adu = resolve_camera_profile(_attribute(frame, "camera")).clip_ceiling_adu.value
+        measurements.append(measure_frame_saturation(data, ceiling_adu, float(fwhm)))
     return measurements
 
 

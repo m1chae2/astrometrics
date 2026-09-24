@@ -15,7 +15,6 @@ from scipy.optimize import minimize
 from scipy.signal import find_peaks
 
 from astrometricslib.drivers.image import AstrometricsImage
-from astrometricslib.pipelines.shared.quality.quality_metrics import DEFAULT_SATURATION_ADU_THRESHOLD
 from astrometricslib.pipelines.shared.quality.saturation import compute_saturated_pixel_fraction
 from astrometricslib.pipelines.spectroscopy.optics_physics import (
     BALMER_SERIES_NM,
@@ -199,7 +198,10 @@ class SpectroscopyCalibrationTuner:
         extraction_start = (base_pos[0] + offset_px * vector[0], base_pos[1] + offset_px * vector[1])
 
         use_flare_mask_extraction = SpectroscopyCalibrationTuner._detect_flare_contamination(
-            image, extraction_start, int(tuned_config.extraction_radius)
+            image,
+            extraction_start,
+            int(tuned_config.extraction_radius),
+            spec_pipeline.camera_profile.saturation_threshold_adu.value,
         )
         max_extraction_length_px = SpectroscopyCalibrationTuner._detect_max_extraction_length_px(
             base_pos, vector, offset_px, length_px, image.data.shape
@@ -209,9 +211,24 @@ class SpectroscopyCalibrationTuner:
 
     @staticmethod
     def _detect_flare_contamination(
-        image: AstrometricsImage, extraction_start: tuple[float, float], extraction_radius: int
+        image: AstrometricsImage,
+        extraction_start: tuple[float, float],
+        extraction_radius: int,
+        saturation_threshold_adu: float,
     ) -> bool:
         """Check for star-flare saturation at the theoretical dispersion start.
+
+        Parameters
+        ----------
+        image : `AstrometricsImage`
+            The calibration image.
+        extraction_start : `tuple` [`float`, `float`]
+            Where the theoretical dispersion starts, in pixels.
+        extraction_radius : `int`
+            How far around that point to look, in pixels.
+        saturation_threshold_adu : `float`
+            A pixel at or above this value counts as saturated. Take it from
+            the camera's profile.
 
         Returns
         -------
@@ -228,7 +245,7 @@ class SpectroscopyCalibrationTuner:
         cutout = np.asarray(data[y_start:y_end, x_start:x_end], dtype=float)
         if cutout.size == 0:
             return False
-        fraction = compute_saturated_pixel_fraction(cutout, DEFAULT_SATURATION_ADU_THRESHOLD)
+        fraction = compute_saturated_pixel_fraction(cutout, saturation_threshold_adu)
         return fraction > _FLARE_CONTAMINATION_FRACTION_THRESHOLD
 
     @staticmethod

@@ -19,10 +19,7 @@ from astrometricslib.drivers.camera_profile_store import (
     load_camera_profiles,
     resolve_camera_profile,
 )
-from astrometricslib.pipelines.photometry import variability_analyzer
-from astrometricslib.pipelines.shared.quality import background_measurement, quality_metrics
 from astrometricslib.pipelines.spectroscopy.quantum_efficiency_curves import get_quantum_efficiency_curve
-from astrometricslib.pipelines.stacking.exposure_saturation import camera_ceiling_adu
 
 
 def write_profile(
@@ -115,12 +112,12 @@ def test_an_unlisted_zwo_camera_gets_the_generic_profile_not_the_zwo_family_ceil
     """Record a deliberate change from the old lookup.
 
     The old code gave any camera with ZWO in its name the ceiling measured
-    on the ASI533. A profile now says only what was measured or assumed
+    on the ASI533 (65532). A profile says only what was measured or assumed
     for that exact model, so an unlisted ZWO camera gets the generic value.
     """
-    assert camera_ceiling_adu("ZWO ASI2600MM Pro") == pytest.approx(65532.0)
-    generic_ceiling = resolve_camera_profile("ZWO ASI2600MM Pro").clip_ceiling_adu.value
-    assert generic_ceiling == pytest.approx(65535.0)
+    profile = resolve_camera_profile("ZWO ASI2600MM Pro")
+    assert profile.is_generic_fallback
+    assert profile.clip_ceiling_adu.value == pytest.approx(65535.0)
 
 
 def test_the_nikon_threshold_is_known_to_sit_above_its_ceiling() -> None:
@@ -160,49 +157,47 @@ def test_two_profiles_claiming_the_same_name_are_rejected(tmp_path: Path) -> Non
         load_camera_profiles(tmp_path)
 
 
-# ---- Parity with the constants the pipelines still use ---------------------
+# ---- The numbers the pipelines used before they read profiles --------------
+# The constants these values came from have been removed from the pipelines,
+# so the values are pinned here. A change to a profile file that alters one
+# of them must be a deliberate decision.
 
 
 @pytest.mark.parametrize(
-    "camera_name",
+    ("camera_name", "expected_ceiling_adu"),
     [
-        "ZWO CCD ASI533MM Pro",
-        "ZWO ASI 533MM Pro",
-        "ZWO ASI533MM Pro",
-        "ZWO ASI120MC-S",
-        "Nikon D5300",
-        "Nikon DSLR DSC D5300",
-        "Unknown camera",
-        None,
+        ("ZWO CCD ASI533MM Pro", 65532.0),
+        ("ZWO ASI 533MM Pro", 65532.0),
+        ("ZWO ASI533MM Pro", 65532.0),
+        ("ZWO ASI120MC-S", 65532.0),
+        ("Nikon D5300", 16383.0),
+        ("Nikon DSLR DSC D5300", 16383.0),
+        ("Unknown camera", 65535.0),
+        (None, 65535.0),
     ],
 )
-def test_the_clip_ceiling_matches_the_old_camera_lookup(camera_name: str | None) -> None:
-    """Check that the profile ceiling equals the old lookup's answer."""
-    assert resolve_camera_profile(camera_name).clip_ceiling_adu.value == pytest.approx(
-        camera_ceiling_adu(camera_name)
-    )
+def test_the_clip_ceiling_is_the_value_the_old_lookup_gave(
+    camera_name: str | None, expected_ceiling_adu: float
+) -> None:
+    """Check each camera's ceiling against the old lookup's answer."""
+    assert resolve_camera_profile(camera_name).clip_ceiling_adu.value == pytest.approx(expected_ceiling_adu)
 
 
-def test_every_saturation_threshold_matches_the_old_copies() -> None:
-    """Check that the profile value equals each copy it replaces."""
-    old_copies = {
-        quality_metrics.DEFAULT_SATURATION_ADU_THRESHOLD,
-        background_measurement._SATURATION_ADU_THRESHOLD,
-        variability_analyzer._SATURATION_ADU_THRESHOLD,
-    }
-    assert len(old_copies) == 1
-    old_value = old_copies.pop()
+def test_every_saturation_threshold_is_the_value_the_old_constants_had() -> None:
+    """Check that every profile keeps the 65000 the old constants held."""
     for profile in load_camera_profiles():
-        assert profile.saturation_threshold_adu.value == pytest.approx(old_value)
+        assert profile.saturation_threshold_adu.value == pytest.approx(65000.0)
 
 
-def test_the_linearity_limit_matches_the_old_constant_for_the_asi533() -> None:
+def test_only_the_asi533_has_a_linearity_limit() -> None:
     """Check the one camera that has a measured linearity limit."""
-    profile = resolve_camera_profile("ZWO ASI533MM Pro")
-    assert profile.photometric_linearity_limit_adu is not None
-    assert profile.photometric_linearity_limit_adu.value == pytest.approx(
-        quality_metrics.DEFAULT_PHOTOMETRIC_LINEARITY_ADU_THRESHOLD
-    )
+    limits = {
+        profile.camera_name: profile.photometric_linearity_limit_adu
+        for profile in load_camera_profiles()
+        if profile.photometric_linearity_limit_adu is not None
+    }
+    assert list(limits) == ["ZWO ASI533MM Pro"]
+    assert limits["ZWO ASI533MM Pro"].value == pytest.approx(60000.0)
 
 
 @pytest.mark.parametrize(

@@ -348,9 +348,12 @@ def _compute_star_coefficients_of_variation(stellar_objects: list[StellarObject]
                 star.photometry.coefficient_of_variation = cv
                 cv_list.append(cv)
 
-        if getattr(star, "star_data", None) and isinstance(star.star_data, dict):
-            star.magnitude = star.star_data.get("mag")
-
+    # `star.magnitude` is deliberately left alone. The "mag" the star finder
+    # keeps in `star_data` is an instrument magnitude (-2.5 log10 of the
+    # counts), not a catalog one. An earlier version copied it over
+    # `star.magnitude`, which turned catalog values into numbers such as -14.5
+    # (BD+33 3249, catalog V of about 9) and replaced them with `None` for
+    # stars that had no "mag" at all.
     return cv_list
 
 

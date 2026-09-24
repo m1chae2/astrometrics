@@ -95,6 +95,16 @@ MAXIMUM_PLATE_SOLVE_SOURCES = 100
 # detected stars to the SIMBAD/Gaia catalogs, and when merging duplicates.
 CATALOG_MATCH_RADIUS_ARCSEC = 10.0
 
+# Catalog entries closer together than this cannot be told apart in one of our
+# frames, so the light comes from all of them and the brightest dominates. The
+# scale is 1.9 arcseconds per pixel and a star's blur spans a few pixels; 3
+# arcseconds is about one and a half pixels. Albireo's two stars (beta1 Cyg A,
+# a K3II star, and its B9.5V companion, 0.4 arcseconds apart) were the case
+# that showed the problem: the spectrum was K-type, but the star was named
+# after the companion because it happened to be nearer by a fraction of a
+# pixel. A judgement call, checked on that one pair.
+UNRESOLVED_COMPANION_RADIUS_ARCSEC = 3.0
+
 _gaia_failure_state_lock = threading.Lock()
 _gaia_consecutive_failures = 0
 _gaia_circuit_open = False
@@ -316,6 +326,47 @@ def _read_catalog_magnitude(match: Any, column_names: list[str]) -> float | None
             return None
         return magnitude if math.isfinite(magnitude) else None
     return None
+
+
+def brightest_unresolved_entry_index(
+    star_coord: SkyCoord, nearest_index: int, simbad_coords: SkyCoord, result_table: Any
+) -> int:
+    """Pick the brightest catalog entry that a star cannot be told from.
+
+    Parameters
+    ----------
+    star_coord : `astropy.coordinates.SkyCoord`
+        Where the detected star is on the sky.
+    nearest_index : `int`
+        The index of the nearest catalog entry.
+    simbad_coords : `astropy.coordinates.SkyCoord`
+        The positions of every catalog entry, lined up with `result_table`.
+    result_table : `astropy.table.Table`
+        The catalog rows.
+
+    Returns
+    -------
+    index : `int`
+        The index of the brightest entry (lowest V magnitude) within
+        `UNRESOLVED_COMPANION_RADIUS_ARCSEC` of the star, or
+        `nearest_index` when there is only one, or none has a magnitude.
+        An entry with no magnitude is treated as the faintest.
+    """
+    separations = star_coord.separation(simbad_coords).arcsec
+    candidates = np.flatnonzero(separations <= UNRESOLVED_COMPANION_RADIUS_ARCSEC)
+    if candidates.size < 2:
+        return nearest_index
+    magnitudes = [
+        _read_catalog_magnitude(result_table[int(index)], ["V", "FLUX_V", "flux_v", "flux(V)"])
+        for index in candidates
+    ]
+    if all(magnitude is None for magnitude in magnitudes):
+        return nearest_index
+    brightest = min(
+        range(len(candidates)),
+        key=lambda position: math.inf if magnitudes[position] is None else magnitudes[position],
+    )
+    return int(candidates[brightest])
 
 
 class StarIdentifier:
@@ -1256,6 +1307,9 @@ class StarIdentifier:
             if simbad_coords is not None and result_table is not None:
                 idx, d2d, _ = star_coord.match_to_catalog_sky(simbad_coords)
                 if d2d < CATALOG_MATCH_RADIUS_ARCSEC * u.arcsec:
+                    idx = brightest_unresolved_entry_index(
+                        star_coord, int(np.ravel(idx)[0]), simbad_coords, result_table
+                    )
                     self._apply_simbad_match(stellar_object, result_table[idx], ra, dec)
                     # The separation between where the solved WCS put this
                     # star and where the catalog says it is, which is the

@@ -138,6 +138,24 @@ def test_analysis_replaces_classification_for_glowing_extended_target() -> None:
     assert analysis.features == []
 
 
+def test_analysis_gives_no_stellar_type_to_an_extended_target_without_confirmed_lines() -> None:
+    """A featureless "Cluster" spectrum (M 27, M 13) gets no stellar type."""
+    rng = np.random.default_rng(11)
+    analysis = analyze_spectrum(
+        WAVELENGTHS,
+        1.0 + 0.05 * rng.normal(size=WAVELENGTHS.size),
+        "any camera",
+        is_quantum_efficiency_corrected=False,
+        catalog_spectral_type="GlC",
+        is_extended_target=True,
+        extraction_box_width_px=2.0 * HALF_WIDTH / 11.0,
+    )
+    assert not analysis.is_emission_line_source
+    assert analysis.classification["spectral_type"] == "Unknown"
+    assert "extended object" in str(analysis.classification["reason"])
+    assert analysis.features == []
+
+
 def test_analysis_never_replaces_classification_of_an_ordinary_star() -> None:
     """The same spectrum on a typed star is flagged but keeps its verdicts."""
     analysis = analyze_spectrum(

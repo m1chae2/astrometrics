@@ -9,9 +9,11 @@ background/annulus) is significantly saturated.
 import numpy as np
 import pytest
 
+from astrometricslib.models.stellar_source import PhotometryResult, StellarObject
 from astrometricslib.pipelines.photometry.variability_analyzer import (
     VariabilityAnalyzer,
     _calculate_frame_offset,
+    _compute_star_coefficients_of_variation,
     _measure_aperture_flux,
     locate_star_centroid,
 )
@@ -162,3 +164,23 @@ def test_calculate_frame_offset_returns_zero_when_too_few_stars_located():  # ru
     data = np.full((100, 100), 500.0)
     reference_positions = [(20.0, 20.0, 0.0), (40.0, 40.0, 0.0)]
     assert _calculate_frame_offset(data, reference_positions) == (0.0, 0.0)
+
+
+def test_the_variability_step_keeps_the_catalog_magnitude() -> None:
+    """An instrument magnitude in `star_data` must not replace the catalog one.
+
+    Regression: the step copied the star finder's instrument magnitude over
+    `magnitude`, so BD+33 3249 showed -14.5 instead of its catalog value.
+    """
+    catalog_star = StellarObject(id="cataloged", name="cataloged")
+    catalog_star.magnitude = 9.0
+    catalog_star.star_data = {"mag": -14.5}
+    catalog_star.photometry = PhotometryResult(fluxes_normalized=[1.0, 1.1, 0.9, 1.0])
+    unknown_star = StellarObject(id="unknown", name="unknown")
+    unknown_star.star_data = {"mag": -11.6}
+    unknown_star.photometry = PhotometryResult(fluxes_normalized=[1.0, 1.1, 0.9, 1.0])
+
+    _compute_star_coefficients_of_variation([catalog_star, unknown_star])
+
+    assert catalog_star.magnitude == pytest.approx(9.0)
+    assert unknown_star.magnitude is None

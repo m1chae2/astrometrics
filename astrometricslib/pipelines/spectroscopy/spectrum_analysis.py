@@ -22,7 +22,11 @@ from astrometricslib.pipelines.spectroscopy.instrument_response import (
     load_instrument_response,
 )
 from astrometricslib.pipelines.spectroscopy.spectral_classifier import (
+    GIANT_REFERENCE_SPECTRAL_TYPES,
+    catalog_disagreement_note,
     classify_spectral_type,
+    is_catalog_giant,
+    luminosity_class_note,
     nearest_reference_type,
     unclassified_result,
 )
@@ -118,17 +122,18 @@ def analyze_spectrum(
     is_extended_target : `bool`, optional
         Whether the catalog says this is an extended object (its
         `stellar_spectral_type` is `EXTENDED_TARGET_SPECTRAL_TYPE`). Only
-        such targets have their stellar classification replaced when
-        emission lines are found; an ordinary star's never is.
+        such targets never get a stellar classification: it is replaced by
+        an "Unknown" result saying why (see below). An ordinary star's is
+        never replaced.
 
     Returns
     -------
     analysis : `SpectrumAnalysis`
         The classification, the feature results and the emission lines.
-        When `is_extended_target` is set and the
-        spectrum is an emission-line source, the stellar classification is
+        When `is_extended_target` is set, the stellar classification is
         replaced by an "Unknown" result saying so and the absorption
-        features are left empty, since neither describes glowing gas.
+        features are left empty, since neither describes a nebula or a
+        cluster's light. The emission lines are still tested and reported.
     """
     wavelength_angstrom = np.asarray(wavelength_angstrom, dtype=float)
     intensity = np.asarray(intensity, dtype=float)
@@ -186,17 +191,64 @@ def analyze_spectrum(
             True,
         )
 
+    if is_extended_target:
+        # No emission lines were confirmed, but the light is still a whole
+        # nebula's or cluster's, not one star's. Matching it to a single-star
+        # reference gave M 27 (a planetary nebula) G8V and M 13 (a globular
+        # cluster) K3V at 0.89, both meaningless. The absorption-line tests
+        # are left empty for the same reason.
+        return SpectrumAnalysis(
+            unclassified_result(
+                "extended object: the light is a whole nebula's or cluster's, not one star's, so a "
+                "single stellar type does not apply"
+            ),
+            [],
+            False,
+            resolution_element_angstrom,
+            is_resolution_measured,
+            signal_to_noise,
+            emission_lines,
+            False,
+        )
+
     response = load_instrument_response(camera_name) if is_quantum_efficiency_corrected else None
     if response is None:
         classification = unclassified_result(
             "no instrument response is available for this camera, so the spectrum cannot be compared"
         )
     else:
+        corrected_intensity = apply_instrument_response(wavelength_angstrom, intensity, response)
         classification = classify_spectral_type(
             wavelength_angstrom,
-            apply_instrument_response(wavelength_angstrom, intensity, response),
+            corrected_intensity,
             resolution_element_angstrom=resolution_element_angstrom,
         )
+
+    if classification["spectral_type"] != "Unknown" and not classification["reason"]:
+        # For a star the catalog calls a giant, also find the closest giant
+        # reference, so the note can say what the spectrum looks like once
+        # the (unreliable) luminosity class is set aside.
+        closest_giant = None
+        if response is not None and is_catalog_giant(catalog_spectral_type):
+            giant_result = classify_spectral_type(
+                wavelength_angstrom,
+                corrected_intensity,
+                resolution_element_angstrom=resolution_element_angstrom,
+                reference_types=GIANT_REFERENCE_SPECTRAL_TYPES,
+            )
+            if giant_result["spectral_type"] != "Unknown":
+                closest_giant = (str(giant_result["spectral_type"]), float(giant_result["rms"]))  # type: ignore[arg-type]
+        notes = [
+            note
+            for note in (
+                catalog_disagreement_note(catalog_spectral_type, str(classification["spectral_type"])),
+                luminosity_class_note(
+                    catalog_spectral_type, str(classification["spectral_type"]), closest_giant
+                ),
+            )
+            if note
+        ]
+        classification["reason"] = "; ".join(notes) or None
 
     # The catalog type says what kind of star this is without using the
     # spectrum being tested. A spectrum match is only a fallback, and only

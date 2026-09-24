@@ -94,6 +94,81 @@ REFERENCE_SPECTRAL_TYPES: tuple[str, ...] = (
     "M6V",
 )
 
+# Giant, bright-giant and supergiant references from the same Pickles library
+# (luminosity classes III, II and I; 56 spectra, downloaded 2026-09-24). They
+# are NOT ranked against the main-sequence ladder when a spectrum is
+# classified: on 2026-09-24 the best giant beat the best dwarf by at most
+# 0.015 in relative RMS for every star with a known catalog class (dwarfs
+# Vega +0.002, Alcor -0.001, HD 172149 -0.008; giants HD 183753 +0.006,
+# Arcturus +0.014, Albireo A +0.015), so a slitless spectrum at this
+# resolution cannot tell the classes apart, and ranking them together
+# relabelled dwarfs as "A0III" and "G8I". They are used to look up the
+# expected feature depths of a catalog giant, and to name the closest giant
+# reference in the note on a catalog giant (see `luminosity_class_note`).
+# `REFERENCE_SPECTRAL_TYPES` stays the ladder that the classification, the
+# instrument response and the catalog-type lookup for dwarfs use. The library's
+# labels are kept as they are: "B12III" is B1-2 III, "K01II" is K0-1 II and
+# "K34II" is K3-4 II. M9III and M10III are left out: the source has small
+# negative fluxes near 4700-4800 A for both, and no star here is that late.
+GIANT_REFERENCE_SPECTRAL_TYPES: tuple[str, ...] = (
+    "A0I",
+    "A2I",
+    "B0I",
+    "B1I",
+    "B3I",
+    "B5I",
+    "B8I",
+    "F0I",
+    "F5I",
+    "F8I",
+    "G0I",
+    "G2I",
+    "G5I",
+    "G8I",
+    "K2I",
+    "K3I",
+    "K4I",
+    "M2I",
+    "B2II",
+    "B5II",
+    "F0II",
+    "F2II",
+    "G5II",
+    "K01II",
+    "K34II",
+    "M3II",
+    "A0III",
+    "A3III",
+    "A5III",
+    "A7III",
+    "B12III",
+    "B3III",
+    "B5III",
+    "B9III",
+    "F0III",
+    "F2III",
+    "F5III",
+    "G0III",
+    "G5III",
+    "G8III",
+    "K0III",
+    "K1III",
+    "K2III",
+    "K3III",
+    "K4III",
+    "K5III",
+    "M0III",
+    "M1III",
+    "M2III",
+    "M3III",
+    "M4III",
+    "M5III",
+    "M6III",
+    "M7III",
+    "M8III",
+    "O8III",
+)
+
 # Below this many overlapping points, a comparison is too noisy to trust.
 _MINIMUM_OVERLAP_POINTS = 20
 
@@ -147,6 +222,21 @@ _RANKING_SOFTMAX_TEMPERATURE = 0.005
 # to the spectrum, not that the type is right.
 POOR_MATCH_RMS_THRESHOLD = 0.15
 
+# A best match with a root-mean-square difference above this is not a match at
+# all: the spectrum is off by nearly half its own brightness from every
+# reference, so naming the least-bad one would only invent a type.
+# Provisional, and a judgement call from one data set. Of the 55 stars
+# classified in the catalog on 2026-09-24, 19 scored above 0.45 (up to 1.66).
+# 18 of those have no catalog type and are stars matched to the wrong part of
+# the sky (see `REGISTRATION_REFERENCE_FIELD_RADIUS_DEG`), so their "type" was
+# a fit to a faint, noisy spectrum. The one exception, beta Lyr B (catalog
+# B7V, matched B8V at 0.58 with a signal-to-noise of 5.9), is lost by this
+# cut. The highest scores among stars with a catalog type are V* HM Lyr (M6,
+# matched M6V at 0.39), HD 183987 (0.32) and HD 183931 (0.28), all matched
+# correctly and all kept: cool stars score high because their blue end is
+# faint and noisy, so the cut is set above them.
+UNRELIABLE_MATCH_RMS_THRESHOLD = 0.45
+
 # The score reported as "confidence" is 1 minus the root-mean-square
 # difference, so the poor-match threshold above becomes this score.
 LOW_CONFIDENCE_THRESHOLD = 1.0 - POOR_MATCH_RMS_THRESHOLD
@@ -169,13 +259,191 @@ _blurred_cache: dict[int, dict[str, tuple[np.ndarray, np.ndarray]]] = {}
 _SPECTRAL_LETTER_ORDER = "OBAFGKM"
 
 
+# The luminosity class in a spectral type such as "K3II", "G8III/IV" or
+# "B9.5V": a supergiant (I, Ia, Iab, Ib), bright giant (II), giant (III),
+# subgiant (IV) or dwarf (V). The first one named is used.
+_LUMINOSITY_CLASS = re.compile(r"[OBAFGKM]\d+(?:\.\d)?(?:-\d)?\s*(Ia\+?|Iab|Ib|III|II|IV|V|I)(?![IVab])")
+
+
+def _luminosity_class(spectral_type_text: str | None) -> str | None:
+    """Read the luminosity class of a spectral type.
+
+    Parameters
+    ----------
+    spectral_type_text : `str`, optional
+        A spectral type such as "K3II" or "A0V".
+
+    Returns
+    -------
+    luminosity_class : `str` or `None`
+        "I" (all supergiants), "II", "III", "IV" or "V", or `None` when the
+        text names none.
+    """
+    match = _LUMINOSITY_CLASS.search(str(spectral_type_text or ""))
+    if match is None:
+        return None
+    return (
+        "I"
+        if match.group(1).startswith("I") and match.group(1) not in ("II", "III", "IV")
+        else match.group(1)
+    )
+
+
+def is_catalog_giant(catalog_spectral_type: str | None) -> bool:
+    """Tell whether the catalog calls a star a giant or supergiant.
+
+    Parameters
+    ----------
+    catalog_spectral_type : `str`, optional
+        The star's catalog spectral type, such as "K3II".
+
+    Returns
+    -------
+    is_giant : `bool`
+        `True` for luminosity class I, II or III (not IV or V).
+    """
+    return _luminosity_class(catalog_spectral_type) in ("I", "II", "III")
+
+
+def luminosity_class_note(
+    catalog_spectral_type: str | None,
+    classified_type: str | None,
+    closest_giant: tuple[str, float] | None = None,
+) -> str:
+    """Explain the type of a star the catalog says is not a dwarf.
+
+    The classification compares with main-sequence references only, because
+    a slitless spectrum at this resolution cannot tell luminosity classes
+    apart (see `GIANT_REFERENCE_SPECTRAL_TYPES`). So a catalog giant's type
+    is the dwarf that looks most alike, and this note says so, and says which
+    giant reference is closest.
+
+    Parameters
+    ----------
+    catalog_spectral_type : `str`, optional
+        The star's catalog spectral type, such as "K3II".
+    classified_type : `str`, optional
+        The type matched from the spectrum, such as "K7V".
+    closest_giant : `tuple` [`str`, `float`], optional
+        The closest giant reference and its score (relative RMS), when it
+        has been worked out.
+
+    Returns
+    -------
+    note : `str`
+        The note, or an empty string when the catalog gives no giant class
+        (I, II or III) or no type was matched.
+    """
+    catalog_class = _luminosity_class(catalog_spectral_type)
+    if not is_catalog_giant(catalog_spectral_type) or not classified_type or classified_type == "Unknown":
+        return ""
+    note = (
+        f"the catalog gives this star luminosity class {catalog_class} ({catalog_spectral_type}), "
+        f"but the type above is the closest main-sequence reference ({classified_type})"
+    )
+    if closest_giant is not None:
+        giant_type, giant_rms = closest_giant
+        note += f"; the closest giant or supergiant reference is {giant_type} (score {giant_rms:.2f})"
+    return note + ". A slitless spectrum cannot reliably tell giants from dwarfs"
+
+
+# A classified type more than this many subclass steps from the catalog type
+# is flagged. A step is a tenth of a letter class, so 20 is two whole classes
+# (for example B to F). Of the 29 stars with a catalog type classified on
+# 2026-09-24, 27 were within 12 steps (F8 matched K0 was the worst), and the
+# only two beyond that were both wrong for reasons other than the templates:
+# Elnath (catalog B7III, matched M2V, 45 steps, with a blue end that looks like
+# the zero order's glare) and the star named beta1 Cyg B (catalog B9.5V,
+# matched K4V, 34.5 steps, which is really the K3II primary). A judgement call
+# from that one data set.
+CATALOG_DISAGREEMENT_SUBCLASS_STEPS = 20.0
+
+
+def _subclass_position(spectral_type_text: str | None) -> float | None:
+    """Place a spectral type on a single scale, ten steps per letter class.
+
+    Parameters
+    ----------
+    spectral_type_text : `str`, optional
+        A spectral type such as "K3V", "B9.5V" or "A5V+M3-4V". Only the
+        first letter and subclass are read.
+
+    Returns
+    -------
+    position : `float` or `None`
+        Steps from the start of O (so B0 is 10 and M0 is 60), taking a
+        missing subclass as 5, or `None` if the text has no O to M letter.
+    """
+    match = re.match(r"\s*([OBAFGKM])\s*(\d(?:\.\d)?)?", str(spectral_type_text or ""))
+    if match is None:
+        return None
+    subclass = float(match.group(2)) if match.group(2) else 5.0
+    return _SPECTRAL_LETTER_ORDER.index(match.group(1)) * 10.0 + subclass
+
+
+def catalog_disagreement_note(catalog_spectral_type: str | None, classified_type: str | None) -> str:
+    """Warn when the spectrum's type is far from the catalog's.
+
+    A mismatch this large usually means the spectrum is not the catalog
+    star's: a bright neighbour's light, glare from a very bright star's zero
+    order, or the star's name having been given to the wrong object.
+
+    Parameters
+    ----------
+    catalog_spectral_type : `str`, optional
+        The star's catalog spectral type.
+    classified_type : `str`, optional
+        The type matched from the spectrum.
+
+    Returns
+    -------
+    note : `str`
+        The warning, or an empty string when either type is missing or the
+        two are within `CATALOG_DISAGREEMENT_SUBCLASS_STEPS`.
+    """
+    catalog_position = _subclass_position(catalog_spectral_type)
+    classified_position = _subclass_position(classified_type)
+    if catalog_position is None or classified_position is None:
+        return ""
+    if abs(classified_position - catalog_position) <= CATALOG_DISAGREEMENT_SUBCLASS_STEPS:
+        return ""
+    return (
+        f"the spectrum matches {classified_type} but the catalog gives {catalog_spectral_type}, "
+        "more than two spectral classes apart: the spectrum may not be this star's "
+        "(a bright neighbour, glare from a very bright star, or a wrong name)"
+    )
+
+
+def _template_position(reference_type: str) -> float:
+    """Place a reference label on the ladder, ten steps per letter class.
+
+    Parameters
+    ----------
+    reference_type : `str`
+        A label such as "K3V", "B12III" (B1-2) or "K34II" (K3-4).
+
+    Returns
+    -------
+    position : `float`
+        Steps from the start of O. A two-digit subclass is the average of
+        its two digits.
+    """
+    match = re.match(r"([OBAFGKM])(\d+)", reference_type)
+    digits = match.group(2)
+    subclass = sum(int(digit) for digit in digits) / len(digits) if len(digits) == 2 else float(digits)
+    return _SPECTRAL_LETTER_ORDER.index(match.group(1)) * 10 + subclass
+
+
 def nearest_reference_type(spectral_type_text: str | None) -> str | None:
     """Find the bundled reference type closest to a catalog spectral type.
 
     Catalog types come in many forms ("A0Va", "K0", "B7III",
     "A5V+M3-4V"). The letter and first number are read from the start
     (so for a double star the first, brighter component is used), and the
-    closest bundled reference on the O to M ladder is returned.
+    closest bundled reference on the O to M ladder is returned. When the
+    catalog names a giant or supergiant class (I, II, III) the closest
+    reference of that class is used; anything else uses the main-sequence
+    ladder.
 
     Parameters
     ----------
@@ -185,8 +453,9 @@ def nearest_reference_type(spectral_type_text: str | None) -> str | None:
     Returns
     -------
     reference_type : `str` or `None`
-        A label from `REFERENCE_SPECTRAL_TYPES`, or `None` when the text
-        has no recognizable letter and number.
+        A label from `REFERENCE_SPECTRAL_TYPES` (or, for a giant class,
+        `GIANT_REFERENCE_SPECTRAL_TYPES`), or `None` when the text has no
+        recognizable letter and number.
     """
     if not spectral_type_text:
         return None
@@ -195,10 +464,16 @@ def nearest_reference_type(spectral_type_text: str | None) -> str | None:
         return None
     position = _SPECTRAL_LETTER_ORDER.index(match.group(1)) * 10 + float(match.group(2))
 
-    def ladder_position(reference_type: str) -> float:
-        return _SPECTRAL_LETTER_ORDER.index(reference_type[0]) * 10 + float(reference_type[1])
-
-    return min(REFERENCE_SPECTRAL_TYPES, key=lambda reference: abs(ladder_position(reference) - position))
+    catalog_class = _luminosity_class(spectral_type_text.strip())
+    candidates = REFERENCE_SPECTRAL_TYPES
+    if catalog_class in ("I", "II", "III"):
+        same_class = [
+            reference
+            for reference in GIANT_REFERENCE_SPECTRAL_TYPES
+            if _luminosity_class(reference) == catalog_class
+        ]
+        candidates = tuple(same_class) or REFERENCE_SPECTRAL_TYPES
+    return min(candidates, key=lambda reference: abs(_template_position(reference) - position))
 
 
 def _load_reference_template(spectral_type: str) -> tuple[np.ndarray, np.ndarray]:
@@ -230,10 +505,11 @@ def _get_reference_templates() -> dict[str, tuple[np.ndarray, np.ndarray]]:
     -------
     templates : `dict`
         Spectral type label mapped to its `(wavelength_angstrom,
-        normalized_flux)` arrays.
+        normalized_flux)` arrays, for the main-sequence ladder and the
+        giant references.
     """
     if not _reference_cache:
-        for spectral_type in REFERENCE_SPECTRAL_TYPES:
+        for spectral_type in (*REFERENCE_SPECTRAL_TYPES, *GIANT_REFERENCE_SPECTRAL_TYPES):
             _reference_cache[spectral_type] = _load_reference_template(spectral_type)
     return _reference_cache
 
@@ -334,6 +610,7 @@ def classify_spectral_type(
     intensity: np.ndarray,
     resolution_element_angstrom: float = FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
     exclude_atmospheric_bands: bool = True,
+    reference_types: Iterable[str] | None = None,
 ) -> dict[str, object]:
     """Find the bundled reference spectrum a star's spectrum most resembles.
 
@@ -368,6 +645,10 @@ def classify_spectral_type(
         comparison (see `atmospheric_mask`), so a dip that comes from the
         air is not counted as a difference between the star and the
         reference. Defaults to `True`.
+    reference_types : `Iterable` [`str`], optional
+        The references to compare with. Defaults to the main-sequence
+        ladder, `REFERENCE_SPECTRAL_TYPES`; pass
+        `GIANT_REFERENCE_SPECTRAL_TYPES` to find the closest giant.
 
     Returns
     -------
@@ -407,9 +688,12 @@ def classify_spectral_type(
 
     rms_by_type: dict[str, float] = {}
     correlation_by_type: dict[str, float] = {}
+    allowed_types = set(REFERENCE_SPECTRAL_TYPES if reference_types is None else reference_types)
     for spectral_type, (template_wavelength, template_flux) in _get_blurred_templates(
         resolution_element_angstrom
     ).items():
+        if spectral_type not in allowed_types:
+            continue
         overlap_min = max(wavelength_angstrom.min(), template_wavelength.min(), low)
         overlap_max = min(wavelength_angstrom.max(), template_wavelength.max(), high)
         if overlap_max - overlap_min < MINIMUM_CLASSIFICATION_COVERAGE_ANGSTROM:
@@ -444,6 +728,12 @@ def classify_spectral_type(
 
     best_type = min(rms_by_type, key=rms_by_type.get)
     best_rms = rms_by_type[best_type]
+    if best_rms > UNRELIABLE_MATCH_RMS_THRESHOLD:
+        return unclassified_result(
+            f"no reference matches this spectrum: even the closest ({best_type}) is off by "
+            f"{best_rms:.0%} of its brightness, and more than {UNRELIABLE_MATCH_RMS_THRESHOLD:.0%} "
+            "is too far to call a match"
+        )
     return {
         "spectral_type": best_type,
         "confidence": max(0.0, 1.0 - best_rms),

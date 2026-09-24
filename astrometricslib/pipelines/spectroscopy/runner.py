@@ -10,6 +10,8 @@ result as a `SpectroscopyQualitySummary`, and saves the stars.
 import statistics
 from typing import Any
 
+import numpy as np
+
 from astrometricslib.models.quality_summary import (
     SpectroscopyPipelineQualityMetrics,
     SpectroscopyQualitySummary,
@@ -29,6 +31,16 @@ from astrometricslib.pipelines.shared.target_center_hint import (
     resolve_solved_stack_center_hint,
     resolve_solved_stack_wcs,
 )
+
+# How far from the frame centre, in degrees, a reference star may be and still
+# be used to name the stars in a spectral frame. The frame is 3008 pixels of
+# about 1.9 arcseconds (1.6 degrees) on a side, so its corners are 1.13
+# degrees from the centre; 1.5 degrees allows for a mount pointing error of
+# a few tenths of a degree and nothing more. Before this limit, a target with
+# no stars of its own was registered against every named star in the catalog,
+# and on 2026-09-24 25 of 69 stored spectra (Albireo, Alnath and M 57 fields)
+# carried the name of a star 6 to 145 degrees away.
+REGISTRATION_REFERENCE_FIELD_RADIUS_DEG = 1.5
 
 
 def _recover_extended_source_hint(
@@ -94,7 +106,74 @@ def _recover_extended_source_hint(
     )
 
 
-def _registration_reference_candidates(target: Target, catalog_access: Any) -> list:
+def _field_center_for_registration(
+    stack_path: str, hint_ra: float | None, hint_dec: float | None
+) -> tuple[float, float] | None:
+    """Find roughly where on the sky a spectral stack points.
+
+    Prefers the plate-solved position hint; otherwise reads the mount's
+    ``RA`` and ``DEC`` (decimal degrees) from the stack's FITS header.
+
+    Parameters
+    ----------
+    stack_path : `str`
+        The spectral stack.
+    hint_ra : `float` or `None`
+        The solved-stack right ascension in decimal degrees, if any.
+    hint_dec : `float` or `None`
+        The solved-stack declination in decimal degrees, if any.
+
+    Returns
+    -------
+    center : `tuple` [`float`, `float`] or `None`
+        The `(ra, dec)` in decimal degrees, or `None` when neither source
+        has a usable position.
+    """
+    if hint_ra is not None and hint_dec is not None:
+        return float(hint_ra), float(hint_dec)
+    from astrometricslib.drivers.fits_access import read_header
+
+    try:
+        header = read_header(stack_path)
+        return float(header["RA"]), float(header["DEC"])
+    except OSError, KeyError, TypeError, ValueError:
+        return None
+
+
+def _within_field(stellar_object: Any, field_center: tuple[float, float] | None) -> bool:
+    """Tell whether a catalog star lies inside the frame's part of the sky.
+
+    Parameters
+    ----------
+    stellar_object : `StellarObject`
+        The star to test.
+    field_center : `tuple` [`float`, `float`] or `None`
+        The frame centre `(ra, dec)` in decimal degrees. `None` means the
+        centre is unknown, so no star is ruled out.
+
+    Returns
+    -------
+    is_inside : `bool`
+        `False` for a star with no sky position when a centre is known,
+        because it cannot be checked.
+    """
+    if field_center is None:
+        return True
+    if stellar_object.right_ascension is None or stellar_object.declination is None:
+        return False
+    ra_star = np.radians(float(stellar_object.right_ascension))
+    dec_star = np.radians(float(stellar_object.declination))
+    ra_center, dec_center = np.radians(field_center[0]), np.radians(field_center[1])
+    cosine_separation = np.sin(dec_star) * np.sin(dec_center) + np.cos(dec_star) * np.cos(
+        dec_center
+    ) * np.cos(ra_star - ra_center)
+    separation_deg = float(np.degrees(np.arccos(np.clip(cosine_separation, -1.0, 1.0))))
+    return separation_deg <= REGISTRATION_REFERENCE_FIELD_RADIUS_DEG
+
+
+def _registration_reference_candidates(
+    target: Target, catalog_access: Any, field_center: tuple[float, float] | None = None
+) -> list:
     """Collect the stars a spectral field can register its identity against.
 
     `identify_spectral_stars_via_registration` needs a reference set of
@@ -126,19 +205,27 @@ def _registration_reference_candidates(target: Target, catalog_access: Any) -> l
         set to stars this target's own astrometry pass already found.
     catalog_access : `Any`
         Provides the read of `stellar_catalog`.
+    field_center : `tuple` [`float`, `float`], optional
+        Where the spectral frame points, `(ra, dec)` in decimal degrees.
+        Only stars within `REGISTRATION_REFERENCE_FIELD_RADIUS_DEG` of it
+        are kept, from both the own-target set and the fallback set: a
+        target's recorded stars can include ones an earlier bad run
+        attached to it, and registration matches by pixel geometry alone,
+        so a star from another part of the sky can be handed to a spectral
+        star that is really something else.
 
     Returns
     -------
     candidates : `list` [`StellarObject`]
-        This target's own catalog-identified stars if any exist,
-        otherwise every catalog-identified star in the catalog. A star
+        This target's own catalog-identified stars in the field if any
+        exist, otherwise every catalog-identified star in the field. A star
         with no normal-image pixel position is skipped later by the
         registration itself.
     """
     catalog_identified = [
         stellar_object
         for stellar_object in catalog_access.get("stellar_catalog", {})
-        if stellar_object.is_catalog_identified
+        if stellar_object.is_catalog_identified and _within_field(stellar_object, field_center)
     ]
     own_target_stars = [
         stellar_object for stellar_object in catalog_identified if target.id in stellar_object.target_ids
@@ -223,7 +310,8 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
         # instances spectroscopy.process() mutates next, so it
         # doesn't matter that most of them won't end up with a
         # spectrum extracted.
-        reference_stellar_objects = _registration_reference_candidates(target, catalog_access)
+        field_center = _field_center_for_registration(request.path, hint_ra, hint_dec)
+        reference_stellar_objects = _registration_reference_candidates(target, catalog_access, field_center)
         if reference_stellar_objects:
             from astrometricslib.pipelines.astrometry.spectral_star_registration import (
                 identify_spectral_stars_via_registration,

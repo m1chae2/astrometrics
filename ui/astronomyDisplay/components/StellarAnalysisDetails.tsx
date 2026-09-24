@@ -7,6 +7,7 @@
 import React, { useState } from 'react';
 import '../styles/astronomyDisplay.css';
 import {
+    describeEmissionLineVerdict,
     describeFeatureVerdict,
     describeMissingPattern,
     describeTemplateMatch,
@@ -19,7 +20,7 @@ import {
     shortFeatureName,
     splitFeaturesForTable,
 } from '../utils/starDisplayFormat';
-import { SpectralFeatureResult } from '../../common/types/spectralFeatureTypes';
+import { EmissionLineResult, SpectralFeatureResult } from '../../common/types/spectralFeatureTypes';
 
 /** Fewest measurements the Lomb-Scargle period search accepts. Matches the backend analyzer. */
 const MINIMUM_POINTS_FOR_PERIOD_SEARCH = 5;
@@ -130,6 +131,10 @@ export const StellarAnalysisDetails: React.FC<StellarAnalysisDetailsProps> = ({
     const templateMatch = describeTemplateMatch(spectroscopy, astronomyData?.spectralType);
     const spectralCandidates: any[] = spectroscopy?.selfDeterminedSpectralTypeCandidates ?? [];
     const testedFeatures = (spectroscopy?.probableSpectralFeatures ?? []) as SpectralFeatureResult[];
+    // A glowing-gas source (such as a nebula) is described by its emission lines, not by a star type.
+    const emissionLines = (spectroscopy?.emissionLines ?? []) as EmissionLineResult[];
+    const isGlowingGas = spectroscopy?.isEmissionLineSource === true;
+    const listedEmissionLines = emissionLines.filter((line) => line.verdict !== 'not_covered');
     const featureTable = splitFeaturesForTable(testedFeatures);
     // Expect and Present compare with a reference spectrum, so they are only listed when the star has one.
     const showReferenceColumns = hasReferenceExpectations(testedFeatures);
@@ -142,7 +147,7 @@ export const StellarAnalysisDetails: React.FC<StellarAnalysisDetailsProps> = ({
     // any other star, so it is only offered while a star has no result.
     const canAnalyze = !!onAnalyze && pointCount >= MINIMUM_POINTS_FOR_PERIOD_SEARCH && !hasSearchResult;
 
-    if (pointCount === 0 && !measuredSpectralType && testedFeatures.length === 0 && !periodogram && !transitCandidate) {
+    if (pointCount === 0 && !measuredSpectralType && testedFeatures.length === 0 && emissionLines.length === 0 && !periodogram && !transitCandidate) {
         return (
             <div className="stellar-analysis-details__empty">
                 <span>This star has no light curve or classified spectrum to analyze.</span>
@@ -192,7 +197,7 @@ export const StellarAnalysisDetails: React.FC<StellarAnalysisDetailsProps> = ({
                 </div>
             )}
 
-            {measuredSpectralType && (
+            {measuredSpectralType && !isGlowingGas && (
                 <div className="stellar-analysis-details__section">
                     <div className="stellar-analysis-details__section-title">
                         Stellar Classification
@@ -224,6 +229,55 @@ export const StellarAnalysisDetails: React.FC<StellarAnalysisDetailsProps> = ({
                                 <span className="analysis-value">{(Number(candidate.rms) * 100).toFixed(0)}% off</span>
                             </div>
                         ))}
+                    </div>
+                </div>
+            )}
+
+            {isGlowingGas && (
+                <div className="stellar-analysis-details__section">
+                    <div className="stellar-analysis-details__section-title">
+                        Glowing Gas
+                        <InfoTip text="This spectrum is made of bright emission lines, like a nebula, not the smooth glow with dark dips of a star, so no star type is given. The lines are as wide as the object is across, so nearby lines run together and are listed as one blend. Line strengths are not compared, because the red end of the spectrum is not reliable." />
+                    </div>
+                    <div className="stellar-analysis-details__grid">
+                        <div className="analysis-row" title="Two or more emission lines were found well above the noise.">
+                            <span className="analysis-label">Result:</span>
+                            <span className="analysis-value">Emission-line source</span>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {listedEmissionLines.length > 0 && (
+                <div className="stellar-analysis-details__section">
+                    <div className="stellar-analysis-details__section-title">
+                        Emission Lines
+                        <InfoTip text="Bright humps in the spectrum where glowing gas gives off light. Only light below 8,000 Å is used. Hover a result for what it means." />
+                    </div>
+                    <div className="stellar-analysis-details__table-wrapper">
+                        <table className="stellar-analysis-details__table">
+                            <thead>
+                                <tr>
+                                    <th>Line</th>
+                                    <th>Result</th>
+                                    <th title="How many error bars the hump stands above the continuum.">Strength</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {listedEmissionLines.map((line) => {
+                                    const verdictDescription = describeEmissionLineVerdict(line.verdict);
+                                    return (
+                                        <tr key={line.line} className={`feature-row feature-row--${line.verdict}`}>
+                                            <td className="feature-name-cell">{line.line}</td>
+                                            <td title={verdictDescription.explanation}>{verdictDescription.label}</td>
+                                            <td>
+                                                {typeof line.significance === 'number' ? `${line.significance.toFixed(1)}σ` : '–'}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             )}

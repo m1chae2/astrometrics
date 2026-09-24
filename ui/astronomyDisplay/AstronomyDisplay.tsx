@@ -139,7 +139,9 @@ export const AstronomyDisplay: React.FC = () => {
   const [endIdx, setEndIdx] = useState<number>(0);
   const [showFeatures, setShowFeatures] = useState<boolean>(true);
 
-  const hasFeatures = (astronomyData?.spectroscopy?.probableSpectralFeatures?.length ?? 0) > 0;
+  const hasFeatures =
+    (astronomyData?.spectroscopy?.probableSpectralFeatures?.length ?? 0) > 0 ||
+    (astronomyData?.spectroscopy?.emissionLines?.length ?? 0) > 0;
 
   // Reset the selected timestamp range whenever the underlying data
   // changes (e.g. a different star is picked). Gating this on "only if

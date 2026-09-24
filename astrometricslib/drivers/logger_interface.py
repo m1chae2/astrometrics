@@ -8,6 +8,7 @@ emitted log records into that same database.
 
 """
 
+import json
 import logging
 import sqlite3
 from datetime import datetime
@@ -78,9 +79,20 @@ class LoggerInterface:
                     log_file_path TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    completed_at TIMESTAMP
+                    completed_at TIMESTAMP,
+                    input_metrics TEXT,
+                    output_metrics TEXT
                 )
             """)
+
+            # Migration: ensure input_metrics and output_metrics columns
+            # exist on existing databases
+            cursor.execute("PRAGMA table_info(processing_jobs)")
+            cols = {row[1] for row in cursor.fetchall()}
+            if "input_metrics" not in cols:
+                cursor.execute("ALTER TABLE processing_jobs ADD COLUMN input_metrics TEXT")
+            if "output_metrics" not in cols:
+                cursor.execute("ALTER TABLE processing_jobs ADD COLUMN output_metrics TEXT")
 
             # Interaction logging for audit and reflection
             cursor.execute("""
@@ -153,6 +165,9 @@ class LoggerInterface:
 
             now = datetime.now().isoformat()
 
+            input_metrics_json = json.dumps(job.input_metrics) if job.input_metrics else None
+            output_metrics_json = json.dumps(job.output_metrics) if job.output_metrics else None
+
             if exists:
                 cursor.execute(
                     """
@@ -163,7 +178,9 @@ class LoggerInterface:
                         message = ?,
                         log_file_path = ?,
                         updated_at = ?,
-                        completed_at = ?
+                        completed_at = ?,
+                        input_metrics = ?,
+                        output_metrics = ?
                     WHERE id = ?
                 """,
                     (
@@ -174,6 +191,8 @@ class LoggerInterface:
                         job.log_file_path,
                         now,
                         job.completed_at,
+                        input_metrics_json,
+                        output_metrics_json,
                         job.id,
                     ),
                 )
@@ -182,8 +201,9 @@ class LoggerInterface:
                     """
                     INSERT INTO processing_jobs (
                         id, target_id, job_type, status, progress_current,
-                        progress_total, message, log_file_path, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        progress_total, message, log_file_path, created_at, updated_at,
+                        input_metrics, output_metrics
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                     (
                         job.id,
@@ -196,6 +216,8 @@ class LoggerInterface:
                         job.log_file_path,
                         job.created_at or now,
                         now,
+                        input_metrics_json,
+                        output_metrics_json,
                     ),
                 )
 
@@ -402,6 +424,19 @@ class LoggerInterface:
         job : `ProcessingJob`
             Pydantic model constructed from `row`.
         """
+        input_metrics = {}
+        output_metrics = {}
+        if "input_metrics" in row.keys() and row["input_metrics"]:
+            try:
+                input_metrics = json.loads(row["input_metrics"])
+            except Exception:
+                input_metrics = {}
+        if "output_metrics" in row.keys() and row["output_metrics"]:
+            try:
+                output_metrics = json.loads(row["output_metrics"])
+            except Exception:
+                output_metrics = {}
+
         return ProcessingJob(
             id=row["id"],
             target_id=row["target_id"],
@@ -414,6 +449,8 @@ class LoggerInterface:
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             completed_at=row["completed_at"],
+            input_metrics=input_metrics,
+            output_metrics=output_metrics,
         )
 
     # --- Agent LTM Methods ---

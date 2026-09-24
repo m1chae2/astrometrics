@@ -225,6 +225,21 @@ export interface ActionRegistry {
     "sequencer:reorder": { payload: { sequence_ids: string[] }; response: boolean };
     "sequencer:begin": { payload: Record<string, never>; response: void };
     "sequencer:modify": { payload: { sequence_id: string; sequence: SequenceItem }; response: boolean };
+
+    // Terminal, Console & Documentation
+    "terminal:execute": { payload: { code_str: string; source?: string }; response: { status: string; stdout: string; stderr: string; result: any; plots: string[]; execution_time_ms: number; workspace: any[] } };
+    "terminal:get_workspace": { payload: Record<string, never>; response: any[] };
+    "terminal:completions": { payload: { text: string }; response: string[] };
+    "terminal:list_recipes": { payload: Record<string, never>; response: Array<{ id: string; name: string; filename: string; category: string; description: string; size_bytes: number }> };
+    "terminal:get_recipe": { payload: { recipe_id: string }; response: { id: string; filename: string; code: string } };
+    "terminal:list_scripts": { payload: Record<string, never>; response: Array<{ id: string; name: string; filename: string; size_bytes: number; modified_at: number }> };
+    "terminal:read_script": { payload: { filename: string }; response: { filename: string; code: string } };
+    "terminal:save_script": { payload: { filename: string; content: string }; response: { filename: string; size_bytes: number; status: string } };
+    "terminal:load_run": { payload: { job_id: string }; response: { job_id: string; job_type: string; target_name?: string; injected_variables: string[] } };
+    "docs:list_topics": { payload: Record<string, never>; response: Array<{ id: string; title: string; path: string; category: string }> };
+    "docs:get_topic": { payload: { topic_id: string }; response: { id: string; title: string; content: string } };
+    "ui:editor_get": { payload: Record<string, never>; response: { code: string } };
+    "ui:editor_set": { payload: { code_content: string }; response: { status: string; length: number } };
 }
 
 /**

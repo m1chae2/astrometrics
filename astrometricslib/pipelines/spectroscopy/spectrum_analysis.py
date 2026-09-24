@@ -3,15 +3,20 @@
 Both the spectroscopy pipeline (when a spectrum is first extracted) and
 the recompute script (when stored spectra are re-analyzed) need the same
 steps: remove the instrument's tilt, compare with the reference spectra,
-and test for the named absorption features. Keeping them here means the
-two can never drift apart.
+and test for the named absorption features and emission lines. Keeping
+them here means the two can never drift apart.
 """
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
+from astrometricslib.pipelines.spectroscopy.emission_line_detector import (
+    detect_emission_lines,
+    is_emission_line_source,
+    line_half_width_angstrom,
+)
 from astrometricslib.pipelines.spectroscopy.instrument_response import (
     apply_instrument_response,
     load_instrument_response,
@@ -60,6 +65,14 @@ class SpectrumAnalysis:
     resolution_element_angstrom: float
     is_resolution_measured: bool
     signal_to_noise: float | None = None
+    emission_lines: list[dict[str, object]] = field(default_factory=list)
+    is_emission_line_source: bool = False
+
+
+# The `stellar_spectral_type` label given to extended objects (clusters
+# and nebulae; their `spectral_type` keeps the object kind, for example
+# "PN"). Callers use it to set `is_extended_target`.
+EXTENDED_TARGET_SPECTRAL_TYPE = "Cluster"
 
 
 def analyze_spectrum(
@@ -69,6 +82,8 @@ def analyze_spectrum(
     is_quantum_efficiency_corrected: bool,
     catalog_spectral_type: str | None = None,
     trail_width_px: Sequence[float] | None = None,
+    extraction_box_width_px: float | None = None,
+    is_extended_target: bool = False,
 ) -> SpectrumAnalysis:
     """Classify a spectrum and test it for the named absorption features.
 
@@ -95,11 +110,25 @@ def analyze_spectrum(
         sample, lined up one to one with `wavelength_angstrom`. It gives
         this spectrum's own resolution (see `spectral_resolution`); when
         it is missing or unusable, a fixed fallback resolution is used.
+    extraction_box_width_px : `float`, optional
+        The width, in pixels, of the box the spectrum was extracted from.
+        It sets how wide the emission lines are expected to be (see
+        `line_half_width_angstrom`); without it the lines are taken to be
+        as narrow as the instrument blur, which suits a point source.
+    is_extended_target : `bool`, optional
+        Whether the catalog says this is an extended object (its
+        `stellar_spectral_type` is `EXTENDED_TARGET_SPECTRAL_TYPE`). Only
+        such targets have their stellar classification replaced when
+        emission lines are found; an ordinary star's never is.
 
     Returns
     -------
     analysis : `SpectrumAnalysis`
-        The classification and the feature results.
+        The classification, the feature results and the emission lines.
+        When `is_extended_target` is set and the
+        spectrum is an emission-line source, the stellar classification is
+        replaced by an "Unknown" result saying so and the absorption
+        features are left empty, since neither describes glowing gas.
     """
     wavelength_angstrom = np.asarray(wavelength_angstrom, dtype=float)
     intensity = np.asarray(intensity, dtype=float)
@@ -129,6 +158,32 @@ def analyze_spectrum(
             resolution_element_angstrom,
             is_resolution_measured,
             signal_to_noise,
+        )
+
+    half_width_angstrom = (
+        line_half_width_angstrom(wavelength_angstrom, extraction_box_width_px)
+        if extraction_box_width_px is not None
+        else resolution_element_angstrom
+    )
+    emission_lines = detect_emission_lines(
+        wavelength_angstrom,
+        intensity,
+        max(half_width_angstrom, resolution_element_angstrom),
+        resolution_element_angstrom=resolution_element_angstrom,
+    )
+    is_emission_source = is_emission_line_source(emission_lines)
+    if is_emission_source and is_extended_target:
+        return SpectrumAnalysis(
+            unclassified_result(
+                "glowing gas: the spectrum is made of emission lines, so a stellar type does not apply"
+            ),
+            [],
+            False,
+            resolution_element_angstrom,
+            is_resolution_measured,
+            signal_to_noise,
+            emission_lines,
+            True,
         )
 
     response = load_instrument_response(camera_name) if is_quantum_efficiency_corrected else None
@@ -168,4 +223,6 @@ def analyze_spectrum(
         resolution_element_angstrom,
         is_resolution_measured,
         signal_to_noise,
+        emission_lines,
+        is_emission_source,
     )

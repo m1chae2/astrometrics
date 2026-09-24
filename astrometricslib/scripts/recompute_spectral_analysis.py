@@ -36,7 +36,10 @@ import numpy as np
 
 from astrometricslib import Astrometrics
 from astrometricslib.models.stellar_source import SpectralObservation, StellarObject
-from astrometricslib.pipelines.spectroscopy.spectrum_analysis import analyze_spectrum
+from astrometricslib.pipelines.spectroscopy.spectrum_analysis import (
+    EXTENDED_TARGET_SPECTRAL_TYPE,
+    analyze_spectrum,
+)
 from astrometricslib.scripts.reconcile_position_only_star_catalog import _backup_catalog_database
 
 logger = logging.getLogger(__name__)
@@ -201,6 +204,8 @@ def recompute_star(
         spectroscopy.self_determined_spectral_type_note = "too little of the spectrum was measured"
         spectroscopy.self_determined_spectral_type_candidates = []
         spectroscopy.probable_spectral_features = []
+        spectroscopy.emission_lines = []
+        spectroscopy.is_emission_line_source = False
         return True
 
     analysis = analyze_spectrum(
@@ -213,8 +218,16 @@ def recompute_star(
         camera_name,
         is_quantum_efficiency_corrected=bool(spectroscopy.quantum_efficiency_corrected_intensities),
         catalog_spectral_type=star.spectral_type,
+        is_extended_target=star.stellar_spectral_type == EXTENDED_TARGET_SPECTRAL_TYPE,
         trail_width_px=spectroscopy.trail_width_px,
+        extraction_box_width_px=(
+            float(spectroscopy.rectangle[3])
+            if spectroscopy.rectangle is not None and len(spectroscopy.rectangle) > 3
+            else None
+        ),
     )
+    spectroscopy.emission_lines = analysis.emission_lines
+    spectroscopy.is_emission_line_source = analysis.is_emission_line_source
     spectroscopy.resolution_element_angstrom = (
         analysis.resolution_element_angstrom if analysis.is_resolution_measured else None
     )

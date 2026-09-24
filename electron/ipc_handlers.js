@@ -61,6 +61,28 @@ export function registerIpcHandlers(
     }
   });
 
+  // Save-file dialog
+  ipcMain.handle('dialog-save-file', async (event, options) => {
+    const dialogOptions = typeof options === 'object' && options ? options : {};
+    try {
+      const result = await dialog.showSaveDialog(mainWindow || undefined, dialogOptions);
+      if (result.canceled) return null;
+      return result.filePath;
+    } catch (error) {
+      console.warn('dialog-save-file failed:', error);
+      return null;
+    }
+  });
+
+  // Open Matplotlib figure window
+  ipcMain.handle('open-figure-window', (_event, plotPath) => {
+    if (typeof windowCoordinator.createFigureWindow === 'function') {
+      const win = windowCoordinator.createFigureWindow(plotPath);
+      return { windowId: win.id };
+    }
+    return null;
+  });
+
   // Open new display window
   ipcMain.handle('open-display-window', (_event, options) => {
     if (typeof windowCoordinator.createDisplayWindow === 'function') {

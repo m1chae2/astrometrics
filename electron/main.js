@@ -341,6 +341,7 @@ async function createMainWindow() {
       closeSecondaryWindow,
       setWindowMode,
       windowModes,
+      createFigureWindow,
     },
     platform,
     pythonTerminalManager
@@ -454,6 +455,61 @@ function createDisplayWindow(options = {}) {
 }
 
 /**
+ * Creates an independent pop-up figure window for Matplotlib plots.
+ *
+ * @param {string} plotPath Filesystem path to the saved PNG figure.
+ * @returns {BrowserWindow}
+ */
+function createFigureWindow(plotPath) {
+  const figureWin = new BrowserWindow({
+    width: 720,
+    height: 560,
+    title: 'Astrometrics Figure',
+    backgroundColor: '#0a0d14',
+    icon: getAppPath('assets', 'orbit.png'),
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+    },
+  });
+
+  figureWin.setMenuBarVisibility(false);
+  const fileUrl = `file://${plotPath}`;
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Astrometrics Figure</title>
+        <style>
+          body {
+            margin: 0;
+            padding: 0;
+            background-color: #0a0d14;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: auto;
+          }
+          img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+            border-radius: 4px;
+          }
+        </style>
+      </head>
+      <body>
+        <img src="${fileUrl}" alt="Figure" />
+      </body>
+    </html>
+  `;
+  figureWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
+  return figureWin;
+}
+
+/**
  * Creates or focuses the secondary window for dual-screen setups.
  *
  * Functions identically to the main window but doesn't handle the backend
@@ -538,7 +594,8 @@ function updateTrayMenu(status = {}) {
         { label: 'Planetarium', click: () => navigateTo('Planetarium') },
         { label: 'Image Processing', click: () => navigateTo('Image Processing') },
         { label: 'Observatory Manager', click: () => navigateTo('Observatory Manager') },
-        { label: 'Observation Manager', click: () => navigateTo('Observation Manager') }
+        { label: 'Observation Manager', click: () => navigateTo('Observation Manager') },
+        { label: 'Command Console', click: () => navigateTo('Command Console') }
       ]
     },
     {

@@ -5,6 +5,8 @@ tracking in memory and within the storage layer, within the
 Astrometrics ecosystem.
 """
 
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -52,6 +54,8 @@ class ProcessingJob(BaseModel):
     created_at: str | None = Field(None, alias="createdAt")
     updated_at: str | None = Field(None, alias="updatedAt")
     completed_at: str | None = Field(None, alias="completedAt")
+    input_metrics: dict[str, Any] | None = Field(default_factory=dict, alias="inputMetrics")
+    output_metrics: dict[str, Any] | None = Field(default_factory=dict, alias="outputMetrics")
 
 
 class ProcessStatus(BaseModel):

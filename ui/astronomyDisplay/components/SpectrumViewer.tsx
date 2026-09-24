@@ -11,12 +11,13 @@ import { BasePlot } from '../../common/components/plotting/BasePlot';
 import '../styles/astronomyViewer.css';
 
 import { Spectrum, SpectralObservation } from '../../common/types/backendTypes';
-import { SpectralFeatureResult } from '../../common/types/spectralFeatureTypes';
+import { EmissionLineResult, SpectralFeatureResult } from '../../common/types/spectralFeatureTypes';
 import {
     assignLabelRows,
     formatFalseAlarmProbability,
     inconclusiveFeatures,
     shortFeatureName,
+    emissionLineMarks,
     significantFeatures,
 } from '../utils/starDisplayFormat';
 
@@ -126,10 +127,15 @@ export const SpectrumViewer: React.FC<Props> = ({
         () => inconclusiveFeatures(testedSpectralFeatures),
         [testedSpectralFeatures]
     );
+    // Detected and unclear emission lines (glowing-gas sources) are marked the same way as absorption features.
+    const emissionLineMarkers = useMemo(
+        () => emissionLineMarks((astronomyData?.spectroscopy?.emissionLines ?? []) as EmissionLineResult[]),
+        [astronomyData]
+    );
     // Green and red lines share one drawing path below; they differ only in color and wording.
     const markedSpectralFeatures = useMemo(
-        () => [...probableSpectralFeatures, ...inconclusiveSpectralFeatures],
-        [probableSpectralFeatures, inconclusiveSpectralFeatures]
+        () => [...probableSpectralFeatures, ...inconclusiveSpectralFeatures, ...emissionLineMarkers],
+        [probableSpectralFeatures, inconclusiveSpectralFeatures, emissionLineMarkers]
     );
 
     const plotData: PlotlyTrace[] = useMemo(() => {
@@ -323,7 +329,7 @@ export const SpectrumViewer: React.FC<Props> = ({
     }
 
     const hasEpochs = Array.isArray(astronomyData?.spectraHistory) && (astronomyData?.spectraHistory?.length ?? 0) > 1;
-    const hasFeatures = testedSpectralFeatures.length > 0;
+    const hasFeatures = testedSpectralFeatures.length > 0 || emissionLineMarkers.length > 0;
     const hasInternalFeaturesButton = hasFeatures && !onToggleFeatures;
     const showToolbar = hasEpochs || hasInternalFeaturesButton;
 

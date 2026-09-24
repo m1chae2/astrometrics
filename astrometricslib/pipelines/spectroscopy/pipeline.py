@@ -25,7 +25,10 @@ from astrometricslib.pipelines.spectroscopy.second_order_risk import compute_sec
 from astrometricslib.pipelines.spectroscopy.spectroscopy_instrument import (
     SpectroscopyInstrument,
 )
-from astrometricslib.pipelines.spectroscopy.spectrum_analysis import analyze_spectrum
+from astrometricslib.pipelines.spectroscopy.spectrum_analysis import (
+    EXTENDED_TARGET_SPECTRAL_TYPE,
+    analyze_spectrum,
+)
 from astrometricslib.pipelines.spectroscopy.spectrum_calibrator import SpectrumCalibrator
 from astrometricslib.pipelines.spectroscopy.spectrum_extractor import SpectrumExtractor
 from astrometricslib.utilities import SpectroscopyConfig
@@ -807,6 +810,14 @@ class SpectroscopyPipeline:
                 curve=quantum_efficiency_curve,
             ).tolist()
 
+        # Compute the visual overlay rectangle and total rotated
+        # dispersion angle
+        rectangle, dispersion_angle = self._dispersion_overlay_geometry(
+            result["target_pos"],
+            result.get("extraction_radius", self.config.extraction_radius),
+            dispersion_angle_degrees=result["detected_angle"],
+        )
+
         # Classify and test features on the QE-corrected spectrum when
         # available -- it better reflects the star's true color than raw
         # sensor counts.
@@ -820,18 +831,12 @@ class SpectroscopyPipeline:
             self.config.camera.name,
             is_quantum_efficiency_corrected=quantum_efficiency_corrected_intensities is not None,
             catalog_spectral_type=star.spectral_type,
+            is_extended_target=star.stellar_spectral_type == EXTENDED_TARGET_SPECTRAL_TYPE,
             trail_width_px=result.get("trail_width_px"),
+            extraction_box_width_px=float(rectangle[3]) if rectangle is not None else None,
         )
         classification = analysis.classification
         probable_spectral_features = analysis.features
-
-        # Compute the visual overlay rectangle and total rotated
-        # dispersion angle
-        rectangle, dispersion_angle = self._dispersion_overlay_geometry(
-            result["target_pos"],
-            result.get("extraction_radius", self.config.extraction_radius),
-            dispersion_angle_degrees=result["detected_angle"],
-        )
 
         star.spectroscopy = SpectroscopyResult(
             wavelengths_angstrom=wavelengths_angstrom,
@@ -843,6 +848,8 @@ class SpectroscopyPipeline:
             self_determined_spectral_type_note=classification.get("reason") or "",
             self_determined_spectral_type_candidates=classification["ranked_types"],
             probable_spectral_features=probable_spectral_features,
+            emission_lines=analysis.emission_lines,
+            is_emission_line_source=analysis.is_emission_line_source,
             star_position_px=[float(result["target_pos"][0]), float(result["target_pos"][1])],
             requested_wavelength_range_angstrom=(
                 [float(value) * 10.0 for value in result["requested_wavelength_range_nm"]]

@@ -5,6 +5,8 @@
 import { describe, expect, it } from 'vitest';
 import {
     buildStarListSubtitle,
+    describeEmissionLineVerdict,
+    emissionLineMarks,
     formatCatalogMagnitude,
     formatCoordinateDegrees,
     formatStarListLabel,
@@ -416,5 +418,36 @@ describe('formatPeriod', () => {
         expect(formatPeriod(2.345)).toBe('2.35 d');
         expect(formatPeriod(0)).toBe('n/a');
         expect(formatPeriod(undefined)).toBe('n/a');
+    });
+});
+
+describe('emissionLineMarks', () => {
+    const line = (verdict: string, wavelengths: number[]) =>
+        ({
+            line: 'blend',
+            members: [],
+            rest_wavelengths_angstrom: wavelengths,
+            is_blend: true,
+            second_order_ghost_angstrom: 0,
+            verdict,
+            significance: 6,
+        }) as never;
+
+    it('marks only detected and unclear lines, at the mean rest wavelength', () => {
+        const marks = emissionLineMarks([line('detected', [4959, 5007]), line('unclear', [6563]), line('not_seen', [7136])]);
+        expect(marks.map((mark) => mark.verdict)).toEqual(['detected', 'possible']);
+        expect(marks[0].wavelength_angstrom).toBeCloseTo(4983);
+    });
+
+    it('copes with no lines', () => {
+        expect(emissionLineMarks(undefined)).toEqual([]);
+    });
+});
+
+describe('describeEmissionLineVerdict', () => {
+    it('labels each verdict', () => {
+        expect(describeEmissionLineVerdict('detected').label).toBe('Detected');
+        expect(describeEmissionLineVerdict('not_seen').label).toBe('Not seen');
+        expect(describeEmissionLineVerdict('odd').label).toBe('odd');
     });
 });

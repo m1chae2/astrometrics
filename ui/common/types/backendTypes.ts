@@ -244,6 +244,8 @@ export interface SpectroscopyResult {
   selfDeterminedSpectralTypeNote?: string;
   selfDeterminedSpectralTypeCandidates?: Record<string, any>[];
   probableSpectralFeatures?: Record<string, any>[];
+  emissionLines?: Record<string, any>[];
+  isEmissionLineSource?: boolean;
   starPositionPx?: number[] | null;
   requestedWavelengthRangeAngstrom?: number[] | null;
   validFraction?: number | null;
@@ -449,6 +451,8 @@ export interface ProcessingJob {
   createdAt?: string | null;
   updatedAt?: string | null;
   completedAt?: string | null;
+  inputMetrics?: Record<string, any> | null;
+  outputMetrics?: Record<string, any> | null;
 }
 
 /**

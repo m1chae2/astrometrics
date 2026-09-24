@@ -542,7 +542,7 @@ async def tool_electron_run_python(code: str) -> dict[str, Any]:
         plots, execution time in milliseconds, and active workspace
         manifest.
     """
-    res = await execute_rpc("terminal:execute", {"code_str": code})
+    res = await execute_rpc("terminal:execute", {"code_str": code, "source": "agent"})
     if res.get("status") == "success" and "data" in res:
         return res["data"]
     return res
@@ -618,6 +618,7 @@ async def tool_terminal_inspect_api(target: str) -> dict[str, Any]:
                     "Observatory",
                     "Image Processing",
                     "Observation Manager",
+                    "Command Console",
                 ],
                 "description": "Target workspace mode.",
             },
@@ -677,3 +678,74 @@ async def tool_ui_inspect_variable(variable_name: str) -> dict[str, Any]:
     """
     await execute_rpc("ui:inspect_variable", {"variable_name": variable_name})
     return {"status": "success", "variable_name": variable_name}
+
+
+@registry.register(
+    "docs_get",
+    "Read repository documentation and guides (same topics available in Command Console Doc Viewer).",
+    {
+        "type": "object",
+        "properties": {
+            "topic_id": {
+                "type": "string",
+                "description": "Relative documentation topic ID or file path (e.g. 'Getting_Started.md').",
+            },
+        },
+        "required": ["topic_id"],
+    },
+)
+async def tool_docs_get(topic_id: str) -> dict[str, Any]:
+    """Retrieve markdown documentation topic content.
+
+    Parameters
+    ----------
+    topic_id : `str`
+        Documentation path or identifier.
+
+    Returns
+    -------
+    result : `dict[str, Any]`
+        Documentation topic content and title.
+    """
+    res = await execute_rpc("docs:get_topic", {"topic_id": topic_id})
+    if res.get("status") == "success" and "data" in res:
+        return res["data"]
+    return res
+
+
+@registry.register(
+    "ui_editor_sync",
+    "Read or update the active code buffer in the Command Console Code Editor.",
+    {
+        "type": "object",
+        "properties": {
+            "code": {
+                "type": "string",
+                "description": "Optional code to set in editor. If omitted, returns current editor code.",
+            },
+        },
+    },
+)
+async def tool_ui_editor_sync(code: str | None = None) -> dict[str, Any]:
+    """Sync code with the Command Console editor.
+
+    Parameters
+    ----------
+    code : `str`, optional
+        Code to push to editor.
+
+    Returns
+    -------
+    result : `dict[str, Any]`
+        Current or updated editor code status.
+    """
+    if code is not None:
+        res = await execute_rpc("ui:editor_set", {"code_content": code})
+        if res.get("status") == "success" and "data" in res:
+            return res["data"]
+        return res
+
+    res = await execute_rpc("ui:editor_get", {})
+    if res.get("status") == "success" and "data" in res:
+        return res["data"]
+    return res

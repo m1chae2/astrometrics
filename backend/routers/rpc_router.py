@@ -122,6 +122,16 @@ class RPCHandlerRegistry:
         self.register("terminal:execute", ("scripting_service", "execute_structured"))
         self.register("terminal:get_workspace", ("scripting_service", "get_workspace_manifest"))
         self.register("terminal:completions", ("scripting_service", "get_completions"))
+        self.register("terminal:list_recipes", ("scripting_service", "list_recipes"))
+        self.register("terminal:get_recipe", ("scripting_service", "get_recipe"))
+        self.register("terminal:list_scripts", ("scripting_service", "list_user_scripts"))
+        self.register("terminal:read_script", ("scripting_service", "read_user_script"))
+        self.register("terminal:save_script", ("scripting_service", "save_user_script"))
+        self.register("terminal:load_run", ("scripting_service", "load_job_into_scope"))
+        self.register("docs:list_topics", ("scripting_service", "list_doc_topics"))
+        self.register("docs:get_topic", ("scripting_service", "get_doc_topic"))
+        self.register("ui:editor_get", ("scripting_service", "get_editor_buffer"))
+        self.register("ui:editor_set", ("scripting_service", "set_editor_buffer"))
         self.register(
             "ui:navigate",
             lambda mode, target=None: container.socket_manager.broadcast_ui_event_sync(

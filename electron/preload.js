@@ -204,6 +204,24 @@ const api = {
 		 */
 		async openFile(options) {
 			return ipcRenderer.invoke('dialog-open-file', options);
+		},
+
+		/**
+		 * Show a save-file dialog with the specified options.
+		 * @param {Object} [options] Electron showSaveDialog options.
+		 * @returns {Promise<string|null>} Resolves to selected file path or null if cancelled.
+		 */
+		async saveFile(options) {
+			return ipcRenderer.invoke('dialog-save-file', options);
+		},
+
+		/**
+		 * Open an independent pop-up figure window for a Matplotlib plot.
+		 * @param {string} plotPath Path to PNG figure file.
+		 * @returns {Promise<{ windowId: number }|null>}
+		 */
+		async openFigureWindow(plotPath) {
+			return ipcRenderer.invoke('open-figure-window', plotPath);
 		}
 	},
 	tray: {
@@ -295,6 +313,7 @@ const api = {
 // Freeze surface to prevent tampering from renderer scripts.
 Object.freeze(api);
 Object.freeze(api.app);
+Object.freeze(api.dialog);
 Object.freeze(api.tray);
 Object.freeze(api.terminal);
 

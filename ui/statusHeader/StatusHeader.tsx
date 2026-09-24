@@ -86,6 +86,7 @@ export const StatusHeader: React.FC = () => {
   const availableModes = [
     'Image Viewer',
     'Image Processing',
+    'Command Console',
     ...(config['Frontend']?.['enable_astronomy'] === 'true' ? ['Astronomy Manager'] : []),
     ...(config['Frontend']?.['enable_planetarium'] === 'true' ? ['Planetarium'] : []),
     ...(config['Frontend']?.['enable_observatory'] === 'true' ? ['Observatory Manager'] : []),

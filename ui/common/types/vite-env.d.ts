@@ -36,6 +36,16 @@ interface Window {
     };
     dialog: {
       openFile: (options?: any) => Promise<string[] | null>;
+      saveFile?: (options?: any) => Promise<string | null>;
+      openFigureWindow?: (plotPath: string) => Promise<{ windowId: number } | null>;
+    };
+    terminal?: {
+      executeScript: (code: string, options?: any) => Promise<any>;
+      getWorkspace: () => Promise<any[]>;
+      getCompletions: (text: string) => Promise<string[]>;
+      onOutput: (callback: (chunk: { stdout?: string; stderr?: string }) => void) => () => void;
+      onFigure: (callback: (plotPath: string) => void) => () => void;
+      onWorkspaceUpdated: (callback: (workspace: any[]) => void) => () => void;
     };
     tray: {
       /**

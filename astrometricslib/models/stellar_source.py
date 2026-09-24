@@ -209,6 +209,12 @@ class SpectroscopyResult(BaseModel):
     probable_spectral_features: list[dict[str, Any]] = Field(
         default_factory=list, alias="probableSpectralFeatures"
     )
+    # Named emission lines (or blends of lines) found in this spectrum, most
+    # convincing first -- see emission_line_detector.detect_emission_lines.
+    emission_lines: list[dict[str, Any]] = Field(default_factory=list, alias="emissionLines")
+    # True when at least two emission lines or blends were detected, so the
+    # spectrum looks like glowing gas rather than a star.
+    is_emission_line_source: bool = Field(default=False, alias="isEmissionLineSource")
     # Where the star's zero-order image sits, as an (x, y) pixel pair, in
     # the spectroscopy image. `StellarObject.star_data` holds the star's
     # position in the normal (astrometry) image, and the two pictures

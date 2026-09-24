@@ -49,6 +49,11 @@ const PlanetariumDisplay = React.lazy(() =>
     default: m.PlanetariumDisplay,
   }))
 );
+const CommandConsole = React.lazy(() =>
+  import('./commandConsole/CommandConsole').then((m) => ({
+    default: m.CommandConsole,
+  }))
+);
 
 /**
  * Profiler callback — dev only. React strips onRender calls in production builds.
@@ -80,6 +85,7 @@ const MODE_PANELS: { mode: string; id: string; Component: React.ComponentType }[
   { mode: 'Image Processing', id: 'ImageProcessingDisplay', Component: ImageProcessingDisplay },
   { mode: 'Observatory Manager', id: 'ObservatoryDisplay', Component: ObservatoryDisplay },
   { mode: 'Observation Manager', id: 'ObservationManager', Component: ObservationManager },
+  { mode: 'Command Console', id: 'CommandConsole', Component: CommandConsole },
 ];
 
 const normalizeAppMode = (m: string): string => {

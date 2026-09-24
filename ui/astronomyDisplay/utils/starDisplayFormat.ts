@@ -5,7 +5,7 @@
  */
 
 import { PhotometryResult, SpectroscopyResult } from '../../common/types/backendTypes';
-import { SpectralFeatureResult } from '../../common/types/spectralFeatureTypes';
+import { EmissionLineResult, SpectralFeatureResult } from '../../common/types/spectralFeatureTypes';
 
 /** Prefix of an id given to a star found in an image but never matched to a catalog. */
 const POSITION_ONLY_STAR_ID_PATTERN = /^FIELD_J(-?\d+(?:\.\d+)?)([+-]\d+(?:\.\d+)?)$/;
@@ -598,4 +598,52 @@ export function formatPeriod(periodDays: number | null | undefined): string {
     if (periodMinutes < 90) return `${periodMinutes.toFixed(1)} min`;
     if (periodDays < 2) return `${(periodDays * 24).toFixed(1)} h`;
     return `${periodDays.toFixed(2)} d`;
+}
+
+
+/**
+ * Describes an emission-line verdict for a table cell.
+ * @param verdict The backend's verdict for one line or blend.
+ * @returns A short label and a plain-language explanation.
+ */
+export function describeEmissionLineVerdict(verdict: string | null | undefined): FeatureVerdictDescription {
+    switch (verdict) {
+        case 'detected':
+            return {
+                label: 'Detected',
+                explanation: 'The hump is at least 5 error bars above the continuum. Very likely real.',
+            };
+        case 'unclear':
+            return {
+                label: 'Unclear',
+                explanation: 'The hump is 3 to 5 error bars above the continuum. It could be noise.',
+            };
+        case 'not_seen':
+            return { label: 'Not seen', explanation: 'No hump worth reporting here.' };
+        case 'not_covered':
+            return { label: 'No data', explanation: 'The spectrum does not reach this line.' };
+        default:
+            return { label: verdict ?? '', explanation: '' };
+    }
+}
+
+/**
+ * Turns the detected and unclear emission lines into markers the spectrum plot can draw
+ * the same way as absorption features.
+ * @param emissionLines Every tested emission line or blend.
+ * @returns One marker per detected or unclear entry, placed at the mean of its lines' rest wavelengths.
+ */
+export function emissionLineMarks(emissionLines: EmissionLineResult[] | null | undefined): SpectralFeatureResult[] {
+    return (emissionLines ?? [])
+        .filter((entry) => entry.verdict === 'detected' || entry.verdict === 'unclear')
+        .map((entry) => {
+            const wavelengths = entry.rest_wavelengths_angstrom ?? [];
+            const meanWavelength = wavelengths.reduce((sum, value) => sum + value, 0) / Math.max(wavelengths.length, 1);
+            return {
+                feature: entry.line,
+                wavelength_angstrom: meanWavelength,
+                verdict: entry.verdict === 'detected' ? 'detected' : 'possible',
+                significance: entry.significance,
+            } as SpectralFeatureResult;
+        });
 }

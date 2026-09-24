@@ -1,5 +1,5 @@
 /**
- * Types for the absorption-feature tests on a spectrum.
+ * Types for the absorption-feature and emission-line tests on a spectrum.
  *
  * `SpectroscopyResult.probableSpectralFeatures` is a list of plain objects
  * on the Python side, so the code generator can only type it as
@@ -38,4 +38,36 @@ export interface SpectralFeatureResult {
   expected_depth?: number | null;
   /** A model-based chance the line is present, or null without a reference type. */
   probability_present?: number | null;
+}
+
+/**
+ * What the test for one emission line (or blend of lines) concluded. "unclear" means a hump was
+ * measured but is not far enough above the noise to call real.
+ */
+export type EmissionLineVerdict = 'detected' | 'unclear' | 'not_seen' | 'not_covered';
+
+/**
+ * The result of testing one emission line, or one blend of lines too close to tell apart, in a
+ * glowing-gas spectrum. Produced by `emission_line_detector.py` and stored in
+ * `SpectroscopyResult.emissionLines`.
+ */
+export interface EmissionLineResult {
+  /** The display name; blends join their lines with " / ". */
+  line: string;
+  /** The named lines this entry stands for. */
+  members: string[];
+  /** The rest wavelengths of those lines, in Angstroms. */
+  rest_wavelengths_angstrom: number[];
+  /** Whether more than one named line is inside this entry. */
+  is_blend: boolean;
+  /** Where this entry's second-order copy would land, in Angstroms. It is not fitted. */
+  second_order_ghost_angstrom: number;
+  /** What the test concluded. */
+  verdict: EmissionLineVerdict;
+  /** Height above the continuum, in the spectrum's own units. Missing when not covered. */
+  amplitude?: number;
+  /** The one-sigma uncertainty of the amplitude. */
+  amplitude_uncertainty?: number;
+  /** Amplitude divided by its uncertainty. */
+  significance?: number;
 }

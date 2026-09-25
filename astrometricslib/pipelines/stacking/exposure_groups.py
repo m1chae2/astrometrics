@@ -43,6 +43,10 @@ from typing import Any
 import numpy as np
 
 from astrometricslib.drivers.fits_access import read_data, write_image
+from astrometricslib.pipelines.shared.quality.saturation import (
+    SATURATION_MASK_FRACTION_OF_CEILING,
+    find_saturation_plateau_ceiling,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -107,27 +111,9 @@ FRAMES_SAMPLED_PER_GROUP = 3
 # been checked against a saturated star in a stack from this pipeline.
 SATURATION_FRACTION_OF_FULL_SCALE = 0.95
 
-# The fixed level above is not enough on its own. In the Vega session's group
-# stacks the saturated pixels sit at a ceiling that differs from group to
-# group (about 1.0 for the 0.5-2 s groups but 0.81-0.82 for the 3 s and 5 s
-# groups, because Siril's normalization rescales each stack), and the 5 s
-# group's ceiling lies below 0.95, so its saturated trail was used as if it
-# were a measurement. That made the combined spectrum too red (measured
-# 2026-09-21, see logs/stack_exposure_groups_20260920.json). So each group's
-# ceiling is measured from its own pixels: the median of its brightest
-# SATURATION_CEILING_SAMPLE_PIXELS pixels. Saturated pixels pile up there, so
-# it is a ceiling only if at least SATURATION_PLATEAU_MINIMUM_PIXELS pixels lie
-# within SATURATION_PLATEAU_TOLERANCE of it. On Vega the saturated groups had
-# 571-828 such pixels and 101-576 for the 0.5-2 s groups; a real, unsaturated
-# peak has only a handful. The counts 25, 50 and 3% were chosen from those
-# numbers and have not been tested on other stars. Pixels above
-# SATURATION_MASK_FRACTION_OF_CEILING times the ceiling are masked, because the
-# plateau is ragged (0.79-0.85 in the 3 s group) and the last few percent
-# below it are already clipped by some frames in the average.
-SATURATION_CEILING_SAMPLE_PIXELS = 25
-SATURATION_PLATEAU_MINIMUM_PIXELS = 50
-SATURATION_PLATEAU_TOLERANCE = 0.03
-SATURATION_MASK_FRACTION_OF_CEILING = 0.9
+# The plateau-ceiling constants (SATURATION_CEILING_SAMPLE_PIXELS and the
+# rest) live in astrometricslib.pipelines.shared.quality.saturation, where the
+# stack-wide saturation check shares them.
 
 # Each group's stack also carries its own overall brightness scale. Against
 # the 2 s group, the Vega session's per-second brightness was 0.84-0.88 (1 s),
@@ -304,15 +290,8 @@ def estimate_saturation_mask_level(
     level : `float`
         Pixels at or above this value should be treated as saturated.
     """
-    flat = np.asarray(image, dtype=np.float64).ravel()
-    if flat.size < SATURATION_PLATEAU_MINIMUM_PIXELS:
-        return fallback_level
-    brightest = np.partition(flat, -SATURATION_CEILING_SAMPLE_PIXELS)[-SATURATION_CEILING_SAMPLE_PIXELS:]
-    ceiling = float(np.median(brightest))
-    if ceiling <= 0:
-        return fallback_level
-    pixels_near_ceiling = int(np.count_nonzero(flat >= ceiling * (1.0 - SATURATION_PLATEAU_TOLERANCE)))
-    if pixels_near_ceiling < SATURATION_PLATEAU_MINIMUM_PIXELS:
+    ceiling = find_saturation_plateau_ceiling(image)
+    if ceiling is None:
         return fallback_level
     return min(fallback_level, ceiling * SATURATION_MASK_FRACTION_OF_CEILING)
 

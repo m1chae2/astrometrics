@@ -14,7 +14,11 @@ from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.models.stellar_source import SpectralObservation, SpectroscopyResult, StellarObject
 from astrometricslib.pipelines.shared.analysis_context import AnalysisContext
-from astrometricslib.pipelines.shared.quality.saturation import compute_saturated_pixel_fraction
+from astrometricslib.pipelines.shared.quality.saturation import (
+    compute_saturated_pixel_fraction,
+    compute_stack_saturated_pixel_fraction,
+    is_normalised_stack_scale,
+)
 from astrometricslib.pipelines.spectroscopy.instrument_response import load_instrument_response
 from astrometricslib.pipelines.spectroscopy.quantum_efficiency_correction import (
     apply_quantum_efficiency_correction,
@@ -1184,6 +1188,9 @@ class SpectroscopyPipeline:
         y_start, y_end = max(0, y_center - aperture_radius), min(height, y_center + aperture_radius + 1)
         x_start, x_end = max(0, x_center - aperture_radius), min(width, x_center + aperture_radius + 1)
         zero_order_cutout = np.asarray(data[y_start:y_end, x_start:x_end], dtype=float)
+        if is_normalised_stack_scale(data):
+            # Siril stacks run 0 to 1, below any ADU level.
+            return compute_stack_saturated_pixel_fraction(data, zero_order_cutout)
         return compute_saturated_pixel_fraction(
             zero_order_cutout, self.camera_profile.saturation_threshold_adu.value
         )

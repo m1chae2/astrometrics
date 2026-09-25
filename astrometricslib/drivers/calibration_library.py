@@ -10,6 +10,8 @@ from typing import Any
 from astropy.io import fits
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
+from astrometricslib.drivers.camera_profile_store import camera_identity, record_name_for_camera
+
 logger = logging.getLogger(__name__)
 
 
@@ -345,16 +347,22 @@ class CalibrationLibrary(BaseModel):
             )
         return keys
 
-    def _get_camera_name(self, header):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
-        """Normalize camera name from header.
+    def _get_camera_name(self, header: Any) -> str:
+        """Give the camera name to file a calibration frame under.
+
+        Parameters
+        ----------
+        header : `Any`
+            The image header.
 
         Returns
         -------
         camera_name : `str`
-            Normalized camera name.
+            The camera's ``record_name`` from its profile, which is the
+            spelling frame records use, or the header's own text when the
+            camera has none.
         """
-        c_head = header.get("INSTRUME", header.get("CAMERA", "Unknown"))
-        return c_head.replace("ZWO CCD", "ZWO").replace("ASI533", "ASI 533")
+        return record_name_for_camera(header.get("INSTRUME", header.get("CAMERA", "Unknown")))
 
     def add_dark_frame(self, image_file):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
         """Add a dark frame to the library."""
@@ -500,7 +508,14 @@ class CalibrationLibrary(BaseModel):
         if camera in frame_dict:
             return frame_dict[camera]
 
-        # Fuzzy match: "Nikon D5300" should match "Nikon DSLR DSC D5300"
+        # The same camera under another spelling: "Nikon D5300" is
+        # "Nikon DSLR DSC D5300", found through the camera's profile.
+        wanted_identity = camera_identity(camera)
+        for key in frame_dict:
+            if camera_identity(key) == wanted_identity:
+                return frame_dict[key]
+
+        # Partial names: a name that is part of another, or contains it.
         for key in frame_dict:
             if camera.upper() in key.upper() or key.upper() in camera.upper():
                 return frame_dict[key]

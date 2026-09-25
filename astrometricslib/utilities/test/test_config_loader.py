@@ -57,3 +57,15 @@ def test_get_frames_path_reads_configured_frames_path(tmp_path: Path) -> None:
     custom_frames.mkdir(parents=True)
     config.app_config.set("Image Library", "frames_path", str(custom_frames))
     assert config.get_frames_path() == custom_frames
+
+
+def test_a_camera_section_is_found_whatever_the_spacing_case_or_punctuation() -> None:
+    """Check the loose match that finds a camera's own config section."""
+    import configparser
+
+    parser = configparser.ConfigParser()
+    parser.read_string("[Observatory.Camera.ZWO ASI 533MM Pro]\ngrating_lines_per_mm = 200\n")
+    config = AppConfiguration()
+    config.app_config = parser
+    for spelling in ("ZWO ASI 533MM Pro", "ZWO ASI533MM Pro", "zwo-asi533mm-pro"):
+        assert config.get_camera_config(spelling) == {"grating_lines_per_mm": "200"}

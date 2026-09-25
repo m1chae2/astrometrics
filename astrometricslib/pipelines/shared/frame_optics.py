@@ -12,8 +12,7 @@ setups the observer lists in the config file (see
 import logging
 from dataclasses import dataclass
 
-from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
-from astrometricslib.utilities.camera_names import normalize_camera_name
+from astrometricslib.drivers.camera_profile_store import camera_identity
 from astrometricslib.utilities.observatory_setups import ObservatorySetups, OpticConfig
 from astrometricslib.utilities.warn_once import warn_once
 
@@ -50,26 +49,6 @@ class TelescopeResolution:
 
     telescope_name: str
     reason: str
-
-
-def camera_identity(camera_name: str) -> str:
-    """Reduce a camera name to text that is the same for every spelling of it.
-
-    Parameters
-    ----------
-    camera_name : `str`
-        A camera name, for example from a header or from the config.
-
-    Returns
-    -------
-    identity : `str`
-        The camera's profile name when it has a profile, otherwise the name
-        with case, spaces and punctuation removed.
-    """
-    profile = resolve_camera_profile(camera_name)
-    if profile.is_generic_fallback:
-        return normalize_camera_name(camera_name)
-    return normalize_camera_name(profile.camera_name)
 
 
 def _warn_once_unresolved(camera_name: str | None, focal_length_mm: float | None, reason: str) -> None:

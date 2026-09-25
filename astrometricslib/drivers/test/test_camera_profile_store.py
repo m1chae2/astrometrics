@@ -15,6 +15,7 @@ import pytest
 from astrometricslib.drivers import camera_profile_store
 from astrometricslib.drivers.camera_profile_store import (
     CAMERA_PROFILE_DIRECTORY,
+    camera_identity,
     load_camera_profiles,
     record_name_for_camera,
     resolve_camera_profile,
@@ -245,3 +246,23 @@ def test_a_camera_without_a_record_name_keeps_its_header_text() -> None:
     """Check that cameras with no record name keep their header text."""
     assert record_name_for_camera("ZWO CCD ASI120MC-S") == "ZWO CCD ASI120MC-S"
     assert record_name_for_camera("Acme Imager 9000") == "Acme Imager 9000"
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        ("ZWO CCD ASI533MM Pro", "ZWO ASI 533MM Pro"),
+        ("Nikon DSLR DSC D5300", "Nikon D5300"),
+        ("zwo-asi533mm-pro", "ZWO ASI533MM Pro"),
+    ],
+)
+def test_every_spelling_of_a_listed_camera_has_the_same_identity(first: str, second: str) -> None:
+    """Check spelling, punctuation and profile aliases."""
+    assert camera_identity(first) == camera_identity(second)
+
+
+def test_different_cameras_have_different_identities() -> None:
+    """Check that listed and unlisted cameras are kept apart."""
+    assert camera_identity("ZWO ASI 533MM Pro") != camera_identity("Nikon D5300")
+    assert camera_identity("Acme Imager 9000") != camera_identity("Acme Imager 9001")
+    assert camera_identity("Acme Imager 9000") == camera_identity("acme-imager 9000")

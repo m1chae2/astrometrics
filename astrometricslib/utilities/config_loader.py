@@ -5,6 +5,7 @@ import logging
 import os
 from pathlib import Path
 
+from .camera_names import normalize_camera_name
 from .enums import FilterType
 from .observatory_setups import ObservatorySetups, load_observatory_setups
 
@@ -377,10 +378,10 @@ class AppConfiguration:
         # Camera names in settings and image files often differ slightly
         # in spacing/capitalization (e.g. "ZWO ASI533MM Pro" in a config
         # file typed by hand vs. "ZWO ASI 533MM Pro" as the camera's own
-        # FITS header spells it). Matching loosely here, the same way
-        # `astrometricslib.pipelines.stacking.stage._camera_names_match`
-        # already has to for stack lookups, keeps a real per-camera
-        # section (dispersion geometry, grating spacing, etc.) from being
+        # FITS header spells it). Matching loosely here, with the same
+        # `normalize_camera_name` the rest of the library uses, keeps a
+        # real per-camera section (dispersion geometry, grating spacing,
+        # etc.) from being
         # silently skipped over a formatting difference -- which
         # otherwise falls through to the generic `[Observatory.Camera]`
         # section's bare model list and produces nonsensical spectroscopy
@@ -390,7 +391,7 @@ class AppConfiguration:
             if not section.startswith(camera_prefix):
                 continue
             section_camera_name = section[len(camera_prefix) :]
-            if "".join(section_camera_name.split()).casefold() == "".join(camera_name.split()).casefold():
+            if normalize_camera_name(section_camera_name) == normalize_camera_name(camera_name):
                 return dict(self.app_config[section])
 
         if "Observatory.Camera" in self.app_config:

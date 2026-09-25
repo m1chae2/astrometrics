@@ -20,7 +20,6 @@ spectra and used only for the camera it was derived for.
 """
 
 import json
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -31,6 +30,7 @@ from astrometricslib.pipelines.spectroscopy.spectral_resolution import (
     FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
     blur_sigma_in_samples,
 )
+from astrometricslib.utilities.camera_names import normalize_camera_name
 
 _DATA_DIR = Path(__file__).parent / "data"
 
@@ -133,18 +133,6 @@ class InstrumentResponse:
         return np.exp(np.polyval(self.coefficients, scaled))
 
 
-def _normalize_camera_name(camera_name: str) -> str:
-    """Reduce a camera name to lowercase letters and digits.
-
-    Returns
-    -------
-    normalized : `str`
-        The name with spaces, dashes and case removed, so "ZWO ASI 533MM
-        Pro" and "ZWO ASI533MM Pro" match.
-    """
-    return re.sub(r"[^a-z0-9]", "", camera_name.lower())
-
-
 def load_instrument_response(camera_name: str) -> InstrumentResponse | None:
     """Read the stored response for a camera, if one exists.
 
@@ -158,10 +146,10 @@ def load_instrument_response(camera_name: str) -> InstrumentResponse | None:
     response : `InstrumentResponse` or `None`
         The response, or `None` when none has been derived for this camera.
     """
-    wanted = _normalize_camera_name(camera_name)
+    wanted = normalize_camera_name(camera_name)
     for path in sorted(_DATA_DIR.glob("instrument_response_*.json")):
         stored = json.loads(path.read_text())
-        if _normalize_camera_name(stored["camera_name"]) == wanted:
+        if normalize_camera_name(stored["camera_name"]) == wanted:
             return InstrumentResponse(
                 camera_name=stored["camera_name"],
                 coefficients=tuple(stored["coefficients"]),

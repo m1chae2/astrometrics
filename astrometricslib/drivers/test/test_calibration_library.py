@@ -298,3 +298,33 @@ def test_stats_report_the_offset(tmp_path):  # ruff: ignore[missing-type-functio
 
     assert dark["iso"] == "0.0"
     assert dark["offset"] == pytest.approx(30.0)
+
+
+@pytest.mark.parametrize(
+    ("header_name", "expected"),
+    [
+        ("ZWO CCD ASI533MM Pro", "ZWO ASI 533MM Pro"),
+        ("Nikon DSLR DSC D5300", "Nikon DSLR DSC D5300"),
+        ("Some Other Camera", "Some Other Camera"),
+    ],
+)
+def test_calibration_frames_are_filed_under_the_record_spelling_of_the_camera(
+    header_name: str, expected: str
+) -> None:
+    """The library uses the same camera spelling as frame records."""
+    assert CalibrationLibrary()._get_camera_name({"INSTRUME": header_name}) == expected
+
+
+def test_a_camera_is_found_under_another_spelling_of_its_name():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """The config's 'Nikon D5300' finds frames filed as the header's name."""
+    library = CalibrationLibrary()
+    filed = {"Nikon DSLR DSC D5300": {"800": ["dark.fits"]}, "ZWO ASI 533MM Pro": {"0": ["other.fits"]}}
+    assert library._get_camera_dict(filed, "Nikon D5300") == {"800": ["dark.fits"]}
+    assert library._get_camera_dict(filed, "ZWO CCD ASI533MM Pro") == {"0": ["other.fits"]}
+
+
+def test_a_partial_camera_name_still_matches_as_before():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """The older substring rule is kept for partial names."""
+    library = CalibrationLibrary()
+    filed = {"ZWO ASI 533MM Pro": {"0": ["dark.fits"]}, "Nikon DSLR DSC D5300": {"800": ["x.fits"]}}
+    assert library._get_camera_dict(filed, "ASI 533") == {"0": ["dark.fits"]}

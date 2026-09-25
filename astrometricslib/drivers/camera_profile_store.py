@@ -140,6 +140,31 @@ def resolve_camera_profile(camera_name: str | None, directory: Path | None = Non
     return generic_profile
 
 
+def camera_identity(camera_name: str) -> str:
+    """Reduce a camera name to text that is the same for every spelling of it.
+
+    Two names give the same identity when they are the same camera, whether
+    they differ in case, spaces and punctuation or are listed as aliases in the
+    camera's profile (for example ``ZWO CCD ASI533MM Pro`` and
+    ``ZWO ASI 533MM Pro``).
+
+    Parameters
+    ----------
+    camera_name : `str`
+        A camera name, for example from a header or from the config.
+
+    Returns
+    -------
+    identity : `str`
+        The camera's profile name, reduced to lowercase letters and digits,
+        when it has a profile. Otherwise the name itself reduced the same way.
+    """
+    profile = resolve_camera_profile(camera_name)
+    if profile.is_generic_fallback:
+        return normalize_camera_name(camera_name)
+    return normalize_camera_name(profile.camera_name)
+
+
 def record_name_for_camera(camera_name: str) -> str:
     """Give the spelling of a camera's name that frame records use.
 

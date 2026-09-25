@@ -7,6 +7,7 @@ and checking the quality of the final stacked images.
 import logging
 from typing import Any
 
+from astrometricslib.drivers.camera_profile_store import camera_identity
 from astrometricslib.utilities.enums import FilterType
 
 logger = logging.getLogger(__name__)
@@ -426,12 +427,12 @@ def _record_configuration_stack(target, target_frames, stacked_path) -> bool:  #
 
 
 def _camera_names_match(first: str, second: str) -> bool:
-    """Check if two camera names match, ignoring spaces and capitalization.
+    """Check whether two camera names mean the same camera.
 
-    Camera names in settings and image files often have slight differences
-    (like "ZWO ASI533MM Pro" vs. "ZWO ASI 533MM Pro"). This function cleans
-    them up so we can reliably match them even if they aren't typed exactly
-    the same way.
+    Camera names in settings and image files are spelled differently (like
+    "ZWO ASI533MM Pro" vs. "ZWO ASI 533MM Pro", or "Nikon D5300" vs. the
+    header's "Nikon DSLR DSC D5300"). Case, spaces and punctuation are ignored,
+    and the aliases listed in a camera's profile count as the same camera.
 
     Parameters
     ----------
@@ -443,7 +444,7 @@ def _camera_names_match(first: str, second: str) -> bool:
     matches : `bool`
         True if the names mean the same camera.
     """
-    return "".join(first.split()).casefold() == "".join(second.split()).casefold()
+    return camera_identity(first) == camera_identity(second)
 
 
 def _base_stack_quality_summary(  # ruff: ignore[missing-return-type-private-function]

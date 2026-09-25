@@ -12,9 +12,8 @@ a script.
 
 from typing import Any
 
-from astrometricslib.drivers.camera_profile_store import record_name_for_camera
+from astrometricslib.drivers.camera_profile_store import camera_identity, record_name_for_camera
 from astrometricslib.pipelines.shared.frame_grouping import select_frames_for_camera
-from astrometricslib.pipelines.shared.frame_optics import camera_identity
 from astrometricslib.utilities.observatory_setups import ObservatorySetups
 
 

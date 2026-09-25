@@ -24,6 +24,7 @@ from typing import Any
 from astrometricslib import Astrometrics
 from astrometricslib.drivers.fits_access import read_header
 from astrometricslib.pipelines.shared.frame_optics import resolve_frame_telescope
+from astrometricslib.utilities.iso_text import iso_or_gain_text, iso_or_gain_values_match
 from astrometricslib.utilities.observatory_setups import ObservatorySetups
 
 logger = logging.getLogger(__name__)
@@ -87,6 +88,8 @@ def find_iso_disagreements(targets: list[Any]) -> collections.Counter[tuple[str,
 
     Only frames whose header records an ``ISOSPEED`` or ``GAIN`` are checked,
     because for the others a re-scan uses the camera's configured default.
+    ``800`` and ``800.0`` count as the same ISO, so a difference in how the
+    number is written is not reported.
 
     Parameters
     ----------
@@ -109,11 +112,11 @@ def find_iso_disagreements(targets: list[Any]) -> collections.Counter[tuple[str,
             except Exception as header_error:
                 logger.debug("Skipping unreadable frame %s: %s", frame.path, header_error)
                 continue
-            header_value = header.get("ISOSPEED", header.get("GAIN"))
+            header_value = iso_or_gain_text(header)
             if header_value is None:
                 continue
-            if str(header_value) != str(frame.iso):
-                disagreements[str(frame.camera), str(frame.iso), str(header_value)] += 1
+            if not iso_or_gain_values_match(header_value, frame.iso):
+                disagreements[str(frame.camera), str(frame.iso), header_value] += 1
     return disagreements
 
 

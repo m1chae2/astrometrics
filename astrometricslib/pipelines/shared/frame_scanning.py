@@ -18,6 +18,7 @@ from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.frame_optics import resolve_frame_telescope
 from astrometricslib.utilities.enums import FilterType
+from astrometricslib.utilities.iso_text import iso_or_gain_text
 from astrometricslib.utilities.warn_once import warn_once
 
 logger = logging.getLogger(__name__)
@@ -133,7 +134,9 @@ def _camera_default_iso(camera_name: str, config: Any) -> str | None:
 def read_iso_or_gain(header: Any, camera_name: str, config: Any, placeholder: str) -> str:
     """Read the ISO (or gain) an image was taken at.
 
-    The header's ``ISOSPEED`` is used first, then its ``GAIN``. If it has
+    The header's ``ISOSPEED`` is used first (written without a needless
+    decimal, so ``800.0`` becomes ``800``), then its ``GAIN`` exactly as the
+    header spells it. If it has
     neither, the camera's ``default_iso`` from the config is used, and if
     there is none of those either, `placeholder` is used with a warning.
 
@@ -153,9 +156,9 @@ def read_iso_or_gain(header: Any, camera_name: str, config: Any, placeholder: st
     iso : `str`
         The ISO or gain, as text.
     """
-    value = header.get("ISOSPEED", header.get("GAIN"))
+    value = iso_or_gain_text(header)
     if value is not None:
-        return str(value)
+        return value
     configured = _camera_default_iso(camera_name, config)
     if configured is not None:
         return configured

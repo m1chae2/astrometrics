@@ -11,6 +11,7 @@ from astropy.io import fits
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from astrometricslib.drivers.camera_profile_store import camera_identity, record_name_for_camera
+from astrometricslib.utilities.iso_text import iso_or_gain_values_match
 
 logger = logging.getLogger(__name__)
 
@@ -784,8 +785,9 @@ def is_calibration_gain_compatible(light_gain: str, master_gain: str) -> bool:
     """Check if the calibration and light frames share the same gain.
 
     Gain (or ISO) is how sensitive the camera is set to be. All calibration
-    files (darks, bias, and flats) must have the exact same gain as the
-    light images for the math to work correctly.
+    files (darks, bias, and flats) must have the same gain as the light
+    images for the math to work correctly. Gains are compared as numbers, so
+    "800" and "800.0" are the same gain.
 
     Parameters
     ----------
@@ -797,9 +799,9 @@ def is_calibration_gain_compatible(light_gain: str, master_gain: str) -> bool:
     Returns
     -------
     is_compatible : `bool`
-        True if the gain settings match exactly, False if they don't.
+        True if the gain settings match, False if they don't.
     """
-    return str(light_gain) == str(master_gain)
+    return iso_or_gain_values_match(light_gain, master_gain)
 
 
 def is_calibration_offset_compatible(light_offset: Any, master_offset: Any) -> bool:

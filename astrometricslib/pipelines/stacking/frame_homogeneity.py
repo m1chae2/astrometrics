@@ -7,6 +7,8 @@ file finds and drops the images that don't match the rest.
 
 from typing import Any
 
+from astrometricslib.utilities.iso_text import canonical_iso_text
+
 
 def find_dominant_gain_subset(frames: list[Any]) -> tuple[list[Any], list[Any]]:
     """Group images by their gain setting and return the largest group.
@@ -23,7 +25,8 @@ def find_dominant_gain_subset(frames: list[Any]) -> tuple[list[Any], list[Any]]:
     Returns
     -------
     dominant_subset : `list` [`Any`]
-        The largest group of images that all share the exact same gain.
+        The largest group of images that all share the same gain. Gains are
+        compared as numbers, so "800" and "800.0" are the same gain.
     excluded : `list` [`Any`]
         The images that were thrown out because their gain was different.
     """
@@ -32,9 +35,9 @@ def find_dominant_gain_subset(frames: list[Any]) -> tuple[list[Any], list[Any]]:
 
     groups: dict[str, list[Any]] = {}
     for frame in frames:
-        groups.setdefault(str(frame.iso), []).append(frame)
+        groups.setdefault(canonical_iso_text(frame.iso), []).append(frame)
 
     dominant_gain = max(groups, key=lambda gain: len(groups[gain]))
     dominant_subset = groups[dominant_gain]
-    excluded = [f for f in frames if str(f.iso) != dominant_gain]
+    excluded = [f for f in frames if canonical_iso_text(f.iso) != dominant_gain]
     return dominant_subset, excluded

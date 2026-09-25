@@ -194,3 +194,15 @@ def test_a_frame_with_no_camera_in_its_header_goes_under_the_primary_camera(tmp_
 
     expected = tmp_path / "library" / "frames" / "lights" / "M31" / "Apertura 75Q" / "ZWO ASI 533MM Pro"
     assert (expected / "light.fits").exists()
+
+
+def test_an_iso_written_with_a_decimal_is_recorded_without_it(tmp_path: Path) -> None:
+    """Check the change to the stored ISO text: 800.0 becomes 800."""
+    path = write_frame(tmp_path / "a.fits", INSTRUME="Nikon DSLR DSC D5300", ISOSPEED=800.0, FOCALLEN=300.0)
+    assert create_frame_record_from_fits(path, config=make_config()).iso == "800"
+
+
+def test_a_gain_is_recorded_exactly_as_the_header_writes_it(tmp_path: Path) -> None:
+    """Check that session ids built from the gain text do not change."""
+    path = write_frame(tmp_path / "a.fits", INSTRUME="ZWO CCD ASI533MM Pro", GAIN=0.0, FOCALLEN=405.0)
+    assert create_frame_record_from_fits(path, config=make_config()).iso == "0.0"

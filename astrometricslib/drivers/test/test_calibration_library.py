@@ -328,3 +328,10 @@ def test_a_partial_camera_name_still_matches_as_before():  # ruff: ignore[missin
     library = CalibrationLibrary()
     filed = {"ZWO ASI 533MM Pro": {"0": ["dark.fits"]}, "Nikon DSLR DSC D5300": {"800": ["x.fits"]}}
     assert library._get_camera_dict(filed, "ASI 533") == {"0": ["dark.fits"]}
+
+
+def test_calibration_gain_compatibility_compares_numbers_not_text():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """A master written as 800.0 calibrates lights recorded as 800."""
+    assert is_calibration_gain_compatible("800", "800.0")
+    assert is_calibration_gain_compatible("0.0", "0")
+    assert not is_calibration_gain_compatible("100", "800.0")

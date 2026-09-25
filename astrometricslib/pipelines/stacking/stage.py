@@ -875,4 +875,11 @@ def _build_stack_quality_summary(  # ruff: ignore[missing-return-type-private-fu
         exposures = ", ".join(f"{entry['exposure_seconds']:g} s" for entry in clipped_groups)
         summary.flag_reasons.append(f"raw frames clipped at zero in the {exposures} exposure group(s)")
         summary.flagged = True
+
+    from astrometricslib.pipelines.shared.applied_camera_profile import (
+        most_common_camera_name,
+        record_camera_profile,
+    )
+
+    record_camera_profile(summary, most_common_camera_name(target_frames))
     return summary

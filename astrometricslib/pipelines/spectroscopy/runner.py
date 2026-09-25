@@ -410,6 +410,10 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
             summary.flag_reasons.append(
                 f"spectral classification uncertain for {len(flagged_spectral_classifications)} star(s)"
             )
+
+        from astrometricslib.pipelines.shared.applied_camera_profile import record_camera_profile
+
+        record_camera_profile(summary, spectroscopy.config.camera.name)
         return summary
 
     def to_result_dict(

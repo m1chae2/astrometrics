@@ -154,3 +154,22 @@ def test_all_zero_shifts_does_not_fabricate_a_reference():  # ruff: ignore[missi
 
     assert summary.stacking_metrics.registration_reference_frame is None
     assert summary.stacking_metrics.registration_reference_star_count is None
+
+
+def test_the_stack_summary_records_the_camera_profile_of_its_frames():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """A listed camera is recorded plainly; an unlisted one flags."""
+    paths = ["/lib/a.fits", "/lib/b.fits"]
+    registration_frames = [_registration_fact(dx=0.0, dy=0.0), _registration_fact(dx=1.0, dy=1.0)]
+
+    listed = [FrameRecord(path=p, role="LIGHT", camera="ZWO ASI 533MM Pro", exposure="1.0") for p in paths]
+    listed_summary = _build_summary(listed, registration_frames, paths)
+    assert listed_summary.camera_profile is not None
+    assert listed_summary.camera_profile.profile_name == "ZWO ASI533MM Pro"
+    assert listed_summary.camera_profile.is_generic_fallback is False
+
+    unlisted = [FrameRecord(path=p, role="LIGHT", camera="Acme Imager 9000", exposure="1.0") for p in paths]
+    unlisted_summary = _build_summary(unlisted, registration_frames, paths)
+    assert unlisted_summary.camera_profile is not None
+    assert unlisted_summary.camera_profile.is_generic_fallback is True
+    assert unlisted_summary.flagged is True
+    assert any("Acme Imager 9000" in reason for reason in unlisted_summary.flag_reasons)

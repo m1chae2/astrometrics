@@ -41,6 +41,7 @@ from astrometricslib.api.targets import (
 from astrometricslib.models.moving_object import AsteroidDetectionCandidate
 from astrometricslib.models.moving_object_config import MovingObjectConfig
 from astrometricslib.models.quality_summary import (
+    AppliedCameraProfile,
     AstrometryPipelineQualityMetrics,
     AstrometryQualitySummary,
     ExposureGroupSummary,
@@ -234,6 +235,7 @@ __all__ = [
     "AbstractCatalogAccess",
     "AnalysisResult",
     "AppConfiguration",
+    "AppliedCameraProfile",
     "AsteroidDetectionCandidate",
     "Astrometrics",
     "AstrometryPipeline",

@@ -24,6 +24,7 @@ from astrometricslib.models.moving_object import (
     MovingObjectTrack,
 )
 from astrometricslib.models.quality_summary import (
+    AppliedCameraProfile,
     AsteroidDetectionPipelineQualityMetrics,
     AsteroidDetectionQualitySummary,
     AstrometryPipelineQualityMetrics,
@@ -290,6 +291,7 @@ def main() -> None:
         generate_interface(ExcludedFrame, "ExcludedFrame"),
         generate_interface(TargetSessionContribution, "TargetSessionContribution"),
         generate_interface(ExposureGroupSummary, "ExposureGroupSummary"),
+        generate_interface(AppliedCameraProfile, "AppliedCameraProfile"),
         generate_interface(StackingPipelineQualityMetrics, "StackingPipelineQualityMetrics"),
         generate_interface(StackQualitySummary, "StackQualitySummary"),
         generate_interface(AstrometryPipelineQualityMetrics, "AstrometryPipelineQualityMetrics"),

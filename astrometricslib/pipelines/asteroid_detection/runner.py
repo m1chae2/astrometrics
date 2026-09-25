@@ -142,6 +142,13 @@ class AsteroidDetectionPipelineAdapter(AnalysisPipeline):
                 f"{candidates_awaiting_recovery} candidate(s) confirmed as movers but not "
                 "matched to a known body -- worth a manual look"
             )
+
+        from astrometricslib.pipelines.shared.applied_camera_profile import (
+            most_common_camera_name,
+            record_camera_profile,
+        )
+
+        record_camera_profile(summary, most_common_camera_name(light_frames))
         return summary
 
     def to_result_dict(

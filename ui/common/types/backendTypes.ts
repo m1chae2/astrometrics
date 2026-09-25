@@ -655,6 +655,26 @@ export interface ExposureGroupSummary {
 }
 
 /**
+ * Which camera profile a pipeline run used, and the numbers from it.
+ *
+ * A camera profile holds facts about one camera model (see
+ * `astrometricslib.models.camera_profile`). Recording it on each summary
+ * lets a reader see which assumptions a result rests on, in particular
+ * whether the camera was recognised at all.
+ */
+export interface AppliedCameraProfile {
+  cameraName?: string | null;
+  profileName: string;
+  isGenericFallback: boolean;
+  clipCeilingAdu: number;
+  clipCeilingSource: string;
+  saturationThresholdAdu: number;
+  saturationThresholdSource: string;
+  saturationThresholdCanBeReached: boolean;
+  hasQuantumEfficiencyCurve: boolean;
+}
+
+/**
  * Measurements recorded when combining (stacking) multiple images.
  *
  * This tracks how many images were successfully combined and records details
@@ -703,6 +723,7 @@ export interface StackQualitySummary {
   targetSessionBreakdown?: TargetSessionContribution[];
   upstreamQualitySummaryReference?: string | null;
   resolvedParameters?: Record<string, any>;
+  cameraProfile?: AppliedCameraProfile | null;
   qualityProcessingApplied?: boolean;
   flagged?: boolean;
   flagReasons?: string[];
@@ -744,6 +765,7 @@ export interface AstrometryQualitySummary {
   targetSessionBreakdown?: TargetSessionContribution[];
   upstreamQualitySummaryReference?: string | null;
   resolvedParameters?: Record<string, any>;
+  cameraProfile?: AppliedCameraProfile | null;
   qualityProcessingApplied?: boolean;
   flagged?: boolean;
   flagReasons?: string[];
@@ -800,6 +822,7 @@ export interface PhotometryQualitySummary {
   targetSessionBreakdown?: TargetSessionContribution[];
   upstreamQualitySummaryReference?: string | null;
   resolvedParameters?: Record<string, any>;
+  cameraProfile?: AppliedCameraProfile | null;
   qualityProcessingApplied?: boolean;
   flagged?: boolean;
   flagReasons?: string[];
@@ -855,6 +878,7 @@ export interface SpectroscopyQualitySummary {
   targetSessionBreakdown?: TargetSessionContribution[];
   upstreamQualitySummaryReference?: string | null;
   resolvedParameters?: Record<string, any>;
+  cameraProfile?: AppliedCameraProfile | null;
   qualityProcessingApplied?: boolean;
   flagged?: boolean;
   flagReasons?: string[];
@@ -958,6 +982,7 @@ export interface AsteroidDetectionQualitySummary {
   targetSessionBreakdown?: TargetSessionContribution[];
   upstreamQualitySummaryReference?: string | null;
   resolvedParameters?: Record<string, any>;
+  cameraProfile?: AppliedCameraProfile | null;
   qualityProcessingApplied?: boolean;
   flagged?: boolean;
   flagReasons?: string[];

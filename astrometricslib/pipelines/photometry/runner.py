@@ -452,6 +452,20 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         if no_work_reason:
             summary.flagged = True
             summary.flag_reasons.append(no_work_reason)
+
+        from astrometricslib.pipelines.shared.applied_camera_profile import (
+            camera_name_for_paths,
+            most_common_camera_name,
+            record_camera_profile,
+        )
+
+        # The camera of the frames that were actually measured; the target's
+        # frames are the fallback when the run measured none.
+        record_camera_profile(
+            summary,
+            camera_name_for_paths(target.frames, payload.get("image_paths") or [])
+            or most_common_camera_name(target.frames),
+        )
         return summary
 
     def to_result_dict(self, request: PipelineRequest, result: Result, summary: Any) -> dict[str, Any]:

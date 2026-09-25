@@ -419,6 +419,24 @@ class TestAttachSpectroscopyQualitySummary:
         assert breakdown[0].frames_clipped == 0
         assert target.spectroscopy_quality_summary.upstream_quality_summary_reference == "raw_frames"
 
+    def test_records_the_camera_profile_of_the_frames_that_were_processed(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        """The summary names the camera of the session's frames."""
+        frames = [
+            FrameRecord(path="a.fits", role="LIGHT", camera="ZWO ASI 533MM Pro", exposure="1.0"),
+            FrameRecord(path="b.fits", role="LIGHT", camera="ZWO ASI 533MM Pro", exposure="1.0"),
+            FrameRecord(path="other.fits", role="LIGHT", camera="Acme Imager 9000", exposure="1.0"),
+        ]
+        target = Target(id="CameraProfileTestTarget", frames=frames)
+        summary = parallel_batch.BatchRunSummary(succeeded=["a.fits", "b.fits"], failed=[], results={})
+        session = _make_session("Target:2026-01-01:0.0:0", ["a.fits", "b.fits"])
+
+        batch._attach_spectroscopy_quality_summary(target, summary, [(session, SimpleNamespace())])
+
+        recorded = target.spectroscopy_quality_summary
+        assert recorded.camera_profile is not None
+        assert recorded.camera_profile.profile_name == "ZWO ASI533MM Pro"
+        assert recorded.flagged is False
+
     def test_flags_target_when_zero_order_saturation_significant(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Verify significant zero-order saturation flags with a reason."""
         target = Target(id="SaturationFlagTestTarget")

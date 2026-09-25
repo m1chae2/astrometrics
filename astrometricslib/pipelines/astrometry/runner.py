@@ -229,6 +229,19 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
         if not summary.astrometry_metrics.plate_solve_succeeded:
             summary.flagged = True
             summary.flag_reasons.append("plate solve failed")
+
+        from astrometricslib.pipelines.shared.applied_camera_profile import (
+            camera_name_from_header,
+            most_common_camera_name,
+            record_camera_profile,
+        )
+
+        # The image's own header names its camera; the target's frames are the
+        # fallback for an image whose header does not.
+        camera_name = camera_name_from_header(result.context.image.header) or most_common_camera_name(
+            request.frames or request.target.frames
+        )
+        record_camera_profile(summary, camera_name)
         return summary
 
     def to_result_dict(

@@ -618,3 +618,13 @@ def _attach_spectroscopy_quality_summary(
         target.spectroscopy_quality_summary.flag_reasons.append(
             f"spectral classification uncertain for {len(all_spectral_classification_concerns)} star(s)"
         )
+
+    from astrometricslib.pipelines.shared.applied_camera_profile import (
+        camera_name_for_paths,
+        record_camera_profile,
+    )
+
+    record_camera_profile(
+        target.spectroscopy_quality_summary,
+        camera_name_for_paths(target.frames, [path for session in sessions for path in session.frame_paths]),
+    )

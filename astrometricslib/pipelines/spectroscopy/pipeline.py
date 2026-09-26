@@ -33,6 +33,7 @@ from astrometricslib.pipelines.spectroscopy.quantum_efficiency_correction import
     curve_from_profile_record,
 )
 from astrometricslib.pipelines.spectroscopy.second_order_risk import compute_second_order_blue_to_red_ratio
+from astrometricslib.pipelines.spectroscopy.spectral_resolution import load_line_spread_profile
 from astrometricslib.pipelines.spectroscopy.spectroscopy_instrument import (
     SpectroscopyInstrument,
 )
@@ -515,6 +516,7 @@ class SpectroscopyPipeline:
         # The stored correction for this setup's grating and sensor, or
         # `None` when none has been derived. Read once here, not per star.
         self.instrument_response = load_instrument_response(config.camera.name)
+        self.line_spread_profile = load_line_spread_profile(config.camera.name)
         # The stored blur of this camera's streaks, measured on an isolated
         # bright star, or `None` when none has been derived. Only used when
         # `config.subtract_neighbor_wings` is on.
@@ -913,6 +915,7 @@ class SpectroscopyPipeline:
             catalog_b_minus_v=star.b_minus_v,
             trail_width_px=result.get("trail_width_px"),
             extraction_box_width_px=float(rectangle[3]) if rectangle is not None else None,
+            resolution_profile=self.line_spread_profile,
         )
         classification = analysis.classification
         probable_spectral_features = analysis.features

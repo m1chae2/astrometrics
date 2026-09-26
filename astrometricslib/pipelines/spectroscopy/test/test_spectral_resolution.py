@@ -9,10 +9,12 @@ copy that could drift apart.
 """
 
 import inspect
+from collections.abc import Callable
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from scipy.ndimage import gaussian_filter1d
 
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.spectroscopy.instrument_response import (
@@ -35,8 +37,12 @@ from astrometricslib.pipelines.spectroscopy.spectral_resolution import (
     FWHM_PER_SIGMA,
     MINIMUM_FITTED_TRAIL_WIDTH_SAMPLES,
     MINIMUM_RESOLUTION_ELEMENT_PIXELS,
+    ResolutionProfile,
     blur_sigma_in_samples,
+    blur_to_resolution_profile,
     estimate_resolution_element_angstrom,
+    estimate_resolution_profile,
+    load_line_spread_profile,
     resolve_resolution_element_angstrom,
 )
 from astrometricslib.pipelines.spectroscopy.spectrum_analysis import analyze_spectrum
@@ -313,3 +319,90 @@ def test_pipeline_records_no_resolution_when_the_fallback_was_used() -> None:
     )
 
     assert star.spectroscopy.resolution_element_angstrom is None
+
+
+def _varying_trail(sigma_at: Callable[[float], float]) -> tuple[np.ndarray, np.ndarray]:
+    """Make a wavelength grid at 11.3 A per pixel and its trail widths.
+
+    Parameters
+    ----------
+    sigma_at : `Callable`
+        Gives the trail's sigma, in pixels, at a wavelength.
+
+    Returns
+    -------
+    wavelengths : `numpy.ndarray`
+        The wavelength of each step, in Angstroms.
+    widths : `numpy.ndarray`
+        The trail's sigma at each step, in pixels.
+    """
+    wavelengths = 4000.0 + 11.3 * np.arange(500)
+    return wavelengths, np.array([sigma_at(w) for w in wavelengths])
+
+
+def test_a_profile_follows_a_trail_that_widens_to_the_red() -> None:
+    """Bands of a trail that widens with wavelength give a rising profile."""
+    wavelengths, widths = _varying_trail(lambda w: 1.5 + (w - 4000.0) / 3000.0)
+    profile = estimate_resolution_profile(wavelengths, widths)
+    assert profile is not None
+    assert np.all(np.diff(profile.resolution_element_angstrom) > 0)
+    assert profile.at(np.array([4100.0]))[0] < profile.at(np.array([9500.0]))[0]
+
+
+def test_a_constant_trail_gives_a_flat_profile_matching_the_single_number() -> None:
+    """A trail of one width gives every band the scalar's value."""
+    wavelengths, widths = _varying_trail(lambda w: 1.6)
+    profile = estimate_resolution_profile(wavelengths, widths)
+    assert profile is not None
+    scalar = estimate_resolution_element_angstrom(wavelengths, widths)
+    assert np.allclose(profile.resolution_element_angstrom, scalar, rtol=0.01)
+
+
+def test_no_profile_without_usable_widths() -> None:
+    """Missing or mostly failed widths give no profile."""
+    wavelengths, _ = _varying_trail(lambda w: 1.5)
+    assert estimate_resolution_profile(wavelengths, None) is None
+    assert estimate_resolution_profile(wavelengths, np.zeros(wavelengths.size)) is None
+
+
+def test_blurring_to_a_flat_profile_equals_one_gaussian_blur() -> None:
+    """A flat profile blurs exactly like the single-width gaussian filter."""
+    grid = np.linspace(4000.0, 9000.0, 1000)
+    flux = 1.0 - 0.3 * np.exp(-0.5 * ((grid - 6563.0) / 8.0) ** 2)
+    profile = ResolutionProfile(np.array([4000.0, 9000.0]), np.array([45.0, 45.0]))
+    expected = gaussian_filter1d(flux, blur_sigma_in_samples(45.0, float(grid[1] - grid[0])))
+    assert np.allclose(blur_to_resolution_profile(grid, flux, profile), expected)
+
+
+def test_a_line_is_blurred_more_where_the_profile_is_wider() -> None:
+    """Two identical lines end up shallower at the wide end of the profile."""
+    grid = np.linspace(4000.0, 9000.0, 2000)
+    flux = np.ones_like(grid)
+    for centre in (4800.0, 8200.0):
+        flux -= 0.4 * np.exp(-0.5 * ((grid - centre) / 6.0) ** 2)
+    profile = ResolutionProfile(np.array([4000.0, 9000.0]), np.array([35.0, 90.0]))
+    blurred = blur_to_resolution_profile(grid, flux, profile)
+    blue_depth = 1.0 - blurred[np.argmin(abs(grid - 4800.0))]
+    red_depth = 1.0 - blurred[np.argmin(abs(grid - 8200.0))]
+    assert red_depth < 0.6 * blue_depth
+
+
+def test_the_stored_line_spread_grows_toward_the_red_and_is_found_by_camera() -> None:
+    """The ASI533 profile is found by name and widens with wavelength."""
+    profile = load_line_spread_profile("zwo asi533mm pro")
+    assert profile is not None
+    blue, middle, red = profile.at(np.array([4300.0, 5500.0, 6600.0]))
+    assert blue < middle < red
+    assert load_line_spread_profile("No Such Camera") is None
+
+
+def test_a_wider_blur_at_the_red_lowers_the_expected_line_depth_there() -> None:
+    """The expected H-alpha is shallower with the stored profile."""
+    profile = load_line_spread_profile("ZWO ASI 533MM Pro")
+    assert profile is not None
+    alpha = "Hydrogen Balmer series (H-alpha)"
+    flat = expected_feature_depth("A0V", alpha, 49.0)
+    profiled = expected_feature_depth("A0V", alpha, 49.0, profile)
+    assert flat is not None
+    assert profiled is not None
+    assert profiled < 0.5 * flat

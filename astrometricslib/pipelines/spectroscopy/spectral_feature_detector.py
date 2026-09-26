@@ -38,7 +38,9 @@ from scipy.ndimage import gaussian_filter1d
 
 from astrometricslib.pipelines.spectroscopy.spectral_resolution import (
     FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
+    ResolutionProfile,
     blur_sigma_in_samples,
+    blur_to_resolution_profile,
 )
 
 # Rest wavelengths of features broad or strong enough for a low-resolution
@@ -482,6 +484,7 @@ def expected_feature_depth(
     reference_spectral_type: str,
     feature_name: str,
     resolution_element_angstrom: float = FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
+    resolution_profile: ResolutionProfile | None = None,
 ) -> float | None:
     """Measure how deep a feature should be for a star of a given type.
 
@@ -499,6 +502,10 @@ def expected_feature_depth(
         The instrument's resolution element, in Angstroms. Defaults to
         `FALLBACK_RESOLUTION_ELEMENT_ANGSTROM`; pass the spectrum's own
         measured value when there is one (see `spectral_resolution`).
+    resolution_profile : `ResolutionProfile`, optional
+        How the blur changes along the spectrum. When given, the template
+        is blurred by the resolution element at each wavelength, so a line
+        in the red is expected as shallow as the red's wider blur makes it.
 
     Returns
     -------
@@ -513,9 +520,12 @@ def expected_feature_depth(
         return None
     template_wavelength, template_flux = templates[reference_spectral_type]
     sample_spacing = float(np.median(np.diff(template_wavelength)))
-    smoothed = gaussian_filter1d(
-        template_flux, blur_sigma_in_samples(resolution_element_angstrom, sample_spacing)
-    )
+    if resolution_profile is not None:
+        smoothed = blur_to_resolution_profile(template_wavelength, template_flux, resolution_profile)
+    else:
+        smoothed = gaussian_filter1d(
+            template_flux, blur_sigma_in_samples(resolution_element_angstrom, sample_spacing)
+        )
 
     for feature in NAMED_FEATURES:
         if feature["name"] == feature_name:
@@ -715,6 +725,7 @@ def detect_named_features(
     intensity: np.ndarray,
     reference_spectral_type: str | None = None,
     resolution_element_angstrom: float = FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
+    resolution_profile: ResolutionProfile | None = None,
 ) -> list[dict[str, object]]:
     """Test a spectrum for each named line, as absorption or as emission.
 
@@ -741,6 +752,10 @@ def detect_named_features(
         the instrument blurs this spectrum. Defaults to
         `FALLBACK_RESOLUTION_ELEMENT_ANGSTROM`; pass the spectrum's own
         measured value when there is one (see `spectral_resolution`).
+    resolution_profile : `ResolutionProfile`, optional
+        How the blur changes along the spectrum, used to blur the
+        reference for the expected depths (see `expected_feature_depth`).
+        The observed dips are still measured at the single width above.
 
     Returns
     -------
@@ -863,7 +878,7 @@ def detect_named_features(
         probability_present = None
         if reference_spectral_type:
             expected_depth = expected_feature_depth(
-                reference_spectral_type, name, resolution_element_angstrom
+                reference_spectral_type, name, resolution_element_angstrom, resolution_profile
             )
         if expected_depth is not None and not is_emission:
             # Both hypotheses are compared on the significance scale, the

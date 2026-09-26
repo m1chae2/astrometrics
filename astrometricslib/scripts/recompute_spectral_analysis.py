@@ -40,6 +40,10 @@ from astrometricslib.pipelines.spectroscopy.instrument_response import (
     InstrumentResponse,
     load_instrument_response,
 )
+from astrometricslib.pipelines.spectroscopy.spectral_resolution import (
+    ResolutionProfile,
+    load_line_spread_profile,
+)
 from astrometricslib.pipelines.spectroscopy.spectrum_analysis import (
     EXTENDED_TARGET_SPECTRAL_TYPE,
     analyze_spectrum,
@@ -114,6 +118,7 @@ def recompute_star(
     instrument_response: InstrumentResponse | None,
     minimum_wavelength_angstrom: float,
     maximum_wavelength_angstrom: float,
+    resolution_profile: ResolutionProfile | None = None,
 ) -> bool:
     """Repair and re-analyze one star's stored spectrum, in place.
 
@@ -128,6 +133,9 @@ def recompute_star(
         The shortest wavelength the camera can see, in Angstroms.
     maximum_wavelength_angstrom : `float`
         The longest wavelength the camera can see, in Angstroms.
+    resolution_profile : `ResolutionProfile`, optional
+        How the camera's blur changes with wavelength (see
+        `load_line_spread_profile`), or `None` when none is stored.
 
     Returns
     -------
@@ -231,6 +239,7 @@ def recompute_star(
             if spectroscopy.rectangle is not None and len(spectroscopy.rectangle) > 3
             else None
         ),
+        resolution_profile=resolution_profile,
     )
     spectroscopy.emission_lines = analysis.emission_lines
     spectroscopy.is_emission_line_source = analysis.is_emission_line_source
@@ -296,6 +305,7 @@ def run_recompute(argv: list[str] | None = None) -> int:
     minimum_wavelength_angstrom = float(camera_config.get("sensor_min_wavelength", 300.0)) * 10.0
     maximum_wavelength_angstrom = float(camera_config.get("sensor_max_wavelength", 1000.0)) * 10.0
     instrument_response = load_instrument_response(camera_name)
+    resolution_profile = load_line_spread_profile(camera_name)
 
     star_ids = [
         summary.id
@@ -319,7 +329,11 @@ def run_recompute(argv: list[str] | None = None) -> int:
         before_samples = len(star.spectroscopy.wavelengths_angstrom)
         before_type = star.spectroscopy.self_determined_spectral_type
         if not recompute_star(
-            star, instrument_response, minimum_wavelength_angstrom, maximum_wavelength_angstrom
+            star,
+            instrument_response,
+            minimum_wavelength_angstrom,
+            maximum_wavelength_angstrom,
+            resolution_profile,
         ):
             continue
         changed_stars.append(star)

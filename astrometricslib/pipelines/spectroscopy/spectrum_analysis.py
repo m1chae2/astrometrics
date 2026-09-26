@@ -36,7 +36,10 @@ from astrometricslib.pipelines.spectroscopy.spectral_feature_detector import (
     VERDICT_POSSIBLE,
     detect_named_features,
 )
-from astrometricslib.pipelines.spectroscopy.spectral_resolution import resolve_resolution_element_angstrom
+from astrometricslib.pipelines.spectroscopy.spectral_resolution import (
+    ResolutionProfile,
+    resolve_resolution_element_angstrom,
+)
 from astrometricslib.pipelines.spectroscopy.spectrum_signal import (
     MINIMUM_SPECTRUM_SIGNAL_TO_NOISE,
     estimate_spectrum_signal_to_noise,
@@ -146,6 +149,7 @@ def analyze_spectrum(
     extraction_box_width_px: float | None = None,
     is_extended_target: bool = False,
     catalog_b_minus_v: float | None = None,
+    resolution_profile: ResolutionProfile | None = None,
 ) -> SpectrumAnalysis:
     """Classify a spectrum and test it for the named absorption features.
 
@@ -173,6 +177,12 @@ def analyze_spectrum(
         sample, lined up one to one with `wavelength_angstrom`. It gives
         this spectrum's own resolution (see `spectral_resolution`); when
         it is missing or unusable, a fixed fallback resolution is used.
+    resolution_profile : `ResolutionProfile`, optional
+        How the instrument's blur changes along the spectrum (see
+        `load_line_spread_profile`). When given, the references are blurred
+        by it at each wavelength; the single width from `trail_width_px`
+        still sets the feature windows and the counting of independent
+        measurements.
     extraction_box_width_px : `float`, optional
         The width, in pixels, of the box the spectrum was extracted from.
         It sets how wide the emission lines are expected to be (see
@@ -284,6 +294,7 @@ def analyze_spectrum(
         intensity,
         reference_spectral_type=expected_reference_type,
         resolution_element_angstrom=resolution_element_angstrom,
+        resolution_profile=resolution_profile,
     )
     emission_windows, emission_names = _emission_windows(features, resolution_element_angstrom)
 
@@ -300,6 +311,7 @@ def analyze_spectrum(
             corrected_intensity,
             resolution_element_angstrom=resolution_element_angstrom,
             excluded_windows_angstrom=emission_windows,
+            resolution_profile=resolution_profile,
         )
 
     if classification["spectral_type"] != "Unknown" and not classification["reason"]:
@@ -314,6 +326,7 @@ def analyze_spectrum(
                 resolution_element_angstrom=resolution_element_angstrom,
                 reference_types=GIANT_REFERENCE_SPECTRAL_TYPES,
                 excluded_windows_angstrom=emission_windows,
+                resolution_profile=resolution_profile,
             )
             if giant_result["spectral_type"] != "Unknown":
                 closest_giant = (str(giant_result["spectral_type"]), float(giant_result["rms"]))  # type: ignore[arg-type]
@@ -355,6 +368,7 @@ def analyze_spectrum(
             intensity,
             reference_spectral_type=str(classification["spectral_type"]),
             resolution_element_angstrom=resolution_element_angstrom,
+            resolution_profile=resolution_profile,
         )
     return SpectrumAnalysis(
         classification,

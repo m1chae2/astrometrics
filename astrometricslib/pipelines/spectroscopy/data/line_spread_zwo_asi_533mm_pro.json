@@ -1,0 +1,22 @@
+{
+  "camera_name": "ZWO ASI 533MM Pro",
+  "source": "Fitted 2026-09-26 to the Balmer, Mg b and Na D line depths of Schedar, Mirach and Mirfak (frames of 2026-09-25, Star Analyzer 200 on the Apertura 75Q): the Gaussian blur that makes each catalog-type reference match the observed dip depth, straight line 119 A + 27 A per 1000 A about 5500 A. Vega, Albireo B, Deneb and Albireo A were held out. Below 4400 A the widths are the trail widths (Vega Hgamma at 4340 A needed 41 A, the trail says 36-45 A); above 6563 A the value is held at the 6563 A one because nothing was measured beyond it. Focuser temperature 18-22 C across the stars, one setup only.",
+  "wavelength_angstrom": [
+    4200.0,
+    4400.0,
+    4861.0,
+    5175.0,
+    5893.0,
+    6563.0,
+    9000.0
+  ],
+  "resolution_element_angstrom": [
+    42.0,
+    45.0,
+    102.0,
+    110.0,
+    130.0,
+    148.0,
+    148.0
+  ]
+}

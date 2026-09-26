@@ -72,7 +72,9 @@ from scipy.ndimage import gaussian_filter1d
 from astrometricslib.pipelines.spectroscopy.atmospheric_mask import atmospheric_band_mask
 from astrometricslib.pipelines.spectroscopy.spectral_resolution import (
     FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
+    ResolutionProfile,
     blur_sigma_in_samples,
+    blur_to_resolution_profile,
 )
 
 if TYPE_CHECKING:
@@ -547,7 +549,9 @@ def _get_reference_templates() -> dict[str, tuple[np.ndarray, np.ndarray]]:
     return _reference_cache
 
 
-def _get_blurred_templates(resolution_element_angstrom: float) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+def _get_blurred_templates(
+    resolution_element_angstrom: float, resolution_profile: ResolutionProfile | None = None
+) -> dict[str, tuple[np.ndarray, np.ndarray]]:
     """Give every reference spectrum blurred to a given resolution.
 
     The references are much sharper than a grism spectrum, so they are
@@ -559,6 +563,10 @@ def _get_blurred_templates(resolution_element_angstrom: float) -> dict[str, tupl
     ----------
     resolution_element_angstrom : `float`
         The resolution element to blur to, in Angstroms.
+    resolution_profile : `ResolutionProfile`, optional
+        How the resolution element changes with wavelength. When given, it
+        is used instead of the single width. These blurred copies are not
+        kept for reuse, since each spectrum has its own profile.
 
     Returns
     -------
@@ -566,6 +574,11 @@ def _get_blurred_templates(resolution_element_angstrom: float) -> dict[str, tupl
         Spectral type label mapped to `(wavelength_angstrom, flux)`, the
         flux blurred with a gaussian as wide as one resolution element.
     """
+    if resolution_profile is not None:
+        return {
+            spectral_type: (wavelength, blur_to_resolution_profile(wavelength, flux, resolution_profile))
+            for spectral_type, (wavelength, flux) in _get_reference_templates().items()
+        }
     cache_key = round(resolution_element_angstrom)
     if cache_key not in _blurred_cache:
         _blurred_cache[cache_key] = {
@@ -646,6 +659,7 @@ def classify_spectral_type(
     exclude_atmospheric_bands: bool = True,
     reference_types: Iterable[str] | None = None,
     excluded_windows_angstrom: Sequence[tuple[float, float]] | None = None,
+    resolution_profile: ResolutionProfile | None = None,
 ) -> dict[str, object]:
     """Find the bundled reference spectrum a star's spectrum most resembles.
 
@@ -690,6 +704,10 @@ def classify_spectral_type(
         absorption, so a star whose Balmer lines are filled with emission
         looks like a different type unless those lines are set aside. The
         windows used are returned in ``"excluded_windows_angstrom"``.
+    resolution_profile : `ResolutionProfile`, optional
+        How the blur changes along this spectrum. When given, each
+        reference is blurred by the resolution element at each wavelength
+        instead of by `resolution_element_angstrom` everywhere.
 
     Returns
     -------
@@ -736,7 +754,7 @@ def classify_spectral_type(
     correlation_by_type: dict[str, float] = {}
     allowed_types = set(REFERENCE_SPECTRAL_TYPES if reference_types is None else reference_types)
     for spectral_type, (template_wavelength, template_flux) in _get_blurred_templates(
-        resolution_element_angstrom
+        resolution_element_angstrom, resolution_profile
     ).items():
         if spectral_type not in allowed_types:
             continue

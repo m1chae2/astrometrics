@@ -38,6 +38,7 @@ import os
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any
 
 import numpy as np
@@ -47,6 +48,7 @@ from astrometricslib.pipelines.shared.quality.saturation import (
     SATURATION_MASK_FRACTION_OF_CEILING,
     find_saturation_plateau_ceiling,
 )
+from astrometricslib.pipelines.shared.target_sessions import compute_session_night
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +98,24 @@ CLIPPING_FLOOR_SIGMAS = 2.0
 # value the same factor lower, and the floor with it).
 FULL_SCALE_COUNTS = 65535.0
 
+# A stacked image with less than this fraction of its pixels holding data
+# (finite and not exactly zero) is treated as blank and discarded (see
+# `siril_stacking._is_stack_blank`). When the frames will not register, the
+# python phase-correlation fallback can write a stack file with nothing in it,
+# and because it reports no registration counts it counted as 100% registered
+# and beat the real stacks. On the Vega restack of 2026-09-25 the 0.5 s group
+# (138 frames from two nights; standard detection registered 43%, relaxed 26%)
+# ended up with a blank stack, exactly 0.0% of pixels holding data, which then
+# carried the most weight, became the reference every other group was lined up
+# with, and turned the combined image into garbage. Each night's 0.5 s frames
+# stacked fine on their own (6% and 38% of pixels). The limit is kept tiny
+# (0.01%, under 1,000 pixels of a 3008 x 3008 stack) because a real but faint
+# stack can hold little: short exposures are clipped at zero, and on the same
+# session the good 0.02 s to 0.25 s groups held only 0.1% to 0.8% (the star
+# and its spectrum), against 76% to 100% for the 1 s to 5 s groups. Checked on
+# that one session only.
+MINIMUM_STACK_DATA_FRACTION = 0.0001
+
 # How many raw frames of a group are read to measure the frame noise. The
 # noise of a frame hardly varies from one frame to the next (the spread over
 # three frames per exposure was under 0.01 counts on the Vega session), so a
@@ -141,10 +161,15 @@ class ExposureGroup:
         The mean exposure length of the frames in the group, in seconds.
     frames : `list`
         The frame records in the group, in their original order.
+    night : `str` or `None`
+        The observing night of the group's frames (``YYYY-MM-DD``, see
+        `split_groups_by_night`), or `None` when the group was not split by
+        night.
     """
 
     exposure_seconds: float
     frames: list[Any] = field(default_factory=list)
+    night: str | None = None
 
 
 def frame_exposure_seconds(frame: Any) -> float | None:
@@ -202,7 +227,10 @@ def split_frames_by_exposure(
 
     by_exposure: dict[float, list[Any]] = defaultdict(list)
     for frame, exposure in zip(frames, exposures, strict=True):
-        by_exposure[round(exposure, 3)].append(frame)
+        # Three significant figures, not three decimal places: the camera's
+        # shortest exposure is 0.000032 s, which rounds to 0.0 at three
+        # decimals and made the nearest-group ratio below divide by zero.
+        by_exposure[float(f"{exposure:.3g}")].append(frame)
     if len(by_exposure) == 1:
         return [ExposureGroup(next(iter(by_exposure)), list(frames))]
 
@@ -212,7 +240,12 @@ def split_frames_by_exposure(
     for key, members in by_exposure.items():
         if key in large:
             continue
-        nearest = min(large, key=lambda large_key, small_key=key: abs(math.log(large_key / small_key)))
+        # An exposure of exactly 0 has no ratio; a tiny stand-in keeps it
+        # nearest to the shortest group instead of raising.
+        nearest = min(
+            large,
+            key=lambda large_key, small_key=key: abs(math.log(max(large_key, 1e-9) / max(small_key, 1e-9))),
+        )
         large[nearest].extend(members)
 
     position = {id(frame): index for index, frame in enumerate(frames)}
@@ -225,6 +258,80 @@ def split_frames_by_exposure(
     return groups
 
 
+def _frame_night(frame: Any) -> date | None:
+    """Read which observing night a frame belongs to.
+
+    Returns
+    -------
+    night : `datetime.date` or `None`
+        The night (noon to noon, see `compute_session_night`), or `None` when
+        the frame has no readable timestamp.
+    """
+    raw = frame.get("timestamp") if isinstance(frame, dict) else getattr(frame, "timestamp", None)
+    try:
+        return compute_session_night(float(raw))
+    except TypeError, ValueError, OverflowError, OSError:
+        return None
+
+
+def split_groups_by_night(
+    groups: list[ExposureGroup], minimum_frames_per_group: int = MINIMUM_FRAMES_PER_EXPOSURE_GROUP
+) -> list[ExposureGroup]:
+    """Split each exposure group into one group per observing night.
+
+    The star sits on a slightly different pixel each night (a few to tens of
+    pixels for a spectroscopy target), and registering frames from two nights
+    as one batch can fail for most of them: on the Vega session the 138 frames
+    of the 0.5 s group, from two nights, registered only 43% together, while
+    each night's frames stacked cleanly alone. Stacking each night on its own
+    and letting the group alignment line the nights up (see
+    `group_alignment`) keeps every frame.
+
+    A night with fewer than `minimum_frames_per_group` frames of an exposure
+    is added to the nearest night's group of that exposure. A group whose
+    frames are all from one night, or that has a frame without a readable
+    timestamp, is left as it is.
+
+    Parameters
+    ----------
+    groups : `list` [`ExposureGroup`]
+        The groups from `split_frames_by_exposure`.
+    minimum_frames_per_group : `int`, optional
+        The fewest frames a night needs to be stacked on its own.
+
+    Returns
+    -------
+    groups : `list` [`ExposureGroup`]
+        The groups, shortest exposure first and then earliest night first.
+    """
+    result: list[ExposureGroup] = []
+    for group in groups:
+        nights = [_frame_night(frame) for frame in group.frames]
+        if any(night is None for night in nights) or len(set(nights)) < 2:
+            result.append(group)
+            continue
+        by_night: dict[date, list[Any]] = defaultdict(list)
+        for frame, night in zip(group.frames, nights, strict=True):
+            by_night[night].append(frame)
+        large = {
+            night: members for night, members in by_night.items() if len(members) >= minimum_frames_per_group
+        }
+        if len(large) < 2:
+            result.append(group)
+            continue
+        for night, members in by_night.items():
+            if night not in large:
+                nearest = min(
+                    large, key=lambda large_night, small_night=night: abs((large_night - small_night).days)
+                )
+                large[nearest].extend(members)
+        position = {id(frame): index for index, frame in enumerate(group.frames)}
+        for night in sorted(large):
+            members = sorted(large[night], key=lambda frame: position[id(frame)])
+            result.append(ExposureGroup(group.exposure_seconds, members, night.isoformat()))
+    return result
+
+
 def _mean_exposure(exposures: list[float | None]) -> float:
     """Average the readable exposure lengths.
 
@@ -235,6 +342,26 @@ def _mean_exposure(exposures: list[float | None]) -> float:
     """
     readable = [exposure for exposure in exposures if exposure is not None]
     return float(np.mean(readable)) if readable else 0.0
+
+
+def stack_data_fraction(image: np.ndarray) -> float:
+    """Measure how much of a stacked image holds data.
+
+    Parameters
+    ----------
+    image : `numpy.ndarray`
+        One group's stacked image.
+
+    Returns
+    -------
+    fraction : `float`
+        The fraction of pixels that are finite and not exactly zero, from 0
+        to 1. A blank stack gives 0.
+    """
+    pixels = np.asarray(image)
+    if pixels.size == 0:
+        return 0.0
+    return float(np.count_nonzero(np.isfinite(pixels) & (pixels != 0)) / pixels.size)
 
 
 def estimate_background_noise(image: np.ndarray) -> float:

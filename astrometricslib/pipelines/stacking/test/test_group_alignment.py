@@ -16,6 +16,7 @@ from astrometricslib.pipelines.stacking.group_alignment import (
     NEGLIGIBLE_SHIFT_PIXELS,
     align_images_to_reference,
     apply_shift,
+    find_zero_order_position,
     measure_alignment,
 )
 
@@ -229,3 +230,109 @@ def test_align_images_moves_each_group_onto_the_reference_and_flags_a_stranger()
     assert np.corrcoef(aligned[0][inner].ravel(), reference[inner].ravel())[0, 1] > 0.7
     assert aligned[2] is None
     assert covered[2] is None
+
+
+def make_spectrum_stack(
+    star_row: float,
+    star_column: float,
+    star_brightness: float,
+    trail_brightness: float,
+    size: int = 1000,
+    saturation: float = 1.0,
+) -> np.ndarray:
+    """Build a stack of a slitless spectrum: a star with a trail below it.
+
+    The trail is a vertical streak that starts 350 px below the star, as the
+    Star Analyzer 200's does. A star brighter than ``saturation`` becomes a
+    flat plateau.
+
+    Returns
+    -------
+    image : `numpy.ndarray`
+        A ``size`` x ``size`` float32 image.
+    """
+    y, x = np.mgrid[0:size, 0:size].astype(np.float32)
+    star = star_brightness * np.exp(-((x - star_column) ** 2 + (y - star_row) ** 2) / (2 * 3.0**2))
+    along = ((y > star_row + 330) & (y < star_row + 480)).astype(np.float32)
+    trail = trail_brightness * along * np.exp(-((x - star_column) ** 2) / (2 * 4.0**2))
+    return np.minimum(star + trail, saturation).astype(np.float32)
+
+
+def test_the_zero_order_star_is_found_to_a_fraction_of_a_pixel() -> None:
+    """The star's centre is recovered from a stack that has a trail too."""
+    image = make_spectrum_stack(500.4, 507.6, 0.5, 0.2)
+
+    row, column = find_zero_order_position(image)
+
+    assert row == pytest.approx(500.4, abs=0.3)
+    assert column == pytest.approx(507.6, abs=0.3)
+
+
+def test_a_saturated_star_is_found_at_the_middle_of_its_plateau() -> None:
+    """A flat-topped star is found at its centre."""
+    image = make_spectrum_stack(497.0, 511.0, 5.0, 0.9)
+
+    row, column = find_zero_order_position(image)
+
+    assert row == pytest.approx(497.0, abs=0.5)
+    assert column == pytest.approx(511.0, abs=0.5)
+
+
+def test_a_trail_as_bright_as_the_star_is_not_mistaken_for_it() -> None:
+    """The trail lies outside the search window, so it cannot be picked."""
+    image = make_spectrum_stack(500.0, 500.0, 1.0, 1.0)
+
+    row, _ = find_zero_order_position(image)
+
+    assert row == pytest.approx(500.0, abs=0.5)
+
+
+def test_two_equally_bright_stars_are_ambiguous() -> None:
+    """A second equally bright star leaves no clear zero order."""
+    image = make_spectrum_stack(500.0, 450.0, 0.5, 0.0) + make_spectrum_stack(500.0, 560.0, 0.5, 0.0)
+
+    assert find_zero_order_position(image) is None
+
+
+def test_an_empty_image_has_no_zero_order_star() -> None:
+    """A blank image gives no position."""
+    assert find_zero_order_position(np.zeros((400, 400), np.float32)) is None
+
+
+def test_stacks_that_look_very_different_are_aligned_on_the_star() -> None:
+    """A faint stack is lined up with a saturated one by the star."""
+    reference = make_spectrum_stack(500.0, 500.0, 5.0, 0.9)
+    image = make_spectrum_stack(519.0, 488.0, 0.08, 0.0)
+
+    result = measure_alignment(reference, image, prefer_star_position=True)
+
+    assert result.is_star_based
+    assert result.trusted
+    assert result.shift_rows_pixels == pytest.approx(-19.0, abs=0.5)
+    assert result.shift_columns_pixels == pytest.approx(12.0, abs=0.5)
+
+
+def test_without_a_clear_star_the_images_are_correlated_instead() -> None:
+    """With no clear star, the images are correlated as before."""
+    reference = make_star_field(1)
+    image = np.roll(reference, (3, -2), axis=(0, 1))
+
+    result = measure_alignment(reference, image, prefer_star_position=True)
+
+    assert not result.is_star_based
+    assert result.shift_rows_pixels == pytest.approx(-3.0, abs=0.3)
+    assert result.shift_columns_pixels == pytest.approx(2.0, abs=0.3)
+
+
+def test_align_images_can_use_the_star_position_for_every_group() -> None:
+    """Each group is moved onto the reference by its star's position."""
+    reference = make_spectrum_stack(500.0, 500.0, 5.0, 0.9)
+    moved = make_spectrum_stack(512.0, 520.0, 0.3, 0.0)
+
+    aligned, _, results = align_images_to_reference([reference, moved], 0, prefer_star_position=True)
+
+    assert aligned[1] is not None
+    assert results[1].is_star_based
+    row, column = find_zero_order_position(aligned[1])
+    assert row == pytest.approx(500.0, abs=0.6)
+    assert column == pytest.approx(500.0, abs=0.6)

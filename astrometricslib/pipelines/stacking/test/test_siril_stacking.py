@@ -11,6 +11,7 @@ a fake Siril driver that writes small real FITS files, so the file handling
 import json
 import logging
 import zlib
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -522,6 +523,124 @@ def test_a_group_that_shares_no_field_with_the_others_is_left_out(tmp_path: Path
     assert len(left_out) == 1
     assert "could not be lined up" in left_out[0]["left_out_reason"]
     assert fits.getheader(path)["STACKCNT"] == 6
+
+
+def test_a_group_whose_every_attempt_is_blank_is_left_out_as_not_stacked(tmp_path: Path) -> None:
+    """A group that only ever produces blank stacks is named and left out."""
+
+    class BlankGroupDriver(FakeSirilDriver):
+        """Blanks every stack of the second group (calls 4 to 6)."""
+
+        def process_target(self, **kwargs: Any) -> str | None:
+            """Write a stack, then blank it for the second group.
+
+            Returns
+            -------
+            path : `str` or `None`
+                The stack path.
+            """
+            path = super().process_target(**kwargs)
+            if len(self.calls) > 1 and path:
+                fits.writeto(path, np.zeros((64, 64), np.float32), overwrite=True)
+            return path
+
+    frames = [_frame("0.5", f"short_{i}") for i in range(6)] + [_frame("5.0", f"long_{i}") for i in range(12)]
+    driver = BlankGroupDriver(
+        tmp_path, [{"registered": 6}, {"registered": 12}, {"registered": 12}, {"registered": 12}]
+    )
+
+    path, diagnostics = run_siril_stack(driver, frames, "Vega", "Vega_SPEC.fits", None, True)
+
+    assert path is not None
+    entries = {entry["exposure_seconds"]: entry for entry in diagnostics["exposure_group_summaries"]}
+    assert entries[5.0]["left_out_reason"] == "could not be stacked"
+    assert entries[0.5]["left_out_reason"] is None
+    assert fits.getheader(path)["STACKCNT"] == 6
+
+
+def test_a_blank_attempt_never_beats_a_real_stack_that_registered_fewer_frames(tmp_path: Path) -> None:
+    """A blank last attempt is discarded, not kept as 100% registered."""
+
+    class BlankLastDriver(FakeSirilDriver):
+        """Writes a blank third stack that reports no counts."""
+
+        def process_target(self, **kwargs: Any) -> str | None:
+            """Write a stack, then blank the third call's image.
+
+            Returns
+            -------
+            path : `str` or `None`
+                The stack path.
+            """
+            path = super().process_target(**kwargs)
+            if len(self.calls) == 3 and path:
+                self.last_run_diagnostics.pop("registered_frames")
+                self.last_run_diagnostics.pop("registration_failed_frames")
+                fits.writeto(path, np.zeros((64, 64), np.float32), overwrite=True)
+            return path
+
+    driver = BlankLastDriver(
+        tmp_path,
+        [{"failed": 6, "registered": 4, "fill": 0.3}, {"failed": 8, "registered": 2}, {"registered": 10}],
+    )
+
+    path, diagnostics = run_siril_stack(
+        driver, [_frame() for _ in range(10)], "Vega", "Vega_SPEC.fits", None, True
+    )
+
+    assert path is not None
+    assert diagnostics["spectral_star_detection"] == "standard"
+    assert float(np.mean(fits.getdata(path))) > 0.1
+
+
+def test_a_spectral_session_from_two_nights_is_stacked_one_night_at_a_time(tmp_path: Path) -> None:
+    """Spectral frames from two nights become two group stacks."""
+
+    def night_frame(day: int, name: str) -> SimpleNamespace:
+        """Build a frame taken at 22:00 local time on a day of January 2026.
+
+        Returns
+        -------
+        frame : `types.SimpleNamespace`
+            A frame with an exposure, a timestamp and `model_dump`.
+        """
+        taken = datetime(2026, 1, day, 22, 0, 0).timestamp()
+        return SimpleNamespace(
+            exposure="0.5",
+            timestamp=str(taken),
+            model_dump=lambda: {"path": name, "exposure": "0.5", "timestamp": str(taken)},
+        )
+
+    frames = [night_frame(10, f"may_{i}") for i in range(6)] + [night_frame(20, f"sep_{i}") for i in range(6)]
+    driver = FakeSirilDriver(tmp_path, [{"registered": 6}, {"registered": 6}])
+
+    path, diagnostics = run_siril_stack(driver, frames, "Vega", "Vega_SPEC.fits", None, True)
+
+    assert path is not None
+    assert [call["output_file"] for call in driver.calls] == [
+        "Vega_SPEC_exp0p5s_2026-01-10.fits",
+        "Vega_SPEC_exp0p5s_2026-01-20.fits",
+    ]
+    assert len(diagnostics["exposure_group_summaries"]) == 2
+    assert fits.getheader(path)["STACKCNT"] == 12
+
+
+def test_imaging_frames_from_two_nights_are_not_split_by_night(tmp_path: Path) -> None:
+    """Only spectral stacks are split by night; imaging stays one batch."""
+    frames = [
+        SimpleNamespace(
+            exposure="0.5",
+            timestamp=str(datetime(2026, 1, day, 22, 0, 0).timestamp()),
+            model_dump=lambda: {"exposure": "0.5"},
+        )
+        for day in (10, 20)
+        for _ in range(6)
+    ]
+    driver = FakeSirilDriver(tmp_path, [{"registered": 12}])
+
+    run_siril_stack(driver, frames, "M 31", "M31.fits", None, False)
+
+    assert len(driver.calls) == 1
 
 
 def test_a_group_that_cannot_be_stacked_still_appears_in_the_summaries(tmp_path: Path) -> None:

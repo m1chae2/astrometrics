@@ -70,6 +70,50 @@ COVERED_PIXEL_THRESHOLD = 0.999
 # correlation. Not yet validated on other spectral sessions.
 SPECTRAL_ALIGNMENT_CENTER_CROP_FRACTION = 0.5
 
+# Aligning spectral group stacks on the zero-order star instead of on the
+# image as a whole. The dispersed trail is a long streak, so shifting an image
+# along it barely changes how well two stacks match, and a saturated long
+# exposure and a faint short one look too different for the correlation to
+# lock on. On the 2026 Vega group stacks the 0.05 s group's true offset from
+# the 5 s group was about (+6 rows, +26 columns), where the correlation
+# reported (-39, -5), and the 0.1 s group's came out 395 px off; the star's own
+# position in each stack agreed to 1 px across the 1 s to 5 s groups. The star
+# is found as the brightest spot of the image smoothed by this many pixels
+# (seeing spreads the star over a few pixels).
+ZERO_ORDER_SMOOTHING_SIGMA_PIXELS = 2.0
+
+# The star is looked for only within this many pixels of the centre of the
+# image, because a saturated long-exposure stack has a second spot as bright as
+# the star: its dispersed trail, about 350 px below the star. On the Vega 5 s
+# stack the brightest smoothed spot in the central half of the frame was the
+# trail (0.76 of full scale, against 0.77 for the star), and the trail beat the
+# star outright in the 1 s stack. The spectroscopy target is framed near the
+# image centre (the same assumption `SPECTRAL_ALIGNMENT_CENTER_CROP_FRACTION`
+# makes): on the Vega nights the star sat within 35 px of it. 150 px covers
+# four times that and stays well inside the 350 px to the trail. A target
+# framed farther from the centre is not found, and the images are correlated
+# instead.
+ZERO_ORDER_SEARCH_HALF_WIDTH_PIXELS = 150
+
+# The star's centre is the brightness-weighted centre of the pixels within this
+# many pixels of the brightest spot that are at least
+# ZERO_ORDER_CENTROID_FRACTION_OF_PEAK of it. A saturated star is a flat
+# plateau, where the brightest single pixel is arbitrary but the centre of the
+# plateau is not. The window is wider than a saturated plateau (about 15 px
+# across on the Vega 5 s stack, unmeasured elsewhere) and far narrower than the
+# 40 px separation below.
+ZERO_ORDER_CENTROID_HALF_WINDOW_PIXELS = 25
+ZERO_ORDER_CENTROID_FRACTION_OF_PEAK = 0.5
+
+# The star is only believed when nothing else at least this far away is
+# brighter than ZERO_ORDER_MAX_RIVAL_FRACTION of it. A stack with two similar
+# bright spots (a double star, or the trail as bright as the star) is
+# ambiguous, and then the caller falls back to correlating the images.
+# Unvalidated choices: on the Vega group stacks the brightest spot away from
+# the star was well under half the star's brightness.
+ZERO_ORDER_RIVAL_SEPARATION_PIXELS = 40
+ZERO_ORDER_MAX_RIVAL_FRACTION = 0.5
+
 
 @dataclass
 class AlignmentResult:
@@ -85,11 +129,18 @@ class AlignmentResult:
     correlation : `float`
         How well the two filtered images agree once the image is moved. Near
         one is a match; near zero means the offset found is not real.
+    is_star_based : `bool`
+        `True` when the offset is the difference between the two images'
+        zero-order star positions (see `find_zero_order_position`) rather
+        than the result of correlating the images. Such an offset is trusted
+        without the correlation test, since the images may look very
+        different (a saturated long exposure against a faint short one).
     """
 
     shift_rows_pixels: float
     shift_columns_pixels: float
     correlation: float
+    is_star_based: bool = False
 
     @property
     def trusted(self) -> bool:
@@ -98,9 +149,10 @@ class AlignmentResult:
         Returns
         -------
         trusted : `bool`
-            `True` at or above `MINIMUM_ALIGNMENT_CORRELATION`.
+            `True` for a star-based offset, otherwise `True` at or above
+            `MINIMUM_ALIGNMENT_CORRELATION`.
         """
-        return self.correlation >= MINIMUM_ALIGNMENT_CORRELATION
+        return self.is_star_based or self.correlation >= MINIMUM_ALIGNMENT_CORRELATION
 
 
 def _to_plane(image: np.ndarray) -> np.ndarray:
@@ -155,8 +207,56 @@ def _filtered(plane: np.ndarray) -> np.ndarray:
     return filtered
 
 
+def find_zero_order_position(plane: np.ndarray) -> tuple[float, float] | None:
+    """Find the star that casts a slitless spectrum in a stacked image.
+
+    Parameters
+    ----------
+    plane : `numpy.ndarray`
+        A 2-D stacked image (already cropped to where the star can be).
+
+    Returns
+    -------
+    position : `tuple` [`float`, `float`] or `None`
+        The star's (row, column), or `None` when the centre of the image
+        has no bright spot, or has a second spot too bright to tell which is
+        the star (see `ZERO_ORDER_MAX_RIVAL_FRACTION`).
+    """
+    smooth = gaussian_filter(
+        np.nan_to_num(np.asarray(plane, dtype=np.float32)), ZERO_ORDER_SMOOTHING_SIGMA_PIXELS
+    )
+    rows, columns = np.ogrid[: smooth.shape[0], : smooth.shape[1]]
+    in_search_window = (np.abs(rows - (smooth.shape[0] - 1) / 2.0) <= ZERO_ORDER_SEARCH_HALF_WIDTH_PIXELS) & (
+        np.abs(columns - (smooth.shape[1] - 1) / 2.0) <= ZERO_ORDER_SEARCH_HALF_WIDTH_PIXELS
+    )
+    searched = np.where(in_search_window, smooth, 0.0)
+    peak_row, peak_column = np.unravel_index(int(np.argmax(searched)), searched.shape)
+    peak = float(searched[peak_row, peak_column])
+    if peak <= 0:
+        return None
+    distance_squared = (rows - peak_row) ** 2 + (columns - peak_column) ** 2
+    far_away = distance_squared > ZERO_ORDER_RIVAL_SEPARATION_PIXELS**2
+    rival = float(searched[far_away & in_search_window].max(initial=0.0))
+    if rival > ZERO_ORDER_MAX_RIVAL_FRACTION * peak:
+        return None
+    half = ZERO_ORDER_CENTROID_HALF_WINDOW_PIXELS
+    row_slice = slice(max(peak_row - half, 0), min(peak_row + half + 1, smooth.shape[0]))
+    column_slice = slice(max(peak_column - half, 0), min(peak_column + half + 1, smooth.shape[1]))
+    window = smooth[row_slice, column_slice]
+    weights = np.where(window >= ZERO_ORDER_CENTROID_FRACTION_OF_PEAK * peak, window, 0.0)
+    window_rows, window_columns = np.mgrid[row_slice, column_slice]
+    total = float(weights.sum())
+    return (
+        float((weights * window_rows).sum() / total),
+        float((weights * window_columns).sum() / total),
+    )
+
+
 def measure_alignment(
-    reference: np.ndarray, image: np.ndarray, crop_fraction: float | None = None
+    reference: np.ndarray,
+    image: np.ndarray,
+    crop_fraction: float | None = None,
+    prefer_star_position: bool = False,
 ) -> AlignmentResult:
     """Find the shift that puts `image` onto `reference`.
 
@@ -173,6 +273,11 @@ def measure_alignment(
         in both images does not change the offset between them; it only
         keeps frame edges and empty sky from influencing it. `None` measures
         on the whole frame, as before.
+    prefer_star_position : `bool`, optional
+        When `True`, the offset is first taken from the zero-order star's
+        position in each image (see `find_zero_order_position`), which
+        works when the two images look very different. If either image has
+        no clear star, the images are correlated as usual.
 
     Returns
     -------
@@ -193,19 +298,32 @@ def measure_alignment(
         image_plane = _center_crop(image_plane, crop_fraction)
     fixed = _filtered(reference_plane)
     moving = _filtered(image_plane)
-    shift, _, _ = phase_cross_correlation(
-        fixed, moving, upsample_factor=ALIGNMENT_UPSAMPLE_FACTOR, normalization=None
-    )
+    star_positions = None
+    if prefer_star_position:
+        reference_star = find_zero_order_position(reference_plane)
+        image_star = find_zero_order_position(image_plane)
+        if reference_star is not None and image_star is not None:
+            star_positions = (reference_star, image_star)
+    if star_positions is not None:
+        shift = np.array([
+            star_positions[0][0] - star_positions[1][0],
+            star_positions[0][1] - star_positions[1][1],
+        ])
+    else:
+        shift, _, _ = phase_cross_correlation(
+            fixed, moving, upsample_factor=ALIGNMENT_UPSAMPLE_FACTOR, normalization=None
+        )
+    is_star_based = star_positions is not None
     moved = shift_image(moving, shift, order=1, mode="constant", cval=0.0)
     covered = (
         shift_image(np.ones_like(moving), shift, order=1, mode="constant", cval=0.0) > COVERED_PIXEL_THRESHOLD
     )
     if not covered.any():
-        return AlignmentResult(float(shift[0]), float(shift[1]), 0.0)
+        return AlignmentResult(float(shift[0]), float(shift[1]), 0.0, is_star_based)
     correlation = float(np.corrcoef(fixed[covered], moved[covered])[0, 1])
     if not np.isfinite(correlation):
         correlation = 0.0
-    return AlignmentResult(float(shift[0]), float(shift[1]), correlation)
+    return AlignmentResult(float(shift[0]), float(shift[1]), correlation, is_star_based)
 
 
 def apply_shift(
@@ -255,7 +373,10 @@ def apply_shift(
 
 
 def align_images_to_reference(
-    images: list[np.ndarray], reference_index: int, crop_fraction: float | None = None
+    images: list[np.ndarray],
+    reference_index: int,
+    crop_fraction: float | None = None,
+    prefer_star_position: bool = False,
 ) -> tuple[list[np.ndarray | None], list[np.ndarray | None], list[AlignmentResult | None]]:
     """Line up every image with the reference image.
 
@@ -269,6 +390,8 @@ def align_images_to_reference(
         Passed to `measure_alignment` for every pair; see there. The images
         themselves are never cropped, only the region used to measure the
         offset between them.
+    prefer_star_position : `bool`, optional
+        Passed to `measure_alignment` for every pair; see there.
 
     Returns
     -------
@@ -290,7 +413,12 @@ def align_images_to_reference(
             covered_masks.append(np.ones(np.shape(image)[-2:], dtype=bool))
             results.append(None)
             continue
-        result = measure_alignment(images[reference_index], image, crop_fraction=crop_fraction)
+        result = measure_alignment(
+            images[reference_index],
+            image,
+            crop_fraction=crop_fraction,
+            prefer_star_position=prefer_star_position,
+        )
         results.append(result)
         if not result.trusted:
             aligned.append(None)

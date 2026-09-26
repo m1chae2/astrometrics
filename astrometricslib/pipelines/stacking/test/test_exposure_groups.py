@@ -9,6 +9,7 @@ into an image that is closer to the truth than an equal-weight average,
 leaves out saturated pixels, and rejects nonsense input.
 """
 
+from datetime import datetime
 from types import SimpleNamespace
 
 import numpy as np
@@ -32,6 +33,8 @@ from astrometricslib.pipelines.stacking.exposure_groups import (
     merge_registration_sequences,
     merge_rejection_maps,
     split_frames_by_exposure,
+    split_groups_by_night,
+    stack_data_fraction,
 )
 
 
@@ -77,6 +80,18 @@ def test_a_bracketed_session_is_split_by_exposure_shortest_first() -> None:
 
     assert [group.exposure_seconds for group in groups] == pytest.approx([0.5, 1.0, 2.0, 3.0, 5.0])
     assert [len(group.frames) for group in groups] == [60, 20, 20, 20, 20]
+
+
+def test_the_cameras_shortest_exposures_do_not_divide_by_zero() -> None:
+    """M 13's 32 microsecond and 1320 s stragglers fold into the 30 s group.
+
+    Rounding 0.000032 s to three decimals gave 0.0 and a division by zero
+    when the tiny groups were matched to their nearest large group.
+    """
+    groups = split_frames_by_exposure(_frames(*(["30.0"] * 94 + ["3.2e-05"] * 2 + ["1320.000064"])))
+
+    assert len(groups) == 1
+    assert len(groups[0].frames) == 97
 
 
 def test_frames_keep_their_original_order_inside_a_group() -> None:
@@ -569,3 +584,75 @@ def test_zero_fractions_must_line_up_with_the_groups() -> None:
         combine_exposure_group_images(
             [image, image], [1.0, 2.0], frame_noises=[1.0, 1.0], frame_zero_fractions=[0.0]
         )
+
+
+def test_stack_data_fraction_counts_only_finite_nonzero_pixels() -> None:
+    """A blank image has no data; NaN and zero are not data."""
+    image = np.zeros((10, 10))
+    assert stack_data_fraction(image) == pytest.approx(0.0)
+    image[:5] = 0.3
+    assert stack_data_fraction(image) == pytest.approx(0.5)
+    image[0, :] = np.nan
+    assert stack_data_fraction(image) == pytest.approx(0.4)
+    assert stack_data_fraction(np.empty((0, 0))) == pytest.approx(0.0)
+
+
+def _night_frame(day: int, exposure: str = "0.5", name: str = "f") -> SimpleNamespace:
+    """Build a frame taken at 22:00 local time on a day of January 2026.
+
+    Returns
+    -------
+    frame : `types.SimpleNamespace`
+        A frame with an exposure and a timestamp.
+    """
+    taken = datetime(2026, 1, day, 22, 0, 0)
+    return SimpleNamespace(exposure=exposure, timestamp=str(taken.timestamp()), name=name)
+
+
+def test_a_group_from_two_nights_is_split_into_one_group_per_night() -> None:
+    """Each night of an exposure becomes its own group, earliest first."""
+    frames = [_night_frame(10, name=f"a{i}") for i in range(6)] + [
+        _night_frame(20, name=f"b{i}") for i in range(7)
+    ]
+    groups = split_groups_by_night(split_frames_by_exposure(frames))
+
+    assert [(group.night, len(group.frames)) for group in groups] == [("2026-01-10", 6), ("2026-01-20", 7)]
+    assert all(group.exposure_seconds == pytest.approx(0.5) for group in groups)
+
+
+def test_a_night_with_too_few_frames_joins_the_nearest_night() -> None:
+    """A night below the minimum is folded into the closest night."""
+    frames = (
+        [_night_frame(10, name=f"a{i}") for i in range(6)]
+        + [_night_frame(12, name=f"c{i}") for i in range(2)]
+        + [_night_frame(20, name=f"b{i}") for i in range(7)]
+    )
+    groups = split_groups_by_night(split_frames_by_exposure(frames))
+
+    assert [(group.night, len(group.frames)) for group in groups] == [("2026-01-10", 8), ("2026-01-20", 7)]
+
+
+def test_one_night_or_missing_timestamps_leave_a_group_unchanged() -> None:
+    """One night, or an unreadable timestamp, splits nothing."""
+    one_night = split_frames_by_exposure([_night_frame(10, name=f"a{i}") for i in range(6)])
+    assert split_groups_by_night(one_night) == one_night
+
+    frames = [_night_frame(10, name=f"a{i}") for i in range(6)] + [
+        _night_frame(20, name=f"b{i}") for i in range(6)
+    ]
+    frames[3].timestamp = "not a number"
+    unreadable = split_frames_by_exposure(frames)
+    assert split_groups_by_night(unreadable) == unreadable
+
+
+def test_each_exposure_is_split_by_night_on_its_own() -> None:
+    """A night split does not mix exposure lengths."""
+    frames = [_night_frame(d, e) for e in ("0.5", "5.0") for d in (10, 20) for _ in range(5)]
+    groups = split_groups_by_night(split_frames_by_exposure(frames))
+
+    assert [(round(group.exposure_seconds, 1), group.night) for group in groups] == [
+        (0.5, "2026-01-10"),
+        (0.5, "2026-01-20"),
+        (5.0, "2026-01-10"),
+        (5.0, "2026-01-20"),
+    ]

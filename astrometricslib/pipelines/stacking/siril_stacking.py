@@ -93,13 +93,21 @@ def run_siril_stack(
     """
     if output_file is None:
         output_file = f"{target_id.replace(' ', '_')}_Stacked.fits"
-    from astrometricslib.pipelines.stacking.exposure_groups import split_frames_by_exposure
+    from astrometricslib.pipelines.stacking.exposure_groups import (
+        split_frames_by_exposure,
+        split_groups_by_night,
+    )
 
     # Frames of different exposure lengths are stacked one length at a time,
     # for spectra and for images. Each length needs the dark frames of its own
     # length, and the normalization and rejection of one stack cannot treat
     # frames of different lengths as one population (see `exposure_groups`).
     groups = split_frames_by_exposure(frames)
+    if is_spectral:
+        # Each night's frames are stacked on their own too: the zero order
+        # sits on a different pixel each night and registering two nights
+        # together can lose most frames (see `split_groups_by_night`).
+        groups = split_groups_by_night(groups)
     if len(groups) > 1:
         return _stack_exposure_groups(
             siril_driver, groups, target_id, output_file, log_file, is_spectral, **stack_options
@@ -154,6 +162,17 @@ def _stack_one_batch(
             **options,
         )
         diagnostics = dict(siril_driver.last_run_diagnostics)
+        if path and _is_stack_blank(path):
+            # A blank stack is not a result. Without this its unreported
+            # registration counts as 100% (see `_registered_fraction`), so
+            # it would beat a real stack that registered fewer frames.
+            logger.warning(
+                "The stack of %d frames for '%s' with %s star detection is blank; discarding it.",
+                len(frames),
+                target_id,
+                mode or "the default",
+            )
+            path = None
         fraction = _registered_fraction(diagnostics)
         if mode is not None:
             diagnostics["spectral_star_detection"] = mode
@@ -200,6 +219,35 @@ def _stack_one_batch(
             kept[1].get("spectral_star_detection"),
         )
     return kept_path, kept[1]
+
+
+def _is_stack_blank(stack_path: str) -> bool:
+    """Tell whether a stacked file holds no data.
+
+    Parameters
+    ----------
+    stack_path : `str`
+        The stacked image Siril wrote.
+
+    Returns
+    -------
+    is_blank : `bool`
+        `True` when almost none of the pixels hold data (see
+        `MINIMUM_STACK_DATA_FRACTION`), `False` otherwise or when the file
+        cannot be read (an unreadable file is left for later steps to report).
+    """
+    import numpy as np
+
+    from astrometricslib.drivers.fits_access import read_data
+    from astrometricslib.pipelines.stacking.exposure_groups import (
+        MINIMUM_STACK_DATA_FRACTION,
+        stack_data_fraction,
+    )
+
+    try:
+        return stack_data_fraction(np.asarray(read_data(stack_path))) < MINIMUM_STACK_DATA_FRACTION
+    except OSError:
+        return False
 
 
 def _registered_fraction(diagnostics: dict[str, Any]) -> float:
@@ -378,12 +426,16 @@ def _stack_exposure_groups(
         "Stacking '%s' as %d exposure groups (%s s) and combining them.",
         target_id,
         len(groups),
-        ", ".join(f"{group.exposure_seconds:g}" for group in groups),
+        ", ".join(
+            f"{group.exposure_seconds:g}" + (f" ({group.night})" if group.night else "") for group in groups
+        ),
     )
     results = []
     failed_groups = []
     for group in groups:
         tag = f"exp{group.exposure_seconds:g}s".replace(".", "p")
+        if group.night is not None:
+            tag += f"_{group.night}"
         path, diagnostics = _stack_one_batch(
             siril_driver,
             group.frames,
@@ -455,7 +507,7 @@ def _stack_exposure_groups(
     reference_index = int(np.argmax(weights))
     crop_fraction = SPECTRAL_ALIGNMENT_CENTER_CROP_FRACTION if is_spectral else None
     aligned_images, covered_masks, alignments = align_images_to_reference(
-        images, reference_index, crop_fraction=crop_fraction
+        images, reference_index, crop_fraction=crop_fraction, prefer_star_position=is_spectral
     )
     left_out_reasons: dict[int, str] = {}
     for index, aligned in enumerate(aligned_images):

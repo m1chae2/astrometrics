@@ -20,6 +20,14 @@ from astrometricslib.pipelines.shared.quality.saturation import (
     is_normalised_stack_scale,
 )
 from astrometricslib.pipelines.spectroscopy.instrument_response import load_instrument_response
+from astrometricslib.pipelines.spectroscopy.neighbor_wing_correction import (
+    STATUS_APPLIED,
+    STATUS_NOT_NEEDED,
+    StoredCrossTrailBlur,
+    correct_neighbor_wings,
+    load_cross_trail_blur,
+    star_trace_from_result,
+)
 from astrometricslib.pipelines.spectroscopy.quantum_efficiency_correction import (
     apply_quantum_efficiency_correction,
     curve_from_profile_record,
@@ -507,6 +515,10 @@ class SpectroscopyPipeline:
         # The stored correction for this setup's grating and sensor, or
         # `None` when none has been derived. Read once here, not per star.
         self.instrument_response = load_instrument_response(config.camera.name)
+        # The stored blur of this camera's streaks, measured on an isolated
+        # bright star, or `None` when none has been derived. Only used when
+        # `config.subtract_neighbor_wings` is on.
+        self.cross_trail_blur: StoredCrossTrailBlur | None = load_cross_trail_blur(config.camera.name)
         self.instrument = SpectroscopyInstrument(config)
         # The extractor also does the sky background subtraction stage:
         # each brightness reading has the night-sky glow (measured in strips
@@ -772,7 +784,7 @@ class SpectroscopyPipeline:
             One result dict per successfully processed star, each also
             carrying its original `star_source` object.
         """
-        results = []
+        extracted: list[tuple[Any, bool, dict[str, Any]]] = []
         batch = target_stars[:limit]
         batch_positions = [_star_pixel_position(star)[1] for star in batch]
         dispersion_vector = self.instrument.get_dispersion_vector()
@@ -797,14 +809,63 @@ class SpectroscopyPipeline:
             if "error" not in result:
                 # Attach the original star object if possible for reference
                 result["star_source"] = star
+                extracted.append((star, is_stellar_obj, result))
 
-                # If it's a StellarObject, enrich it with results
-                if is_stellar_obj:
-                    self._apply_result_to_stellar_object(star, result, image)
+        # Every star is read first, so each one's neighbours' light can be
+        # taken out of it before the results are applied.
+        if self.config.subtract_neighbor_wings and len(extracted) > 1:
+            self._subtract_neighbor_wings(image, [result for _, _, result in extracted])
 
-                results.append(result)
+        results = []
+        for star, is_stellar_obj, result in extracted:
+            # If it's a StellarObject, enrich it with results
+            if is_stellar_obj:
+                self._apply_result_to_stellar_object(star, result, image)
+            results.append(result)
 
         return results
+
+    def _subtract_neighbor_wings(self, image: AstrometricsImage, results: list[dict[str, Any]]) -> None:
+        """Take each star's neighbours' blurred light out of its spectrum.
+
+        Two stars close together give side-by-side streaks, and the bright
+        one's blur reaches into the faint one's box (see
+        `neighbor_trail_deblending`). For every star with such a neighbour the
+        stored blur is fitted to the pair, and the neighbour's share is taken
+        out of the star's intensities. What was done, and how much was taken
+        out at each sample, is recorded in the star's result.
+
+        Parameters
+        ----------
+        image : `AstrometricsImage`
+            The picture the spectra were read from.
+        results : `list` [`dict`]
+            Every star's extraction result. Changed in place: a corrected
+            star's ``"intensities"`` are replaced, and every star with a
+            neighbour gets ``"neighbor_wing_status"`` and, when it was
+            corrected, ``"neighbor_wing_fraction"``.
+        """
+        traces = [star_trace_from_result(result) for result in results]
+        first_vector = next(
+            (result["dispersion_vector"] for result in results if result.get("dispersion_vector")),
+            None,
+        )
+        if first_vector is None:
+            return
+        outcomes = correct_neighbor_wings(
+            image.data, traces, self.cross_trail_blur, (float(first_vector[0]), float(first_vector[1]))
+        )
+        for result, outcome in zip(results, outcomes, strict=True):
+            if outcome.status == STATUS_NOT_NEEDED:
+                continue
+            result["neighbor_wing_status"] = outcome.status
+            if (
+                outcome.status == STATUS_APPLIED
+                and outcome.corrected_flux is not None
+                and outcome.wing_fraction is not None
+            ):
+                result["intensities"] = outcome.corrected_flux.tolist()
+                result["neighbor_wing_fraction"] = outcome.wing_fraction.tolist()
 
     def _apply_result_to_stellar_object(
         self, star: StellarObject, result: dict[str, Any], image: AstrometricsImage
@@ -886,6 +947,8 @@ class SpectroscopyPipeline:
             resolution_element_angstrom=(
                 analysis.resolution_element_angstrom if analysis.is_resolution_measured else None
             ),
+            neighbor_wing_fraction=result.get("neighbor_wing_fraction"),
+            neighbor_wing_status=result.get("neighbor_wing_status"),
         )
 
         # Records this extraction as one more epoch in the star's own
@@ -982,6 +1045,10 @@ class SpectroscopyPipeline:
                 "error": "The instrument model asked for a spectrum of zero length; check the camera config."
             }
         requested_wavelength_range_nm = [float(np.nanmin(wavelengths)), float(np.nanmax(wavelengths))]
+        # The geometry the plain dispersion-line extraction used, kept so the
+        # neighbour-wing stage can place every sample on the image again. The
+        # flare-mask extraction reads a different path and records none.
+        sample_distances_px = self.instrument.zero_order_offset_px + np.arange(wavelengths.size, dtype=float)
         usable = keep_usable_samples(
             wavelengths,
             intensities,
@@ -993,6 +1060,7 @@ class SpectroscopyPipeline:
         valid_fraction = float(usable.mean())
         wavelengths = wavelengths[usable]
         intensities = intensities[usable]
+        sample_distances_px = sample_distances_px[usable]
         if trail_centerline_px is not None and len(trail_centerline_px) == len(usable):
             trail_centerline_px = np.asarray(trail_centerline_px, dtype=float)[usable].tolist()
         if trail_width_px is not None and len(trail_width_px) == len(usable):
@@ -1010,6 +1078,18 @@ class SpectroscopyPipeline:
             "trail_width_px": trail_width_px,
             "valid_fraction": valid_fraction,
             "requested_wavelength_range_nm": requested_wavelength_range_nm,
+            **(
+                {}
+                if use_flare_mask
+                else {
+                    "distances_from_zero_order_px": sample_distances_px.tolist(),
+                    "base_position_px": (
+                        float(pos[0]) + self.config.dispersion_offset_x,
+                        float(pos[1]) + self.config.dispersion_offset_y,
+                    ),
+                    "dispersion_vector": tuple(float(v) for v in self.instrument.get_dispersion_vector()),
+                }
+            ),
         }
 
     def _extract_via_flare_mask(

@@ -267,6 +267,16 @@ class SpectroscopyResult(BaseModel):
     # How many pixels out from the star's center to gather light from
     # when measuring its spectrum.
     extraction_radius: int | None = Field(default=None, alias="extractionRadius")
+    # An audit record for the neighbour-wing correction (see
+    # neighbor_trail_deblending). For each sample of the spectrum above, the
+    # share of this star's box light that came from a neighbouring star's
+    # blur and was taken out, from 0 to 1. `None` when the correction was not
+    # run (the switch is off, or there was no neighbour to correct for).
+    neighbor_wing_fraction: list[float] | None = Field(default=None, alias="neighborWingFraction")
+    # What the neighbour-wing correction did for this star, in words:
+    # "applied", or "skipped: ..." with the reason (for example the fit was
+    # not trustworthy). `None` when the correction was not run.
+    neighbor_wing_status: str | None = Field(default=None, alias="neighborWingStatus")
 
 
 class StellarObject(BaseModel):

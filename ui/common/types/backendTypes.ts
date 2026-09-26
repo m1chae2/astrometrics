@@ -261,6 +261,8 @@ export interface SpectroscopyResult {
   secondOrderBlueToRedRatio?: number[] | null;
   resolutionElementAngstrom?: number | null;
   extractionRadius?: number | null;
+  neighborWingFraction?: number[] | null;
+  neighborWingStatus?: string | null;
 }
 
 /**

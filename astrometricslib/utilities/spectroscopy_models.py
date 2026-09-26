@@ -136,6 +136,13 @@ class SpectroscopyConfig(BaseModel):
         (other stars' trails and zero orders) by the smooth level, by
         default `False`. The pipeline turns it on for a nebula's wide box
         only.
+    subtract_neighbor_wings : `bool`
+        Whether to take a bright neighbour's light out of a star's box, by
+        default `False`. Two stars close together give side-by-side streaks,
+        and the bright one's blur reaches into the faint one's box (see
+        ``neighbor_trail_deblending``). It needs a stored blur profile for
+        the camera (``neighbor_wing_correction``); with none, nothing is
+        changed. Off until it has been checked on more real pairs.
     use_flare_mask_extraction : `bool`
         Whether to extract starting from an offset anchored past the
         star's own position, to avoid a bright flare/astigmatism
@@ -198,6 +205,10 @@ class SpectroscopyConfig(BaseModel):
     reject_narrow_contaminants: bool = Field(
         False,
         description="Replace narrow bright spikes (other stars' trails) in the box by the smooth level",
+    )
+    subtract_neighbor_wings: bool = Field(
+        False,
+        description="Take a bright neighbour's blurred light out of each star's box (needs a stored blur)",
     )
     use_flare_mask_extraction: bool = Field(
         False,
@@ -405,6 +416,7 @@ class ConfigLoader:
             expected_fwhm=get_f("expected_fwhm", 8.0),
             extraction_radius=int(get_f("extraction_radius", 10)),
             use_flare_mask_extraction=get_bool("use_flare_mask_extraction", False),
+            subtract_neighbor_wings=get_bool("subtract_neighbor_wings", False),
             max_extraction_length_px=(
                 get_f("max_extraction_length_px", None) if "max_extraction_length_px" in cam_data else None
             ),

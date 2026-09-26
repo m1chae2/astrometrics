@@ -25,6 +25,7 @@ from astrometricslib.pipelines.spectroscopy.spectral_feature_detector import (
     VERDICT_NOT_DETECTED,
     VERDICT_POSSIBLE,
     _control_centers,
+    _mark_features_sharing_a_dip,
     _shoulder_edges,
     detect_named_features,
     expected_feature_depth,
@@ -150,10 +151,10 @@ def test_a_reference_type_adds_expected_depth_and_a_probability():  # ruff: igno
 def test_a_dip_the_noise_could_hide_is_inconclusive():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verify a dip too big to ignore but too weak to call is inconclusive.
 
-    A 10% dip in 6% noise (seed 12) gives a p-value between the "possible"
+    A 10% dip in 6% noise (seed 2) gives a p-value between the "possible"
     and "inconclusive" cutoffs: too weak to call, too big to ignore. (The
-    seed only fixes one draw: seed 5 was in that range with the old,
-    nearer continuum bands, and many other seeds are in it now.)
+    seed only fixes one draw: seeds 5 and 12 were in that range with earlier
+    versions of the detector, and many other seeds are in it now.)
     """
     h_alpha = next(f for f in NAMED_FEATURES if "H-alpha" in f["name"])
     wavelength, intensity = _spectrum_with_dip(
@@ -161,7 +162,7 @@ def test_a_dip_the_noise_could_hide_is_inconclusive():  # ruff: ignore[missing-r
         depth=0.10,
         half_width=h_alpha["window_angstrom"],
         noise_fraction=0.06,
-        seed=12,
+        seed=2,
     )
 
     entry = _entry(detect_named_features(wavelength, intensity), "H-alpha")
@@ -190,7 +191,7 @@ def test_inconclusive_features_sort_between_possible_and_not_detected():  # ruff
         depth=0.10,
         half_width=h_alpha["window_angstrom"],
         noise_fraction=0.06,
-        seed=12,
+        seed=2,
     )
     order = [
         VERDICT_DETECTED,
@@ -369,3 +370,100 @@ def test_controls_cover_the_blue_but_never_reach_a_feature_core():  # ruff: igno
         rest = float(feature["wavelength_angstrom"])
         window = float(feature["window_angstrom"])
         assert np.all(np.abs(controls - rest) > CENTER_SEARCH_TOLERANCE_ANGSTROM + 25.0 + window)
+
+
+def _spectrum_with_hump(
+    center: float, height: float, half_width: float, noise_fraction: float = 0.005, seed: int = 1
+) -> tuple[np.ndarray, np.ndarray]:
+    """Build a flat continuum with one box-shaped bump (emission) at `center`.
+
+    Returns
+    -------
+    wavelength_angstrom, intensity : `tuple` [`np.ndarray`, `np.ndarray`]
+        A synthetic spectrum spanning 3500-8000 A with a single bump.
+    """
+    return _spectrum_with_dip(center, -height, half_width, noise_fraction, seed)
+
+
+def test_a_bump_at_a_named_wavelength_is_detected_as_emission():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """A Be star's H-alpha emission is reported, with its height."""
+    wavelength, intensity = _spectrum_with_hump(6563.0, 0.25, 25.0)
+
+    features = detect_named_features(wavelength, intensity, reference_spectral_type="B0V")
+
+    h_alpha = _entry(features, "H-alpha")
+    assert h_alpha["kind"] == "emission"
+    assert h_alpha["verdict"] == VERDICT_DETECTED
+    assert h_alpha["depth"] == pytest.approx(0.25, abs=0.05)
+    assert h_alpha["p_value"] < 0.01
+    assert h_alpha["probability_present"] is None
+    assert features[0] is h_alpha
+
+
+def test_a_dip_is_still_reported_as_absorption():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Every measured feature says which way it points."""
+    wavelength, intensity = _spectrum_with_dip(6563.0, 0.3, 25.0)
+
+    features = detect_named_features(wavelength, intensity)
+
+    assert _entry(features, "H-alpha")["kind"] == "absorption"
+    assert all(entry["kind"] == "absorption" for entry in features if entry["verdict"] != VERDICT_NOT_COVERED)
+
+
+def test_a_flat_spectrum_has_no_emission_either():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Testing both directions does not make noise look like emission."""
+    wavelength, intensity = _spectrum_with_hump(6563.0, 0.0, 25.0, noise_fraction=0.005)
+
+    features = detect_named_features(wavelength, intensity)
+
+    assert all(entry["verdict"] != VERDICT_DETECTED for entry in features)
+
+
+def test_testing_both_directions_costs_a_factor_of_two_in_the_p_value():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """The p-value pays for both directions: twice the one-sided value."""
+    wavelength, intensity = _spectrum_with_dip(6563.0, 0.06, 25.0, noise_fraction=0.02, seed=3)
+
+    entry = _entry(detect_named_features(wavelength, intensity), "H-alpha")
+
+    assert 0.0 < entry["p_value"] <= 1.0
+    assert entry["p_value"] == pytest.approx(min(1.0, 2.0 * entry["p_value_one_sided"]))
+
+
+def test_features_of_opposite_kinds_are_not_blended_into_one_dip():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """A bump and a dip close together are two features."""
+    entries = [
+        {
+            "feature": "Hydrogen Balmer series (H-gamma)",
+            "wavelength_angstrom": 4340.0,
+            "verdict": VERDICT_DETECTED,
+            "kind": "emission",
+            "measured_wavelength_angstrom": 4335.0,
+            "blended_with": None,
+        },
+        {
+            "feature": "Iron/titanium blend (G band)",
+            "wavelength_angstrom": 4300.0,
+            "verdict": VERDICT_DETECTED,
+            "kind": "absorption",
+            "measured_wavelength_angstrom": 4320.0,
+            "blended_with": None,
+        },
+    ]
+
+    _mark_features_sharing_a_dip(entries, 50.0)
+
+    assert entries[1]["blended_with"] is None
+    assert entries[1]["verdict"] == VERDICT_DETECTED
+
+
+def test_only_h_alpha_and_h_beta_are_tested_for_emission():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """A bump at H-gamma is not called emission (blanketed spectra)."""
+    wavelength, intensity = _spectrum_with_hump(4340.0, 0.25, 20.0)
+
+    features = detect_named_features(wavelength, intensity)
+
+    h_gamma = _entry(features, "H-gamma")
+    assert h_gamma["kind"] == "absorption"
+    assert h_gamma["verdict"] == VERDICT_NOT_DETECTED
+    h_beta_wavelength, h_beta_intensity = _spectrum_with_hump(4861.0, 0.25, 25.0)
+    assert _entry(detect_named_features(h_beta_wavelength, h_beta_intensity), "H-beta")["kind"] == "emission"

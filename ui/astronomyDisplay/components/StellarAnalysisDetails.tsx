@@ -314,7 +314,10 @@ export const StellarAnalysisDetails: React.FC<StellarAnalysisDetailsProps> = ({
                                         const verdictDescription = describeFeatureVerdict(feature.verdict);
                                         return (
                                             <tr key={feature.feature} className={`feature-row feature-row--${feature.verdict}`}>
-                                                <td className="feature-name-cell">{shortFeatureName(feature.feature)}</td>
+                                                <td className="feature-name-cell">
+                                                    {shortFeatureName(feature.feature)}
+                                                    {feature.kind === 'emission' ? ' (emission)' : ''}
+                                                </td>
                                                 <td title={verdictDescription.explanation}>{verdictDescription.label}</td>
                                                 <td>
                                                     {isDepthMeaningful(feature.verdict) && feature.depth !== undefined

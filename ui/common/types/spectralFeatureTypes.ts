@@ -22,16 +22,24 @@ export interface SpectralFeatureResult {
   wavelength_angstrom: number;
   /** What the test concluded. */
   verdict: SpectralFeatureVerdict;
-  /** Where the best dip was found, in Angstroms. Missing for a feature the spectrum does not reach. */
+  /**
+   * Which way the feature points: a dip below the continuum ("absorption") or a bump above it
+   * ("emission"). Missing for a feature the spectrum does not reach. H-alpha and H-beta are tested
+   * both ways; every other feature only as absorption.
+   */
+  kind?: 'absorption' | 'emission';
+  /** Where the best dip or bump was found, in Angstroms. Missing for a feature the spectrum does not reach. */
   measured_wavelength_angstrom?: number;
-  /** How far below the continuum the dip is, as a fraction. */
+  /** How far below the continuum a dip is, or above it a bump is (see `kind`), as a fraction. */
   depth?: number;
   /** The one-sigma uncertainty of the depth. */
   depth_uncertainty?: number;
   /** Depth divided by its uncertainty. */
   significance?: number;
-  /** The chance that noise like this spectrum's gives a dip at least this significant. */
+  /** The chance that noise like this spectrum's gives a dip or bump at least this significant, in either direction. */
   p_value?: number;
+  /** The same chance for the reported direction alone, before allowing for the two directions tried. */
+  p_value_one_sided?: number;
   /** How the p-value was found. */
   p_value_method?: string;
   /** The depth a star of the expected type should show, or null without a reference type. */

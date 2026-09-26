@@ -83,6 +83,14 @@ def validate_feature_detector(trials: int) -> bool:
                 detected += entry["verdict"] == "detected"
     rate = detected / max(tested, 1)
     print(f"Feature test, pure noise ({trials} spectra, {tested} feature tests): {rate:.2%} called detected")
+    emission_detected = 0
+    for seed in range(trials):
+        for entry in detect_named_features(wavelength, _noise_spectrum(seed, wavelength, 0.02)):
+            emission_detected += entry["verdict"] == "detected" and entry.get("kind") == "emission"
+    print(
+        f"  of which called emission (a bump, not a dip): {emission_detected / max(tested, 1):.2%}"
+        " (both directions are tested and the p-value pays for both)"
+    )
     print("  pure noise called inconclusive (a dip worth a second look), by noise level:")
     for noise_fraction in (0.02, 0.05, 0.10, 0.20):
         tested_at_level = inconclusive = 0
@@ -101,6 +109,15 @@ def validate_feature_detector(trials: int) -> bool:
             entry = next(e for e in detect_named_features(wavelength, spectrum) if "H-alpha" in e["feature"])
             hits += entry["verdict"] == "detected"
         print(f"    {depth:.0%}: {hits / trials:.0%}")
+    print("  injected H-alpha EMISSION bump (FWHM 50 A, 2% noise) -> share detected as emission:")
+    for height in (0.05, 0.10, 0.20):
+        hits = 0
+        for seed in range(trials):
+            spectrum = _noise_spectrum(2000 + seed, wavelength, 0.02)
+            spectrum = spectrum + height * np.exp(-0.5 * ((wavelength - 6563.0) / (50.0 / 2.355)) ** 2)
+            entry = next(e for e in detect_named_features(wavelength, spectrum) if "H-alpha" in e["feature"])
+            hits += entry["verdict"] == "detected" and entry.get("kind") == "emission"
+        print(f"    {height:.0%}: {hits / trials:.0%}")
     return rate <= _MAXIMUM_NOISE_DETECTION_RATE
 
 

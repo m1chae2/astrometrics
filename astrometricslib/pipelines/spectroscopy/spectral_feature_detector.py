@@ -65,6 +65,23 @@ NAMED_FEATURES: tuple[dict[str, object], ...] = (
     {"name": "Iron/titanium blend (G band)", "wavelength_angstrom": 4300.0, "window_angstrom": 20.0},
 )
 
+# Which way a measured feature points: a dip below the continuum (absorption)
+# or a bump above it (emission). Both are tested at every named line.
+KIND_ABSORPTION = "absorption"
+KIND_EMISSION = "emission"
+
+# Only these lines are tested for emission. They are where stars show it (Be
+# stars, active stars, winds) and where the continuum beside the line is
+# smooth enough for a bump to mean emission. The blue lines and the Ca H & K,
+# G band, Mg b and Na D features of cooler stars sit in blanketed spectra where
+# the gaps between absorption bands stand up as bumps against a local
+# continuum: an H-gamma "emission" of 9% to 21% appeared in K and M stars
+# (2026-09-25). Dividing by the reference type's spectrum to remove that
+# structure was tried and does not work yet: the observed Balmer lines are only
+# 55 to 70% as deep as the bundled A0V template's at the best-fit blur, so the
+# ratio shows every Balmer line as emission in every star.
+EMISSION_TESTED_FEATURES = ("H-alpha", "H-beta")
+
 # The answers this module gives for each feature.
 VERDICT_DETECTED = "detected"
 VERDICT_POSSIBLE = "possible"
@@ -530,8 +547,9 @@ def _mark_features_sharing_a_dip(
     the G band came out with the same depth and p-value as H-gamma, and a G
     band "detected" in an A0V star is not real.
 
-    When two reported features measure their dips less than one resolution
-    element apart, only one keeps the dip. If a reference type was given and
+    When two reported features of the same kind (both dips or both bumps)
+    measure them less than one resolution element apart, only one keeps
+    the dip. If a reference type was given and
     the two features' expected depths for it differ by more than
     `EXPECTED_DEPTH_TIE_BREAK_MARGIN`, the feature the type expects to be
     deeper keeps it (an A star shows H-gamma and not the G band; a K star the
@@ -584,7 +602,8 @@ def _mark_features_sharing_a_dip(
         candidate_expected = candidate.get("expected_depth")
         rival_expected = rival.get("expected_depth")
         if (
-            candidate_expected is not None
+            candidate["kind"] == KIND_ABSORPTION
+            and candidate_expected is not None
             and rival_expected is not None
             and abs(float(candidate_expected) - float(rival_expected)) > EXPECTED_DEPTH_TIE_BREAK_MARGIN
         ):
@@ -596,7 +615,11 @@ def _mark_features_sharing_a_dip(
             continue
         keeper = None
         for other in measured:
-            if other is entry or abs(dip_center(other) - dip_center(entry)) >= resolution_element_angstrom:
+            if (
+                other is entry
+                or other["kind"] != entry["kind"]
+                or abs(dip_center(other) - dip_center(entry)) >= resolution_element_angstrom
+            ):
                 continue
             if keeps_dip_over(other, entry) and (keeper is None or keeps_dip_over(other, keeper)):
                 keeper = other
@@ -605,18 +628,102 @@ def _mark_features_sharing_a_dip(
             entry["verdict"] = VERDICT_INCONCLUSIVE
 
 
+def _one_sided_p_value(
+    observed_significance: float,
+    control_significances: list[float],
+    resolution_element_angstrom: float,
+) -> tuple[float, str, float]:
+    """Give the chance noise like this spectrum's is as significant.
+
+    Each control's result is the best of several centers, exactly like the real
+    feature's, so how those "best of several" numbers are spread already
+    includes the price of trying several centers. The largest of many noisy
+    numbers follows an extreme-value (Gumbel) curve, so one is fitted to them
+    and its upper tail gives the p-value. The tail can be reached far below
+    1 / (controls + 1), which counting alone cannot. With too few controls to
+    fit anything, Gaussian noise is assumed and the several centers tried are
+    paid for with the Sidak formula (independent centers = tolerance window /
+    resolution element).
+
+    Parameters
+    ----------
+    observed_significance : `float`
+        The feature's best significance in one direction (a dip's depth over
+        its uncertainty, or a bump's height over its uncertainty).
+    control_significances : `list` [`float`]
+        The best significance in the same direction at each control position.
+    resolution_element_angstrom : `float`
+        The width of one independent measurement, in Angstroms.
+
+    Returns
+    -------
+    p_value : `float`
+        The chance of a result at least this significant in noise.
+    method : `str`
+        ``"control_calibrated"`` or ``"gaussian"``.
+    likelihood_absent : `float`
+        The density of the noise distribution at the observed significance.
+    """
+    if len(control_significances) >= MINIMUM_CONTROL_POSITIONS:
+        location, width = stats.gumbel_r.fit(np.array(control_significances))
+        width = max(float(width), _MINIMUM_NOISE_WIDTH * _GUMBEL_WIDTH_FLOOR_FRACTION)
+        return (
+            float(stats.gumbel_r.sf(observed_significance, loc=location, scale=width)),
+            "control_calibrated",
+            float(stats.gumbel_r.pdf(observed_significance, loc=location, scale=width)),
+        )
+    independent_candidates = max(
+        1, round(2.0 * CENTER_SEARCH_TOLERANCE_ANGSTROM / resolution_element_angstrom) + 1
+    )
+    single_chance = _upper_tail_gaussian(max(observed_significance, 0.0))
+    return (
+        float(1.0 - (1.0 - single_chance) ** independent_candidates),
+        "gaussian",
+        _normal_density(observed_significance, 0.0, 1.0),
+    )
+
+
+def _verdict_for(magnitude: float, p_value: float) -> str:
+    """Turn a feature's size and p-value into a verdict, before the noise cap.
+
+    Parameters
+    ----------
+    magnitude : `float`
+        How far below the continuum a dip is, or above it a bump is, as a
+        fraction of the continuum.
+    p_value : `float`
+        The chance of a result at least this significant in noise, after
+        allowing for both directions.
+
+    Returns
+    -------
+    verdict : `str`
+        `VERDICT_DETECTED`, `VERDICT_POSSIBLE`, `VERDICT_INCONCLUSIVE` or
+        `VERDICT_NOT_DETECTED`.
+    """
+    if magnitude >= MINIMUM_REPORTED_DEPTH and p_value <= DETECTED_P_VALUE:
+        return VERDICT_DETECTED
+    if magnitude >= MINIMUM_REPORTED_DEPTH and p_value <= POSSIBLE_P_VALUE:
+        return VERDICT_POSSIBLE
+    if magnitude >= INCONCLUSIVE_MINIMUM_DEPTH and p_value <= INCONCLUSIVE_P_VALUE:
+        return VERDICT_INCONCLUSIVE
+    return VERDICT_NOT_DETECTED
+
+
 def detect_named_features(
     wavelength_angstrom: np.ndarray,
     intensity: np.ndarray,
     reference_spectral_type: str | None = None,
     resolution_element_angstrom: float = FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
 ) -> list[dict[str, object]]:
-    """Test a spectrum for each named absorption feature.
+    """Test a spectrum for each named line, as absorption or as emission.
 
     For every feature in `NAMED_FEATURES` the spectrum is searched near
-    the rest wavelength for the most significant dip, the dip is compared
-    with control measurements from featureless parts of the same spectrum
-    to get a p-value, and the verdict is set from that p-value.
+    the rest wavelength for the most significant dip and the most
+    significant bump. Each is compared with control measurements from
+    featureless parts of the same spectrum to get a p-value, the direction
+    that stands out more is reported, and the verdict is set from its p-value
+    doubled (two directions were tried).
 
     Parameters
     ----------
@@ -643,13 +750,19 @@ def detect_named_features(
         wavelength) and ``"verdict"`` (`VERDICT_DETECTED`,
         `VERDICT_POSSIBLE`, `VERDICT_INCONCLUSIVE`, `VERDICT_NOT_DETECTED`
         or `VERDICT_NOT_COVERED`). A covered feature also has
-        ``"measured_wavelength_angstrom"`` (where the best dip is),
-        ``"depth"``, ``"depth_uncertainty"``, ``"significance"``,
+        ``"kind"`` (`KIND_ABSORPTION` for a dip, `KIND_EMISSION` for a
+        bump), ``"measured_wavelength_angstrom"`` (where it is),
+        ``"depth"`` (how far below the continuum a dip is, or above it a bump
+        is, as a fraction of the continuum, never negative),
+        ``"depth_uncertainty"``, ``"significance"``,
         ``"p_value"`` (the chance that noise like this spectrum's gives
-        a dip at least this significant), ``"p_value_method"``
+        a dip or bump at least this significant, in either direction),
+        ``"p_value_one_sided"`` (the same for the reported direction alone,
+        before allowing for the two), ``"p_value_method"``
         (``"control_calibrated"``, or ``"gaussian"`` when too few control
         positions were available), ``"expected_depth"`` and
-        ``"probability_present"`` (both `None` without a reference type)
+        ``"probability_present"`` (`None` without a reference type, and for
+        emission: the reference spectra hold absorption only)
         and ``"blended_with"`` (the name of a nearby feature that keeps the
         same dip, or `None`; see `_mark_features_sharing_a_dip`).
         The probability assumes the star really is the reference type and
@@ -673,6 +786,7 @@ def detect_named_features(
         name = str(feature["name"])
         rest_wavelength = float(feature["wavelength_angstrom"])
         half_window = float(feature["window_angstrom"])
+        emission_tested = any(key in name for key in EMISSION_TESTED_FEATURES)
         entry: dict[str, object] = {
             "feature": name,
             "wavelength_angstrom": rest_wavelength,
@@ -690,14 +804,17 @@ def detect_named_features(
         if not observed_candidates:
             entries.append(entry)
             continue
-        observed = max(observed_candidates, key=lambda candidate: candidate.significance)
+        # A dip is a positive significance and a bump (emission) a negative
+        # one, so the best dip is the largest value and the best bump the
+        # smallest.
+        best_dip = max(observed_candidates, key=lambda candidate: candidate.significance)
+        best_bump = min(observed_candidates, key=lambda candidate: candidate.significance)
 
         # Control measurements: the same search, repeated where no named
-        # feature lives. `control_best_depths` is each control's best dip;
-        # `control_significances` pools every candidate center, to measure
-        # how wide the noise is.
-        control_best_depths = []
-        control_significances = []
+        # feature lives, in both directions. Each control's best dip and best
+        # bump pool separately, to measure how wide the noise is on each side.
+        control_dip_significances: list[float] = []
+        control_bump_significances: list[float] = []
         for control_center in _control_centers(
             wavelength_angstrom, half_window, CENTER_SEARCH_TOLERANCE_ANGSTROM, resolution_element_angstrom
         ):
@@ -710,34 +827,37 @@ def detect_named_features(
                 CENTER_SEARCH_TOLERANCE_ANGSTROM,
             )
             if control_candidates:
-                best_control = max(control_candidates, key=lambda candidate: candidate.significance)
-                control_best_depths.append(best_control.depth)
-                control_significances.append(best_control.significance)
+                control_dip_significances.append(
+                    max(candidate.significance for candidate in control_candidates)
+                )
+                control_bump_significances.append(
+                    -min(candidate.significance for candidate in control_candidates)
+                )
 
-        if len(control_best_depths) >= MINIMUM_CONTROL_POSITIONS:
-            # Each control's result is the best of several centers, exactly
-            # like the real feature's, so how those "best of several"
-            # numbers are spread already includes the price of trying
-            # several centers. The largest of many noisy numbers follows
-            # an extreme-value (Gumbel) curve, so one is fitted to them and
-            # its upper tail gives the p-value. The tail can be reached far
-            # below 1 / (controls + 1), which counting alone cannot.
-            location, width = stats.gumbel_r.fit(np.array(control_significances))
-            width = max(float(width), _MINIMUM_NOISE_WIDTH * _GUMBEL_WIDTH_FLOOR_FRACTION)
-            p_value = float(stats.gumbel_r.sf(observed.significance, loc=location, scale=width))
-            p_value_method = "control_calibrated"
-            likelihood_absent = float(stats.gumbel_r.pdf(observed.significance, loc=location, scale=width))
-        else:
-            # Too few controls to fit anything: assume Gaussian noise, and
-            # pay for the several centers tried with the Sidak formula
-            # (independent centers = tolerance window / resolution element).
-            independent_candidates = max(
-                1, round(2.0 * CENTER_SEARCH_TOLERANCE_ANGSTROM / resolution_element_angstrom) + 1
+        p_dip, p_value_method, likelihood_absent = _one_sided_p_value(
+            best_dip.significance, control_dip_significances, resolution_element_angstrom
+        )
+        if emission_tested:
+            p_bump, _, _ = _one_sided_p_value(
+                -best_bump.significance, control_bump_significances, resolution_element_angstrom
             )
-            single_chance = _upper_tail_gaussian(max(observed.significance, 0.0))
-            p_value = float(1.0 - (1.0 - single_chance) ** independent_candidates)
-            p_value_method = "gaussian"
-            likelihood_absent = _normal_density(observed.significance, 0.0, 1.0)
+        else:
+            p_bump = 1.0
+        # The feature is reported as a bump only when the bump stands out more
+        # than the dip and is itself worth reporting; otherwise it is reported
+        # as the dip, the direction these lines are expected to point. Two
+        # directions were tried, so the p-value pays for both: it is doubled
+        # (at most 1), which keeps the chance of calling pure noise a finding
+        # from doubling with it.
+        bump_magnitude = -best_bump.depth
+        bump_p_value = min(1.0, 2.0 * p_bump)
+        is_emission = p_bump < p_dip and _verdict_for(bump_magnitude, bump_p_value) != VERDICT_NOT_DETECTED
+        kind = KIND_EMISSION if is_emission else KIND_ABSORPTION
+        observed = best_bump if is_emission else best_dip
+        magnitude = bump_magnitude if is_emission else observed.depth
+        significance = -observed.significance if is_emission else observed.significance
+        p_one_sided = p_bump if is_emission else p_dip
+        p_value = min(1.0, 2.0 * p_one_sided)
 
         expected_depth = None
         probability_present = None
@@ -745,13 +865,15 @@ def detect_named_features(
             expected_depth = expected_feature_depth(
                 reference_spectral_type, name, resolution_element_angstrom
             )
-        if expected_depth is not None:
+        if expected_depth is not None and not is_emission:
             # Both hypotheses are compared on the significance scale, the
             # same scale the p-value uses, so the two numbers agree. If the
             # line is present, the significance should be near the depth the
             # reference type predicts divided by this measurement's
             # uncertainty; the spread allows one unit of measurement noise
-            # plus the uncertainty in the expected depth itself.
+            # plus the uncertainty in the expected depth itself. The
+            # reference spectra hold absorption only, so an emission feature
+            # gets no probability.
             expected_significance = max(expected_depth, 0.0) / observed.depth_uncertainty
             spread_present = math.hypot(1.0, _EXPECTED_DEPTH_FRACTIONAL_UNCERTAINTY * expected_significance)
             likelihood_present = _normal_density(observed.significance, expected_significance, spread_present)
@@ -763,14 +885,7 @@ def detect_named_features(
             denominator = prior * likelihood_present + (1.0 - prior) * likelihood_absent
             probability_present = float(prior * likelihood_present / denominator) if denominator > 0 else None
 
-        if observed.depth >= MINIMUM_REPORTED_DEPTH and p_value <= DETECTED_P_VALUE:
-            verdict = VERDICT_DETECTED
-        elif observed.depth >= MINIMUM_REPORTED_DEPTH and p_value <= POSSIBLE_P_VALUE:
-            verdict = VERDICT_POSSIBLE
-        elif observed.depth >= INCONCLUSIVE_MINIMUM_DEPTH and p_value <= INCONCLUSIVE_P_VALUE:
-            verdict = VERDICT_INCONCLUSIVE
-        else:
-            verdict = VERDICT_NOT_DETECTED
+        verdict = _verdict_for(magnitude, p_value)
 
         limited_by_noise = observed.depth_uncertainty > MAXIMUM_UNCERTAINTY_FOR_A_VERDICT
         if limited_by_noise and verdict in (VERDICT_DETECTED, VERDICT_POSSIBLE):
@@ -778,11 +893,13 @@ def detect_named_features(
 
         entry.update({
             "verdict": verdict,
+            "kind": kind,
             "measured_wavelength_angstrom": observed.center_angstrom,
-            "depth": observed.depth,
+            "depth": magnitude,
             "depth_uncertainty": observed.depth_uncertainty,
-            "significance": observed.significance,
+            "significance": significance,
             "p_value": p_value,
+            "p_value_one_sided": p_one_sided,
             "p_value_method": p_value_method,
             "expected_depth": expected_depth,
             "probability_present": probability_present,

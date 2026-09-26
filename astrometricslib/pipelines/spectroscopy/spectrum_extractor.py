@@ -41,6 +41,39 @@ What this stage does NOT do: it does not remove Earth's atmosphere
 absorption (telluric lines from oxygen and water vapour). Those are dips
 in the star's own light after it passes through the air, so they are not
 part of the sky glow that we measure beside the streak.
+
+Limits of adding up a box
+-------------------------
+Both methods here add up the light in a box. That is simple and works well
+for a star whose streak looks the same at every colour. It gives a
+distorted spectrum when the streak's blur changes with wavelength, because
+the light of neighbouring wavelengths then lands in each other's boxes.
+Neveu et al. (2024, Astronomy & Astrophysics 684, A21) describe this and
+the alternative: model the whole 2D image, with a blur for every
+wavelength, and fit it to the pixels. We do not do that.
+
+The blur does change with wavelength in this setup. A grating placed in a
+converging beam (the Star Analyzer 200 sits in front of the sensor) blurs
+the redder light more, and that paper reports the same for a grating of
+that kind. Measured on the stored spectra (2026-09-26, the fitted trail
+width, in pixels): Vega 1.2 at 4200 A, 1.9 at 5000 A, 1.6 at 6600 A and
+1.9 at 7400 A, and the other four stars checked show the same pattern. It
+is not a steady rise, so we have no simple correction for it.
+
+What this costs, as far as we know:
+
+* Balmer lines look shallower than the reference spectra's, more so toward
+  the red. On Vega, the observed depth as a fraction of the reference's
+  (2026-09-26, blurring the reference with a width that grows with
+  wavelength instead of one fixed width) went from 1.03 to 0.98 at
+  H-gamma, 0.68 to 0.85 at H-beta and 0.23 to 0.65 at H-alpha. So part of
+  the gap comes from the blur changing with colour, and part is still
+  unexplained. Treat line depths, especially H-alpha, as understated.
+* The zero-order star of a bright target is saturated, so its position
+  comes from `find_zero_order_position`, not from a fit to the star.
+
+Do not read this as a measured size of the error for any one star. It has
+not been tested that a 2D fit would remove the gap.
 """
 
 import logging

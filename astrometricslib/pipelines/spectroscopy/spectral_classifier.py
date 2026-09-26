@@ -25,6 +25,39 @@ type, changed for reasons that had nothing to do with the star. On the
 Vega-field A stars, leaving out the atmospheric bands moved the median from
 6130 A to 5940 A and flipped the best type from A0V to B9V. A best-fit scale
 does not depend on any one wavelength.
+
+What the match leaves out
+-------------------------
+The score is a plain comparison of shapes, so anything the references do not
+contain counts against the star, or is absorbed by a wrong type:
+
+* Reddening. The references are not reddened, and dust between us and the
+  star tilts the spectrum toward the red. A hot star can then match a cooler
+  type. Fitting a reddening term was tried on 2026-09-26 (Cardelli law,
+  R_V = 3.1, E(B-V) from 0 to 1.5 for each reference). It moved gamma Cas
+  (Navi) and Deneb to hot types, but with E(B-V) of 0.36 and 0.42 against
+  about 0.1 from the catalog colour, and for Deneb the type was still wrong.
+  The fit was trading dust against a missing template, so reddening is NOT
+  modelled.
+* Airmass. The spectrum is not corrected for how much air the light crossed.
+  On the 2026-09-25 spectra the airmass ran from 1.01 to 1.46 (Mirfak),
+  which is too small a range, and the wrong direction, to explain the
+  tilts in the stars checked.
+* Luminosity class. The ladder is main-sequence only (see
+  `GIANT_REFERENCE_SPECTRAL_TYPES`). Deneb (catalog A2Ia) matches A2I best
+  at rms 0.036, against 0.063 for its stored A5V, so the class does matter
+  for a supergiant; ranking all the classes together mislabelled ordinary
+  stars as giants, and it is not done.
+* Line depth. Observed Balmer lines are shallower than the references' (see
+  the limits in `spectrum_extractor`), so a star with strong Balmer lines
+  can look like a type with weaker ones.
+* Emission. Emission lines are left out of the comparison when the feature
+  test finds them at H-alpha or H-beta, but a star with a disc (a Be star
+  such as gamma Cas) also has extra light in the continuum, which no
+  reference has. Its stored type stayed A3V against a catalog B0IVe.
+
+Read a type here as "the reference this spectrum most resembles at this
+resolution", not as a classification of the star.
 """
 
 import csv

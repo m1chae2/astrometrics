@@ -180,7 +180,9 @@ def astrometrics_catalog(
 
     # 2. Fetch and filter StellarObjects, batched the same way as
     # Targets above.
-    stars = sky._astrometrics.stellar_objects
+    # Only the stars near the search circle are read from the library, using
+    # its sky-position index, not every star it holds.
+    stars = sky._astrometrics.stars.list_objects_in_region(ra_deg, dec_deg, radius_deg)
     candidate_stars: list[StellarObject] = []
     candidate_star_ra: list[Any] = []
     candidate_star_dec: list[Any] = []

@@ -113,34 +113,41 @@ def test_mock_catalog_access_injection():  # ruff: ignore[missing-return-type-un
     assert len(mock_catalog_access.targets) == 2
 
 
-def test_disk_butler_caches_stellar_catalog_reads(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify repeated stellar_catalog reads avoid redundant disk I/O."""
+def test_catalog_access_keeps_no_copy_of_the_stellar_catalog(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify a stellar_catalog read goes to the database every time.
+
+    A whole-catalog cache used to live here. Every write emptied it, each
+    `CatalogAccess` had its own, and a full copy is gigabytes on a real
+    library, so several copies at once got the backend killed for running
+    out of memory. The database is the single copy; nothing is kept.
+    """
     mock_config = MagicMock()
     catalog_access = CatalogAccess(config=mock_config)
 
     mock_load = mocker.patch.object(
         catalog_access._generic,
         "get_all",
-        return_value=[StellarObject(id="Star1")],
+        side_effect=lambda dataset_type: [StellarObject(id="Star1")],
     )
 
     first = catalog_access.get("stellar_catalog", {})
     second = catalog_access.get("stellar_catalog", {})
 
-    assert mock_load.call_count == 1
-    assert first is second
+    assert mock_load.call_count == 2
+    assert first is not second
 
 
-def test_disk_butler_put_refreshes_stellar_catalog_cache(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify put() writes through to disk and refreshes the cache."""
+def test_catalog_access_put_does_not_keep_the_list_it_was_given(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify put() writes to the database and holds on to nothing.
+
+    Keeping the saved list as the "current catalog" is what left a second
+    full copy of the catalog alive next to the one that was just loaded.
+    """
     mock_config = MagicMock()
     catalog_access = CatalogAccess(config=mock_config)
 
-    mock_load = mocker.patch.object(
-        catalog_access._generic,
-        "get_all",
-        return_value=[StellarObject(id="Star1")],
-    )
+    stored = [StellarObject(id="Star1")]
+    mock_load = mocker.patch.object(catalog_access._generic, "get_all", return_value=stored)
     mock_save = mocker.patch.object(catalog_access._generic, "put_all")
 
     updated = [StellarObject(id="Star2")]
@@ -148,8 +155,84 @@ def test_disk_butler_put_refreshes_stellar_catalog_cache(mocker):  # ruff: ignor
     result = catalog_access.get("stellar_catalog", {})
 
     assert mock_save.call_count == 1
-    assert result == updated
-    assert mock_load.call_count == 0
+    assert mock_load.call_count == 1
+    assert result is stored
+    assert result is not updated
+
+
+def _build_catalog_access_with_stars(tmp_path, stars) -> CatalogAccess:  # ruff: ignore[missing-type-function-argument]
+    """Build a `CatalogAccess` over a temporary library holding `stars`.
+
+    Returns
+    -------
+    catalog_access : `CatalogAccess`
+        A catalog whose stellar_catalog table holds exactly `stars`.
+    """
+    from astrometricslib.utilities.config_loader import AppConfiguration
+
+    library_path = tmp_path / "library"
+    (library_path / "targets").mkdir(parents=True)
+    (library_path / "frames").mkdir(parents=True)
+    config = AppConfiguration()
+    config.update_config({"Image Library": {"path": str(library_path)}})
+    catalog_access = CatalogAccess(config=config)
+    catalog_access.put(stars, "stellar_catalog", {})
+    return catalog_access
+
+
+def test_catalog_access_list_star_ids_and_existing_star_ids(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify the id-only queries return ids without loading star records."""
+    catalog_access = _build_catalog_access_with_stars(
+        tmp_path, [StellarObject(id="Alpha"), StellarObject(id="Beta"), StellarObject(id="Gamma")]
+    )
+
+    assert sorted(catalog_access.list_star_ids()) == ["Alpha", "Beta", "Gamma"]
+    assert catalog_access.existing_star_ids(["Alpha", "Missing", "Gamma"]) == {"Alpha", "Gamma"}
+    assert catalog_access.existing_star_ids([]) == set()
+
+
+def test_catalog_access_get_by_ids_handles_more_ids_than_one_query_allows(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify a long id list is split, so every star of a big target loads.
+
+    SQLite refuses one statement with too many bound values; a target can
+    own tens of thousands of stars, so the id list is sent in pieces.
+    """
+    stars = [StellarObject(id=f"Star{index}") for index in range(2500)]
+    catalog_access = _build_catalog_access_with_stars(tmp_path, stars)
+    wanted_ids = [f"Star{index}" for index in range(2500)]
+
+    assert len(catalog_access.get_by_ids("stellar_catalog", wanted_ids)) == 2500
+    assert len(catalog_access.existing_star_ids([*wanted_ids, "Nope"])) == 2500
+
+
+def test_catalog_access_find_star_ids_by_name_matches_id_or_name_ignoring_case(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify a name lookup finds a star by id or by name, ignoring case.
+
+    Also checks that a substring never counts as a match: "Vega" must not
+    find "Vega B", and an empty name finds nothing rather than everything.
+    """
+    named = StellarObject(id="* alf Lyr", name="Vega")
+    companion = StellarObject(id="* alf Lyr B", name="Vega B")
+    unrelated = StellarObject(id="HD 1", name="HD 1")
+    catalog_access = _build_catalog_access_with_stars(tmp_path, [named, companion, unrelated])
+
+    assert catalog_access.find_star_ids_by_name("vega") == ["* alf Lyr"]
+    assert catalog_access.find_star_ids_by_name("* alf Lyr") == ["* alf Lyr"]
+    assert catalog_access.find_star_ids_by_name("HD 1") == ["HD 1"]
+    assert catalog_access.find_star_ids_by_name("nothing like it") == []
+    assert catalog_access.find_star_ids_by_name("") == []
+
+
+def test_abstract_catalog_access_defaults_work_for_a_simple_stand_in():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify a bare-bones stand-in gets working versions of the new queries.
+
+    Test doubles only implement the abstract methods; the ordinary methods
+    on `AbstractCatalogAccess` must still give correct answers for them.
+    """
+    stand_in = MockCatalogAccess()
+
+    assert [star.id for star in stand_in.get_by_ids("stellar_catalog", ["Star2"])] == ["Star2"]
+    assert stand_in.get_by_ids("stellar_catalog", []) == []
 
 
 def test_catalog_access_list_star_summaries_reads_the_stellar_catalog(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]

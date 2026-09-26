@@ -42,6 +42,11 @@ from astrometricslib.pipelines.shared.target_center_hint import (
 # carried the name of a star 6 to 145 degrees away.
 REGISTRATION_REFERENCE_FIELD_RADIUS_DEG = 1.5
 
+# How many stars are read from the database at once when every
+# catalog-identified star must be examined. Small enough that the stars that
+# are not kept can be freed before the next slice is read.
+_CATALOG_SLICE_SIZE = 2000
+
 
 def _recover_extended_source_hint(
     astrometry: Any,
@@ -204,7 +209,8 @@ def _registration_reference_candidates(
         The target running spectroscopy; scopes the preferred candidate
         set to stars this target's own astrometry pass already found.
     catalog_access : `Any`
-        Provides the read of `stellar_catalog`.
+        Provides the queries on `stellar_catalog`: `list_stars_in_region`,
+        `list_star_summaries`, `list_star_ids` and `get_by_ids`.
     field_center : `tuple` [`float`, `float`], optional
         Where the spectral frame points, `(ra, dec)` in decimal degrees.
         Only stars within `REGISTRATION_REFERENCE_FIELD_RADIUS_DEG` of it
@@ -222,15 +228,48 @@ def _registration_reference_candidates(
         with no normal-image pixel position is skipped later by the
         registration itself.
     """
-    catalog_identified = [
-        stellar_object
-        for stellar_object in catalog_access.get("stellar_catalog", {})
-        if stellar_object.is_catalog_identified and _within_field(stellar_object, field_center)
-    ]
+    if field_center is not None:
+        # Read only the stars in this field, straight from the database's
+        # sky-position index. This used to read every star in the catalog
+        # (about 270,000) just to keep the few hundred in the field, which
+        # cost gigabytes of memory in every analysis worker.
+        field_star_ids = [
+            summary.id
+            for summary in catalog_access.list_stars_in_region(
+                field_center[0], field_center[1], REGISTRATION_REFERENCE_FIELD_RADIUS_DEG
+            )
+        ]
+        catalog_identified = [
+            stellar_object
+            for stellar_object in catalog_access.get_by_ids("stellar_catalog", field_star_ids)
+            if stellar_object.is_catalog_identified and _within_field(stellar_object, field_center)
+        ]
+        own_target_stars = [
+            stellar_object for stellar_object in catalog_identified if target.id in stellar_object.target_ids
+        ]
+        return own_target_stars if own_target_stars else catalog_identified
+
+    # The frame's position is unknown, so no part of the sky can be ruled
+    # out. This target's own stars are read first, from the target index.
+    own_star_ids = [summary.id for summary in catalog_access.list_star_summaries(target_id=target.id)]
     own_target_stars = [
-        stellar_object for stellar_object in catalog_identified if target.id in stellar_object.target_ids
+        stellar_object
+        for stellar_object in catalog_access.get_by_ids("stellar_catalog", own_star_ids)
+        if stellar_object.is_catalog_identified and target.id in stellar_object.target_ids
     ]
-    return own_target_stars if own_target_stars else catalog_identified
+    if own_target_stars:
+        return own_target_stars
+    # Nothing of its own: fall back to every catalog-identified star, read a
+    # slice of the catalog at a time so only the identified ones are kept.
+    all_star_ids = catalog_access.list_star_ids()
+    return [
+        stellar_object
+        for start in range(0, len(all_star_ids), _CATALOG_SLICE_SIZE)
+        for stellar_object in catalog_access.get_by_ids(
+            "stellar_catalog", all_star_ids[start : start + _CATALOG_SLICE_SIZE]
+        )
+        if stellar_object.is_catalog_identified
+    ]
 
 
 class SpectroscopyPipelineAdapter(AnalysisPipeline):

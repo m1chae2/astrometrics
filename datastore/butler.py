@@ -26,6 +26,12 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["AbstractButler", "Butler", "DatasetSpec"]
 
+# How many ids one `WHERE id IN (...)` query may carry. SQLite refuses a
+# statement with more bound values than its compiled-in limit (as low as 999
+# on older builds), and a single target can own tens of thousands of stars,
+# so longer id lists are split into queries of this size.
+_IDS_PER_QUERY = 900
+
 
 @dataclass(frozen=True)
 class DatasetSpec:
@@ -377,9 +383,54 @@ class Butler(AbstractButler):
         try:
             cursor = conn.cursor()
             self._ensure_table(cursor, spec)
-            placeholders = ",".join("?" for _ in ids)
-            cursor.execute(f"SELECT data_json FROM {spec.table_name} WHERE id IN ({placeholders})", list(ids))
-            return [self._row_to_obj(spec, row) for row in cursor.fetchall()]
+            records: list[Any] = []
+            for start in range(0, len(ids), _IDS_PER_QUERY):
+                id_chunk = list(ids[start : start + _IDS_PER_QUERY])
+                placeholders = ",".join("?" for _ in id_chunk)
+                cursor.execute(
+                    f"SELECT data_json FROM {spec.table_name} WHERE id IN ({placeholders})", id_chunk
+                )
+                records.extend(self._row_to_obj(spec, row) for row in cursor.fetchall())
+            return records
+        finally:
+            conn.close()
+
+    def existing_ids(self, dataset_type: str, ids: list[str]) -> set[str]:
+        """Say which of the given ids are recorded, without loading any record.
+
+        Reads only the id column, so a stored record's JSON is never
+        parsed. Use this instead of `get_by_ids` when only "does it exist"
+        matters.
+
+        Parameters
+        ----------
+        dataset_type : `str`
+            Registered dataset type to query.
+        ids : `list` [`str`]
+            The ids to look for.
+
+        Returns
+        -------
+        found_ids : `set` [`str`]
+            The subset of `ids` that has a recorded row.
+        """
+        if not ids:
+            return set()
+        spec = self._spec(dataset_type)
+        db_path = self._db_path()
+        if not os.path.exists(db_path):
+            return set()
+        conn = connect_db(db_path)
+        try:
+            cursor = conn.cursor()
+            self._ensure_table(cursor, spec)
+            found_ids: set[str] = set()
+            for start in range(0, len(ids), _IDS_PER_QUERY):
+                id_chunk = list(ids[start : start + _IDS_PER_QUERY])
+                placeholders = ",".join("?" for _ in id_chunk)
+                cursor.execute(f"SELECT id FROM {spec.table_name} WHERE id IN ({placeholders})", id_chunk)
+                found_ids.update(row[0] for row in cursor.fetchall())
+            return found_ids
         finally:
             conn.close()
 

@@ -44,15 +44,15 @@ def resolve_target_coordinates(sky, target_name: str) -> Target | StellarObject:
                 return target
 
     # 2. Search local stellar objects
-    stars = sky._astrometrics.stellar_objects
-    for star in stars:
-        if star.id == target_name or (star.name and star.name.lower() == target_name.lower()):
-            # Only return if coordinates are initialized (nonzero)
-            if (
-                star.right_ascension != 0.0  # ruff: ignore[float-equality-comparison] -- exact sentinel: 0.0 means "uninitialized"
-                or star.declination != 0.0  # ruff: ignore[float-equality-comparison] -- exact sentinel: 0.0 means "uninitialized"
-            ):
-                return star
+    # Only the stars that match the name are read from the library, not
+    # every star in it.
+    for star in sky._astrometrics.stars.find_all_by_id_or_name(target_name):
+        # Only return if coordinates are initialized (nonzero)
+        if (
+            star.right_ascension != 0.0  # ruff: ignore[float-equality-comparison] -- exact sentinel: 0.0 means "uninitialized"
+            or star.declination != 0.0  # ruff: ignore[float-equality-comparison] -- exact sentinel: 0.0 means "uninitialized"
+        ):
+            return star
 
     # 3. Fallback to SIMBAD query by name
     try:

@@ -231,13 +231,15 @@ class StellarService:
     def get_stellar_objects(self, target_id: str | None = None) -> list[StellarObject]:
         """Unified stellar objects getter.
 
-        Delegates directly to the high-level interface analysis
-        astrometrics to query disk.
+        Delegates to the astrometrics library, which owns the catalog.
         Includes VariabilityAnalyzer's per-frame detection stubs (ids ending
-        ``:Star_<n>``) -- callers that round-trip the full catalog
-        (``save_objects``, ``find_or_create_by_position``) need those
-        included; UI-facing listings should call
+        ``:Star_<n>``); UI-facing listings should call
         ``get_displayable_stellar_objects`` instead.
+
+        Warning: with no ``target_id`` this reads every star in the library
+        into new objects -- about 12 seconds and 2.8 GB on a 274,000-star
+        library -- so it is only for a caller that truly needs all of them.
+        Pass a ``target_id`` to read just that target's stars.
 
         Returns
         -------
@@ -252,16 +254,9 @@ class StellarService:
         if is_mock:
             return self.astrometrics.stars.list_objects()
 
-        try:
-            objects = self.astrometrics.stars.list_objects()
-        except Exception:
-            objects = self.astrometrics.stars.list_objects()
-
         if target_id:
-            return [
-                obj for obj in objects if getattr(obj, "target_ids", None) and target_id in obj.target_ids
-            ]
-        return objects
+            return self.astrometrics.stars.list_objects_for_target(target_id)
+        return self.astrometrics.stars.list_objects()
 
     def get_displayable_stellar_objects(self, target_id: str | None = None) -> list[StellarObject]:
         """Stellar objects suitable for a user-facing catalog listing.
@@ -433,7 +428,15 @@ class StellarService:
                     return results
 
         norm_target_ids = {str(tid).replace("_", " ").strip().lower() for tid in candidate_ids}
-        objects = self.get_displayable_stellar_objects()
+        # Only the stars of the target itself are read, once under each
+        # spelling of its id ("M 13" and "M_13"), not the whole catalog.
+        objects = []
+        seen_star_ids: set[str] = set()
+        for candidate_id in candidate_ids:
+            for star in self.get_displayable_stellar_objects(candidate_id):
+                if star.id not in seen_star_ids:
+                    seen_star_ids.add(star.id)
+                    objects.append(star)
         candidates: list[tuple[Any, float, float]] = []
 
         for obj in objects:
@@ -634,20 +637,24 @@ class StellarService:
         pass
 
     def save_objects(self) -> str:
-        """Record the current list of stellar objects to SQLite.
+        """Report that the stellar catalog is saved; there is nothing to do.
 
-        Saved via the high-level interface.
+        Every change to a star is written to the database at the moment it
+        is made (see `StellarCatalog.update`, `create` and
+        `find_or_create_by_position`), so there is no unsaved list to write.
+        This used to load every star from the database and write them all
+        back, replacing the whole table. That cost about 12 seconds and
+        2.8 GB each time, ran at the end of every re-index, and could
+        delete a star that another process added between the read and the
+        write. It stays as a method because the ``astronomy:save`` request
+        and the re-index job still call it.
 
         Returns
         -------
         result : `str`
-            Status message from the storage layer.
+            A status message.
         """
-        try:
-            return self.astrometrics.stars.save_all(self.get_stellar_objects())
-        except Exception as e:
-            logger.error(f"Failed to save stellar objects to database: {e}")
-            raise e
+        return "stellar catalog saved"
 
     def get_object(self, object_id: str) -> StellarObject | None:
         """Retrieve a stellar object by ID.
@@ -750,11 +757,7 @@ class StellarService:
         result : `list` of `str`
             IDs of objects with processed spectrum data.
         """
-        return [
-            obj.id
-            for obj in self.get_stellar_objects()
-            if getattr(obj, "spectroscopy", None) and obj.spectroscopy.wavelengths_angstrom
-        ]
+        return self.astrometrics.stars.list_spectrum_object_ids()
 
     def find_or_create_by_position(
         self,
@@ -768,111 +771,23 @@ class StellarService:
     ) -> StellarObject:
         """Find or create a StellarObject near (ra, dec).
 
-        Searches for an existing StellarObject within angular tolerance
-        of (ra, dec), or creates a new one if no match exists. Updates
-        metadata on the matched or created object when provided.
+        Delegates to the astrometrics library, which owns the catalog and
+        looks only at the stars near that position.
 
         Returns
         -------
         result : `StellarObject`
             The matched or newly created stellar object.
-
-        REQ: IMG-4.5
         """
-        import astropy.units as u
-        from astropy.coordinates import SkyCoord
-
-        stellar_objects = self.get_stellar_objects()
-
-        # 1. Fast path: If SIMBAD name is provided, check if it already
-        # exists by ID
-        if name:
-            existing = next((o for o in stellar_objects if o.id == name), None)
-            if existing:
-                updates = {}
-                if spectral_type and not existing.spectral_type:
-                    updates["spectral_type"] = spectral_type
-                    updates["stellar_spectral_type"] = spectral_type
-                if magnitude is not None and existing.magnitude is None:
-                    updates["magnitude"] = magnitude
-                if target_id and target_id not in existing.target_ids:
-                    target_ids = [*list(existing.target_ids), target_id]
-                    updates["target_ids"] = target_ids
-
-                if updates:
-                    self.astrometrics.stars.update(existing.id, updates)
-                    # Refresh to get updated state
-                    existing = self.get_object(existing.id)
-                return existing
-
-        # 2. Spatial match fallback
-        target_coord = SkyCoord(ra=ra, dec=dec, unit=(u.deg, u.deg))
-
-        for obj in stellar_objects:
-            if not obj.right_ascension or not obj.declination:
-                continue
-            try:
-                existing_coord = SkyCoord(
-                    ra=float(obj.right_ascension), dec=float(obj.declination), unit=(u.deg, u.deg)
-                )
-                separation = target_coord.separation(existing_coord)
-                if separation.arcsecond < tolerance_arcsec:
-                    # REQ: IMG-4.5 - Update name/spectral type if a SIMBAD
-                    # match was found
-                    updates = {}
-                    new_id = obj.id
-                    if name and (not obj.name or "Star_" in obj.id):
-                        # Ensure we don't create a collision if we rename
-                        # this Star_X
-                        if not self.get_object(name):
-                            updates["name"] = name
-                            if "Star_" in obj.id:
-                                new_id = name
-                                updates["id"] = name
-                    if spectral_type and not obj.spectral_type:
-                        updates["spectral_type"] = spectral_type
-                        updates["stellar_spectral_type"] = spectral_type
-                    if magnitude is not None and obj.magnitude is None:
-                        updates["magnitude"] = magnitude
-                    if target_id and target_id not in obj.target_ids:
-                        updates["target_ids"] = [*list(obj.target_ids), target_id]
-
-                    if updates:
-                        if new_id != obj.id:
-                            # Recreate with new ID or delete/insert
-                            self.astrometrics.stars.delete(obj.id)
-                            self.astrometrics.stars.create(new_id, ra=ra, dec=dec)
-                        self.astrometrics.stars.update(new_id, updates)
-                        obj = self.get_object(new_id)
-                    return obj
-            except ValueError, TypeError:
-                continue
-
-        # 3. Create new if no match
-        if name:
-            safe_id = name
-        else:
-            base_id = f"Star_{len(stellar_objects) + 1}"
-            safe_id = base_id
-            counter = 1
-            while self.get_object(safe_id):
-                safe_id = f"{base_id}_{counter}"
-                counter += 1
-
-        self.astrometrics.stars.create(safe_id, ra=ra, dec=dec)
-
-        updates = {}
-        updates["name"] = name or safe_id
-        if spectral_type:
-            updates["spectral_type"] = spectral_type
-            updates["stellar_spectral_type"] = spectral_type
-        if magnitude is not None:
-            updates["magnitude"] = magnitude
-        if target_id:
-            updates["target_ids"] = [target_id]
-
-        self.astrometrics.stars.update(safe_id, updates)
-        return self.get_object(safe_id)
+        return self.astrometrics.stars.find_or_create_by_position(
+            ra,
+            dec,
+            name=name,
+            spectral_type=spectral_type,
+            magnitude=magnitude,
+            target_id=target_id,
+            tolerance_arcsec=tolerance_arcsec,
+        )
 
     def get_audit(self) -> dict:
         """Return a statistical summary of the stellar library.
@@ -929,8 +844,7 @@ class StellarService:
         # way, below: loading every library star in full (photometry and
         # all) to check its position took about ten seconds on a real
         # 270,000-star library. Only targets are loaded here. With the
-        # catalog on, the full objects are still needed to tell the
-        # library's stars apart from SIMBAD's.
+        # catalog on, only the library's stars inside this region are read.
         objects = self.wayfinder.planning.get_sources(
             ra, dec, radius, include_catalog=include_catalog, include_stars=include_catalog
         )
@@ -938,11 +852,14 @@ class StellarService:
         # These ID sets exist only to tell apart local objects from ones
         # merged in from the global SIMBAD catalog, which only happens when
         # include_catalog is True -- get_sources() returns local-only
-        # objects otherwise. Building them unconditionally meant every
-        # viewport-scoped Planetarium query (include_catalog=False) paid
-        # for a full scan of the local catalog just to compute a flag that
-        # was already guaranteed False for every returned object.
-        local_star_ids = {o.id for o in self.get_stellar_objects()} if include_catalog else None
+        # objects otherwise, so no query is made for them. The star ids
+        # are checked with a query for just the ids returned above; they
+        # used to be collected by loading every star in the library.
+        local_star_ids = (
+            self.astrometrics.stars.existing_ids([o.id for o in objects if isinstance(o, StellarObject)])
+            if include_catalog
+            else None
+        )
         local_target_ids = {o.id for o in self.astrometrics.targets.list()} if include_catalog else None
 
         sources = []

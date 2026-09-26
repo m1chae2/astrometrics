@@ -487,8 +487,10 @@ def _load_target_stars(target: Any, stars: Any, limit: int) -> tuple[list, list,
     if not getattr(target, "stacked_image", None):
         raise ValueError(f"Target {getattr(target, 'id', 'unknown')!r} has no stacked_image.")
 
-    all_objects = stars.list_objects()
     target_id = getattr(target, "id", "")
+    # Only this target's stars are read from the database, not the whole
+    # catalog of every target ever imaged.
+    all_objects = stars.list_objects_for_target(target_id)
 
     astrometry_stars = sorted(
         (

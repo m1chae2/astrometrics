@@ -8,7 +8,11 @@ set, and that nothing is ruled out when the frame centre is unknown.
 """
 
 from types import SimpleNamespace
+from typing import Any
 
+from astropy.coordinates import SkyCoord
+
+from astrometricslib.drivers.catalog_access import AbstractCatalogAccess, StarPosition, StarSummary
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.spectroscopy.runner import (
     _field_center_for_registration,
@@ -34,22 +38,115 @@ def _star(star_id: str, ra: float | None, dec: float | None, targets: list[str])
     return star
 
 
-class _Catalog:
-    """A stand-in for the catalog read the candidate search uses."""
+class _Catalog(AbstractCatalogAccess):
+    """A stand-in for the database that the candidate search queries.
+
+    Answers the same queries as `CatalogAccess`, from a list of stars, and
+    refuses to hand back the whole catalog: the search must ask only for the
+    stars it needs.
+    """
 
     def __init__(self, stars: list[StellarObject]) -> None:
         """Keep the stars to hand back."""
         self._stars = stars
 
-    def get(self, name: str, default: object) -> list[StellarObject]:
-        """Return every star, whatever the name.
+    def get(self, dataset_type: str, selector: dict[str, Any]) -> Any:
+        """Refuse to return the whole catalog.
+
+        Raises
+        ------
+        AssertionError
+            Always: reading every star is what this search must not do.
+        """
+        raise AssertionError("the candidate search read the whole catalog")
+
+    def put(self, obj: Any, dataset_type: str, selector: dict[str, Any]) -> None:
+        """Do nothing; nothing here is saved."""
+
+    def exists(self, dataset_type: str, selector: dict[str, Any]) -> bool:
+        """Report that nothing exists.
+
+        Returns
+        -------
+        found : `bool`
+            Always `False`.
+        """
+        return False
+
+    def get_local_path(self, dataset_type: str, selector: dict[str, Any]) -> str:
+        """Return a placeholder path.
+
+        Returns
+        -------
+        path : `str`
+            An unused placeholder.
+        """
+        return ""
+
+    def _summary(self, star: StellarObject) -> StarSummary:
+        return StarSummary(
+            id=star.id,
+            name=star.name,
+            right_ascension=star.right_ascension,
+            declination=star.declination,
+            target_ids=list(star.target_ids),
+        )
+
+    def list_star_summaries(
+        self, target_id: str | None = None, limit: int | None = None
+    ) -> list[StarSummary]:
+        """List every star, or the stars of one target, in short form.
+
+        Returns
+        -------
+        summaries : `list` [`StarSummary`]
+            One summary per matching star.
+        """
+        return [self._summary(s) for s in self._stars if not target_id or target_id in s.target_ids]
+
+    def list_stars_in_region(
+        self,
+        ra_degrees: float,
+        dec_degrees: float,
+        radius_degrees: float,
+        magnitude_range: tuple[float, float] | None = None,
+    ) -> list[StarSummary]:
+        """List the stars within a circle of sky, by great-circle distance.
+
+        Returns
+        -------
+        summaries : `list` [`StarSummary`]
+            One summary per star with a position inside the circle.
+        """
+        center = SkyCoord(ra_degrees, dec_degrees, unit="deg")
+        return [
+            self._summary(s)
+            for s in self._stars
+            if s.right_ascension is not None
+            and s.declination is not None
+            and center.separation(SkyCoord(s.right_ascension, s.declination, unit="deg")).deg
+            <= radius_degrees
+        ]
+
+    def list_position_only_stars(self, target_id: str | None = None) -> list[StarPosition]:
+        """Return no position-only stars.
+
+        Returns
+        -------
+        positions : `list` [`StarPosition`]
+            Always empty.
+        """
+        return []
+
+    def get_by_ids(self, dataset_type: str, ids: list[str]) -> list[StellarObject]:
+        """Return the stars with the given ids.
 
         Returns
         -------
         stars : `list` [`StellarObject`]
-            The stored stars.
+            The stars found.
         """
-        return self._stars
+        return [s for s in self._stars if s.id in set(ids)]
 
 
 def test_own_target_stars_far_from_the_field_are_left_out() -> None:

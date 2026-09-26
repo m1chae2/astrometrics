@@ -383,6 +383,77 @@ class AbstractCatalogAccess(ABC):
         """
         pass
 
+    # The four methods below are ordinary (not abstract) so that a simple
+    # stand-in for a database, such as the ones tests use, keeps working
+    # without writing them. These versions read the whole catalog through
+    # `get` and so are slow on a real library; `CatalogAccess` replaces every
+    # one of them with a query that touches only the rows it needs.
+
+    def get_by_ids(self, dataset_type: str, ids: list[str]) -> list[Any]:
+        """Load only the records with the given ids.
+
+        Parameters
+        ----------
+        dataset_type : `str`
+            The kind of data to load (like "stellar_catalog").
+        ids : `list` [`str`]
+            The ids to look for.
+
+        Returns
+        -------
+        records : `list`
+            The records that were found, in no particular order.
+        """
+        wanted_ids = set(ids)
+        return [record for record in self.get(dataset_type, {}) if record.id in wanted_ids]
+
+    def list_star_ids(self) -> list[str]:
+        """List the id of every star in the catalog.
+
+        Returns
+        -------
+        star_ids : `list` [`str`]
+            One id per star.
+        """
+        return [summary.id for summary in self.list_star_summaries()]
+
+    def existing_star_ids(self, ids: list[str]) -> set[str]:
+        """Say which of the given star ids are in the catalog.
+
+        Parameters
+        ----------
+        ids : `list` [`str`]
+            The star ids to look for.
+
+        Returns
+        -------
+        found_ids : `set` [`str`]
+            The subset of `ids` that has a star record.
+        """
+        return set(ids) & set(self.list_star_ids())
+
+    def find_star_ids_by_name(self, name: str) -> list[str]:
+        """Find the ids of stars whose id or name equals `name`, ignoring case.
+
+        Parameters
+        ----------
+        name : `str`
+            The id or name to look for.
+
+        Returns
+        -------
+        star_ids : `list` [`str`]
+            The ids of every matching star.
+        """
+        if not name:
+            return []
+        wanted_name = name.lower()
+        return [
+            summary.id
+            for summary in self.list_star_summaries()
+            if summary.id == name or (summary.name and summary.name.lower() == wanted_name)
+        ]
+
 
 def _target_extra_columns(target: Any) -> dict[str, Any]:
     """Pull specific columns from a target so it can be searched quickly.
@@ -458,7 +529,6 @@ class CatalogAccess(AbstractCatalogAccess):
 
             config = get_configuration()
         self.config = config
-        self._stellar_catalog_cache: list[Any] | None = None
         self._generic = self._build_generic_butler(config)
 
     @staticmethod
@@ -568,13 +638,17 @@ class CatalogAccess(AbstractCatalogAccess):
 
             return local_database.load_targets(self.config)
         elif dataset_type == "stellar_catalog":
-            # put()/merge_and_record() write through to (or
-            # invalidate) self._stellar_catalog_cache specifically so
-            # this can skip disk I/O on repeated reads -- serve from it
-            # when populated, instead of unconditionally hitting disk.
-            if self._stellar_catalog_cache is None:
-                self._stellar_catalog_cache = self._generic.get_all("stellar_catalog")
-            return self._stellar_catalog_cache
+            # Reads every star from the database into new objects each time,
+            # and keeps none of them. It used to keep the list in a cache
+            # here, but every write emptied that cache, each `CatalogAccess`
+            # had its own, and `put` filled it with whatever list it was
+            # handed -- so a busy backend held several full copies (about
+            # 2.8 GB each on a 274,000-star library) and was killed for
+            # running out of memory. The database is the one copy of the
+            # catalog. Ask for only what is needed: `list_star_summaries`,
+            # `list_stars_in_region`, `get_by_ids`, `list_star_ids` and
+            # `existing_star_ids`.
+            return self._generic.get_all("stellar_catalog")
 
         elif dataset_type == "raw_frame" or dataset_type == "stacked_image":
             path = self.get_local_path(dataset_type, selector)
@@ -607,7 +681,6 @@ class CatalogAccess(AbstractCatalogAccess):
             self._generic.put(obj, "target_catalog")
         elif dataset_type == "stellar_catalog":
             self._generic.put_all("stellar_catalog", obj)
-            self._stellar_catalog_cache = obj
         else:
             raise ValueError(f"Write operation not supported on dataset type: {dataset_type}")
 
@@ -643,11 +716,6 @@ class CatalogAccess(AbstractCatalogAccess):
 
         self._generic.merge_and_record(dataset_type, objects, merge_function)
 
-        # Invalidate the cache so the next get() re-reads the merged
-        # state from disk.
-        if dataset_type == "stellar_catalog":
-            self._stellar_catalog_cache = None
-
     def delete_by_ids(self, dataset_type: str, ids: list[str]) -> None:
         """Delete specific records from the database using their IDs.
 
@@ -668,9 +736,6 @@ class CatalogAccess(AbstractCatalogAccess):
 
         self._generic.delete_by_ids(dataset_type, ids)
 
-        if dataset_type == "stellar_catalog":
-            self._stellar_catalog_cache = None
-
     def get_by_ids(self, dataset_type: str, ids: list[str]) -> list[Any]:
         """Load only specific records from the database instead of everything.
 
@@ -687,6 +752,61 @@ class CatalogAccess(AbstractCatalogAccess):
             The records that were found.
         """
         return self._generic.get_by_ids(dataset_type, ids)
+
+    def list_star_ids(self) -> list[str]:
+        """List the id of every star, reading nothing but the id column.
+
+        Returns
+        -------
+        star_ids : `list` [`str`]
+            One id per star.
+        """
+        return [row["id"] for row in self._generic.list_projected("stellar_catalog", ["id"])]
+
+    def existing_star_ids(self, ids: list[str]) -> set[str]:
+        """Say which of the given star ids are in the catalog.
+
+        Parameters
+        ----------
+        ids : `list` [`str`]
+            The star ids to look for.
+
+        Returns
+        -------
+        found_ids : `set` [`str`]
+            The subset of `ids` that has a star record.
+        """
+        return self._generic.existing_ids("stellar_catalog", ids)
+
+    def find_star_ids_by_name(self, name: str) -> list[str]:
+        """Find the ids of stars whose id or name equals `name`, ignoring case.
+
+        The database narrows the search to names that contain `name`, and
+        the exact comparison happens afterwards, so only a handful of rows
+        are ever read.
+
+        Parameters
+        ----------
+        name : `str`
+            The id or name to look for.
+
+        Returns
+        -------
+        star_ids : `list` [`str`]
+            The ids of every matching star.
+        """
+        if not name:
+            return []
+        wanted_name = name.lower()
+        candidate_rows = self._generic.list_projected("stellar_catalog", ["id", "name"], like={"name": name})
+        matching_ids = [
+            row["id"] for row in candidate_rows if row["name"] and row["name"].lower() == wanted_name
+        ]
+        # A star matches by its id even when its stored name differs.
+        matching_ids.extend(
+            found_id for found_id in self.existing_star_ids([name]) if found_id not in matching_ids
+        )
+        return matching_ids
 
     def list_star_summaries(
         self, target_id: str | None = None, limit: int | None = None

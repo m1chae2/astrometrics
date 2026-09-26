@@ -72,25 +72,28 @@ export const SettingsLayout: React.FC<SettingsLayoutProps> = ({
                 </div>
 
                 {/* Sub-tabs for Config Sections */}
-                {!loadingConfig && (
-                    <div className="settings__tabs settings__tabs--sub">
+                <div className="settings__tabs settings__tabs--sub">
+                    <button
+                        className={`settings__tab-button ${activeConfigTab === 'System' ? 'settings__tab-button--active' : ''}`}
+                        onClick={() => setActiveConfigTab('System')}
+                    >
+                        System
+                    </button>
+                    {groupedConfig.filter(g => g.name !== 'System').map(group => (
                         <button
-                            className={`settings__tab-button ${activeConfigTab === 'System' ? 'settings__tab-button--active' : ''}`}
-                            onClick={() => setActiveConfigTab('System')}
+                            key={group.name}
+                            className={`settings__tab-button ${activeConfigTab === group.name ? 'settings__tab-button--active' : ''}`}
+                            onClick={() => setActiveConfigTab(group.name)}
                         >
-                            System
+                            {group.name}
                         </button>
-                        {groupedConfig.filter(g => g.name !== 'System').map(group => (
-                            <button
-                                key={group.name}
-                                className={`settings__tab-button ${activeConfigTab === group.name ? 'settings__tab-button--active' : ''}`}
-                                onClick={() => setActiveConfigTab(group.name)}
-                            >
-                                {group.name}
-                            </button>
-                        ))}
-                    </div>
-                )}
+                    ))}
+                    {loadingConfig && groupedConfig.length === 0 && (
+                        <span className="settings__tab-loading" style={{ alignSelf: 'center', fontSize: '12px', opacity: 0.7, paddingLeft: '8px' }}>
+                            Loading sections...
+                        </span>
+                    )}
+                </div>
 
                 <div
                     ref={contentRef}
@@ -107,28 +110,31 @@ export const SettingsLayout: React.FC<SettingsLayoutProps> = ({
                             handleConfigChange={handleConfigChange}
                             agentShortcut={agentShortcut}
                             setAgentShortcutInput={setAgentShortcutInput}
+                            loadingConfig={loadingConfig}
                         />
                     )}
 
-                    {loadingConfig ? (
-                        <div className="settings__loading">Loading configuration...</div>
-                    ) : (
-                        <>
-                            {groupedConfig.filter(g => g.name !== 'System').map(group => {
-                                if (group.name !== activeConfigTab) return null;
-                                return (
-                                    <ConfigForm
-                                        key={group.name}
-                                        group={group}
-                                        onConfigChange={handleConfigChange}
-                                        isReindexing={isReindexing}
-                                        reindexingStatus={reindexingStatus}
-                                        reindexingProgress={reindexingProgress}
-                                        onReindex={handleReindex}
-                                    />
-                                );
-                            })}
-                        </>
+                    {activeConfigTab !== 'System' && (
+                        loadingConfig ? (
+                            <div className="settings__loading">Loading configuration...</div>
+                        ) : (
+                            <>
+                                {groupedConfig.filter(g => g.name !== 'System').map(group => {
+                                    if (group.name !== activeConfigTab) return null;
+                                    return (
+                                        <ConfigForm
+                                            key={group.name}
+                                            group={group}
+                                            onConfigChange={handleConfigChange}
+                                            isReindexing={isReindexing}
+                                            reindexingStatus={reindexingStatus}
+                                            reindexingProgress={reindexingProgress}
+                                            onReindex={handleReindex}
+                                        />
+                                    );
+                                })}
+                            </>
+                        )
                     )}
 
                     <div className="settings__footer">

@@ -4,6 +4,7 @@ import { useTargetListQuery } from '../../common/queries/useTargetListQuery';
 import { useToast } from '../../common/hooks/useToast';
 import { SelectableItem } from '../../common/components/SelectableList';
 import { Spectrum } from '../../common/types/backendTypes';
+import { buildStarListSubtitle, formatStarListLabel } from '../utils/starDisplayFormat';
 
 const BASE_FILTER_OPTIONS = [
     'All',
@@ -193,8 +194,6 @@ export const useSpectrumList = (
         [dropdown, checkHasSpectra, checkHasPhotometry]
     );
 
-    const latestTargetId = localStorage.getItem('latestAnalysisTargetId');
-
     const filteredItems: SelectableItem[] = spectra
         .filter((s) => {
             const name = typeof s === 'string' ? s : (s.name || s.id || s.label || '');
@@ -210,28 +209,24 @@ export const useSpectrumList = (
         .map((s) => {
             const objectId = typeof s === 'string' ? s : (s.id || s.name || s.label || '');
             const value = objectId;
-            const label = typeof s === 'string' ? s : (s.name || s.label || s.id || '');
-
-
-
-
+            const fullName = typeof s === 'string' ? s : (s.name || s.label || s.id || '');
             const hasSpectra = checkHasSpectra(s);
             const hasPhotometry = checkHasPhotometry(s);
+
+            // The list column is narrow, so the label is shortened to keep the
+            // part that tells stars apart; the full name and id are the hover text.
+            const tooltip = fullName === value ? fullName : `${fullName} (${value})`;
 
             return {
                 id: value,
                 value: value,
-                label: label,
+                label: formatStarListLabel(fullName),
+                subtitle: typeof s === 'string' ? '' : buildStarListSubtitle(s),
+                tooltip,
                 hasSpectra,
                 hasPhotometry
             };
         });
-
-    const highlightedIds = new Set<string>(
-        spectra
-            .filter(s => latestTargetId && s.targetIds?.includes(latestTargetId))
-            .map(s => String(s.id || s.label || s))
-    );
 
     const hasMore = spectra.length >= 100;
 
@@ -242,7 +237,6 @@ export const useSpectrumList = (
         setFilterOption: handleSetDropdown,
         filterText,
         setFilterText: handleSetFilterText,
-        highlightedIds,
         page,
         setPage,
         hasMore,

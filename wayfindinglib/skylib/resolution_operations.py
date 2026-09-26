@@ -4,6 +4,8 @@ Resolves a named target/star against the local Astrometrics database or
 SIMBAD, and retrieves objects within a sky region for wayfindinglib.sky.Sky.
 """
 
+from typing import Any
+
 from astrometricslib import StellarObject, Target
 from wayfindinglib.drivers.catalog.simbad_catalog_driver import resolve_simbad_radec
 from wayfindinglib.exceptions import AstrometryHardwareError
@@ -42,15 +44,15 @@ def resolve_target_coordinates(sky, target_name: str) -> Target | StellarObject:
                 return target
 
     # 2. Search local stellar objects
-    stars = sky._astrometrics.stellar_objects
-    for star in stars:
-        if star.id == target_name or (star.name and star.name.lower() == target_name.lower()):
-            # Only return if coordinates are initialized (nonzero)
-            if (
-                star.right_ascension != 0.0  # ruff: ignore[float-equality-comparison] -- exact sentinel: 0.0 means "uninitialized"
-                or star.declination != 0.0  # ruff: ignore[float-equality-comparison] -- exact sentinel: 0.0 means "uninitialized"
-            ):
-                return star
+    # Only the stars that match the name are read from the library, not
+    # every star in it.
+    for star in sky._astrometrics.stars.find_all_by_id_or_name(target_name):
+        # Only return if coordinates are initialized (nonzero)
+        if (
+            star.right_ascension != 0.0  # ruff: ignore[float-equality-comparison] -- exact sentinel: 0.0 means "uninitialized"
+            or star.declination != 0.0  # ruff: ignore[float-equality-comparison] -- exact sentinel: 0.0 means "uninitialized"
+        ):
+            return star
 
     # 3. Fallback to SIMBAD query by name
     try:
@@ -113,6 +115,7 @@ def get_sources(
     dec_deg: float,
     radius_deg: float,
     include_catalog: bool = False,
+    include_stars: bool = True,
 ) -> list[Target | StellarObject]:
     """Retrieve list of targets and stars in a specific sky region.
 
@@ -129,6 +132,9 @@ def get_sources(
     include_catalog : bool
         If True, query includes the global SIMBAD catalog. If False,
         returns local database records only.
+    include_stars : bool
+        If False, the user's own stars are left out and only targets
+        (plus the SIMBAD results, if asked for) come back.
 
     Returns
     -------
@@ -137,13 +143,16 @@ def get_sources(
     """
     from wayfindinglib.skylib import catalog_operations
 
-    if not include_catalog:
-        sources = []
-        sources.extend(sky._astrometrics.targets.list())
-        sources.extend(sky._astrometrics.stellar_objects)
-        return sources
-
-    sources = catalog_operations.astrometrics_catalog(sky, ra_deg, dec_deg, radius_deg)
+    # astrometrics_catalog() already restricts local targets/stars to
+    # ra_deg/dec_deg/radius_deg via a batched SkyCoord separation check
+    # (see its own docstring), so it's used for both branches below --
+    # there used to be a separate "not include_catalog" fast path that
+    # returned sky._astrometrics.targets.list() and .stellar_objects
+    # directly, unfiltered by radius_deg. That meant every viewport-scoped
+    # Planetarium query (which always calls this with include_catalog=False)
+    # fetched and serialized the entire local catalog instead of just
+    # what's in view.
+    sources = catalog_operations.astrometrics_catalog(sky, ra_deg, dec_deg, radius_deg, include_stars)
     if include_catalog:
         online_sources = catalog_operations.global_catalog(sky, ra_deg, dec_deg, radius_deg)
         # Avoid duplicating IDs
@@ -154,12 +163,52 @@ def get_sources(
     return sources
 
 
+def get_library_star_summaries(
+    sky,  # ruff: ignore[missing-type-function-argument]
+    ra_deg: float,
+    dec_deg: float,
+    radius_deg: float,
+    magnitude_range: tuple[float, float] | None = None,
+) -> list[dict[str, Any]]:
+    """Retrieve quick summaries of the user's own stars in a sky region.
+
+    `get_sources` loads every library star in full and checks each one, so
+    it takes seconds on a large library. This reads only the saved columns
+    of the stars near the region, which takes milliseconds.
+
+    Parameters
+    ----------
+    sky : Sky
+        The Sky instance providing the local Astrometrics catalog.
+    ra_deg : float
+        Center Right Ascension in degrees.
+    dec_deg : float
+        Center Declination in degrees.
+    radius_deg : float
+        Search radius in degrees.
+    magnitude_range : Tuple[float, float], optional
+        Lowest and highest magnitude to keep, ends included. Stars with no
+        saved magnitude are left out. Every star is kept when omitted.
+
+    Returns
+    -------
+    List[Dict[str, Any]]
+        One dict per star inside the region, with keys ``id``, ``name``,
+        ``ra``, ``dec``, ``targetIds``, ``hasSpectra``, ``hasPhotometry``,
+        ``magnitude`` and ``spectralType``.
+    """
+    return sky._astrometrics.stars.list_object_summaries_in_region(
+        ra_deg, dec_deg, radius_deg, magnitude_range
+    )
+
+
 def get_online_catalog_sources(
     sky,  # ruff: ignore[missing-type-function-argument]
     ra_deg: float,
     dec_deg: float,
     radius_deg: float,
     enabled_driver_names: list[str],
+    magnitude_limit: float | None = None,
 ) -> list[tuple[str, StellarObject]]:
     """Query registered online catalog drivers for objects in a sky region.
 
@@ -180,6 +229,9 @@ def get_online_catalog_sources(
         Search radius in degrees.
     enabled_driver_names : List[str]
         Registry keys of drivers to query (e.g. ['simbad', 'gaia']).
+    magnitude_limit : float, optional
+        Faintest magnitude the caller wants; drivers that can use it fetch
+        fewer stars.
 
     Returns
     -------
@@ -196,4 +248,5 @@ def get_online_catalog_sources(
         dec_degrees=dec_deg,
         radius_degrees=radius_deg,
         enabled_driver_names=enabled_driver_names,
+        magnitude_limit=magnitude_limit,
     )

@@ -24,11 +24,13 @@ from astrometricslib.models.moving_object import (
     MovingObjectTrack,
 )
 from astrometricslib.models.quality_summary import (
+    AppliedCameraProfile,
     AsteroidDetectionPipelineQualityMetrics,
     AsteroidDetectionQualitySummary,
     AstrometryPipelineQualityMetrics,
     AstrometryQualitySummary,
     ExcludedFrame,
+    ExposureGroupSummary,
     FrameEnsembleComposition,
     PhotometryPipelineQualityMetrics,
     PhotometryQualitySummary,
@@ -75,10 +77,15 @@ from wayfindinglib.drivers.indi_interface import TelescopeStatus
 from wayfindinglib.models.session.observation_session import WeatherSample
 from wayfindinglib.models.session.telemetry import (
     AlignmentAttempt,
+    AlignmentSessionSummary,
     GuidingSample,
+    GuidingSpectrumAnalysis,
+    GuidingSpectrumPeak,
     GuidingStats,
     GuidingStatus,
     IndiStatus,
+    MountPointingModel,
+    PolarAlignmentStatus,
 )
 from wayfindinglib.observation import (
     CalibrationEntry,
@@ -269,6 +276,11 @@ def main() -> None:
         generate_interface(SystemPulse, "SystemPulse"),
         generate_interface(GuidingSample, "GuidingSample"),
         generate_interface(AlignmentAttempt, "AlignmentAttempt"),
+        generate_interface(PolarAlignmentStatus, "PolarAlignmentStatus"),
+        generate_interface(AlignmentSessionSummary, "AlignmentSessionSummary"),
+        generate_interface(MountPointingModel, "MountPointingModel"),
+        generate_interface(GuidingSpectrumPeak, "GuidingSpectrumPeak"),
+        generate_interface(GuidingSpectrumAnalysis, "GuidingSpectrumAnalysis"),
         generate_interface(ProcessStatus, "ProcessStatus"),
         generate_interface(ProcessingJob, "ProcessingJob"),
         generate_interface(AnalysisResult, "AnalysisResult"),
@@ -288,6 +300,8 @@ def main() -> None:
         generate_interface(MosaicPanel, "MosaicPanel"),
         generate_interface(ExcludedFrame, "ExcludedFrame"),
         generate_interface(TargetSessionContribution, "TargetSessionContribution"),
+        generate_interface(ExposureGroupSummary, "ExposureGroupSummary"),
+        generate_interface(AppliedCameraProfile, "AppliedCameraProfile"),
         generate_interface(StackingPipelineQualityMetrics, "StackingPipelineQualityMetrics"),
         generate_interface(StackQualitySummary, "StackQualitySummary"),
         generate_interface(AstrometryPipelineQualityMetrics, "AstrometryPipelineQualityMetrics"),

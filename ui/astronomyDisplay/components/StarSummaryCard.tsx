@@ -5,6 +5,15 @@
 
 import React from 'react';
 import '../styles/astronomyDisplay.css';
+import {
+    describePatternBadges,
+    describeStarTypeBadges,
+    formatCatalogMagnitude,
+    formatCoordinateDegrees,
+} from '../utils/starDisplayFormat';
+import { useOptionalTargetContext } from '../../common/context/TargetContext';
+import { emitToast } from '../../common/utils/emitToast';
+import { navigateToElement } from '../../common/utils/displayCoordinator';
 
 export interface StarSummaryCardProps {
     /** Detailed astronomy/stellar object data. */
@@ -14,16 +23,96 @@ export interface StarSummaryCardProps {
 }
 
 /**
- * Format numerical RA and DEC into standard degree, arcminute, arcsecond strings.
+ * Formats right ascension and declination as degrees rounded to five decimals.
  * @param ra RA coordinate in degrees or string.
  * @param dec DEC coordinate in degrees or string.
- * @returns Formatted coordinate string with dot separator.
+ * @returns Formatted coordinate string with dot separator, or empty if either is missing.
  */
 function formatCoordinates(ra?: any, dec?: any): string {
-    if (ra === undefined || dec === undefined || ra === null || dec === null || ra === '') {
-        return '';
+    const rightAscensionText = formatCoordinateDegrees(ra);
+    const declinationText = formatCoordinateDegrees(dec);
+    if (rightAscensionText === '' || declinationText === '') return '';
+    return `${rightAscensionText}° • ${declinationText}°`;
+}
+
+/**
+ * Switches the app to Planetarium, centered on the given star, in place --
+ * the reverse of Planetarium's "Open in Astronomy Manager" action.
+ *
+ * @param id Star identifier to select once Planetarium mounts.
+ * @param name Display name for the star.
+ * @param ra Right ascension in degrees.
+ * @param dec Declination in degrees.
+ * @param hasSpectra Whether spectroscopy data exists for this star.
+ * @param hasPhotometry Whether photometry data exists for this star.
+ * @returns {void}
+ */
+function locateInPlanetarium(
+    id: string,
+    name: string,
+    ra: number,
+    dec: number,
+    hasSpectra: boolean,
+    hasPhotometry: boolean
+): void {
+    const payload = { id, name, ra, dec, hasSpectra, hasPhotometry };
+    try {
+        window.localStorage.setItem('astronomyLocateStar', JSON.stringify(payload));
+        window.localStorage.setItem('appMode', 'Planetarium');
+    } catch {
+        // Ignore localStorage access failures (e.g. in private browsing)
     }
-    return `${ra}° • ${dec}°`;
+    window.dispatchEvent(new CustomEvent('astrometrics:modeChange', { detail: 'Planetarium' }));
+    window.dispatchEvent(new CustomEvent('astrometrics:planetariumLocateStar', { detail: payload }));
+}
+
+/**
+ * Switches the app to Image Processing Display with the specified target selected,
+ * Astrometry overlay enabled, and the current star selected in the FITS viewer.
+ *
+ * @param targetId Target identifier to load in the Image Processing workspace.
+ * @param setSelectedTarget Optional setter from TargetContext to directly set selectedTarget.
+ * @param setPendingTarget Optional setter from TargetContext to directly set pendingTarget.
+ * @param selectedStarId Optional identifier of the star being handed off.
+ */
+function navigateToTarget(
+    targetId: string,
+    setSelectedTarget?: (id: string) => void,
+    setPendingTarget?: (id: string) => void,
+    selectedStarId?: string
+): void {
+    if (!targetId) return;
+    try {
+        window.localStorage.setItem('selectedTarget', targetId);
+        if (selectedStarId) {
+            window.localStorage.setItem('astrometrics:imageProcessingSelectedStar', selectedStarId);
+        }
+        window.localStorage.setItem('astrometrics:enableAstrometryOverlay', 'true');
+    } catch {
+        // Ignore localStorage access failures (e.g. in private browsing)
+    }
+    setSelectedTarget?.(targetId);
+    setPendingTarget?.(targetId);
+
+    navigateToElement({
+        targetDisplay: 'Image Processing',
+        targetElement: 'fitsViewer',
+        action: 'targetSelected',
+        payload: { targetId, starId: selectedStarId, enableAstrometry: true },
+        toast: {
+            message: `Opening ${targetId.replace(/_/g, ' ')} in Image Processing with Astrometry`,
+            type: 'info',
+            title: 'Targets',
+        },
+    }).then((result) => {
+        if (!result.handledRemotely) {
+            try {
+                window.localStorage.setItem('appMode', 'Image Processing');
+            } catch {
+                // Ignore
+            }
+        }
+    });
 }
 
 /**
@@ -33,6 +122,8 @@ export const StarSummaryCard: React.FC<StarSummaryCardProps> = ({
     astronomyData,
     starId,
 }) => {
+    const targetContext = useOptionalTargetContext();
+
     if (!starId && !astronomyData) {
         return null;
     }
@@ -42,48 +133,79 @@ export const StarSummaryCard: React.FC<StarSummaryCardProps> = ({
     const ra = astronomyData?.ra ?? astronomyData?.right_ascension;
     const dec = astronomyData?.dec ?? astronomyData?.declination;
     const formattedCoords = formatCoordinates(ra, dec);
-    const mag = astronomyData?.magnitude ?? astronomyData?.mag;
-    const meanFlux = astronomyData?.photometry?.meanFlux ?? astronomyData?.photometry?.mean_flux;
-    const variabilityScore = astronomyData?.variabilityScore ?? astronomyData?.variability_score;
+    const raNum = typeof ra === 'number' ? ra : parseFloat(ra);
+    const decNum = typeof dec === 'number' ? dec : parseFloat(dec);
+    const canLocate = Number.isFinite(raNum) && Number.isFinite(decNum);
+    const catalogMagnitudeText = formatCatalogMagnitude(astronomyData?.magnitude ?? astronomyData?.mag);
+    const typeBadges = describeStarTypeBadges(spectralType, astronomyData?.spectroscopy);
+    const patternBadges = describePatternBadges(astronomyData?.photometry);
     const targetIds: string[] = Array.isArray(astronomyData?.targetIds) ? astronomyData.targetIds : [];
 
     return (
         <div className="star-summary-card">
             <div className="star-summary-card__header">
                 <span className="star-summary-card__title">{name}</span>
-                {spectralType && (
-                    <span className="star-summary-card__badge spectral-badge">{spectralType}</span>
-                )}
-                {variabilityScore !== undefined && variabilityScore !== null && (
-                    <span className="star-summary-card__badge variability-badge">
-                        Var Score: {(Number(variabilityScore)).toFixed(2)}
+                {typeBadges.map((badge) => (
+                    <span
+                        key={badge.text}
+                        className={`star-summary-card__badge spectral-badge spectral-badge--${badge.tone}`}
+                        title={badge.title}
+                    >
+                        {badge.text}
                     </span>
+                ))}
+                {patternBadges.map((badge) => (
+                    <span key={badge.text} className="star-summary-card__badge variability-badge" title={badge.title}>
+                        {badge.text}
+                    </span>
+                ))}
+                {canLocate && (
+                    <button
+                        type="button"
+                        className="star-summary-card__locate-btn"
+                        onClick={() => locateInPlanetarium(
+                            String(astronomyData?.id || astronomyData?.name || starId),
+                            String(name),
+                            raNum,
+                            decNum,
+                            !!(astronomyData?.hasSpectra ?? astronomyData?.has_spectra),
+                            !!(astronomyData?.hasPhotometry ?? astronomyData?.has_photometry)
+                        )}
+                    >
+                        Locate in Planetarium
+                    </button>
                 )}
             </div>
 
             <div className="star-summary-card__details">
                 {formattedCoords && (
-                    <span className="star-summary-card__item">
-                        <span className="item-label">Coords:</span> {formattedCoords}
+                    <span className="star-summary-card__item" title="Right ascension and declination, in degrees.">
+                        <span className="item-label">RA / Dec:</span> {formattedCoords}
                     </span>
                 )}
-                {mag !== undefined && mag !== null && mag !== '' && (
-                    <span className="star-summary-card__item">
-                        <span className="item-label">Mag:</span> {String(mag)}
-                    </span>
-                )}
-                {meanFlux !== undefined && meanFlux !== null && (
-                    <span className="star-summary-card__item">
-                        <span className="item-label">Mean Flux:</span> {Math.round(Number(meanFlux)).toLocaleString()} ADU
+                {catalogMagnitudeText !== null && (
+                    <span className="star-summary-card__item" title="Brightness in magnitudes. A smaller number is brighter.">
+                        <span className="item-label">Mag:</span> {catalogMagnitudeText}
                     </span>
                 )}
                 {targetIds.length > 0 && (
                     <span className="star-summary-card__item">
                         <span className="item-label">Targets:</span>{' '}
                         {targetIds.map((t) => (
-                            <span key={t} className="target-tag-badge">
+                            <button
+                                key={t}
+                                type="button"
+                                className="target-tag-badge"
+                                title={`Open ${t} in Image Processing Display with Astrometry enabled`}
+                                onClick={() => navigateToTarget(
+                                    t,
+                                    targetContext?.setSelectedTarget,
+                                    targetContext?.setPendingTarget,
+                                    String(astronomyData?.id || astronomyData?.name || starId || '')
+                                )}
+                            >
                                 {t}
-                            </span>
+                            </button>
                         ))}
                     </span>
                 )}

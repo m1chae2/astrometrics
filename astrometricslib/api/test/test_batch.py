@@ -13,7 +13,7 @@ from astrometricslib.api import batch
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines import tasks
 from astrometricslib.pipelines.shared import frame_grouping
-from astrometricslib.utilities import parallel_batch
+from astrometricslib.utilities import concurrency, parallel_batch
 
 
 def _patch_astrometrics(monkeypatch, target) -> MagicMock:  # ruff: ignore[missing-type-function-argument]
@@ -93,7 +93,33 @@ class TestProcessSingleTargetWorker:
         result = batch._process_single_target_worker("M13", 2, "ASI294")
 
         assert result["status"] == "failed"
-        assert result["error"] == "pipeline blew up"
+        assert "RuntimeError" in result["error"]
+        assert "pipeline blew up" in result["error"]
+
+    def test_reports_the_exception_type_even_when_its_message_is_empty(self, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+        """A messageless exception must not collapse to a blank error.
+
+        `str(exc)` is empty for an exception raised with no arguments
+        (e.g. a bare Rust panic pyo3 converts into a Python exception),
+        and `run_parallel_batch` treats a falsy "error" as "Unknown
+        failure" -- discarding the only clue to what actually broke. This
+        reproduces a real production incident where every target in a
+        batch run came back as an undiagnosable "Unknown failure".
+        """
+        target = Target(id="M13")
+        _patch_astrometrics(monkeypatch, target=target)
+        monkeypatch.setattr(frame_grouping, "select_frames_for_camera", lambda t, c: ["a frame"])
+
+        def _explode_with_no_message(*args: object, **kwargs: object) -> object:
+            raise RuntimeError
+
+        monkeypatch.setattr(tasks, "run_full_pipeline", _explode_with_no_message)
+
+        result = batch._process_single_target_worker("M13", 2, "ASI294")
+
+        assert result["status"] == "failed"
+        assert result["error"]
+        assert "RuntimeError" in result["error"]
 
 
 class TestProcessAllTargets:
@@ -138,10 +164,25 @@ class TestProcessAllTargets:
         api.targets.list.assert_not_called()
 
     def test_forwards_resolved_worker_counts_and_niceness(self, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-        """Verify config settings reach run_parallel_batch resolved."""
+        """Verify config settings reach run_parallel_batch resolved.
+
+        resolve_worker_counts is monkeypatched to a deterministic stub so
+        this test only verifies the forwarding contract -- that the values
+        returned by resolve_worker_counts are passed through correctly --
+        without being affected by real system memory constraints on CI
+        runners. Memory-based capping logic is tested separately in the
+        concurrency module's own unit tests.
+        """
         api = self._make_api(["M13"])
         api.config.get_target_workers.return_value = "2"
         api.config.get_photometry_workers.return_value = "3"
+        monkeypatch.setattr(
+            batch,
+            "resolve_worker_counts",
+            lambda outer, inner: concurrency.WorkerCounts(
+                outer_worker_count=int(outer), inner_worker_count=int(inner)
+            ),
+        )
         run_mock = MagicMock(return_value="a summary")
         monkeypatch.setattr(parallel_batch, "run_parallel_batch", run_mock)
 

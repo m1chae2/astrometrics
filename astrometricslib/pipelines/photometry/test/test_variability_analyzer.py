@@ -9,9 +9,11 @@ background/annulus) is significantly saturated.
 import numpy as np
 import pytest
 
+from astrometricslib.models.stellar_source import PhotometryResult, StellarObject
 from astrometricslib.pipelines.photometry.variability_analyzer import (
     VariabilityAnalyzer,
     _calculate_frame_offset,
+    _compute_star_coefficients_of_variation,
     _measure_aperture_flux,
     locate_star_centroid,
 )
@@ -23,7 +25,7 @@ def test_measure_flux_numpy_unsaturated_star():  # ruff: ignore[missing-return-t
     data[45:55, 45:55] += 3000.0  # bright but unsaturated star
 
     analyzer = VariabilityAnalyzer()
-    flux, is_saturated = analyzer._measure_flux_numpy(data, 50, 50)
+    flux, is_saturated = analyzer._measure_flux_numpy(data, 50, 50, saturation_threshold_adu=65000.0)
     assert flux > 0
     assert is_saturated is False
 
@@ -34,15 +36,27 @@ def test_measure_flux_numpy_saturated_star():  # ruff: ignore[missing-return-typ
     data[46:54, 46:54] = 65535.0  # saturated core within the 4px-radius aperture
 
     analyzer = VariabilityAnalyzer()
-    _flux, is_saturated = analyzer._measure_flux_numpy(data, 50, 50)
+    _flux, is_saturated = analyzer._measure_flux_numpy(data, 50, 50, saturation_threshold_adu=65000.0)
     assert is_saturated is True
+
+
+def test_measure_flux_numpy_uses_the_threshold_it_is_given():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verifies a low threshold flags the star and a high one does not."""
+    data = np.full((100, 100), 500.0)
+    data[46:54, 46:54] = 16000.0  # a 14-bit camera's clipped core
+
+    analyzer = VariabilityAnalyzer()
+    _flux, saturated_for_low = analyzer._measure_flux_numpy(data, 50, 50, saturation_threshold_adu=15000.0)
+    _flux, saturated_for_high = analyzer._measure_flux_numpy(data, 50, 50, saturation_threshold_adu=65000.0)
+    assert saturated_for_low is True
+    assert saturated_for_high is False
 
 
 def test_measure_flux_numpy_out_of_bounds_returns_unsaturated_zero():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verifies an out-of-bounds star returns (0.0, False), not raises."""
     data = np.full((20, 20), 500.0)
     analyzer = VariabilityAnalyzer()
-    flux, is_saturated = analyzer._measure_flux_numpy(data, 1, 1)
+    flux, is_saturated = analyzer._measure_flux_numpy(data, 1, 1, saturation_threshold_adu=65000.0)
     assert flux == pytest.approx(0.0)
     assert is_saturated is False
 
@@ -65,7 +79,7 @@ def test_measure_aperture_flux_pins_sum_method_exact():  # ruff: ignore[missing-
     data = np.full((100, 100), 500.0)
     data[46:54, 46:54] = 1000.0  # hard-edged square, not a soft star glow
 
-    flux, is_saturated = _measure_aperture_flux(data, 50, 50)
+    flux, is_saturated = _measure_aperture_flux(data, 50, 50, saturation_threshold_adu=65000.0)
     assert flux == pytest.approx(23824.693920034817)
     assert is_saturated is False
 
@@ -81,7 +95,7 @@ def test_measure_aperture_flux_empty_annulus_uses_local_median():  # ruff: ignor
     data = np.full((9, 9), 500.0)
     data[2:7, 2:7] = 1000.0  # star block big enough that the local median is still background (500)
 
-    flux, is_saturated = _measure_aperture_flux(data, 4, 4, cutout_radius=4)
+    flux, is_saturated = _measure_aperture_flux(data, 4, 4, cutout_radius=4, saturation_threshold_adu=65000.0)
     assert flux == pytest.approx(12500.0)
     assert is_saturated is False
 
@@ -97,7 +111,9 @@ def test_measure_aperture_flux_empty_annulus_honors_explicit_fallback():  # ruff
     data = np.full((9, 9), 500.0)
     data[2:7, 2:7] = 1000.0
 
-    flux, is_saturated = _measure_aperture_flux(data, 4, 4, cutout_radius=4, fallback_background=100.0)
+    flux, is_saturated = _measure_aperture_flux(
+        data, 4, 4, cutout_radius=4, fallback_background=100.0, saturation_threshold_adu=65000.0
+    )
     assert flux == pytest.approx(32606.192982974677)
     assert is_saturated is False
 
@@ -162,3 +178,23 @@ def test_calculate_frame_offset_returns_zero_when_too_few_stars_located():  # ru
     data = np.full((100, 100), 500.0)
     reference_positions = [(20.0, 20.0, 0.0), (40.0, 40.0, 0.0)]
     assert _calculate_frame_offset(data, reference_positions) == (0.0, 0.0)
+
+
+def test_the_variability_step_keeps_the_catalog_magnitude() -> None:
+    """An instrument magnitude in `star_data` must not replace the catalog one.
+
+    Regression: the step copied the star finder's instrument magnitude over
+    `magnitude`, so BD+33 3249 showed -14.5 instead of its catalog value.
+    """
+    catalog_star = StellarObject(id="cataloged", name="cataloged")
+    catalog_star.magnitude = 9.0
+    catalog_star.star_data = {"mag": -14.5}
+    catalog_star.photometry = PhotometryResult(fluxes_normalized=[1.0, 1.1, 0.9, 1.0])
+    unknown_star = StellarObject(id="unknown", name="unknown")
+    unknown_star.star_data = {"mag": -11.6}
+    unknown_star.photometry = PhotometryResult(fluxes_normalized=[1.0, 1.1, 0.9, 1.0])
+
+    _compute_star_coefficients_of_variation([catalog_star, unknown_star])
+
+    assert catalog_star.magnitude == pytest.approx(9.0)
+    assert unknown_star.magnitude is None

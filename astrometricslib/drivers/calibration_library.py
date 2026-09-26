@@ -4,10 +4,14 @@ import json
 import logging
 import os
 import threading
+from collections.abc import Iterable
 from typing import Any
 
 from astropy.io import fits
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+
+from astrometricslib.drivers.camera_profile_store import camera_identity, record_name_for_camera
+from astrometricslib.utilities.iso_text import iso_or_gain_values_match
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +29,94 @@ BAADER_BESSEL_ASI533_TRANSFORM_COEFFICIENTS = {
     "T_v_vr": {"value": -0.012, "error": 0.025},
     "T_r_vr": {"value": -0.221, "error": 0.030},
 }
+
+
+# The text that joins a gain and a nonzero camera offset into one library key,
+# for example "0.0@offset=30". A key with no such suffix means offset 0 or
+# offset not recorded, which is every key the library held before offset was
+# tracked, so a saved library file needs no migration.
+_OFFSET_KEY_MARKER = "@offset="
+
+
+def calibration_setting_key(gain: Any, offset: Any = None) -> str:
+    """Build the library key for a camera gain and offset.
+
+    A camera's offset is a baseline added to every pixel before it is
+    digitized. A frame taken at one offset cannot calibrate frames taken at
+    another, and at offset 0 much of the noise is clipped away, so the two
+    settings must not share a slot in the library.
+
+    Parameters
+    ----------
+    gain : `Any`
+        The gain or ISO, as written in the frame header.
+    offset : `Any`, optional
+        The camera offset. `None`, zero, or text that is not a number gives
+        the plain gain key.
+
+    Returns
+    -------
+    key : `str`
+        The gain as text, followed by ``@offset=<offset>`` when the offset is
+        a nonzero number.
+    """
+    offset_value = _as_float(offset)
+    if offset_value is None or offset_value == 0.0:  # ruff: ignore[float-equality-comparison] -- a setting read from a header, not a measurement
+        return str(gain)
+    return f"{gain}{_OFFSET_KEY_MARKER}{offset_value:g}"
+
+
+def split_calibration_setting_key(key: str) -> tuple[str, float]:
+    """Split a library key back into its gain and offset.
+
+    Parameters
+    ----------
+    key : `str`
+        A key made by `calibration_setting_key`, or an older gain-only key.
+
+    Returns
+    -------
+    gain, offset : `tuple` [`str`, `float`]
+        The gain text, and the offset (0.0 when the key has none).
+    """
+    gain, marker, offset_text = str(key).partition(_OFFSET_KEY_MARKER)
+    offset_value = _as_float(offset_text) if marker else None
+    return gain, 0.0 if offset_value is None else offset_value
+
+
+def _as_float(value: Any) -> float | None:
+    """Read a header value as a number.
+
+    Returns
+    -------
+    number : `float` or `None`
+        The value as a float, or `None` if it is missing or not a number.
+    """
+    try:
+        return None if value is None else float(value)
+    except TypeError, ValueError:
+        return None
+
+
+def _is_same_setting(key: str, gain: Any, offset: Any) -> bool:
+    """Tell whether a library key is the given gain and offset.
+
+    Gains are compared as numbers when both are numbers ("0" equals "0.0"),
+    and as text otherwise (an ISO such as "800").
+
+    Returns
+    -------
+    is_same : `bool`
+        `True` if the key's gain and offset both match.
+    """
+    key_gain, key_offset = split_calibration_setting_key(key)
+    key_gain_number, wanted_gain_number = _as_float(key_gain), _as_float(gain)
+    if key_gain_number is not None and wanted_gain_number is not None:
+        gain_matches = key_gain_number == wanted_gain_number
+    else:
+        gain_matches = key_gain.strip() == str(gain).strip()
+    wanted_offset = _as_float(offset)
+    return gain_matches and key_offset == (0.0 if wanted_offset is None else wanted_offset)
 
 
 class CalibrationLibrary(BaseModel):
@@ -142,9 +234,11 @@ class CalibrationLibrary(BaseModel):
                             exposure = float(exp)
                         except ValueError, TypeError:
                             exposure = None
+                        gain, offset = split_calibration_setting_key(iso)
                         darks.append({
                             "camera": camera,
-                            "iso": iso,
+                            "iso": gain,
+                            "offset": offset,
                             "exposure": exposure,
                             "count": len(file_list),
                         })
@@ -156,7 +250,8 @@ class CalibrationLibrary(BaseModel):
                 for iso, file_list in iso_dict.items():
                     if not isinstance(file_list, list):
                         continue
-                    biases.append({"camera": camera, "iso": iso, "count": len(file_list)})
+                    gain, offset = split_calibration_setting_key(iso)
+                    biases.append({"camera": camera, "iso": gain, "offset": offset, "count": len(file_list)})
 
             # 3. Flat frames stats
             for _telescope, camera_dict in self.flat_frames.items():
@@ -171,10 +266,12 @@ class CalibrationLibrary(BaseModel):
                         for iso, file_list in iso_dict.items():
                             if not isinstance(file_list, list):
                                 continue
+                            gain, offset = split_calibration_setting_key(iso)
                             flats.append({
                                 "camera": camera,
                                 "filter": filt,
-                                "iso": iso,
+                                "iso": gain,
+                                "offset": offset,
                                 "count": len(file_list),
                             })
 
@@ -195,16 +292,78 @@ class CalibrationLibrary(BaseModel):
             iso = "800"
         return str(iso)
 
-    def _get_camera_name(self, header):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
-        """Normalize camera name from header.
+    def _get_offset(self, header):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+        """Extract the camera offset from a header.
+
+        Returns
+        -------
+        offset : `Any`
+            The ``OFFSET`` value, else ``BLKLEVEL``, else `None` when the
+            header records neither.
+        """
+        offset = header.get("OFFSET")
+        return header.get("BLKLEVEL") if offset is None else offset
+
+    def _choose_setting_keys(
+        self, available_keys: Iterable[str], gain: Any, offset: Any, what: str
+    ) -> list[str]:
+        """Pick which gain-and-offset slots to take calibration frames from.
+
+        Frames at the light frames' own gain and offset are used when there
+        are any. Otherwise every slot is used, with a warning, because a
+        calibration frame at other settings is judged better than none (the
+        stacker also logs a soft flag for it).
+
+        Parameters
+        ----------
+        available_keys : `Iterable` [`str`]
+            The slot keys that exist.
+        gain : `Any`
+            The light frames' gain, or `None` to take every slot without a
+            warning (a caller that does not say what the lights used).
+        offset : `Any`
+            The light frames' camera offset.
+        what : `str`
+            What is being looked up, for the warning.
+
+        Returns
+        -------
+        keys : `list` [`str`]
+            The slot keys to read.
+        """
+        keys = list(available_keys)
+        if gain is None:
+            return keys
+        exact = [key for key in keys if _is_same_setting(key, gain, offset)]
+        if exact:
+            return exact
+        if keys:
+            logger.warning(
+                "No %s at gain %s and offset %s; using %s taken at other settings (%s).",
+                what,
+                gain,
+                offset,
+                what,
+                ", ".join(sorted(keys)),
+            )
+        return keys
+
+    def _get_camera_name(self, header: Any) -> str:
+        """Give the camera name to file a calibration frame under.
+
+        Parameters
+        ----------
+        header : `Any`
+            The image header.
 
         Returns
         -------
         camera_name : `str`
-            Normalized camera name.
+            The camera's ``record_name`` from its profile, which is the
+            spelling frame records use, or the header's own text when the
+            camera has none.
         """
-        c_head = header.get("INSTRUME", header.get("CAMERA", "Unknown"))
-        return c_head.replace("ZWO CCD", "ZWO").replace("ASI533", "ASI 533")
+        return record_name_for_camera(header.get("INSTRUME", header.get("CAMERA", "Unknown")))
 
     def add_dark_frame(self, image_file):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
         """Add a dark frame to the library."""
@@ -215,7 +374,9 @@ class CalibrationLibrary(BaseModel):
             with fits.open(image_file) as hdu_list:
                 header_info = hdu_list[0].header
                 camera = self._get_camera_name(header_info)
-                iso_speed = self._get_iso_gain(header_info)
+                iso_speed = calibration_setting_key(
+                    self._get_iso_gain(header_info), self._get_offset(header_info)
+                )
                 exposure_time = str(header_info.get("EXPTIME", "30.0"))
 
                 with self._lock:
@@ -240,7 +401,9 @@ class CalibrationLibrary(BaseModel):
             with fits.open(image_file) as hdu_list:
                 header_info = hdu_list[0].header
                 camera = self._get_camera_name(header_info)
-                iso_speed = self._get_iso_gain(header_info)
+                iso_speed = calibration_setting_key(
+                    self._get_iso_gain(header_info), self._get_offset(header_info)
+                )
 
                 with self._lock:
                     if camera not in self.bias_frames:
@@ -266,7 +429,9 @@ class CalibrationLibrary(BaseModel):
 
                 filter_type = get_filter_type(header_info)
                 filter_val = filter_type.value if hasattr(filter_type, "value") else str(filter_type)
-                iso_speed = self._get_iso_gain(header_info)
+                iso_speed = calibration_setting_key(
+                    self._get_iso_gain(header_info), self._get_offset(header_info)
+                )
 
                 with self._lock:
                     if telescope not in self.flat_frames:
@@ -344,15 +509,50 @@ class CalibrationLibrary(BaseModel):
         if camera in frame_dict:
             return frame_dict[camera]
 
-        # Fuzzy match: "Nikon D5300" should match "Nikon DSLR DSC D5300"
+        # The same camera under another spelling: "Nikon D5300" is
+        # "Nikon DSLR DSC D5300", found through the camera's profile.
+        wanted_identity = camera_identity(camera)
+        for key in frame_dict:
+            if camera_identity(key) == wanted_identity:
+                return frame_dict[key]
+
+        # Partial names: a name that is part of another, or contains it.
         for key in frame_dict:
             if camera.upper() in key.upper() or key.upper() in camera.upper():
                 return frame_dict[key]
 
         return {}
 
-    def get_dark_frames(self, camera=None, exposure=None, validate_paths=True, **kwargs):  # ruff: ignore[missing-type-function-argument, missing-type-kwargs, missing-return-type-undocumented-public-function]
-        """Retrieve dark frames for a camera and exposure.
+    def get_dark_frames(  # ruff: ignore[missing-return-type-undocumented-public-function]
+        self,
+        camera=None,  # ruff: ignore[missing-type-function-argument]
+        exposure=None,  # ruff: ignore[missing-type-function-argument]
+        validate_paths=True,  # ruff: ignore[missing-type-function-argument]
+        iso=None,  # ruff: ignore[missing-type-function-argument]
+        offset=None,  # ruff: ignore[missing-type-function-argument]
+        **kwargs,  # ruff: ignore[missing-type-kwargs]
+    ):
+        """Retrieve dark frames for a camera, exposure, gain and offset.
+
+        Darks taken at the given gain and camera offset are used when there
+        are any for the exposure. When there are none, darks from every other
+        gain and offset are used instead, with a warning, since a mismatched
+        dark is judged better than none. When `iso` is not given, every gain
+        and offset is used, as before.
+
+        Parameters
+        ----------
+        camera : `str`, optional
+            The camera name.
+        exposure : `Any`, optional
+            The light frames' exposure in seconds; darks within 0.1 s of it
+            are used. When `None`, every exposure is used.
+        validate_paths : `bool`, optional
+            Drop files that no longer exist, by default `True`.
+        iso : `Any`, optional
+            The light frames' gain or ISO.
+        offset : `Any`, optional
+            The light frames' camera offset.
 
         Returns
         -------
@@ -361,33 +561,59 @@ class CalibrationLibrary(BaseModel):
             files if `validate_paths` is `True`.
         """
         camera_data = self._get_camera_dict(self.dark_frames, camera)
-        frames = []
 
         try:
             target_exp = float(exposure) if exposure is not None else None
         except ValueError, TypeError:
             target_exp = None
 
-        # Iterate through all ISO keys (ignoring ISO)
-        for iso_key in camera_data:
-            iso_dict = camera_data[iso_key]
-            # iso_dict is Dict[str, List[str]] where keys are exposure strings
-            for exp_key, file_list in iso_dict.items():
-                try:
-                    # Fuzzy exposure match (allow 0.1s jitter)
-                    if target_exp is None or abs(float(exp_key) - target_exp) < 0.1:
-                        frames.extend(file_list)
-                except ValueError, TypeError:
-                    # Fallback to exact string match
-                    if str(exposure) == exp_key:
-                        frames.extend(file_list)
+        def frames_at_exposure(setting_keys):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+            collected = []
+            for setting_key in setting_keys:
+                for exp_key, file_list in camera_data[setting_key].items():
+                    try:
+                        # Fuzzy exposure match (allow 0.1s jitter)
+                        if target_exp is None or abs(float(exp_key) - target_exp) < 0.1:
+                            collected.extend(file_list)
+                    except ValueError, TypeError:
+                        # Fallback to exact string match
+                        if str(exposure) == exp_key:
+                            collected.extend(file_list)
+            return collected
+
+        if iso is None:
+            frames = frames_at_exposure(camera_data)
+        else:
+            frames = frames_at_exposure([key for key in camera_data if _is_same_setting(key, iso, offset)])
+            if not frames:
+                fallback_keys = self._choose_setting_keys(camera_data, None, offset, "dark frames")
+                frames = frames_at_exposure(fallback_keys)
+                if frames:
+                    logger.warning(
+                        "No dark frames at gain %s and offset %s for exposure %s; "
+                        "using darks taken at other settings.",
+                        iso,
+                        offset,
+                        exposure,
+                    )
 
         if validate_paths:
             return [f for f in frames if os.path.exists(f)]
         return frames
 
-    def get_bias_frames(self, camera=None, validate_paths=True, **kwargs):  # ruff: ignore[missing-type-function-argument, missing-type-kwargs, missing-return-type-undocumented-public-function]
-        """Retrieve bias frames for a camera.
+    def get_bias_frames(  # ruff: ignore[missing-return-type-undocumented-public-function]
+        self,
+        camera=None,  # ruff: ignore[missing-type-function-argument]
+        validate_paths=True,  # ruff: ignore[missing-type-function-argument]
+        iso=None,  # ruff: ignore[missing-type-function-argument]
+        offset=None,  # ruff: ignore[missing-type-function-argument]
+        **kwargs,  # ruff: ignore[missing-type-kwargs]
+    ):
+        """Retrieve bias frames for a camera, gain and offset.
+
+        Bias frames at the given gain and camera offset are used when there
+        are any; otherwise every gain and offset is used, with a warning. When
+        `iso` is not given, every gain and offset is used, as before.
 
         Returns
         -------
@@ -398,11 +624,10 @@ class CalibrationLibrary(BaseModel):
         camera_data = self._get_camera_dict(self.bias_frames, camera)
         frames = []
 
-        # Gather from all ISO keys
-        for iso_key in camera_data:
-            iso_list = camera_data[iso_key]
-            if isinstance(iso_list, list):
-                frames.extend(iso_list)
+        for setting_key in self._choose_setting_keys(camera_data, iso, offset, "bias frames"):
+            setting_list = camera_data[setting_key]
+            if isinstance(setting_list, list):
+                frames.extend(setting_list)
 
         if validate_paths:
             return [f for f in frames if os.path.exists(f)]
@@ -414,9 +639,16 @@ class CalibrationLibrary(BaseModel):
         camera=None,  # ruff: ignore[missing-type-function-argument]
         filter_type=None,  # ruff: ignore[missing-type-function-argument]
         validate_paths=True,  # ruff: ignore[missing-type-function-argument]
+        iso=None,  # ruff: ignore[missing-type-function-argument]
+        offset=None,  # ruff: ignore[missing-type-function-argument]
         **kwargs,  # ruff: ignore[missing-type-kwargs]
     ):
-        """Retrieve flat frames for a telescope, camera, and filter.
+        """Retrieve flats for a telescope, camera, filter, gain and offset.
+
+        Flats at the given gain and camera offset are used when there are any
+        for the filter; otherwise every gain and offset is used, with a
+        warning. When `iso` is not given, every gain and offset is used, as
+        before.
 
         Returns
         -------
@@ -450,8 +682,9 @@ class CalibrationLibrary(BaseModel):
         frames = []
         for f_name in search_filters:
             filter_data = camera_data.get(f_name, {})
-            # Gather from all ISO keys
-            for iso_key in filter_data:
+            # Take the light frames' own gain and offset when there are
+            # flats for it, otherwise every one, with a warning.
+            for iso_key in self._choose_setting_keys(filter_data, iso, offset, "flat frames"):
                 iso_list = filter_data[iso_key]
                 if isinstance(iso_list, list):
                     frames.extend(iso_list)
@@ -552,8 +785,9 @@ def is_calibration_gain_compatible(light_gain: str, master_gain: str) -> bool:
     """Check if the calibration and light frames share the same gain.
 
     Gain (or ISO) is how sensitive the camera is set to be. All calibration
-    files (darks, bias, and flats) must have the exact same gain as the
-    light images for the math to work correctly.
+    files (darks, bias, and flats) must have the same gain as the light
+    images for the math to work correctly. Gains are compared as numbers, so
+    "800" and "800.0" are the same gain.
 
     Parameters
     ----------
@@ -565,9 +799,33 @@ def is_calibration_gain_compatible(light_gain: str, master_gain: str) -> bool:
     Returns
     -------
     is_compatible : `bool`
-        True if the gain settings match exactly, False if they don't.
+        True if the gain settings match, False if they don't.
     """
-    return str(light_gain) == str(master_gain)
+    return iso_or_gain_values_match(light_gain, master_gain)
+
+
+def is_calibration_offset_compatible(light_offset: Any, master_offset: Any) -> bool:
+    """Check if the calibration and light frames share the same camera offset.
+
+    The offset is the baseline the camera adds to every pixel. Calibration
+    frames taken at a different offset carry a different baseline, so
+    subtracting them shifts every pixel by the difference. An offset that was
+    not recorded counts as 0.
+
+    Parameters
+    ----------
+    light_offset : `Any`
+        The camera offset of the light images.
+    master_offset : `Any`
+        The camera offset of the calibration file.
+
+    Returns
+    -------
+    is_compatible : `bool`
+        True if the two offsets are the same number.
+    """
+    light_value, master_value = _as_float(light_offset), _as_float(master_offset)
+    return (0.0 if light_value is None else light_value) == (0.0 if master_value is None else master_value)
 
 
 def is_dark_calibration_metadata_compatible(

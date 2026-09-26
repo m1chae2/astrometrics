@@ -11,6 +11,7 @@ names can be copied from the normal image to the spectroscopy image.
 """
 
 import logging
+from typing import Any
 
 import numpy as np
 
@@ -133,13 +134,17 @@ def _apply_matches(
         if distance > max_match_distance_px:
             continue
         reference_star = reference_objs[reference_index]
-        spectral_obj.id = f"{reference_star.id}::spectroscopy"
+        # Same id as the reference star, so the catalog merge adds this
+        # spectrum to that star's existing row instead of creating a
+        # second row for the same star.
+        spectral_obj.id = reference_star.id
         spectral_obj.name = reference_star.name
         spectral_obj.right_ascension = reference_star.right_ascension
         spectral_obj.declination = reference_star.declination
         spectral_obj.spectral_type = reference_star.spectral_type
         spectral_obj.stellar_spectral_type = reference_star.stellar_spectral_type
         spectral_obj.magnitude = reference_star.magnitude
+        spectral_obj.b_minus_v = reference_star.b_minus_v
         spectral_obj.is_catalog_identified = reference_star.is_catalog_identified
         matched_count += 1
     return matched_count
@@ -229,3 +234,143 @@ def identify_spectral_stars_via_registration(
         f"(rotation={np.degrees(transform.rotation):.3f} deg, scale={transform.scale:.4f})."
     )
     return matched_count
+
+
+# The fewest identified stars needed to trust an offset between the two star
+# fields. Below this, one bad match could move the median.
+_MINIMUM_OFFSET_PAIR_COUNT = 4
+
+
+def _positions_through_wcs(stellar_objects: list[StellarObject], wcs: Any) -> dict[str, tuple[float, float]]:
+    """Find where a plate solution puts each star that has a sky position.
+
+    Parameters
+    ----------
+    stellar_objects : `list` [`StellarObject`]
+        The stars to place. Stars without a right ascension and declination
+        are skipped.
+    wcs : `astropy.wcs.WCS`
+        The plate solution that turns a sky position into a pixel position.
+
+    Returns
+    -------
+    positions : `dict` [`str`, `tuple` [`float`, `float`]]
+        Each placed star's `(x, y)` pixel position, keyed by star id.
+    """
+    positions = {}
+    for stellar_object in stellar_objects:
+        right_ascension = stellar_object.right_ascension
+        declination = stellar_object.declination
+        if not stellar_object.id or right_ascension is None or declination is None:
+            continue
+        x, y = wcs.all_world2pix(float(right_ascension), float(declination), 0)
+        if np.isfinite(x) and np.isfinite(y):
+            positions[stellar_object.id] = (float(x), float(y))
+    return positions
+
+
+def estimate_registration_offset(
+    spectral_stellar_objects: list[StellarObject],
+    reference_stellar_objects: list[StellarObject],
+    reference_wcs: Any | None = None,
+) -> tuple[float, float] | None:
+    """Measure how far the spectroscopy image sits from the reference image.
+
+    After `identify_spectral_stars_via_registration`, every matched
+    spectral star carries the same `id` as its reference star, while its
+    pixel position is still the spectroscopy image's own. The typical
+    difference between the two positions is the shift between the images.
+
+    Only a pure shift is reported: if the paired stars disagree about it by
+    more than the offset-vote bin width, the images differ by a rotation or
+    scale as well and one shift would be wrong, so `None` is returned.
+
+    Parameters
+    ----------
+    spectral_stellar_objects : `list` [`StellarObject`]
+        The stars found in the spectroscopy image, after identification.
+    reference_stellar_objects : `list` [`StellarObject`]
+        The named stars of the reference image.
+    reference_wcs : `astropy.wcs.WCS`, optional
+        The plate solution that will be shifted by the result. When given,
+        the star identities are not used at all. Every reference star's
+        pixel position is worked out from its sky position with this
+        solution, and the shift is the one most (spectral star, reference
+        star) pairs agree on. A target's stored stars can come from several
+        stacks (a different camera, say) whose pixel frames differ by
+        hundreds of pixels, and identities carried over by registration can
+        repeat one star many times (M 27 gave one name to eight points on a
+        bright star's trail), which would drag a median to the wrong place.
+        Counting agreeing pairs is not fooled by either.
+
+    Returns
+    -------
+    offset : `tuple` [`float`, `float`] or `None`
+        The `(dx, dy)` to add to a reference-image pixel position to get the
+        matching spectroscopy-image position, or `None` when there are too
+        few pairs or they do not agree on a single shift.
+    """
+    if reference_wcs is not None:
+        reference_points = np.array(
+            list(_positions_through_wcs(reference_stellar_objects, reference_wcs).values())
+        )
+        spectral_points = np.array(
+            list({pos for obj in spectral_stellar_objects if (pos := _pixel_position(obj))})
+        )
+        if (
+            len(reference_points) < _MINIMUM_OFFSET_PAIR_COUNT
+            or len(spectral_points) < _MINIMUM_OFFSET_PAIR_COUNT
+        ):
+            return None
+        return _estimate_translation_offset(
+            reference_points,
+            spectral_points,
+            _DEFAULT_MAX_TRANSLATION_OFFSET_PX,
+            _TRANSLATION_BIN_PX,
+        )
+
+    reference_positions = {
+        obj.id: pos for obj in reference_stellar_objects if obj.id and (pos := _pixel_position(obj))
+    }
+    differences = []
+    for spectral_obj in spectral_stellar_objects:
+        spectral_position = _pixel_position(spectral_obj)
+        reference_position = reference_positions.get(spectral_obj.id)
+        if spectral_position is None or reference_position is None:
+            continue
+        differences.append((
+            spectral_position[0] - reference_position[0],
+            spectral_position[1] - reference_position[1],
+        ))
+    if len(differences) < _MINIMUM_OFFSET_PAIR_COUNT:
+        return None
+
+    differences_array = np.array(differences)
+    median_offset = np.median(differences_array, axis=0)
+    typical_disagreement = np.median(np.abs(differences_array - median_offset), axis=0)
+    if np.any(typical_disagreement > _TRANSLATION_BIN_PX):
+        return None
+    return float(median_offset[0]), float(median_offset[1])
+
+
+def shift_wcs_to_frame(reference_wcs: Any, offset_px: tuple[float, float]) -> Any:
+    """Move a plate solution onto the spectroscopy image.
+
+    Parameters
+    ----------
+    reference_wcs : `astropy.wcs.WCS`
+        The reference image's plate solution.
+    offset_px : `tuple` [`float`, `float`]
+        The `(dx, dy)` from `estimate_registration_offset`.
+
+    Returns
+    -------
+    shifted_wcs : `astropy.wcs.WCS`
+        A copy that gives spectroscopy-image pixel positions. The input is
+        not changed.
+    """
+    shifted_wcs = reference_wcs.deepcopy()
+    shifted_wcs.wcs.crpix = np.asarray(shifted_wcs.wcs.crpix, dtype=float) + np.asarray(
+        offset_px, dtype=float
+    )
+    return shifted_wcs

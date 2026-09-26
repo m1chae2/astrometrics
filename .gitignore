@@ -25,10 +25,18 @@ coverage/
 astrometricslib/libraryIndex/astrometrics.db
 astrometricslib/libraryIndex/astrometrics_log.db
 wayfindinglib/libraryIndex/*.db
-# Gaia cone-search cache. Regenerated on demand by star_identifier.py, and
-# its cached_regions rows encode the sky coordinates actually pointed at,
-# so a populated cache is local history rather than a shipped asset.
-astrometricslib/libraryIndex/catalogs/catalog_cache.db
+# Downloaded and cached star catalogs. The Gaia cone-search cache
+# (catalog_cache.db) is regenerated on demand by star_identifier.py, and its
+# cached_regions rows encode the sky coordinates actually pointed at, so a
+# populated cache is local history rather than a shipped asset. The
+# deep-star catalog (deep_star_catalog.db) is rebuilt by
+# build_deep_star_catalog, and is large data, not source.
+astrometricslib/libraryIndex/catalogs/
+# Timestamped safety copies of the catalog database, made by the cleanup
+# scripts (--apply) before they change anything. Each is as large as the
+# database itself (hundreds of MB) and holds the same personal observing
+# log, so they are local only. Includes the SQLite -shm / -wal side files.
+astrometricslib/libraryIndex/*.bak*
 # Device and catalog-merge lock files: zero-byte runtime artifacts that
 # file_lock() recreates, having first makedirs'd its own parent directory.
 astrometricslib/libraryIndex/locks/
@@ -202,6 +210,7 @@ astrometrics.zip
 node_modules/
 out/
 .run_logs/
+.run_logs_archive/
 .run_pids/
 # Ignored moved/obsolete scripts and logs
 scripts/siril.log

@@ -323,6 +323,36 @@ class AstrometryPipeline:
                 logger.warning(f"Failed to derive extraction radius from WCS/SIMBAD: {e}")
         return extraction_radius_px
 
+    def build_extended_source_hint(
+        self, image: AstrometricsImage, wcs: Any, target_ra: float | None, target_dec: float | None
+    ) -> ExtendedSourceHint | None:
+        """Build an image's extended-source hint from a supplied WCS.
+
+        `process` builds the hint itself when the image has a plate
+        solution. A spectroscopy stack has none, so its caller works one out
+        afterwards (from a solved stack of the same field, shifted to match)
+        and asks for the hint here.
+
+        Parameters
+        ----------
+        image : `AstrometricsImage`
+            The image whose target name is looked up.
+        wcs : `astropy.wcs.WCS`
+            A plate solution that gives this image's pixel positions.
+        target_ra : `float` or `None`
+            The target's right ascension in decimal degrees, used when the
+            catalog lookup gives no position.
+        target_dec : `float` or `None`
+            The target's declination in decimal degrees.
+
+        Returns
+        -------
+        extended_source_hint : `ExtendedSourceHint` or `None`
+            The hint, or `None` if the target isn't an extended source or
+            its region couldn't be resolved.
+        """
+        return self._build_extended_source_hint(self._resolve_object_name(image), wcs, target_ra, target_dec)
+
     def _build_extended_source_hint(
         self,
         object_name: str | None,

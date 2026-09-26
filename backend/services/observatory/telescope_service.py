@@ -104,20 +104,105 @@ class TelescopeService:
                 "focuserPosition": 0,
             }
 
-        # Inject real guiding history if service is available
+        # Poll external guiding telemetry to drain real-time pulses from
+        # KStars/Ekos/PHD2
         if self._guiding_service:
+            try:
+                self._guiding_service.poll_external_telemetry()
+            except Exception as e:
+                logger.debug(f"Failed to poll external guiding telemetry: {e}")
             guiding_status = self._guiding_service.get_status()
             data["guidingHistory"] = guiding_status.get("history", [])
 
         # Inject real alignment attempt history if service is available
         if self._alignment_service:
+            try:
+                driver = getattr(self.wayfinder.control, "driver", None) or getattr(
+                    self.wayfinder.control, "_driver", None
+                )
+                self._alignment_service.poll_external_syncs(driver)
+            except Exception as e:
+                logger.debug(f"Failed to poll external syncs: {e}")
             data["alignmentAttempts"] = self._alignment_service.get_attempts()
             data["alignmentActive"] = self._alignment_service.is_active()
+            if hasattr(self._alignment_service, "get_polar_alignment"):
+                data["polarAlignment"] = self._alignment_service.get_polar_alignment()
+
+        # Resolve active celestial target: prioritize target name reported
+        # by driver (e.g. from camera FITS_HEADER / OBJECT or mount metadata),
+        # then fall back to coordinate matching against catalog targets.
+        target_name = data.get("targetName") or data.get("target_name")
+        if not target_name:
+            target_name = self._infer_target_at_coordinates(data.get("ra"), data.get("dec"))
+        if target_name:
+            data["targetName"] = target_name
 
         if self._astrometrics_service:
             self._astrometrics_service.update_telescope_state(data)
 
         return data
+
+    def _infer_target_at_coordinates(self, ra_str: str | None, dec_str: str | None) -> str | None:
+        """Infer target identity by matching coordinates against catalog.
+
+        Parameters
+        ----------
+        ra_str : `str` | `None`
+            Current Right Ascension coordinate string.
+        dec_str : `str` | `None`
+            Current Declination coordinate string.
+
+        Returns
+        -------
+        `str` | `None`
+            The matched target name, or None if coordinates are missing or no
+            target is within 1 degree separation.
+        """
+        if not ra_str or not dec_str or ra_str in ("-", "Unknown", "00 00 00") or not self._target_service:
+            return None
+
+        try:
+            import math
+
+            from astrometricslib import parse_coordinate_string
+
+            mount_ra_deg = parse_coordinate_string(ra_str, is_ra=True)
+            mount_dec_deg = parse_coordinate_string(dec_str, is_ra=False)
+
+            targets = self._target_service.get_targets()
+            if not isinstance(targets, list):
+                return None
+
+            best_match = None
+            min_sep_deg = 1.0  # 1 degree tolerance for sensor FOV match
+
+            for target in targets:
+                t_ra = getattr(target, "ra", None)
+                t_dec = getattr(target, "dec", None)
+                if not t_ra or not t_dec or t_ra in ("-", "Unknown", "00 00 00"):
+                    continue
+
+                try:
+                    target_ra_deg = parse_coordinate_string(t_ra, is_ra=True)
+                    target_dec_deg = parse_coordinate_string(t_dec, is_ra=False)
+
+                    # Simple angular separation approximation (small angles)
+                    cos_dec = math.cos(math.radians(mount_dec_deg))
+                    d_ra = (mount_ra_deg - target_ra_deg) * cos_dec
+                    d_dec = mount_dec_deg - target_dec_deg
+                    sep_deg = math.hypot(d_ra, d_dec)
+
+                    if sep_deg < min_sep_deg:
+                        min_sep_deg = sep_deg
+                        best_match = getattr(target, "name", None) or getattr(target, "id", None)
+                except Exception as exc:
+                    logger.debug(f"Target candidate parsing failed: {exc}")
+                    continue
+
+            return best_match
+        except Exception as exc:
+            logger.debug(f"Target inference failed: {exc}")
+            return None
 
     def get_telescope_status(self) -> dict[str, Any]:
         """Alias of get_status for reflected tool calls.

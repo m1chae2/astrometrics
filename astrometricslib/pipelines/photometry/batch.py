@@ -11,12 +11,31 @@ unrelated ones.
 """
 
 import logging
+import math
 from typing import Any
 
+from astrometricslib.drivers.catalog_access import POSITION_ONLY_STAR_ID_PREFIX
+from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.shared.target_center_hint import resolve_target_center_hint
 
 logger = logging.getLogger(__name__)
+
+# How many of a target's brightest stars get a period search automatically,
+# on top of the target's own star. The two searches take about 8 seconds per
+# star (measured on a 139-point light curve: 1.1 s for the smooth-cycle
+# search and 6.9 s for the repeating-dip search), and a target's field holds
+# up to about 40,000 stars, so searching them all would take days. Ten
+# brightest plus the main star is about 90 seconds and matches the ten stars
+# the spectral analysis follows (`MAXIMUM_TRACKED_STARS_PER_FRAME`). The
+# brightest stars are chosen because their light curves are the least noisy.
+# Any other star can still be searched from the Astronomy Manager.
+MAXIMUM_BRIGHTEST_STARS_FOR_PERIOD_SEARCH = 10
+
+# Fewest measurements the smooth-cycle search accepts (the repeating-dip
+# search needs 8). A star with fewer is not worth choosing, because its
+# search would return nothing.
+MINIMUM_POINTS_FOR_PERIOD_SEARCH = 5
 
 
 def _run_variability_analysis_for_session(
@@ -397,3 +416,183 @@ def _match_and_merge_across_sessions(
             merged_stellar_objects.append(star)
 
     return merged_stellar_objects, sessions_missing_wcs, match_count
+
+
+def _separation_degrees(
+    ra_degrees: float, dec_degrees: float, other_ra_degrees: float, other_dec_degrees: float
+) -> float:
+    """Measure the angle on the sky between two points.
+
+    Parameters
+    ----------
+    ra_degrees, dec_degrees : `float`
+        The first point, in degrees.
+    other_ra_degrees, other_dec_degrees : `float`
+        The second point, in degrees.
+
+    Returns
+    -------
+    separation_degrees : `float`
+        The angle between them, in degrees.
+    """
+    ra = math.radians(ra_degrees)
+    dec = math.radians(dec_degrees)
+    other_ra = math.radians(other_ra_degrees)
+    other_dec = math.radians(other_dec_degrees)
+    # The haversine formula stays accurate for very small angles.
+    haversine = (
+        math.sin((other_dec - dec) / 2.0) ** 2
+        + math.cos(dec) * math.cos(other_dec) * math.sin((other_ra - ra) / 2.0) ** 2
+    )
+    return math.degrees(2.0 * math.asin(math.sqrt(min(1.0, haversine))))
+
+
+def select_period_search_stars(
+    stellar_objects: list[StellarObject],
+    center_ra: float | None,
+    center_dec: float | None,
+    limit: int = MAXIMUM_BRIGHTEST_STARS_FOR_PERIOD_SEARCH,
+) -> list[StellarObject]:
+    """Choose the stars that get a period search automatically.
+
+    A period search takes several seconds per star, so a target's tens of
+    thousands of stars cannot all be searched. The ones chosen are:
+
+    1. The target's own star: the catalog-identified star closest to the
+       target's coordinates.
+    2. The brightest other stars (the highest mean flux), whose light
+       curves are the least noisy.
+
+    Only stars with enough measurements for a search are considered, and
+    stars known only by their position (ids starting with ``FIELD_J``) are
+    never chosen as the target's star.
+
+    Parameters
+    ----------
+    stellar_objects : `list` [`StellarObject`]
+        The stars found by the photometry run.
+    center_ra : `float` or `None`
+        The target's right ascension in degrees, if known.
+    center_dec : `float` or `None`
+        The target's declination in degrees, if known.
+    limit : `int`, optional
+        How many bright stars to add after the target's own star.
+
+    Returns
+    -------
+    chosen : `list` [`StellarObject`]
+        The target's star first (when it can be found), then up to `limit`
+        stars from brightest to faintest.
+    """
+    searchable = [
+        star
+        for star in stellar_objects
+        if star.photometry is not None and len(star.photometry.timestamps) >= MINIMUM_POINTS_FOR_PERIOD_SEARCH
+    ]
+
+    target_star = None
+    if center_ra is not None and center_dec is not None:
+        identified = [
+            star
+            for star in searchable
+            if star.is_catalog_identified
+            and not star.id.startswith(POSITION_ONLY_STAR_ID_PREFIX)
+            and star.right_ascension not in (None, "")
+            and star.declination not in (None, "")
+        ]
+        if identified:
+            target_star = min(
+                identified,
+                key=lambda star: _separation_degrees(
+                    float(star.right_ascension), float(star.declination), center_ra, center_dec
+                ),
+            )
+
+    brightest = sorted(
+        (star for star in searchable if star is not target_star and (star.photometry.mean_flux or 0.0) > 0.0),
+        key=lambda star: star.photometry.mean_flux,
+        reverse=True,
+    )[:limit]
+    return ([target_star] if target_star is not None else []) + brightest
+
+
+def _add_period_results_to_saved_star(
+    existing_star: StellarObject | None, updated_star: StellarObject
+) -> StellarObject:
+    """Copy a star's new period-search results onto its saved row.
+
+    Nothing else on the saved row is touched, so the search cannot undo
+    anything the photometry save just wrote.
+
+    Parameters
+    ----------
+    existing_star : `StellarObject` or `None`
+        The saved row, or `None` if there is none.
+    updated_star : `StellarObject`
+        The star carrying the new results.
+
+    Returns
+    -------
+    star : `StellarObject`
+        The row to save.
+    """
+    if existing_star is None:
+        return updated_star
+    if existing_star.photometry is None or updated_star.photometry is None:
+        return existing_star
+    existing_star.photometry.periodogram = updated_star.photometry.periodogram
+    existing_star.photometry.transit_candidate = updated_star.photometry.transit_candidate
+    return existing_star
+
+
+def search_periods_and_save(
+    stellar_objects: list[StellarObject],
+    target: Target,
+    catalog_access: Any,
+    limit: int = MAXIMUM_BRIGHTEST_STARS_FOR_PERIOD_SEARCH,
+) -> int:
+    """Search the main and brightest stars for repeating patterns, and save.
+
+    Runs after the photometry itself has been saved, so a slow or failing
+    search never delays or loses the light curves. A star whose search
+    fails is skipped with a warning and the rest carry on.
+
+    Parameters
+    ----------
+    stellar_objects : `list` [`StellarObject`]
+        The stars the photometry run found and saved.
+    target : `Target`
+        The target that was analyzed; its coordinates pick the main star.
+    catalog_access : `Any`
+        Provides `merge_and_record` to save the results.
+    limit : `int`, optional
+        How many bright stars to search after the target's own star.
+
+    Returns
+    -------
+    searched_count : `int`
+        How many stars had a search result saved.
+    """
+    from astrometricslib.pipelines.photometry.variability_analyzer import VariabilityAnalyzer
+
+    center_ra, center_dec = resolve_target_center_hint(target)
+    chosen = select_period_search_stars(stellar_objects, center_ra, center_dec, limit)
+    if not chosen:
+        return 0
+
+    analyzer = VariabilityAnalyzer()
+    searched: list[StellarObject] = []
+    for star in chosen:
+        try:
+            periodogram = analyzer.run_lomb_scargle_periodogram(star)
+            transit_candidate = analyzer.run_bls_transit_search(star)
+        except Exception as search_error:
+            logger.warning("[%s] Period search failed for %s: %s", target.id, star.id, search_error)
+            continue
+        if periodogram is not None or transit_candidate is not None:
+            searched.append(star)
+
+    if searched:
+        catalog_access.merge_and_record("stellar_catalog", searched, _add_period_results_to_saved_star)
+    logger.info(f"[{target.id}] Searched {len(searched)} star(s) for repeating patterns.")
+    return len(searched)

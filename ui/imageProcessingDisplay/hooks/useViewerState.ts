@@ -1,4 +1,9 @@
-import { useState, useEffect } from 'react';
+/**
+ * @file useViewerState.ts
+ * @description State management hook for the image viewer panel.
+ * Coordinates fetching of light frames, arbitrary files, stretch state, and auto-pan triggers.
+ */
+import { useState, useEffect, useRef } from 'react';
 import { fetchLightFrame, fetchImageByPath } from '../../common/services/imagingService';
 import { reportError } from '../../common/utils/reportError';
 
@@ -12,7 +17,12 @@ export interface ImageFrameInfo {
 }
 
 /**
- * Hook to manage the state of the image viewer (loading, current URL, frame info).
+ * Hook to manage the state of the image viewer (loading, current URL, frame info, and stretch toggling).
+ *
+ * @param selectedTarget The currently selected target identifier.
+ * @param lightFrames Available light frame records.
+ * @param externalSelectedFilePath Explicit file path selected in the file browser.
+ * @returns State and action handlers for the image viewer panel.
  */
 export const useViewerState = (
     selectedTarget: string | null,
@@ -30,6 +40,9 @@ export const useViewerState = (
     const [stretch, setStretch] = useState(true);
     const [prevTarget, setPrevTarget] = useState<string | null>(null);
 
+    const prevFetchedFilePathRef = useRef<string | null>(null);
+    const prevSelectedLightRowRef = useRef<number | null>(null);
+
     // Synchronously reset row when target changes to prevent race conditions in effects
     if (selectedTarget !== prevTarget) {
         setPrevTarget(selectedTarget);
@@ -42,6 +55,7 @@ export const useViewerState = (
         setImageUrl(null);
         setImageFrameInfo(null);
         setError(null);
+        setAutoPanTrigger((n) => n + 1);
     }, [selectedTarget]);
 
     // Ensure mutual exclusivity: if we have a manual file selection, clear row selection
@@ -73,6 +87,11 @@ export const useViewerState = (
             const row = lightFrames[selectedLightRow];
             if (!row) return;
             const [iso, exposure] = row;
+
+            if (prevSelectedLightRowRef.current !== selectedLightRow) {
+                prevSelectedLightRowRef.current = selectedLightRow;
+                setAutoPanTrigger((n) => n + 1);
+            }
 
             setLoading(true);
             setError(null);
@@ -131,16 +150,21 @@ export const useViewerState = (
         return () => {
             aborted = true;
         };
-    }, [selectedLightRow, selectedTarget, lightFrames, stretch]);
+    }, [selectedLightRow, selectedTarget, lightFrames, stretch, externalSelectedFilePath]);
 
     // Fetch arbitrary file data
     useEffect(() => {
         let aborted = false;
         const doFetch = async () => {
             if (!externalSelectedFilePath) return;
+            const isDifferentFile = prevFetchedFilePathRef.current !== externalSelectedFilePath;
+            if (isDifferentFile) {
+                prevFetchedFilePathRef.current = externalSelectedFilePath;
+                setImageUrl(null); // Clear old image only when switching to a different file
+                setAutoPanTrigger((n) => n + 1);
+            }
             setLoading(true);
             setError(null);
-            setImageUrl(null); // Clear old image while loading new one
             try {
                 const data = await fetchImageByPath(externalSelectedFilePath, stretch);
                 if (!aborted && data) {

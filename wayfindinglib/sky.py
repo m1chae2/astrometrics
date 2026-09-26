@@ -39,13 +39,18 @@ class Sky:
         (1600.0).
     """
 
-    def __init__(  # ruff: ignore[missing-return-type-special-method]
+    def __init__(
         self,
         config: Any | None = None,
         latitude: float | None = None,
         longitude: float | None = None,
         elevation: float | None = None,
-    ):
+    ) -> None:
+        from astropy.utils import iers
+
+        iers.conf.auto_download = False
+        iers.conf.auto_max_age = None
+
         self._config = config
 
         # Read from config if available and args are None
@@ -75,7 +80,7 @@ class Sky:
         from astrometricslib import Astrometrics
 
         self._astrometrics = Astrometrics()
-        self._catalog_driver_registry = build_catalog_driver_registry()
+        self._catalog_driver_registry = build_catalog_driver_registry(star_source=self._astrometrics.stars)
         # Bundled constellation stick-figure line data — not a CatalogDriver
         # since it's static cultural/artistic topology, not a live query.
         self._constellation_lines = ConstellationLineLibrary()
@@ -147,7 +152,12 @@ class Sky:
         return resolution_operations.resolve_target_coordinates(self, target_name)
 
     def get_sources(
-        self, ra_deg: float, dec_deg: float, radius_deg: float, include_catalog: bool = False
+        self,
+        ra_deg: float,
+        dec_deg: float,
+        radius_deg: float,
+        include_catalog: bool = False,
+        include_stars: bool = True,
     ) -> list[Target | StellarObject]:
         """Delegate get_sources to skylib resolution_operations.
 
@@ -158,7 +168,29 @@ class Sky:
         """
         from wayfindinglib.skylib import resolution_operations
 
-        return resolution_operations.get_sources(self, ra_deg, dec_deg, radius_deg, include_catalog)
+        return resolution_operations.get_sources(
+            self, ra_deg, dec_deg, radius_deg, include_catalog, include_stars
+        )
+
+    def get_library_star_summaries(
+        self,
+        ra_deg: float,
+        dec_deg: float,
+        radius_deg: float,
+        magnitude_range: tuple[float, float] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Delegate get_library_star_summaries to skylib resolution_operations.
+
+        Returns
+        -------
+        summaries : `list` [`dict`]
+            Quick summaries of the user's own stars inside the region.
+        """
+        from wayfindinglib.skylib import resolution_operations
+
+        return resolution_operations.get_library_star_summaries(
+            self, ra_deg, dec_deg, radius_deg, magnitude_range
+        )
 
     def get_online_catalog_sources(
         self,
@@ -166,6 +198,7 @@ class Sky:
         dec_deg: float,
         radius_deg: float,
         enabled_driver_names: list[str],
+        magnitude_limit: float | None = None,
     ) -> list[tuple[str, StellarObject]]:
         """Delegate get_online_catalog_sources to resolution_operations.
 
@@ -178,7 +211,7 @@ class Sky:
         from wayfindinglib.skylib import resolution_operations
 
         return resolution_operations.get_online_catalog_sources(
-            self, ra_deg, dec_deg, radius_deg, enabled_driver_names
+            self, ra_deg, dec_deg, radius_deg, enabled_driver_names, magnitude_limit
         )
 
     def list_catalog_driver_metadata(self) -> list[dict[str, Any]]:

@@ -2,6 +2,7 @@ import React from 'react';
 import { SectionPanel } from '../../common/components/SectionPanel';
 import { FitsViewerManager, FitsRendererHandle } from '../../common/fitsViewer/FitsViewerManager';
 import { FileBrowser, FileBrowserToolbar } from '../fileBrowser/FileBrowser';
+import { AstrometryOverlayStar } from '../../common/services/astronomyService';
 
 interface ViewerPanelContainerProps {
   // Viewer Props
@@ -16,6 +17,12 @@ interface ViewerPanelContainerProps {
   disableStretch: boolean;
   stretch: boolean;
   toggleStretch: () => void;
+  overlayStars?: AstrometryOverlayStar[];
+  showAstrometryOverlay?: boolean;
+  onToggleAstrometryOverlay?: () => void;
+  isLoadingOverlay?: boolean;
+  onStarClick?: (star: AstrometryOverlayStar) => void;
+  selectedStarId?: string | null;
 
   // File Browser Props
   allFiles: any[];
@@ -40,6 +47,8 @@ interface ViewerPanelContainerProps {
 export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
   fitsRendererRef, imageUrl, imageBlob, imageFrameInfo, loading, error, selectedTarget,
   autoPanTrigger, disableStretch, stretch, toggleStretch,
+  overlayStars, showAstrometryOverlay, onToggleAstrometryOverlay, isLoadingOverlay, onStarClick,
+  selectedStarId,
   allFiles, filteredFiles, fileFilterText, setFileFilterText, fileBrowserCamera, setFileBrowserCamera,
   checkedFiles, handleRequestDeleteFiles, onOpenHeaderModal, onFileClick, selectedFile,
   toggleFile, toggleAllFiles, analysisResults
@@ -78,6 +87,18 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
             >
               {stretch ? "Stretch" : "Linear"}
             </button>
+            <button
+              className={`btn btn--tiny ${showAstrometryOverlay ? 'btn--active' : ''}`}
+              onClick={onToggleAstrometryOverlay}
+              disabled={isLoadingOverlay}
+              title={
+                isLoadingOverlay
+                  ? "Loading astrometry results..."
+                  : (showAstrometryOverlay ? "Hide Astrometry Overlay" : "Show Astrometry Overlay")
+              }
+            >
+              {isLoadingOverlay ? "Loading..." : "Astrometry"}
+            </button>
             <button className="btn btn--tiny" onClick={() => fitsRendererRef.current?.zoomIn()} title="Zoom In">+</button>
             <button className="btn btn--tiny" onClick={() => fitsRendererRef.current?.zoomOut()} title="Zoom Out">-</button>
             <button className="btn btn--tiny" onClick={() => fitsRendererRef.current?.zoomToFit()} title="Zoom to Fit">Fit</button>
@@ -96,6 +117,10 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
           autoPanTrigger={autoPanTrigger}
           disableStretch={disableStretch}
           stretch={stretch}
+          overlayStars={overlayStars}
+          showOverlay={showAstrometryOverlay}
+          onStarClick={onStarClick}
+          selectedStarId={selectedStarId}
         />
       </SectionPanel>
       <SectionPanel

@@ -214,16 +214,16 @@ class ImageProcessingService(BaseBackgroundService):
         }
 
 
-def start_siril_processing_task(  # ruff: ignore[missing-return-type-undocumented-public-function]
-    job_id,  # ruff: ignore[missing-type-function-argument]
-    target_id,  # ruff: ignore[missing-type-function-argument]
-    image_files,  # ruff: ignore[missing-type-function-argument]
-    log_file_path=None,  # ruff: ignore[missing-type-function-argument]
-    target_service=None,  # ruff: ignore[missing-type-function-argument]
-    siril=None,  # ruff: ignore[missing-type-function-argument]
-    notification_service=None,  # ruff: ignore[missing-type-function-argument]
-    **kwargs,  # ruff: ignore[missing-type-kwargs]
-):
+def start_siril_processing_task(
+    job_id: str,
+    target_id: str,
+    image_files: list[Any],
+    log_file_path: str | None = None,
+    target_service: Any = None,
+    siril: Any = None,
+    notification_service: Any = None,
+    **kwargs: Any,
+) -> str | None:
     """Worker task to execute Siril processing.
 
     Returns
@@ -265,14 +265,32 @@ def start_siril_processing_task(  # ruff: ignore[missing-return-type-undocumente
         logging.error("Siril driver NOT provided to task! Creating un-configured instance.")
         siril = ImageProcessing(None, None)
 
+    # REQ: IMG-4.2 - Route spectral stacks to specialized property and
+    # dispatch Siril processing with shift-only registration when handling
+    # spectroscopy frames.
+    from astrometricslib import frame_is_spectral
+
+    is_spectral = any(frame_is_spectral(f) for f in image_files) if image_files else False
+
     # Bound how many Siril subprocesses run concurrently system-wide,
     # whether they were started here or by the offline batch script
     # (pipeline_tasks.run_full_pipeline) -- an OS-level lock, respected
     # across processes.
-    from astrometricslib import ProcessingPipelines, get_configuration
+    from astrometricslib import ProcessingPipelines, get_configuration, run_siril_stack
 
     with ProcessingPipelines(get_configuration()).acquire_stacking_slot():
-        final_path = siril.process_target(target_id, image_files, log_file=log_file_path, job_id=job_id)
+        # Goes through `run_siril_stack` so that spectral frames of different
+        # exposure lengths are stacked one length at a time, and a
+        # registration that loses too many frames is retried.
+        final_path, _diagnostics = run_siril_stack(
+            siril,
+            image_files,
+            target_id,
+            None,
+            log_file_path,
+            is_spectral,
+            job_id=job_id,
+        )
 
     if notification_service:
         if final_path:
@@ -283,9 +301,6 @@ def start_siril_processing_task(  # ruff: ignore[missing-return-type-undocumente
             status = "error"
 
         notification_service.notify(target_id, message, status=status)
-
-    # REQ: IMG-4.2 - Route spectral stacks to specialized property
-    is_spectral = all(f.get("filter") == "SPEC" for f in image_files if isinstance(f, dict))
 
     if final_path and target_service:
         try:

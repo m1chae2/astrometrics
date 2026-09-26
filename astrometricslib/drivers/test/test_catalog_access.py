@@ -70,6 +70,16 @@ class MockCatalogAccess(AbstractCatalogAccess):
         """
         return []
 
+    def list_stars_in_region(self, ra_degrees, dec_degrees, radius_degrees) -> list:  # ruff: ignore[missing-type-function-argument]
+        """Return no stars; this mock keeps no indexed columns.
+
+        Returns
+        -------
+        list
+            Always empty.
+        """
+        return []
+
     def list_position_only_stars(self, target_id=None) -> list:  # ruff: ignore[missing-type-function-argument]
         """Return no positions; this mock keeps no indexed columns.
 
@@ -103,34 +113,41 @@ def test_mock_catalog_access_injection():  # ruff: ignore[missing-return-type-un
     assert len(mock_catalog_access.targets) == 2
 
 
-def test_disk_butler_caches_stellar_catalog_reads(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify repeated stellar_catalog reads avoid redundant disk I/O."""
+def test_catalog_access_keeps_no_copy_of_the_stellar_catalog(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify a stellar_catalog read goes to the database every time.
+
+    A whole-catalog cache used to live here. Every write emptied it, each
+    `CatalogAccess` had its own, and a full copy is gigabytes on a real
+    library, so several copies at once got the backend killed for running
+    out of memory. The database is the single copy; nothing is kept.
+    """
     mock_config = MagicMock()
     catalog_access = CatalogAccess(config=mock_config)
 
     mock_load = mocker.patch.object(
         catalog_access._generic,
         "get_all",
-        return_value=[StellarObject(id="Star1")],
+        side_effect=lambda dataset_type: [StellarObject(id="Star1")],
     )
 
     first = catalog_access.get("stellar_catalog", {})
     second = catalog_access.get("stellar_catalog", {})
 
-    assert mock_load.call_count == 1
-    assert first is second
+    assert mock_load.call_count == 2
+    assert first is not second
 
 
-def test_disk_butler_put_refreshes_stellar_catalog_cache(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify put() writes through to disk and refreshes the cache."""
+def test_catalog_access_put_does_not_keep_the_list_it_was_given(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify put() writes to the database and holds on to nothing.
+
+    Keeping the saved list as the "current catalog" is what left a second
+    full copy of the catalog alive next to the one that was just loaded.
+    """
     mock_config = MagicMock()
     catalog_access = CatalogAccess(config=mock_config)
 
-    mock_load = mocker.patch.object(
-        catalog_access._generic,
-        "get_all",
-        return_value=[StellarObject(id="Star1")],
-    )
+    stored = [StellarObject(id="Star1")]
+    mock_load = mocker.patch.object(catalog_access._generic, "get_all", return_value=stored)
     mock_save = mocker.patch.object(catalog_access._generic, "put_all")
 
     updated = [StellarObject(id="Star2")]
@@ -138,8 +155,84 @@ def test_disk_butler_put_refreshes_stellar_catalog_cache(mocker):  # ruff: ignor
     result = catalog_access.get("stellar_catalog", {})
 
     assert mock_save.call_count == 1
-    assert result == updated
-    assert mock_load.call_count == 0
+    assert mock_load.call_count == 1
+    assert result is stored
+    assert result is not updated
+
+
+def _build_catalog_access_with_stars(tmp_path, stars) -> CatalogAccess:  # ruff: ignore[missing-type-function-argument]
+    """Build a `CatalogAccess` over a temporary library holding `stars`.
+
+    Returns
+    -------
+    catalog_access : `CatalogAccess`
+        A catalog whose stellar_catalog table holds exactly `stars`.
+    """
+    from astrometricslib.utilities.config_loader import AppConfiguration
+
+    library_path = tmp_path / "library"
+    (library_path / "targets").mkdir(parents=True)
+    (library_path / "frames").mkdir(parents=True)
+    config = AppConfiguration()
+    config.update_config({"Image Library": {"path": str(library_path)}})
+    catalog_access = CatalogAccess(config=config)
+    catalog_access.put(stars, "stellar_catalog", {})
+    return catalog_access
+
+
+def test_catalog_access_list_star_ids_and_existing_star_ids(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify the id-only queries return ids without loading star records."""
+    catalog_access = _build_catalog_access_with_stars(
+        tmp_path, [StellarObject(id="Alpha"), StellarObject(id="Beta"), StellarObject(id="Gamma")]
+    )
+
+    assert sorted(catalog_access.list_star_ids()) == ["Alpha", "Beta", "Gamma"]
+    assert catalog_access.existing_star_ids(["Alpha", "Missing", "Gamma"]) == {"Alpha", "Gamma"}
+    assert catalog_access.existing_star_ids([]) == set()
+
+
+def test_catalog_access_get_by_ids_handles_more_ids_than_one_query_allows(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify a long id list is split, so every star of a big target loads.
+
+    SQLite refuses one statement with too many bound values; a target can
+    own tens of thousands of stars, so the id list is sent in pieces.
+    """
+    stars = [StellarObject(id=f"Star{index}") for index in range(2500)]
+    catalog_access = _build_catalog_access_with_stars(tmp_path, stars)
+    wanted_ids = [f"Star{index}" for index in range(2500)]
+
+    assert len(catalog_access.get_by_ids("stellar_catalog", wanted_ids)) == 2500
+    assert len(catalog_access.existing_star_ids([*wanted_ids, "Nope"])) == 2500
+
+
+def test_catalog_access_find_star_ids_by_name_matches_id_or_name_ignoring_case(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify a name lookup finds a star by id or by name, ignoring case.
+
+    Also checks that a substring never counts as a match: "Vega" must not
+    find "Vega B", and an empty name finds nothing rather than everything.
+    """
+    named = StellarObject(id="* alf Lyr", name="Vega")
+    companion = StellarObject(id="* alf Lyr B", name="Vega B")
+    unrelated = StellarObject(id="HD 1", name="HD 1")
+    catalog_access = _build_catalog_access_with_stars(tmp_path, [named, companion, unrelated])
+
+    assert catalog_access.find_star_ids_by_name("vega") == ["* alf Lyr"]
+    assert catalog_access.find_star_ids_by_name("* alf Lyr") == ["* alf Lyr"]
+    assert catalog_access.find_star_ids_by_name("HD 1") == ["HD 1"]
+    assert catalog_access.find_star_ids_by_name("nothing like it") == []
+    assert catalog_access.find_star_ids_by_name("") == []
+
+
+def test_abstract_catalog_access_defaults_work_for_a_simple_stand_in():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify a bare-bones stand-in gets working versions of the new queries.
+
+    Test doubles only implement the abstract methods; the ordinary methods
+    on `AbstractCatalogAccess` must still give correct answers for them.
+    """
+    stand_in = MockCatalogAccess()
+
+    assert [star.id for star in stand_in.get_by_ids("stellar_catalog", ["Star2"])] == ["Star2"]
+    assert stand_in.get_by_ids("stellar_catalog", []) == []
 
 
 def test_catalog_access_list_star_summaries_reads_the_stellar_catalog(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
@@ -243,3 +336,220 @@ def test_disk_butler_stellar_catalog_has_a_target_id_index(tmp_path):  # ruff: i
     conn.close()
 
     assert "idx_stellar_objects_target_id" in indexes
+
+
+def _make_catalog_access_in(tmp_path) -> CatalogAccess:  # ruff: ignore[missing-type-function-argument]
+    """Build a CatalogAccess that saves into an empty temporary library.
+
+    Returns
+    -------
+    catalog_access : `CatalogAccess`
+        Reads and writes a library inside `tmp_path`, never the real one.
+    """
+    from astrometricslib.utilities.config_loader import AppConfiguration
+
+    library_path = tmp_path / "library"
+    (library_path / "targets").mkdir(parents=True)
+    (library_path / "frames").mkdir(parents=True)
+    config = AppConfiguration()
+    config.update_config({"Image Library": {"path": str(library_path)}})
+    return CatalogAccess(config=config)
+
+
+def _make_star(star_id: str, ra: float, dec: float, magnitude=None, spectral_type="") -> StellarObject:  # ruff: ignore[missing-type-function-argument]
+    """Build a star at a sky position for the region tests.
+
+    Returns
+    -------
+    star : `StellarObject`
+        A star with just the fields the region read uses.
+    """
+    star = StellarObject(id=star_id, name=star_id)
+    star.right_ascension = ra
+    star.declination = dec
+    star.magnitude = magnitude
+    star.spectral_type = spectral_type
+    star.target_ids = ["NGC 7023"]
+    return star
+
+
+def _ids_inside_circle_by_the_slow_route(
+    ra: float, dec: float, radius: float, stars: list[StellarObject]
+) -> set[str]:
+    """Pick the stars inside a circle the way the old sky map did.
+
+    The old code loaded every star and asked astropy for each separation,
+    so this is the answer the fast read has to agree with.
+
+    Returns
+    -------
+    star_ids : `set` [`str`]
+        The ids of the stars whose separation from the point is at most
+        `radius` degrees.
+    """
+    import astropy.units as u
+    from astropy.coordinates import SkyCoord
+
+    center = SkyCoord(ra=ra * u.deg, dec=dec * u.deg)
+    star_positions = SkyCoord(
+        ra=[star.right_ascension for star in stars] * u.deg,
+        dec=[star.declination for star in stars] * u.deg,
+    )
+    separations_degrees = center.separation(star_positions).deg
+    return {
+        star.id for star, separation in zip(stars, separations_degrees, strict=True) if separation <= radius
+    }
+
+
+def test_list_stars_in_region_matches_the_old_load_everything_answer(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify the fast read returns the same stars astropy would pick.
+
+    Circles are tried at the places a search box is most likely to go
+    wrong: an ordinary spot, right on the 0/360 degree right ascension
+    seam, and touching each pole.
+    """
+    import numpy as np
+
+    random_generator = np.random.default_rng(seed=7)
+    catalog_access = _make_catalog_access_in(tmp_path)
+    stars = [
+        _make_star(
+            f"S{index}",
+            float(random_generator.uniform(0.0, 360.0)),
+            float(np.degrees(np.arcsin(random_generator.uniform(-1.0, 1.0)))),
+        )
+        for index in range(3000)
+    ]
+    catalog_access.put(stars, "stellar_catalog", {})
+
+    circles = [
+        (100.0, 20.0, 12.0),
+        (2.0, 5.0, 15.0),  # spills over the seam at right ascension 0
+        (358.0, -30.0, 20.0),  # spills over the seam from the other side
+        (10.0, 88.0, 6.0),  # contains the north pole
+        (200.0, -89.0, 4.0),  # contains the south pole
+        (0.0, 0.0, 180.0),  # the whole sky
+    ]
+    for ra, dec, radius in circles:
+        expected_ids = _ids_inside_circle_by_the_slow_route(ra, dec, radius, stars)
+
+        found_ids = {star.id for star in catalog_access.list_stars_in_region(ra, dec, radius)}
+
+        assert found_ids == expected_ids, (ra, dec, radius)
+
+
+def test_list_stars_in_region_carries_magnitude_spectral_type_and_data_flags(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify the summary has everything the sky map draws from a star."""
+    catalog_access = _make_catalog_access_in(tmp_path)
+    catalog_access.put(
+        [_make_star("HD 1", 315.0, 68.0, magnitude=8.09, spectral_type="B3V")], "stellar_catalog", {}
+    )
+
+    (summary,) = catalog_access.list_stars_in_region(315.0, 68.0, 1.0)
+
+    assert summary.id == "HD 1"
+    assert summary.magnitude == 8.09  # ruff: ignore[float-equality-comparison]
+    assert summary.spectral_type == "B3V"
+    assert summary.target_ids == ["NGC 7023"]
+    assert summary.has_photometry is False
+    assert summary.has_spectra is False
+
+
+def test_list_stars_in_region_leaves_out_stars_with_no_position(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify a star at exactly (0, 0) is treated as having no position.
+
+    The old sky map dropped these, so the fast read must too, even when
+    the circle asked about happens to contain that point.
+    """
+    catalog_access = _make_catalog_access_in(tmp_path)
+    no_position = StellarObject(id="NoPosition", name="NoPosition")
+    no_position.right_ascension = 0.0
+    no_position.declination = 0.0
+    catalog_access.put([no_position, _make_star("Near", 1.0, 1.0)], "stellar_catalog", {})
+
+    found_ids = [star.id for star in catalog_access.list_stars_in_region(0.0, 0.0, 5.0)]
+
+    assert found_ids == ["Near"]
+
+
+def test_region_read_is_answered_from_an_index_without_opening_the_stored_rows(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify the region read's own query is answered from one index.
+
+    Correct answers alone would not prove this, since a full scan gives
+    the same rows, only far more slowly. The query text is the one the
+    region read sends, so a column added to the read but not to the index
+    makes this fail.
+    """
+    import sqlite3
+
+    catalog_access = _make_catalog_access_in(tmp_path)
+    catalog_access.put([_make_star("Polaris", 37.9, 89.3)], "stellar_catalog", {})
+    catalog_access.list_stars_in_region(37.9, 89.3, 1.0)
+
+    connection = sqlite3.connect(str(tmp_path / "library" / "astrometrics.db"))
+    plan_rows = connection.execute(
+        "EXPLAIN QUERY PLAN SELECT id, name, ra, dec, target_id, has_spectra, has_photometry, magnitude, "
+        "spectral_type FROM stellar_objects WHERE dec BETWEEN 10 AND 20 AND ra BETWEEN 1 AND 2 "
+        "AND magnitude BETWEEN -2 AND 12"
+    ).fetchall()
+    connection.close()
+
+    plan_text = " ".join(str(row) for row in plan_rows)
+    assert "COVERING INDEX" in plan_text
+    assert "idx_stellar_objects_dec_ra_magnitude" in plan_text
+
+
+def test_spectral_type_is_backfilled_for_stars_saved_before_the_column_existed(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify an older database gets spectral types copied out of its JSON.
+
+    The table is written by hand the way the app used to write it, with
+    no spectral_type column, so the first read has to add and fill it.
+    """
+    import json
+    import sqlite3
+
+    catalog_access = _make_catalog_access_in(tmp_path)
+    database_path = tmp_path / "library" / "astrometrics.db"
+    connection = sqlite3.connect(str(database_path))
+    connection.execute(
+        "CREATE TABLE stellar_objects (id TEXT PRIMARY KEY, target_id TEXT, name TEXT, ra REAL, dec REAL, "
+        "magnitude REAL, data_json TEXT, has_spectra INTEGER, has_photometry INTEGER)"
+    )
+    payload = json.dumps({"id": "HD 2", "spectralType": "K0III"})
+    connection.execute(
+        "INSERT INTO stellar_objects VALUES ('HD 2', 'NGC 7023', 'HD 2', 315.0, 68.0, 7.5, ?, 0, 0)",
+        (payload,),
+    )
+    connection.commit()
+    connection.close()
+
+    (summary,) = catalog_access.list_stars_in_region(315.0, 68.0, 1.0)
+
+    assert summary.spectral_type == "K0III"
+
+
+def test_list_stars_in_region_can_keep_only_stars_in_a_magnitude_range(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify magnitude_range keeps stars inside it, ends included.
+
+    A star with no saved magnitude is left out, since it has no value to
+    compare with the range.
+    """
+    catalog_access = _make_catalog_access_in(tmp_path)
+    catalog_access.put(
+        [
+            _make_star("TooBright", 10.0, 10.0, magnitude=-3.0),
+            _make_star("LowEdge", 10.1, 10.0, magnitude=-2.0),
+            _make_star("Middle", 10.2, 10.0, magnitude=8.0),
+            _make_star("HighEdge", 10.3, 10.0, magnitude=12.0),
+            _make_star("TooFaint", 10.4, 10.0, magnitude=12.5),
+            _make_star("NoMagnitude", 10.5, 10.0, magnitude=None),
+        ],
+        "stellar_catalog",
+        {},
+    )
+
+    kept = catalog_access.list_stars_in_region(10.0, 10.0, 5.0, magnitude_range=(-2.0, 12.0))
+    everything = catalog_access.list_stars_in_region(10.0, 10.0, 5.0)
+
+    assert sorted(star.id for star in kept) == ["HighEdge", "LowEdge", "Middle"]
+    assert len(everything) == 6

@@ -1,0 +1,107 @@
+/**
+ * @fileoverview Styles for the bottom workstation StatusBar component.
+ * Provides a sleek, compact 28px docked strip across the bottom of the window
+ * displaying coordinates, environment, and system telemetry with monospace tabular figures.
+ */
+
+.status-bar {
+  flex: 0 0 28px;
+  height: 28px;
+  width: 100%;
+  box-sizing: border-box;
+  background-color: var(--grey-darkest, #151515);
+  color: var(--text-muted, rgba(255, 255, 255, 0.7));
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 11px;
+  line-height: 1;
+  user-select: none;
+  z-index: 90;
+}
+
+.status-bar__left,
+.status-bar__right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.status-bar__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.status-bar__item--coords {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.status-bar__label {
+  color: rgba(255, 255, 255, 0.45);
+  font-weight: 500;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.status-bar__value {
+  color: var(--white, #ffffff);
+  font-family: var(--font-family-mono, monospace);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: -0.2px;
+}
+
+.status-bar__value--coord {
+  display: inline-block;
+}
+
+.status-bar__unit {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.6);
+  margin-left: 1px;
+}
+
+.status-bar__divider {
+  width: 1px;
+  height: 14px;
+  background-color: rgba(255, 255, 255, 0.12);
+  flex-shrink: 0;
+}
+
+.status-bar__icon {
+  width: 13px;
+  height: 13px;
+  fill: currentColor;
+  opacity: 0.8;
+  vertical-align: middle;
+}
+
+.status-bar__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.status-bar__dot--connected {
+  background-color: var(--success-green, #4caf50);
+  box-shadow: 0 0 6px rgba(76, 175, 80, 0.4);
+}
+
+.status-bar__dot--disconnected {
+  background-color: var(--danger-red, #f44336);
+}
+
+.status-bar__dot--unknown {
+  background-color: var(--warning-amber, #ff9800);
+}

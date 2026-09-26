@@ -31,13 +31,20 @@ from astrometricslib.api.processing import (
     LoggerInterface,
     capture_job_logs,
     registered_job,
+    run_siril_stack,
 )
-from astrometricslib.api.targets import classify_and_sort_fits_files, derive_target_sessions
+from astrometricslib.api.targets import (
+    classify_and_sort_fits_files,
+    derive_target_sessions,
+    frame_is_spectral,
+)
 from astrometricslib.models.moving_object import AsteroidDetectionCandidate
 from astrometricslib.models.moving_object_config import MovingObjectConfig
 from astrometricslib.models.quality_summary import (
+    AppliedCameraProfile,
     AstrometryPipelineQualityMetrics,
     AstrometryQualitySummary,
+    ExposureGroupSummary,
     TargetSessionContribution,
 )
 from astrometricslib.models.stellar_source import (
@@ -123,12 +130,12 @@ class Astrometrics:
     star tracking, and data visualization) together in one place.
     """
 
-    def __init__(  # ruff: ignore[missing-return-type-special-method]
+    def __init__(
         self,
         config: AppConfiguration | None = None,
         app_config: AppConfiguration | None = None,
         catalog_access: AbstractCatalogAccess | None = None,
-    ):
+    ) -> None:
         """Set up the main Astrometrics tools.
 
         Parameters
@@ -153,10 +160,11 @@ class Astrometrics:
         self.config = config or app_config or get_configuration()
         self.catalog_access = catalog_access or CatalogAccess(self.config)
 
-        # Load the known stars from storage here; a target's own data is
-        # loaded separately, since TargetCatalog owns that (see its docstring).
-        self.stellar_objects: list[StellarObject] = self.catalog_access.get("stellar_catalog", {}) or []
-
+        # There is deliberately no in-memory copy of the star catalog here.
+        # The database is the one copy, reached through `self.stars`, which
+        # answers each question with a query for just the stars it needs.
+        # A target's own data is loaded separately, since TargetCatalog owns
+        # that (see its docstring).
         self.targets = TargetCatalog(self.config, self.catalog_access)
         self.stars = StellarCatalog(self.config, catalog_access=self.catalog_access)
         self.moving_objects = MovingObjectRecovery()
@@ -200,6 +208,7 @@ __all__ = [
     "AbstractCatalogAccess",
     "AnalysisResult",
     "AppConfiguration",
+    "AppliedCameraProfile",
     "AsteroidDetectionCandidate",
     "Astrometrics",
     "AstrometryPipeline",
@@ -209,6 +218,7 @@ __all__ = [
     "CalibrationCatalog",
     "CatalogAccess",
     "DbLogHandler",
+    "ExposureGroupSummary",
     "FileItem",
     "FilterType",
     "FitsHeaderEntry",
@@ -239,9 +249,11 @@ __all__ = [
     "capture_job_logs",
     "classify_and_sort_fits_files",
     "derive_target_sessions",
+    "frame_is_spectral",
     "get_configuration",
     "parse_coordinate_string",
     "registered_job",
     "resolve_worker_counts",
     "run_parallel_batch",
+    "run_siril_stack",
 ]

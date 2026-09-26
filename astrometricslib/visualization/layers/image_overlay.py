@@ -48,21 +48,17 @@ class ImageOverlay:
             else:
                 image_data = image_data[0]
 
-        # A hard threshold mask (zeroing everything below `percentile`
-        # and letting imshow auto-scale the rest) crushes any star
-        # just above the cut to near-black next to a bright cluster
-        # core, since the remaining linear range still spans
-        # background-to-peak. Use the same percentile-clip stretch as
-        # the UI's Image Processor Display (`ImageScaler.scale_to_uint8`)
-        # instead, so stars actually stand out at display brightness.
-        # `percentile` is caller-supplied (directly from
-        # VisualizationConfig in some callers) and isn't guaranteed to
-        # sit above the 1.0 lower clip -- clamp it so vmax can never
-        # come out <= vmin, which imshow's Normalize rejects outright.
+        # Show the auto-stretched image (black point a few sigma below the
+        # median, then a midtones curve -- the same "Autostretch" the UI's
+        # Image Processor Display uses), so faint stars stand out against a
+        # dark background. `percentile` only matters for the fallback
+        # percentile stretch used when an image has no measurable
+        # background. It is clamped so the upper clip always sits above the
+        # 1.0 lower clip.
         upper_percentile = min(max(percentile, 1.0 + 1e-3), 100.0)
-        _, vmin, vmax = ImageScaler.scale_to_uint8(image_data, percentiles=(1.0, upper_percentile))
-        self.ax.imshow(image_data, origin="lower", cmap="gray", vmin=vmin, vmax=vmax)
-        self.ax.set_aspect("auto")
+        stretched_image, _, _ = ImageScaler.scale_to_uint8(image_data, percentiles=(1.0, upper_percentile))
+        self.ax.imshow(stretched_image, origin="lower", cmap="gray", vmin=0, vmax=255)
+        self.ax.set_aspect("equal")
         self.ax.set_title(title)
         self.ax.set_xlabel("X Pixel")
         self.ax.set_ylabel("Y Pixel")

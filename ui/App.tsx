@@ -49,6 +49,11 @@ const PlanetariumDisplay = React.lazy(() =>
     default: m.PlanetariumDisplay,
   }))
 );
+const CommandConsole = React.lazy(() =>
+  import('./commandConsole/CommandConsole').then((m) => ({
+    default: m.CommandConsole,
+  }))
+);
 
 /**
  * Profiler callback — dev only. React strips onRender calls in production builds.
@@ -80,7 +85,14 @@ const MODE_PANELS: { mode: string; id: string; Component: React.ComponentType }[
   { mode: 'Image Processing', id: 'ImageProcessingDisplay', Component: ImageProcessingDisplay },
   { mode: 'Observatory Manager', id: 'ObservatoryDisplay', Component: ObservatoryDisplay },
   { mode: 'Observation Manager', id: 'ObservationManager', Component: ObservationManager },
+  { mode: 'Command Console', id: 'CommandConsole', Component: CommandConsole },
 ];
+
+const normalizeAppMode = (m: string): string => {
+  if (m === 'Astronomy Display') return 'Astronomy Manager';
+  if (m === 'Image Processing Display') return 'Image Processing';
+  return m;
+};
 
 /**
  * Internal layout wrapper that handles dynamic mode switching,
@@ -94,8 +106,10 @@ const AppContent: React.FC = () => {
     try {
       const params = new URLSearchParams(window.location.search);
       const urlMode = params.get('mode');
-      if (urlMode) return urlMode;
-      return window.localStorage.getItem('appMode') || 'Image Viewer';
+      if (urlMode) return normalizeAppMode(urlMode);
+      const isAuxWindow = Boolean(params.get('windowId'));
+      if (isAuxWindow) return 'Image Processing';
+      return normalizeAppMode(window.localStorage.getItem('appMode') || 'Image Viewer');
     } catch {
       return 'Image Viewer';
     }
@@ -155,6 +169,12 @@ const AppContent: React.FC = () => {
             setMode(payload.mode);
             window.dispatchEvent(new CustomEvent('astrometrics:modeChange', { detail: payload.mode }));
           }
+        } else if (action === 'handoff') {
+          // Sync domain state (e.g. active target selection) across clients without
+          // forcefully overriding individual window layouts or display modes.
+          if (payload.selected_target) {
+            window.dispatchEvent(new CustomEvent('astrometrics:targetSelected', { detail: payload.selected_target }));
+          }
         } else if (action === 'log') {
           window.dispatchEvent(new CustomEvent('astrometrics:log', { detail: payload }));
         } else if (action === 'refresh') {
@@ -168,16 +188,75 @@ const AppContent: React.FC = () => {
 
     /** Handles custom mode change events. */
     const onModeChange = (e: Event): void => {
-      const detail = (e as CustomEvent).detail;
+      const rawDetail = (e as CustomEvent).detail;
+      const detail = normalizeAppMode(rawDetail);
       setMode(detail);
+      try {
+        const isAuxWindow = Boolean(new URLSearchParams(window.location.search).get('windowId'));
+        if (!isAuxWindow) {
+          window.localStorage.setItem('appMode', detail);
+        }
+      } catch {
+        // Ignore localStorage access failures
+      }
+      fetch('/api/handoff/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active_mode: detail, origin_device: 'desktop' }),
+      }).catch(() => {});
     };
     window.addEventListener('astrometrics:modeChange', onModeChange);
 
+    // Native OS Integration: Listen to mode switches from Ubuntu dock / Windows Jump List / Tray
+    let removeNavMode: (() => void) | undefined;
+    if (window.astrometrics?.app?.onNavigateMode) {
+      removeNavMode = window.astrometrics.app.onNavigateMode((navMode: string) => {
+        if (navMode) {
+          const detail = normalizeAppMode(navMode);
+          setMode(detail);
+          window.dispatchEvent(new CustomEvent('astrometrics:modeChange', { detail }));
+        }
+      });
+    }
+
+    // Native OS Integration: Listen to remote actions routed from other windows
+    let removeRemoteAction: (() => void) | undefined;
+    if (window.astrometrics?.app?.onRemoteAction) {
+      removeRemoteAction = window.astrometrics.app.onRemoteAction((data: any) => {
+        const { action, payload, intent } = data || {};
+        if (action) {
+          window.dispatchEvent(new CustomEvent(`astrometrics:${action}`, { detail: payload }));
+        }
+        if (intent) {
+          window.dispatchEvent(new CustomEvent('astrometrics:navigationIntent', { detail: intent }));
+        }
+      });
+    }
+
+    // Native OS Integration: Emergency park telescope command from tray
+    const onEmergencyPark = (): void => {
+      fetch('/api/telescope/park', { method: 'POST' }).catch(() => {});
+    };
+    window.addEventListener('emergency-park-mount', onEmergencyPark);
+
     return () => {
       removeSocketAction?.();
+      removeNavMode?.();
+      removeRemoteAction?.();
       window.removeEventListener('astrometrics:modeChange', onModeChange);
+      window.removeEventListener('emergency-park-mount', onEmergencyPark);
     };
   }, []);
+
+  // Update dynamic tray menu and report active mode to Electron main process
+  useEffect(() => {
+    if (window.astrometrics?.app?.updateTrayStatus) {
+      window.astrometrics.app.updateTrayStatus({ activeMode: mode });
+    }
+    if (window.astrometrics?.app?.reportWindowMode) {
+      window.astrometrics.app.reportWindowMode(mode);
+    }
+  }, [mode]);
 
   return (
     <div className="app">

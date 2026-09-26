@@ -17,6 +17,8 @@ without needing to independently reimplement the Alt/Az transform in
 the test.
 """
 
+from typing import Any
+
 import pytest
 
 from wayfindinglib.drivers.indi.mount_controller import MountController
@@ -233,3 +235,34 @@ def test_validate_hour_angle_limits_accepts_ra_near_meridian(app_config):  # ruf
     near_ra = local_sidereal_time % 24.0
 
     controller.validate_hour_angle_limits(telescope, ra=near_ra)
+
+
+def test_move_stop_does_not_send_switch_when_already_stopped(app_config: Any) -> None:
+    """Verify that stopping a direction already off sends no INDI switch."""
+    from unittest.mock import MagicMock
+
+    from wayfindinglib.drivers.indi.pyindi_compatibility import PyIndi
+
+    client_mock = MagicMock()
+    client_mock.config = app_config
+    controller = MountController(client_mock)
+
+    s1 = MagicMock()
+    s1.getName.return_value = "MOTION_NORTH"
+    s1.s = PyIndi.ISS_OFF
+
+    s2 = MagicMock()
+    s2.getName.return_value = "MOTION_SOUTH"
+    s2.s = PyIndi.ISS_OFF
+
+    switch_mock = [s1, s2]
+    telescope_mock = MagicMock()
+    telescope_mock.getSwitch.return_value = switch_mock
+
+    # Move with start=False (stopping motion in N)
+    controller.move(telescope_mock, "N", start=False)
+    client_mock.sendNewSwitch.assert_not_called()
+
+    # Move STOP
+    controller.move(telescope_mock, "STOP")
+    client_mock.sendNewSwitch.assert_not_called()

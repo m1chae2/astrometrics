@@ -44,31 +44,26 @@ def get_object(analysis, object_id: str) -> Any | None:  # ruff: ignore[missing-
     """Find a specific star in the database by its name.
 
     First try to look it up exactly (which is very fast). If that
-    doesn't work, load the whole list of stars and search through
-    it, ignoring spaces and capital letters, in case it was
-    typed slightly wrong.
+    doesn't work, compare the ids of all the stars, ignoring spaces,
+    underscores and capital letters, in case it was typed slightly
+    wrong, and load only the one star that matches. Only the id column is
+    read for that comparison, never the stars' full records.
 
     Returns
     -------
     stellar_object : `Any` or `None`
         The star if it was found, or None if it doesn't exist.
     """
-    get_by_ids = getattr(analysis.catalog_access, "get_by_ids", None)
-    if callable(get_by_ids):
-        exact_matches = get_by_ids("stellar_catalog", [object_id])
-        if exact_matches:
-            return exact_matches[0]
-        objects = analysis.list_objects()
-    else:
-        objects = analysis.list_objects()
-        for obj in objects:
-            if obj.id == object_id:
-                return obj
+    catalog_access = analysis.catalog_access
+    exact_matches = catalog_access.get_by_ids("stellar_catalog", [object_id])
+    if exact_matches:
+        return exact_matches[0]
 
     normalized = object_id.lower().replace(" ", "").replace("_", "")
-    for obj in objects:
-        if obj.id.lower().replace(" ", "").replace("_", "") == normalized:
-            return obj
+    for star_id in catalog_access.list_star_ids():
+        if star_id.lower().replace(" ", "").replace("_", "") == normalized:
+            fuzzy_matches = catalog_access.get_by_ids("stellar_catalog", [star_id])
+            return fuzzy_matches[0] if fuzzy_matches else None
 
     return None
 

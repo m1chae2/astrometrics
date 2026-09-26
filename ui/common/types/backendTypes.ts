@@ -86,6 +86,9 @@ export interface TelescopeStatus {
   focuserPosition?: number;
   filter?: string;
   guidingHistory?: any;
+  cameraTemperature?: string;
+  cameraStatus?: string;
+  targetName?: string | null;
   /** Flexible index to accommodate additional data from the backend. */
   [key: string]: any;
 }
@@ -192,10 +195,12 @@ export interface Spectrum {
   dec?: any;
   flux?: any;
   magnitude?: any;
+  bMinusV?: any;
   spectralType?: string;
   photometry?: PhotometryResult | null;
   spectraHistory?: SpectralObservation[];
   starData?: any;
+  radiusPx?: number | null;
   spectroscopy?: SpectroscopyResult | null;
   stellarSpectralType?: string;
   targetIds?: string[];
@@ -239,13 +244,22 @@ export interface SpectroscopyResult {
   quantumEfficiencyCorrectedIntensities?: number[] | null;
   selfDeterminedSpectralType?: string;
   selfDeterminedSpectralTypeConfidence?: number | null;
+  selfDeterminedSpectralTypeRms?: number | null;
+  selfDeterminedSpectralTypeNote?: string;
   selfDeterminedSpectralTypeCandidates?: Record<string, any>[];
   probableSpectralFeatures?: Record<string, any>[];
+  emissionLines?: Record<string, any>[];
+  isEmissionLineSource?: boolean;
+  starPositionPx?: number[] | null;
+  requestedWavelengthRangeAngstrom?: number[] | null;
+  validFraction?: number | null;
   rectangle?: any | null;
   detectedAngle?: number | null;
   dispersionAngle?: number | null;
   trailCenterlinePx?: number[] | null;
   trailWidthPx?: number[] | null;
+  secondOrderBlueToRedRatio?: number[] | null;
+  resolutionElementAngstrom?: number | null;
   extractionRadius?: number | null;
 }
 
@@ -261,6 +275,11 @@ export interface PeriodogramResult {
   bestPeriodDays?: number;
   power?: number;
   falseAlarmProbability?: number;
+  verdict?: string;
+  note?: string;
+  cyclesObserved?: number | null;
+  searchedMinPeriodDays?: number | null;
+  searchedMaxPeriodDays?: number | null;
 }
 
 /**
@@ -280,6 +299,13 @@ export interface TransitCandidate {
   epochT0?: number;
   transitSnr?: number;
   transitConfidence?: number;
+  falseAlarmProbability?: number;
+  transitCount?: number;
+  pointsInTransit?: number;
+  verdict?: string;
+  note?: string;
+  searchedMinPeriodDays?: number | null;
+  searchedMaxPeriodDays?: number | null;
 }
 
 /**
@@ -316,6 +342,10 @@ export interface TelescopePulse {
   guidingHistory?: Record<string, any>[];
   alignmentAttempts?: any[];
   alignmentActive?: boolean;
+  polarAlignment?: PolarAlignmentStatus | null;
+  cameraTemperature?: string | null;
+  cameraStatus?: string | null;
+  targetName?: string | null;
 }
 
 /**
@@ -356,6 +386,84 @@ export interface AlignmentAttempt {
   status: string;
   deltaRaArcsec?: number | null;
   deltaDecArcsec?: number | null;
+  ra?: number | null;
+  dec?: number | null;
+  pointingErrorArcsec?: number | null;
+  timestamp?: number | null;
+  targetName?: string | null;
+}
+
+/**
+ * Status and measurement metrics from Polar Alignment Assistant (PAA).
+ */
+export interface PolarAlignmentStatus {
+  status?: string;
+  totalErrorArcsec?: number | null;
+  altErrorArcsec?: number | null;
+  azErrorArcsec?: number | null;
+  poleRa?: number | null;
+  poleDec?: number | null;
+  paaPoints?: Record<string, any>[];
+  timestamp?: number | null;
+}
+
+/**
+ * Summary of a past observing session's alignment and polar telemetry.
+ */
+export interface AlignmentSessionSummary {
+  sessionId: string;
+  sessionDate: string;
+  syncCount?: number;
+  targetCount?: number | null;
+  startTime?: number | null;
+  endTime?: number | null;
+  avgErrorArcsec?: number | null;
+  polarErrorArcsec?: number | null;
+  polarAltErrorArcsec?: number | null;
+  polarAzErrorArcsec?: number | null;
+}
+
+/**
+ * Decomposed geometric mount pointing model terms from plate solves.
+ */
+export interface MountPointingModel {
+  sampleCount: number;
+  rawRmsArcsec: number;
+  residualRmsArcsec: number;
+  improvementPercent?: number;
+  ihArcsec?: number;
+  idArcsec?: number;
+  meArcsec?: number;
+  maArcsec?: number;
+  chArcsec?: number;
+  tfArcsec?: number;
+  totalPolarErrorArcsec?: number;
+  confidence?: string;
+  message?: string;
+}
+
+/**
+ * A dominant harmonic frequency identified in guiding telemetry.
+ */
+export interface GuidingSpectrumPeak {
+  periodSeconds: number;
+  amplitudeArcsec: number;
+  power: number;
+  probableSource?: string;
+}
+
+/**
+ * Periodic error, worm harmonic spectrum, and backlash diagnostics.
+ */
+export interface GuidingSpectrumAnalysis {
+  sampleCount: number;
+  durationSeconds: number;
+  periodicErrorPeakToPeakArcsec?: number;
+  dominantPeriodSeconds?: number | null;
+  decBacklashEstimateMs?: number | null;
+  peaks?: GuidingSpectrumPeak[];
+  psdCurve?: Record<string, number>[];
+  message?: string;
 }
 
 /**
@@ -429,6 +537,8 @@ export interface ProcessingJob {
   createdAt?: string | null;
   updatedAt?: string | null;
   completedAt?: string | null;
+  inputMetrics?: Record<string, any> | null;
+  outputMetrics?: Record<string, any> | null;
 }
 
 /**
@@ -610,6 +720,46 @@ export interface TargetSessionContribution {
 }
 
 /**
+ * What happened to the frames of one exposure length in a stack.
+ *
+ * Frames taken with different exposure lengths are stacked one length at a
+ * time (each with the dark frames of its own length) and the results are
+ * combined. This records, for each length, how it went. A group left out of
+ * the combined image says why in `left_out_reason`.
+ */
+export interface ExposureGroupSummary {
+  exposureSeconds: number;
+  framesSubmitted: number;
+  framesStacked: number;
+  darkApplied: boolean;
+  saturated?: boolean;
+  clippedAtZero?: boolean;
+  stackPath?: string | null;
+  alignmentShiftPixels?: number[] | null;
+  leftOutReason?: string | null;
+}
+
+/**
+ * Which camera profile a pipeline run used, and the numbers from it.
+ *
+ * A camera profile holds facts about one camera model (see
+ * `astrometricslib.models.camera_profile`). Recording it on each summary
+ * lets a reader see which assumptions a result rests on, in particular
+ * whether the camera was recognised at all.
+ */
+export interface AppliedCameraProfile {
+  cameraName?: string | null;
+  profileName: string;
+  isGenericFallback: boolean;
+  clipCeilingAdu: number;
+  clipCeilingSource: string;
+  saturationThresholdAdu: number;
+  saturationThresholdSource: string;
+  saturationThresholdCanBeReached: boolean;
+  hasQuantumEfficiencyCurve: boolean;
+}
+
+/**
  * Measurements recorded when combining (stacking) multiple images.
  *
  * This tracks how many images were successfully combined and records details
@@ -627,6 +777,12 @@ export interface StackingPipelineQualityMetrics {
   calibrationMismatchFlags?: string[];
   saturatedPixelFraction?: number | null;
   saturationFlagged?: boolean;
+  exposureGroups?: ExposureGroupSummary[];
+  recommendedExposureSeconds?: number | null;
+  zeroPixelFraction?: number | null;
+  zeroFractionFlagged?: boolean;
+  negativePixelMaxPercent?: number | null;
+  negativePixelsFlagged?: boolean;
   stackedFwhmPx?: number | null;
   medianInputFwhmPx?: number | null;
   fwhmDegraded?: boolean;
@@ -652,6 +808,7 @@ export interface StackQualitySummary {
   targetSessionBreakdown?: TargetSessionContribution[];
   upstreamQualitySummaryReference?: string | null;
   resolvedParameters?: Record<string, any>;
+  cameraProfile?: AppliedCameraProfile | null;
   qualityProcessingApplied?: boolean;
   flagged?: boolean;
   flagReasons?: string[];
@@ -693,6 +850,7 @@ export interface AstrometryQualitySummary {
   targetSessionBreakdown?: TargetSessionContribution[];
   upstreamQualitySummaryReference?: string | null;
   resolvedParameters?: Record<string, any>;
+  cameraProfile?: AppliedCameraProfile | null;
   qualityProcessingApplied?: boolean;
   flagged?: boolean;
   flagReasons?: string[];
@@ -749,6 +907,7 @@ export interface PhotometryQualitySummary {
   targetSessionBreakdown?: TargetSessionContribution[];
   upstreamQualitySummaryReference?: string | null;
   resolvedParameters?: Record<string, any>;
+  cameraProfile?: AppliedCameraProfile | null;
   qualityProcessingApplied?: boolean;
   flagged?: boolean;
   flagReasons?: string[];
@@ -804,6 +963,7 @@ export interface SpectroscopyQualitySummary {
   targetSessionBreakdown?: TargetSessionContribution[];
   upstreamQualitySummaryReference?: string | null;
   resolvedParameters?: Record<string, any>;
+  cameraProfile?: AppliedCameraProfile | null;
   qualityProcessingApplied?: boolean;
   flagged?: boolean;
   flagReasons?: string[];
@@ -907,6 +1067,7 @@ export interface AsteroidDetectionQualitySummary {
   targetSessionBreakdown?: TargetSessionContribution[];
   upstreamQualitySummaryReference?: string | null;
   resolvedParameters?: Record<string, any>;
+  cameraProfile?: AppliedCameraProfile | null;
   qualityProcessingApplied?: boolean;
   flagged?: boolean;
   flagReasons?: string[];

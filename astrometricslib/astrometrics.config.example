@@ -28,6 +28,46 @@ allow_commands = true
 indi_port = 7624
 remote_pictures_path = /home/stellarmate/Pictures
 
+[Observatory.Optics]
+# Every telescope or camera lens you use, by name. The name is stored as the
+# "telescope" of each frame, so it decides which flat frames are used and
+# which library folder a frame goes in. Each name needs its own
+# [Observatory.Optic.<name>] section below.
+available = Apertura 75Q, Nikkor 300mm
+
+[Observatory.Optic.Apertura 75Q]
+focal_length_mm = 405
+focal_ratio = 5.4
+
+[Observatory.Optic.Nikkor 300mm]
+focal_length_mm = 300
+focal_ratio = 5.6
+
+[Observatory.Setups]
+# The camera-and-optic pairings you really use. A camera may appear in
+# several setups (the D5300 below), and an optic may be used by several
+# cameras (the Apertura below). Each name needs its own
+# [Observatory.Setup.<name>] section.
+#
+# A frame's optic is chosen from the setups that use its camera: first by
+# matching the FOCALLEN in its header to an optic's focal_length_mm (within
+# 2%), then, when the header has no FOCALLEN, by the camera's only setup, then
+# by an optic's name appearing in the file path. Otherwise it is "Unknown",
+# and a warning is logged.
+available = ASI533 on Apertura, D5300 on Apertura, D5300 on Nikkor
+
+[Observatory.Setup.ASI533 on Apertura]
+camera = ZWO ASI533MM Pro
+optic = Apertura 75Q
+
+[Observatory.Setup.D5300 on Apertura]
+camera = Nikon D5300
+optic = Apertura 75Q
+
+[Observatory.Setup.D5300 on Nikkor]
+camera = Nikon D5300
+optic = Nikkor 300mm
+
 [Observatory.Constraints]
 min_altitude = 0.0
 max_altitude = 90.0
@@ -45,6 +85,9 @@ sensor_height_px = 4000
 grating_distance_mm = 75
 sensor_min_wavelength = 350
 sensor_max_wavelength = 900
+# The ISO to record for an image whose header has neither ISOSPEED nor GAIN.
+# An ISO that the header does give is always used instead.
+default_iso = 800
 
 [Observatory.Camera.ZWO ASI533MM Pro]
 name = ZWO ASI533MM Pro
@@ -57,6 +100,9 @@ dispersion_orientation = vertical
 dispersion_direction = positive
 grating_lines_per_mm = 200
 dispersion_offset_x = 0.0
+# Optional. The wavelength, in nm, that calibration treats as the start of
+# the spectrum. Leave it out to use the default of 380.
+# extraction_start_wavelength_nm = 380
 # CALCULATED -- everything below this line, and only what's below this
 # line, is fitted from a calibration frame by
 # SpectroscopyCalibrationTuner.tune_calibration()

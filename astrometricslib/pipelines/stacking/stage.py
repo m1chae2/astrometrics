@@ -7,6 +7,7 @@ and checking the quality of the final stacked images.
 import logging
 from typing import Any
 
+from astrometricslib.drivers.camera_profile_store import camera_identity
 from astrometricslib.utilities.enums import FilterType
 
 logger = logging.getLogger(__name__)
@@ -100,8 +101,10 @@ def stack_frames(
 
     # Validate that only homogeneous frame types are stacked (no mixed
     # spectral/standard frames)
-    has_spectral = any(getattr(f, "filter", None) in ("SPEC", FilterType.SPEC) for f in target_frames)
-    has_standard = any(getattr(f, "filter", None) not in ("SPEC", FilterType.SPEC) for f in target_frames)
+    from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
+
+    has_spectral = any(frame_is_spectral(f) for f in target_frames)
+    has_standard = any(not frame_is_spectral(f) for f in target_frames)
     if has_spectral and has_standard:
         raise ValueError(
             "Target contains a mixed set of spectral ('SPEC') and standard imaging frames. "
@@ -178,12 +181,13 @@ def stack_frames(
 
     background_split = None
     if get_configuration().get_background_homogeneity_check_enabled():
+        from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
         from astrometricslib.pipelines.shared.quality.background_measurement import (
             measure_frame_background_level,
             measure_frame_saturated_pixel_fraction,
         )
         from astrometricslib.pipelines.stacking.background_homogeneity import (
-            find_dominant_background_subset,
+            find_dominant_background_subset_by_exposure,
         )
 
         for frame in target_frames:
@@ -194,7 +198,10 @@ def stack_frames(
                 if frame.background_level is None:
                     frame.background_level = measure_frame_background_level(frame.path)
                 if frame.saturated_pixel_fraction is None:
-                    frame.saturated_pixel_fraction = measure_frame_saturated_pixel_fraction(frame.path)
+                    camera_profile = resolve_camera_profile(frame.camera)
+                    frame.saturated_pixel_fraction = measure_frame_saturated_pixel_fraction(
+                        frame.path, camera_profile.saturation_threshold_adu.value
+                    )
             except Exception as exc:
                 logger.debug("Skipping background/saturation measurement for '%s': %s", frame.path, exc)
                 continue
@@ -204,8 +211,11 @@ def stack_frames(
         # use a washed-out frame as the main reference for aligning the images,
         # the software won't be able to find any sharp stars to lock onto. This
         # would cause the alignment to fail and crash the entire stacking
-        # process.
-        target_frames, excluded_by_background, background_split = find_dominant_background_subset(
+        # process. The check is made within each exposure length: the sky
+        # background grows with the exposure, so frames of different lengths
+        # cannot be compared (all 14 of the 60 s frames of NGC 2403 were once
+        # excluded because the 300 s frames were brighter).
+        target_frames, excluded_by_background, background_split = find_dominant_background_subset_by_exposure(
             target_frames
         )
         if background_split:
@@ -228,22 +238,26 @@ def stack_frames(
             )
 
     from astrometricslib.drivers.siril_interface import ImageProcessing
+    from astrometricslib.pipelines.stacking.siril_stacking import run_siril_stack
 
     siril_driver = ImageProcessing()
-    stacked_path = siril_driver.process_target(
-        id=target.id,
-        image_files=[f.model_dump() for f in target_frames],
-        output_file=output_file,
-        log_file=log_file,
-        is_spectral=has_spectral,
+    # `run_siril_stack` adds two safeguards for spectroscopy: frames of
+    # different exposure lengths are stacked one length at a time and then
+    # combined, and a registration that loses too many frames is retried with
+    # a different star detection.
+    stacked_path, diagnostics = run_siril_stack(
+        siril_driver,
+        target_frames,
+        target.id,
+        output_file,
+        log_file,
+        has_spectral,
         rejection_sigma=rejection_sigma,
         filter_wfwhm=filter_wfwhm,
         filter_round=filter_round,
         stack_weight=stack_weight,
         generate_rejmap=generate_rejmap,
     )
-
-    diagnostics = siril_driver.last_run_diagnostics
     excluded_frames.extend(
         ExcludedFrame(path=path, reason="corrupt or unreadable FITS file")
         for path in diagnostics.get("corrupt_frames_skipped", [])
@@ -413,12 +427,12 @@ def _record_configuration_stack(target, target_frames, stacked_path) -> bool:  #
 
 
 def _camera_names_match(first: str, second: str) -> bool:
-    """Check if two camera names match, ignoring spaces and capitalization.
+    """Check whether two camera names mean the same camera.
 
-    Camera names in settings and image files often have slight differences
-    (like "ZWO ASI533MM Pro" vs. "ZWO ASI 533MM Pro"). This function cleans
-    them up so we can reliably match them even if they aren't typed exactly
-    the same way.
+    Camera names in settings and image files are spelled differently (like
+    "ZWO ASI533MM Pro" vs. "ZWO ASI 533MM Pro", or "Nikon D5300" vs. the
+    header's "Nikon DSLR DSC D5300"). Case, spaces and punctuation are ignored,
+    and the aliases listed in a camera's profile count as the same camera.
 
     Parameters
     ----------
@@ -430,7 +444,7 @@ def _camera_names_match(first: str, second: str) -> bool:
     matches : `bool`
         True if the names mean the same camera.
     """
-    return "".join(first.split()).casefold() == "".join(second.split()).casefold()
+    return camera_identity(first) == camera_identity(second)
 
 
 def _base_stack_quality_summary(  # ruff: ignore[missing-return-type-private-function]
@@ -685,6 +699,74 @@ def _check_spectral_registration_quality(summary, stacked_path: str, diagnostics
         summary.stacking_metrics.spectral_registration_flags = [ExcludedFrame(**entry) for entry in flagged]
 
 
+def _record_exposure_groups(summary, diagnostics: dict) -> None:  # ruff: ignore[missing-type-function-argument]
+    """Copy the exposure-group entries and recommended exposure from a run.
+
+    Parameters
+    ----------
+    summary : `StackQualitySummary`
+        The summary being built; its metrics are set in place.
+    diagnostics : `dict`
+        What the stacking run reported (see `run_siril_stack`).
+    """
+    from astrometricslib.models.quality_summary import ExposureGroupSummary
+
+    summary.stacking_metrics.exposure_groups = [
+        ExposureGroupSummary(**entry) for entry in diagnostics.get("exposure_group_summaries", [])
+    ]
+    summary.stacking_metrics.recommended_exposure_seconds = diagnostics.get("recommended_exposure_seconds")
+
+
+def _measure_calibration_health(
+    summary,  # ruff: ignore[missing-type-function-argument]
+    stacked_path: str,
+    is_spectral: bool,
+    diagnostics: dict,
+) -> None:
+    """Record whether calibration left the stack mostly zeros.
+
+    Two signs are used: the share of exactly-zero pixels in the stack, and the
+    worst "many negative pixels" percentage Siril printed after subtracting the
+    dark. Both are recorded for every stack. The zero share is flagged only for
+    images, because the sky of a spectral stack is legitimately at or below
+    zero.
+
+    Parameters
+    ----------
+    summary : `StackQualitySummary`
+        The summary being built; its metrics are set in place.
+    stacked_path : `str`
+        The stacked image to measure.
+    is_spectral : `bool`
+        Whether the stack is spectral.
+    diagnostics : `dict`
+        What the stacking run reported.
+    """
+    import numpy as np
+
+    from astrometricslib.drivers.fits_access import read_data
+    from astrometricslib.pipelines.stacking.stack_quality import (
+        is_negative_pixel_percent_significant,
+        is_zero_fraction_significant,
+    )
+
+    metrics = summary.stacking_metrics
+    try:
+        data = np.asarray(read_data(stacked_path))
+    except OSError as read_error:
+        logger.warning("Could not read '%s' to check for a blank stack: %s", stacked_path, read_error)
+    else:
+        plane = data[data.shape[0] // 2] if data.ndim == 3 else data
+        metrics.zero_pixel_fraction = float(np.count_nonzero(plane == 0) / plane.size)
+        metrics.zero_fraction_flagged = (not is_spectral) and is_zero_fraction_significant(
+            metrics.zero_pixel_fraction
+        )
+    negative_percent = diagnostics.get("negative_pixel_max_percent")
+    if negative_percent is not None:
+        metrics.negative_pixel_max_percent = int(negative_percent)
+        metrics.negative_pixels_flagged = is_negative_pixel_percent_significant(negative_percent)
+
+
 def _finalize_stack_quality_flags(summary) -> None:  # ruff: ignore[missing-type-function-argument]
     """Derive `summary.flagged` and `flag_reasons` from measured metrics."""
     metrics = summary.stacking_metrics
@@ -710,6 +792,19 @@ def _finalize_stack_quality_flags(summary) -> None:  # ruff: ignore[missing-type
         flag_reasons.append(
             f"saturated pixel fraction {metrics.saturated_pixel_fraction:.2%} at or above threshold"
         )
+    if metrics.zero_fraction_flagged:
+        flag_reasons.append(
+            f"{metrics.zero_pixel_fraction:.0%} of the stack's pixels are exactly zero: "
+            "calibration removed more than the sky (blank stack)"
+        )
+    if metrics.negative_pixels_flagged:
+        flag_reasons.append(
+            f"Siril reported up to {metrics.negative_pixel_max_percent}% negative pixels after "
+            "dark subtraction: calibration frames are probably incorrect"
+        )
+    for group in metrics.exposure_groups:
+        if group.left_out_reason:
+            flag_reasons.append(f"the {group.exposure_seconds:g} s exposure group {group.left_out_reason}")
     if not summary.quality_processing_applied:
         flag_reasons.append("single-frame stack: no rejection/registration quality processing applied")
 
@@ -724,7 +819,7 @@ def _build_stack_quality_summary(  # ruff: ignore[missing-return-type-private-fu
     target_frames: list[Any],
     excluded_frames: list[Any],
     diagnostics: dict,
-    background_split: dict | None,
+    background_split: dict | list[dict] | None,
     stacked_path: str | None,
 ):
     """Gather diagnostic data into a final `StackQualitySummary`.
@@ -745,17 +840,27 @@ def _build_stack_quality_summary(  # ruff: ignore[missing-return-type-private-fu
         target, is_spectral, frames_submitted, target_frames, excluded_frames, diagnostics
     )
 
-    if background_split:
+    # One split per exposure length that showed one; a single dictionary (the
+    # older shape) is one split with no exposure length attached.
+    splits = [background_split] if isinstance(background_split, dict) else list(background_split or [])
+    if splits:
         summary.stacking_metrics.background_split_detected = True
-        summary.stacking_metrics.background_split_detail = (
-            f"{background_split['low_group_count']} frame(s) at background~"
-            f"{background_split['low_group_median']:.0f} vs {background_split['high_group_count']} "
-            f"frame(s) at ~{background_split['high_group_median']:.0f} (gap ratio "
-            f"{background_split['gap_ratio']:.1f})"
-        )
+        details = []
+        for split in splits:
+            prefix = f"{split['exposure_seconds']:g} s frames: " if "exposure_seconds" in split else ""
+            details.append(
+                f"{prefix}{split['low_group_count']} frame(s) at background~"
+                f"{split['low_group_median']:.0f} vs {split['high_group_count']} "
+                f"frame(s) at ~{split['high_group_median']:.0f} (gap ratio "
+                f"{split['gap_ratio']:.1f})"
+            )
+        summary.stacking_metrics.background_split_detail = "; ".join(details)
+
+    _record_exposure_groups(summary, diagnostics)
 
     if stacked_path:
         _measure_stacked_pixel_fractions(summary, stacked_path)
+        _measure_calibration_health(summary, stacked_path, is_spectral, diagnostics)
 
         if not is_spectral and summary.quality_processing_applied:
             _update_frame_registration_results(summary, stacked_path, target_frames, diagnostics)
@@ -765,4 +870,16 @@ def _build_stack_quality_summary(  # ruff: ignore[missing-return-type-private-fu
             _check_spectral_registration_quality(summary, stacked_path, diagnostics)
 
     _finalize_stack_quality_flags(summary)
+    clipped_groups = diagnostics.get("clipped_exposure_groups", [])
+    if clipped_groups:
+        exposures = ", ".join(f"{entry['exposure_seconds']:g} s" for entry in clipped_groups)
+        summary.flag_reasons.append(f"raw frames clipped at zero in the {exposures} exposure group(s)")
+        summary.flagged = True
+
+    from astrometricslib.pipelines.shared.applied_camera_profile import (
+        most_common_camera_name,
+        record_camera_profile,
+    )
+
+    record_camera_profile(summary, most_common_camera_name(target_frames))
     return summary

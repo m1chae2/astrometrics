@@ -71,11 +71,60 @@ export async function fetchAstronomyData(
     signal?: AbortSignal
 ): Promise<any> {
     try {
-        const data = await callBackend("astronomy:get", { object_id: name.trim() });
+        const data = await callBackend("astronomy:get", { object_id: name.trim() }, { signal });
         return data || null;
     } catch (err: unknown) {
+        if ((err as any)?.name === 'AbortError') {
+            return null;
+        }
         const errorMessage = err instanceof Error ? err.message : String(err);
         reportError(err instanceof Error ? err : new Error(errorMessage), 'backend');
         throw err;
     }
+}
+
+/**
+ * Runs the period and transit search on a star's light curve and saves the result.
+ * @param objectId The id of the star to analyze.
+ * @return The star with any new analysis attached, or null if it does not exist.
+ */
+export async function analyzeStarPeriodicity(objectId: string): Promise<Spectrum | null> {
+    try {
+        const data = await callBackend("astronomy:analyze_periodicity", { object_id: objectId.trim() });
+        return (data as Spectrum | null) || null;
+    } catch (err: unknown) {
+        reportError(err instanceof Error ? err : new Error(String(err)), 'backend');
+        throw err;
+    }
+}
+
+export interface AstrometryOverlayStar {
+    id: string;
+    name: string;
+    x: number;
+    y: number;
+    spectralType?: string;
+    isCatalogIdentified: boolean;
+    referenceWidth?: number | null;
+    referenceHeight?: number | null;
+    /** Measured star radius in reference-image pixels, if available. */
+    radiusPx?: number | null;
+}
+
+/**
+ * Fetches identified stars and their pixel coordinates for astrometry overlay.
+ * @param targetId The target identifier to fetch stars for.
+ * @param limit Maximum number of stars to return (defaults to 35).
+ * @returns List of star overlay items with centroid coordinates and labels.
+ */
+export async function fetchAstrometryOverlayStars(
+    targetId: string,
+    limit = 35
+): Promise<AstrometryOverlayStar[]> {
+    if (!targetId || targetId.trim() === '') return [];
+    const data = await callBackend("astronomy:get_overlay_stars", {
+        target_id: targetId.trim(),
+        limit
+    });
+    return Array.isArray(data) ? (data as AstrometryOverlayStar[]) : [];
 }

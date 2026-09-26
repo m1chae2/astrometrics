@@ -17,8 +17,8 @@
 }
 
 .astronomy-plot {
-  background: var(--grey-dark, #1e1e1e);
-  border-radius: 4px;
+  background: transparent;
+  border: none;
   align-self: center;
   width: 100%;
   max-width: none;
@@ -154,4 +154,11 @@
 .astronomy-viewer__plot {
     width: 100%;
     height: 100%;
+}
+
+/* One line under a plot saying part of the requested range was not measured. */
+.astronomy-viewer__coverage-note {
+  padding: 2px 8px;
+  font-size: 0.75rem;
+  color: var(--text-muted, #9fb0c9);
 }

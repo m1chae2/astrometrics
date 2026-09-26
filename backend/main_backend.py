@@ -7,7 +7,11 @@ defines API/WebSocket routes.
 
 import logging
 import os
+import socket
+import threading
+import time
 import warnings
+from typing import Any
 
 import uvicorn
 
@@ -25,6 +29,7 @@ warnings.filterwarnings("ignore", category=AstropyDeprecationWarning)
 warnings.filterwarnings("ignore", category=AstropyWarning, message=".*extra padding.*")
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 from astrometricslib import get_configuration
 from backend.container import container
@@ -48,6 +53,31 @@ logging.getLogger("uvicorn.access").setLevel(logging.ERROR)
 logging.getLogger("uvicorn.error").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
+
+
+def _use_bundled_earth_orientation_data() -> None:
+    """Stop astropy downloading Earth-orientation (IERS) data while running.
+
+    Turning a star's position into altitude and azimuth needs a small table
+    of how the Earth's rotation drifts (UT1 minus UTC). By default astropy
+    tries to download the latest copy the first time it is needed, which
+    stalled the first star click for 6 to 14 seconds, and quietly needed the
+    internet. The copy that ships with astropy is used instead.
+
+    Measured (astropy 8.0.1, Bozeman, a star at RA 315.7 deg, Dec 68.7 deg):
+    the first conversion took 5.8 to 13.8 s with the download and 0.5 s
+    without. Altitude and azimuth differed by at most 0.5 arcseconds across
+    dates from two years ago to ten years ahead, far below what a sky map or
+    a telescope slew can resolve, and nothing raised an error for any date.
+    """
+    from astropy.utils import iers
+
+    iers.conf.auto_download = False
+    # Without this, astropy refuses to use a table more than 30 days old.
+    iers.conf.auto_max_age = None
+
+
+_use_bundled_earth_orientation_data()
 
 # Initialize Container Resources
 container.init_resources()
@@ -105,9 +135,15 @@ origins = [
     "app://.",  # Electron
 ]
 
+lan_origin_regex = (
+    r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?$|"
+    r"^capacitor://localhost$"
+)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
+    allow_origin_regex=lan_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -218,6 +254,231 @@ async def session_token():  # ruff: ignore[missing-return-type-undocumented-publ
     return {"token": session_auth.SESSION_TOKEN}
 
 
+def _detect_lan_ip() -> str:
+    """Detect the active LAN IPv4 address for remote mobile companion clients.
+
+    Returns
+    -------
+    lan_ip : `str`
+        The local IPv4 address, or '127.0.0.1' if none can be resolved.
+    """
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("1.1.1.1", 80))
+        return str(s.getsockname()[0])
+    except Exception:
+        return "127.0.0.1"
+    finally:
+        s.close()
+
+
+@app.get("/api/pairing-info")
+async def pairing_info(request: Request) -> dict[str, Any]:
+    """Provide connection and authorization metadata for companion clients.
+
+    Facilitates zero-configuration pairing with mobile companion apps
+    or remote browser clients over the local network.
+
+    Parameters
+    ----------
+    request : `~fastapi.Request`
+        The incoming HTTP request.
+
+    Returns
+    -------
+    info : `dict`
+        Server metadata, host/port, endpoints, and the active session token.
+    """
+    host_header = request.headers.get("host", "")
+    host = host_header.split(":")[0] if host_header else _detect_lan_ip()
+    port = request.url.port or 5000
+
+    return {
+        "app": "Astrometrics",
+        "version": "0.2.0",
+        "host": host,
+        "port": port,
+        "lan_ip": _detect_lan_ip(),
+        "session_token": session_auth.SESSION_TOKEN,
+        "endpoints": {
+            "rpc": f"http://{host}:{port}/api/action",
+            "ws_events": f"ws://{host}:{port}/ws/events?token={session_auth.SESSION_TOKEN}",
+            "ws_terminal": f"ws://{host}:{port}/ws/terminal?token={session_auth.SESSION_TOKEN}",
+        },
+    }
+
+
+class HandoffStateUpdate(BaseModel):
+    """Payload for updating the active workspace handoff state."""
+
+    active_mode: str | None = Field(None, description="Active UI mode")
+    selected_target: str | None = Field(None, description="Selected target designation")
+    coordinates: dict[str, Any] | None = Field(None, description="RA/Dec coordinates and FOV")
+    telemetry: dict[str, Any] | None = Field(None, description="Mount or capture telemetry")
+    origin_device: str = Field("desktop", description="Device identifier")
+
+
+@app.get("/api/handoff/state")
+async def get_handoff_state() -> dict[str, Any]:
+    """Retrieve the workspace handoff state used for cross-device continuity.
+
+    Returns
+    -------
+    state : `dict`
+        Active workspace mode, selected target, coordinates, and telemetry.
+    """
+    if container.handoff_service:
+        return container.handoff_service.get_state()
+    return {}
+
+
+@app.post("/api/handoff/state")
+async def update_handoff_state(payload: HandoffStateUpdate) -> dict[str, Any]:
+    """Update the workspace handoff state and broadcast it to clients.
+
+    Parameters
+    ----------
+    payload : `HandoffStateUpdate`
+        State fields to update.
+
+    Returns
+    -------
+    state : `dict`
+        Updated active workspace state.
+    """
+    if container.handoff_service:
+        return container.handoff_service.update_state(
+            active_mode=payload.active_mode,
+            selected_target=payload.selected_target,
+            coordinates=payload.coordinates,
+            telemetry=payload.telemetry,
+            origin_device=payload.origin_device,
+        )
+    return {}
+
+
+@app.post("/api/handoff/beam")
+async def beam_to_device(target: str | None = None, mode: str | None = None) -> dict[str, Any]:
+    """Beam the current target or view to a paired phone via GSConnect.
+
+    Parameters
+    ----------
+    target : `str`, optional
+        Target designation to open on the mobile device.
+    mode : `str`, optional
+        Workspace view mode to display on the mobile device.
+
+    Returns
+    -------
+    result : `dict`
+        Status of the beam dispatch attempt.
+    """
+    if container.handoff_service:
+        return container.handoff_service.beam_to_device(target=target, mode=mode)
+    return {
+        "success": False,
+        "message": "HandoffService is unavailable",
+        "deep_link": f"astrometrics://handoff?mode={mode or 'Planetarium'}",
+    }
+
+
+@app.get("/api/handoff/devices")
+async def list_companion_devices() -> list[dict[str, Any]]:
+    """Enumerate paired companion devices via GSConnect or KDE Connect.
+
+    Returns
+    -------
+    devices : `list` of `dict`
+        List of paired devices with identifiers and reachable states.
+    """
+    if container.handoff_service:
+        return container.handoff_service.list_paired_devices()
+    return []
+
+
+class DeviceAlertRequest(BaseModel):
+    """Request schema for dispatching an alert to companion hardware."""
+
+    title: str = Field(..., description="Short alert title or category")
+    message: str = Field(..., description="Descriptive alert text")
+    priority: str = Field("normal", description="Severity level")
+    ring_device: bool = Field(False, description="Trigger audible ring alarm")
+    device_id: str | None = Field(None, description="Optional target device ID")
+
+
+@app.post("/api/handoff/alert")
+async def dispatch_device_alert(payload: DeviceAlertRequest) -> dict[str, Any]:
+    """Dispatch an alert to companion devices and WebSocket subscribers.
+
+    Parameters
+    ----------
+    payload : `DeviceAlertRequest`
+        Alert details, severity, and optional ring flag.
+
+    Returns
+    -------
+    result : `dict`
+        Status and delivered communication channels.
+    """
+    if container.handoff_service:
+        return container.handoff_service.send_device_alert(
+            title=payload.title,
+            message=payload.message,
+            priority=payload.priority,
+            ring_device=payload.ring_device,
+            device_id=payload.device_id,
+        )
+    return {"success": False, "message": "HandoffService is unavailable"}
+
+
+class ShareFileRequest(BaseModel):
+    """Request schema for sharing a file to a companion device."""
+
+    file_path: str = Field(..., description="Absolute path of file to share")
+    device_id: str | None = Field(None, description="Optional target device ID")
+
+
+@app.post("/api/handoff/share-file")
+async def share_file_to_device(payload: ShareFileRequest) -> dict[str, Any]:
+    """Share an image or data file to a companion device via GSConnect.
+
+    Parameters
+    ----------
+    payload : `ShareFileRequest`
+        Path of file and optional target device ID.
+
+    Returns
+    -------
+    result : `dict`
+        Status of the file beam attempt.
+    """
+    if container.handoff_service:
+        return container.handoff_service.share_file_to_device(
+            file_path=payload.file_path,
+            device_id=payload.device_id,
+        )
+    return {"success": False, "message": "HandoffService is unavailable"}
+
+
+@app.get("/api/ready")
+async def readiness():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Report whether startup warm-up has finished.
+
+    Distinct from the liveness route below: the backend accepts requests
+    as soon as it is listening, but the first Planetarium load stays slow
+    until the star catalog has been loaded into memory.
+
+    Returns
+    -------
+    response : `~fastapi.responses.JSONResponse`
+        Status 200 with ``{"ready": true}`` once warm-up has finished,
+        otherwise status 503 with ``{"ready": false}``.
+    """
+    if sky_catalog_warmup_finished.is_set():
+        return JSONResponse(status_code=200, content={"ready": True})
+    return JSONResponse(status_code=503, content={"ready": False})
+
+
 @app.get("/")
 async def root():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Return a simple liveness message for the backend root route.
@@ -283,12 +544,61 @@ async def periodic_telemetry_loop():  # ruff: ignore[missing-return-type-undocum
         await asyncio.sleep(2.0)
 
 
+# Set once the startup catalog warm-up below has finished, whether or not it
+# succeeded. The desktop shell polls `/api/ready` and holds its splash screen
+# until this is set, so the UI never opens onto a Planetarium that would sit
+# empty while the catalog loads. It is set on failure too: a broken warm-up
+# only means a slow first load, and must never keep the app from opening.
+sky_catalog_warmup_finished = threading.Event()
+
+
+def _warm_earth_orientation_data() -> None:
+    """Load astropy's Earth-orientation table now, while the splash is up.
+
+    The first altitude/azimuth conversion in a process reads that table
+    (about half a second), so do one here instead of on the first star click.
+    """
+    import astropy.units as u
+    from astropy.coordinates import AltAz, EarthLocation, SkyCoord
+    from astropy.time import Time
+
+    started_at = time.monotonic()
+    SkyCoord(0.0 * u.deg, 0.0 * u.deg).transform_to(
+        AltAz(obstime=Time.now(), location=EarthLocation(lat=0.0 * u.deg, lon=0.0 * u.deg))
+    )
+    logger.info("Earth-orientation data loaded in %.1fs", time.monotonic() - started_at)
+
+
+def _warm_sky_catalog() -> None:
+    """Load the Planetarium's star catalog into memory ahead of first use.
+
+    The first `planetarium:get_sources` request otherwise pays a one-time
+    cost of tens of seconds (deserializing every stored star) while the
+    user waits on an empty sky. A tiny query constructs the sky engine and
+    loads that catalog now, in a worker thread, so it doesn't delay startup
+    or block other requests.
+    """
+    started_at = time.monotonic()
+    try:
+        container.wayfinder.planning.get_sources(0.0, 0.0, 0.01)
+        logger.info("Sky catalog warmed in %.1fs", time.monotonic() - started_at)
+    except Exception as warm_error:
+        logger.warning("Sky catalog warm-up failed; first Planetarium load will be slow: %s", warm_error)
+    try:
+        _warm_earth_orientation_data()
+    except Exception as warm_error:
+        logger.warning("Earth-orientation warm-up failed; the first star click will be slow: %s", warm_error)
+    finally:
+        sky_catalog_warmup_finished.set()
+
+
 @app.on_event("startup")
 # ruff: ignore[unused-async] -- required async signature for FastAPI's
 # on_event("startup") decorator, which awaits this handler.
 async def startup_event():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Launch the background telemetry loop on FastAPI startup."""
+    """Launch the telemetry loop and sky catalog warm-up on startup."""
     app.state.telemetry_task = asyncio.create_task(periodic_telemetry_loop())
+    app.state.sky_warmup_task = asyncio.create_task(asyncio.to_thread(_warm_sky_catalog))
 
 
 @app.on_event("shutdown")

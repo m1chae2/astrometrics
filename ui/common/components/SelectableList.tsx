@@ -8,6 +8,10 @@ export interface SelectableItem {
     hasSpectra?: boolean;
     hasPhotometry?: boolean;
     isProcessed?: boolean;
+    /** Optional second line of smaller text under the label, such as a magnitude. */
+    subtitle?: string;
+    /** Optional hover text, such as the full name when the label is shortened. */
+    tooltip?: string;
 }
 
 export interface SelectableListProps {
@@ -19,12 +23,15 @@ export interface SelectableListProps {
     highlightedIds?: Set<string>;
 }
 
-// Matches .selectable-list__item's CSS min-height. Rows are absolutely
-// positioned at idx * ROW_HEIGHT_PX, so a row's rendered height must
-// never exceed this value or it will visually overlap the next row.
-// .selectable-list__label-text enforces single-line truncation (rather
-// than wrapping) on the label to guarantee that.
+// Match .selectable-list__item's CSS min-height (and its --two-line
+// modifier). Rows are absolutely positioned at idx * row height, so a
+// row's rendered height must never exceed its height or it will visually
+// overlap the next row. .selectable-list__label-text and
+// .selectable-list__subtitle enforce single-line truncation (rather than
+// wrapping) to guarantee that. A list whose items carry a subtitle uses
+// the taller row for every row so the rows stay evenly spaced.
 const ROW_HEIGHT_PX = 32;
+const TWO_LINE_ROW_HEIGHT_PX = 48;
 
 // Rendered above/below the visible viewport so a fast scroll or key
 // repeat doesn't show blank space for a frame before the next batch
@@ -75,10 +82,12 @@ export const SelectableList: React.FC<SelectableListProps> = ({
         }
     }, []);
 
-    const totalHeight = items.length * ROW_HEIGHT_PX;
-    const firstVisibleIndex = Math.floor(scrollTop / ROW_HEIGHT_PX);
+    const hasSubtitles = items.some((item) => item.subtitle !== undefined);
+    const rowHeightPx = hasSubtitles ? TWO_LINE_ROW_HEIGHT_PX : ROW_HEIGHT_PX;
+    const totalHeight = items.length * rowHeightPx;
+    const firstVisibleIndex = Math.floor(scrollTop / rowHeightPx);
     const startIndex = Math.max(0, firstVisibleIndex - OVERSCAN_ROWS);
-    const rowsInViewport = Math.ceil(viewportHeight / ROW_HEIGHT_PX);
+    const rowsInViewport = Math.ceil(viewportHeight / rowHeightPx);
     const endIndex = Math.min(items.length, firstVisibleIndex + rowsInViewport + OVERSCAN_ROWS);
     const visibleItems = items.slice(startIndex, endIndex);
 
@@ -101,8 +110,9 @@ export const SelectableList: React.FC<SelectableListProps> = ({
                         <label
                             key={`${item.id}-${idx}`}
                             htmlFor={radioId}
-                            className="selectable-list__item"
-                            style={{ position: 'absolute', top: idx * ROW_HEIGHT_PX, left: 0, right: 0 }}
+                            className={`selectable-list__item${hasSubtitles ? ' selectable-list__item--two-line' : ''}${isSelected ? ' selectable-list__item--selected' : ''}${isHighlighted ? ' selectable-list__item--highlighted' : ''}`}
+                            style={{ position: 'absolute', top: idx * rowHeightPx, left: 0, right: 0 }}
+                            title={item.tooltip}
                         >
                             <span className="radio">
                                 <input
@@ -117,7 +127,14 @@ export const SelectableList: React.FC<SelectableListProps> = ({
                                 <span className="radio__indicator"></span>
                             </span>
                             <span className="selectable-list__label selectable-list__label-content">
-                                <span className="selectable-list__label-text">{item.label}</span>
+                                {hasSubtitles ? (
+                                    <span className="selectable-list__label-stack">
+                                        <span className="selectable-list__label-text">{item.label}</span>
+                                        <span className="selectable-list__subtitle">{item.subtitle ?? ''}</span>
+                                    </span>
+                                ) : (
+                                    <span className="selectable-list__label-text">{item.label}</span>
+                                )}
                                 {item.hasSpectra && (
                                     <span className="selectable-list__badge selectable-list__badge--spectra" title="Has Spectrum Data">S</span>
                                 )}

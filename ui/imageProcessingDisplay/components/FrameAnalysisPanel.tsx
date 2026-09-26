@@ -15,6 +15,7 @@ import { useImageProcessingContext } from '../context/ImageProcessingContext';
 import { fetchFrameStatsGrouped, refreshTarget, updateTargetById } from '../../common/services/targetService';
 import { ConfirmDialog } from '../../common/components/ConfirmDialog';
 import { GroupedFrameStat } from '../../common/types/backendTypes';
+import { chooseAnalysisSelection, chooseTemporalVariationSelection } from '../utils/analysisSelection';
 
 interface FrameAnalysisPanelProps {
   // Data Tab Props
@@ -128,6 +129,19 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
     };
   }, [checkedFiles, allFiles, filteredFiles]);
 
+  // What the two Analyze actions would send right now. Stage one analyzes the
+  // master stacked spectral image; stage two follows the raw spectral frames.
+  const selectionInput = {
+    filterType: filterStatus.filterType,
+    stackedImage,
+    stackedSpectralTarget,
+    checkedFiles,
+    selectedFile,
+    filteredFilePaths: filteredFiles.map(f => f.path),
+  };
+  const analysisSelection = chooseAnalysisSelection(selectionInput);
+  const temporalVariationSelection = chooseTemporalVariationSelection(selectionInput);
+
   return (
     <div className="image-processing-display__right panel-group">
       <SectionPanel
@@ -199,6 +213,7 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
                     spectralPath={stackedSpectralTarget || ''}
                     exposureTime={totalExposure}
                     targetId={selectedTarget}
+                    selectedFile={selectedFile}
                     onView={handleSelectFile}
                     onShowHeader={onShowHeader}
                   />
@@ -257,29 +272,10 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
           hasNoFiles={checkedFiles.size === 0 && filteredFiles.length === 0}
           hasMultipleFilters={filterStatus.hasMultiple}
           selectedFilters={filterStatus.filters}
-          onAnalyze={(stackedImage || stackedSpectralTarget || checkedFiles.size > 0 || selectedFile || filteredFiles.length > 0) ? () => {
-            // Priority 1: Specifically checked files (checkboxes)
-            if (checkedFiles.size > 0) {
-              startAnalysis(Array.from(checkedFiles), filterStatus.filterType || undefined);
-            }
-            // Priority 2: Stacked spectral results
-            else if ((filterStatus.filterType === 'SPEC' || filterStatus.filterType === 'Spectroscopy' || filterStatus.filterType === 'Star Analyzer 200') && stackedSpectralTarget) {
-              startAnalysis([stackedSpectralTarget], 'SPEC');
-            }
-            // Priority 3: Stacked images (L or other)
-            else if (stackedImage) {
-              startAnalysis([stackedImage], filterStatus.filterType || undefined);
-            }
-            // Priority 4: Single selected (previewed) file
-            else if (selectedFile) {
-              startAnalysis([selectedFile], filterStatus.filterType || undefined);
-            }
-            // Priority 5: All files in current view
-            else {
-              const filesToAnalyze = filteredFiles.map(f => f.path);
-              startAnalysis(filesToAnalyze, filterStatus.filterType || undefined);
-            }
-          } : undefined}
+          onAnalyze={analysisSelection ? () => startAnalysis(analysisSelection.paths, analysisSelection.filterType) : undefined}
+          onAnalyzeTemporalVariation={temporalVariationSelection
+            ? () => startAnalysis(temporalVariationSelection.paths, temporalVariationSelection.filterType)
+            : undefined}
           isAnalyzing={isAnalyzing}
           onIngest={openIngestModal}
           isIngestDisabled={!selectedTarget}

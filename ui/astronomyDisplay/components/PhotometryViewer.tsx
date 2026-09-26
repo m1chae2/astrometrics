@@ -9,6 +9,7 @@ import { PlotlyTrace, getVar, buildLayout } from '../../common/utils/plotTools';
 import '../styles/astronomyViewer.css';
 
 import { Spectrum } from '../../common/types/backendTypes';
+import { formatPeriod, isSignificantVerdict, selectLightCurveSeries } from '../utils/starDisplayFormat';
 
 interface Props {
     astronomyData: Spectrum | null;
@@ -49,14 +50,23 @@ export const PhotometryViewer: React.FC<Props> = ({
     const lc = astronomyData?.photometry;
     const periodogram = lc?.periodogram;
     const transitCandidate = lc?.transitCandidate;
-    const bestPeriodDays = periodogram?.bestPeriodDays || transitCandidate?.periodDays || 0;
+    // A period is only offered for phase folding when the search judged it
+    // detected or possible. The strongest peak of a noisy light curve is
+    // not a period.
+    const bestPeriodDays =
+        (isSignificantVerdict(periodogram?.verdict) ? periodogram?.bestPeriodDays : 0) ||
+        (isSignificantVerdict(transitCandidate?.verdict) ? transitCandidate?.periodDays : 0) ||
+        0;
+
+    // Which series is plotted (and how its axis is titled) comes from what
+    // the star actually has, not from a fixed choice.
+    const lightCurveSeries = useMemo(() => selectLightCurveSeries(lc), [lc]);
 
     const plotData: PlotlyTrace[] = useMemo(() => {
         if (!astronomyData?.photometry) return [];
 
         const allX = lc?.timestamps || [];
-        const allFlux = lc?.fluxes || [];
-        const allMag = lc?.magnitudes || [];
+        const { values: allValues, axisTitle: yLabel } = lightCurveSeries;
 
         const rawX: string[] = [];
         const y: number[] = [];
@@ -64,12 +74,10 @@ export const PhotometryViewer: React.FC<Props> = ({
         allX.forEach((timestamp, i) => {
             if (selectedTimestamps && !selectedTimestamps.has(timestamp)) return;
             rawX.push(timestamp);
-            y.push(allMag.length > i ? allMag[i] : allFlux[i]);
+            y.push(allValues[i]);
         });
 
         if (rawX.length === 0) return [];
-
-        const yLabel = allMag.length > 0 ? 'Magnitude' : 'Flux (Relative)';
 
         if (isPhaseFolded && bestPeriodDays > 0) {
             const phaseX = computePhaseArray(rawX, bestPeriodDays);
@@ -81,7 +89,7 @@ export const PhotometryViewer: React.FC<Props> = ({
                     type: 'scatter',
                     marker: { color: getVar('--plot-accent', '#2196f3'), size: 6 },
                     line: { width: 0 },
-                    name: `${yLabel} (Phase-Folded P=${bestPeriodDays.toFixed(2)}d)`,
+                    name: `${yLabel} (Phase-Folded P=${formatPeriod(bestPeriodDays)})`,
                 },
             ];
         }
@@ -97,21 +105,21 @@ export const PhotometryViewer: React.FC<Props> = ({
                 name: yLabel,
             },
         ];
-    }, [astronomyData, selectedTimestamps, isPhaseFolded, bestPeriodDays, lc]);
+    }, [astronomyData, selectedTimestamps, isPhaseFolded, bestPeriodDays, lc, lightCurveSeries]);
 
     const layout = useMemo(() => {
-        const hasMagnitudes = ((astronomyData?.photometry as any)?.magnitudes?.length ?? 0) > 0;
+        const hasMagnitudes = lightCurveSeries.isMagnitude;
         const xTitle = isPhaseFolded && bestPeriodDays > 0 ? 'Orbital Phase (0.0 - 1.0)' : 'Time (UTC)';
         const base = buildLayout({
             xTitle,
-            yTitle: hasMagnitudes ? 'Magnitude' : 'Flux (Relative)',
+            yTitle: lightCurveSeries.axisTitle,
         });
 
         if (base.yaxis && hasMagnitudes) {
             (base.yaxis as any).autorange = 'reversed';
         }
         return base;
-    }, [astronomyData, isPhaseFolded, bestPeriodDays]);
+    }, [isPhaseFolded, bestPeriodDays, lightCurveSeries]);
 
     if (loading) return <div className="astronomy-viewer-loading">Loading photometry...</div>;
     if (error) return <div className="astronomy-viewer-error">{error}</div>;
@@ -135,7 +143,7 @@ export const PhotometryViewer: React.FC<Props> = ({
                             className={`segmented-btn ${isPhaseFolded ? 'active' : ''}`}
                             onClick={() => setIsPhaseFolded(true)}
                         >
-                            Phase-Folded ({bestPeriodDays.toFixed(2)}d)
+                            Phase-Folded ({formatPeriod(bestPeriodDays)})
                         </button>
                     </div>
                 )}

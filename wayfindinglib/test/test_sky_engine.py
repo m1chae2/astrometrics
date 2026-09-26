@@ -15,6 +15,7 @@ from astrometricslib import StellarObject, Target
 from wayfindinglib.sky import Sky
 from wayfindinglib.skylib.catalog_operations import astrometrics_catalog
 from wayfindinglib.skylib.coordinate_operations import compute_altaz
+from wayfindinglib.skylib.resolution_operations import get_library_star_summaries, get_sources
 
 
 def test_sky_initialization() -> None:
@@ -78,7 +79,7 @@ def test_get_sources(mock_global, mock_local) -> None:  # ruff: ignore[missing-t
     # Mock local Astrometrics instance on Sky
     sky._astrometrics = MagicMock()
     sky._astrometrics.targets.list.return_value = [target]
-    sky._astrometrics.stellar_objects = []
+    sky._astrometrics.stars.list_objects_in_region.return_value = []
 
     # 1. Local only
     result_local = sky.get_sources(12.0, 34.0, 5.0, include_catalog=False)
@@ -104,7 +105,7 @@ def test_astrometrics_catalog_includes_letterless_plate_solved_targets() -> None
 
     fake_astrometrics = MagicMock()
     fake_astrometrics.targets.list.return_value = [plate_solved_target]
-    fake_astrometrics.stellar_objects = []
+    fake_astrometrics.stars.list_objects_in_region.return_value = []
 
     fake_sky = MagicMock()
     fake_sky._astrometrics = fake_astrometrics
@@ -128,7 +129,7 @@ def test_astrometrics_catalog_skips_unparseable_target_without_dropping_others()
 
     fake_astrometrics = MagicMock()
     fake_astrometrics.targets.list.return_value = [good_target, bad_target]
-    fake_astrometrics.stellar_objects = []
+    fake_astrometrics.stars.list_objects_in_region.return_value = []
 
     fake_sky = MagicMock()
     fake_sky._astrometrics = fake_astrometrics
@@ -137,6 +138,66 @@ def test_astrometrics_catalog_skips_unparseable_target_without_dropping_others()
 
     assert len(results) == 1
     assert results[0].id == "GOOD"
+
+
+def test_astrometrics_catalog_filters_stellar_objects_by_radius() -> None:
+    """Verifies the stellar-object branch returns only in-radius stars.
+
+    Also covers the local-only (`include_catalog=False`) path of
+    `Sky.get_sources`, which used to return every stellar object
+    regardless of the requested region.
+    """
+    near_star = StellarObject(id="NEAR", ra=250.17, dec=36.46)
+    far_star = StellarObject(id="FAR", ra=10.0, dec=-60.0)
+    no_coordinates_star = StellarObject(id="BLANK", ra="", dec="")
+
+    fake_astrometrics = MagicMock()
+    fake_astrometrics.targets.list.return_value = []
+    fake_astrometrics.stars.list_objects_in_region.return_value = [near_star, far_star, no_coordinates_star]
+
+    fake_sky = MagicMock()
+    fake_sky._astrometrics = fake_astrometrics
+
+    results = astrometrics_catalog(fake_sky, ra_deg=250.17, dec_deg=36.46, radius_deg=1.0)
+
+    assert [result.id for result in results] == ["NEAR"]
+
+    local_only = get_sources(fake_sky, 250.17, 36.46, 1.0, include_catalog=False)
+    assert [result.id for result in local_only] == ["NEAR"]
+
+
+def test_astrometrics_catalog_leaves_the_stars_alone_when_asked_not_to_load_them() -> None:
+    """Verifies include_stars=False returns targets without touching the stars.
+
+    Reading every star in full takes seconds on a large library, so a
+    caller that gets the stars another way must be able to skip that. The
+    stellar objects are made to raise if they are read at all.
+    """
+    target = Target(id="T1", commonName="Target 1", ra="16h 41m 40s", dec="+36d 27m 36s")
+
+    fake_astrometrics = MagicMock()
+    fake_astrometrics.targets.list.return_value = [target]
+    fake_astrometrics.stars.list_objects_in_region.side_effect = AssertionError("stars were loaded")
+
+    fake_sky = MagicMock()
+    fake_sky._astrometrics = fake_astrometrics
+
+    results = get_sources(fake_sky, 250.17, 36.46, 1.0, include_catalog=False, include_stars=False)
+
+    assert [result.id for result in results] == ["T1"]
+
+
+def test_get_library_star_summaries_reads_the_region_summaries_from_astrometrics() -> None:
+    """Verifies the summaries come from the library's fast region read."""
+    fake_sky = MagicMock()
+    fake_sky._astrometrics.stars.list_object_summaries_in_region.return_value = [{"id": "S1"}]
+
+    summaries = get_library_star_summaries(fake_sky, 250.17, 36.46, 2.0)
+
+    assert summaries == [{"id": "S1"}]
+    fake_sky._astrometrics.stars.list_object_summaries_in_region.assert_called_once_with(
+        250.17, 36.46, 2.0, None
+    )
 
 
 def test_compute_altaz_matches_recorded_indi_driver_baseline() -> None:
@@ -197,3 +258,59 @@ def test_object_visibility() -> None:
     vis_subhorizon = sky.get_object_visibility(180.0, -85.0, time)
     assert vis_subhorizon["rise_time"] == "Never Rises"
     assert vis_subhorizon["set_time"] == "Never Rises"
+
+
+def test_query_online_catalogs_passes_the_magnitude_limit_to_every_driver():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """A magnitude limit given to the dispatcher reaches each driver."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from wayfindinglib.skylib.catalog_operations import query_online_catalogs
+
+    driver = MagicMock()
+    driver.driver_name = "gaia"
+    driver.maximum_query_radius_degrees = 90.0
+    driver.query_region.return_value = []
+    sky = SimpleNamespace(_catalog_driver_registry={"gaia": driver})
+
+    query_online_catalogs(sky, 250.0, 36.0, 2.0, ["gaia"], magnitude_limit=14.0)
+
+    driver.query_region.assert_called_once_with(250.0, 36.0, 2.0, magnitude_limit=14.0)
+
+
+def test_astrometrics_catalog_reads_only_the_stars_near_the_search_circle() -> None:
+    """Verifies the stars are fetched for the search circle, not all at once.
+
+    Holding every star of a 270,000-star library in memory cost gigabytes
+    and got the backend killed, so the library is asked for just the stars
+    inside the circle being searched.
+    """
+    fake_astrometrics = MagicMock()
+    fake_astrometrics.targets.list.return_value = []
+    fake_astrometrics.stars.list_objects_in_region.return_value = []
+    fake_sky = MagicMock()
+    fake_sky._astrometrics = fake_astrometrics
+
+    astrometrics_catalog(fake_sky, ra_deg=250.17, dec_deg=36.46, radius_deg=1.0)
+
+    fake_astrometrics.stars.list_objects_in_region.assert_called_once_with(250.17, 36.46, 1.0)
+
+
+def test_resolve_target_coordinates_asks_the_library_for_the_named_star_only() -> None:
+    """Verifies a name is looked up in the library, skipping unset positions.
+
+    A star that matches the name but has no position yet (0.0, 0.0) must be
+    passed over in favour of a later match that has one, as before.
+    """
+    from wayfindinglib.skylib.resolution_operations import resolve_target_coordinates
+
+    unset = StellarObject(id="Vega", name="Vega", ra=0.0, dec=0.0)
+    placed = StellarObject(id="* alf Lyr", name="Vega", ra=279.23, dec=38.78)
+    fake_sky = MagicMock()
+    fake_sky._astrometrics.targets.list.return_value = []
+    fake_sky._astrometrics.stars.find_all_by_id_or_name.return_value = [unset, placed]
+
+    resolved = resolve_target_coordinates(fake_sky, "Vega")
+
+    assert resolved is placed
+    fake_sky._astrometrics.stars.find_all_by_id_or_name.assert_called_once_with("Vega")

@@ -314,10 +314,24 @@
     flex-direction: column;
 }
 
+/* Panel__content scrolls by default (see panels.css); override so the
+   log box below is the only thing that scrolls, not the status/progress
+   rows above it. Must stay a flex column (like panel--flex-grow above)
+   so the bounded height propagates down to .modal-log-container instead
+   of just being clipped here. */
+.ingest-modal__status-container .panel__content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+}
+
 .ingest-modal__status-content {
     flex: 1;
     display: flex;
     flex-direction: column;
+    min-height: 0;
 }
 
 .ingest-modal__logs-message {

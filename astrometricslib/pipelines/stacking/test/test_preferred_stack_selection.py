@@ -161,6 +161,12 @@ def test_camera_names_match_across_spelling_differences():  # ruff: ignore[missi
     assert not _camera_names_match("ZWO ASI533MM Pro", "Nikon DSLR DSC D5300")
 
 
+def test_camera_names_match_across_profile_aliases():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """The header's spelling and the config's are the same camera."""
+    assert _camera_names_match("Nikon DSLR DSC D5300", "Nikon D5300")
+    assert _camera_names_match("ZWO CCD ASI533MM Pro", "ZWO ASI 533MM Pro")
+
+
 def test_the_recorded_entry_carries_its_frame_count():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Frame count is how a reader judges which stack is worth using."""
     target = _Target()

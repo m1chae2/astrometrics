@@ -179,7 +179,10 @@ def test_sky_browsing_methods_delegate_to_the_sky_engine(mocker, isolated_butler
     fake_sky.resolve_target_coordinates.assert_called_once_with("M 81")
 
     planning.get_sources(1.0, 2.0, 3.0, include_catalog=True)
-    fake_sky.get_sources.assert_called_once_with(1.0, 2.0, 3.0, True)
+    fake_sky.get_sources.assert_called_once_with(1.0, 2.0, 3.0, True, True)
+
+    planning.get_library_star_summaries(1.0, 2.0, 3.0)
+    fake_sky.get_library_star_summaries.assert_called_once_with(1.0, 2.0, 3.0, None)
 
     planning.get_visibility(["obj"], time_input="now")
     fake_sky.get_visibility.assert_called_once_with(["obj"], "now")
@@ -220,6 +223,51 @@ def test_sky_and_observation_engines_are_lazily_constructed_once(isolated_butler
 
     assert planning._sky_engine is sky_engine
     assert planning._observation_engine is observation_engine
+
+
+def test_sky_engine_is_constructed_once_under_concurrent_first_access(isolated_butler, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify simultaneous first requests share one `Sky` instead of one each.
+
+    Regression test: the Planetarium fires several queries at once on mount,
+    and an unguarded lazy init let every one of them construct its own `Sky`
+    -- each loading a full copy of the star catalog (tens of seconds and
+    gigabytes each on a 270k-star library).
+    """
+    import threading
+    import time
+
+    import wayfindinglib.sky
+
+    construction_count = 0
+    count_lock = threading.Lock()
+
+    class SlowFakeSky:
+        def __init__(self, config=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+            nonlocal construction_count
+            with count_lock:
+                construction_count += 1
+            time.sleep(0.2)  # long enough that every thread arrives mid-construction
+
+    monkeypatch.setattr(wayfindinglib.sky, "Sky", SlowFakeSky)
+
+    planning = ObservationPlanning(butler=isolated_butler)
+    thread_count = 8
+    start_together = threading.Barrier(thread_count)
+    engines = []
+
+    def request_engine() -> None:
+        start_together.wait()
+        engines.append(planning._sky_engine)
+
+    threads = [threading.Thread(target=request_engine) for _ in range(thread_count)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert construction_count == 1
+    assert len(engines) == thread_count
+    assert all(engine is engines[0] for engine in engines)
 
 
 def test_planning_module_tree_imports_no_device_driver():  # ruff: ignore[missing-return-type-undocumented-public-function]

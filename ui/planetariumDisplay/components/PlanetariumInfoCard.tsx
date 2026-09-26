@@ -14,6 +14,7 @@ import { PlanetariumSource, ObserverLocation } from '../../common/types/planetar
 import { SpectrumViewer } from '../../astronomyDisplay/components/SpectrumViewer';
 import { ParsedAstronomyData } from '../../astronomyDisplay/hooks/useSpectrumData';
 import { safeParse, formatRA, formatDec, formatNumber } from '../utils/coordinateUtils';
+import { formatCatalogMagnitude } from '../layers/StarOverlay';
 
 /**
  * Props for PlanetariumInfoCard.
@@ -135,7 +136,7 @@ export const PlanetariumInfoCard: React.FC<Props> = ({
               <>
                 <tr>
                   <td>Magnitude</td>
-                  <td>{formatNumber(source.magnitude, 2)}</td>
+                  <td>{formatCatalogMagnitude(source.magnitude, 2)}</td>
                 </tr>
                 <tr>
                   <td>Spectral Type</td>

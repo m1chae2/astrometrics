@@ -91,6 +91,11 @@ class PyIndiStub:
     ISS_ON = 1
     ISS_OFF = 0
 
+    IPS_IDLE = 0
+    IPS_OK = 1
+    IPS_BUSY = 2
+    IPS_ALERT = 3
+
 
 try:
     import PyIndi  # type: ignore[import-untyped, missing-import]

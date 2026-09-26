@@ -74,7 +74,18 @@ def test_get_attempts_returns_alias_keyed_dicts():  # ruff: ignore[missing-retur
     service.alignment_attempts = [
         AlignmentAttempt(status="aligned", deltaRaArcsec=1.5, deltaDecArcsec=-2.5),
     ]
-    assert service.get_attempts() == [{"status": "aligned", "deltaRaArcsec": 1.5, "deltaDecArcsec": -2.5}]
+    assert service.get_attempts() == [
+        {
+            "status": "aligned",
+            "deltaRaArcsec": 1.5,
+            "deltaDecArcsec": -2.5,
+            "ra": None,
+            "dec": None,
+            "pointingErrorArcsec": None,
+            "timestamp": None,
+            "targetName": None,
+        }
+    ]
 
 
 def test_clear_attempts_empties_the_list():  # ruff: ignore[missing-return-type-undocumented-public-function]

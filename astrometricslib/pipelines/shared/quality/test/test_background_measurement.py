@@ -29,7 +29,7 @@ def test_measure_frame_saturated_pixel_fraction_reads_known_saturated_frame(tmp_
     data[:10, :] = 65535.0  # 10% of pixels saturated
     path = tmp_path / "partially_saturated.fits"
     fits.PrimaryHDU(data).writeto(path)
-    assert measure_frame_saturated_pixel_fraction(str(path)) == pytest.approx(0.1)
+    assert measure_frame_saturated_pixel_fraction(str(path), 65000.0) == pytest.approx(0.1)
 
 
 def test_measure_frame_saturated_pixel_fraction_reads_known_clean_frame(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
@@ -37,4 +37,14 @@ def test_measure_frame_saturated_pixel_fraction_reads_known_clean_frame(tmp_path
     data = np.full((100, 100), 500.0, dtype=np.float32)
     path = tmp_path / "clean.fits"
     fits.PrimaryHDU(data).writeto(path)
-    assert measure_frame_saturated_pixel_fraction(str(path)) == pytest.approx(0.0)
+    assert measure_frame_saturated_pixel_fraction(str(path), 65000.0) == pytest.approx(0.0)
+
+
+def test_measure_frame_saturated_pixel_fraction_uses_the_threshold_it_is_given(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify a low threshold flags the frame and a high one does not."""
+    data = np.full((100, 100), 500.0, dtype=np.float32)
+    data[:10, :] = 16000.0  # a 14-bit camera's clipped pixels
+    path = tmp_path / "fourteen_bit.fits"
+    fits.PrimaryHDU(data).writeto(path)
+    assert measure_frame_saturated_pixel_fraction(str(path), 15000.0) == pytest.approx(0.1)
+    assert measure_frame_saturated_pixel_fraction(str(path), 65000.0) == pytest.approx(0.0)

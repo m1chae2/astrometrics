@@ -26,6 +26,12 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["AbstractButler", "Butler", "DatasetSpec"]
 
+# How many ids one `WHERE id IN (...)` query may carry. SQLite refuses a
+# statement with more bound values than its compiled-in limit (as low as 999
+# on older builds), and a single target can own tens of thousands of stars,
+# so longer id lists are split into queries of this size.
+_IDS_PER_QUERY = 900
+
 
 @dataclass(frozen=True)
 class DatasetSpec:
@@ -58,18 +64,35 @@ class DatasetSpec:
     id_field: str = "id"
     extra_column_types: dict[str, str] = field(default_factory=dict)
     extra_columns: Callable[[Any], dict[str, Any]] | None = None
-    indexed_columns: tuple[str, ...] = ()
+    indexed_columns: tuple[str | tuple[str, ...], ...] = ()
     """Names from `extra_column_types` that should get a real SQL index,
     for callers that filter or project on them via `list_projected`
     without needing every row's `data_json` parsed. Omit columns
     nothing ever queries by -- an index is write overhead this schema
     doesn't need for `id`/`data_json` access alone, since `id` is
-    already the primary key."""
+    already the primary key.
+
+    An entry can also be a tuple of column names, which makes one index
+    over all of them, in that order. If a query reads only columns that
+    are in such an index, the database answers it from the index alone
+    and never opens the (large) stored rows, which is far faster for a
+    table whose rows carry a big ``data_json``. Put the column the query
+    filters on first."""
     serializer: Callable[[Any], Any] | None = None
     """Override for producing the JSON-serializable payload from a model
     instance. Defaults to ``obj.serialize()``; pass e.g.
     ``lambda obj: obj.model_dump(mode="json", by_alias=True)`` for plain
     pydantic models with no `.serialize()` convention."""
+    column_backfills: dict[str, str] = field(default_factory=dict)
+    """SQL expressions that fill a column that was just added to a table
+    that already holds rows, keyed by column name.
+
+    Adding a column leaves every old row empty (NULL). If the value can
+    be worked out from the row's own ``data_json``, list it here, for
+    example ``{"spectral_type": "json_extract(data_json, '$.spectralType')"}``.
+    The expression runs once, in the same call that adds the column, and
+    never again, so later writes are never overwritten. Columns that
+    were not just added are ignored."""
 
 
 class AbstractButler(ABC):
@@ -161,9 +184,20 @@ class Butler(AbstractButler):
         for name, sql_type in spec.extra_column_types.items():
             if name not in existing_columns:
                 cursor.execute(f"ALTER TABLE {spec.table_name} ADD COLUMN {name} {sql_type}")
-        for column in spec.indexed_columns:
-            index_name = f"idx_{spec.table_name}_{column}"
-            cursor.execute(f"CREATE INDEX IF NOT EXISTS {index_name} ON {spec.table_name}({column})")
+                backfill_expression = spec.column_backfills.get(name)
+                if backfill_expression is not None:
+                    cursor.execute(f"UPDATE {spec.table_name} SET {name} = {backfill_expression}")
+                    # Read-only callers never commit, and an UPDATE that is
+                    # not committed is undone when the connection closes.
+                    # The column already exists by then, so this code would
+                    # never run again and the column would stay empty.
+                    cursor.connection.commit()
+        for indexed_entry in spec.indexed_columns:
+            index_columns = (indexed_entry,) if isinstance(indexed_entry, str) else tuple(indexed_entry)
+            index_name = f"idx_{spec.table_name}_{'_'.join(index_columns)}"
+            cursor.execute(
+                f"CREATE INDEX IF NOT EXISTS {index_name} ON {spec.table_name}({', '.join(index_columns)})"
+            )
 
     def _row_to_obj(self, spec: DatasetSpec, row: Any) -> Any:
         return spec.model_class.model_validate(json.loads(row["data_json"]))
@@ -211,6 +245,7 @@ class Butler(AbstractButler):
         columns: list[str],
         like: dict[str, str] | None = None,
         limit: int | None = None,
+        between: dict[str, tuple[float, float]] | None = None,
     ) -> list[dict[str, Any]]:
         """List rows as plain dicts of only the given columns.
 
@@ -251,10 +286,19 @@ class Butler(AbstractButler):
             must match literally, not act as a wildcard).
         limit : `int`, optional
             Maximum rows to return. `None` (default) returns every
-            matching row. Applied after `like`, with no defined
-            ordering -- a caller needing a stable "top N" must sort
-            the result itself or add its own ``ORDER BY`` via a future
-            extension of this method.
+            matching row. Applied after `like` and `between`, with no
+            defined ordering -- a caller needing a stable "top N" must
+            sort the result itself or add its own ``ORDER BY`` via a
+            future extension of this method.
+        between : `dict` [`str`, `tuple` [`float`, `float`]], optional
+            Column-name/(low, high) pairs. A row is kept only if each
+            named column is at least ``low`` and at most ``high``
+            (both ends included), ANDed with `like` and with each
+            other. Rows where the column is empty (NULL) never match.
+            Keys are validated the same way as `columns`. When the
+            column has an index (see `DatasetSpec.indexed_columns`),
+            SQLite uses it to skip the rows outside the range instead
+            of reading every row.
 
         Returns
         -------
@@ -265,16 +309,18 @@ class Butler(AbstractButler):
         Raises
         ------
         ValueError
-            If `columns` is empty, or `columns`/`like` name anything
-            outside ``id``/``data_json``/this dataset's registered
-            extra columns.
+            If `columns` is empty, or `columns`/`like`/`between` name
+            anything outside ``id``/``data_json``/this dataset's
+            registered extra columns.
         """
         spec = self._spec(dataset_type)
         allowed_columns = {"id", "data_json", *spec.extra_column_types.keys()}
 
         if not columns:
             raise ValueError("list_projected requires at least one column")
-        unknown = [column for column in (*columns, *(like or {})) if column not in allowed_columns]
+        unknown = [
+            column for column in (*columns, *(like or {}), *(between or {})) if column not in allowed_columns
+        ]
         if unknown:
             raise ValueError(
                 f"list_projected: unknown column(s) {unknown} for dataset type {dataset_type!r}; "
@@ -306,6 +352,9 @@ class Butler(AbstractButler):
                     + "%"
                     for value in like.values()
                 )
+            for column, (low_value, high_value) in (between or {}).items():
+                conditions.append(f"{column} BETWEEN ? AND ?")
+                params.extend([low_value, high_value])
             if conditions:
                 query += " WHERE " + " AND ".join(conditions)
             if limit is not None:
@@ -334,9 +383,54 @@ class Butler(AbstractButler):
         try:
             cursor = conn.cursor()
             self._ensure_table(cursor, spec)
-            placeholders = ",".join("?" for _ in ids)
-            cursor.execute(f"SELECT data_json FROM {spec.table_name} WHERE id IN ({placeholders})", list(ids))
-            return [self._row_to_obj(spec, row) for row in cursor.fetchall()]
+            records: list[Any] = []
+            for start in range(0, len(ids), _IDS_PER_QUERY):
+                id_chunk = list(ids[start : start + _IDS_PER_QUERY])
+                placeholders = ",".join("?" for _ in id_chunk)
+                cursor.execute(
+                    f"SELECT data_json FROM {spec.table_name} WHERE id IN ({placeholders})", id_chunk
+                )
+                records.extend(self._row_to_obj(spec, row) for row in cursor.fetchall())
+            return records
+        finally:
+            conn.close()
+
+    def existing_ids(self, dataset_type: str, ids: list[str]) -> set[str]:
+        """Say which of the given ids are recorded, without loading any record.
+
+        Reads only the id column, so a stored record's JSON is never
+        parsed. Use this instead of `get_by_ids` when only "does it exist"
+        matters.
+
+        Parameters
+        ----------
+        dataset_type : `str`
+            Registered dataset type to query.
+        ids : `list` [`str`]
+            The ids to look for.
+
+        Returns
+        -------
+        found_ids : `set` [`str`]
+            The subset of `ids` that has a recorded row.
+        """
+        if not ids:
+            return set()
+        spec = self._spec(dataset_type)
+        db_path = self._db_path()
+        if not os.path.exists(db_path):
+            return set()
+        conn = connect_db(db_path)
+        try:
+            cursor = conn.cursor()
+            self._ensure_table(cursor, spec)
+            found_ids: set[str] = set()
+            for start in range(0, len(ids), _IDS_PER_QUERY):
+                id_chunk = list(ids[start : start + _IDS_PER_QUERY])
+                placeholders = ",".join("?" for _ in id_chunk)
+                cursor.execute(f"SELECT id FROM {spec.table_name} WHERE id IN ({placeholders})", id_chunk)
+                found_ids.update(row[0] for row in cursor.fetchall())
+            return found_ids
         finally:
             conn.close()
 

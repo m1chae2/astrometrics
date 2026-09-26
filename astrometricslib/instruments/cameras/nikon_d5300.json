@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "camera_name": "Nikon D5300",
+  "name_aliases": [
+    "Nikon DSLR DSC D5300"
+  ],
+  "record_name": "Nikon DSLR DSC D5300",
+  "is_generic_fallback": false,
+  "clip_ceiling_adu": {
+    "value": 16383.0,
+    "provenance": {
+      "kind": "measured",
+      "source": "Maximum of saturated raw frames in this library. The sensor is 14-bit, so a clipped frame reaches 16383. Recorded before the camera profiles existed, in pipelines/stacking/exposure_saturation.py."
+    }
+  },
+  "saturation_threshold_adu": {
+    "value": 65000.0,
+    "provenance": {
+      "kind": "assumed",
+      "source": "The pipeline's long-standing default for raw frames: just under the 16-bit maximum of 65535, applied to every camera. It was never measured per camera."
+    }
+  },
+  "photometric_linearity_limit_adu": null,
+  "quantum_efficiency": null,
+  "notes": "OPEN QUESTION: this threshold sits above the clip ceiling of 16383, so a saturated pixel could never reach it, and saturation checks that use it would always report none for raw D5300 frames read at their native 14-bit scale. The module docstring of pipelines/stacking/exposure_saturation.py records the same problem. Not yet checked against real D5300 frames here. The value is kept as it was so that behaviour does not change during the profile refactor."
+}

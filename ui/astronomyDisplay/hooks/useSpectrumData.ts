@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { fetchAstronomyData } from '../../common/services/astronomyService';
 import { reportError } from '../../common/utils/reportError';
 
@@ -20,6 +20,8 @@ export interface UseSpectrumDataResult {
     loading: boolean;
     /** Error message if fetching or parsing failed. */
     error: string | null;
+    /** Replaces the loaded star, and its cached copy, with a newer version from the backend. */
+    replaceAstronomyData: (updatedStar: Spectrum) => void;
 }
 
 /**
@@ -37,6 +39,9 @@ export function useSpectrumData(
 
     const cacheRef = useRef<Map<string, ParsedAstronomyData>>(new Map());
     const onLoadedRef = useRef(onLoaded);
+    // The id the currently shown star was requested under. `pendingId` is
+    // cleared once a star loads, so this is what its cached copy is keyed by.
+    const loadedKeyRef = useRef<string>('');
 
     useEffect(() => {
         onLoadedRef.current = onLoaded;
@@ -51,6 +56,7 @@ export function useSpectrumData(
         // Check cache for existing data.
         const cached = cacheRef.current.get(pendingId);
         if (cached) {
+            loadedKeyRef.current = pendingId;
             setAstronomyData(cached);
             onLoadedRef.current?.(pendingId);
             return;
@@ -76,6 +82,7 @@ export function useSpectrumData(
 
                 cacheRef.current.set(pendingId, result);
                 if (!cancelled) {
+                    loadedKeyRef.current = pendingId;
                     setAstronomyData(result);
                     onLoadedRef.current?.(pendingId);
                 }
@@ -97,5 +104,16 @@ export function useSpectrumData(
         };
     }, [pendingId]);
 
-    return { astronomyData, loading, error };
+    const replaceAstronomyData = useCallback((updatedStar: Spectrum) => {
+        const plotData = updatedStar.plotData || { wavelengths: [], intensities: [] };
+        const replacement: ParsedAstronomyData = {
+            ...updatedStar,
+            wavelength: plotData.wavelengths,
+            spectrumFlux: plotData.intensities,
+        };
+        if (loadedKeyRef.current) cacheRef.current.set(loadedKeyRef.current, replacement);
+        setAstronomyData(replacement);
+    }, []);
+
+    return { astronomyData, loading, error, replaceAstronomyData };
 }

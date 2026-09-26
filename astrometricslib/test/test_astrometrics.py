@@ -5,6 +5,7 @@ Astrometrics high-level interface.
 """
 
 from astrometricslib import Astrometrics
+from astrometricslib.drivers.catalog_access import CatalogAccess
 from astrometricslib.pipelines.tasks import analyze_target
 from astrometricslib.utilities.config_loader import AppConfiguration
 
@@ -34,6 +35,42 @@ def test_astrometrics_target_access(tmp_path):  # ruff: ignore[missing-type-func
         targets = astrometrics.targets.list()
         assert len(targets) == 1
         assert targets[0].id == "Vega"
+    finally:
+        config.update_config({"Image Library": {"path": original_path}})
+
+
+def test_astrometrics_keeps_no_copy_of_the_star_catalog(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify `Astrometrics` neither loads nor holds the whole star catalog.
+
+    Two real production incidents came from this. `Astrometrics.__init__`
+    once loaded the entire local catalog eagerly (about 270,000 stars,
+    550MB of stored JSON), which ran memory-capped batch workers out of
+    memory. Later a lazy `stellar_objects` property kept one permanent
+    full copy (about 2.8 GB) beside the ones other code loaded, and the
+    backend was killed for running out of memory. The database is the one
+    copy of the catalog now, reached through `astrometrics.stars`.
+    """
+    config = AppConfiguration()
+    library_path = tmp_path / "library"
+    library_path.mkdir()
+    (library_path / "targets").mkdir()
+    original_path = config.get_value("Image Library", "path", fallback="./libraryIndex")
+    config.update_config({"Image Library": {"path": str(library_path)}})
+
+    try:
+        dataset_types_read: list[str] = []
+        original_get = CatalogAccess.get
+
+        def _counting_get(self, dataset_type, selector):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+            dataset_types_read.append(dataset_type)
+            return original_get(self, dataset_type, selector)
+
+        monkeypatch.setattr(CatalogAccess, "get", _counting_get)
+
+        astrometrics = Astrometrics(app_config=config)
+
+        assert "stellar_catalog" not in dataset_types_read
+        assert not hasattr(astrometrics, "stellar_objects")
     finally:
         config.update_config({"Image Library": {"path": original_path}})
 

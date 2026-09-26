@@ -1,3 +1,10 @@
+/**
+ * Frame Count Table Component
+ *
+ * Displays frame counts and calibration match status for session light frames
+ * categorized by filter and exposure duration.
+ */
+
 import React, { useMemo } from 'react';
 import { SectionPanel } from '../../common/components/SectionPanel';
 import { CalibrationEntry } from '../../common/types/backendTypes';
@@ -160,59 +167,61 @@ export const UnifiedFrameAnalysis: React.FC<UnifiedFrameAnalysisProps> = ({
                 {cameraSelector}
             </div>
 
-            <table className="data-table data-table-full">
-                <thead>
-                    <tr className="data-table-header-row">
-                        <th className="data-table-cell-padding">Asset Type</th>
-                        <th className="data-table-cell-right">Duration</th>
-                        <th className="data-table-cell-right">Session</th>
-                        <th className="data-table-cell-right">Library Match</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {Object.entries(groupedLights)
-                        .sort(([a], [b]) => a.localeCompare(b))
-                        .map(([filterName, frames]) => (
-                            <React.Fragment key={`group-${filterName}`}>
-                                <tr className="data-table-row">
-                                    <td colSpan={4} className="frame-count-section-header" style={{ padding: '8px 12px 4px 12px' }}>
-                                        {filterName}
-                                    </td>
-                                </tr>
-                                {frames
-                                    .sort((a, b) => parseFloat(a.exposure) - parseFloat(b.exposure))
-                                    .map((frame, index) => {
-                                        const darkStatus = frame.darks || "Missing";
-                                        const isMissing = darkStatus === "Missing";
-                                        const darkCount = isMissing ? 0 : parseInt(darkStatus);
-                                        const exposureLabel = formatExposureDuration(frame.exposure);
-                                        const cameraLabel = frame.camera || "the camera";
-
-                                        return (
-                                            <FrameAnalysisRow
-                                                key={`frame-group-${index}`}
-                                                label="Light"
-                                                duration={exposureLabel}
-                                                sessionCount={`${frame.count}`}
-                                                libraryCount={darkCount}
-                                                libraryLabel="Darks"
-                                                isLoading={isLoading}
-                                                isNested={true}
-                                                missingReason={isMissing ? `No matching Dark frames found in library for ${exposureLabel} with ${cameraLabel}.` : undefined}
-                                            />
-                                        );
-                                    })}
-                            </React.Fragment>
-                        ))}
-                    {Object.keys(groupedLights).length === 0 && (
-                        <tr>
-                            <td colSpan={4} className="data-table-empty-row">
-                                No session frame data available
-                            </td>
+            <div className="frame-analysis-table-container">
+                <table className="data-table data-table-full">
+                    <thead>
+                        <tr className="data-table-header-row">
+                            <th className="data-table-cell-padding">Asset Type</th>
+                            <th className="data-table-cell-right">Duration</th>
+                            <th className="data-table-cell-right">Session</th>
+                            <th className="data-table-cell-right">Library Match</th>
                         </tr>
-                    )}
-                </tbody>
-            </table>
+                    </thead>
+                    <tbody>
+                        {Object.entries(groupedLights)
+                            .sort(([a], [b]) => a.localeCompare(b))
+                            .map(([filterName, frames]) => (
+                                <React.Fragment key={`group-${filterName}`}>
+                                    <tr className="data-table-row">
+                                        <td colSpan={4} className="frame-count-section-header" style={{ padding: '8px 12px 4px 12px' }}>
+                                            {filterName}
+                                        </td>
+                                    </tr>
+                                    {frames
+                                        .sort((a, b) => parseFloat(a.exposure) - parseFloat(b.exposure))
+                                        .map((frame, index) => {
+                                            const darkStatus = frame.darks || "Missing";
+                                            const isMissing = darkStatus === "Missing";
+                                            const darkCount = isMissing ? 0 : parseInt(darkStatus);
+                                            const exposureLabel = formatExposureDuration(frame.exposure);
+                                            const cameraLabel = frame.camera || "the camera";
+
+                                            return (
+                                                <FrameAnalysisRow
+                                                    key={`frame-group-${index}`}
+                                                    label="Light"
+                                                    duration={exposureLabel}
+                                                    sessionCount={`${frame.count}`}
+                                                    libraryCount={darkCount}
+                                                    libraryLabel="Darks"
+                                                    isLoading={isLoading}
+                                                    isNested={true}
+                                                    missingReason={isMissing ? `No matching Dark frames found in library for ${exposureLabel} with ${cameraLabel}.` : undefined}
+                                                />
+                                            );
+                                        })}
+                                </React.Fragment>
+                            ))}
+                        {Object.keys(groupedLights).length === 0 && (
+                            <tr>
+                                <td colSpan={4} className="data-table-empty-row">
+                                    No session frame data available
+                                </td>
+                            </tr>
+                        )}
+                    </tbody>
+                </table>
+            </div>
         </div>
     );
 };

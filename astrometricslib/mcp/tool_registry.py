@@ -126,7 +126,17 @@ class ToolRegistry:
 
             for key, val in list(arguments.items()):
                 if "path" in key.lower() and isinstance(val, str):
-                    real_val = os.path.realpath(val)
+                    check_val = val
+                    if not os.path.exists(check_val):
+                        if check_val.startswith("/run/media/"):
+                            alt = check_val.replace("/run/media/", "/media/", 1)
+                            if os.path.exists(alt):
+                                check_val = alt
+                        elif check_val.startswith("/media/"):
+                            alt = check_val.replace("/media/", "/run/media/", 1)
+                            if os.path.exists(alt):
+                                check_val = alt
+                    real_val = os.path.realpath(check_val)
                     # Allow validation if it starts with either of
                     # our valid sandbox roots
                     is_under_lib = os.path.commonpath([lib_path, real_val]) == lib_path
@@ -150,7 +160,15 @@ class ToolRegistry:
                 return result
 
             serialized = _serialize_result(result)
-            return [TextContent(type="text", text=json.dumps(serialized, indent=2, default=str))]
+            result_str = json.dumps(serialized, indent=2, default=str)
+            max_bytes = 40000  # Cap output to ~10k tokens to prevent transport and context blowout
+            if len(result_str) > max_bytes:
+                truncated_note = (
+                    f"\n\n... [Output truncated: payload exceeded {max_bytes} bytes. "
+                    "Use specific filtering arguments or limit queries to avoid context blowout.]"
+                )
+                result_str = result_str[:max_bytes] + truncated_note
+            return [TextContent(type="text", text=result_str)]
         except Exception as e:
             return [TextContent(type="text", text=f"Error during tool execution: {e!s}")]
 

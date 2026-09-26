@@ -53,18 +53,18 @@ export const TargetDisplay: React.FC = () => {
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  /** Callback to finalize selection once an image is successfully loaded. */
+  /** Callback to clear pending state once an image is successfully loaded. */
   const handleImageLoaded = useCallback((target: string) => {
     setSelectedTarget(target);
     setPendingTarget('');
   }, [setSelectedTarget, setPendingTarget]);
 
+  const activeTarget = selectedTarget || pendingTarget;
+
   const { imageUrl, imageBlob, loading, error } = useTargetImage(
-    pendingTarget || selectedTarget,
+    activeTarget,
     handleImageLoaded
   );
-
-  const activeTarget = pendingTarget || selectedTarget;
 
   const handleDeleteTarget = () => {
     // REQ: TGT-1.4: The display SHALL allow deletion of existing targets from the catalog.
@@ -76,14 +76,21 @@ export const TargetDisplay: React.FC = () => {
     setShowDeleteConfirm(false);
   };
 
+  /** Handles immediate target selection from the list. */
+  const handleTargetSelect = useCallback((id: string) => {
+    setSelectedTarget(id);
+    setPendingTarget(id);
+  }, [setSelectedTarget, setPendingTarget]);
+
   const leftPanel = (
     <RadioListManager
+      className="target-display__targets-manager"
       title="Targets"
       // REQ: TGT-1.1: The display SHALL present a selectable list of all targets in the catalog.
       items={items}
       selectedId={selectedTarget}
       pendingId={pendingTarget}
-      onSelect={setPendingTarget}
+      onSelect={handleTargetSelect}
       filterOptions={filterOptions}
       selectedFilterOption={selectedFilterOption}
       onFilterOptionChange={setFilterOption}

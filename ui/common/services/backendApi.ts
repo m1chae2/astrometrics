@@ -23,7 +23,10 @@ import {
     SequencePlan,
     CalibrationStats,
     MosaicPanel,
-    FrameRecord
+    FrameRecord,
+    AlignmentAttempt,
+    PolarAlignmentStatus,
+    AlignmentSessionSummary
 } from '../types/backendTypes';
 
 import {
@@ -42,6 +45,22 @@ export interface ObservationSessionSummary {
     status: string;
     nightDate: string;
     entryCount: number;
+}
+
+/** How much of the downloaded deep-star (Gaia DR3) catalog is installed, from planetarium:get_deep_catalog_status. */
+export interface DeepCatalogStatus {
+    /** True once any part of the catalog has been downloaded. */
+    installed: boolean;
+    /** True once every chunk of the sky has been downloaded. */
+    complete: boolean;
+    star_count: number;
+    pixels_downloaded: number;
+    pixels_total: number | null;
+    healpix_level: number | null;
+    magnitude_limit: number | null;
+    size_megabytes: number;
+    /** The command that downloads the catalog. */
+    installCommand: string;
 }
 
 /** Camera sensor profile as returned by observatory:list_cameras. */
@@ -82,15 +101,18 @@ export interface ActionRegistry {
     "astronomy:visible": { payload: Record<string, never>; response: Spectrum[] };
     "astronomy:list": { payload: { target_id?: string; limit?: number; search?: string; filter_type?: string }; response: Spectrum[] };
     "astronomy:get": { payload: { object_id: string }; response: Spectrum | null };
+    "astronomy:analyze_periodicity": { payload: { object_id: string }; response: Spectrum | null };
     "astronomy:delete": { payload: { object_id: string }; response: boolean };
     "astronomy:update": { payload: { object_id: string; updates: Partial<Spectrum> }; response: Spectrum | null };
     "astronomy:create": { payload: { object_id: string; ra?: string; dec?: string }; response: Spectrum | null };
     "astronomy:get_audit": { payload: Record<string, never>; response: Record<string, any>[] };
-    "planetarium:get_sources": { payload: { ra: number; dec: number; radius: number }; response: PlanetariumSource[] };
+    "astronomy:get_overlay_stars": { payload: { target_id: string; limit?: number }; response: any[] };
+    "planetarium:get_sources": { payload: { ra: number; dec: number; radius: number; limiting_magnitude?: number; include_stars_without_catalog_magnitude?: boolean }; response: PlanetariumSource[] };
     "planetarium:get_targets": { payload: Record<string, never>; response: PlanetariumTarget[] };
     "planetarium:get_visibility": { payload: { objects: Array<{ id: string; type?: string }>; time?: string }; response: PlanetariumVisibilityItem[] };
     "planetarium:get_observer_location": { payload: Record<string, never>; response: ObserverLocation };
-    "planetarium:get_catalog_sources": { payload: { ra: number; dec: number; radius: number; enabled_drivers: string[] }; response: PlanetariumSource[] };
+    "planetarium:get_catalog_sources": { payload: { ra: number; dec: number; radius: number; enabled_drivers: string[]; limiting_magnitude?: number }; response: PlanetariumSource[] };
+    "planetarium:get_deep_catalog_status": { payload: Record<string, never>; response: DeepCatalogStatus };
     "planetarium:list_catalog_drivers": { payload: Record<string, never>; response: Array<{ driver_name: string; display_name: string; maximum_query_radius_degrees: number }> };
     "planetarium:get_constellation_lines": { payload: Record<string, never>; response: ConstellationLineSegment[] };
 
@@ -133,6 +155,12 @@ export interface ActionRegistry {
     "telescope:is_syncing": { payload: { object_id: string }; response: boolean };
     "telescope:alignment_start": { payload: { target_ra: string; target_dec: string }; response: boolean };
     "telescope:alignment_stop": { payload: Record<string, never>; response: boolean };
+    "telescope:list_alignment_sessions": { payload: Record<string, never>; response: AlignmentSessionSummary[] };
+    "telescope:get_session_alignment": { payload: { session_id?: string }; response: { alignmentAttempts: AlignmentAttempt[]; polarAlignment: PolarAlignmentStatus | null } };
+    "telescope:get_cumulative_tracking_data": { payload: { limit?: number } | Record<string, never>; response: { alignmentAttempts: AlignmentAttempt[]; polarAlignment: PolarAlignmentStatus | null } };
+    "telescope:sync_logs": { payload: Record<string, never>; response: { status: string; guideLogsDownloaded: number; guidingSamplesIngested: number; fitsSolvesRecorded: number; message: string } };
+    "telescope:get_pointing_model": { payload: { session_id?: string }; response: import('../types/backendTypes').MountPointingModel };
+    "telescope:get_guiding_spectrum": { payload: { session_id?: string }; response: import('../types/backendTypes').GuidingSpectrumAnalysis };
 
     // Guiding
     "guiding:status": { payload: Record<string, never>; response: GuidingStatus };
@@ -206,6 +234,21 @@ export interface ActionRegistry {
     "sequencer:reorder": { payload: { sequence_ids: string[] }; response: boolean };
     "sequencer:begin": { payload: Record<string, never>; response: void };
     "sequencer:modify": { payload: { sequence_id: string; sequence: SequenceItem }; response: boolean };
+
+    // Terminal, Console & Documentation
+    "terminal:execute": { payload: { code_str: string; source?: string }; response: { status: string; stdout: string; stderr: string; result: any; plots: string[]; execution_time_ms: number; workspace: any[] } };
+    "terminal:get_workspace": { payload: Record<string, never>; response: any[] };
+    "terminal:completions": { payload: { text: string }; response: string[] };
+    "terminal:list_recipes": { payload: Record<string, never>; response: Array<{ id: string; name: string; filename: string; category: string; description: string; size_bytes: number }> };
+    "terminal:get_recipe": { payload: { recipe_id: string }; response: { id: string; filename: string; code: string } };
+    "terminal:list_scripts": { payload: Record<string, never>; response: Array<{ id: string; name: string; filename: string; size_bytes: number; modified_at: number }> };
+    "terminal:read_script": { payload: { filename: string }; response: { filename: string; code: string } };
+    "terminal:save_script": { payload: { filename: string; content: string }; response: { filename: string; size_bytes: number; status: string } };
+    "terminal:load_run": { payload: { job_id: string }; response: { job_id: string; job_type: string; target_name?: string; injected_variables: string[] } };
+    "docs:list_topics": { payload: Record<string, never>; response: Array<{ id: string; title: string; path: string; category: string }> };
+    "docs:get_topic": { payload: { topic_id: string }; response: { id: string; title: string; content: string } };
+    "ui:editor_get": { payload: Record<string, never>; response: { code: string } };
+    "ui:editor_set": { payload: { code_content: string }; response: { status: string; length: number } };
 }
 
 /**
@@ -319,13 +362,55 @@ export async function parseResponseError(response: Response): Promise<string> {
 import { emitToast } from '../utils/emitToast';
 
 /**
+ * Optional settings for a single callBackend request.
+ */
+export interface CallBackendOptions {
+    /**
+     * Cancels the request when signalled. A cancelled call rejects with an
+     * `AbortError` and shows no error toast, since cancelling is deliberate.
+     */
+    signal?: AbortSignal;
+    /**
+     * Milliseconds to wait before aborting the request. Defaults to 15000ms.
+     */
+    timeoutMs?: number;
+    /**
+     * When true, does not emit a toast notification on timeout or error (useful for background polling).
+     */
+    silent?: boolean;
+}
+
+/**
  * Unified type-safe JSON-RPC 2.0 network client.
  * Dispatches a POST request to '/api/rpc'.
  */
 export async function callBackend<A extends keyof ActionRegistry>(
     action: A,
-    params: ActionRegistry[A]["payload"]
+    params: ActionRegistry[A]["payload"],
+    options?: CallBackendOptions
 ): Promise<ActionRegistry[A]["response"]> {
+    const timeoutMs = options?.timeoutMs ?? 15000;
+    const controller = new AbortController();
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let didTimeout = false;
+
+    if (timeoutMs > 0) {
+        timeoutId = setTimeout(() => {
+            didTimeout = true;
+            controller.abort(new Error(`Request timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+    }
+
+    if (options?.signal) {
+        if (options.signal.aborted) {
+            controller.abort(options.signal.reason);
+        } else {
+            options.signal.addEventListener('abort', () => {
+                controller.abort(options.signal?.reason);
+            });
+        }
+    }
+
     try {
         const url = getBackendUrl('/api/rpc');
         const requestId = Math.floor(Math.random() * 1000000).toString();
@@ -340,7 +425,8 @@ export async function callBackend<A extends keyof ActionRegistry>(
                 method: action,
                 params: params,
                 id: requestId
-            })
+            }),
+            signal: controller.signal
         });
 
         if (!response.ok) {
@@ -361,9 +447,26 @@ export async function callBackend<A extends keyof ActionRegistry>(
 
         throw new Error('Malformed RPC response envelope');
     } catch (error: any) {
+        if (didTimeout) {
+            const msg = `Request timed out for ${action}`;
+            if (!options?.silent) {
+                emitToast(msg, 'error', `API:${action}`);
+            }
+            throw new Error(msg);
+        }
+        // A deliberate cancel is not a failure worth telling the user about.
+        if (error?.name === 'AbortError') {
+            throw error;
+        }
         const msg = error?.message || String(error);
-        emitToast(msg, 'error', `API:${action}`);
+        if (!options?.silent) {
+            emitToast(msg, 'error', `API:${action}`);
+        }
         throw error;
+    } finally {
+        if (timeoutId) {
+            clearTimeout(timeoutId);
+        }
     }
 }
 
@@ -445,9 +548,9 @@ export async function withSessionToken(wsUrl: string): Promise<string> {
 export function resolveImageSrc(absolutePath: string | null | undefined): string {
     if (!absolutePath) return '';
 
-    // Check if running in Electron (window.astrometricsIPC is defined)
+    // Check if running in Electron (window.astrometrics is defined)
     // under the file:// protocol, and path is already an absolute system path
-    if (typeof window !== 'undefined' && (window as any).astrometricsIPC && window.location.protocol === 'file:' && /^[/\\]/.test(absolutePath)) {
+    if (typeof window !== 'undefined' && ((window as any).astrometrics || (window as any).astrometricsIPC) && window.location.protocol === 'file:' && /^[/\\]/.test(absolutePath)) {
         return `file://${absolutePath.replace(/\\/g, '/')}`;
     }
 
@@ -483,5 +586,6 @@ export function resolveImageSrc(absolutePath: string | null | undefined): string
     }
 
     const prefix = isFramePath ? '/static/frames/' : '/static/';
-    return `${base}${prefix}${relPath}`;
+    const rawUrl = `${base}${prefix}${relPath}`;
+    return encodeURI(decodeURI(rawUrl));
 }

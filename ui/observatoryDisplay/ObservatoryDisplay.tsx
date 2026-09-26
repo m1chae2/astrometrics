@@ -78,7 +78,7 @@ export const ObservatoryDisplay: React.FC = () => {
                     {/* REQ: OBS-3.3: The display SHALL provide an "Add Target" function */}
                     <button className="btn" onClick={handlers.onAddTarget}>Add Target</button>
                     {/* REQ: OBS-3.4: The display SHALL provide a "Slew to Target" command button */}
-                    <button className="btn btn--success" onClick={() => handlers.onSlewToTarget(raShared, decShared)}>Slew to Target</button>
+                    <button className="btn btn--primary" onClick={() => handlers.onSlewToTarget(raShared, decShared)}>Slew to Target</button>
                 </ListActions>
             }
         />

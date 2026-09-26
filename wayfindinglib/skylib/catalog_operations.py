@@ -11,32 +11,42 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 import astropy.units as u
+import numpy as np
 from astropy.coordinates import SkyCoord
 
 from astrometricslib import StellarObject, Target, parse_coordinate_string
 from wayfindinglib.drivers.catalog import (
     CatalogDriver,
-    GaiaCatalogDriver,
+    DeepStarCatalogDriver,
+    DeepStarSource,
     LocalBrightStarCatalogDriver,
-    SimbadCatalogDriver,
 )
 from wayfindinglib.drivers.catalog.simbad_catalog_driver import resolve_simbad_radec
 
 logger = logging.getLogger(__name__)
 
 
-def build_catalog_driver_registry() -> dict[str, CatalogDriver]:
-    """Construct the registry of online/local catalog query drivers.
+def build_catalog_driver_registry(star_source: DeepStarSource | None = None) -> dict[str, CatalogDriver]:
+    """Construct the registry of catalog query drivers.
+
+    Every driver reads from this computer; none of them use the internet.
+
+    Parameters
+    ----------
+    star_source : `DeepStarSource`, optional
+        Where the deep-star driver reads the downloaded Gaia stars from.
+        Without one, the deep-star driver returns no stars.
 
     Returns
     -------
     Dict[str, CatalogDriver]
-        Registry keyed by driver name: "simbad", "gaia", "hipparcos".
+        Registry keyed by driver name: "deep_stars", "hipparcos".
     """
     return {
-        "simbad": SimbadCatalogDriver(),
-        # Live TAP-backed driver, for small viewport-scoped deep queries.
-        "gaia": GaiaCatalogDriver(),
+        # Faint stars from the Gaia DR3 copy downloaded to disk, for the
+        # viewport-scoped deep layer. Replaces the live Gaia archive query,
+        # which took tens of seconds per view and could not be cached.
+        "deep_stars": DeepStarCatalogDriver(star_source=star_source),
         # Locally bundled Hipparcos extract, for the full-sky "Bright
         # Stars" overview layer. GAIA is unsuitable for this layer — its
         # detectors saturate on very bright stars, so it's missing nearly
@@ -85,6 +95,7 @@ def astrometrics_catalog(
     ra_deg: float,
     dec_deg: float,
     radius_deg: float,
+    include_stars: bool = True,
 ) -> list[Target | StellarObject]:
     """Query the local Astrometrics database for objects in a region.
 
@@ -98,6 +109,11 @@ def astrometrics_catalog(
         Declination of the search center in degrees.
     radius_deg : float
         Search radius in degrees.
+    include_stars : bool
+        If False, only targets are searched. The stars branch loads every
+        star in the library in full and takes seconds on a large one, so
+        a caller that reads the stars another way (see
+        `resolution_operations.get_library_star_summaries`) skips it.
 
     Returns
     -------
@@ -146,14 +162,27 @@ def astrometrics_catalog(
         candidate_dec_deg.append(dec_deg)
 
     if candidate_targets:
+        # Converting to numpy arrays before SkyCoord() matters: given plain
+        # Python lists, astropy falls back to constructing one Angle per
+        # element in a Python-level loop instead of a vectorized numpy path
+        # -- for this catalog's ~270k stellar objects (see the stars branch
+        # below) that turned a sub-10ms array build into a ~40s one.
         target_coordinates = SkyCoord(
-            ra=candidate_ra_deg, dec=candidate_dec_deg, unit=(u.deg, u.deg), frame="icrs"
+            ra=np.asarray(candidate_ra_deg, dtype=float),
+            dec=np.asarray(candidate_dec_deg, dtype=float),
+            unit=(u.deg, u.deg),
+            frame="icrs",
         )
         results.extend(_filter_within_radius(candidate_targets, target_coordinates, center, radius_deg))
 
+    if not include_stars:
+        return results
+
     # 2. Fetch and filter StellarObjects, batched the same way as
     # Targets above.
-    stars = sky._astrometrics.stellar_objects
+    # Only the stars near the search circle are read from the library, using
+    # its sky-position index, not every star it holds.
+    stars = sky._astrometrics.stars.list_objects_in_region(ra_deg, dec_deg, radius_deg)
     candidate_stars: list[StellarObject] = []
     candidate_star_ra: list[Any] = []
     candidate_star_dec: list[Any] = []
@@ -171,8 +200,15 @@ def astrometrics_catalog(
 
     if candidate_stars:
         try:
+            # See the numpy conversion note on the target branch above --
+            # this is the one that matters in practice, since a catalog can
+            # hold hundreds of thousands of stars where it holds a handful
+            # of targets.
             star_coordinates = SkyCoord(
-                ra=candidate_star_ra, dec=candidate_star_dec, unit=(u.deg, u.deg), frame="icrs"
+                ra=np.asarray(candidate_star_ra, dtype=float),
+                dec=np.asarray(candidate_star_dec, dtype=float),
+                unit=(u.deg, u.deg),
+                frame="icrs",
             )
             results.extend(_filter_within_radius(candidate_stars, star_coordinates, center, radius_deg))
         except Exception as batch_error:
@@ -313,6 +349,7 @@ def query_online_catalogs(
     dec_degrees: float,
     radius_degrees: float,
     enabled_driver_names: list[str],
+    magnitude_limit: float | None = None,
 ) -> list[tuple[str, StellarObject]]:
     """Query one or more registered online catalog drivers in parallel.
 
@@ -333,6 +370,9 @@ def query_online_catalogs(
         maximum_query_radius_degrees before dispatch.
     enabled_driver_names : List[str]
         Registry keys of drivers to query (e.g. ['simbad', 'gaia']).
+    magnitude_limit : float, optional
+        Faintest magnitude the caller wants, passed to every driver. A driver
+        that cannot use it ignores it.
 
     Returns
     -------
@@ -356,7 +396,9 @@ def query_online_catalogs(
     def _query_driver(driver: CatalogDriver) -> list[tuple[str, StellarObject]]:
         effective_radius = min(radius_degrees, driver.maximum_query_radius_degrees)
         try:
-            objects = driver.query_region(ra_degrees, dec_degrees, effective_radius)
+            objects = driver.query_region(
+                ra_degrees, dec_degrees, effective_radius, magnitude_limit=magnitude_limit
+            )
             return [(driver.driver_name, obj) for obj in objects]
         except Exception as driver_error:
             logger.warning(

@@ -10,6 +10,8 @@ result as a `SpectroscopyQualitySummary`, and saves the stars.
 import statistics
 from typing import Any
 
+import numpy as np
+
 from astrometricslib.models.quality_summary import (
     SpectroscopyPipelineQualityMetrics,
     SpectroscopyQualitySummary,
@@ -25,9 +27,158 @@ from astrometricslib.pipelines.shared.star_recording import (
     merge_spectroscopy_stellar_object,
     record_pipeline_stars,
 )
+from astrometricslib.pipelines.shared.target_center_hint import (
+    resolve_solved_stack_center_hint,
+    resolve_solved_stack_wcs,
+)
+
+# How far from the frame centre, in degrees, a reference star may be and still
+# be used to name the stars in a spectral frame. The frame is 3008 pixels of
+# about 1.9 arcseconds (1.6 degrees) on a side, so its corners are 1.13
+# degrees from the centre; 1.5 degrees allows for a mount pointing error of
+# a few tenths of a degree and nothing more. Before this limit, a target with
+# no stars of its own was registered against every named star in the catalog,
+# and on 2026-09-24 25 of 69 stored spectra (Albireo, Alnath and M 57 fields)
+# carried the name of a star 6 to 145 degrees away.
+REGISTRATION_REFERENCE_FIELD_RADIUS_DEG = 1.5
+
+# How many stars are read from the database at once when every
+# catalog-identified star must be examined. Small enough that the stars that
+# are not kept can be freed before the next slice is read.
+_CATALOG_SLICE_SIZE = 2000
 
 
-def _registration_reference_candidates(target: Target, catalog_access: Any) -> list:
+def _recover_extended_source_hint(
+    astrometry: Any,
+    context: Any,
+    target: Target,
+    spectral_stack_path: str,
+    reference_stellar_objects: list,
+    hint_ra: float | None,
+    hint_dec: float | None,
+) -> None:
+    """Find where an extended target (a nebula, say) sits in a spectral stack.
+
+    A spectral stack has no plate solution, so `AstrometryPipeline.process`
+    cannot turn the target's catalog position into a pixel position, and
+    without one no extended target is extracted (an old stored record for it
+    then keeps a position from some earlier run). The target's solved
+    standard stack has a plate solution, and star registration has just
+    measured how far the two stacks are shifted apart (against the reference
+    stars' sky positions run through that same solution, since the target's
+    stored stars may come from stacks with other pixel frames). Shifting the
+    solution by that amount gives one for the spectral stack, good to a few
+    pixels (on M 57 the ring nebula fell about 6 pixels from where its zero
+    order really is).
+
+    Does nothing when the hint already exists, there is no matching solved
+    stack, or the star fields are not related by a single shift.
+
+    Parameters
+    ----------
+    astrometry : `AstrometryPipeline`
+        The pipeline that built `context`; it looks the target up.
+    context : `AnalysisContext`
+        The spectral stack's context. Its `extended_source_hint` is filled in.
+    target : `Target`
+        The target being analyzed.
+    spectral_stack_path : `str`
+        Path of the spectral stack.
+    reference_stellar_objects : `list` [`StellarObject`]
+        The named stars the spectral field was just registered against.
+    hint_ra : `float` or `None`
+        The position hint's right ascension in decimal degrees.
+    hint_dec : `float` or `None`
+        The position hint's declination in decimal degrees.
+    """
+    if context.extended_source_hint is not None:
+        return
+
+    from astrometricslib.pipelines.astrometry.spectral_star_registration import (
+        estimate_registration_offset,
+        shift_wcs_to_frame,
+    )
+
+    reference_wcs = resolve_solved_stack_wcs(target, spectral_stack_path)
+    if reference_wcs is None:
+        return
+    offset = estimate_registration_offset(context.stellar_objects, reference_stellar_objects, reference_wcs)
+    if offset is None:
+        return
+    spectral_wcs = shift_wcs_to_frame(reference_wcs, offset)
+    context.extended_source_hint = astrometry.build_extended_source_hint(
+        context.image, spectral_wcs, hint_ra, hint_dec
+    )
+
+
+def _field_center_for_registration(
+    stack_path: str, hint_ra: float | None, hint_dec: float | None
+) -> tuple[float, float] | None:
+    """Find roughly where on the sky a spectral stack points.
+
+    Prefers the plate-solved position hint; otherwise reads the mount's
+    ``RA`` and ``DEC`` (decimal degrees) from the stack's FITS header.
+
+    Parameters
+    ----------
+    stack_path : `str`
+        The spectral stack.
+    hint_ra : `float` or `None`
+        The solved-stack right ascension in decimal degrees, if any.
+    hint_dec : `float` or `None`
+        The solved-stack declination in decimal degrees, if any.
+
+    Returns
+    -------
+    center : `tuple` [`float`, `float`] or `None`
+        The `(ra, dec)` in decimal degrees, or `None` when neither source
+        has a usable position.
+    """
+    if hint_ra is not None and hint_dec is not None:
+        return float(hint_ra), float(hint_dec)
+    from astrometricslib.drivers.fits_access import read_header
+
+    try:
+        header = read_header(stack_path)
+        return float(header["RA"]), float(header["DEC"])
+    except OSError, KeyError, TypeError, ValueError:
+        return None
+
+
+def _within_field(stellar_object: Any, field_center: tuple[float, float] | None) -> bool:
+    """Tell whether a catalog star lies inside the frame's part of the sky.
+
+    Parameters
+    ----------
+    stellar_object : `StellarObject`
+        The star to test.
+    field_center : `tuple` [`float`, `float`] or `None`
+        The frame centre `(ra, dec)` in decimal degrees. `None` means the
+        centre is unknown, so no star is ruled out.
+
+    Returns
+    -------
+    is_inside : `bool`
+        `False` for a star with no sky position when a centre is known,
+        because it cannot be checked.
+    """
+    if field_center is None:
+        return True
+    if stellar_object.right_ascension is None or stellar_object.declination is None:
+        return False
+    ra_star = np.radians(float(stellar_object.right_ascension))
+    dec_star = np.radians(float(stellar_object.declination))
+    ra_center, dec_center = np.radians(field_center[0]), np.radians(field_center[1])
+    cosine_separation = np.sin(dec_star) * np.sin(dec_center) + np.cos(dec_star) * np.cos(
+        dec_center
+    ) * np.cos(ra_star - ra_center)
+    separation_deg = float(np.degrees(np.arccos(np.clip(cosine_separation, -1.0, 1.0))))
+    return separation_deg <= REGISTRATION_REFERENCE_FIELD_RADIUS_DEG
+
+
+def _registration_reference_candidates(
+    target: Target, catalog_access: Any, field_center: tuple[float, float] | None = None
+) -> list:
     """Collect the stars a spectral field can register its identity against.
 
     `identify_spectral_stars_via_registration` needs a reference set of
@@ -58,23 +209,67 @@ def _registration_reference_candidates(target: Target, catalog_access: Any) -> l
         The target running spectroscopy; scopes the preferred candidate
         set to stars this target's own astrometry pass already found.
     catalog_access : `Any`
-        Provides the read of `stellar_catalog`.
+        Provides the queries on `stellar_catalog`: `list_stars_in_region`,
+        `list_star_summaries`, `list_star_ids` and `get_by_ids`.
+    field_center : `tuple` [`float`, `float`], optional
+        Where the spectral frame points, `(ra, dec)` in decimal degrees.
+        Only stars within `REGISTRATION_REFERENCE_FIELD_RADIUS_DEG` of it
+        are kept, from both the own-target set and the fallback set: a
+        target's recorded stars can include ones an earlier bad run
+        attached to it, and registration matches by pixel geometry alone,
+        so a star from another part of the sky can be handed to a spectral
+        star that is really something else.
 
     Returns
     -------
     candidates : `list` [`StellarObject`]
-        This target's own catalog-identified, non-spectroscopy-derived
-        stars if any exist, otherwise every such star in the catalog.
+        This target's own catalog-identified stars in the field if any
+        exist, otherwise every catalog-identified star in the field. A star
+        with no normal-image pixel position is skipped later by the
+        registration itself.
     """
-    catalog_identified = [
-        stellar_object
-        for stellar_object in catalog_access.get("stellar_catalog", {})
-        if stellar_object.is_catalog_identified and not stellar_object.id.endswith("::spectroscopy")
-    ]
+    if field_center is not None:
+        # Read only the stars in this field, straight from the database's
+        # sky-position index. This used to read every star in the catalog
+        # (about 270,000) just to keep the few hundred in the field, which
+        # cost gigabytes of memory in every analysis worker.
+        field_star_ids = [
+            summary.id
+            for summary in catalog_access.list_stars_in_region(
+                field_center[0], field_center[1], REGISTRATION_REFERENCE_FIELD_RADIUS_DEG
+            )
+        ]
+        catalog_identified = [
+            stellar_object
+            for stellar_object in catalog_access.get_by_ids("stellar_catalog", field_star_ids)
+            if stellar_object.is_catalog_identified and _within_field(stellar_object, field_center)
+        ]
+        own_target_stars = [
+            stellar_object for stellar_object in catalog_identified if target.id in stellar_object.target_ids
+        ]
+        return own_target_stars if own_target_stars else catalog_identified
+
+    # The frame's position is unknown, so no part of the sky can be ruled
+    # out. This target's own stars are read first, from the target index.
+    own_star_ids = [summary.id for summary in catalog_access.list_star_summaries(target_id=target.id)]
     own_target_stars = [
-        stellar_object for stellar_object in catalog_identified if target.id in stellar_object.target_ids
+        stellar_object
+        for stellar_object in catalog_access.get_by_ids("stellar_catalog", own_star_ids)
+        if stellar_object.is_catalog_identified and target.id in stellar_object.target_ids
     ]
-    return own_target_stars if own_target_stars else catalog_identified
+    if own_target_stars:
+        return own_target_stars
+    # Nothing of its own: fall back to every catalog-identified star, read a
+    # slice of the catalog at a time so only the identified ones are kept.
+    all_star_ids = catalog_access.list_star_ids()
+    return [
+        stellar_object
+        for start in range(0, len(all_star_ids), _CATALOG_SLICE_SIZE)
+        for stellar_object in catalog_access.get_by_ids(
+            "stellar_catalog", all_star_ids[start : start + _CATALOG_SLICE_SIZE]
+        )
+        if stellar_object.is_catalog_identified
+    ]
 
 
 class SpectroscopyPipelineAdapter(AnalysisPipeline):
@@ -126,8 +321,14 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
         catalog_access = request.catalog_access
 
         # Use the AstrometryPipeline to identify the stars in the field
+        # The stack's own FITS position is only the mount's report and can be
+        # far off (see `resolve_solved_stack_center_hint`), so prefer the
+        # centre of this target's plate-solved stack when there is one.
+        hint_ra, hint_dec = resolve_solved_stack_center_hint(target, request.path)
         astrometry = AstrometryPipeline()
-        context = astrometry.process(request.path, attempt_plate_solving=False)
+        context = astrometry.process(
+            request.path, attempt_plate_solving=False, target_ra=hint_ra, target_dec=hint_dec
+        )
 
         # The spectral stack has no WCS of its own (see the module
         # docstring on spectral_star_registration), so these stars
@@ -148,13 +349,17 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
         # instances spectroscopy.process() mutates next, so it
         # doesn't matter that most of them won't end up with a
         # spectrum extracted.
-        reference_stellar_objects = _registration_reference_candidates(target, catalog_access)
+        field_center = _field_center_for_registration(request.path, hint_ra, hint_dec)
+        reference_stellar_objects = _registration_reference_candidates(target, catalog_access, field_center)
         if reference_stellar_objects:
             from astrometricslib.pipelines.astrometry.spectral_star_registration import (
                 identify_spectral_stars_via_registration,
             )
 
             identify_spectral_stars_via_registration(context.stellar_objects, reference_stellar_objects)
+            _recover_extended_source_hint(
+                astrometry, context, target, request.path, reference_stellar_objects, hint_ra, hint_dec
+            )
 
         spectroscopy = SpectroscopyPipeline()
         limit = request.options.get("limit", 10)
@@ -244,6 +449,10 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
             summary.flag_reasons.append(
                 f"spectral classification uncertain for {len(flagged_spectral_classifications)} star(s)"
             )
+
+        from astrometricslib.pipelines.shared.applied_camera_profile import record_camera_profile
+
+        record_camera_profile(summary, spectroscopy.config.camera.name)
         return summary
 
     def to_result_dict(

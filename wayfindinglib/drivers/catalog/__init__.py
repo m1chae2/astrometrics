@@ -9,10 +9,14 @@ REQ: PLN-3.1, PLN-3.2
 """
 
 from wayfindinglib.drivers.catalog.base_catalog_driver import CatalogDriver
-from wayfindinglib.drivers.catalog.gaia_catalog_driver import GaiaCatalogDriver
+from wayfindinglib.drivers.catalog.deep_star_catalog_driver import DeepStarCatalogDriver, DeepStarSource
 from wayfindinglib.drivers.catalog.local_bright_star_catalog_driver import (
     LocalBrightStarCatalogDriver,
 )
-from wayfindinglib.drivers.catalog.simbad_catalog_driver import SimbadCatalogDriver
 
-__all__ = ["CatalogDriver", "GaiaCatalogDriver", "LocalBrightStarCatalogDriver", "SimbadCatalogDriver"]
+__all__ = [
+    "CatalogDriver",
+    "DeepStarCatalogDriver",
+    "DeepStarSource",
+    "LocalBrightStarCatalogDriver",
+]

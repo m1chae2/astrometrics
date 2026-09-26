@@ -115,3 +115,21 @@ def test_session_token_endpoint_serves_the_token(client: TestClient):  # ruff: i
     response = client.get("/api/session-token")
     assert response.status_code == 200
     assert response.json()["token"] == session_auth.SESSION_TOKEN
+
+
+def test_pairing_info_endpoint_returns_metadata(client: TestClient) -> None:
+    """The companion pairing route must supply complete connection metadata.
+
+    Verifies that host, LAN IP, session token, and endpoint URLs are
+    properly resolved and serialized for remote client consumption.
+    """
+    response = client.get("/api/pairing-info")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["app"] == "Astrometrics"
+    assert data["version"] == "0.2.0"
+    assert "lan_ip" in data
+    assert data["session_token"] == session_auth.SESSION_TOKEN
+    assert "rpc" in data["endpoints"]
+    assert "ws_events" in data["endpoints"]
+    assert "ws_terminal" in data["endpoints"]

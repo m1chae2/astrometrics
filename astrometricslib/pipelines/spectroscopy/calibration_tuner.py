@@ -15,7 +15,6 @@ from scipy.optimize import minimize
 from scipy.signal import find_peaks
 
 from astrometricslib.drivers.image import AstrometricsImage
-from astrometricslib.pipelines.shared.quality.quality_metrics import DEFAULT_SATURATION_ADU_THRESHOLD
 from astrometricslib.pipelines.shared.quality.saturation import compute_saturated_pixel_fraction
 from astrometricslib.pipelines.spectroscopy.optics_physics import (
     BALMER_SERIES_NM,
@@ -27,6 +26,7 @@ from astrometricslib.pipelines.spectroscopy.pipeline import (
     _read_xy_source_position,
 )
 from astrometricslib.pipelines.spectroscopy.spectroscopy_instrument import SpectroscopyInstrument
+from astrometricslib.utilities.spectroscopy_models import SpectroscopyConfig
 
 logger = logging.getLogger(__name__)
 
@@ -123,13 +123,8 @@ class SpectroscopyCalibrationTuner:
         )
 
         # Now that we know the distance (L), calculate exactly where the
-        # visible spectrum starts (380 nm) in pixels.
-        best_x0 = calculate_pixel_offset(
-            wavelength_nm=380.0,
-            grating_distance_mm=best_grating_distance_mm,
-            lines_per_mm=spec_pipeline.config.grating_lines_per_mm,
-            pixel_size_um=spec_pipeline.config.camera.pixel_size_um,
-        )
+        # spectrum starts in pixels.
+        best_x0 = self._spectrum_start_offset_px(spec_pipeline.config, best_grating_distance_mm)
 
         use_flare_mask_extraction, max_extraction_length_px = self._detect_extraction_geometry_quirks(
             image, spec_pipeline, star_pos, best_grating_distance_mm, best_x0
@@ -155,6 +150,31 @@ class SpectroscopyCalibrationTuner:
             spec_pipeline,
             use_flare_mask_extraction,
             max_extraction_length_px,
+        )
+
+    @staticmethod
+    def _spectrum_start_offset_px(config: SpectroscopyConfig, grating_distance_mm: float) -> float:
+        """Work out how many pixels from the star the spectrum starts.
+
+        Parameters
+        ----------
+        config : `SpectroscopyConfig`
+            The camera and grating settings. The wavelength that counts as
+            the start of the spectrum is its `extraction_start_wavelength_nm`
+            (380 nm unless the config file says otherwise).
+        grating_distance_mm : `float`
+            The distance from the grating to the sensor, in millimeters.
+
+        Returns
+        -------
+        offset_px : `float`
+            The distance, in pixels, from the star to the start wavelength.
+        """
+        return calculate_pixel_offset(
+            wavelength_nm=config.extraction_start_wavelength_nm,
+            grating_distance_mm=grating_distance_mm,
+            lines_per_mm=config.grating_lines_per_mm,
+            pixel_size_um=config.camera.pixel_size_um,
         )
 
     @staticmethod
@@ -199,7 +219,10 @@ class SpectroscopyCalibrationTuner:
         extraction_start = (base_pos[0] + offset_px * vector[0], base_pos[1] + offset_px * vector[1])
 
         use_flare_mask_extraction = SpectroscopyCalibrationTuner._detect_flare_contamination(
-            image, extraction_start, int(tuned_config.extraction_radius)
+            image,
+            extraction_start,
+            int(tuned_config.extraction_radius),
+            spec_pipeline.camera_profile.saturation_threshold_adu.value,
         )
         max_extraction_length_px = SpectroscopyCalibrationTuner._detect_max_extraction_length_px(
             base_pos, vector, offset_px, length_px, image.data.shape
@@ -209,9 +232,24 @@ class SpectroscopyCalibrationTuner:
 
     @staticmethod
     def _detect_flare_contamination(
-        image: AstrometricsImage, extraction_start: tuple[float, float], extraction_radius: int
+        image: AstrometricsImage,
+        extraction_start: tuple[float, float],
+        extraction_radius: int,
+        saturation_threshold_adu: float,
     ) -> bool:
         """Check for star-flare saturation at the theoretical dispersion start.
+
+        Parameters
+        ----------
+        image : `AstrometricsImage`
+            The calibration image.
+        extraction_start : `tuple` [`float`, `float`]
+            Where the theoretical dispersion starts, in pixels.
+        extraction_radius : `int`
+            How far around that point to look, in pixels.
+        saturation_threshold_adu : `float`
+            A pixel at or above this value counts as saturated. Take it from
+            the camera's profile.
 
         Returns
         -------
@@ -228,7 +266,7 @@ class SpectroscopyCalibrationTuner:
         cutout = np.asarray(data[y_start:y_end, x_start:x_end], dtype=float)
         if cutout.size == 0:
             return False
-        fraction = compute_saturated_pixel_fraction(cutout, DEFAULT_SATURATION_ADU_THRESHOLD)
+        fraction = compute_saturated_pixel_fraction(cutout, saturation_threshold_adu)
         return fraction > _FLARE_CONTAMINATION_FRACTION_THRESHOLD
 
     @staticmethod

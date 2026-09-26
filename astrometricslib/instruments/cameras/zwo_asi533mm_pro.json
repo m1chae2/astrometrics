@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "camera_name": "ZWO ASI533MM Pro",
+  "name_aliases": [
+    "ZWO CCD ASI533MM Pro"
+  ],
+  "record_name": "ZWO ASI 533MM Pro",
+  "is_generic_fallback": false,
+  "clip_ceiling_adu": {
+    "value": 65532.0,
+    "provenance": {
+      "kind": "measured",
+      "source": "Maximum of saturated raw frames in this library. The sensor is 14-bit, stored as 16-bit in steps of 4, so a clipped frame reaches 65532. Recorded before the camera profiles existed, in pipelines/stacking/exposure_saturation.py."
+    }
+  },
+  "saturation_threshold_adu": {
+    "value": 65000.0,
+    "provenance": {
+      "kind": "assumed",
+      "source": "The pipeline's long-standing default for raw frames: just under the 16-bit maximum of 65535. It was never measured per camera."
+    }
+  },
+  "photometric_linearity_limit_adu": {
+    "value": 60000.0,
+    "provenance": {
+      "kind": "measured",
+      "source": "Antonov 2026: the response turns non-linear above about 60,000 ADU at Gain 0 / Offset 10, before hard clipping. Recorded before the camera profiles existed, as DEFAULT_PHOTOMETRIC_LINEARITY_ADU_THRESHOLD in pipelines/shared/quality/quality_metrics.py, which nothing used."
+    }
+  },
+  "quantum_efficiency": {
+    "wavelength_nm": [400.0, 420.0, 440.0, 460.0, 480.0, 500.0, 520.0, 550.0, 600.0, 650.0, 700.0, 750.0, 800.0, 850.0, 900.0, 950.0, 1000.0],
+    "quantum_efficiency_fraction": [0.7, 0.82, 0.88, 0.91, 0.92, 0.9, 0.89, 0.88, 0.78, 0.62, 0.48, 0.36, 0.27, 0.19, 0.13, 0.08, 0.06],
+    "provenance": {
+      "kind": "datasheet",
+      "source": "Read off the sensitivity graph published by ZWO. Recorded before the camera profiles existed, in pipelines/spectroscopy/quantum_efficiency_curves.py."
+    }
+  },
+  "notes": ""
+}

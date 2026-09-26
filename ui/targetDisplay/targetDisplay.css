@@ -1,4 +1,5 @@
 /* TargetDisplay.css */
+@import '../common/styles/scrollbars.css';
 
 /* Main Containers */
 .target-display-manager {
@@ -24,21 +25,29 @@
 }
 
 /* Target Details Panel */
+.target-details-manager__panel .panel__content {
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
 .target-details {
     width: 100%;
     height: 100%;
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
-    gap: 12px;
     color: var(--white);
-    overflow: auto;
+    overflow: hidden;
+    min-height: 0;
 }
 
 .target-details__content {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    height: 100%;
+    min-height: 0;
+    gap: 0;
 }
 
 .target-details__row {
@@ -84,12 +93,17 @@
     padding-bottom: 10px;
     margin-bottom: 6px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    flex-shrink: 0;
 }
 
-.target-details__tree-section:last-child {
+.target-details__tree-section:last-child,
+.target-details__tree-section--frames {
     border-bottom: none;
     margin-bottom: 0;
     padding-bottom: 0;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
 }
 
 .target-details__tree-header {
@@ -97,6 +111,17 @@
     font-size: 14px;
     color: var(--primary-blue-light, #58a6ff);
     margin-bottom: 4px;
+    flex-shrink: 0;
+}
+
+.target-details__frames-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
 }
 
 .target-details__tree-group {

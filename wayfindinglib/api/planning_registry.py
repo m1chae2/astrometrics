@@ -10,6 +10,7 @@ identical queue structure (`Wayfinding_Library_Architecture.md` §2.3.2,
 directly.
 """
 
+import threading
 import uuid
 from datetime import date, datetime
 from typing import Any
@@ -51,6 +52,12 @@ class ObservationPlanning:
         self._planning_config = planning_config or PlanningConfig()
         self.__sky_engine = None
         self.__observation_engine = None
+        # Guards the lazy engine construction below. A web backend calls this
+        # object from many threads at once, and the first request after startup
+        # (e.g. the Planetarium mounting and firing several queries together)
+        # would otherwise find an engine still None on every thread and build
+        # one apiece -- each `Sky` loads its own full copy of the star catalog.
+        self._engine_construction_lock = threading.Lock()
 
     @property
     def _sky_engine(self) -> Any:
@@ -67,9 +74,11 @@ class ObservationPlanning:
         "Planning Is Hardware-Free".
         """
         if self.__sky_engine is None:
-            from wayfindinglib.sky import Sky
+            with self._engine_construction_lock:
+                if self.__sky_engine is None:
+                    from wayfindinglib.sky import Sky
 
-            self.__sky_engine = Sky(config=self._butler.config)
+                    self.__sky_engine = Sky(config=self._butler.config)
         return self.__sky_engine
 
     @property
@@ -82,9 +91,11 @@ class ObservationPlanning:
         the existing engine rather than duplicating it.
         """
         if self.__observation_engine is None:
-            from wayfindinglib.observation import Observation
+            with self._engine_construction_lock:
+                if self.__observation_engine is None:
+                    from wayfindinglib.observation import Observation
 
-            self.__observation_engine = Observation(config=self._butler.config)
+                    self.__observation_engine = Observation(config=self._butler.config)
         return self.__observation_engine
 
     # -- Sky browsing (visibility, resolution, catalog) -------------------
@@ -120,19 +131,56 @@ class ObservationPlanning:
         return self._sky_engine.resolve_target_coordinates(target_name)
 
     def get_sources(
-        self, ra_deg: float, dec_deg: float, radius_deg: float, include_catalog: bool = False
+        self,
+        ra_deg: float,
+        dec_deg: float,
+        radius_deg: float,
+        include_catalog: bool = False,
+        include_stars: bool = True,
     ) -> list[Any]:
         """Return targets/stellar objects within a search radius of a point.
+
+        Pass ``include_stars=False`` to get only targets. Loading every
+        library star in full takes seconds on a large library; read them
+        with `get_library_star_summaries` instead.
 
         Returns
         -------
         sources : `list`
             Targets and/or stellar objects within the search radius.
         """
-        return self._sky_engine.get_sources(ra_deg, dec_deg, radius_deg, include_catalog)
+        return self._sky_engine.get_sources(ra_deg, dec_deg, radius_deg, include_catalog, include_stars)
+
+    def get_library_star_summaries(
+        self,
+        ra_deg: float,
+        dec_deg: float,
+        radius_deg: float,
+        magnitude_range: tuple[float, float] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return quick summaries of the user's own stars near a point.
+
+        ``magnitude_range`` keeps only stars whose magnitude is between
+        the two values, ends included; stars with no saved magnitude are
+        left out. Every star is kept when it is omitted.
+
+        Returns
+        -------
+        summaries : `list` [`dict`]
+            One dict per library star inside the search radius, with keys
+            ``id``, ``name``, ``ra``, ``dec``, ``targetIds``,
+            ``hasSpectra``, ``hasPhotometry``, ``magnitude`` and
+            ``spectralType``.
+        """
+        return self._sky_engine.get_library_star_summaries(ra_deg, dec_deg, radius_deg, magnitude_range)
 
     def get_online_catalog_sources(
-        self, ra_deg: float, dec_deg: float, radius_deg: float, enabled_driver_names: list[str]
+        self,
+        ra_deg: float,
+        dec_deg: float,
+        radius_deg: float,
+        enabled_driver_names: list[str],
+        magnitude_limit: float | None = None,
     ) -> list[tuple[str, Any]]:
         """Return matching stellar objects from enabled catalog drivers.
 
@@ -141,7 +189,9 @@ class ObservationPlanning:
         sources : `list` [`tuple` [`str`, `Any`]]
             Each match paired with the driver name that found it.
         """
-        return self._sky_engine.get_online_catalog_sources(ra_deg, dec_deg, radius_deg, enabled_driver_names)
+        return self._sky_engine.get_online_catalog_sources(
+            ra_deg, dec_deg, radius_deg, enabled_driver_names, magnitude_limit
+        )
 
     def list_catalog_driver_metadata(self) -> list[dict[str, Any]]:
         """Return metadata describing each registered online catalog driver.

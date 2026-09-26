@@ -1,3 +1,8 @@
+/**
+ * @file StackedImagePanel.tsx
+ * @description Component displaying final and spectral stacked output files for a target,
+ * with options to view FITS headers and preview stacks in the viewer.
+ */
 import React, { useEffect, useState } from 'react';
 import { fetchTargetFrameHeader } from '../../common/services/targetService';
 
@@ -6,6 +11,7 @@ interface StackedImagePanelProps {
     spectralPath?: string;
     exposureTime: number;
     targetId: string | null;
+    selectedFile?: string | null;
     onView: (path: string | null) => void;
     onShowHeader?: (path: string) => void;
 }
@@ -19,6 +25,7 @@ export const StackedImagePanel: React.FC<StackedImagePanelProps> = ({
     spectralPath,
     exposureTime,
     targetId,
+    selectedFile,
     onView,
     onShowHeader
 }) => {
@@ -66,12 +73,19 @@ export const StackedImagePanel: React.FC<StackedImagePanelProps> = ({
 
     const effectiveExposure = headerExptime !== null ? headerExptime : exposureTime;
 
+    /**
+     * Renders a row for a stacked FITS item.
+     *
+     * @param imagePath System file path of the stacked frame.
+     * @param label Human-readable label (e.g., Final Stack, Spectral Stack).
+     */
     const renderItem = (imagePath: string, label: string) => {
         if (!imagePath) return null;
         const filename = imagePath.split(/[/\\]/).pop() || imagePath;
+        const isViewing = selectedFile === imagePath;
 
         return (
-            <div className="stacked-image-panel__row" key={label}>
+            <div className={`stacked-image-panel__row ${isViewing ? 'stacked-image-panel__row--active' : ''}`} key={label}>
                 <div className="stacked-image-panel__info">
                     <span className="stacked-image-panel__label">{label}:</span>
                     <span className="stacked-image-panel__value" title={imagePath}>{filename}</span>
@@ -89,11 +103,11 @@ export const StackedImagePanel: React.FC<StackedImagePanelProps> = ({
                     )}
                     <button
                         type="button"
-                        className="btn btn--primary btn--tiny"
+                        className={`btn btn--tiny ${isViewing ? 'btn--active' : 'btn--primary'}`}
                         onClick={() => onView(imagePath)}
                         title={`View ${label.toLowerCase()}`}
                     >
-                        View
+                        {isViewing ? 'Viewing' : 'View'}
                     </button>
                 </div>
             </div>

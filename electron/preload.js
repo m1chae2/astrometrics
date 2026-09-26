@@ -52,12 +52,108 @@ const api = {
 		},
 
 		/**
+		 * Open a new display window with an optional initial workspace mode.
+		 * @param {string|Object} [options] Requested mode string or options object.
+		 * @returns {Promise<{ windowId: number } | null>}
+		 */
+		openDisplayWindow(options) {
+			const payload = typeof options === 'string' ? { mode: options } : (options || {});
+			return ipcRenderer.invoke('open-display-window', payload);
+		},
+
+		/**
+		 * Report the current window's active workspace mode to the main process.
+		 * @param {string} mode Current mode name.
+		 */
+		reportWindowMode(mode) {
+			ipcRenderer.send('window-mode-changed', mode);
+		},
+
+		/**
+		 * Route a cross-display navigation action to another window presenting the target display.
+		 * @param {Object} intent The navigation intent object.
+		 * @returns {Promise<{ handledRemotely: boolean, targetWindowId?: number }>}
+		 */
+		routeDisplayAction(intent) {
+			return ipcRenderer.invoke('route-display-action', intent);
+		},
+
+		/**
+		 * Subscribe to remote actions forwarded from other application windows.
+		 * @param {Function} callback Receives { action, payload, intent }.
+		 * @returns {Function} Unsubscribe function.
+		 */
+		onRemoteAction(callback) {
+			const handler = (_event, data) => callback(data);
+			ipcRenderer.on('remote-action', handler);
+			return () => ipcRenderer.removeListener('remote-action', handler);
+		},
+
+		/**
 		 * Show a native notification.
 		 * @param {string} title
 		 * @param {string} body
+		 * @param {Object} [options]
+		 * @param {'normal' | 'critical'} [options.urgency]
+		 * @param {string} [options.tag]
+		 * @param {boolean} [options.silent]
+		 * @param {'default' | 'never'} [options.timeoutType]
+		 * @param {string[]} [options.actions]
 		 */
-		showNotification(title, body) {
-			ipcRenderer.send('show-notification', { title, body });
+		showNotification(title, body, options = {}) {
+			ipcRenderer.send('show-notification', { title, body, ...options });
+		},
+
+		/**
+		 * Update dynamic tray menu with live mount status and active workspace.
+		 * @param {Object} status
+		 * @param {string} [status.mountStatus]
+		 * @param {string} [status.activeTarget]
+		 * @param {string} [status.activeMode]
+		 */
+		updateTrayStatus(status) {
+			ipcRenderer.send('update-tray-status', status);
+		},
+
+		/**
+		 * Enable or disable power-save blocker to prevent system sleep during imaging/guiding.
+		 * @param {boolean} enable
+		 */
+		setPowerSaveBlocker(enable) {
+			ipcRenderer.send('set-power-save-blocker', { enable });
+		},
+
+		/**
+		 * Subscribe to mode navigation events triggered by OS jump lists, dock actions, or tray.
+		 * @param {Function} callback (mode: string) => void
+		 * @returns {Function} Unsubscribe function
+		 */
+		onNavigateMode(callback) {
+			const handler = (_event, mode) => callback(mode);
+			ipcRenderer.on('navigate-mode', handler);
+			return () => ipcRenderer.removeListener('navigate-mode', handler);
+		},
+
+		/**
+		 * Subscribe to OS theme change events (e.g. dark/light system mode toggle).
+		 * @param {Function} callback (isDark: boolean) => void
+		 * @returns {Function} Unsubscribe function
+		 */
+		onSystemThemeChanged(callback) {
+			const handler = (_event, isDark) => callback(isDark);
+			ipcRenderer.on('system-theme-changed', handler);
+			return () => ipcRenderer.removeListener('system-theme-changed', handler);
+		},
+
+		/**
+		 * Subscribe to notification action button clicks.
+		 * @param {Function} callback ({ index: number }) => void
+		 * @returns {Function} Unsubscribe function
+		 */
+		onNotificationAction(callback) {
+			const handler = (_event, data) => callback(data);
+			ipcRenderer.on('notification-action-clicked', handler);
+			return () => ipcRenderer.removeListener('notification-action-clicked', handler);
 		},
 
 		/**
@@ -108,6 +204,108 @@ const api = {
 		 */
 		async openFile(options) {
 			return ipcRenderer.invoke('dialog-open-file', options);
+		},
+
+		/**
+		 * Show a save-file dialog with the specified options.
+		 * @param {Object} [options] Electron showSaveDialog options.
+		 * @returns {Promise<string|null>} Resolves to selected file path or null if cancelled.
+		 */
+		async saveFile(options) {
+			return ipcRenderer.invoke('dialog-save-file', options);
+		},
+
+		/**
+		 * Open an independent pop-up figure window for a Matplotlib plot.
+		 * @param {string} plotPath Path to PNG figure file.
+		 * @returns {Promise<{ windowId: number }|null>}
+		 */
+		async openFigureWindow(plotPath) {
+			return ipcRenderer.invoke('open-figure-window', plotPath);
+		}
+	},
+	tray: {
+		/**
+		 * Send a quick action from the tray popover to the main process.
+		 * Supported actions: 'park', 'navigate', 'open-app', 'quit'.
+		 * @param {string} action Action identifier.
+		 * @param {Object} [payload] Optional action-specific payload (e.g. { mode: 'Planetarium' }).
+		 */
+		sendAction(action, payload) {
+			ipcRenderer.send('tray-popover-action', { action, payload });
+		},
+
+		/**
+		 * Subscribe to visibility changes of the tray popover window.
+		 * Used to pause background animations and timers when hidden.
+		 * @param {Function} callback (isVisible: boolean) => void
+		 * @returns {Function} Unsubscribe function
+		 */
+		onVisibilityChange(callback) {
+			const handler = (_event, isVisible) => callback(isVisible);
+			ipcRenderer.on('tray-visibility-changed', handler);
+			return () => ipcRenderer.removeListener('tray-visibility-changed', handler);
+		}
+	},
+	terminal: {
+		/**
+		 * Execute Python script in supervised terminal environment.
+		 * @param {string} code Python code snippet.
+		 * @param {Object} [options] Execution options.
+		 * @returns {Promise<Object>} Execution envelope with status, stdout, stderr, result, plots, workspace.
+		 */
+		async executeScript(code, options = {}) {
+			return ipcRenderer.invoke('python-terminal-execute', { code, ...options });
+		},
+
+		/**
+		 * Fetch current active workspace variable manifest.
+		 * @returns {Promise<Array<Object>>}
+		 */
+		async getWorkspace() {
+			return ipcRenderer.invoke('python-terminal-get-workspace');
+		},
+
+		/**
+		 * Query completions for an input prefix.
+		 * @param {string} text Prefix string.
+		 * @returns {Promise<string[]>}
+		 */
+		async getCompletions(text) {
+			return ipcRenderer.invoke('python-terminal-completions', { text });
+		},
+
+		/**
+		 * Subscribe to streaming stdout/stderr chunks from execution.
+		 * @param {Function} callback ({ stdout, stderr }) => void
+		 * @returns {Function} Unsubscribe function
+		 */
+		onOutput(callback) {
+			const handler = (_event, chunk) => callback(chunk);
+			ipcRenderer.on('python-terminal-output', handler);
+			return () => ipcRenderer.removeListener('python-terminal-output', handler);
+		},
+
+		/**
+		 * Subscribe to figures/plots emitted by matplotlib.
+		 * @param {Function} callback (plotPath: string) => void
+		 * @returns {Function} Unsubscribe function
+		 */
+		onFigure(callback) {
+			const handler = (_event, plotPath) => callback(plotPath);
+			ipcRenderer.on('python-terminal-figure', handler);
+			return () => ipcRenderer.removeListener('python-terminal-figure', handler);
+		},
+
+		/**
+		 * Subscribe to workspace variable manifest updates.
+		 * @param {Function} callback (workspace: Array<Object>) => void
+		 * @returns {Function} Unsubscribe function
+		 */
+		onWorkspaceUpdated(callback) {
+			const handler = (_event, workspace) => callback(workspace);
+			ipcRenderer.on('python-terminal-workspace-updated', handler);
+			return () => ipcRenderer.removeListener('python-terminal-workspace-updated', handler);
 		}
 	}
 };
@@ -115,5 +313,8 @@ const api = {
 // Freeze surface to prevent tampering from renderer scripts.
 Object.freeze(api);
 Object.freeze(api.app);
+Object.freeze(api.dialog);
+Object.freeze(api.tray);
+Object.freeze(api.terminal);
 
 contextBridge.exposeInMainWorld('astrometrics', api);

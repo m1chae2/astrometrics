@@ -28,10 +28,16 @@ export const useSettingsLogic = (open: boolean, closing: boolean, onClose: () =>
     useEffect(() => {
         if (open && !closing) {
             setLoadingConfig(true);
-            getSystemConfig().then((data) => {
-                setConfigData(data as ConfigData);
-                setLoadingConfig(false);
-            }).catch(() => setLoadingConfig(false));
+            const controller = new AbortController();
+
+            getSystemConfig({ signal: controller.signal, timeoutMs: 10000 })
+                .then((data) => {
+                    setConfigData(data as ConfigData);
+                    setLoadingConfig(false);
+                })
+                .catch(() => {
+                    setLoadingConfig(false);
+                });
 
             // Re-read backend base incase changed externally?
             // Usually not, but good practice.
@@ -39,7 +45,12 @@ export const useSettingsLogic = (open: boolean, closing: boolean, onClose: () =>
                 setBackendInput(getBackendBase());
                 setAgentShortcutInput(getAgentShortcut());
             } catch { /* ignore */ }
+
+            return () => {
+                controller.abort();
+            };
         }
+        return undefined;
     }, [open, closing]);
 
     // Sync Secondary Window
@@ -149,7 +160,8 @@ export const useSettingsLogic = (open: boolean, closing: boolean, onClose: () =>
         setSecondaryWindowEnabled(enabled);
         const app = (window as any).astrometrics?.app;
         if (app?.toggleSecondaryWindow) {
-            app.toggleSecondaryWindow(enabled);
+            const preferredMode = configData['Frontend']?.['secondary_window_mode'] || 'Image Processing';
+            app.toggleSecondaryWindow(enabled, preferredMode);
         } else {
             showToast('Multi-window not supported in this environment', 'error');
         }
@@ -161,12 +173,17 @@ export const useSettingsLogic = (open: boolean, closing: boolean, onClose: () =>
         } catch {
             setBackendInput('');
         }
-        getSystemConfig().then((data) => {
-            setConfigData(data as ConfigData);
-            setLoadingConfig(false);
-            showToast('Configuration reverted', 'success');
-            window.dispatchEvent(new CustomEvent('astrometrics:configChange'));
-        });
+        setLoadingConfig(true);
+        getSystemConfig({ timeoutMs: 10000 })
+            .then((data) => {
+                setConfigData(data as ConfigData);
+                setLoadingConfig(false);
+                showToast('Configuration reverted', 'success');
+                window.dispatchEvent(new CustomEvent('astrometrics:configChange'));
+            })
+            .catch(() => {
+                setLoadingConfig(false);
+            });
     };
 
     const handleSaveBackend = () => {

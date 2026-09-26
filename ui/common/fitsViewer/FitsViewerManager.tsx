@@ -3,9 +3,9 @@ import { ImageViewer } from '../../targetDisplay/targetViewerManager/imageViewer
 import { FitsRenderer } from './FitsRenderer';
 import type { FitsRendererHandle } from './FitsRenderer';
 
-export type { FitsRendererHandle };
+import { AstrometryOverlayStar } from '../services/astronomyService';
 
-/** Props for the FitsViewerManager component. */
+export type { FitsRendererHandle };
 
 /** Props for the FitsViewerManager component. */
 interface Props {
@@ -34,6 +34,14 @@ interface Props {
   disableStretch?: boolean;
   /** Explicit stretch toggle. */
   stretch?: boolean;
+  /** Identified star overlay items. */
+  overlayStars?: AstrometryOverlayStar[];
+  /** Whether astrometry overlay is enabled. */
+  showOverlay?: boolean;
+  /** Callback when a star in the overlay is clicked. */
+  onStarClick?: (star: AstrometryOverlayStar) => void;
+  /** Currently selected star identifier for overlay highlighting. */
+  selectedStarId?: string | null;
 }
 
 /**
@@ -49,7 +57,11 @@ export const FitsViewerManager = React.forwardRef<FitsRendererHandle, Props>(({
   frameInfo,
   autoPanTrigger,
   disableStretch,
-  stretch
+  stretch,
+  overlayStars,
+  showOverlay,
+  onStarClick,
+  selectedStarId
 }, ref) => {
   // REQ: IMG-3: Image Visualization
   // REQ: IMG-3.1: The display SHALL render FITS format images directly in the browser.
@@ -70,6 +82,10 @@ export const FitsViewerManager = React.forwardRef<FitsRendererHandle, Props>(({
         selectedTarget={selectedTarget || null}
         disableStretch={disableStretch}
         stretch={stretch}
+        overlayStars={overlayStars}
+        showOverlay={showOverlay}
+        onStarClick={onStarClick}
+        selectedStarId={selectedStarId}
       />
     );
   }

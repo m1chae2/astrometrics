@@ -118,6 +118,7 @@ class LocalBrightStarCatalogDriver(CatalogDriver):
         ra_degrees: float,
         dec_degrees: float,
         radius_degrees: float,
+        magnitude_limit: float | None = None,
     ) -> list[StellarObject]:
         """Return bundled bright Hipparcos stars within a circular sky region.
 

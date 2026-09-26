@@ -26,6 +26,8 @@ import { TelescopeOverlay } from '../layers/TelescopeOverlay';
 import { CompassOverlay } from '../layers/CompassOverlay';
 import { HudOverlay } from '../layers/HudOverlay';
 import { ConstellationOverlay } from '../layers/ConstellationOverlay';
+import { AlignmentOverlay } from '../layers/AlignmentOverlay';
+import { TrackingRiskOverlay } from '../layers/TrackingRiskOverlay';
 import { StarFieldRenderer } from '../webgl/StarFieldRenderer';
 
 /**
@@ -58,6 +60,20 @@ interface Props {
   constellationLines: ConstellationLineSegment[];
   /** Show telescope pointing crosshair overlay. */
   showTelescope: boolean;
+  /** Show telescope alignment pointing vectors and polar alignment overlay. */
+  showAlignment?: boolean;
+  /** Show mount tracking mechanical risk heatmap overlay. */
+  showTrackingRisk?: boolean;
+  /** Plate-solve alignment attempts to project onto the celestial sphere. */
+  alignmentAttempts?: import('../../common/types/backendTypes').AlignmentAttempt[];
+  /** Cumulative tracking and alignment attempts across all recorded observing sessions. */
+  cumulativeTrackingAttempts?: import('../../common/types/backendTypes').AlignmentAttempt[];
+  /** Polar Alignment Assistant (PAA) status and coordinates. */
+  polarAlignment?: import('../../common/types/backendTypes').PolarAlignmentStatus | null;
+  /** Selected historical session identifier being reviewed. */
+  selectedSessionId?: string | null;
+  /** Active simulation date (from Date & Time modal or simulation clock). */
+  simulationDate?: Date;
   /** Current field of view in degrees. */
   fov: number;
   /** Callback invoked when the user scrolls to change FOV. */
@@ -115,9 +131,8 @@ const LST_REDRAW_EPSILON_DEGREES = 0.001;
 // frame once sidereal drift exceeds this many pixels.
 const LST_REDRAW_EPSILON_PIXELS = 1.5;
 
-const calculateLST = (offsetMinutes: number, lon: number): number => {
-  const baseDate = new Date();
-  const date = new Date(baseDate.getTime() + offsetMinutes * 60 * 1000);
+export const calculateLST = (simDate: Date, offsetMinutes: number, lon: number): number => {
+  const date = new Date(simDate.getTime() + offsetMinutes * 60 * 1000);
 
   const jd2000 = 2451545.0;
   const currentJd = (date.getTime() / 86400000.0) + 2440587.5;
@@ -155,6 +170,13 @@ export const CelestialSkyMap: React.FC<Props> = ({
   showConstellations,
   constellationLines,
   showTelescope,
+  showAlignment = true,
+  showTrackingRisk = false,
+  alignmentAttempts,
+  cumulativeTrackingAttempts,
+  polarAlignment,
+  selectedSessionId,
+  simulationDate,
   fov,
   onFOVChange,
   onSelectSource,
@@ -168,6 +190,12 @@ export const CelestialSkyMap: React.FC<Props> = ({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const starCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+
+  // Keep a ref to the active simulation date
+  const simulationDateRef = useRef<Date>(simulationDate || new Date());
+  useEffect(() => {
+    simulationDateRef.current = simulationDate || new Date();
+  }, [simulationDate]);
 
   // WebGL star-field renderer: draws the (potentially thousands of) star
   // points on its own canvas via instanced point sprites, instead of
@@ -200,11 +228,13 @@ export const CelestialSkyMap: React.FC<Props> = ({
   // dots on its own canvas) or stays StarOverlay as the WebGL2-unavailable fallback.
   const overlays = useMemo(() => [
     new BackgroundOverlay(),
+    new TrackingRiskOverlay(),
     new ImageOverlay(),
     new GridOverlay(),
     new ConstellationOverlay(),
     new CompassOverlay(),
     new TargetOverlay(),
+    new AlignmentOverlay(),
     starRenderMode === 'webgl' ? new StarSelectionOverlay() : new StarOverlay(),
     new FovOverlay(),
     new TelescopeOverlay(),
@@ -284,7 +314,7 @@ export const CelestialSkyMap: React.FC<Props> = ({
   const observerLat = safeParse(location?.latitude ?? 39.7392);
   const observerLon = safeParse(location?.longitude ?? -104.9903);
 
-  const currentLST = calculateLST(timeOffsetMinutes, observerLon);
+  const currentLST = calculateLST(simulationDate || new Date(), timeOffsetMinutes, observerLon);
 
   // Kept in sync so the 't' keydown handler (subscribed once) can read the
   // latest selection without recreating the window listener on every change.
@@ -613,8 +643,14 @@ export const CelestialSkyMap: React.FC<Props> = ({
     if (!context) return;
 
     const renderLoop = () => {
+      // 0. Power efficiency: Pause render work if document is hidden or canvas is not visible
+      if (document.hidden || canvas.offsetParent === null) {
+        animFrameId = requestAnimationFrame(renderLoop);
+        return;
+      }
+
       // 1. Advance tracking target position for current sidereal time
-      const currentFrameLST = calculateLST(timeOffsetMinutesRef.current, observerLon);
+      const currentFrameLST = calculateLST(simulationDateRef.current, timeOffsetMinutesRef.current, observerLon);
 
       if (trackingMode && trackedCoords.current) {
         const targetAltAz = getAltAz(trackedCoords.current.ra, trackedCoords.current.dec, currentFrameLST, observerLat);
@@ -702,6 +738,12 @@ export const CelestialSkyMap: React.FC<Props> = ({
         telescopeConnected: telescopeConnectedRef.current,
         telescopeRa: telescopeRaRef.current,
         telescopeDec: telescopeDecRef.current,
+        showAlignment,
+        showTrackingRisk,
+        alignmentAttempts,
+        cumulativeTrackingAttempts,
+        polarAlignment,
+        selectedSessionId,
         sensorFovWidthDeg: sensorFovWidthDegRef.current,
         sensorFovHeightDeg: sensorFovHeightDegRef.current,
         projectCoords: (ra: number, dec: number) => {
@@ -777,6 +819,8 @@ export const CelestialSkyMap: React.FC<Props> = ({
     sources, targets, showStars, showFOV, showFITS,
     showEnvironment, showGrid, showCatalog, showTelescope, selectedTargetId,
     showConstellations, constellationLines,
+    showAlignment, showTrackingRisk, alignmentAttempts, cumulativeTrackingAttempts, polarAlignment, selectedSessionId,
+    simulationDate,
     loadedFits, trackingMode, observerLat, observerLon, overlays
   ]);
 
@@ -789,6 +833,7 @@ export const CelestialSkyMap: React.FC<Props> = ({
       clickX: e.clientX - rect.left,
       clickY: e.clientY - rect.top,
       sources, targets, showStars, showCatalog, showEnvironment,
+      showAlignment, alignmentAttempts,
       canvasWidth: rect.width, canvasHeight: rect.height,
       fov: localFOVRef.current,
       centerAlt: centerAltRef.current,
@@ -796,7 +841,9 @@ export const CelestialSkyMap: React.FC<Props> = ({
       lst: currentLSTRef.current,
       observerLat,
     });
-    onSelectSource(nearest);
+    if (nearest) {
+      onSelectSource(nearest);
+    }
   };
 
   // Context menu handler. REQ: PLN-2.5
@@ -810,6 +857,7 @@ export const CelestialSkyMap: React.FC<Props> = ({
       clickX: e.clientX - rect.left,
       clickY: e.clientY - rect.top,
       sources, targets, showStars, showCatalog, showEnvironment,
+      showAlignment, alignmentAttempts,
       canvasWidth: rect.width, canvasHeight: rect.height,
       fov: localFOVRef.current,
       centerAlt: centerAltRef.current,

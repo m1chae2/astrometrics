@@ -3,18 +3,18 @@
 Description: Verifies quantum-efficiency curve interpolation (exact
 knots, mid-point linear interpolation, edge-hold extrapolation),
 correction division math, divide-by-zero floor protection, and the
-per-camera curve lookup's None-handling for unregistered cameras.
+conversion of a camera profile's stored curve, and the None handling for
+cameras without one.
 """
 
 import numpy as np
 
+from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib.pipelines.spectroscopy.quantum_efficiency_correction import (
-    apply_quantum_efficiency_correction,
-    interpolate_quantum_efficiency,
-)
-from astrometricslib.pipelines.spectroscopy.quantum_efficiency_curves import (
     QuantumEfficiencyCurve,
-    get_quantum_efficiency_curve,
+    apply_quantum_efficiency_correction,
+    curve_from_profile_record,
+    interpolate_quantum_efficiency,
 )
 
 
@@ -80,15 +80,19 @@ def test_apply_quantum_efficiency_correction_floors_near_zero_quantum_efficiency
     np.testing.assert_allclose(corrected, [100.0 / 0.01])
 
 
-def test_get_quantum_efficiency_curve_known_camera():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify the ZWO ASI533MM Pro curve is registered with real data."""
-    curve = get_quantum_efficiency_curve("ZWO ASI533MM Pro")
-    assert curve is not None
+def test_the_asi533_profile_curve_becomes_matching_arrays():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify the ASI533's stored curve converts to arrays of equal length."""
+    record = resolve_camera_profile("ZWO ASI533MM Pro").quantum_efficiency
+    assert record is not None
+    curve = curve_from_profile_record(record)
+    assert isinstance(curve.wavelength_nm, np.ndarray)
     assert curve.wavelength_nm.size == curve.quantum_efficiency_fraction.size
     assert curve.wavelength_nm.size > 0
+    # Peak sensitivity (92%) is near 480 nm; it falls to 6% at 1000 nm.
+    np.testing.assert_allclose(interpolate_quantum_efficiency(np.array([480.0, 1000.0]), curve), [0.92, 0.06])
 
 
-def test_get_quantum_efficiency_curve_unregistered_camera_returns_none():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verifies cameras without a digitized curve return None, not an error."""
-    assert get_quantum_efficiency_curve("Nikon D5300") is None
-    assert get_quantum_efficiency_curve("Some Unknown Camera") is None
+def test_cameras_without_a_stored_curve_have_none_not_an_error():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verifies cameras without a digitized curve give None."""
+    assert resolve_camera_profile("Nikon D5300").quantum_efficiency is None
+    assert resolve_camera_profile("Some Unknown Camera").quantum_efficiency is None

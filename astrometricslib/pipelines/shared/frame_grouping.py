@@ -150,18 +150,22 @@ def frame_is_spectral(frame: Any) -> bool:
     Parameters
     ----------
     frame : `Any`
-        The frame record (or anything with a `.filter` attribute) to check.
+        The frame record (or anything with a `.filter` attribute or
+        `"filter"` key) to check.
 
     Returns
     -------
     is_spectral : `bool`
         True if the frame is a spectroscopy frame.
     """
-    frame_filter = getattr(frame, "filter", None)
+    if isinstance(frame, dict):
+        frame_filter = frame.get("filter")
+    else:
+        frame_filter = getattr(frame, "filter", None)
     return (
         frame_filter == FilterType.SPEC
         or getattr(frame_filter, "name", None) == "SPEC"
-        or str(frame_filter).upper() in ("SPEC", "STAR ANALYZER 200")
+        or str(frame_filter).upper() in ("SPEC", "STAR ANALYZER 200", "SPECTROSCOPY")
     )
 
 

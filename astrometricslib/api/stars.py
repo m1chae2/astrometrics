@@ -9,6 +9,7 @@ in the database.
 import logging
 from typing import Any
 
+from astrometricslib.drivers import deep_star_store
 from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.utilities.config_loader import AppConfiguration
@@ -72,6 +73,15 @@ class StellarCatalog:
     def list_objects(self) -> list[StellarObject]:
         """List all stellar objects extracted across the library.
 
+        Warning: this reads every star's full record from the database
+        into new objects each time -- about 12 seconds and 2.8 GB on a
+        274,000-star library, and none of that memory is handed back
+        afterwards. It is for one-off scripts. Application code should ask
+        for only what it needs: `list_object_summaries`,
+        `list_object_summaries_in_region`, `list_object_ids`,
+        `list_objects_for_target`, `list_objects_in_region`,
+        `find_by_id_or_name`, `find_by_position` or `get_object`.
+
         Returns
         -------
         stellar_objects : `list` [`StellarObject`]
@@ -80,6 +90,280 @@ class StellarCatalog:
         from astrometricslib.api import stellar_operations
 
         return stellar_operations.list_objects(self)
+
+    def list_object_ids(self) -> list[str]:
+        """List the id of every star in the catalog.
+
+        Reads only the id column, so no star record is loaded.
+
+        Returns
+        -------
+        star_ids : `list` [`str`]
+            One id per star.
+        """
+        return self.catalog_access.list_star_ids()
+
+    def existing_ids(self, ids: list[str]) -> set[str]:
+        """Say which of the given ids are stars in the catalog.
+
+        Parameters
+        ----------
+        ids : `list` [`str`]
+            The star ids to look for.
+
+        Returns
+        -------
+        found_ids : `set` [`str`]
+            The subset of `ids` that has a star record.
+        """
+        return self.catalog_access.existing_star_ids(ids)
+
+    def list_spectrum_object_ids(self) -> list[str]:
+        """List the id of every star that has a recorded spectrum.
+
+        Returns
+        -------
+        star_ids : `list` [`str`]
+            The ids of the stars with spectroscopy data.
+        """
+        return [summary.id for summary in self.catalog_access.list_star_summaries() if summary.has_spectra]
+
+    def list_objects_for_target(self, target_id: str) -> list[StellarObject]:
+        """Load the full records of the stars that belong to one target.
+
+        Only that target's stars are read from the database, however large
+        the rest of the catalog is.
+
+        Parameters
+        ----------
+        target_id : `str`
+            The target whose stars to load.
+
+        Returns
+        -------
+        stellar_objects : `list` [`StellarObject`]
+            The stars recorded against `target_id`.
+        """
+        star_ids = [summary.id for summary in self.catalog_access.list_star_summaries(target_id=target_id)]
+        return self.catalog_access.get_by_ids("stellar_catalog", star_ids)
+
+    def list_objects_in_region(self, ra: float, dec: float, radius: float) -> list[StellarObject]:
+        """Load the full records of the stars inside a circle on the sky.
+
+        Uses the database's declination index to read only the stars near
+        that spot.
+
+        Parameters
+        ----------
+        ra : `float`
+            Right ascension of the circle's center, in degrees.
+        dec : `float`
+            Declination of the circle's center, in degrees.
+        radius : `float`
+            Radius of the circle, in degrees.
+
+        Returns
+        -------
+        stellar_objects : `list` [`StellarObject`]
+            The stars whose position is inside the circle.
+        """
+        star_ids = [summary.id for summary in self.catalog_access.list_stars_in_region(ra, dec, radius)]
+        return self.catalog_access.get_by_ids("stellar_catalog", star_ids)
+
+    def find_all_by_id_or_name(self, name: str) -> list[StellarObject]:
+        """Find every star whose id or name equals `name`, ignoring case.
+
+        Parameters
+        ----------
+        name : `str`
+            The star's id or its name.
+
+        Returns
+        -------
+        stellar_objects : `list` [`StellarObject`]
+            The matching stars, an exact id match first. Empty if there is
+            no match.
+        """
+        matching_ids = self.catalog_access.find_star_ids_by_name(name)
+        if name in matching_ids:
+            matching_ids.remove(name)
+            matching_ids.insert(0, name)
+        by_id = {star.id: star for star in self.catalog_access.get_by_ids("stellar_catalog", matching_ids)}
+        return [by_id[star_id] for star_id in matching_ids if star_id in by_id]
+
+    def find_by_id_or_name(self, name: str) -> StellarObject | None:
+        """Find a star whose id or name equals `name`, ignoring case.
+
+        Parameters
+        ----------
+        name : `str`
+            The star's id or its name.
+
+        Returns
+        -------
+        stellar_object : `StellarObject` or `None`
+            The matching star, or `None` if there is none. When several
+            stars match, an exact id match wins.
+        """
+        matches = self.find_all_by_id_or_name(name)
+        return matches[0] if matches else None
+
+    def find_by_position(self, ra: float, dec: float, tolerance_arcsec: float = 5.0) -> StellarObject | None:
+        """Find the catalog star nearest to a spot on the sky.
+
+        Only the stars within the tolerance of that spot are read, using the
+        database's declination index, instead of checking the whole
+        catalog.
+
+        Parameters
+        ----------
+        ra : `float`
+            Right ascension, in degrees.
+        dec : `float`
+            Declination, in degrees.
+        tolerance_arcsec : `float`, optional
+            How far from the spot a star may be and still count as a
+            match, in arcseconds. Defaults to 5.
+
+        Returns
+        -------
+        stellar_object : `StellarObject` or `None`
+            The nearest star inside the tolerance, or `None` if none is.
+        """
+        import astropy.units as u
+        from astropy.coordinates import SkyCoord
+
+        target_coordinate = SkyCoord(ra=ra, dec=dec, unit=(u.deg, u.deg))
+        nearest_id: str | None = None
+        nearest_separation = tolerance_arcsec
+        for candidate in self.catalog_access.list_stars_in_region(ra, dec, tolerance_arcsec / 3600.0):
+            # A stored 0.0 means "position never set", not the point
+            # (0, 0) on the sky, so those stars are never matched.
+            if not candidate.right_ascension or not candidate.declination:
+                continue
+            try:
+                candidate_coordinate = SkyCoord(
+                    ra=float(candidate.right_ascension),
+                    dec=float(candidate.declination),
+                    unit=(u.deg, u.deg),
+                )
+            except ValueError, TypeError:
+                continue
+            separation = target_coordinate.separation(candidate_coordinate).arcsecond
+            if separation < nearest_separation:
+                nearest_id, nearest_separation = candidate.id, separation
+        if nearest_id is None:
+            return None
+        matches = self.catalog_access.get_by_ids("stellar_catalog", [nearest_id])
+        return matches[0] if matches else None
+
+    def find_or_create_by_position(
+        self,
+        ra: float,
+        dec: float,
+        name: str | None = None,
+        spectral_type: str | None = None,
+        magnitude: float | None = None,
+        target_id: str | None = None,
+        tolerance_arcsec: float = 5.0,
+    ) -> StellarObject:
+        """Find the star at a spot on the sky, or record a new one there.
+
+        Looks for an existing star with the given name, then for one within
+        `tolerance_arcsec` of (`ra`, `dec`), and only creates a new star if
+        neither exists. Whichever star is used gets any of the spectral
+        type, magnitude and target that it does not have yet.
+
+        Parameters
+        ----------
+        ra : `float`
+            Right ascension, in degrees.
+        dec : `float`
+            Declination, in degrees.
+        name : `str`, optional
+            The star's catalog name (for example from SIMBAD). Also becomes
+            the id of a new star.
+        spectral_type : `str`, optional
+            Spectral type to record if the star has none.
+        magnitude : `float`, optional
+            Magnitude to record if the star has none.
+        target_id : `str`, optional
+            Target to add to the star's list of targets.
+        tolerance_arcsec : `float`, optional
+            How close in position counts as the same star, in arcseconds.
+
+        Returns
+        -------
+        stellar_object : `StellarObject`
+            The star that was found or created.
+        """
+        # 1. A star with this exact id is the same star, wherever it sits.
+        if name:
+            matches = self.catalog_access.get_by_ids("stellar_catalog", [name])
+            if matches:
+                existing = matches[0]
+                updates: dict[str, Any] = {}
+                if spectral_type and not existing.spectral_type:
+                    updates["spectral_type"] = spectral_type
+                    updates["stellar_spectral_type"] = spectral_type
+                if magnitude is not None and existing.magnitude is None:
+                    updates["magnitude"] = magnitude
+                if target_id and target_id not in existing.target_ids:
+                    updates["target_ids"] = [*list(existing.target_ids), target_id]
+                if updates:
+                    self.update(existing.id, updates)
+                    existing = self.get_object(existing.id)
+                return existing
+
+        # 2. Otherwise a star at the same spot is the same star.
+        nearby = self.find_by_position(ra, dec, tolerance_arcsec)
+        if nearby is not None:
+            updates = {}
+            new_id = nearby.id
+            if name and (not nearby.name or "Star_" in nearby.id) and not self.get_object(name):
+                # A field detection that a catalog has now named takes the
+                # catalog name, unless that name is already another star.
+                updates["name"] = name
+                if "Star_" in nearby.id:
+                    new_id = name
+                    updates["id"] = name
+            if spectral_type and not nearby.spectral_type:
+                updates["spectral_type"] = spectral_type
+                updates["stellar_spectral_type"] = spectral_type
+            if magnitude is not None and nearby.magnitude is None:
+                updates["magnitude"] = magnitude
+            if target_id and target_id not in nearby.target_ids:
+                updates["target_ids"] = [*list(nearby.target_ids), target_id]
+            if updates:
+                if new_id != nearby.id:
+                    self.delete(nearby.id)
+                    self.create(new_id, ra=ra, dec=dec)
+                self.update(new_id, updates)
+                nearby = self.get_object(new_id)
+            return nearby
+
+        # 3. Nothing there yet: record a new star.
+        if name:
+            new_star_id = name
+        else:
+            base_id = f"Star_{len(self.list_object_ids()) + 1}"
+            new_star_id = base_id
+            counter = 1
+            while self.get_object(new_star_id):
+                new_star_id = f"{base_id}_{counter}"
+                counter += 1
+
+        self.create(new_star_id, ra=ra, dec=dec)
+        new_star_updates: dict[str, Any] = {"name": name or new_star_id}
+        if spectral_type:
+            new_star_updates["spectral_type"] = spectral_type
+            new_star_updates["stellar_spectral_type"] = spectral_type
+        if magnitude is not None:
+            new_star_updates["magnitude"] = magnitude
+        if target_id:
+            new_star_updates["target_ids"] = [target_id]
+        self.update(new_star_id, new_star_updates)
+        return self.get_object(new_star_id)
 
     def list_object_summaries(
         self, target_id: str | None = None, limit: int | None = None, *, apply_default_limit: bool = True
@@ -117,8 +401,10 @@ class StellarCatalog:
         -------
         summaries : `list` [`dict`]
             One dict per star with keys ``id``, ``name``, ``ra``,
-            ``dec``, ``targetIds``, ``hasSpectra``, and
-            ``hasPhotometry``, optionally filtered by ``target_id``.
+            ``dec``, ``targetIds``, ``hasSpectra``, ``hasPhotometry``,
+            ``magnitude`` (`None` when unknown), and ``spectralType`` (an
+            empty string when unknown), optionally filtered by
+            ``target_id``.
         """
         effective_limit = limit
         if effective_limit is None and not target_id and apply_default_limit:
@@ -136,9 +422,101 @@ class StellarCatalog:
                 "targetIds": star.target_ids,
                 "hasSpectra": star.has_spectra,
                 "hasPhotometry": star.has_photometry,
+                "magnitude": star.magnitude,
+                "spectralType": star.spectral_type,
             }
             for star in self.catalog_access.list_star_summaries(target_id=target_id, limit=effective_limit)
         ]
+
+    def list_object_summaries_in_region(
+        self, ra: float, dec: float, radius: float, magnitude_range: tuple[float, float] | None = None
+    ) -> list[dict[str, Any]]:
+        """Get quick summaries of the library stars inside a circle of sky.
+
+        Like `list_object_summaries`, this never loads a star's full
+        record, so it stays fast however large the library is. The
+        difference is that it only reads the stars near one spot, using
+        the database's declination index, and each summary also carries
+        the star's magnitude and spectral type. The sky map calls it on
+        every pan and zoom.
+
+        Parameters
+        ----------
+        ra : `float`
+            Right ascension of the circle's center, in degrees.
+        dec : `float`
+            Declination of the circle's center, in degrees.
+        radius : `float`
+            Radius of the circle, in degrees.
+        magnitude_range : `tuple` [`float`, `float`], optional
+            Lowest and highest magnitude to keep, ends included. Stars
+            with no saved magnitude are left out. Every star is kept when
+            omitted.
+
+        Returns
+        -------
+        summaries : `list` [`dict`]
+            One dict per star inside the circle with keys ``id``,
+            ``name``, ``ra``, ``dec``, ``targetIds``, ``hasSpectra``,
+            ``hasPhotometry``, ``magnitude`` (`None` when unknown), and
+            ``spectralType`` (an empty string when unknown).
+        """
+        # camelCase keys for the same reason as in `list_object_summaries`.
+        return [
+            {
+                "id": star.id,
+                "name": star.name,
+                "ra": star.right_ascension,
+                "dec": star.declination,
+                "targetIds": star.target_ids,
+                "hasSpectra": star.has_spectra,
+                "hasPhotometry": star.has_photometry,
+                "magnitude": star.magnitude,
+                "spectralType": star.spectral_type,
+            }
+            for star in self.catalog_access.list_stars_in_region(ra, dec, radius, magnitude_range)
+        ]
+
+    def find_deep_stars(
+        self, ra: float, dec: float, radius: float, magnitude_limit: float, maximum_stars: int | None = None
+    ) -> list[tuple[int, float, float, float]] | None:
+        """Look up stars in the downloaded Gaia deep-star catalog.
+
+        The catalog is a copy of Gaia DR3 saved on this computer by
+        ``python -m astrometricslib.scripts.build_deep_star_catalog``, so
+        this makes no internet request. It is meant for drawing a sky map
+        quickly; it does not touch the stars in the library itself.
+
+        Parameters
+        ----------
+        ra, dec : `float`
+            The center of the circle, in degrees.
+        radius : `float`
+            The radius of the circle, in degrees.
+        magnitude_limit : `float`
+            Only stars as bright as this Gaia G magnitude, or brighter.
+        maximum_stars : `int`, optional
+            Return at most this many stars, keeping the brightest.
+
+        Returns
+        -------
+        stars : `list` of `tuple` or `None`
+            One ``(source_id, ra, dec, magnitude)`` tuple per star, brightest
+            first, or `None` if the catalog has not been downloaded at all.
+        """
+        return deep_star_store.find_deep_stars(self._config, ra, dec, radius, magnitude_limit, maximum_stars)
+
+    def get_deep_catalog_status(self) -> dict[str, Any]:
+        """Say how much of the deep-star catalog has been downloaded.
+
+        Returns
+        -------
+        status : `dict`
+            ``installed``, ``complete``, ``star_count``, ``pixels_downloaded``,
+            ``pixels_total``, ``healpix_level``, ``magnitude_limit`` and
+            ``size_megabytes``. See `deep_star_store.get_deep_catalog_status`.
+        """
+        return deep_star_store.get_deep_catalog_status(self._config)
 
     def get_object(self, object_id: str) -> StellarObject | None:
         """Find a single star in the catalog using its ID.
@@ -156,6 +534,41 @@ class StellarCatalog:
         from astrometricslib.api import stellar_operations
 
         return stellar_operations.get_object(self, object_id)
+
+    def analyze_periodicity(self, object_id: str) -> StellarObject | None:
+        """Search a star's light curve for a repeating pattern, and save it.
+
+        Runs the Lomb-Scargle periodogram (needs at least 5 brightness
+        measurements) and the box-fitting transit search (needs at least
+        8), and saves whichever produced a result on the star's
+        photometry. The photometry pipeline already runs these for a
+        target's own star and its brightest stars; this is how any other
+        star gets its period and transit numbers.
+
+        Parameters
+        ----------
+        object_id : `str`
+            The id of the star to analyze.
+
+        Returns
+        -------
+        stellar_object : `StellarObject` or `None`
+            The star with any new analysis saved, or `None` if no such
+            star exists. A star with too few measurements is returned
+            unchanged.
+        """
+        from astrometricslib.pipelines.photometry.variability_analyzer import VariabilityAnalyzer
+
+        star = self.get_object(object_id)
+        if star is None or not star.photometry:
+            return star
+
+        analyzer = VariabilityAnalyzer()
+        periodogram = analyzer.run_lomb_scargle_periodogram(star)
+        transit_candidate = analyzer.run_bls_transit_search(star)
+        if periodogram is None and transit_candidate is None:
+            return star
+        return self.update(star.id, {"photometry": star.photometry})
 
     def tune_spectroscopy_calibration(
         self,
@@ -297,11 +710,13 @@ class StellarCatalog:
             Counts and coverage percentages for identified, spectral,
             and photometric records.
         """
-        stellar_objects = self.list_objects()
-        total = len(stellar_objects)
-        with_names = len([o for o in stellar_objects if o.name and "Star_" not in o.id])
-        with_spectral = len([o for o in stellar_objects if o.spectral_type and o.spectral_type != "Unknown"])
-        with_magnitude = len([o for o in stellar_objects if o.magnitude not in (None, 0.0)])
+        # Counts come from the short-form summaries, which read only the
+        # indexed columns, so no star record is loaded to answer them.
+        summaries = self.catalog_access.list_star_summaries()
+        total = len(summaries)
+        with_names = len([s for s in summaries if s.name and "Star_" not in s.id])
+        with_spectral = len([s for s in summaries if s.spectral_type and s.spectral_type != "Unknown"])
+        with_magnitude = len([s for s in summaries if s.magnitude not in (None, 0.0)])
 
         return {
             "total_objects": total,

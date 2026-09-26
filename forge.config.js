@@ -95,13 +95,31 @@ export default {
         description: 'A clean modern looking visualization app for astrophotography images and spectroscopy',
         productName: 'Astrometrics',
         productDescription: 'A clean modern looking visualization app for astrophotography images and spectroscopy',
-        depends: ['libnotify4', 'xdg-utils'], // Ensure notification and open support
+        depends: [
+          'libnotify4',
+          'xdg-utils',
+          'shared-mime-info',
+          'libayatana-appindicator3-1'
+        ], // Ensure notifications, mime-types, file-open, and top-panel AppIndicator support
         desktop: {
           Name: 'Astrometrics',
           GenericName: 'Astronomy Application',
           Comment: 'Astrometrics Image Viewer and Analyzer',
           Categories: 'Science;Education;Graphics;',
-          MimeType: 'image/fits;application/fits;application/x-fits;'
+          MimeType: 'image/fits;application/fits;application/x-fits;',
+          Actions: 'Planetarium;Observatory;Processing;',
+          'Desktop Action Planetarium': {
+            Name: 'Open Planetarium',
+            Exec: 'astrometrics --mode=Planetarium'
+          },
+          'Desktop Action Observatory': {
+            Name: 'Observatory Manager',
+            Exec: 'astrometrics --mode="Observatory Manager"'
+          },
+          'Desktop Action Processing': {
+            Name: 'Image Processing',
+            Exec: 'astrometrics --mode="Image Processing"'
+          }
         }
       }
     },

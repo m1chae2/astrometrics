@@ -71,6 +71,24 @@ def _start_alignment(target_ra: str, target_dec: str) -> bool:
     return container.alignment_service.start_alignment(ra_deg, dec_deg)
 
 
+def _get_session_alignment(session_id: str = "") -> dict:
+    """Fetch alignment attempts and polar alignment data for a session.
+
+    Parameters
+    ----------
+    session_id : `str`
+        Session identifier or date string.
+
+    Returns
+    -------
+    data : `dict`
+        Dictionary containing alignmentAttempts and polarAlignment.
+    """
+    if hasattr(container, "alignment_service") and container.alignment_service:
+        return container.alignment_service.get_session_data(session_id)
+    return {"alignmentAttempts": [], "polarAlignment": None}
+
+
 class RPCHandlerRegistry:
     """Registry for dynamic RPC action dispatching.
 
@@ -119,6 +137,31 @@ class RPCHandlerRegistry:
         self.register("system:filters", ("config_service", "get_available_filters"))
         self.register("system:pulse", ("system_status_service", "get_pulse"))
         self.register("system:save", lambda: container.astrometrics.targets.save())
+        self.register("terminal:execute", ("scripting_service", "execute_structured"))
+        self.register("terminal:get_workspace", ("scripting_service", "get_workspace_manifest"))
+        self.register("terminal:completions", ("scripting_service", "get_completions"))
+        self.register("terminal:list_recipes", ("scripting_service", "list_recipes"))
+        self.register("terminal:get_recipe", ("scripting_service", "get_recipe"))
+        self.register("terminal:list_scripts", ("scripting_service", "list_user_scripts"))
+        self.register("terminal:read_script", ("scripting_service", "read_user_script"))
+        self.register("terminal:save_script", ("scripting_service", "save_user_script"))
+        self.register("terminal:load_run", ("scripting_service", "load_job_into_scope"))
+        self.register("docs:list_topics", ("scripting_service", "list_doc_topics"))
+        self.register("docs:get_topic", ("scripting_service", "get_doc_topic"))
+        self.register("ui:editor_get", ("scripting_service", "get_editor_buffer"))
+        self.register("ui:editor_set", ("scripting_service", "set_editor_buffer"))
+        self.register(
+            "ui:navigate",
+            lambda mode, target=None: container.socket_manager.broadcast_ui_event_sync(
+                "navigate-mode", {"mode": mode, "target": target}
+            ),
+        )
+        self.register(
+            "ui:inspect_variable",
+            lambda variable_name: container.socket_manager.broadcast_ui_event_sync(
+                "inspect-variable", {"variable_name": variable_name}
+            ),
+        )
 
         # --- Guiding (Infrastructure level) ---
         self.register("guiding:status", ("guiding_service", "get_status"))
@@ -133,6 +176,15 @@ class RPCHandlerRegistry:
         # --- Alignment (Infrastructure level) ---
         self.register("telescope:alignment_start", _start_alignment)
         self.register("telescope:alignment_stop", ("alignment_service", "cancel_alignment"))
+        self.register("telescope:list_alignment_sessions", ("alignment_service", "list_sessions"))
+        self.register("telescope:get_session_alignment", _get_session_alignment)
+        self.register(
+            "telescope:get_cumulative_tracking_data",
+            ("alignment_service", "get_cumulative_tracking_data"),
+        )
+        self.register("telescope:sync_logs", ("sync_service", "sync_telescope_logs"))
+        self.register("telescope:get_pointing_model", ("alignment_service", "compute_pointing_model"))
+        self.register("telescope:get_guiding_spectrum", ("guiding_service", "analyze_guiding_spectrum"))
 
         # --- Ingestion (Infrastructure level) ---
         self.register("ingestion:start", ("ingestion_service", "start_ingestion_by_args"))
@@ -176,7 +228,9 @@ class RPCHandlerRegistry:
         self.register("astronomy:list", ("stellar_service", "get_displayable_stellar_object_summaries"))
         self.register("astronomy:get", ("stellar_service", "get_object_fuzzy_by_id"))
         self.register("astronomy:save", ("stellar_service", "save_objects"))
+        self.register("astronomy:analyze_periodicity", ("stellar_service", "analyze_periodicity"))
         self.register("astronomy:get_stellar_objects", ("stellar_service", "get_stellar_objects"))
+        self.register("astronomy:get_overlay_stars", ("stellar_service", "get_astrometry_overlay_stars"))
         self.register("astronomy:get_target_status", ("stellar_service", "get_target_status"))
         self.register("astronomy:get_status", ("stellar_service", "get_target_status"))
         self.register("astronomy:visible", ("stellar_service", "get_visible_targets"))
@@ -208,6 +262,7 @@ class RPCHandlerRegistry:
         self.register("planetarium:get_observer_location", ("telescope_service", "get_observer_location"))
         self.register("planetarium:get_catalog_sources", ("stellar_service", "get_online_catalog_sources"))
         self.register("planetarium:list_catalog_drivers", ("stellar_service", "list_catalog_drivers"))
+        self.register("planetarium:get_deep_catalog_status", ("stellar_service", "get_deep_catalog_status"))
         self.register("planetarium:get_constellation_lines", ("stellar_service", "get_constellation_lines"))
 
         # --- Imaging (Camera) (Infrastructure level) ---

@@ -1,11 +1,19 @@
 """StellarObject lifecycle, planetarium sky sources, and visibility queries."""
 
 import logging
+import math
 import re
+import threading
+from typing import Any
 
 from astrometricslib import Astrometrics, StellarObject
 
 logger = logging.getLogger(__name__)
+
+# The command that downloads the deep-star catalog the Planetarium draws
+# from. Sent to the UI with the catalog's status so the first-launch prompt
+# shows the same command the script documents.
+DEEP_CATALOG_INSTALL_COMMAND = "python -m astrometricslib.scripts.build_deep_star_catalog"
 
 # Matches the ID suffix VariabilityAnalyzer stamps onto every per-frame point
 # source it detects during photometry (target_sessions.py's
@@ -27,6 +35,83 @@ def _is_per_frame_photometry_detection(object_id: str) -> bool:
         VariabilityAnalyzer generates, rather than a curated catalog id.
     """
     return bool(_PER_FRAME_DETECTION_ID_SUFFIX.search(object_id))
+
+
+# Real apparent magnitudes bottom out near -1.5 (Sirius), but photometry
+# stores instrumental magnitudes (about -10 to -17) in the same field, which
+# say nothing about how bright a star looks. Must match
+# BRIGHTEST_CATALOG_MAGNITUDE in ui/planetariumDisplay/layers/StarOverlay.ts.
+_BRIGHTEST_CATALOG_MAGNITUDE = -2.0
+
+
+# How many period searches may run at once. A search is a few seconds of
+# work on one processor core (a dip search shuffles the light curve 150 to
+# 300 times), so two at a time cannot swamp the computer, while a click
+# never waits behind a long stacking job the way it would if it shared the
+# heavy-job slots that stacking and image analysis use.
+_MAXIMUM_CONCURRENT_PERIOD_SEARCHES = 2
+
+# Prefix of an id given to a star that was found in an image but never
+# matched to a catalog. Must match POSITION_ONLY_STAR_ID_PREFIX in
+# astrometricslib/drivers/catalog_access.py.
+_POSITION_ONLY_STAR_ID_PREFIX = "FIELD_J"
+
+
+def _has_catalog_magnitude(magnitude: object) -> bool:
+    """Say whether a star's magnitude is a real catalog magnitude.
+
+    Parameters
+    ----------
+    magnitude : `object`
+        The star's raw magnitude field, which may be a number, `None`, or
+        an empty string.
+
+    Returns
+    -------
+    has_catalog_magnitude : `bool`
+        `True` for a finite number at or above the catalog floor; `False`
+        for a missing (`None`, `""`), instrumental (very negative) or
+        exactly zero value. Zero is what is saved for a star whose catalog
+        gave no magnitude (about 4,000 stars in the library), so it is
+        treated as unknown rather than as a very bright star.
+    """
+    return (
+        isinstance(magnitude, int | float)
+        and not isinstance(magnitude, bool)
+        and math.isfinite(magnitude)
+        and magnitude >= _BRIGHTEST_CATALOG_MAGNITUDE
+        and magnitude != 0
+    )
+
+
+def _summary_sort_key(summary: dict) -> tuple:
+    """Order star summaries so the most useful stars come first.
+
+    Parameters
+    ----------
+    summary : `dict`
+        One star summary from ``list_object_summaries``.
+
+    Returns
+    -------
+    sort_key : `tuple`
+        Sorts stars that have a spectrum first, then stars with a real
+        catalog name (not a ``FIELD_J`` position-only id), then stars
+        with photometry, then by catalog magnitude with the brightest
+        first. A star with no catalog magnitude sorts after every star
+        that has one. The id is the last part, so the order is the same
+        on every request and page boundaries never repeat or skip a star.
+    """
+    magnitude = summary.get("magnitude")
+    has_magnitude = _has_catalog_magnitude(magnitude)
+    return (
+        not summary.get("hasSpectra"),
+        str(summary.get("id") or "").startswith(_POSITION_ONLY_STAR_ID_PREFIX),
+        not summary.get("hasPhotometry"),
+        not has_magnitude,
+        magnitude if has_magnitude else 0.0,
+        str(summary.get("id") or ""),
+    )
 
 
 def _serialize_target_for_planetarium(target, local_target_ids: set | None = None) -> dict | None:  # ruff: ignore[missing-type-function-argument]
@@ -85,15 +170,38 @@ def _serialize_target_for_planetarium(target, local_target_ids: set | None = Non
         "dec": dec_deg,
         "name": getattr(target, "common_name", None) or target.id,
         "commonName": getattr(target, "common_name", None) or target.id,
-        "spectral_type": None,
+        "spectralType": None,
         "magnitude": None,
-        "has_spectra": bool(getattr(target, "stacked_spectral_target", None)),
-        "has_photometry": bool(stacked_image or getattr(target, "processed_image", None)),
+        "hasSpectra": bool(getattr(target, "stacked_spectral_target", None)),
+        "hasPhotometry": bool(stacked_image or getattr(target, "processed_image", None)),
         "type": "target",
         "global": is_global,
         "stackedImage": stacked_image or None,
         "fieldOfView": getattr(target, "field_of_view", None),
     }
+
+
+def _stored_star_radius_px(astrometrics: Any, star_id: str) -> float | None:
+    """Look up the detected radius saved on a star's record.
+
+    Parameters
+    ----------
+    astrometrics : `Any`
+        The high-level astrometrics interface.
+    star_id : `str`
+        Identifier of the star to look up.
+
+    Returns
+    -------
+    radius_px : `float` or `None`
+        `StellarObject.radius_px`, or `None` if the star or radius is missing.
+    """
+    try:
+        star = astrometrics.stars.get_object(star_id)
+    except Exception as err:
+        logger.debug("Could not load %s for its radius: %s", star_id, err)
+        return None
+    return getattr(star, "radius_px", None) if star else None
 
 
 class StellarService:
@@ -106,6 +214,7 @@ class StellarService:
         self.config = config
         self.astrometrics = astrometrics or Astrometrics(config)
         self._wayfinder = wayfinder
+        self._period_search_slots = threading.BoundedSemaphore(_MAXIMUM_CONCURRENT_PERIOD_SEARCHES)
 
     @property
     def wayfinder(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
@@ -122,13 +231,15 @@ class StellarService:
     def get_stellar_objects(self, target_id: str | None = None) -> list[StellarObject]:
         """Unified stellar objects getter.
 
-        Delegates directly to the high-level interface analysis
-        astrometrics to query disk.
+        Delegates to the astrometrics library, which owns the catalog.
         Includes VariabilityAnalyzer's per-frame detection stubs (ids ending
-        ``:Star_<n>``) -- callers that round-trip the full catalog
-        (``save_objects``, ``find_or_create_by_position``) need those
-        included; UI-facing listings should call
+        ``:Star_<n>``); UI-facing listings should call
         ``get_displayable_stellar_objects`` instead.
+
+        Warning: with no ``target_id`` this reads every star in the library
+        into new objects -- about 12 seconds and 2.8 GB on a 274,000-star
+        library -- so it is only for a caller that truly needs all of them.
+        Pass a ``target_id`` to read just that target's stars.
 
         Returns
         -------
@@ -143,16 +254,9 @@ class StellarService:
         if is_mock:
             return self.astrometrics.stars.list_objects()
 
-        try:
-            objects = self.astrometrics.stars.list_objects()
-        except Exception:
-            objects = self.astrometrics.stars.list_objects()
-
         if target_id:
-            return [
-                obj for obj in objects if getattr(obj, "target_ids", None) and target_id in obj.target_ids
-            ]
-        return objects
+            return self.astrometrics.stars.list_objects_for_target(target_id)
+        return self.astrometrics.stars.list_objects()
 
     def get_displayable_stellar_objects(self, target_id: str | None = None) -> list[StellarObject]:
         """Stellar objects suitable for a user-facing catalog listing.
@@ -173,6 +277,252 @@ class StellarService:
             for obj in self.get_stellar_objects(target_id)
             if not _is_per_frame_photometry_detection(obj.id)
         ]
+
+    def get_astrometry_overlay_stars(self, target_id: str, limit: int = 35) -> list[dict]:
+        """Retrieve star pixel centroids and labels for astrometry overlay.
+
+        Attempts to retrieve catalog-identified stars and their pixel positions
+        on the target's stacked reference image, using WCS celestial projection
+        when celestial coordinates (RA/Dec) are present or direct centroids
+        from detection star data.
+
+        Parameters
+        ----------
+        target_id : `str`
+            Target identifier to retrieve overlay stars for.
+        limit : `int`, optional
+            Maximum number of stars to return (default 35).
+
+        Returns
+        -------
+        result : `list` of `dict`
+            List of star overlay entries with ``id``, ``name``, ``x``, ``y``,
+            ``spectralType``, ``isCatalogIdentified``, ``referenceWidth``,
+            ``referenceHeight``, and ``radiusPx`` (the star's detected
+            radius in reference-image pixels, or `None` when unrecorded).
+        """
+        if not target_id:
+            return []
+
+        from unittest.mock import Mock
+
+        is_mock = isinstance(self.astrometrics, Mock) or isinstance(
+            getattr(self.astrometrics, "stars", None), Mock
+        )
+
+        candidate_ids = [target_id]
+        if "_" in target_id:
+            cand_space = target_id.replace("_", " ")
+            if cand_space not in candidate_ids:
+                candidate_ids.append(cand_space)
+        if " " in target_id:
+            cand_under = target_id.replace(" ", "_")
+            if cand_under not in candidate_ids:
+                candidate_ids.append(cand_under)
+
+        ref_width: int | None = None
+        ref_height: int | None = None
+        wcs = None
+        target_entity = None
+        targets_api = getattr(self.astrometrics, "targets", None)
+
+        if targets_api and hasattr(targets_api, "get"):
+            for tid in candidate_ids:
+                try:
+                    target_entity = targets_api.get(tid)
+                    if target_entity:
+                        break
+                except Exception as err:
+                    logger.debug("Failed to get target entity for %s: %s", tid, err)
+
+        img_path = None
+        if target_entity:
+            img_path = getattr(target_entity, "stacked_image", None) or getattr(
+                target_entity, "processed_image", None
+            )
+
+        if img_path and str(img_path).endswith(".fits"):
+            try:
+                from astropy.io import fits
+                from astropy.wcs import WCS
+
+                with fits.open(img_path, memmap=False) as hdul:
+                    hdr = hdul[0].header
+                    val_w = hdr.get("NAXIS1")
+                    val_h = hdr.get("NAXIS2")
+                    if val_w is not None:
+                        ref_width = int(val_w)
+                    if val_h is not None:
+                        ref_height = int(val_h)
+                    try:
+                        w = WCS(hdr)
+                        if w.is_celestial:
+                            wcs = w
+                    except Exception:
+                        wcs = None
+            except Exception as err:
+                logger.debug("Could not read WCS from reference image %s: %s", img_path, err)
+
+        results: list[dict] = []
+
+        if not is_mock:
+            summaries: list[dict] = []
+            for tid in candidate_ids:
+                try:
+                    sums = self.get_displayable_stellar_object_summaries(tid, limit=max(100, limit * 3))
+                    if sums and isinstance(sums, list) and isinstance(sums[0], dict):
+                        summaries = sums
+                        break
+                except Exception as err:
+                    logger.debug("Failed to get stellar summaries for %s: %s", tid, err)
+
+            if summaries:
+                for s in summaries:
+                    spec_type = str(s.get("spectralType") or "")
+                    if spec_type in ("GlC", "Cluster") or "Cluster" in str(s.get("name") or ""):
+                        continue
+                    s_id = str(s.get("id") or "")
+                    if s_id.startswith("Star_"):
+                        continue
+
+                    x = s.get("x")
+                    y = s.get("y")
+
+                    if (
+                        (x is None or y is None)
+                        and wcs
+                        and s.get("ra") is not None
+                        and s.get("dec") is not None
+                    ):
+                        try:
+                            px, py = wcs.all_world2pix(float(s["ra"]), float(s["dec"]), 0)
+                            x = float(px)
+                            y = float(py)
+                        except Exception as err:
+                            logger.debug("WCS projection failed for %s: %s", s_id, err)
+                            continue
+
+                    if x is None or y is None:
+                        continue
+
+                    if ref_width is not None and ref_height is not None:
+                        if not (0 <= x <= ref_width and 0 <= y <= ref_height):
+                            continue
+
+                    name = str(s.get("name") or s_id)
+                    results.append({
+                        "id": s_id,
+                        "name": name,
+                        "x": round(float(x), 1),
+                        "y": round(float(y), 1),
+                        "spectralType": spec_type,
+                        "isCatalogIdentified": not s_id.startswith("Star_"),
+                        "referenceWidth": ref_width,
+                        "referenceHeight": ref_height,
+                        "radiusPx": _stored_star_radius_px(self.astrometrics, s_id),
+                    })
+                    if limit and limit > 0 and len(results) >= limit:
+                        break
+
+                if results:
+                    return results
+
+        norm_target_ids = {str(tid).replace("_", " ").strip().lower() for tid in candidate_ids}
+        # Only the stars of the target itself are read, once under each
+        # spelling of its id ("M 13" and "M_13"), not the whole catalog.
+        objects = []
+        seen_star_ids: set[str] = set()
+        for candidate_id in candidate_ids:
+            for star in self.get_displayable_stellar_objects(candidate_id):
+                if star.id not in seen_star_ids:
+                    seen_star_ids.add(star.id)
+                    objects.append(star)
+        candidates: list[tuple[Any, float, float]] = []
+
+        for obj in objects:
+            obj_target_ids = {
+                str(tid).replace("_", " ").strip().lower() for tid in (getattr(obj, "target_ids", None) or [])
+            }
+            if not (norm_target_ids & obj_target_ids):
+                continue
+            if getattr(obj, "stellar_spectral_type", "") == "Cluster":
+                continue
+            obj_id = str(getattr(obj, "id", ""))
+            if obj_id.startswith("Star_"):
+                continue
+
+            star_data = getattr(obj, "star_data", {})
+            x = None
+            y = None
+            if isinstance(star_data, dict):
+                x = star_data.get("xcentroid", star_data.get("x_centroid"))
+                y = star_data.get("ycentroid", star_data.get("y_centroid"))
+
+            if (x is None or y is None) and wcs:
+                ra_val = getattr(obj, "right_ascension", None) or getattr(obj, "ra", None)
+                dec_val = getattr(obj, "declination", None) or getattr(obj, "dec", None)
+                if ra_val is not None and dec_val is not None:
+                    try:
+                        px, py = wcs.all_world2pix(float(ra_val), float(dec_val), 0)
+                        x, y = float(px), float(py)
+                    except Exception as err:
+                        logger.debug("WCS projection failed for fallback %s: %s", obj_id, err)
+
+            if x is None or y is None:
+                continue
+
+            try:
+                x_val = float(x)
+                y_val = float(y)
+            except ValueError, TypeError:
+                continue
+
+            if ref_width is not None and ref_height is not None:
+                if not (0 <= x_val <= ref_width and 0 <= y_val <= ref_height):
+                    continue
+
+            candidates.append((obj, x_val, y_val))
+
+        def _overlay_sort_key(item: tuple[Any, float, float]) -> tuple:
+            candidate_obj = item[0]
+            cand_id = str(getattr(candidate_obj, "id", "") or "")
+            is_identified = bool(getattr(candidate_obj, "is_catalog_identified", False))
+            is_position_only = cand_id.startswith(_POSITION_ONLY_STAR_ID_PREFIX)
+            magnitude = getattr(candidate_obj, "magnitude", None)
+            has_mag = _has_catalog_magnitude(magnitude)
+            flux = getattr(candidate_obj, "flux", None)
+            flux_val = float(flux) if flux is not None and isinstance(flux, (int, float)) else 0.0
+            return (
+                not is_identified,
+                is_position_only,
+                not has_mag,
+                float(magnitude) if has_mag else 0.0,
+                -flux_val,
+                cand_id,
+            )
+
+        candidates.sort(key=_overlay_sort_key)
+        capped = candidates[:limit] if limit and limit > 0 else candidates
+
+        fallback_results = []
+        for obj, x_val, y_val in capped:
+            spectral_type = (
+                getattr(obj, "stellar_spectral_type", "") or getattr(obj, "spectral_type", "") or ""
+            )
+            name = getattr(obj, "name", "") or getattr(obj, "id", "")
+            fallback_results.append({
+                "id": str(getattr(obj, "id", "")),
+                "name": str(name),
+                "x": round(x_val, 1),
+                "y": round(y_val, 1),
+                "spectralType": str(spectral_type),
+                "isCatalogIdentified": bool(getattr(obj, "is_catalog_identified", False)),
+                "referenceWidth": ref_width,
+                "referenceHeight": ref_height,
+                "radiusPx": getattr(obj, "radius_px", None),
+            })
+
+        return fallback_results
 
     def get_displayable_stellar_object_summaries(
         self,
@@ -212,11 +562,18 @@ class StellarService:
         -------
         summaries : `list` [`dict`]
             One dict per displayable star with keys ``id``, ``name``,
-            ``targetIds``, ``hasSpectra``, and ``hasPhotometry``,
-            optionally filtered by ``target_id``, ``search``, and
-            ``filter_type``, paginated by ``offset`` and ``limit``.
+            ``targetIds``, ``hasSpectra``, ``hasPhotometry``,
+            ``magnitude``, and ``spectralType``, optionally filtered by
+            ``target_id``, ``search``, and ``filter_type``, paginated by
+            ``offset`` and ``limit``. Results for a target, a search or
+            a filter are sorted with spectra first, then named stars,
+            then photometry, then brightest first (see
+            `_summary_sort_key`); an unfiltered listing keeps database
+            order.
         """
-        needs_full_scan = bool(search or filter_type or (offset and offset > 0))
+        # A target's own stars are cheap to read in full, and the sort below
+        # needs all of them, so they count as a full scan too.
+        needs_full_scan = bool(target_id or search or filter_type or (offset and offset > 0))
         effective_limit = None if needs_full_scan else limit
         # A search/filter/paginated request must see every row before its
         # own in-memory filtering below runs, or a real match past
@@ -259,6 +616,14 @@ class StellarService:
 
             filtered.append(summary)
 
+        # Only a request that already reads its whole scope is sorted: a
+        # target's stars, or a search/filter over the catalog. Sorting an
+        # unfiltered browse would mean scanning all ~270,000 rows on every
+        # page (about 2 seconds), and sorting only its capped first page
+        # would make page 2 repeat or skip stars.
+        if target_id or search_needle or filter_type:
+            filtered.sort(key=_summary_sort_key)
+
         start_offset = max(0, offset or 0)
         if limit is not None and limit > 0:
             return filtered[start_offset : start_offset + limit]
@@ -272,20 +637,24 @@ class StellarService:
         pass
 
     def save_objects(self) -> str:
-        """Record the current list of stellar objects to SQLite.
+        """Report that the stellar catalog is saved; there is nothing to do.
 
-        Saved via the high-level interface.
+        Every change to a star is written to the database at the moment it
+        is made (see `StellarCatalog.update`, `create` and
+        `find_or_create_by_position`), so there is no unsaved list to write.
+        This used to load every star from the database and write them all
+        back, replacing the whole table. That cost about 12 seconds and
+        2.8 GB each time, ran at the end of every re-index, and could
+        delete a star that another process added between the read and the
+        write. It stays as a method because the ``astronomy:save`` request
+        and the re-index job still call it.
 
         Returns
         -------
         result : `str`
-            Status message from the storage layer.
+            A status message.
         """
-        try:
-            return self.astrometrics.stars.save_all(self.get_stellar_objects())
-        except Exception as e:
-            logger.error(f"Failed to save stellar objects to database: {e}")
-            raise e
+        return "stellar catalog saved"
 
     def get_object(self, object_id: str) -> StellarObject | None:
         """Retrieve a stellar object by ID.
@@ -333,6 +702,23 @@ class StellarService:
             raise ValueError("Missing search term or object_id")
         return self.get_object_fuzzy(term)
 
+    def analyze_periodicity(self, object_id: str) -> StellarObject | None:
+        """Search a star's light curve for a repeating pattern, and save it.
+
+        Parameters
+        ----------
+        object_id : `str`
+            The id of the star to analyze.
+
+        Returns
+        -------
+        result : `StellarObject` or `None`
+            The star with any new analysis saved, or `None` if no such
+            star exists.
+        """
+        with self._period_search_slots:
+            return self.astrometrics.stars.analyze_periodicity(object_id)
+
     def add_object(self, new_object: StellarObject):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Add or update a stellar object."""
         self.astrometrics.stars.create(
@@ -371,11 +757,7 @@ class StellarService:
         result : `list` of `str`
             IDs of objects with processed spectrum data.
         """
-        return [
-            obj.id
-            for obj in self.get_stellar_objects()
-            if getattr(obj, "spectroscopy", None) and obj.spectroscopy.wavelengths_angstrom
-        ]
+        return self.astrometrics.stars.list_spectrum_object_ids()
 
     def find_or_create_by_position(
         self,
@@ -389,111 +771,23 @@ class StellarService:
     ) -> StellarObject:
         """Find or create a StellarObject near (ra, dec).
 
-        Searches for an existing StellarObject within angular tolerance
-        of (ra, dec), or creates a new one if no match exists. Updates
-        metadata on the matched or created object when provided.
+        Delegates to the astrometrics library, which owns the catalog and
+        looks only at the stars near that position.
 
         Returns
         -------
         result : `StellarObject`
             The matched or newly created stellar object.
-
-        REQ: IMG-4.5
         """
-        import astropy.units as u
-        from astropy.coordinates import SkyCoord
-
-        stellar_objects = self.get_stellar_objects()
-
-        # 1. Fast path: If SIMBAD name is provided, check if it already
-        # exists by ID
-        if name:
-            existing = next((o for o in stellar_objects if o.id == name), None)
-            if existing:
-                updates = {}
-                if spectral_type and not existing.spectral_type:
-                    updates["spectral_type"] = spectral_type
-                    updates["stellar_spectral_type"] = spectral_type
-                if magnitude is not None and existing.magnitude is None:
-                    updates["magnitude"] = magnitude
-                if target_id and target_id not in existing.target_ids:
-                    target_ids = [*list(existing.target_ids), target_id]
-                    updates["target_ids"] = target_ids
-
-                if updates:
-                    self.astrometrics.stars.update(existing.id, updates)
-                    # Refresh to get updated state
-                    existing = self.get_object(existing.id)
-                return existing
-
-        # 2. Spatial match fallback
-        target_coord = SkyCoord(ra=ra, dec=dec, unit=(u.deg, u.deg))
-
-        for obj in stellar_objects:
-            if not obj.right_ascension or not obj.declination:
-                continue
-            try:
-                existing_coord = SkyCoord(
-                    ra=float(obj.right_ascension), dec=float(obj.declination), unit=(u.deg, u.deg)
-                )
-                separation = target_coord.separation(existing_coord)
-                if separation.arcsecond < tolerance_arcsec:
-                    # REQ: IMG-4.5 - Update name/spectral type if a SIMBAD
-                    # match was found
-                    updates = {}
-                    new_id = obj.id
-                    if name and (not obj.name or "Star_" in obj.id):
-                        # Ensure we don't create a collision if we rename
-                        # this Star_X
-                        if not self.get_object(name):
-                            updates["name"] = name
-                            if "Star_" in obj.id:
-                                new_id = name
-                                updates["id"] = name
-                    if spectral_type and not obj.spectral_type:
-                        updates["spectral_type"] = spectral_type
-                        updates["stellar_spectral_type"] = spectral_type
-                    if magnitude is not None and obj.magnitude is None:
-                        updates["magnitude"] = magnitude
-                    if target_id and target_id not in obj.target_ids:
-                        updates["target_ids"] = [*list(obj.target_ids), target_id]
-
-                    if updates:
-                        if new_id != obj.id:
-                            # Recreate with new ID or delete/insert
-                            self.astrometrics.stars.delete(obj.id)
-                            self.astrometrics.stars.create(new_id, ra=ra, dec=dec)
-                        self.astrometrics.stars.update(new_id, updates)
-                        obj = self.get_object(new_id)
-                    return obj
-            except ValueError, TypeError:
-                continue
-
-        # 3. Create new if no match
-        if name:
-            safe_id = name
-        else:
-            base_id = f"Star_{len(stellar_objects) + 1}"
-            safe_id = base_id
-            counter = 1
-            while self.get_object(safe_id):
-                safe_id = f"{base_id}_{counter}"
-                counter += 1
-
-        self.astrometrics.stars.create(safe_id, ra=ra, dec=dec)
-
-        updates = {}
-        updates["name"] = name or safe_id
-        if spectral_type:
-            updates["spectral_type"] = spectral_type
-            updates["stellar_spectral_type"] = spectral_type
-        if magnitude is not None:
-            updates["magnitude"] = magnitude
-        if target_id:
-            updates["target_ids"] = [target_id]
-
-        self.astrometrics.stars.update(safe_id, updates)
-        return self.get_object(safe_id)
+        return self.astrometrics.stars.find_or_create_by_position(
+            ra,
+            dec,
+            name=name,
+            spectral_type=spectral_type,
+            magnitude=magnitude,
+            target_id=target_id,
+            tolerance_arcsec=tolerance_arcsec,
+        )
 
     def get_audit(self) -> dict:
         """Return a statistical summary of the stellar library.
@@ -505,7 +799,15 @@ class StellarService:
         """
         return self.astrometrics.stars.get_audit()
 
-    def get_sources(self, ra: float, dec: float, radius: float, include_catalog: bool = False) -> list[dict]:
+    def get_sources(
+        self,
+        ra: float,
+        dec: float,
+        radius: float,
+        include_catalog: bool = False,
+        limiting_magnitude: float | None = None,
+        include_stars_without_catalog_magnitude: bool = True,
+    ) -> list[dict]:
         """Return all stellar and target objects in a region.
 
         Includes the global SIMBAD catalog if specified.
@@ -520,16 +822,45 @@ class StellarService:
             Viewport radius in degrees.
         include_catalog : bool
             If True, query includes the global SIMBAD catalog.
+        limiting_magnitude : float, optional
+            Faintest star magnitude worth returning. Stars with a catalog
+            magnitude fainter than this are omitted. `None` disables the
+            filter. Targets are never filtered.
+        include_stars_without_catalog_magnitude : bool
+            Whether to return stars that have no usable catalog magnitude
+            (see `_has_catalog_magnitude`). Most local stars are per-field
+            detections whose magnitude is empty or instrumental, so
+            `limiting_magnitude` can't thin them out, and a wide-FOV
+            Planetarium view can match hundreds of thousands of them. The
+            Planetarium passes `False` above the FOV at which it stops
+            drawing them.
 
         Returns
         -------
         List[dict]
             List of serialized sources with coordinate and metadata.
         """
-        objects = self.wayfinder.planning.get_sources(ra, dec, radius, include_catalog=include_catalog)
+        # Without the SIMBAD catalog the user's own stars are read a faster
+        # way, below: loading every library star in full (photometry and
+        # all) to check its position took about ten seconds on a real
+        # 270,000-star library. Only targets are loaded here. With the
+        # catalog on, only the library's stars inside this region are read.
+        objects = self.wayfinder.planning.get_sources(
+            ra, dec, radius, include_catalog=include_catalog, include_stars=include_catalog
+        )
 
-        local_star_ids = {o.id for o in self.get_stellar_objects()}
-        local_target_ids = {o.id for o in self.astrometrics.targets.list()}
+        # These ID sets exist only to tell apart local objects from ones
+        # merged in from the global SIMBAD catalog, which only happens when
+        # include_catalog is True -- get_sources() returns local-only
+        # objects otherwise, so no query is made for them. The star ids
+        # are checked with a query for just the ids returned above; they
+        # used to be collected by loading every star in the library.
+        local_star_ids = (
+            self.astrometrics.stars.existing_ids([o.id for o in objects if isinstance(o, StellarObject)])
+            if include_catalog
+            else None
+        )
+        local_target_ids = {o.id for o in self.astrometrics.targets.list()} if include_catalog else None
 
         sources = []
         for obj in objects:
@@ -550,29 +881,119 @@ class StellarService:
                         # (one per detected point source in the reference
                         # frame), never meant to be browsable catalog stars.
                         continue
+                    if _has_catalog_magnitude(obj.magnitude):
+                        if limiting_magnitude is not None and obj.magnitude > limiting_magnitude:
+                            continue
+                    elif not include_stars_without_catalog_magnitude:
+                        continue
                     sources.append({
                         "id": obj.id,
                         "ra": float(obj.right_ascension),
                         "dec": float(obj.declination),
                         "name": obj.name or obj.id,
                         "commonName": obj.name or obj.id,
-                        "spectral_type": obj.spectral_type,
+                        "spectralType": obj.spectral_type,
                         "magnitude": obj.magnitude,
-                        "has_spectra": bool(obj.spectroscopy and obj.spectroscopy.wavelengths_angstrom),
-                        "has_photometry": bool(obj.photometry and len(obj.photometry.timestamps) > 0),
+                        "hasSpectra": bool(obj.spectroscopy and obj.spectroscopy.wavelengths_angstrom),
+                        "hasPhotometry": bool(obj.photometry and len(obj.photometry.timestamps) > 0),
                         "type": "star",
-                        "global": obj.id not in local_star_ids,
+                        "global": (obj.id not in local_star_ids) if include_catalog else False,
                         "stackedImage": None,
                         "fieldOfView": None,
                     })
                 else:  # Target — delegate to shared serializer. REQ: PLN-2.2
                     serialized = _serialize_target_for_planetarium(obj, local_target_ids)
+                    if serialized and not include_catalog:
+                        # _serialize_target_for_planetarium() defaults to
+                        # is_global=True when local_target_ids is None (its
+                        # own docstring: "when provided..."), which is the
+                        # wrong default here -- when include_catalog is
+                        # False every returned target is local by
+                        # construction, not global.
+                        serialized["global"] = False
                     if serialized:
                         sources.append(serialized)
             except Exception as exc:
                 logger.warning("Failed to serialize celestial object %s: %s", obj.id, exc)
                 continue
 
+        if not include_catalog:
+            # When stars without a catalog magnitude are not wanted, only
+            # stars whose magnitude is a real catalog one, and no fainter
+            # than the limit, can be kept. Say so up front so the database
+            # skips the rest instead of the loop below throwing them away.
+            # Every other case needs stars with no magnitude, so it asks
+            # for everything and the loop below does the trimming.
+            magnitude_range = None
+            if not include_stars_without_catalog_magnitude:
+                faintest_magnitude = math.inf if limiting_magnitude is None else limiting_magnitude
+                magnitude_range = (_BRIGHTEST_CATALOG_MAGNITUDE, faintest_magnitude)
+            sources.extend(
+                self._serialize_library_star_summaries(
+                    self.wayfinder.planning.get_library_star_summaries(ra, dec, radius, magnitude_range),
+                    limiting_magnitude,
+                    include_stars_without_catalog_magnitude,
+                )
+            )
+
+        return sources
+
+    @staticmethod
+    def _serialize_library_star_summaries(
+        star_summaries: list[dict],
+        limiting_magnitude: float | None,
+        include_stars_without_catalog_magnitude: bool,
+    ) -> list[dict]:
+        """Turn the library's quick star summaries into Planetarium sources.
+
+        Applies the same rules `get_sources` applies to a full star, so the
+        map shows the same stars it always did.
+
+        Parameters
+        ----------
+        star_summaries : `list` [`dict`]
+            Summaries from ``planning.get_library_star_summaries``.
+        limiting_magnitude : `float`, optional
+            Faintest catalog magnitude to keep. `None` keeps every star.
+        include_stars_without_catalog_magnitude : `bool`
+            Whether to keep stars that have no usable catalog magnitude.
+
+        Returns
+        -------
+        sources : `list` [`dict`]
+            Planetarium source payloads, one per kept star.
+        """
+        sources = []
+        for summary in star_summaries:
+            # A star with either coordinate exactly zero has no position
+            # saved yet, so there is nowhere to draw it.
+            if not summary["ra"] or not summary["dec"]:
+                continue
+            # See `get_sources`: these per-frame detection stubs are never
+            # meant to be browsable stars.
+            if _is_per_frame_photometry_detection(summary["id"]):
+                continue
+            magnitude = summary["magnitude"]
+            if _has_catalog_magnitude(magnitude):
+                if limiting_magnitude is not None and magnitude > limiting_magnitude:
+                    continue
+            elif not include_stars_without_catalog_magnitude:
+                continue
+            sources.append({
+                "id": summary["id"],
+                "ra": float(summary["ra"]),
+                "dec": float(summary["dec"]),
+                "name": summary["name"] or summary["id"],
+                "commonName": summary["name"] or summary["id"],
+                "spectralType": summary["spectralType"],
+                "magnitude": magnitude,
+                "hasSpectra": summary["hasSpectra"],
+                "hasPhotometry": summary["hasPhotometry"],
+                "type": "star",
+                "global": False,
+                "stackedImage": None,
+                "fieldOfView": None,
+            })
         return sources
 
     def get_online_catalog_sources(
@@ -581,6 +1002,7 @@ class StellarService:
         dec: float,
         radius: float,
         enabled_drivers: list[str],
+        limiting_magnitude: float | None = None,
     ) -> list[dict]:
         """Return serialized StellarObjects from online catalog drivers.
 
@@ -597,7 +1019,11 @@ class StellarService:
         radius : float
             Search radius in degrees.
         enabled_drivers : List[str]
-            Registry keys of drivers to query (e.g. ['simbad', 'gaia']).
+            Registry keys of drivers to query, e.g. ['deep_stars'].
+        limiting_magnitude : float, optional
+            Faintest star magnitude the map can draw at the current zoom
+            (the same value the UI sends to get_sources). Drivers that can
+            use it fetch fewer stars.
 
         Returns
         -------
@@ -607,7 +1033,11 @@ class StellarService:
         REQ: PLN-3.1, PLN-3.2
         """
         tagged_objects = self.wayfinder.planning.get_online_catalog_sources(
-            ra_deg=ra, dec_deg=dec, radius_deg=radius, enabled_driver_names=enabled_drivers
+            ra_deg=ra,
+            dec_deg=dec,
+            radius_deg=radius,
+            enabled_driver_names=enabled_drivers,
+            magnitude_limit=limiting_magnitude,
         )
         results = []
         for driver_name, obj in tagged_objects:
@@ -619,10 +1049,10 @@ class StellarService:
                     "dec": float(obj.declination),
                     "name": obj.name or obj.id,
                     "commonName": obj.name or obj.id,
-                    "spectral_type": obj.spectral_type,
+                    "spectralType": obj.spectral_type,
                     "magnitude": magnitude_value,
-                    "has_spectra": False,
-                    "has_photometry": False,
+                    "hasSpectra": False,
+                    "hasPhotometry": False,
                     "type": "star",
                     "global": True,
                     "catalogSource": driver_name,
@@ -637,8 +1067,28 @@ class StellarService:
                 )
         return results
 
+    def get_deep_catalog_status(self) -> dict:
+        """Say how much of the downloaded deep-star catalog is installed.
+
+        The Planetarium draws faint stars from a copy of Gaia DR3 saved on
+        this computer. This tells it whether that copy is there, so it can
+        prompt to download it when it is not.
+
+        Returns
+        -------
+        dict
+            ``installed``, ``complete``, ``star_count``, ``pixels_downloaded``,
+            ``pixels_total``, ``healpix_level``, ``magnitude_limit`` and
+            ``size_megabytes`` (from ``get_deep_catalog_status`` on the
+            stars API),
+            plus ``installCommand``: the command that downloads it.
+        """
+        status = dict(self.astrometrics.stars.get_deep_catalog_status())
+        status["installCommand"] = DEEP_CATALOG_INSTALL_COMMAND
+        return status
+
     def list_catalog_drivers(self) -> list[dict]:
-        """Return display metadata for all registered online catalog drivers.
+        """Return display metadata for all registered catalog drivers.
 
         Returns
         -------
@@ -746,8 +1196,28 @@ class StellarService:
             sorted by descending altitude.
         """
         wayfinder = self.wayfinder
-        targets = wayfinder.planning.get_sources(0.0, 0.0, 180.0, include_catalog=False)
+        targets = wayfinder.planning.get_sources(0.0, 0.0, 180.0, include_catalog=False, include_stars=False)
         visibility_results = wayfinder.planning.get_visibility(targets)
         visible = [entry for entry in visibility_results if entry.get("above_horizon", False)]
+        for entry in visible:
+            if "altitude" in entry:
+                alt_float = float(entry["altitude"])
+                entry["altitude"] = alt_float
+                entry.setdefault("alt", f"{alt_float:.1f}°")
+                entry.setdefault("alt_deg", alt_float)
+            if "azimuth" in entry:
+                az_float = float(entry["azimuth"])
+                entry["azimuth"] = az_float
+                entry.setdefault("az", f"{az_float:.1f}°")
+            if "id" in entry:
+                entry.setdefault("target_id", str(entry["id"]))
+            if "flip_required" in entry:
+                entry["flip_required"] = bool(entry["flip_required"])
+            if "above_horizon" in entry:
+                entry["above_horizon"] = bool(entry["above_horizon"])
+            if "time_to_flip_seconds" in entry and entry["time_to_flip_seconds"] is not None:
+                entry["time_to_flip_seconds"] = float(entry["time_to_flip_seconds"])
+            if "hour_angle" in entry and entry["hour_angle"] is not None:
+                entry["hour_angle"] = float(entry["hour_angle"])
         visible.sort(key=lambda entry: entry["altitude"], reverse=True)
         return visible

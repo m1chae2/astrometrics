@@ -195,7 +195,7 @@ export const TargetPlanner: React.FC<TargetPlannerProps> = ({
                                             Cancel
                                         </button>
                                         <button
-                                            className="btn btn--success btn--flex-1"
+                                            className="btn btn--primary btn--flex-1"
                                             disabled={!selectedTargetId || planItems.length === 0}
                                             onClick={handleAddToSequenceClick}
                                         >

@@ -61,7 +61,10 @@ function reserveFreePort(): Promise<number> {
         probe.on('error', reject);
         probe.listen(0, '127.0.0.1', () => {
             const { port } = probe.address() as net.AddressInfo;
-            probe.close(() => resolve(port));
+            probe.close(() => {
+                // Avoid TIME_WAIT on Linux by offsetting by 1 from the just-closed socket
+                resolve(port + 1);
+            });
         });
     });
 }

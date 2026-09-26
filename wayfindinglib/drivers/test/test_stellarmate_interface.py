@@ -77,7 +77,9 @@ def test_full_folder_download_protects_remote_path_from_word_splitting(tmp_path)
     driver = StellarMateInterface(host_alias="test-host", remote_pictures_path="/home/stellarmate/Pictures")
 
     mock_process = MagicMock()
-    mock_process.stdout = iter([])
+    # iter(process.stdout.readline, "") requires a file-like object with a
+    # .readline() method; a bare list iterator has no such attribute.
+    mock_process.stdout = MagicMock(readline=MagicMock(return_value=""))
     mock_process.wait.return_value = 0
 
     with (

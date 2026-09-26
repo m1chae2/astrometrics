@@ -5,7 +5,9 @@ import logging
 import os
 from pathlib import Path
 
+from .camera_names import normalize_camera_name
 from .enums import FilterType
+from .observatory_setups import ObservatorySetups, load_observatory_setups
 
 _instance = None
 
@@ -376,10 +378,10 @@ class AppConfiguration:
         # Camera names in settings and image files often differ slightly
         # in spacing/capitalization (e.g. "ZWO ASI533MM Pro" in a config
         # file typed by hand vs. "ZWO ASI 533MM Pro" as the camera's own
-        # FITS header spells it). Matching loosely here, the same way
-        # `astrometricslib.pipelines.stacking.stage._camera_names_match`
-        # already has to for stack lookups, keeps a real per-camera
-        # section (dispersion geometry, grating spacing, etc.) from being
+        # FITS header spells it). Matching loosely here, with the same
+        # `normalize_camera_name` the rest of the library uses, keeps a
+        # real per-camera section (dispersion geometry, grating spacing,
+        # etc.) from being
         # silently skipped over a formatting difference -- which
         # otherwise falls through to the generic `[Observatory.Camera]`
         # section's bare model list and produces nonsensical spectroscopy
@@ -389,7 +391,7 @@ class AppConfiguration:
             if not section.startswith(camera_prefix):
                 continue
             section_camera_name = section[len(camera_prefix) :]
-            if "".join(section_camera_name.split()).casefold() == "".join(camera_name.split()).casefold():
+            if normalize_camera_name(section_camera_name) == normalize_camera_name(camera_name):
                 return dict(self.app_config[section])
 
         if "Observatory.Camera" in self.app_config:
@@ -504,6 +506,45 @@ class AppConfiguration:
         camera_name = (camera_name or "").strip()
         return camera_name or None
 
+    def get_observatory_setups(self) -> ObservatorySetups:
+        """Return the optics and the camera-and-optic pairings in the config.
+
+        The pairings say which cameras are really used with which optics.
+        They are read from the ``[Observatory.Optics]``,
+        ``[Observatory.Optic.<name>]``, ``[Observatory.Setups]`` and
+        ``[Observatory.Setup.<name>]`` sections (see
+        `astrometricslib.utilities.observatory_setups`).
+
+        Returns
+        -------
+        observatory_setups : `ObservatorySetups`
+            The optics and setups. Both are empty when the config has none.
+        """
+        return load_observatory_setups(self)
+
+    def get_camera_default_iso(self, camera_name: str | None) -> str | None:
+        """Return the ISO or gain to assume for a camera whose header has none.
+
+        Read from the ``default_iso`` key of the camera's section. It is used
+        only when an image's header records neither ``ISOSPEED`` nor ``GAIN``.
+
+        Parameters
+        ----------
+        camera_name : `str` or `None`
+            The camera, written in any spelling that matches its section.
+
+        Returns
+        -------
+        default_iso : `str` or `None`
+            The configured value, or `None` when the camera's section does
+            not give one.
+        """
+        if not camera_name:
+            return None
+        value = self.get_camera_config(camera_name).get("default_iso")
+        value = (value or "").strip()
+        return value or None
+
     def get_focal_ratio(self) -> float:
         """Return the telescope focal ratio from the configuration.
 
@@ -578,17 +619,41 @@ class AppConfiguration:
     def get_frames_path(self) -> Path:
         """Return the absolute path to the frames directory.
 
-        Always a `"frames"` subfolder of the library path -- not
-        independently configurable, so the sandboxing check in
-        `mcp/tool_registry.py` only ever has one library root to reason
-        about.
+        Reads the ``"frames_path"`` entry from the ``[Image Library]`` section.
+        If omitted or empty, defaults to a `"frames"` subfolder of the library
+        path. Handles mount path resolution between ``/run/media`` and
+        ``/media`` if one is configured but the other is currently mounted.
 
         Returns
         -------
         frames_path : `Path`
-            Absolute path to the frames directory, nested under the
-            library path.
+            Absolute path to the resolved frames directory.
         """
+        try:
+            path_str = self.app_config.get("Image Library", "frames_path")
+            if path_str:
+                path = Path(path_str)
+                if not path.is_absolute():
+                    check_path = self.get_project_root() / "astrometricslib" / path
+                    if check_path.exists():
+                        path = check_path.absolute()
+                    else:
+                        path = (self.get_project_root() / path).absolute()
+                else:
+                    path = path.absolute()
+                if not path.exists():
+                    p_str = str(path)
+                    if p_str.startswith("/run/media/"):
+                        alt = Path(p_str.replace("/run/media/", "/media/", 1))
+                        if alt.exists():
+                            path = alt
+                    elif p_str.startswith("/media/"):
+                        alt = Path(p_str.replace("/media/", "/run/media/", 1))
+                        if alt.exists():
+                            path = alt
+                return path
+        except configparser.NoSectionError, configparser.NoOptionError, KeyError:
+            pass
         return self.get_library_path() / "frames"
 
     def get_library_file_path(self, filename: str) -> Path:

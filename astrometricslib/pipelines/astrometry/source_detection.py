@@ -49,6 +49,57 @@ _BACKGROUND_2D_BOX_MAX_PX = 200
 # and we fall back to a single global background estimate.
 _BACKGROUND_2D_MIN_BOXES_PER_AXIS = 3
 
+# A star's radius is the distance from its centre at which it falls to this
+# fraction of its peak brightness above the background. 10% captures the
+# visible disc without the faint wings that would make bright stars look
+# enormous.
+_STAR_RADIUS_PEAK_FRACTION = 0.1
+# How far (pixels) around a star to look when measuring it; only pixels
+# within half of this are counted, so a neighbouring star is not mistaken
+# for part of this one.
+_STAR_RADIUS_WINDOW_HALF_WIDTH_PX = 30
+
+
+def measure_star_radius_px(data: np.ndarray, x_centroid: float, y_centroid: float) -> float | None:
+    """Measure how big a star looks in an image.
+
+    Cuts out a small square around the star, takes the median of the cutout
+    as the background, and finds the farthest pixel (near the star) that is
+    still brighter than 10% of the star's peak. Bigger, brighter stars
+    therefore get a bigger radius.
+
+    Parameters
+    ----------
+    data : `numpy.ndarray`
+        The 2-D image.
+    x_centroid, y_centroid : `float`
+        The star's centre, in pixels.
+
+    Returns
+    -------
+    radius_px : `float` or `None`
+        The star's radius in pixels, or `None` if it could not be measured.
+    """
+    half_width = _STAR_RADIUS_WINDOW_HALF_WIDTH_PX
+    x_center, y_center = round(x_centroid), round(y_centroid)
+    x_low, x_high = max(0, x_center - half_width), min(data.shape[1], x_center + half_width + 1)
+    y_low, y_high = max(0, y_center - half_width), min(data.shape[0], y_center + half_width + 1)
+    cutout = data[y_low:y_high, x_low:x_high]
+    if cutout.size == 0 or not np.isfinite(cutout).any():
+        return None
+    background = float(np.nanmedian(cutout))
+    peak = float(np.nanmax(cutout)) - background
+    if peak <= 0:
+        return None
+    y_grid, x_grid = np.mgrid[y_low:y_high, x_low:x_high]
+    distance = np.hypot(x_grid - x_centroid, y_grid - y_centroid)
+    is_star_pixel = ((cutout - background) >= _STAR_RADIUS_PEAK_FRACTION * peak) & (
+        distance <= half_width / 2
+    )
+    if not is_star_pixel.any():
+        return None
+    return round(float(distance[is_star_pixel].max()), 1)
+
 
 class SourceDetector:
     """Finds bright dots (stars) in an image using the DAOStarFinder math."""
@@ -160,7 +211,14 @@ class SourceDetector:
         sources.sort("flux")
         sources.reverse()
 
-        return [dict(zip(sources.colnames, row, strict=False)) for row in sources]
+        detected = [dict(zip(sources.colnames, row, strict=False)) for row in sources]
+        for source in detected:
+            source["radius_px"] = measure_star_radius_px(
+                data,
+                float(source.get("x_centroid", source.get("xcentroid"))),
+                float(source.get("y_centroid", source.get("ycentroid"))),
+            )
+        return detected
 
     def deduplicate(self, sources: list[dict[str, Any]], separation_px: float = 15.0) -> list[dict[str, Any]]:
         """Combine overlapping dots into a single star.

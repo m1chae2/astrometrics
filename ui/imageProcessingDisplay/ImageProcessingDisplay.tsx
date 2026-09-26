@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useTargetContext } from '../common/context/TargetContext';
 import { useTargetListLogic } from '../common/hooks/useTargetListLogic';
 import { useTargetActions } from '../common/hooks/useTargetActions';
@@ -12,9 +12,11 @@ import { FitsRendererHandle } from '../common/fitsViewer/FitsViewerManager';
 import { ViewerPanelContainer } from './components/ViewerPanelContainer';
 import { FrameAnalysisPanel } from './components/FrameAnalysisPanel';
 import { addTargetData, createTarget, fetchTargetObject } from '../common/services/targetService';
+import { fetchAstrometryOverlayStars, AstrometryOverlayStar } from '../common/services/astronomyService';
 import { emit as emitEvent } from '../common/utils/eventBus';
 import { emitToast } from '../common/utils/emitToast';
 import { reportError } from '../common/utils/reportError';
+import { navigateToElement } from '../common/utils/displayCoordinator';
 
 /**
  * Main component for the image processing view.
@@ -72,7 +74,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
     allFiles, filteredFiles, exposureCounts, fileFilterText, setFileFilterText,
     selectedFile, setSelectedFile, filesToDelete, handleRequestDeleteFiles, confirmDeleteFiles,
     showFileDeleteConfirm, setShowFileDeleteConfirm,
-    checkedFiles, toggleFile, toggleAllFiles,
+    checkedFiles, setCheckedFiles, toggleFile, toggleAllFiles,
     stackedImage, stackedSpectralTarget, totalExposure
   } = files;
 
@@ -87,6 +89,61 @@ const ImageProcessingDisplayInner: React.FC = () => {
     setSelectedLightRow, selectedLightRow
   } = useViewerState(selectedTarget, lightFrames, selectedFile);
 
+  // The raw frames ticked for stacking must not stay ticked once stacking
+  // ends. A leftover selection would be sent to the next Analyze run in
+  // place of the stacked result that stacking just produced.
+  const wasProcessingRef = React.useRef(false);
+  useEffect(() => {
+    if (wasProcessingRef.current && !isProcessing) {
+      setCheckedFiles(new Set());
+    }
+    wasProcessingRef.current = isProcessing;
+  }, [isProcessing, setCheckedFiles]);
+
+  const fitsRendererRef = React.useRef<FitsRendererHandle>(null);
+
+  const [overlayStars, setOverlayStars] = useState<AstrometryOverlayStar[]>([]);
+  const [showAstrometryOverlay, setShowAstrometryOverlay] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('astrometrics:enableAstrometryOverlay') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [isLoadingOverlay, setIsLoadingOverlay] = useState(false);
+
+  const [selectedStarId, setSelectedStarId] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem('astrometrics:imageProcessingSelectedStar');
+    } catch {
+      return null;
+    }
+  });
+
+  const pendingEnableAstrometryRef = useRef<boolean>(false);
+
+  // Clear target search filter and pick up incoming star / overlay settings when navigated to a specific target
+  useEffect(() => {
+    const handleTargetSelected = (event: Event) => {
+      const raw = (event as CustomEvent).detail;
+      const targetId = typeof raw === 'string' ? raw : raw?.targetId;
+      if (targetId) {
+        setFilterText('');
+      }
+      if (raw && typeof raw === 'object') {
+        if (raw.enableAstrometry) {
+          pendingEnableAstrometryRef.current = true;
+          setShowAstrometryOverlay(true);
+        }
+        if (raw.starId) {
+          setSelectedStarId(raw.starId);
+        }
+      }
+    };
+    window.addEventListener('astrometrics:targetSelected', handleTargetSelected);
+    return () => window.removeEventListener('astrometrics:targetSelected', handleTargetSelected);
+  }, [setFilterText, setShowAstrometryOverlay, setSelectedStarId]);
+
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isHeaderModalOpen, setIsHeaderModalOpen] = useState(false);
@@ -100,7 +157,123 @@ const ImageProcessingDisplayInner: React.FC = () => {
 
   const { saveTarget, confirmDeleteTarget, handleCreateTarget } = useTargetActions();
 
-  const fitsRendererRef = React.useRef<FitsRendererHandle>(null);
+  useEffect(() => {
+    let active = true;
+    let shouldEnable = pendingEnableAstrometryRef.current;
+    try {
+      if (localStorage.getItem('astrometrics:enableAstrometryOverlay') === 'true') {
+        shouldEnable = true;
+        localStorage.removeItem('astrometrics:enableAstrometryOverlay');
+      }
+    } catch {
+      // Ignore
+    }
+    pendingEnableAstrometryRef.current = false;
+
+    if (shouldEnable) {
+      setShowAstrometryOverlay(true);
+    } else {
+      setShowAstrometryOverlay(false);
+    }
+
+    if (!selectedTarget) {
+      setOverlayStars([]);
+      return;
+    }
+    setIsLoadingOverlay(true);
+    fetchAstrometryOverlayStars(selectedTarget)
+      .then((stars) => {
+        if (active) {
+          setOverlayStars(stars);
+          if (shouldEnable && stars.length > 0) {
+            setShowAstrometryOverlay(true);
+          }
+        }
+      })
+      .catch((err: unknown) => {
+        if (active) {
+          reportError(err instanceof Error ? err : new Error(String(err)), 'backend');
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setIsLoadingOverlay(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [selectedTarget]);
+
+  const handleToggleAstrometryOverlay = React.useCallback(async () => {
+    if (showAstrometryOverlay) {
+      setShowAstrometryOverlay(false);
+      return;
+    }
+
+    if (overlayStars.length > 0) {
+      setShowAstrometryOverlay(true);
+      return;
+    }
+
+    if (!selectedTarget) {
+      emitToast('No target selected.', 'warning', 'Astrometry');
+      return;
+    }
+
+    setIsLoadingOverlay(true);
+    try {
+      const stars = await fetchAstrometryOverlayStars(selectedTarget);
+      setOverlayStars(stars);
+      if (stars.length > 0) {
+        setShowAstrometryOverlay(true);
+      } else {
+        emitToast(`No astrometry stars identified for ${selectedTarget}. Run astrometry plate solving first.`, 'info', 'Astrometry');
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      emitToast(`Failed to load astrometry overlay: ${message}`, 'error', 'Astrometry');
+    } finally {
+      setIsLoadingOverlay(false);
+    }
+  }, [showAstrometryOverlay, overlayStars, selectedTarget, setShowAstrometryOverlay]);
+
+  /**
+   * Handles clicking an astrometry star reticle or badge in the FITS viewer.
+   * Hands off the selected star and navigates to the Astronomy Display.
+   */
+  const handleStarClick = React.useCallback((star: AstrometryOverlayStar) => {
+    const starId = star.id || star.name;
+    if (!starId) return;
+
+    setSelectedStarId(starId);
+    try {
+      localStorage.setItem('astrometrics:imageProcessingSelectedStar', starId);
+      localStorage.setItem('planetariumSelectedStar', starId);
+    } catch {
+      // Ignore
+    }
+
+    navigateToElement({
+      targetDisplay: 'Astronomy Manager',
+      targetElement: 'spectrumViewer',
+      action: 'astronomySelectStar',
+      payload: starId,
+      toast: {
+        message: `Opening ${star.name || starId} in Astronomy Manager`,
+        type: 'info',
+        title: 'Astrometry',
+      },
+    }).then((result) => {
+      if (!result.handledRemotely) {
+        try {
+          localStorage.setItem('appMode', 'Astronomy Manager');
+        } catch {
+          // Ignore
+        }
+      }
+    });
+  }, []);
 
   // Merge remote targets into the list if they don't exist locally
   const allItems = useMemo(() => {
@@ -139,8 +312,15 @@ const ImageProcessingDisplayInner: React.FC = () => {
     // If no files, nothing to do
     if (filteredFiles.length === 0) return;
 
-    // If we already have a valid selection that exists in the current filtered list, keep it
-    if (selectedFile && filteredFiles.some(f => f.path === selectedFile)) return;
+    // If we already have a valid selection that exists in the current filtered list or is a stacked image, keep it
+    if (
+      selectedFile &&
+      (filteredFiles.some(f => f.path === selectedFile) ||
+        selectedFile === stackedImage ||
+        selectedFile === stackedSpectralTarget)
+    ) {
+      return;
+    }
 
     // Otherwise, find the file with the highest exposure time
     let bestFile = filteredFiles[0];
@@ -160,7 +340,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
     if (bestFile) {
       setSelectedFile(bestFile.path);
     }
-  }, [filteredFiles, selectedFile, setSelectedFile]);
+  }, [filteredFiles, selectedFile, setSelectedFile, stackedImage, stackedSpectralTarget]);
 
 
 
@@ -240,6 +420,12 @@ const ImageProcessingDisplayInner: React.FC = () => {
       disableStretch={disableStretch}
       stretch={stretch}
       toggleStretch={toggleStretch}
+      overlayStars={overlayStars}
+      showAstrometryOverlay={showAstrometryOverlay}
+      onToggleAstrometryOverlay={handleToggleAstrometryOverlay}
+      isLoadingOverlay={isLoadingOverlay}
+      onStarClick={handleStarClick}
+      selectedStarId={selectedStarId}
       allFiles={allFiles}
       filteredFiles={filteredFiles}
       fileFilterText={fileFilterText}

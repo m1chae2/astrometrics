@@ -18,6 +18,12 @@ import pytest
 # 1. Set testing flag immediately so any module loading later sees it
 os.environ["ASTROMETRICS_TESTING"] = "1"
 
+# Configure Astropy to use bundled earth orientation tables without downloading
+from astropy.utils import iers
+
+iers.conf.auto_download = False
+iers.conf.auto_max_age = None
+
 # 2. Setup a global temporary directory for tests
 _test_tmp_dir = tempfile.TemporaryDirectory()
 TEST_TEMP_DIR = Path(_test_tmp_dir.name)

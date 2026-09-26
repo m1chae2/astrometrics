@@ -14,11 +14,13 @@ import { GenericDisplayLayout } from '../common/components/GenericDisplayLayout'
 import { RadioListManager } from '../common/radioList/RadioListManager';
 import { CelestialSkyMap } from './components/CelestialSkyMap';
 import { PlanetariumInfoCard } from './components/PlanetariumInfoCard';
+import { AlignmentPointCard } from './components/AlignmentPointCard';
 import { PlanetariumToolbar } from './components/PlanetariumToolbar';
 import { PlanetariumContextMenu } from './components/PlanetariumContextMenu';
 import { PlanetariumDateTimeModal } from './components/PlanetariumDateTimeModal';
+import { TelescopeDiagnosticsModal } from './components/TelescopeDiagnosticsModal';
 import { usePlanetariumSources } from './hooks/usePlanetariumSources';
-import { useOnlineCatalogSources } from './hooks/useOnlineCatalogSources';
+import { useOnlineCatalogSources, LOCAL_CATALOG_QUERY_DEBOUNCE_MS } from './hooks/useOnlineCatalogSources';
 import { useConstellationLines } from './hooks/useConstellationLines';
 import { usePlanetariumTargets } from './hooks/usePlanetariumTargets';
 import { useObserverLocation } from './hooks/useObserverLocation';
@@ -26,6 +28,7 @@ import { useOverlayToggles } from './hooks/useOverlayToggles';
 import { useEquipmentConfiguration } from './hooks/useEquipmentConfiguration';
 import { EquipmentConfigPanel } from './components/EquipmentConfigPanel';
 import { PlanetariumSource, PlanetariumTarget } from '../common/types/planetariumTypes';
+import { AlignmentSessionSummary, AlignmentAttempt, PolarAlignmentStatus } from '../common/types/backendTypes';
 import { useSpectrumData } from '../astronomyDisplay/hooks/useSpectrumData';
 import { SpectrumViewer } from '../astronomyDisplay/components/SpectrumViewer';
 import { PhotometryViewer } from '../astronomyDisplay/components/PhotometryViewer';
@@ -35,6 +38,9 @@ import { useTargetListLogic } from '../common/hooks/useTargetListLogic';
 import { useRemoteStatusContext } from '../common/context/RemoteStatusContext';
 import { useTelescopeStatus } from '../common/hooks/useTelescopeStatus';
 import { safeParse } from './utils/coordinateUtils';
+import { computeLimitingMagnitude, DEEP_STAR_MAX_MAGNITUDE, UNCATALOGED_STAR_MAX_FOV_DEG } from './layers/StarOverlay';
+import { useDeepCatalogStatus } from './hooks/useDeepCatalogStatus';
+import { DeepCatalogPrompt } from './components/DeepCatalogPrompt';
 import './styles/planetariumDisplay.css';
 
 /**
@@ -57,8 +63,8 @@ export const PlanetariumDisplay: React.FC = () => {
   // camera to the target, a canvas click just selects it in place.
   const [slewRequestId, setSlewRequestId] = useState<number>(0);
 
-  // Get telescope connection status
-  const { telescopeConnection } = useTelescopeStatus();
+  // Get telescope connection and telemetry
+  const { telescopeConnection, telemetry } = useTelescopeStatus();
 
   // All overlay and plot visibility toggles
   const {
@@ -70,9 +76,115 @@ export const PlanetariumDisplay: React.FC = () => {
     showCatalog, setShowCatalog,
     showConstellations, setShowConstellations,
     showTelescope, setShowTelescope,
+    showAlignment, setShowAlignment,
     showSpectraPlot, setShowSpectraPlot,
     showPhotometryPlot, setShowPhotometryPlot,
   } = useOverlayToggles();
+
+  // Mount tracking risk heatmap toggle state
+  const [showTrackingRisk, setShowTrackingRisk] = useState<boolean>(false);
+
+  // Historical Session Review State
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [availableSessions, setAvailableSessions] = useState<AlignmentSessionSummary[]>([]);
+  const [sessionAlignmentAttempts, setSessionAlignmentAttempts] = useState<AlignmentAttempt[] | null>(null);
+  const [sessionPolarAlignment, setSessionPolarAlignment] = useState<PolarAlignmentStatus | null>(null);
+  const [cumulativeTrackingAttempts, setCumulativeTrackingAttempts] = useState<AlignmentAttempt[] | null>(null);
+
+  // Fetch available sessions on mount
+  const refreshSessions = useCallback(async () => {
+    try {
+      const sessions = await callBackend('telescope:list_alignment_sessions', {});
+      if (sessions) {
+        setAvailableSessions(sessions);
+      }
+    } catch (err) {
+      console.error('Failed to list alignment sessions:', err);
+    }
+  }, []);
+
+  // Fetch cumulative tracking data across all past sessions
+  const refreshCumulativeTracking = useCallback(async () => {
+    try {
+      const res = await callBackend(
+        'telescope:get_session_alignment',
+        { session_id: 'all' },
+        { silent: true }
+      );
+      if (res && res.alignmentAttempts) {
+        setCumulativeTrackingAttempts(res.alignmentAttempts);
+      }
+    } catch (err) {
+      console.error('Failed to load cumulative tracking data:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshSessions();
+    refreshCumulativeTracking();
+  }, [refreshSessions, refreshCumulativeTracking]);
+
+  // Sync past logs from telescope
+  const [isSyncingLogs, setIsSyncingLogs] = useState<boolean>(false);
+  const handleSyncLogs = useCallback(async () => {
+    setIsSyncingLogs(true);
+    try {
+      await callBackend('telescope:sync_logs', {});
+      await refreshSessions();
+      await refreshCumulativeTracking();
+    } catch (err) {
+      console.error('Failed to sync telescope logs:', err);
+    } finally {
+      setIsSyncingLogs(false);
+    }
+  }, [refreshSessions, refreshCumulativeTracking]);
+
+  // Fetch session data when selectedSessionId changes
+  useEffect(() => {
+    if (!selectedSessionId) {
+      setSessionAlignmentAttempts(null);
+      setSessionPolarAlignment(null);
+      return;
+    }
+    let active = true;
+    const fetchSessionData = async () => {
+      try {
+        const res = await callBackend('telescope:get_session_alignment', { session_id: selectedSessionId });
+        if (active && res) {
+          setSessionAlignmentAttempts(res.alignmentAttempts || []);
+          setSessionPolarAlignment(res.polarAlignment || null);
+        }
+      } catch (err) {
+        console.error(`Failed to fetch alignment for session ${selectedSessionId}:`, err);
+      }
+    };
+    fetchSessionData();
+    return () => { active = false; };
+  }, [selectedSessionId]);
+
+  // Active alignment attempts and polar alignment status: historical session if selected, else live telemetry
+  const activeAlignmentAttempts = useMemo(() => {
+    if (selectedSessionId && sessionAlignmentAttempts !== null) {
+      return sessionAlignmentAttempts;
+    }
+    return telemetry?.alignmentAttempts ?? [];
+  }, [selectedSessionId, sessionAlignmentAttempts, telemetry?.alignmentAttempts]);
+
+  // Cumulative tracking dataset: all recorded historical sessions merged with live telemetry
+  const activeCumulativeTrackingAttempts = useMemo(() => {
+    const historical = cumulativeTrackingAttempts ?? [];
+    const live = telemetry?.alignmentAttempts ?? [];
+    if (live.length === 0) return historical;
+    if (historical.length === 0) return live;
+    return [...historical, ...live];
+  }, [cumulativeTrackingAttempts, telemetry?.alignmentAttempts]);
+
+  const activePolarAlignment = useMemo(() => {
+    if (selectedSessionId && sessionPolarAlignment !== null) {
+      return sessionPolarAlignment;
+    }
+    return telemetry?.polarAlignment ?? null;
+  }, [selectedSessionId, sessionPolarAlignment, telemetry?.polarAlignment]);
 
   const [viewerCenter, setViewerCenter] = useState<{ ra: number; dec: number } | null>(null);
   const [currentFOV, setCurrentFOV] = useState<number>(90.0);
@@ -80,6 +192,7 @@ export const PlanetariumDisplay: React.FC = () => {
   // Date and Time controls
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
   const [isTimeModalOpen, setIsTimeModalOpen] = useState<boolean>(false);
+  const [isDiagnosticsModalOpen, setIsDiagnosticsModalOpen] = useState<boolean>(false);
   // When true, currentDate ticks forward with the system clock every second
   const [isLiveTime, setIsLiveTime] = useState<boolean>(true);
 
@@ -106,7 +219,18 @@ export const PlanetariumDisplay: React.FC = () => {
   // Extend query radius 1.5× beyond FOV to preload sources at pan edges; minimum 0.5°
   const queryRadius = useMemo(() => Math.max(currentFOV * 1.5, 0.5), [currentFOV]);
 
-  const { sources: localSources } = usePlanetariumSources(raValue, decValue, queryRadius);
+  // Same cutoff the renderer applies (see isDisplayableStar), so the backend can skip
+  // stars that would be fetched and then immediately discarded.
+  const limitingMagnitude = useMemo(() => computeLimitingMagnitude(currentFOV), [currentFOV]);
+  const includeStarsWithoutCatalogMagnitude = currentFOV <= UNCATALOGED_STAR_MAX_FOV_DEG;
+
+  const { sources: localSources } = usePlanetariumSources(
+    raValue,
+    decValue,
+    queryRadius,
+    limitingMagnitude,
+    includeStarsWithoutCatalogMagnitude,
+  );
 
   // Whole-sky bright-star query: served from the locally bundled Hipparcos
   // extract ('hipparcos') rather than a live query. GAIA DR3 is unsuitable
@@ -127,18 +251,33 @@ export const PlanetariumDisplay: React.FC = () => {
     0, 0, 180,
     brightStarDrivers,
     true,
+    // Fixed whole-sky query that never changes with the view, so there is nothing to wait out.
+    { debounceMilliseconds: 0 },
   );
 
-  // Deep-zoom star query: GAIA DR3 supplies stars fainter than Hipparcos's
-  // ~magnitude-12 completeness limit (see MAX_ZOOM_LIMITING_MAGNITUDE),
-  // scoped to the current viewport rather than the whole sky since GAIA's
-  // per-region density is far higher than Hipparcos's. Gated on showStars
-  // so toggling the background field off also stops these network queries.
-  const deepStarDrivers = useMemo(() => ['gaia'], []);
+  // Faint-star query: the Gaia DR3 copy downloaded to this computer (see the
+  // deep-star catalog prompt) supplies stars fainter than the bundled Hipparcos
+  // extract, scoped to the current viewport since its per-region density is far
+  // higher. A local database read, so it takes milliseconds and never touches the
+  // internet. Gated on showStars so toggling the background field off also stops it.
+  const deepStarDrivers = useMemo(() => ['deep_stars'], []);
+  const { status: deepCatalogStatus } = useDeepCatalogStatus();
+  // The depth the catalog was actually built to, as it reports itself; the default only stands
+  // in until the status arrives or when no catalog is installed.
+  const deepCatalogMagnitudeLimit = deepCatalogStatus?.magnitude_limit ?? DEEP_STAR_MAX_MAGNITUDE;
+  // Rounded up to a whole magnitude so a slow zoom reuses one query (and one cached region)
+  // instead of asking for a slightly deeper limit at every step, and capped at the depth the
+  // catalog holds so a deeper request is not cached as if it had been served.
+  const deepStarLimitingMagnitude = useMemo(
+    () => Math.min(Math.ceil(limitingMagnitude), deepCatalogMagnitudeLimit),
+    [limitingMagnitude, deepCatalogMagnitudeLimit],
+  );
   const { onlineSources: deepStarSources } = useOnlineCatalogSources(
     raValue, decValue, queryRadius,
     deepStarDrivers,
     showStars,
+    // A local lookup, so only a short wait to skip the steps of one gesture, not the 300 ms a remote query needs.
+    { limitingMagnitude: deepStarLimitingMagnitude, debounceMilliseconds: LOCAL_CATALOG_QUERY_DEBOUNCE_MS },
   );
 
   // Bundled constellation stick-figure lines: fetched once (no ra/dec/radius —
@@ -164,9 +303,20 @@ export const PlanetariumDisplay: React.FC = () => {
   const { targets: libraryTargets } = usePlanetariumTargets();
   const { configuration: equipmentConfig, availableCameras, setActiveCamera } = useEquipmentConfiguration();
 
-  // Split sources into stars and targets
+  // Split sources into stars and targets, ensuring all library targets are included
   const stars = useMemo(() => sources.filter(source => source.type === 'star'), [sources]);
-  const targets = useMemo(() => sources.filter(source => source.type === 'target') as PlanetariumTarget[], [sources]);
+  const targets = useMemo(() => {
+    const queriedTargets = sources.filter(source => source.type === 'target') as PlanetariumTarget[];
+    const seenIds = new Set(queriedTargets.map(t => t.id));
+    const merged = [...queriedTargets];
+    for (const lt of libraryTargets) {
+      if (!seenIds.has(lt.id)) {
+        seenIds.add(lt.id);
+        merged.push(lt);
+      }
+    }
+    return merged;
+  }, [sources, libraryTargets]);
 
   const {
     selectedTarget: selectedTargetId,
@@ -194,15 +344,23 @@ export const PlanetariumDisplay: React.FC = () => {
   }, [libraryTargets, selectedTargetId]);
 
   // Sync details from Backend for selectedSource visibility status
+  const targetTimeIso = isLiveTime ? undefined : currentDate.toISOString();
+
   useEffect(() => {
-    if (!selectedSource) return;
+    if (!selectedSource || selectedSource.type === 'alignment') return;
     let active = true;
+    const controller = new AbortController();
+
     const fetchDetails = async () => {
       try {
-        const details = await callBackend('planetarium:get_visibility', {
-          objects: [{ id: selectedSource.id, type: selectedSource.type || 'star' }],
-          time: currentDate.toISOString()
-        });
+        const details = await callBackend(
+          'planetarium:get_visibility',
+          {
+            objects: [{ id: selectedSource.id, type: selectedSource.type || 'star' }],
+            time: targetTimeIso || new Date().toISOString()
+          },
+          { signal: controller.signal }
+        );
         if (active && details && details.length > 0) {
           setSelectedSource(prev => {
             if (!prev || prev.id !== selectedSource.id) return prev;
@@ -222,21 +380,25 @@ export const PlanetariumDisplay: React.FC = () => {
             };
           });
         }
-      } catch (error) {
-        console.error("Failed to fetch detailed visibility status", error);
+      } catch (error: any) {
+        if (error?.name !== 'AbortError') {
+          console.error("Failed to fetch detailed visibility status", error);
+        }
       }
     };
+
     fetchDetails();
     const interval = setInterval(fetchDetails, 10000);
     return () => {
       active = false;
+      controller.abort();
       clearInterval(interval);
     };
-  }, [selectedSource?.id, currentDate]);
+  }, [selectedSource?.id, targetTimeIso]);
 
   // Load physical spectra/photometry data for the selected star
   const { astronomyData, loading: plotLoading, error: plotError } = useSpectrumData(
-    selectedSource?.id || ''
+    selectedSource?.type === 'alignment' ? '' : (selectedSource?.id || '')
   );
 
   const availableTimestamps = useMemo(() => {
@@ -321,6 +483,55 @@ export const PlanetariumDisplay: React.FC = () => {
   }, [libraryTargets, targetList.targets, targetList.stars, setSelectedTargetId, setPendingTarget]);
 
   /**
+   * Centers the sky map on and selects a star handed off from Astronomy
+   * Manager's "Locate in Planetarium" action.
+   *
+   * Unlike handleSelectObject, this doesn't look the star up in
+   * libraryTargets/targetList -- those lists are paginated/query-scoped and
+   * may not contain the handed-off star, so the RA/Dec and flags carried in
+   * the hand-off itself are used directly instead.
+   *
+   * @param {PlanetariumSource} source - The star to center on and select.
+   * @returns {void}
+   */
+  const applyLocateStar = useCallback((source: PlanetariumSource) => {
+    setViewerCenter({ ra: source.ra, dec: source.dec });
+    setSelectedSource(source);
+    setSelectedTargetId(source.id);
+    setPendingTarget(source.id);
+    setSlewRequestId(prev => prev + 1);
+  }, [setSelectedTargetId, setPendingTarget]);
+
+  // Consumes a star handed off from Astronomy Manager. Read once on mount
+  // (covers this panel's first mount, triggered by the hand-off's own mode
+  // switch) and removed immediately so it doesn't reapply on a later,
+  // unrelated visit to this mode.
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem('astronomyLocateStar');
+      if (raw) {
+        window.localStorage.removeItem('astronomyLocateStar');
+        applyLocateStar(JSON.parse(raw) as PlanetariumSource);
+      }
+    } catch {
+      // Ignore malformed or inaccessible localStorage payloads
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Live event for the case where this panel was already mounted (visited
+  // earlier in the session) when the hand-off fired -- the mount-time effect
+  // above only runs once and would otherwise miss it.
+  useEffect(() => {
+    const handleLocateStar = (event: Event) => {
+      const source = (event as CustomEvent<PlanetariumSource>).detail;
+      if (source) applyLocateStar(source);
+    };
+    window.addEventListener('astrometrics:planetariumLocateStar', handleLocateStar);
+    return () => window.removeEventListener('astrometrics:planetariumLocateStar', handleLocateStar);
+  }, [applyLocateStar]);
+
+  /**
    * Handles source selection from the canvas, resetting plot visibility toggles.
    *
    * @param {PlanetariumSource | null} source - The selected source, or null to deselect.
@@ -333,11 +544,16 @@ export const PlanetariumDisplay: React.FC = () => {
     if (source) {
       setSelectedTargetId(source.id);
       setPendingTarget(source.id);
+      if (source.type === 'alignment' && source.alignmentAttempt?.timestamp) {
+        setIsLiveTime(false);
+        // source.alignmentAttempt.timestamp is in unix epoch seconds
+        setCurrentDate(new Date(source.alignmentAttempt.timestamp * 1000));
+      }
     } else {
       setSelectedTargetId('');
       setPendingTarget('');
     }
-  }, [setShowSpectraPlot, setShowPhotometryPlot, setSelectedTargetId, setPendingTarget]);
+  }, [setShowSpectraPlot, setShowPhotometryPlot, setSelectedTargetId, setPendingTarget, setIsLiveTime, setCurrentDate]);
 
   /**
    * Throttled callback invoked by CelestialSkyMap when the viewport center moves.
@@ -403,8 +619,18 @@ export const PlanetariumDisplay: React.FC = () => {
         onToggleConstellations={setShowConstellations}
         showTelescope={showTelescope}
         onToggleTelescope={setShowTelescope}
+        showAlignment={showAlignment}
+        onToggleAlignment={setShowAlignment}
+        showTrackingRisk={showTrackingRisk}
+        onToggleTrackingRisk={setShowTrackingRisk}
+        availableSessions={availableSessions}
+        selectedSessionId={selectedSessionId}
+        onSelectSession={setSelectedSessionId}
+        onSyncLogs={handleSyncLogs}
+        isSyncingLogs={isSyncingLogs}
         currentFOV={currentFOV}
         onOpenTimeModal={() => setIsTimeModalOpen(true)}
+        onOpenDiagnostics={() => setIsDiagnosticsModalOpen(true)}
       />
 
       <CelestialSkyMap
@@ -421,6 +647,13 @@ export const PlanetariumDisplay: React.FC = () => {
         showConstellations={showConstellations}
         constellationLines={constellationLines}
         showTelescope={showTelescope}
+        showAlignment={showAlignment}
+        showTrackingRisk={showTrackingRisk}
+        alignmentAttempts={activeAlignmentAttempts}
+        cumulativeTrackingAttempts={activeCumulativeTrackingAttempts}
+        polarAlignment={activePolarAlignment}
+        selectedSessionId={selectedSessionId}
+        simulationDate={currentDate}
         fov={currentFOV}
         onFOVChange={setCurrentFOV}
         onSelectSource={handleSelectSource}
@@ -441,6 +674,8 @@ export const PlanetariumDisplay: React.FC = () => {
         onSelectCamera={setActiveCamera}
       />
 
+      <DeepCatalogPrompt status={deepCatalogStatus} />
+
       <PlanetariumDateTimeModal
         isOpen={isTimeModalOpen}
         onClose={() => setIsTimeModalOpen(false)}
@@ -449,7 +684,16 @@ export const PlanetariumDisplay: React.FC = () => {
         onResetToNow={handleResetToNow}
       />
 
-      {selectedSource && (
+      {/* Selected Source Details Card (Star/Target vs Alignment Point) */}
+      {selectedSource && selectedSource.type === 'alignment' && (
+        <AlignmentPointCard
+          source={selectedSource}
+          observerLocation={location}
+          onClose={() => handleSelectSource(null)}
+        />
+      )}
+
+      {selectedSource && selectedSource.type !== 'alignment' && (
         <PlanetariumInfoCard
           source={selectedSource}
           observerLocation={location}
@@ -521,6 +765,12 @@ export const PlanetariumDisplay: React.FC = () => {
           }}
         />
       )}
+
+      <TelescopeDiagnosticsModal
+        isOpen={isDiagnosticsModalOpen}
+        onClose={() => setIsDiagnosticsModalOpen(false)}
+        selectedSessionId={selectedSessionId}
+      />
     </div>
   );
 

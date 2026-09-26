@@ -36,7 +36,7 @@ export const FocuserControl: React.FC<FocuserControlProps> = ({ position, onMove
             <div id="focuser-movement-buttons" className="focuser__actions">
                 <button
                     id="btn-focus-in"
-                    className="btn btn--control btn--success"
+                    className="btn btn--control btn--primary"
                     onClick={() => onMoveFocuser(-stepSize)}
                     type="button"
                 >
@@ -44,7 +44,7 @@ export const FocuserControl: React.FC<FocuserControlProps> = ({ position, onMove
                 </button>
                 <button
                     id="btn-focus-out"
-                    className="btn btn--control btn--success"
+                    className="btn btn--control btn--primary"
                     onClick={() => onMoveFocuser(stepSize)}
                     type="button"
                 >

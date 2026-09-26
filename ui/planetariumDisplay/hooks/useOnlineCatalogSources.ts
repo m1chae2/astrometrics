@@ -11,12 +11,55 @@
  * covers the new one — e.g. zooming in and back out no longer waits on a
  * fresh fetch for a region that was just loaded a moment ago.
  *
+ * A query that is not cached waits for the view to stop changing before it is
+ * sent, and is cancelled if the view changes again while it is in flight, so a
+ * fast pan or wheel-zoom sends one request instead of one per intermediate view.
  */
 
 import { useState, useEffect } from 'react';
 import { callBackend } from '../../common/services/backendApi';
 import { PlanetariumSource } from '../../common/types/planetariumTypes';
 import { findCachedCatalogSources, storeCatalogSources } from '../utils/catalogSourceCache';
+
+/**
+ * How long the view must stay unchanged, in milliseconds, before an uncached
+ * catalog query is sent.
+ *
+ * A wheel-zoom or drag changes the view many times a second, and one deep-star
+ * query takes seconds, so sending a query per step would queue up requests for
+ * views that are already gone. This value was chosen by judgement, not
+ * measured: long enough to skip the intermediate steps of one gesture, short
+ * enough that the wait after the gesture ends is barely noticeable.
+ */
+export const CATALOG_QUERY_DEBOUNCE_MS = 300;
+
+/**
+ * The wait, in milliseconds, for a catalog that is read from this computer.
+ *
+ * A local lookup takes tens of milliseconds (about 50 ms for a busy view on a synthetic
+ * 10 million star catalog), so it does not need the 300 ms a remote query does. A short
+ * wait still skips the intermediate views of one wheel-zoom or drag, which would
+ * otherwise each cost a lookup and a large response. Chosen by judgement, not measured.
+ */
+export const LOCAL_CATALOG_QUERY_DEBOUNCE_MS = 100;
+
+/**
+ * Optional settings for useOnlineCatalogSources.
+ */
+export interface UseOnlineCatalogSourcesOptions {
+  /**
+   * How long the view must stay unchanged, in milliseconds, before an uncached query is sent.
+   * Defaults to CATALOG_QUERY_DEBOUNCE_MS; pass 0 for a query whose arguments never change with
+   * the view (e.g. the fixed whole-sky Hipparcos query).
+   */
+  debounceMilliseconds?: number;
+  /**
+   * Faintest magnitude worth fetching. Sent to the backend so drivers that can use it (Gaia)
+   * fetch fewer stars, and used to decide whether a cached region is deep enough to reuse.
+   * Omit for no limit.
+   */
+  limitingMagnitude?: number;
+}
 
 /**
  * Fetches online catalog sources for enabled drivers within a sky region.
@@ -32,6 +75,7 @@ import { findCachedCatalogSources, storeCatalogSources } from '../utils/catalogS
  * @param {number} radius - Query radius in degrees.
  * @param {string[]} enabledDrivers - Registry keys of drivers to query (e.g. ['hipparcos', 'gaia']).
  * @param {boolean} enabled - When false, returns empty results without querying.
+ * @param {UseOnlineCatalogSourcesOptions} options - Optional tuning; see UseOnlineCatalogSourcesOptions.
  * @returns {{ onlineSources: PlanetariumSource[]; loading: boolean; error: string | null }}
  */
 export const useOnlineCatalogSources = (
@@ -40,7 +84,9 @@ export const useOnlineCatalogSources = (
   radius: number,
   enabledDrivers: string[],
   enabled: boolean,
+  options: UseOnlineCatalogSourcesOptions = {},
 ) => {
+  const { debounceMilliseconds = CATALOG_QUERY_DEBOUNCE_MS, limitingMagnitude } = options;
   const [onlineSources, setOnlineSources] = useState<PlanetariumSource[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -51,10 +97,11 @@ export const useOnlineCatalogSources = (
   useEffect(() => {
     if (!enabled || enabledDrivers.length === 0) {
       setOnlineSources([]);
+      setLoading(false);
       return;
     }
 
-    const cached = findCachedCatalogSources(ra, dec, radius, enabledDriversKey);
+    const cached = findCachedCatalogSources(ra, dec, radius, enabledDriversKey, limitingMagnitude);
     if (cached) {
       setOnlineSources(cached);
       setError(null);
@@ -63,23 +110,30 @@ export const useOnlineCatalogSources = (
     }
 
     let active = true;
+    const abortController = new AbortController();
 
     const fetchOnlineSources = async () => {
       try {
-        setLoading(true);
-        const data = await callBackend('planetarium:get_catalog_sources', {
-          ra,
-          dec,
-          radius,
-          enabled_drivers: enabledDrivers,
-        });
+        const data = await callBackend(
+          'planetarium:get_catalog_sources',
+          {
+            ra,
+            dec,
+            radius,
+            enabled_drivers: enabledDrivers,
+            limiting_magnitude: limitingMagnitude,
+          },
+          { signal: abortController.signal },
+        );
         if (active) {
           setOnlineSources(data);
           setError(null);
-          storeCatalogSources(ra, dec, radius, enabledDriversKey, data);
+          storeCatalogSources(ra, dec, radius, enabledDriversKey, data, limitingMagnitude);
         }
       } catch (error: unknown) {
-        if (active) {
+        // A cancelled request means a newer one replaced it; that request owns the state now.
+        const wasCancelled = error instanceof Error && error.name === 'AbortError';
+        if (active && !wasCancelled) {
           const message = error instanceof Error ? error.message : 'Failed to fetch online catalog sources';
           setError(message);
           setOnlineSources([]);
@@ -91,12 +145,17 @@ export const useOnlineCatalogSources = (
       }
     };
 
-    fetchOnlineSources();
+    // Show that a query is pending straight away, including during the debounce
+    // wait. The previous sources stay on screen until the new ones arrive.
+    setLoading(true);
+    const debounceTimer = setTimeout(fetchOnlineSources, debounceMilliseconds);
     return () => {
       active = false;
+      clearTimeout(debounceTimer);
+      abortController.abort();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ra, dec, radius, enabled, enabledDriversKey]);
+  }, [ra, dec, radius, enabled, enabledDriversKey, limitingMagnitude]);
 
   return { onlineSources, loading, error };
 };

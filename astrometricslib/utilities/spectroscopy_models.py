@@ -2,9 +2,38 @@
 
 from __future__ import annotations
 
+import functools
+import logging
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+logger = logging.getLogger(__name__)
+
+# --- Placeholder values for a camera that is missing from the config --------
+#
+# When a camera's section in the config file does not give one of its
+# hardware settings, the loader uses the value below and logs a warning that
+# names the setting. These are stand-ins so that processing can carry on. They
+# are NOT measurements of that camera: results built from them describe a
+# made-up camera. `FALLBACK_PIXEL_SIZE_UM` is the ZWO ASI533MM Pro's pixel
+# size, kept from before the warning existed so that nothing changed. The
+# others are generic guesses that were never checked against any camera.
+FALLBACK_PIXEL_SIZE_UM = 3.76
+FALLBACK_SENSOR_WIDTH_PX = 3000
+FALLBACK_SENSOR_HEIGHT_PX = 2000
+FALLBACK_SENSOR_MIN_WAVELENGTH_NM = 350.0
+FALLBACK_SENSOR_MAX_WAVELENGTH_NM = 900.0
+FALLBACK_GRATING_LINES_PER_MM = 100.0
+FALLBACK_GRATING_DISTANCE_MM = 0.0
+FALLBACK_DISPERSION_ORIENTATION = "horizontal"
+FALLBACK_DISPERSION_DIRECTION = "negative"
+
+# The bluest wavelength the calibration tuner places the start of the
+# spectrum at (see `SpectroscopyConfig.extraction_start_wavelength_nm`). It is
+# the start of the visible spectrum. It was chosen, not measured. The
+# instrument response and the classifier only use light redder than 420 nm.
+DEFAULT_EXTRACTION_START_WAVELENGTH_NM = 380.0
 
 
 class CameraConfig(BaseModel):
@@ -76,6 +105,12 @@ class SpectroscopyConfig(BaseModel):
     dispersion_angle_degrees : `float`
         Rotation of the dispersion axis relative to orientation, by
         default 0.0.
+    extraction_start_wavelength_nm : `float`
+        The wavelength, in nanometers, that
+        ``SpectroscopyCalibrationTuner.tune_calibration()`` treats as the
+        start of the spectrum when it works out where extraction begins,
+        by default 380.0. Set it per camera in the config file with the key
+        ``extraction_start_wavelength_nm``.
     expected_fwhm : `float`
         Expected FWHM of stars in pixels, by default 8.0.
     extraction_radius : `int`
@@ -90,6 +125,17 @@ class SpectroscopyConfig(BaseModel):
         Degree of the polynomial fit to the traced extraction's per-step
         raw centers, by default 2. Unused when extraction_method is
         "fixed".
+    subtract_sky_background : `bool`
+        Whether extraction measures the night-sky glow in strips beside
+        the spectrum and subtracts it from every reading, by default
+        `True`. See the module docstring of
+        ``spectrum_extractor`` for why. Turn it off only to compare
+        against the raw, un-subtracted spectrum.
+    reject_narrow_contaminants : `bool`
+        Whether extraction replaces narrow bright spikes in the reading box
+        (other stars' trails and zero orders) by the smooth level, by
+        default `False`. The pipeline turns it on for a nebula's wide box
+        only.
     use_flare_mask_extraction : `bool`
         Whether to extract starting from an offset anchored past the
         star's own position, to avoid a bright flare/astigmatism
@@ -130,6 +176,12 @@ class SpectroscopyConfig(BaseModel):
         0.0, description="Rotation of the dispersion axis relative to orientation"
     )
 
+    extraction_start_wavelength_nm: float = Field(
+        DEFAULT_EXTRACTION_START_WAVELENGTH_NM,
+        gt=0.0,
+        description="Wavelength the calibration tuner treats as the start of the spectrum (nm)",
+    )
+
     # Processing hints
     expected_fwhm: float = Field(8.0, description="Expected FWHM of stars in pixels")
     extraction_radius: int = Field(10, description="Radius for spectrum extraction box")
@@ -138,6 +190,14 @@ class SpectroscopyConfig(BaseModel):
     )
     centerline_polynomial_degree: int = Field(
         2, description="Polynomial degree for the traced-extraction trail centerline fit"
+    )
+    subtract_sky_background: bool = Field(
+        True,
+        description="Subtract the night-sky glow, measured in strips beside the spectrum, from every reading",
+    )
+    reject_narrow_contaminants: bool = Field(
+        False,
+        description="Replace narrow bright spikes (other stars' trails) in the box by the smooth level",
     )
     use_flare_mask_extraction: bool = Field(
         False,
@@ -183,6 +243,26 @@ class SpectroscopyConfig(BaseModel):
         return 1.0 / self.grating_lines_per_mm
 
 
+@functools.cache
+def _warn_once_about_fallback_settings(camera_name: str, setting_names: tuple[str, ...]) -> None:
+    """Log a warning the first time a camera falls back to placeholder values.
+
+    Parameters
+    ----------
+    camera_name : `str`
+        The camera whose config section is missing settings.
+    setting_names : `tuple` [`str`, ...]
+        The config keys that were not found. Because the result is cached,
+        a second call with the same arguments does nothing.
+    """
+    logger.warning(
+        "The config has no %s for camera %r; placeholder values are being used, so any "
+        "results are not for a real camera. Add the settings to the camera's section.",
+        ", ".join(setting_names),
+        camera_name,
+    )
+
+
 class ConfigLoader:
     """Load and validate configurations into Pydantic models."""
 
@@ -215,58 +295,113 @@ class ConfigLoader:
 
             app_config = get_configuration()
         cam_data = app_config.get_camera_config(camera_name)
+        resolved_camera_name = camera_name or cam_data.get("name", "Unknown")
+        settings_using_fallback: list[str] = []
 
-        # Helper to get float from legacy config
-        def get_f(key, default=0.0):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
-            val = cam_data.get(key)
-            if val is not None:
-                return float(val)
-            # Fallback to generic sections
-            return float(
-                app_config.get_value("Observatory.Camera", key, app_config.get_value("Camera", key, default))
-            )
+        def read_setting(key: str, default: Any, *, is_hardware_setting: bool = False) -> Any:
+            """Read one setting from the camera's section, then generic ones.
 
-        # Helper to get string from legacy config
-        def get_s(key, default=""):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
-            val = cam_data.get(key)
-            if val is not None:
-                return str(val)
-            return str(
-                app_config.get_value("Observatory.Camera", key, app_config.get_value("Camera", key, default))
-            )
+            Parameters
+            ----------
+            key : `str`
+                The config key to look for.
+            default : `Any`
+                What to return when no section gives the key.
+            is_hardware_setting : `bool`, optional
+                `True` for a setting that describes the camera's hardware.
+                When such a setting falls back to its default, its name is
+                recorded so that one warning can list every missing setting.
 
-        # Helper to get a boolean from legacy config (stored as text)
-        def get_bool(key, default=False):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
-            val = cam_data.get(key)
-            if val is None:
-                generic = app_config.get_value("Camera", key, None)
-                val = app_config.get_value("Observatory.Camera", key, generic)
-            if val is None:
+            Returns
+            -------
+            value : `Any`
+                The text found in the config, or `default`.
+            """
+            value = cam_data.get(key)
+            if value is None:
+                value = app_config.get_value(
+                    "Observatory.Camera", key, app_config.get_value("Camera", key, None)
+                )
+            if value is None:
+                if is_hardware_setting:
+                    settings_using_fallback.append(key)
                 return default
-            return str(val).strip().lower() in ("1", "true", "yes", "on")
+            return value
 
+        def get_f(key: str, default: float | None = 0.0, *, is_hardware_setting: bool = False) -> Any:
+            """Read a number from the config.
+
+            Returns
+            -------
+            value : `float` or `None`
+                The number, or `default` when the key is missing.
+            """
+            value = read_setting(key, default, is_hardware_setting=is_hardware_setting)
+            return None if value is None else float(value)
+
+        def get_s(key: str, default: str = "", *, is_hardware_setting: bool = False) -> str:
+            """Read text from the config.
+
+            Returns
+            -------
+            value : `str`
+                The text, or `default` when the key is missing.
+            """
+            return str(read_setting(key, default, is_hardware_setting=is_hardware_setting))
+
+        def get_bool(key: str, default: bool = False) -> bool:
+            """Read a true/false setting from the config (stored as text).
+
+            Returns
+            -------
+            value : `bool`
+                The setting, or `default` when the key is missing.
+            """
+            value = read_setting(key, None)
+            if value is None:
+                return default
+            return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+        grating_distance_mm = get_f(
+            "grating_distance_mm", FALLBACK_GRATING_DISTANCE_MM, is_hardware_setting=True
+        )
         camera = CameraConfig(
-            name=camera_name or cam_data.get("name", "Unknown"),
-            pixel_size_um=get_f("pixel_size_μm", 3.76),
-            sensor_width_px=int(get_f("sensor_width_px", 3000)),
-            sensor_height_px=int(get_f("sensor_height_px", 2000)),
-            grating_distance_mm=get_f("grating_distance_mm", 0.0),
-            sensor_min_wavelength=get_f("sensor_min_wavelength", 350.0),
-            sensor_max_wavelength=get_f("sensor_max_wavelength", 900.0),
+            name=resolved_camera_name,
+            pixel_size_um=get_f("pixel_size_μm", FALLBACK_PIXEL_SIZE_UM, is_hardware_setting=True),
+            sensor_width_px=int(get_f("sensor_width_px", FALLBACK_SENSOR_WIDTH_PX, is_hardware_setting=True)),
+            sensor_height_px=int(
+                get_f("sensor_height_px", FALLBACK_SENSOR_HEIGHT_PX, is_hardware_setting=True)
+            ),
+            grating_distance_mm=grating_distance_mm,
+            sensor_min_wavelength=get_f(
+                "sensor_min_wavelength", FALLBACK_SENSOR_MIN_WAVELENGTH_NM, is_hardware_setting=True
+            ),
+            sensor_max_wavelength=get_f(
+                "sensor_max_wavelength", FALLBACK_SENSOR_MAX_WAVELENGTH_NM, is_hardware_setting=True
+            ),
         )
 
-        return SpectroscopyConfig(
+        spectroscopy_config = SpectroscopyConfig(
             camera=camera,
-            grating_lines_per_mm=get_f("grating_lines_per_mm", 100.0),
-            grating_distance_mm=get_f("grating_distance_mm", camera.grating_distance_mm),
-            dispersion_orientation=get_s("dispersion_orientation", "horizontal").lower(),
-            dispersion_direction=get_s("dispersion_direction", "negative").lower(),
+            grating_lines_per_mm=get_f(
+                "grating_lines_per_mm", FALLBACK_GRATING_LINES_PER_MM, is_hardware_setting=True
+            ),
+            grating_distance_mm=grating_distance_mm,
+            dispersion_orientation=get_s(
+                "dispersion_orientation", FALLBACK_DISPERSION_ORIENTATION, is_hardware_setting=True
+            ).lower(),
+            dispersion_direction=get_s(
+                "dispersion_direction", FALLBACK_DISPERSION_DIRECTION, is_hardware_setting=True
+            ).lower(),
             dispersion_start_px=(
                 get_f("dispersion_start_px", None) if "dispersion_start_px" in cam_data else None
             ),
             dispersion_offset_x=get_f("dispersion_offset_x", 0.0),
             dispersion_offset_y=get_f("dispersion_offset_y", 0.0),
             dispersion_angle_degrees=get_f("dispersion_angle_degrees", 0.0),
+            extraction_start_wavelength_nm=get_f(
+                "extraction_start_wavelength_nm", DEFAULT_EXTRACTION_START_WAVELENGTH_NM
+            ),
             expected_fwhm=get_f("expected_fwhm", 8.0),
             extraction_radius=int(get_f("extraction_radius", 10)),
             use_flare_mask_extraction=get_bool("use_flare_mask_extraction", False),
@@ -274,3 +409,9 @@ class ConfigLoader:
                 get_f("max_extraction_length_px", None) if "max_extraction_length_px" in cam_data else None
             ),
         )
+
+        if settings_using_fallback:
+            _warn_once_about_fallback_settings(
+                str(resolved_camera_name), tuple(dict.fromkeys(settings_using_fallback))
+            )
+        return spectroscopy_config

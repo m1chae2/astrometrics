@@ -42,10 +42,35 @@ def test_flare_contamination_detected_when_extraction_start_is_saturated():  # r
     image = MockAstrometricsImage(data=data)
 
     contaminated = SpectroscopyCalibrationTuner._detect_flare_contamination(
-        image, extraction_start=(100.0, 100.0), extraction_radius=5
+        image, extraction_start=(100.0, 100.0), extraction_radius=5, saturation_threshold_adu=65000.0
     )
 
     assert contaminated is True
+
+
+def test_flare_contamination_uses_the_threshold_it_is_given():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """The same pixels count as saturated only under a low threshold."""
+    data = np.full((200, 200), 500.0)
+    data[95:106, 95:106] = 20000.0
+    image = MockAstrometricsImage(data=data)
+
+    def detect(threshold_adu: float) -> bool:
+        """Run the detection with one threshold.
+
+        Returns
+        -------
+        contaminated : `bool`
+            Whether the dispersion start counts as flare contaminated.
+        """
+        return SpectroscopyCalibrationTuner._detect_flare_contamination(
+            image,
+            extraction_start=(100.0, 100.0),
+            extraction_radius=5,
+            saturation_threshold_adu=threshold_adu,
+        )
+
+    assert detect(15000.0) is True
+    assert detect(65000.0) is False
 
 
 def test_flare_contamination_not_detected_on_clean_extraction_start():  # ruff: ignore[missing-return-type-undocumented-public-function]
@@ -54,7 +79,7 @@ def test_flare_contamination_not_detected_on_clean_extraction_start():  # ruff: 
     image = MockAstrometricsImage(data=data)
 
     contaminated = SpectroscopyCalibrationTuner._detect_flare_contamination(
-        image, extraction_start=(100.0, 100.0), extraction_radius=5
+        image, extraction_start=(100.0, 100.0), extraction_radius=5, saturation_threshold_adu=65000.0
     )
 
     assert contaminated is False
@@ -97,3 +122,23 @@ def test_max_extraction_length_none_when_star_already_past_the_edge():  # ruff: 
     )
 
     assert cap is None
+
+
+def test_the_spectrum_start_offset_uses_the_configs_start_wavelength():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """The spectrum start moves when the config sets another wavelength."""
+    from astrometricslib.pipelines.spectroscopy.optics_physics import calculate_pixel_offset
+    from astrometricslib.utilities import CameraConfig, SpectroscopyConfig
+
+    camera = CameraConfig(name="TestCam", pixel_size_μm=3.76, sensor_width_px=3008, sensor_height_px=3008)
+    default_config = SpectroscopyConfig(camera=camera, grating_lines_per_mm=200.0, grating_distance_mm=16.5)
+    later_config = default_config.with_overrides(extraction_start_wavelength_nm=400.0)
+
+    default_offset = SpectroscopyCalibrationTuner._spectrum_start_offset_px(default_config, 16.5)
+    later_offset = SpectroscopyCalibrationTuner._spectrum_start_offset_px(later_config, 16.5)
+
+    assert default_offset == pytest.approx(
+        calculate_pixel_offset(
+            wavelength_nm=380.0, grating_distance_mm=16.5, lines_per_mm=200.0, pixel_size_um=3.76
+        )
+    )
+    assert later_offset > default_offset

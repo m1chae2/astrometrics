@@ -47,6 +47,20 @@ class PeriodogramResult(BaseModel):
     # The chance this pattern is just random noise instead of a real
     # repeating cycle. Lower is more trustworthy.
     false_alarm_probability: float = Field(default=1.0, alias="falseAlarmProbability")
+    # What the search concluded: "detected", "possible", "not_detected" or
+    # "insufficient_data" (the measurements are too few or too short to
+    # test any repeat). Only "detected" and "possible" results say anything
+    # about the star; "best_period_days" of the others is just the
+    # strongest of many chance peaks.
+    verdict: str = Field(default="", alias="verdict")
+    # A sentence explaining a verdict that needs it (for example why the
+    # data was insufficient).
+    note: str = Field(default="", alias="note")
+    # How many full cycles of the best period fit in the observed time.
+    cycles_observed: float | None = Field(default=None, alias="cyclesObserved")
+    # The shortest and longest period the search could test.
+    searched_min_period_days: float | None = Field(default=None, alias="searchedMinPeriodDays")
+    searched_max_period_days: float | None = Field(default=None, alias="searchedMaxPeriodDays")
 
 
 class TransitCandidate(BaseModel):
@@ -76,6 +90,19 @@ class TransitCandidate(BaseModel):
     # means noise and confidence approaches 1 as the dip's SNR grows --
     # not a calibrated detection probability.
     transit_confidence: float = Field(default=0.0, alias="transitConfidence")
+    # The chance that shuffling the same measurements gives a dip pattern
+    # at least this strong. Lower is more trustworthy.
+    false_alarm_probability: float = Field(default=1.0, alias="falseAlarmProbability")
+    # How many separate dips were seen, and how many measurements fell
+    # inside them. One event is not a repeating pattern.
+    transit_count: int = Field(default=0, alias="transitCount")
+    points_in_transit: int = Field(default=0, alias="pointsInTransit")
+    # "detected", "possible", "not_detected" or "insufficient_data". Only
+    # "detected" and "possible" results say anything about the star.
+    verdict: str = Field(default="", alias="verdict")
+    note: str = Field(default="", alias="note")
+    searched_min_period_days: float | None = Field(default=None, alias="searchedMinPeriodDays")
+    searched_max_period_days: float | None = Field(default=None, alias="searchedMaxPeriodDays")
 
 
 class PhotometryResult(BaseModel):
@@ -157,6 +184,17 @@ class SpectroscopyResult(BaseModel):
     self_determined_spectral_type_confidence: float | None = Field(
         default=None, alias="selfDeterminedSpectralTypeConfidence"
     )
+    # How far the winning reference is from this spectrum: the root-mean-
+    # square difference between the spectrum and the reference scaled to
+    # its brightness, as a fraction of the spectrum's average brightness.
+    # Lower is better; above about 0.15 the match is poor. `None` when no
+    # type was found.
+    self_determined_spectral_type_rms: float | None = Field(
+        default=None, alias="selfDeterminedSpectralTypeRms"
+    )
+    # Why no spectral type was determined (for example the trail left the
+    # image), or empty when one was.
+    self_determined_spectral_type_note: str = Field(default="", alias="selfDeterminedSpectralTypeNote")
     # Every reference type compared, most probable first -- each entry has
     # "spectral_type", "probability" (sums to 1 across the list, but is a
     # heuristic ranking rather than a calibrated probability), and
@@ -171,6 +209,31 @@ class SpectroscopyResult(BaseModel):
     probable_spectral_features: list[dict[str, Any]] = Field(
         default_factory=list, alias="probableSpectralFeatures"
     )
+    # Named emission lines (or blends of lines) found in this spectrum, most
+    # convincing first -- see emission_line_detector.detect_emission_lines.
+    emission_lines: list[dict[str, Any]] = Field(default_factory=list, alias="emissionLines")
+    # True when at least two emission lines or blends were detected, so the
+    # spectrum looks like glowing gas rather than a star.
+    is_emission_line_source: bool = Field(default=False, alias="isEmissionLineSource")
+    # Where the star's zero-order image sits, as an (x, y) pixel pair, in
+    # the spectroscopy image. `StellarObject.star_data` holds the star's
+    # position in the normal (astrometry) image, and the two pictures
+    # are different pixel grids, so the spectroscopy position is kept
+    # here instead. `rectangle` and `trail_centerline_px` below are in
+    # this same spectroscopy-image grid.
+    star_position_px: list[float] | None = Field(default=None, alias="starPositionPx")
+    # The wavelength range, [lowest, highest] in Angstroms, the extraction
+    # asked for before any samples were dropped. The spectrum arrays above
+    # only hold the part of it that was on the image and inside the
+    # camera's sensitive range, so comparing the two shows how much was lost.
+    requested_wavelength_range_angstrom: list[float] | None = Field(
+        default=None, alias="requestedWavelengthRangeAngstrom"
+    )
+    # The fraction (0 to 1) of the requested samples that were on the image
+    # and inside the camera's range. Below 1.0, part of the spectrum trail
+    # ran off the edge of the picture. `None` for a spectrum saved before
+    # this was recorded.
+    valid_fraction: float | None = Field(default=None, alias="validFraction")
     # The pixel box drawn around the star's spectrum trail in the
     # picture, used to redraw that box later without redetecting it.
     rectangle: Any | None = Field(default=None, alias="rectangle")
@@ -186,6 +249,21 @@ class SpectroscopyResult(BaseModel):
     # how wide the trail is at each point.
     trail_centerline_px: list[float] | None = Field(default=None, alias="trailCenterlinePx")
     trail_width_px: list[float] | None = Field(default=None, alias="trailWidthPx")
+    # An audit warning, one value per sample of the spectrum above: how many
+    # times brighter this star is at half that wavelength. Second-order light
+    # from the blue can add to a red wavelength, and a large ratio means
+    # even a small amount would matter (see second_order_risk). It changes
+    # nothing in the spectrum. 0.0 where half the wavelength was not
+    # measured. `None` for a spectrum saved before this was recorded.
+    second_order_blue_to_red_ratio: list[float] | None = Field(
+        default=None, alias="secondOrderBlueToRedRatio"
+    )
+    # How much the instrument blurred this spectrum, in Angstroms, worked
+    # out from the trail width above (see spectral_resolution). The
+    # classification and the feature tests were run at this width. `None`
+    # when the trail width was not available, in which case they used the
+    # fixed fallback resolution instead.
+    resolution_element_angstrom: float | None = Field(default=None, alias="resolutionElementAngstrom")
     # How many pixels out from the star's center to gather light from
     # when measuring its spectrum.
     extraction_radius: int | None = Field(default=None, alias="extractionRadius")
@@ -217,6 +295,12 @@ class StellarObject(BaseModel):
     # `None` means not yet known, not "magnitude zero" -- same `Any`
     # tolerance as flux above.
     magnitude: Any = Field(default=None, alias="magnitude")
+    # The star's catalog colour: its blue (B) magnitude minus its visual (V)
+    # magnitude, from SIMBAD. Bluer (hotter) stars have lower values. It comes
+    # from a different instrument than ours, so it is an independent check on
+    # a spectrum (see `synthetic_colour`). `None` when the catalog has no B or
+    # no V, or the star was identified from Gaia, which is not read for this.
+    b_minus_v: Any = Field(default=None, alias="bMinusV")
     # spectral_type and stellar_spectral_type are normally kept equal --
     # both hold the star's classification (like "G2V" for a Sun-like
     # star). The one exception is a synthetic entry used to represent a
@@ -234,6 +318,10 @@ class StellarObject(BaseModel):
     # pictures. Defaults to an empty dict, not a list -- every real
     # consumer treats this as a dict (`.get("xcentroid", ...)`).
     star_data: Any = Field(default_factory=dict, alias="starData")
+    # How big the star looks in the image it was detected in, as a radius in
+    # pixels (measured by source detection). Used to size the on-screen
+    # circle drawn around the star. `None` until detection has measured it.
+    radius_px: float | None = Field(default=None, alias="radiusPx")
     # This star's own extracted spectrum and what it suggests about the
     # star -- see SpectroscopyResult. Mirrors photometry above: one
     # nested result per domain, instead of that domain's fields loose

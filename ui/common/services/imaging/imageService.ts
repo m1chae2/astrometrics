@@ -40,8 +40,11 @@ export async function fetchProcessedImage(
         const ext = imagePath.split('.').pop()?.toLowerCase();
         if (ext === 'fits' || ext === 'fit') {
             const result = await callBackend("images:convert_fits", { path: imagePath, stretch: true });
-            if (result && result.imageData) {
-                const res = await fetch(result.imageData, { signal });
+            // Some backend paths return the snake_case name; the generated
+            // `RenderedImage` type only knows `imageData`.
+            const dataUrl = result?.imageData || (result as { image_data?: string } | null)?.image_data;
+            if (dataUrl) {
+                const res = await fetch(dataUrl, { signal });
                 return res.blob();
             }
             return null;
@@ -168,7 +171,7 @@ export async function deleteFiles(paths: string[], targetId?: string): Promise<{
  */
 export async function fetchLastImage(stretch: boolean = true): Promise<{ id: string; min: number; max: number; image_data: string; path: string } | null> {
     try {
-        const result = await callBackend("images:last", { stretch });
+        const result = await callBackend("images:last", { stretch }, { timeoutMs: 30000 });
         return result;
     } catch (err) {
         reportError(err instanceof Error ? err : new Error(String(err)), 'backend');

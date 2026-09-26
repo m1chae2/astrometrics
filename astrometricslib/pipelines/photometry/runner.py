@@ -14,6 +14,7 @@ from astrometricslib.models.target import Target
 from astrometricslib.pipelines.photometry.batch import (
     _match_and_merge_across_sessions,
     _run_variability_analysis_for_session,
+    search_periods_and_save,
 )
 from astrometricslib.pipelines.pipeline_base import (
     AnalysisPipeline,
@@ -310,6 +311,14 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             pipeline_name="photometry",
         )
 
+        # The light curves are saved now. Search the target's own star and
+        # its brightest stars for repeating patterns, in a step of its own so
+        # that a failure here can never cost a photometry result.
+        try:
+            search_periods_and_save(all_stellar_objects, target, catalog_access)
+        except Exception as search_error:
+            logger.warning("[%s] Period search step failed: %s", target.id, search_error)
+
         frames_processed = sum(len(session.frame_paths) for session in photometry_sessions) - len(
             all_rejected_files
         )
@@ -443,6 +452,20 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         if no_work_reason:
             summary.flagged = True
             summary.flag_reasons.append(no_work_reason)
+
+        from astrometricslib.pipelines.shared.applied_camera_profile import (
+            camera_name_for_paths,
+            most_common_camera_name,
+            record_camera_profile,
+        )
+
+        # The camera of the frames that were actually measured; the target's
+        # frames are the fallback when the run measured none.
+        record_camera_profile(
+            summary,
+            camera_name_for_paths(target.frames, payload.get("image_paths") or [])
+            or most_common_camera_name(target.frames),
+        )
         return summary
 
     def to_result_dict(self, request: PipelineRequest, result: Result, summary: Any) -> dict[str, Any]:

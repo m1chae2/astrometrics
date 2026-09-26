@@ -37,6 +37,14 @@ from astrometricslib.utilities.exceptions import AstroLibError
 
 logger = logging.getLogger(__name__)
 
+# A centre star matched to a catalog star farther than this from the position
+# hint is reported as a probable mislabel. Only a warning, nothing is changed
+# by it. Unvalidated: 30 arcsec is about 16 pixels at this rig's 1.92 arcsec
+# per pixel. The correct Vega match is 25 arcsec from the solved stack's
+# centre, and the wrong one (TYC 3105-827-1) was 145 arcsec from the mount's
+# reported position, so 30 lies between the two cases seen.
+HINT_MATCH_WARNING_ARCSEC = 30.0
+
 # --- Preparing the Image for Star Detection ---------------------------------
 #
 # The star-finding algorithm assumes background noise is random for
@@ -86,6 +94,16 @@ MAXIMUM_PLATE_SOLVE_SOURCES = 100
 # the same physical star. This 10-arcsecond limit is used when matching our
 # detected stars to the SIMBAD/Gaia catalogs, and when merging duplicates.
 CATALOG_MATCH_RADIUS_ARCSEC = 10.0
+
+# Catalog entries closer together than this cannot be told apart in one of our
+# frames, so the light comes from all of them and the brightest dominates. The
+# scale is 1.9 arcseconds per pixel and a star's blur spans a few pixels; 3
+# arcseconds is about one and a half pixels. Albireo's two stars (beta1 Cyg A,
+# a K3II star, and its B9.5V companion, 0.4 arcseconds apart) were the case
+# that showed the problem: the spectrum was K-type, but the star was named
+# after the companion because it happened to be nearer by a fraction of a
+# pixel. A judgement call, checked on that one pair.
+UNRESOLVED_COMPANION_RADIUS_ARCSEC = 3.0
 
 _gaia_failure_state_lock = threading.Lock()
 _gaia_consecutive_failures = 0
@@ -269,6 +287,86 @@ def _rescale_source_centroids(sources: list[dict], factor: int) -> None:
                 source[x_key] = source[x_key] * factor + offset
             if y_key in source and source[y_key] is not None:
                 source[y_key] = source[y_key] * factor + offset
+        if source.get("radius_px") is not None:
+            source["radius_px"] = source["radius_px"] * factor
+
+
+def _read_catalog_magnitude(match: Any, column_names: list[str]) -> float | None:
+    """Read a star's brightness from a catalog row, if the catalog has one.
+
+    A catalog often has no brightness for a star (the value is masked, or
+    the column is missing). That case must stay `None`, meaning "not yet
+    known" (see `StellarObject.magnitude`). Returning ``0.0`` instead
+    would look like a real measurement, since magnitude 0 is about as
+    bright as Vega, and it would also stop a real magnitude from being
+    filled in later.
+
+    Parameters
+    ----------
+    match : `astropy.table.Row`
+        One row of a SIMBAD or Gaia result table.
+    column_names : `list` [`str`]
+        Names of the columns that can hold this catalog's magnitude, in
+        the order to try them. Only the first one that exists is used.
+
+    Returns
+    -------
+    magnitude : `float` or `None`
+        The magnitude, or `None` if the catalog has no usable value.
+    """
+    for column_name in column_names:
+        if column_name not in match.colnames:
+            continue
+        value = match[column_name]
+        if value is None or (hasattr(value, "mask") and bool(value.mask)):
+            return None
+        try:
+            magnitude = float(value)
+        except ValueError, TypeError:
+            return None
+        return magnitude if math.isfinite(magnitude) else None
+    return None
+
+
+def brightest_unresolved_entry_index(
+    star_coord: SkyCoord, nearest_index: int, simbad_coords: SkyCoord, result_table: Any
+) -> int:
+    """Pick the brightest catalog entry that a star cannot be told from.
+
+    Parameters
+    ----------
+    star_coord : `astropy.coordinates.SkyCoord`
+        Where the detected star is on the sky.
+    nearest_index : `int`
+        The index of the nearest catalog entry.
+    simbad_coords : `astropy.coordinates.SkyCoord`
+        The positions of every catalog entry, lined up with `result_table`.
+    result_table : `astropy.table.Table`
+        The catalog rows.
+
+    Returns
+    -------
+    index : `int`
+        The index of the brightest entry (lowest V magnitude) within
+        `UNRESOLVED_COMPANION_RADIUS_ARCSEC` of the star, or
+        `nearest_index` when there is only one, or none has a magnitude.
+        An entry with no magnitude is treated as the faintest.
+    """
+    separations = star_coord.separation(simbad_coords).arcsec
+    candidates = np.flatnonzero(separations <= UNRESOLVED_COMPANION_RADIUS_ARCSEC)
+    if candidates.size < 2:
+        return nearest_index
+    magnitudes = [
+        _read_catalog_magnitude(result_table[int(index)], ["V", "FLUX_V", "flux_v", "flux(V)"])
+        for index in candidates
+    ]
+    if all(magnitude is None for magnitude in magnitudes):
+        return nearest_index
+    brightest = min(
+        range(len(candidates)),
+        key=lambda position: math.inf if magnitudes[position] is None else magnitudes[position],
+    )
+    return int(candidates[brightest])
 
 
 class StarIdentifier:
@@ -334,6 +432,8 @@ class StarIdentifier:
                 cleaned_src = src
 
             obj.star_data = cleaned_src
+            radius_px = cleaned_src.get("radius_px") if isinstance(cleaned_src, dict) else None
+            obj.radius_px = float(radius_px) if radius_px is not None else None
             obj.flux = float(cleaned_src.get("flux", 0.0)) if isinstance(cleaned_src, dict) else 0.0
             # Give every object a unique, non-empty placeholder id so
             # it is addressable before catalog identification runs.
@@ -628,7 +728,7 @@ class StarIdentifier:
                 coord,
                 radius=f"{radius_deg}d",
                 # "ids" carries the common names used to label a star.
-                votable_fields=("flux(V)", "sp_type", "ids", "ra(d)", "dec(d)", "otype"),
+                votable_fields=("flux(V)", "flux(B)", "sp_type", "ids", "ra(d)", "dec(d)", "otype"),
                 row_limit=5000,  # Prevent massive result sets
             )
         except Exception as e:
@@ -1207,6 +1307,9 @@ class StarIdentifier:
             if simbad_coords is not None and result_table is not None:
                 idx, d2d, _ = star_coord.match_to_catalog_sky(simbad_coords)
                 if d2d < CATALOG_MATCH_RADIUS_ARCSEC * u.arcsec:
+                    idx = brightest_unresolved_entry_index(
+                        star_coord, int(np.ravel(idx)[0]), simbad_coords, result_table
+                    )
                     self._apply_simbad_match(stellar_object, result_table[idx], ra, dec)
                     # The separation between where the solved WCS put this
                     # star and where the catalog says it is, which is the
@@ -1379,7 +1482,26 @@ class StarIdentifier:
             hint_coord = SkyCoord(center_ra * u.deg, center_dec * u.deg)
             idx, d2d, _ = hint_coord.match_to_catalog_sky(simbad_coords)
             logger.info(f"Nearest stellar SIMBAD entry to hint coordinates is {d2d.to(u.arcsec)} away.")
-            self._apply_simbad_match(center_star_obj, result_table[idx], center_ra, center_dec)
+            hint_offset_arcsec = float(np.atleast_1d(d2d.to(u.arcsec).value)[0])
+            if hint_offset_arcsec > HINT_MATCH_WARNING_ARCSEC:
+                logger.warning(
+                    "The nearest stellar SIMBAD entry is %.0f arcsec from the position hint, so the star at "
+                    "the frame centre may be labelled with the wrong catalog star. Check the hint: the FITS "
+                    "position is only the mount's report.",
+                    hint_offset_arcsec,
+                )
+            # The star gets the catalog star's own position. The hint is only
+            # where the telescope was thought to point, and on the Vega
+            # session it was 22 arcsec (13 pixels) from Vega itself, so
+            # stamping it on the star put the overlay marker in the wrong
+            # place.
+            matched_position = simbad_coords[idx]
+            self._apply_simbad_match(
+                center_star_obj,
+                result_table[idx],
+                float(matched_position.ra.deg),
+                float(matched_position.dec.deg),
+            )
         except Exception as e:
             logger.warning(f"Failed to match hint coordinates against SIMBAD results: {e}")
 
@@ -1457,28 +1579,24 @@ class StarIdentifier:
         if not spectral_type or str(spectral_type).strip() == "":
             spectral_type = "Unknown"
 
-        magnitude = 0.0
-        # Map SIMBAD flux (magnitude)
-        for col in ["V", "FLUX_V", "flux_v", "flux(V)"]:
-            if col in match.colnames:
-                val = match[col]
-                if val is not None and not (hasattr(val, "mask") and bool(val.mask)):
-                    try:
-                        magnitude = float(val)
-                    except ValueError, TypeError:
-                        magnitude = 0.0
-                break
+        # Map SIMBAD flux (magnitude); stays None when SIMBAD has no V value.
+        magnitude = _read_catalog_magnitude(match, ["V", "FLUX_V", "flux_v", "flux(V)"])
+        blue_magnitude = _read_catalog_magnitude(match, ["B", "FLUX_B", "flux_b", "flux(B)"])
 
         stellar_object.name = common_name if common_name else str(main_id)
         stellar_object.id = str(main_id)
         stellar_object.spectral_type = str(spectral_type)
         stellar_object.stellar_spectral_type = str(spectral_type)
         stellar_object.magnitude = magnitude
+        stellar_object.b_minus_v = (
+            blue_magnitude - magnitude if blue_magnitude is not None and magnitude is not None else None
+        )
         stellar_object.right_ascension = float(ra)
         stellar_object.declination = float(dec)
         stellar_object.is_catalog_identified = True
+        magnitude_text = f"{magnitude:.2f}" if magnitude is not None else "unknown"
         logger.info(
-            f"  Identified: {stellar_object.name} ({stellar_object.spectral_type}, mag: {magnitude:.2f}) "
+            f"  Identified: {stellar_object.name} ({stellar_object.spectral_type}, mag: {magnitude_text}) "
             f"at {ra:.4f}, {dec:.4f}"
         )
 
@@ -1497,16 +1615,8 @@ class StarIdentifier:
         elif not source_id.startswith("Gaia"):
             source_id = f"Gaia DR3 {source_id}"
 
-        magnitude = 0.0
-        for col in ["phot_g_mean_mag", "PHOT_G_MEAN_MAG", "g_mag"]:
-            if col in match.colnames:
-                val = match[col]
-                if val is not None and not (hasattr(val, "mask") and bool(val.mask)):
-                    try:
-                        magnitude = float(val)
-                    except ValueError, TypeError:
-                        magnitude = 0.0
-                break
+        # Stays None when Gaia has no G-band value for this star.
+        magnitude = _read_catalog_magnitude(match, ["phot_g_mean_mag", "PHOT_G_MEAN_MAG", "g_mag"])
 
         stellar_object.name = source_id
         stellar_object.id = source_id
@@ -1516,6 +1626,7 @@ class StarIdentifier:
         stellar_object.right_ascension = float(ra)
         stellar_object.declination = float(dec)
         stellar_object.is_catalog_identified = True
+        magnitude_text = f"{magnitude:.2f}" if magnitude is not None else "unknown"
         logger.info(
-            f"  Identified (Gaia): {stellar_object.name} (mag: {magnitude:.2f}) at {ra:.4f}, {dec:.4f}"
+            f"  Identified (Gaia): {stellar_object.name} (mag: {magnitude_text}) at {ra:.4f}, {dec:.4f}"
         )

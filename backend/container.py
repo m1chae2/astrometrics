@@ -11,6 +11,7 @@ from backend.services.analysis.analysis_orchestrator import AnalysisOrchestrator
 from backend.services.data.image_service import ImageService
 from backend.services.data.stellar_service import StellarService
 from backend.services.data.target_service import TargetService
+from backend.services.infrastructure.handoff_service import HandoffService
 from backend.services.infrastructure.maintenance_service import MaintenanceService
 from backend.services.infrastructure.notification_service import NotificationService
 from backend.services.infrastructure.sync_service import SyncService
@@ -42,10 +43,11 @@ class Container:
         self.image_service = None
         self.image_processing_service = None
         self.sync_service = None
-        self.remote_service = None
+        self.stellarmate_interface = None
         self.socket_manager = None
         self.telescope_service = None
         self.notification_service = None
+        self.handoff_service = None
         self.scripting_service = None
         self.ingestion_service = None
         self.system_status_service = None
@@ -118,9 +120,14 @@ class Container:
         self.wayfinder.control.driver = self.indi_driver
 
         # 4. Initialize Infrastructure Services
-        from backend.services.infrastructure.remote_service import RemoteService
+        from wayfindinglib.drivers.stellarmate_interface import StellarMateInterface
 
-        self.remote_service = RemoteService(config_service=self.config_service)
+        remote_pictures_path = self.config_service.get_remote_pictures_path() or "/home/stellarmate/Pictures"
+        self.stellarmate_interface = StellarMateInterface(
+            host_alias=self.config_service.get_telescope_hostname() or "stellarmate",
+            remote_pictures_path=remote_pictures_path,
+            frames_path=self.config_service.get_frames_path(),
+        )
 
         from backend.services.infrastructure.socket_manager import SocketManager
 
@@ -132,10 +139,14 @@ class Container:
 
         notification_path = os.path.join(os.path.dirname(__file__), "notifications.json")
         self.notification_service = NotificationService(storage_path=notification_path)
+        self.handoff_service = HandoffService(socket_manager=self.socket_manager)
 
         from backend.services.observatory.guiding_service import GuidingService
 
-        self.guiding_service = GuidingService(observatory_api=self.wayfinder.control)
+        self.guiding_service = GuidingService(
+            observatory_api=self.wayfinder.control,
+            logger_interface=self.job_repository,
+        )
         self.wayfinder.control.guiding_service = self.guiding_service
 
         # 5. Initialize Domain Services with proper DI
@@ -173,7 +184,12 @@ class Container:
             astrometrics=self.astrometrics,
         )
 
-        self.sync_service = SyncService(remote_service=self.remote_service)
+        self.sync_service = SyncService(
+            stellarmate=self.stellarmate_interface,
+            config_service=self.config_service,
+            guiding_service=self.guiding_service,
+            logger_interface=self.job_repository,
+        )
 
         from backend.services.observatory.imaging_service import ImagingService
 
@@ -200,6 +216,7 @@ class Container:
             indi_interface=self.indi_driver,
             imaging_service=self.imaging_service,
             star_identifier=star_identifier,
+            logger_interface=self.job_repository,
         )
         self.telescope_service._alignment_service = self.alignment_service
 

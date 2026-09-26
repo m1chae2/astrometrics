@@ -6,13 +6,83 @@ This file provides two ways to measure a spectrum:
 2. Advanced (Traced): Carefully follows the exact center of the spectrum as
    it bends or widens. It adjusts the size of the box on the fly to get
    the best possible reading while ignoring background noise.
+
+Pipeline stage: sky background subtraction
+------------------------------------------
+Purpose: the box we add up contains the star's light AND the glow of the
+night sky (city lights, moonlight, airglow). If we leave the sky in, it
+does two kinds of damage to the spectrum:
+
+* It adds a flat pedestal under the whole spectrum. Dark absorption lines
+  are measured against "star plus sky" instead of "star alone", so they
+  look shallower than they really are.
+* Sky glow has its own bright lines (for example sodium and mercury street
+  lamps). These add fake bumps at exact wavelengths, including near real
+  absorption lines such as the sodium D line.
+
+So, at every step along the spectrum, every extraction method in this file
+measures the sky in narrow "sky bands" just outside the box, on both sides
+of the streak, and subtracts that sky level from the box total. This stage
+runs BEFORE wavelength calibration, so the calibrator and every later stage
+(feature detection, classification) only ever see star light.
+
+In a crowded field the "sky" beside a star is mostly the light of other
+stars: their spectra overlap, and the glow around each one adds up. That
+light is under our star's box as well, so subtracting it is right. On the
+M 13 stack it was large: for stars of magnitude 8.5-9, 50-90% of the raw
+spectrum was this background, growing toward the red, and K stars looked
+like M stars until it was removed (see
+logs/k_star_sky_investigation_20260919.json). The Vega frame, by contrast,
+is a bright star in a sparse field, and only 0.6% of its spectrum was sky.
+Check a fainter star in a busier field before trusting a change to this
+stage.
+
+What this stage does NOT do: it does not remove Earth's atmosphere
+absorption (telluric lines from oxygen and water vapour). Those are dips
+in the star's own light after it passes through the air, so they are not
+part of the sky glow that we measure beside the streak.
+
+Limits of adding up a box
+-------------------------
+Both methods here add up the light in a box. That is simple and works well
+for a star whose streak looks the same at every colour. It gives a
+distorted spectrum when the streak's blur changes with wavelength, because
+the light of neighbouring wavelengths then lands in each other's boxes.
+Neveu et al. (2024, Astronomy & Astrophysics 684, A21) describe this and
+the alternative: model the whole 2D image, with a blur for every
+wavelength, and fit it to the pixels. We do not do that.
+
+The blur does change with wavelength in this setup. A grating placed in a
+converging beam (the Star Analyzer 200 sits in front of the sensor) blurs
+the redder light more, and that paper reports the same for a grating of
+that kind. Measured on the stored spectra (2026-09-26, the fitted trail
+width, in pixels): Vega 1.2 at 4200 A, 1.9 at 5000 A, 1.6 at 6600 A and
+1.9 at 7400 A, and the other four stars checked show the same pattern. It
+is not a steady rise, so we have no simple correction for it.
+
+What this costs, as far as we know:
+
+* Balmer lines look shallower than the reference spectra's, more so toward
+  the red. On Vega, the observed depth as a fraction of the reference's
+  (2026-09-26, blurring the reference with a width that grows with
+  wavelength instead of one fixed width) went from 1.03 to 0.98 at
+  H-gamma, 0.68 to 0.85 at H-beta and 0.23 to 0.65 at H-alpha. So part of
+  the gap comes from the blur changing with colour, and part is still
+  unexplained. Treat line depths, especially H-alpha, as understated.
+* The zero-order star of a bright target is saturated, so its position
+  comes from `find_zero_order_position`, not from a fit to the star.
+
+Do not read this as a measured size of the error for any one star. It has
+not been tested that a 2D fit would remove the gap.
 """
 
 import logging
+import math
 import warnings
 
 import numpy as np
 from astropy.modeling import fitting, models
+from scipy.ndimage import binary_dilation, median_filter
 
 from astrometricslib.drivers.image import AstrometricsImage
 
@@ -67,6 +137,43 @@ APERTURE_SIGMA_MULTIPLIER = 2.5
 # line could be, but was still being accepted because the only existing
 # check was "greater than zero".
 _MINIMUM_FIT_SIGMA_PX = 0.5
+
+# --- Sky background subtraction (see the module docstring) ---------------
+# The sky is measured in two strips ("sky bands"), one on each side of the
+# reading box, like this (top-down view across the streak):
+#
+#     | sky band | gap | reading box (the star) | gap | sky band |
+#
+# The gap keeps the sky bands away from the star's own faint outer glow (its
+# "wings"), which stretches past the reading box. If a band touches the
+# wings, we would subtract some of the star's real light and call it sky.
+# gap = 6 px: swept on a real frame (Vega, ASI533MM Pro + 405 mm, 2026-09-19,
+# see logs/sky_band_sweep_vega_20260919.json). Moving the bands out from a
+# 2 px gap to a 6 px gap dropped the amount "removed" from 2.05% to 0.57% of
+# the total flux, which is the wings leaving the band. Past 6 px the drop is
+# slower (0.46% at 8 px, 0.17% at 30 px), so the extra distance gains little
+# but risks reaching a neighbouring star's spectrum. That sweep is a
+# one-frame result on a sparse field. The same 6 px gap was later used on the
+# crowded M 13 stack, where it gave K0V for a K0 star and correct-side types
+# for most of the others (see logs/k_star_sky_investigation_20260919.json),
+# but no sweep of the gap was run there.
+SKY_BAND_GAP_PX = 6
+
+# Wider bands give a steadier median (more pixels, less noise). Narrower
+# bands follow a changing sky better. 10 px gives 20 sky pixels per step,
+# enough that a few odd pixels cannot move the median, while the bands stay
+# close to the star. Chosen in the same Vega sweep as the gap above (gap 6,
+# width 10). Line depths (Na D, H-beta, H-gamma) moved by less than 0.002
+# across all the widths tried, so this is not a sensitive setting on that
+# frame. Same one-frame caveat as the gap.
+SKY_BAND_WIDTH_PX = 10
+
+# The fewest sky pixels we will trust in one band. Near the edge of the image
+# a band can be cut off. If fewer than this many pixels are left in a band,
+# one or two noisy pixels would decide its sky level, so that band is not
+# used. If neither band has enough, we skip the subtraction for that step
+# instead of guessing.
+SKY_BAND_MINIMUM_SAMPLE_COUNT = 4
 
 
 def fit_cross_section_gaussian(
@@ -236,24 +343,312 @@ def fit_trail_centerline_polynomial(raw_centers: list[float | None], degree: int
     return [float(value) for value in np.polyval(coefficients, all_indices)]
 
 
+# A line of pixels across a nebula's box is smooth on the scale of tens of
+# pixels, but another star's trail crossing it is a narrow spike. To tell them
+# apart, each line is compared with a median-smoothed copy of itself. A
+# running median ignores anything narrower than half its window, so the window
+# must be wider than twice a trail and narrower than the nebula's own
+# structure. Measured on the M 27 spectral stack (2026-09-24), the flagged
+# spikes were a median 7 pixels wide (5-11 for the middle 80%, including the
+# dilation below), so 31 pixels is comfortably wide enough. It is a first
+# choice, checked only on M 27 and M 57 and not tuned.
+CONTAMINANT_BASELINE_WIDTH_PX = 31
+
+# A pixel counts as part of a contaminating spike when it stands this many
+# noise-widths above the smoothed copy. 4 is the usual "clearly not noise"
+# cut: with Gaussian noise fewer than 1 pixel in 15,000 passes by chance.
+CONTAMINANT_THRESHOLD_SIGMA = 4.0
+
+# Each side of a flagged spike is also replaced, because a trail's faint
+# edges sit below the threshold but still carry its light. Two pixels is a
+# judgement, not a measurement: on M 27 it leaves 5.9% of the box replaced.
+CONTAMINANT_DILATION_PX = 2
+
+
+def replace_narrow_spikes(cross_section: np.ndarray) -> np.ndarray:
+    """Swap narrow bright spikes in one line of pixels for the smooth level.
+
+    This is the measuring half of the contaminant rejection stage. It is
+    meant for a nebula's wide reading box, where the trails and zero-order
+    points of ordinary stars cross the box and would otherwise be added to
+    the nebula's spectrum as fake bumps (on M 27 the strongest, near 6100
+    Angstroms, was 0.32 in units where the nebula's hump is 0.1).
+
+    Steps:
+    1. Smooth the line with a running median. A median ignores a spike
+       that is narrower than half the window, so the result follows the
+       nebula and the sky but not the trails.
+    2. Subtract the smoothed line. What is left is noise plus the spikes.
+    3. Measure the noise from the middle value of the leftovers' distance
+       from their own middle (the median absolute deviation, times 1.4826 to
+       match a Gaussian's spread). Spikes are too few to move it.
+    4. Any pixel more than `CONTAMINANT_THRESHOLD_SIGMA` noise-widths above
+       the smoothed line is a spike (on a line with no noise at all, any
+       excess is a spike). It and its neighbours within
+       `CONTAMINANT_DILATION_PX` are replaced by the smoothed value.
+
+    Only bright spikes are replaced. A dark dip (a dead pixel, a gap) is
+    left alone because other stars can only add light, never remove it.
+
+    Parameters
+    ----------
+    cross_section : `numpy.ndarray`
+        One line of pixels across the box.
+
+    Returns
+    -------
+    cleaned : `numpy.ndarray`
+        A copy of the line with spikes replaced. The input is not changed.
+        A line shorter than the smoothing window comes back unchanged.
+    """
+    values = np.asarray(cross_section, dtype=float)
+    if values.size < CONTAMINANT_BASELINE_WIDTH_PX:
+        return values.copy()
+    finite = np.isfinite(values)
+    if not finite.all():
+        return values.copy()
+    baseline = median_filter(values, size=CONTAMINANT_BASELINE_WIDTH_PX, mode="nearest")
+    residual = values - baseline
+    noise_width = 1.4826 * float(np.median(np.abs(residual - np.median(residual))))
+    is_spike = residual > CONTAMINANT_THRESHOLD_SIGMA * noise_width
+    if not is_spike.any():
+        return values.copy()
+    is_spike = binary_dilation(is_spike, iterations=CONTAMINANT_DILATION_PX)
+    return np.where(is_spike, baseline, values)
+
+
+def measure_sky_level_per_pixel(
+    cross_section: np.ndarray, aperture_center: int, aperture_half_width: int
+) -> float:
+    """Measure how bright the night sky is beside the spectrum.
+
+    This is the measuring half of the sky background subtraction stage
+    (see the module docstring). It looks at one line of pixels running
+    straight across the streak, ignores the reading box and the gap next
+    to it, and measures the two sky bands beyond. Each band gets its own
+    typical value, and the LOWER of the two is used.
+
+    Why the lower one: anything that is not sky (the trail of a
+    neighbouring star, or its glow) can only add light to a band. In a
+    crowded field such as a star cluster, a neighbour's spectrum often runs
+    alongside ours and fills one band. Pooling both bands would then give a
+    sky level far too high, and subtracting it would remove the star's own
+    light. The lower band is the one less likely to have a neighbour in it.
+    When the sky is smooth and both bands agree, this costs almost nothing.
+
+    Each band's typical value is its median, not its average. The median is
+    the middle number once the pixels are sorted, so a few unusually bright
+    pixels (a hot pixel or a cosmic ray) cannot pull it up.
+
+    Parameters
+    ----------
+    cross_section : `numpy.ndarray`
+        One line of pixels running across the spectrum: a column of the
+        image when the spectrum runs left to right, or a row when it runs
+        top to bottom.
+    aperture_center : `int`
+        Index in `cross_section` of the middle of the reading box.
+    aperture_half_width : `int`
+        How many pixels the reading box reaches on each side of its
+        middle.
+
+    Returns
+    -------
+    sky_level_per_pixel : `float`
+        The typical sky brightness of a single pixel. `0.0` when neither
+        band has enough pixels on the image to measure it (subtract
+        nothing).
+    """
+    nearest_band_edge = aperture_half_width + SKY_BAND_GAP_PX
+    farthest_band_edge = nearest_band_edge + SKY_BAND_WIDTH_PX
+    line_length = cross_section.size
+
+    lower_band = cross_section[
+        max(0, aperture_center - farthest_band_edge) : max(0, aperture_center - nearest_band_edge)
+    ]
+    upper_band = cross_section[
+        min(line_length, aperture_center + nearest_band_edge + 1) : min(
+            line_length, aperture_center + farthest_band_edge + 1
+        )
+    ]
+
+    band_levels = []
+    for band in (lower_band, upper_band):
+        sky_pixels = band.astype(float)
+        sky_pixels = sky_pixels[np.isfinite(sky_pixels)]
+        if sky_pixels.size >= SKY_BAND_MINIMUM_SAMPLE_COUNT:
+            band_levels.append(float(np.median(sky_pixels)))
+    if not band_levels:
+        return 0.0
+    return min(band_levels)
+
+
 class SpectrumExtractor:
     """Reads the brightness of a spectrum from an image.
+
+    Each brightness reading is the light inside the reading box minus the
+    night-sky glow measured beside it (the sky background subtraction
+    stage described in the module docstring).
 
     Attributes
     ----------
     radius : `int`
         How wide of a box to draw around the spectrum (in pixels).
+    subtract_sky_background : `bool`
+        Whether each reading has the sky glow taken out of it.
+    reject_narrow_contaminants : `bool`
+        Whether narrow bright spikes in the reading box (other stars'
+        trails) are replaced by the smooth level before adding up.
     """
 
-    def __init__(self, radius: int = 10):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(  # ruff: ignore[missing-return-type-special-method]
+        self,
+        radius: int = 10,
+        subtract_sky_background: bool = True,
+        reject_narrow_contaminants: bool = False,
+    ):
         """Set up the extractor.
 
         Parameters
         ----------
         radius : `int`, optional
             How wide of a box to use (default is 10 pixels).
+        subtract_sky_background : `bool`, optional
+            Take the night-sky glow out of every reading (default is
+            `True`). Turn this off only to compare against the raw,
+            un-subtracted spectrum.
+        reject_narrow_contaminants : `bool`, optional
+            Replace narrow bright spikes in the box by the smooth level
+            (see `replace_narrow_spikes`), default `False`. Meant for a
+            nebula's wide box; a star's own narrow box would lose its
+            light to this.
         """
         self.radius = radius
+        self.subtract_sky_background = subtract_sky_background
+        self.reject_narrow_contaminants = reject_narrow_contaminants
+
+    def _sum_aperture_minus_sky(
+        self,
+        data: np.ndarray,
+        line_index: int,
+        aperture_center: int,
+        aperture_half_width: int,
+        is_horizontal: bool,
+    ) -> float:
+        """Add up the star's light in one reading box, without the sky.
+
+        Every extraction method in this class reads its brightness through
+        this one method, so the sky background subtraction stage cannot be
+        skipped by accident in one of them.
+
+        Parameters
+        ----------
+        data : `numpy.ndarray`
+            The 2-D image.
+        line_index : `int`
+            Which position along the spectrum to read: the column when the
+            spectrum runs left to right, or the row when it runs top to
+            bottom.
+        aperture_center : `int`
+            Where the middle of the reading box is, across the spectrum.
+        aperture_half_width : `int`
+            How many pixels the box reaches on each side of its middle.
+        is_horizontal : `bool`
+            `True` when the spectrum runs left to right.
+
+        Returns
+        -------
+        flux : `float`
+            The total light in the box minus the sky glow, or `NaN` when
+            the box is not on the image.
+        """
+        height, width = data.shape
+        if is_horizontal:
+            if not 0 <= line_index < width:
+                return np.nan
+            cross_section = data[:, line_index]
+        else:
+            if not 0 <= line_index < height:
+                return np.nan
+            cross_section = data[line_index, :]
+
+        box_start = max(0, aperture_center - aperture_half_width)
+        box_end = min(cross_section.size, aperture_center + aperture_half_width + 1)
+        if box_start >= box_end:
+            return np.nan
+
+        box_pixels = cross_section[box_start:box_end]
+        if self.reject_narrow_contaminants:
+            # Clean with a margin of real pixels beyond each box edge, so a
+            # trail at the edge still has neighbours to be compared with.
+            margin_start = max(0, box_start - CONTAMINANT_BASELINE_WIDTH_PX)
+            margin_end = min(cross_section.size, box_end + CONTAMINANT_BASELINE_WIDTH_PX)
+            cleaned_with_margin = replace_narrow_spikes(cross_section[margin_start:margin_end])
+            box_pixels = cleaned_with_margin[box_start - margin_start : box_end - margin_start]
+        box_total = float(np.sum(box_pixels))
+        if not self.subtract_sky_background:
+            return box_total
+
+        sky_level_per_pixel = measure_sky_level_per_pixel(cross_section, aperture_center, aperture_half_width)
+        return box_total - sky_level_per_pixel * (box_end - box_start)
+
+    def _sum_aperture_at_position(
+        self,
+        data: np.ndarray,
+        along_position: float,
+        aperture_center: int,
+        aperture_half_width: int,
+        is_horizontal: bool,
+    ) -> float:
+        """Read the box at a position along the spectrum, whole pixel or not.
+
+        A sample is meant to sit at one exact distance from the zero-order
+        star, because the wavelength given to it comes from that distance.
+        Reading the whole pixel that contains the position (`int()` rounds
+        down) puts the light up to a pixel too close to the star: about
+        half a pixel on average, so every wavelength came out about 5 A too
+        long, by an amount that changed with where the star's centre fell
+        within its pixel (0 to 11 A for a star measured to a fraction of a
+        pixel). The reading here is the reading of the two whole pixels on
+        either side of the position, weighted by how near each is, so it is
+        the reading at the position itself.
+
+        Parameters
+        ----------
+        data : `numpy.ndarray`
+            The 2-D image.
+        along_position : `float`
+            The position along the spectrum, in pixels: the column when the
+            spectrum runs left to right, or the row when it runs top to
+            bottom. A whole number is the middle of that pixel.
+        aperture_center : `int`
+            Where the middle of the reading box is, across the spectrum.
+        aperture_half_width : `int`
+            How many pixels the box reaches on each side of its middle.
+        is_horizontal : `bool`
+            `True` when the spectrum runs left to right.
+
+        Returns
+        -------
+        flux : `float`
+            The light in the box minus the sky glow, or `NaN` when the
+            position is not on the image.
+        """
+        lower_index = math.floor(along_position)
+        upper_weight = along_position - lower_index
+        lower = self._sum_aperture_minus_sky(
+            data, lower_index, aperture_center, aperture_half_width, is_horizontal
+        )
+        if upper_weight <= 0.0:
+            return lower
+        upper = self._sum_aperture_minus_sky(
+            data, lower_index + 1, aperture_center, aperture_half_width, is_horizontal
+        )
+        if np.isnan(upper):
+            return lower
+        if np.isnan(lower):
+            return upper
+        return (1.0 - upper_weight) * lower + upper_weight * upper
 
     def extract_line(
         self, image: AstrometricsImage, start_pos: tuple[float, float], vector: np.ndarray, length: float
@@ -290,22 +685,22 @@ class SpectrumExtractor:
 
         pixels = []
         for i in range(int(length)):
-            curr_x = int(x0 + i * vx)
-            curr_y = int(y0 + i * vy)
+            exact_x = x0 + i * vx
+            exact_y = y0 + i * vy
+            curr_x = int(exact_x)
+            curr_y = int(exact_y)
 
             if 0 <= curr_x < w and 0 <= curr_y < h:
-                # Sum over radius
+                # Sum over radius, minus the sky glow measured beside it, at
+                # the exact position along the spectrum (see
+                # `_sum_aperture_at_position`).
                 if abs(vx) > abs(vy):  # Horizontal-ish
-                    y_start = max(0, curr_y - self.radius)
-                    y_end = min(h, curr_y + self.radius + 1)
-                    val = np.sum(data[y_start:y_end, curr_x])
+                    val = self._sum_aperture_at_position(data, exact_x, curr_y, self.radius, True)
                 else:  # Vertical-ish
-                    x_start = max(0, curr_x - self.radius)
-                    x_end = min(w, curr_x + self.radius + 1)
-                    val = np.sum(data[curr_y, x_start:x_end])
+                    val = self._sum_aperture_at_position(data, exact_y, curr_x, self.radius, False)
                 pixels.append(val)
             else:
-                pixels.append(0.0)
+                pixels.append(np.nan)
 
         return np.array(pixels)
 
@@ -385,16 +780,12 @@ class SpectrumExtractor:
                 # line to be.
                 if 0 <= int_x < width and 0 <= int_y < height:
                     if abs(vx) > abs(vy):
-                        y_start = max(0, int_y - self.radius)
-                        y_end = min(height, int_y + self.radius + 1)
-                        val = np.sum(data[y_start:y_end, int_x])
+                        val = self._sum_aperture_at_position(data, curr_x, int_y, self.radius, True)
                     else:
-                        x_start = max(0, int_x - self.radius)
-                        x_end = min(width, int_x + self.radius + 1)
-                        val = np.sum(data[int_y, x_start:x_end])
+                        val = self._sum_aperture_at_position(data, curr_y, int_x, self.radius, False)
                     pixels.append(val)
                 else:
-                    pixels.append(0.0)
+                    pixels.append(np.nan)
                 trail_width_px.append(0.0)
                 continue
 
@@ -405,13 +796,9 @@ class SpectrumExtractor:
             center_int_x, center_int_y = round(true_center_x), round(true_center_y)
 
             if abs(vx) > abs(vy):
-                y_start = max(0, center_int_y - aperture_radius)
-                y_end = min(height, center_int_y + aperture_radius + 1)
-                val = np.sum(data[y_start:y_end, int_x]) if 0 <= int_x < width and y_start < y_end else 0.0
+                val = self._sum_aperture_at_position(data, curr_x, center_int_y, aperture_radius, True)
             else:
-                x_start = max(0, center_int_x - aperture_radius)
-                x_end = min(width, center_int_x + aperture_radius + 1)
-                val = np.sum(data[int_y, x_start:x_end]) if 0 <= int_y < height and x_start < x_end else 0.0
+                val = self._sum_aperture_at_position(data, curr_y, center_int_x, aperture_radius, False)
             pixels.append(val)
             trail_width_px.append(sigma)
 
@@ -466,7 +853,6 @@ class SpectrumExtractor:
 
         """
         data = image.data
-        h, w = data.shape
 
         # 1. Centroid Anchor (21x21 subgrid around rough start position)
         anchor_x, anchor_y = self._compute_centroid_reference_point(data, start_pos)
@@ -483,14 +869,7 @@ class SpectrumExtractor:
                 # Calculate dynamically tilted y center
                 y_center = anchor_y + slope * (x - anchor_x)
                 iy_center = round(y_center)
-                y_low = max(0, iy_center - radius)
-                y_high = min(h, iy_center + radius + 1)
-
-                if 0 <= x < w and y_low < y_high:
-                    val = np.sum(data[y_low:y_high, x])
-                    profile.append(val)
-                else:
-                    profile.append(0.0)
+                profile.append(self._sum_aperture_minus_sky(data, x, iy_center, radius, True))
         else:  # vertical
             # Vertical dispersion: from anchor_y + flare_offset_pixels to
             # anchor_y + max_offset_pixels
@@ -501,16 +880,9 @@ class SpectrumExtractor:
                 # Calculate dynamically tilted x center
                 x_center = anchor_x + slope * (y - anchor_y)
                 ix_center = round(x_center)
-                x_low = max(0, ix_center - radius)
-                x_high = min(w, ix_center + radius + 1)
-
-                if 0 <= y < h and x_low < x_high:
-                    # Sum rows horizontally in the bounding box centered
-                    # around the tilted x center
-                    val = np.sum(data[y, x_low:x_high])
-                    profile.append(val)
-                else:
-                    profile.append(0.0)
+                # Sum rows horizontally in the bounding box centered
+                # around the tilted x center
+                profile.append(self._sum_aperture_minus_sky(data, y, ix_center, radius, False))
 
         return np.array(profile), anchor_x, anchor_y
 
@@ -722,7 +1094,6 @@ class SpectrumExtractor:
             The aperture sigma used at each step (0.0 where the fit
             failed).
         """
-        h, w = data.shape
         is_horizontal = orientation == "horizontal"
 
         profile = []
@@ -732,14 +1103,12 @@ class SpectrumExtractor:
             int_step_x, int_step_y = (step, round(nominal_y)) if is_horizontal else (round(nominal_x), step)
 
             if raw_centers[index] is None:
+                # No fit here, so read a plain fixed-size box (still with
+                # the sky taken out).
                 if is_horizontal:
-                    y_low = max(0, int_step_y - radius)
-                    y_high = min(h, int_step_y + radius + 1)
-                    val = np.sum(data[y_low:y_high, step]) if 0 <= step < w and y_low < y_high else 0.0
+                    val = self._sum_aperture_minus_sky(data, step, int_step_y, radius, True)
                 else:
-                    x_low = max(0, int_step_x - radius)
-                    x_high = min(w, int_step_x + radius + 1)
-                    val = np.sum(data[step, x_low:x_high]) if 0 <= step < h and x_low < x_high else 0.0
+                    val = self._sum_aperture_minus_sky(data, step, int_step_x, radius, False)
                 profile.append(val)
                 trail_width_px.append(0.0)
                 continue
@@ -750,15 +1119,9 @@ class SpectrumExtractor:
             true_y = nominal_y + perpendicular_vector[1] * smoothed_centerline[index]
 
             if is_horizontal:
-                center_int_y = round(true_y)
-                y_low = max(0, center_int_y - aperture_radius)
-                y_high = min(h, center_int_y + aperture_radius + 1)
-                val = np.sum(data[y_low:y_high, step]) if 0 <= step < w and y_low < y_high else 0.0
+                val = self._sum_aperture_minus_sky(data, step, round(true_y), aperture_radius, True)
             else:
-                center_int_x = round(true_x)
-                x_low = max(0, center_int_x - aperture_radius)
-                x_high = min(w, center_int_x + aperture_radius + 1)
-                val = np.sum(data[step, x_low:x_high]) if 0 <= step < h and x_low < x_high else 0.0
+                val = self._sum_aperture_minus_sky(data, step, round(true_x), aperture_radius, False)
             profile.append(val)
             trail_width_px.append(sigma)
 

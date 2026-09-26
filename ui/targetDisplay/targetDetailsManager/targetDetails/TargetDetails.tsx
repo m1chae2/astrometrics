@@ -153,29 +153,31 @@ export const TargetDetails: React.FC<TargetDetailsProps> = ({
       </div>
 
       {/* Tree 3: Frames */}
-      <div className="target-details__tree-section">
+      <div className="target-details__tree-section target-details__tree-section--frames">
         <div className="target-details__tree-header">Frames</div>
-        {filterGroups && filterGroups.length > 0 ? (
-          filterGroups.map((group) => (
-            <div className="target-details__tree-group" key={group.filterName}>
-              <div className="target-details__tree-row">
-                <span className="tree-branch">└─</span>
-                <span className="tree-label">{group.filterName}</span>
-              </div>
-              {group.exposures.map((exp) => (
-                <div className="target-details__tree-row target-details__tree-row--sub" key={exp.duration}>
+        <div className="target-details__frames-list">
+          {filterGroups && filterGroups.length > 0 ? (
+            filterGroups.map((group) => (
+              <div className="target-details__tree-group" key={group.filterName}>
+                <div className="target-details__tree-row">
                   <span className="tree-branch">└─</span>
-                  <span className="tree-value">{exp.count} × {exp.duration}″</span>
+                  <span className="tree-label">{group.filterName}</span>
                 </div>
-              ))}
+                {group.exposures.map((exp) => (
+                  <div className="target-details__tree-row target-details__tree-row--sub" key={exp.duration}>
+                    <span className="tree-branch">└─</span>
+                    <span className="tree-value">{exp.count} × {exp.duration}″</span>
+                  </div>
+                ))}
+              </div>
+            ))
+          ) : (
+            <div className="target-details__tree-row">
+              <span className="tree-branch">└─</span>
+              <span className="tree-value">—</span>
             </div>
-          ))
-        ) : (
-          <div className="target-details__tree-row">
-            <span className="tree-branch">└─</span>
-            <span className="tree-value">—</span>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
     </div>

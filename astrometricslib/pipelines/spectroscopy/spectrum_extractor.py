@@ -44,6 +44,7 @@ part of the sky glow that we measure beside the streak.
 """
 
 import logging
+import math
 import warnings
 
 import numpy as np
@@ -558,6 +559,64 @@ class SpectrumExtractor:
         sky_level_per_pixel = measure_sky_level_per_pixel(cross_section, aperture_center, aperture_half_width)
         return box_total - sky_level_per_pixel * (box_end - box_start)
 
+    def _sum_aperture_at_position(
+        self,
+        data: np.ndarray,
+        along_position: float,
+        aperture_center: int,
+        aperture_half_width: int,
+        is_horizontal: bool,
+    ) -> float:
+        """Read the box at a position along the spectrum, whole pixel or not.
+
+        A sample is meant to sit at one exact distance from the zero-order
+        star, because the wavelength given to it comes from that distance.
+        Reading the whole pixel that contains the position (`int()` rounds
+        down) puts the light up to a pixel too close to the star: about
+        half a pixel on average, so every wavelength came out about 5 A too
+        long, by an amount that changed with where the star's centre fell
+        within its pixel (0 to 11 A for a star measured to a fraction of a
+        pixel). The reading here is the reading of the two whole pixels on
+        either side of the position, weighted by how near each is, so it is
+        the reading at the position itself.
+
+        Parameters
+        ----------
+        data : `numpy.ndarray`
+            The 2-D image.
+        along_position : `float`
+            The position along the spectrum, in pixels: the column when the
+            spectrum runs left to right, or the row when it runs top to
+            bottom. A whole number is the middle of that pixel.
+        aperture_center : `int`
+            Where the middle of the reading box is, across the spectrum.
+        aperture_half_width : `int`
+            How many pixels the box reaches on each side of its middle.
+        is_horizontal : `bool`
+            `True` when the spectrum runs left to right.
+
+        Returns
+        -------
+        flux : `float`
+            The light in the box minus the sky glow, or `NaN` when the
+            position is not on the image.
+        """
+        lower_index = math.floor(along_position)
+        upper_weight = along_position - lower_index
+        lower = self._sum_aperture_minus_sky(
+            data, lower_index, aperture_center, aperture_half_width, is_horizontal
+        )
+        if upper_weight <= 0.0:
+            return lower
+        upper = self._sum_aperture_minus_sky(
+            data, lower_index + 1, aperture_center, aperture_half_width, is_horizontal
+        )
+        if np.isnan(upper):
+            return lower
+        if np.isnan(lower):
+            return upper
+        return (1.0 - upper_weight) * lower + upper_weight * upper
+
     def extract_line(
         self, image: AstrometricsImage, start_pos: tuple[float, float], vector: np.ndarray, length: float
     ) -> np.ndarray:
@@ -593,15 +652,19 @@ class SpectrumExtractor:
 
         pixels = []
         for i in range(int(length)):
-            curr_x = int(x0 + i * vx)
-            curr_y = int(y0 + i * vy)
+            exact_x = x0 + i * vx
+            exact_y = y0 + i * vy
+            curr_x = int(exact_x)
+            curr_y = int(exact_y)
 
             if 0 <= curr_x < w and 0 <= curr_y < h:
-                # Sum over radius, minus the sky glow measured beside it
+                # Sum over radius, minus the sky glow measured beside it, at
+                # the exact position along the spectrum (see
+                # `_sum_aperture_at_position`).
                 if abs(vx) > abs(vy):  # Horizontal-ish
-                    val = self._sum_aperture_minus_sky(data, curr_x, curr_y, self.radius, True)
+                    val = self._sum_aperture_at_position(data, exact_x, curr_y, self.radius, True)
                 else:  # Vertical-ish
-                    val = self._sum_aperture_minus_sky(data, curr_y, curr_x, self.radius, False)
+                    val = self._sum_aperture_at_position(data, exact_y, curr_x, self.radius, False)
                 pixels.append(val)
             else:
                 pixels.append(np.nan)
@@ -684,9 +747,9 @@ class SpectrumExtractor:
                 # line to be.
                 if 0 <= int_x < width and 0 <= int_y < height:
                     if abs(vx) > abs(vy):
-                        val = self._sum_aperture_minus_sky(data, int_x, int_y, self.radius, True)
+                        val = self._sum_aperture_at_position(data, curr_x, int_y, self.radius, True)
                     else:
-                        val = self._sum_aperture_minus_sky(data, int_y, int_x, self.radius, False)
+                        val = self._sum_aperture_at_position(data, curr_y, int_x, self.radius, False)
                     pixels.append(val)
                 else:
                     pixels.append(np.nan)
@@ -700,9 +763,9 @@ class SpectrumExtractor:
             center_int_x, center_int_y = round(true_center_x), round(true_center_y)
 
             if abs(vx) > abs(vy):
-                val = self._sum_aperture_minus_sky(data, int_x, center_int_y, aperture_radius, True)
+                val = self._sum_aperture_at_position(data, curr_x, center_int_y, aperture_radius, True)
             else:
-                val = self._sum_aperture_minus_sky(data, int_y, center_int_x, aperture_radius, False)
+                val = self._sum_aperture_at_position(data, curr_y, center_int_x, aperture_radius, False)
             pixels.append(val)
             trail_width_px.append(sigma)
 

@@ -29,7 +29,7 @@ does not depend on any one wavelength.
 
 import csv
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -602,6 +602,7 @@ def unclassified_result(reason: str) -> dict[str, object]:
         "reason": reason,
         "correlation_by_type": {},
         "ranked_types": [],
+        "excluded_windows_angstrom": [],
     }
 
 
@@ -611,6 +612,7 @@ def classify_spectral_type(
     resolution_element_angstrom: float = FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
     exclude_atmospheric_bands: bool = True,
     reference_types: Iterable[str] | None = None,
+    excluded_windows_angstrom: Sequence[tuple[float, float]] | None = None,
 ) -> dict[str, object]:
     """Find the bundled reference spectrum a star's spectrum most resembles.
 
@@ -649,6 +651,12 @@ def classify_spectral_type(
         The references to compare with. Defaults to the main-sequence
         ladder, `REFERENCE_SPECTRAL_TYPES`; pass
         `GIANT_REFERENCE_SPECTRAL_TYPES` to find the closest giant.
+    excluded_windows_angstrom : `Sequence`, optional
+        Wavelength windows, each a (low, high) pair in Angstroms, to leave
+        out of the comparison. Emission lines belong here: the references hold
+        absorption, so a star whose Balmer lines are filled with emission
+        looks like a different type unless those lines are set aside. The
+        windows used are returned in ``"excluded_windows_angstrom"``.
 
     Returns
     -------
@@ -664,6 +672,8 @@ def classify_spectral_type(
         ``"correlation_by_type"``: every reference's Pearson correlation.
         ``"ranked_types"``: every compared type, best first (see
         `_rank_by_probability`).
+        ``"excluded_windows_angstrom"``: the windows left out of the
+        comparison, as (low, high) pairs (empty when there were none).
     """
     wavelength_angstrom = np.asarray(wavelength_angstrom, dtype=float)
     intensity = np.asarray(intensity, dtype=float)
@@ -686,6 +696,9 @@ def classify_spectral_type(
             f"{MINIMUM_CLASSIFICATION_COVERAGE_ANGSTROM:.0f} A is needed"
         )
 
+    excluded_windows = [
+        (float(low_edge), float(high_edge)) for low_edge, high_edge in excluded_windows_angstrom or []
+    ]
     rms_by_type: dict[str, float] = {}
     correlation_by_type: dict[str, float] = {}
     allowed_types = set(REFERENCE_SPECTRAL_TYPES if reference_types is None else reference_types)
@@ -703,6 +716,8 @@ def classify_spectral_type(
         ]
         if exclude_atmospheric_bands:
             common_grid = common_grid[~atmospheric_band_mask(common_grid)]
+        for window_low, window_high in excluded_windows:
+            common_grid = common_grid[(common_grid < window_low) | (common_grid > window_high)]
         if len(common_grid) < _MINIMUM_OVERLAP_POINTS:
             continue
 
@@ -742,6 +757,7 @@ def classify_spectral_type(
         "reason": None,
         "correlation_by_type": correlation_by_type,
         "ranked_types": _rank_by_probability(rms_by_type, correlation_by_type),
+        "excluded_windows_angstrom": excluded_windows,
     }
 
 

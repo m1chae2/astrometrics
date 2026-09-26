@@ -30,7 +30,12 @@ from astrometricslib.pipelines.spectroscopy.spectral_classifier import (
     nearest_reference_type,
     unclassified_result,
 )
-from astrometricslib.pipelines.spectroscopy.spectral_feature_detector import detect_named_features
+from astrometricslib.pipelines.spectroscopy.spectral_feature_detector import (
+    KIND_EMISSION,
+    VERDICT_DETECTED,
+    VERDICT_POSSIBLE,
+    detect_named_features,
+)
 from astrometricslib.pipelines.spectroscopy.spectral_resolution import resolve_resolution_element_angstrom
 from astrometricslib.pipelines.spectroscopy.spectrum_signal import (
     MINIMUM_SPECTRUM_SIGNAL_TO_NOISE,
@@ -81,6 +86,54 @@ class SpectrumAnalysis:
 # and nebulae; their `spectral_type` keeps the object kind, for example
 # "PN"). Callers use it to set `is_extended_target`.
 EXTENDED_TARGET_SPECTRAL_TYPE = "Cluster"
+
+
+# An emission line is left out of the classification over this many resolution
+# elements either side of where it was measured. A line the instrument has
+# blurred is down to 0.2% of its height at 1.5 of its own widths, but a real
+# emission line is wider than the instrument's blur: gamma Cas's H-alpha
+# measured about 80 A across against a 50 A resolution element, so the window
+# is two resolution elements (100 A, 2.9 sigma of that line) either side to
+# leave under 2% of its height in the comparison. Checked on that one star.
+EMISSION_EXCLUSION_HALF_WIDTH_RESOLUTION_ELEMENTS = 2.0
+
+
+def _emission_windows(
+    features: list[dict[str, object]], resolution_element_angstrom: float
+) -> tuple[list[tuple[float, float]], list[str]]:
+    """Find the windows of the emission lines the feature test found.
+
+    Emission fills the lines a star of its type shows in absorption, so
+    comparing the star with the reference spectra there would make it look
+    like a different type. Only emission that is detected or possible counts.
+
+    Parameters
+    ----------
+    features : `list` [`dict`]
+        The results of `detect_named_features`.
+    resolution_element_angstrom : `float`
+        The instrument's resolution element, in Angstroms.
+
+    Returns
+    -------
+    windows : `list` [`tuple` [`float`, `float`]]
+        The (low, high) window around each emission line, in Angstroms.
+    names : `list` [`str`]
+        The short names of those lines, for example ``"H-alpha"``.
+    """
+    half_width = EMISSION_EXCLUSION_HALF_WIDTH_RESOLUTION_ELEMENTS * resolution_element_angstrom
+    windows: list[tuple[float, float]] = []
+    names: list[str] = []
+    for feature in features:
+        if feature.get("kind") != KIND_EMISSION or feature["verdict"] not in (
+            VERDICT_DETECTED,
+            VERDICT_POSSIBLE,
+        ):
+            continue
+        centre = float(feature["measured_wavelength_angstrom"])  # type: ignore[arg-type]
+        windows.append((centre - half_width, centre + half_width))
+        names.append(str(feature["feature"]).split("(")[-1].strip(")"))
+    return windows, names
 
 
 def analyze_spectrum(
@@ -221,6 +274,19 @@ def analyze_spectrum(
             False,
         )
 
+    # Emission is looked for first, because the classification has to leave
+    # it out. The catalog type gives the feature test its reference; when the
+    # catalog has none, the test is run again below with the spectrum's own
+    # best match.
+    expected_reference_type = nearest_reference_type(catalog_spectral_type)
+    features = detect_named_features(
+        wavelength_angstrom,
+        intensity,
+        reference_spectral_type=expected_reference_type,
+        resolution_element_angstrom=resolution_element_angstrom,
+    )
+    emission_windows, emission_names = _emission_windows(features, resolution_element_angstrom)
+
     response = instrument_response if is_quantum_efficiency_corrected else None
     corrected_intensity = None
     if response is None:
@@ -233,6 +299,7 @@ def analyze_spectrum(
             wavelength_angstrom,
             corrected_intensity,
             resolution_element_angstrom=resolution_element_angstrom,
+            excluded_windows_angstrom=emission_windows,
         )
 
     if classification["spectral_type"] != "Unknown" and not classification["reason"]:
@@ -246,6 +313,7 @@ def analyze_spectrum(
                 corrected_intensity,
                 resolution_element_angstrom=resolution_element_angstrom,
                 reference_types=GIANT_REFERENCE_SPECTRAL_TYPES,
+                excluded_windows_angstrom=emission_windows,
             )
             if giant_result["spectral_type"] != "Unknown":
                 closest_giant = (str(giant_result["spectral_type"]), float(giant_result["rms"]))  # type: ignore[arg-type]
@@ -254,9 +322,15 @@ def analyze_spectrum(
             colour_note = colour_disagreement_note(
                 catalog_b_minus_v, synthetic_b_minus_v(wavelength_angstrom, corrected_intensity)
             )
+        emission_note = (
+            f"the {' and '.join(emission_names)} emission was left out of the comparison"
+            if emission_names
+            else ""
+        )
         notes = [
             note
             for note in (
+                emission_note,
                 colour_note,
                 catalog_disagreement_note(catalog_spectral_type, str(classification["spectral_type"])),
                 luminosity_class_note(
@@ -271,20 +345,17 @@ def analyze_spectrum(
     # spectrum being tested. A spectrum match is only a fallback, and only
     # when it is a good one, since a poor match would put a wrong
     # expectation behind the feature probabilities.
-    expected_reference_type = nearest_reference_type(catalog_spectral_type)
     if (
         expected_reference_type is None
         and classification["spectral_type"] != "Unknown"
         and classification["match_quality"] == "good"
     ):
-        expected_reference_type = str(classification["spectral_type"])
-
-    features = detect_named_features(
-        wavelength_angstrom,
-        intensity,
-        reference_spectral_type=expected_reference_type,
-        resolution_element_angstrom=resolution_element_angstrom,
-    )
+        features = detect_named_features(
+            wavelength_angstrom,
+            intensity,
+            reference_spectral_type=str(classification["spectral_type"]),
+            resolution_element_angstrom=resolution_element_angstrom,
+        )
     return SpectrumAnalysis(
         classification,
         features,

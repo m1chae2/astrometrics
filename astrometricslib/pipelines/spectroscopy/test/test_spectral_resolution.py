@@ -231,7 +231,7 @@ def test_analysis_gives_the_classifier_the_measured_resolution(monkeypatch) -> N
     """The classifier must be told the spectrum's own resolution."""
     received = {}
 
-    def fake_classify(wavelength, intensity, resolution_element_angstrom):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def fake_classify(wavelength, intensity, resolution_element_angstrom, **_options):  # ruff: ignore[missing-type-function-argument, missing-type-kwargs, missing-return-type-private-function]
         received["resolution_element_angstrom"] = resolution_element_angstrom
         return unclassified_result("stand-in classifier")
 

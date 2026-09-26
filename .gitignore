@@ -210,6 +210,7 @@ astrometrics.zip
 node_modules/
 out/
 .run_logs/
+.run_logs_archive/
 .run_pids/
 # Ignored moved/obsolete scripts and logs
 scripts/siril.log

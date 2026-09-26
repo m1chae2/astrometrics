@@ -12,7 +12,6 @@ import inspect
 import io
 import json
 import logging
-import os
 import rlcompleter
 import sys
 import tempfile
@@ -183,33 +182,16 @@ class ScriptingService:
         try:
             import matplotlib
 
-            has_display = bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
-            use_tk = False
-            if has_display:
-                try:
-                    import tkinter
-
-                    test_tk = tkinter.Tk()
-                    test_tk.destroy()
-                    use_tk = True
-                except Exception:
-                    use_tk = False
-
-            if use_tk:
-                try:
-                    matplotlib.use("TkAgg")
-                except Exception:
-                    matplotlib.use("Agg")
-            else:
-                matplotlib.use("Agg")
+            # Always use the headless Agg backend in the server. Tk must be
+            # created and destroyed on one thread, but this code runs on
+            # whichever request thread built the workspace, so a Tk window
+            # here can abort the whole backend with "Tcl_AsyncDelete: async
+            # handler deleted by the wrong thread". Plots are returned as
+            # PNG snapshots (see the figure capture in `execute_structured`)
+            # for the interface to draw.
+            matplotlib.use("Agg")
 
             import matplotlib.pyplot as plt
-
-            # If using interactive GUI backend, plt.ion() allows
-            # non-blocking display while keeping figures alive and
-            # interactive for mouse/click events.
-            if plt.get_backend().lower() != "agg":
-                plt.ion()
 
             local_scope["plt"] = plt
         except ImportError:

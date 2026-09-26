@@ -104,6 +104,16 @@ launch_backend() {
     fi
   fi
 
+  # Keep the previous run's backend log before the purge below wipes it, so a
+  # crash can still be diagnosed after the next restart. Only the newest 10
+  # are kept.
+  if [ -s "$LOG_FILE" ]; then
+    ARCHIVE_DIR="$ROOT_DIR/.run_logs_archive"
+    mkdir -p "$ARCHIVE_DIR"
+    cp "$LOG_FILE" "$ARCHIVE_DIR/backend_$(date +%Y%m%d_%H%M%S).log" || true
+    { ls -1t "$ARCHIVE_DIR"/backend_*.log 2>/dev/null | tail -n +11 | xargs -r rm -f; } || true
+  fi
+
   # Purge old logs to ensure process panel starts clean
   echo "Purging old log files..."
   rm -rf "$LOG_DIR"/* || true
@@ -113,6 +123,14 @@ launch_backend() {
   # Pass the bind host via environment variable that the Python entrypoint reads
   # Force PYTHONPATH to include ROOT_DIR so we use local source instead of installed packages
   export PYTHONPATH="$ROOT_DIR:${PYTHONPATH:-}"
+  # Make a hard abort or segfault write a Python traceback into the log,
+  # instead of the process disappearing with no explanation.
+  export PYTHONFAULTHANDLER=1
+  # Limit how many separate malloc heaps the worker threads get. With the
+  # default (8 per core) freed memory is scattered across many heaps and is
+  # rarely handed back to the operating system, so the backend's memory grows
+  # to several times what it really needs after a few jobs.
+  export MALLOC_ARENA_MAX=2
   # -u: unbuffered stdout/stderr. Without it, Python fully block-buffers
   # output once it's not a TTY (redirected to $LOG_FILE), so print()
   # diagnostics -- including the INDI driver's "No indiserver running on

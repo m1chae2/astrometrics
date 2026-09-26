@@ -67,6 +67,44 @@ def test_a_real_continuum_scores_above_the_gate() -> None:
     assert score > 2 * MINIMUM_SPECTRUM_SIGNAL_TO_NOISE
 
 
+def test_a_smooth_well_measured_spectrum_has_a_finite_score() -> None:
+    """A bright star with a smoothly curved continuum is not scored infinite.
+
+    The scatter used to be measured against a running median of five
+    elements, which reproduces any steadily rising or falling stretch exactly,
+    so the scatter came out zero and the score infinite. 23 of the 170 stored
+    spectra scored that.
+    """
+    score = estimate_spectrum_signal_to_noise(WAVELENGTHS, _star_spectrum(300.0), 45.0)
+
+    assert score is not None
+    assert np.isfinite(score)
+    assert score > 100.0
+
+
+def test_the_score_follows_the_noise_level() -> None:
+    """Doubling the noise halves the score; dips do not count as noise."""
+    quiet = estimate_spectrum_signal_to_noise(WAVELENGTHS, _star_spectrum(60.0, seed=7), 45.0)
+    noisy = estimate_spectrum_signal_to_noise(WAVELENGTHS, _star_spectrum(30.0, seed=7), 45.0)
+    with_dips = _star_spectrum(60.0, seed=7)
+    for centre in (4102.0, 4340.0, 4861.0, 6563.0):
+        with_dips = with_dips - 3e-4 * np.exp(-0.5 * ((WAVELENGTHS - centre) / 20.0) ** 2)
+    dipped = estimate_spectrum_signal_to_noise(WAVELENGTHS, with_dips, 45.0)
+
+    assert quiet is not None
+    assert noisy is not None
+    assert dipped is not None
+    assert quiet / noisy == pytest.approx(2.0, rel=0.25)
+    assert dipped == pytest.approx(quiet, rel=0.35)
+
+
+def test_a_perfectly_straight_continuum_has_no_scatter() -> None:
+    """A noiseless, exactly linear spectrum still scores infinite."""
+    straight = 1e-3 + 1e-6 * (WAVELENGTHS - 3800.0)
+
+    assert estimate_spectrum_signal_to_noise(WAVELENGTHS, straight, 45.0) == float("inf")
+
+
 def test_too_few_resolution_elements_are_not_judged() -> None:
     """A tiny spectrum gets no score rather than a wrong one."""
     assert estimate_spectrum_signal_to_noise(WAVELENGTHS[:20], _star_spectrum(6.0)[:20], 45.0) is None

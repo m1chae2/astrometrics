@@ -82,6 +82,16 @@ VERDICT_NOT_COVERED = "not_covered"
 # window is used, and the control test searches the same size of window.
 CENTER_SEARCH_TOLERANCE_ANGSTROM = 30.0
 
+# When two features share one dip (see `_mark_features_sharing_a_dip`), the
+# reference type's expected depths decide which keeps it if they differ by more
+# than this; otherwise the nearer rest wavelength does. Set to
+# MINIMUM_REPORTED_DEPTH, the smallest depth the detector reports at all: a
+# smaller difference is not a difference the detector reports anyway. On the
+# bundled templates, H-gamma against the G band is 0.13 to 0.14 against 0.0 for
+# A0V and A2V, and 0.0 against 0.08 for K0III and K3III (measured
+# 2026-09-25); other pairs are not tested.
+EXPECTED_DEPTH_TIE_BREAK_MARGIN = 0.01
+
 # Degree of the polynomial fitted as the continuum. 2 (a gentle curve)
 # rather than 1 (a straight line): the instrument's own response bends the
 # continuum, and on the Vega, Alcor and Alnath master stacks a straight
@@ -89,11 +99,25 @@ CENTER_SEARCH_TOLERANCE_ANGSTROM = 30.0
 # marginal.
 CONTINUUM_POLYNOMIAL_DEGREE = 2
 
-# The continuum is a curve fitted to two bands on either side of
-# the core. Each band starts one half-window from the center and ends
-# this many half-windows out, so it is wide enough to fit a line but
-# narrow enough that a quadratic can follow the continuum.
-SHOULDER_OUTER_HALF_WINDOWS = 4.0
+# The continuum is a curve fitted to two bands on either side of the core.
+# Each band starts this many resolution elements from the center, or one
+# half-window if that is farther. The instrument blurs a line to about one
+# resolution element (45-50 A), and a blurred line's wings die away only
+# after about 1.5 of them (a Gaussian is down to 0.2% of its depth at 1.5
+# FWHM). Bands that start nearer, as they used to (one half-window, 25 A for
+# H-beta), fit the wings as if they were continuum: the dip reads too
+# shallow and the band scatter, which sets the uncertainty, includes the
+# wings. On the Vega master stack (A0V) H-beta read 0.077 +/- 0.031 that
+# way, and 0.134 +/- 0.008 with the bands starting at 75 A (the bundled A0V
+# template gives 0.129 at 49 A resolution; a second Vega spectrum, 0.087 +/-
+# 0.017 before, gave 0.134 +/- 0.008 too). Measured on those two spectra
+# only, 2026-09-25.
+SHOULDER_INNER_RESOLUTION_ELEMENTS = 1.5
+
+# Each band is this many half-windows wide. It was 3 (from one half-window
+# out to four), wide enough to fit a curve and narrow enough that a
+# quadratic can follow the continuum; the width is unchanged.
+SHOULDER_BAND_HALF_WINDOWS = 3.0
 
 # Fewest samples allowed in a continuum band (both bands together must
 # also give the continuum fit at least this many points) and in a core; below
@@ -126,11 +150,15 @@ POSSIBLE_P_VALUE = 0.05
 # features that are visible by eye (on TYC 3105-899-1, Mg b has p = 0.07
 # and Ca H & K p = 0.18). Because the p-values are calibrated, about a
 # quarter of the features in ANY pure-noise spectrum fall below it, so the
-# depth floor is what keeps quiet spectra clean. The depth floor, 5%, is a
-# little below the median depth (5.7%) the bundled reference spectra show
-# for the features that show a dip at all (>= 1%, 189 of the 272
-# type-and-feature pairs), after blurring to the fallback resolution of
-# 45 A (recomputed 2026-09-19; at the old 30 A it was 7.6%, 210 pairs). A
+# depth floor is what keeps quiet spectra clean. The depth floor, 6.5%, is a
+# little below (0.88 of, the same proportion the old 5% floor had to its
+# 5.7%) the median depth (7.3%) the bundled reference spectra show for the
+# features that show a dip at all (>= 1%, 575 of the 720 type-and-feature
+# pairs, 90 types), after blurring to the fallback resolution of 45 A
+# (recomputed 2026-09-25 with the continuum bands starting 1.5 resolution
+# elements out, see SHOULDER_INNER_RESOLUTION_ELEMENTS; with the old bands the
+# same 720 pairs give a median of 4.9%, and the earlier 5.7% was for 272
+# pairs on 2026-09-19; at the old 30 A blur it was 7.6%). A
 # spectrum's own measured resolution moves this a little, but the floor
 # only needs to sit near the typical depth. A shallower dip is below what
 # a real star of most types shows.
@@ -143,7 +171,7 @@ POSSIBLE_P_VALUE = 0.05
 # of the stars have at least one. (Measured before the resolution changed
 # from 30 A to 45 A; not re-run since.)
 INCONCLUSIVE_P_VALUE = 0.25
-INCONCLUSIVE_MINIMUM_DEPTH = 0.05
+INCONCLUSIVE_MINIMUM_DEPTH = 0.065
 
 # A feature measured with a depth uncertainty above this can be called no
 # better than "inconclusive", however small its p-value. The uncertainty is
@@ -221,6 +249,26 @@ class _DipMeasurement:
     significance: float
 
 
+def _shoulder_edges(half_window: float, resolution_element_angstrom: float) -> tuple[float, float]:
+    """Give how far from a feature's center its continuum bands run.
+
+    Parameters
+    ----------
+    half_window : `float`
+        The core's half-width, in Angstroms.
+    resolution_element_angstrom : `float`
+        The width of one independent measurement, in Angstroms.
+
+    Returns
+    -------
+    inner, outer : `tuple` [`float`, `float`]
+        The distances, in Angstroms, where each continuum band starts and
+        ends (see `SHOULDER_INNER_RESOLUTION_ELEMENTS`).
+    """
+    inner = max(half_window, SHOULDER_INNER_RESOLUTION_ELEMENTS * resolution_element_angstrom)
+    return inner, inner + SHOULDER_BAND_HALF_WINDOWS * half_window
+
+
 def _measure_dip(
     wavelength_angstrom: np.ndarray,
     intensity: np.ndarray,
@@ -256,10 +304,10 @@ def _measure_dip(
         The measurement, or `None` when there are too few samples in the
         bands or the core, or the continuum is not positive.
     """
-    outer = SHOULDER_OUTER_HALF_WINDOWS * half_window
+    inner, outer = _shoulder_edges(half_window, resolution_element_angstrom)
     distance = np.abs(wavelength_angstrom - center)
     in_core = distance <= half_window
-    in_shoulder = (distance > half_window) & (distance <= outer)
+    in_shoulder = (distance > inner) & (distance <= outer)
 
     if in_core.sum() < _MINIMUM_CORE_POINTS or in_shoulder.sum() < _MINIMUM_SHOULDER_POINTS:
         return None
@@ -339,13 +387,17 @@ def _candidate_dips(
 
 
 def _control_centers(
-    wavelength_angstrom: np.ndarray, half_window: float, tolerance_angstrom: float
+    wavelength_angstrom: np.ndarray,
+    half_window: float,
+    tolerance_angstrom: float,
+    resolution_element_angstrom: float = FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
 ) -> np.ndarray:
     """Choose wavelengths for the control measurements.
 
     Controls are spread across the spectrum, keep clear of the edges (so a
-    full search window and continuum band fit), and keep clear of every
-    named feature so a real feature is never counted as noise.
+    full search window and continuum band fit), and keep the search window
+    and core clear of every named feature so a real feature is never counted
+    as noise.
 
     Parameters
     ----------
@@ -355,19 +407,31 @@ def _control_centers(
         The core's half-width, in Angstroms.
     tolerance_angstrom : `float`
         The search tolerance, in Angstroms.
+    resolution_element_angstrom : `float`, optional
+        The width of one independent measurement, in Angstroms, which sets
+        how far the continuum bands reach (see `_shoulder_edges`).
 
     Returns
     -------
     centers : `np.ndarray`
         Control center wavelengths, in Angstroms.
     """
-    reach = tolerance_angstrom + SHOULDER_OUTER_HALF_WINDOWS * half_window
+    reach = tolerance_angstrom + _shoulder_edges(half_window, resolution_element_angstrom)[1]
     first = wavelength_angstrom[0] + reach
     last = wavelength_angstrom[-1] - reach
     if last <= first:
         return np.array([])
     centers = np.arange(first, last + 1e-9, _CONTROL_SPACING_TOLERANCES * tolerance_angstrom)
-    keep_clear = tolerance_angstrom + SHOULDER_OUTER_HALF_WINDOWS * 35.0  # the widest named core is 35 A
+    # A control's search window and core must not reach a named feature's core.
+    # Its continuum bands may reach a feature's wings: that makes the noise
+    # distribution a little heavier where real lines are, which only makes
+    # the p-values more cautious, and it leaves controls in the blue, where
+    # the features are crowded. With the bands kept fully clear (as they were
+    # until 2026-09-25) no control lay below 4558 A, and the blue features
+    # (Ca H & K, H-delta) came out at 5-6% at p <= 0.01 in pure noise where
+    # about 1% was expected.
+    widest_core_half_window = 35.0  # the widest named core, Ca H & K
+    keep_clear = tolerance_angstrom + half_window + widest_core_half_window
     feature_centers = np.array([float(feature["wavelength_angstrom"]) for feature in NAMED_FEATURES])
     far_from_features = np.all(np.abs(centers[:, None] - feature_centers[None, :]) > keep_clear, axis=1)
     return centers[far_from_features]
@@ -452,6 +516,95 @@ def expected_feature_depth(
     return None
 
 
+def _mark_features_sharing_a_dip(
+    entries: list[dict[str, object]], resolution_element_angstrom: float
+) -> None:
+    """Stop one dip being reported as two different lines.
+
+    Each feature looks for its best dip within
+    `CENTER_SEARCH_TOLERANCE_ANGSTROM` of its rest wavelength, independently
+    of the others. Two features whose rest wavelengths are closer together
+    than the instrument can separate (the G band at 4300 A and H-gamma at
+    4340 A, against a resolution element of 45 to 50 A) therefore find the
+    same dip and both report it. On real Vega, Albireo B and Deneb spectra
+    the G band came out with the same depth and p-value as H-gamma, and a G
+    band "detected" in an A0V star is not real.
+
+    When two reported features measure their dips less than one resolution
+    element apart, only one keeps the dip. If a reference type was given and
+    the two features' expected depths for it differ by more than
+    `EXPECTED_DEPTH_TIE_BREAK_MARGIN`, the feature the type expects to be
+    deeper keeps it (an A star shows H-gamma and not the G band; a K star the
+    reverse). Otherwise the dip goes to the feature whose rest wavelength is
+    nearer to it. The other is set to `VERDICT_INCONCLUSIVE` (the spectrum
+    cannot say whether it adds anything of its own) and its ``"blended_with"``
+    names the feature that keeps the dip. A feature that was not reported to
+    begin with is left alone. Changes `entries` in place.
+
+    Parameters
+    ----------
+    entries : `list` [`dict`]
+        The per-feature entries built by `detect_named_features`, before they
+        are sorted.
+    resolution_element_angstrom : `float`
+        Dips closer together than this are treated as one.
+    """
+    measured = [entry for entry in entries if "measured_wavelength_angstrom" in entry]
+
+    def dip_center(entry: dict[str, object]) -> float:
+        """Read where an entry's dip was measured.
+
+        Returns
+        -------
+        center : `float`
+            The measured wavelength, in Angstroms.
+        """
+        return float(entry["measured_wavelength_angstrom"])
+
+    def nearness_rank(entry: dict[str, object]) -> tuple[float, float]:
+        """Rank how near an entry's dip is to its rest wavelength.
+
+        Returns
+        -------
+        rank : `tuple` [`float`, `float`]
+            The distance from the rest wavelength to the dip, then the rest
+            wavelength itself (so an exact tie has a fixed winner).
+        """
+        rest = float(entry["wavelength_angstrom"])
+        return abs(dip_center(entry) - rest), rest
+
+    def keeps_dip_over(candidate: dict[str, object], rival: dict[str, object]) -> bool:
+        """Decide whether `candidate` has a stronger claim to the shared dip.
+
+        Returns
+        -------
+        keeps : `bool`
+            `True` when `candidate` should keep the dip rather than `rival`.
+        """
+        candidate_expected = candidate.get("expected_depth")
+        rival_expected = rival.get("expected_depth")
+        if (
+            candidate_expected is not None
+            and rival_expected is not None
+            and abs(float(candidate_expected) - float(rival_expected)) > EXPECTED_DEPTH_TIE_BREAK_MARGIN
+        ):
+            return float(candidate_expected) > float(rival_expected)
+        return nearness_rank(candidate) < nearness_rank(rival)
+
+    for entry in measured:
+        if entry["verdict"] not in (VERDICT_DETECTED, VERDICT_POSSIBLE):
+            continue
+        keeper = None
+        for other in measured:
+            if other is entry or abs(dip_center(other) - dip_center(entry)) >= resolution_element_angstrom:
+                continue
+            if keeps_dip_over(other, entry) and (keeper is None or keeps_dip_over(other, keeper)):
+                keeper = other
+        if keeper is not None:
+            entry["blended_with"] = keeper["feature"]
+            entry["verdict"] = VERDICT_INCONCLUSIVE
+
+
 def detect_named_features(
     wavelength_angstrom: np.ndarray,
     intensity: np.ndarray,
@@ -496,7 +649,9 @@ def detect_named_features(
         a dip at least this significant), ``"p_value_method"``
         (``"control_calibrated"``, or ``"gaussian"`` when too few control
         positions were available), ``"expected_depth"`` and
-        ``"probability_present"`` (both `None` without a reference type).
+        ``"probability_present"`` (both `None` without a reference type)
+        and ``"blended_with"`` (the name of a nearby feature that keeps the
+        same dip, or `None`; see `_mark_features_sharing_a_dip`).
         The probability assumes the star really is the reference type and
         the 50% and prior settings above; it is not a calibrated
         probability.
@@ -544,7 +699,7 @@ def detect_named_features(
         control_best_depths = []
         control_significances = []
         for control_center in _control_centers(
-            wavelength_angstrom, half_window, CENTER_SEARCH_TOLERANCE_ANGSTROM
+            wavelength_angstrom, half_window, CENTER_SEARCH_TOLERANCE_ANGSTROM, resolution_element_angstrom
         ):
             control_candidates = _candidate_dips(
                 wavelength_angstrom,
@@ -632,8 +787,11 @@ def detect_named_features(
             "expected_depth": expected_depth,
             "probability_present": probability_present,
             "limited_by_noise": limited_by_noise,
+            "blended_with": None,
         })
         entries.append(entry)
+
+    _mark_features_sharing_a_dip(entries, resolution_element_angstrom)
 
     verdict_rank = {
         VERDICT_DETECTED: 0,

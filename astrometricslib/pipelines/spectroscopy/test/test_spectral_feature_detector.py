@@ -11,8 +11,10 @@ validate_spectral_and_period_analysis.py; these tests only pin the behavior.
 """
 
 import numpy as np
+import pytest
 
 from astrometricslib.pipelines.spectroscopy.spectral_feature_detector import (
+    CENTER_SEARCH_TOLERANCE_ANGSTROM,
     INCONCLUSIVE_MINIMUM_DEPTH,
     INCONCLUSIVE_P_VALUE,
     NAMED_FEATURES,
@@ -22,6 +24,8 @@ from astrometricslib.pipelines.spectroscopy.spectral_feature_detector import (
     VERDICT_NOT_COVERED,
     VERDICT_NOT_DETECTED,
     VERDICT_POSSIBLE,
+    _control_centers,
+    _shoulder_edges,
     detect_named_features,
     expected_feature_depth,
 )
@@ -146,8 +150,10 @@ def test_a_reference_type_adds_expected_depth_and_a_probability():  # ruff: igno
 def test_a_dip_the_noise_could_hide_is_inconclusive():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verify a dip too big to ignore but too weak to call is inconclusive.
 
-    A 10% dip in 6% noise (seed 5) gives a p-value between the "possible"
-    and "inconclusive" cutoffs: too weak to call, too big to ignore.
+    A 10% dip in 6% noise (seed 12) gives a p-value between the "possible"
+    and "inconclusive" cutoffs: too weak to call, too big to ignore. (The
+    seed only fixes one draw: seed 5 was in that range with the old,
+    nearer continuum bands, and many other seeds are in it now.)
     """
     h_alpha = next(f for f in NAMED_FEATURES if "H-alpha" in f["name"])
     wavelength, intensity = _spectrum_with_dip(
@@ -155,7 +161,7 @@ def test_a_dip_the_noise_could_hide_is_inconclusive():  # ruff: ignore[missing-r
         depth=0.10,
         half_width=h_alpha["window_angstrom"],
         noise_fraction=0.06,
-        seed=5,
+        seed=12,
     )
 
     entry = _entry(detect_named_features(wavelength, intensity), "H-alpha")
@@ -184,7 +190,7 @@ def test_inconclusive_features_sort_between_possible_and_not_detected():  # ruff
         depth=0.10,
         half_width=h_alpha["window_angstrom"],
         noise_fraction=0.06,
-        seed=5,
+        seed=12,
     )
     order = [
         VERDICT_DETECTED,
@@ -208,3 +214,158 @@ def test_no_feature_core_is_narrower_than_twenty_angstroms():  # ruff: ignore[mi
     the comment on NAMED_FEATURES.
     """
     assert all(float(feature["window_angstrom"]) >= 20.0 for feature in NAMED_FEATURES)
+
+
+def test_one_dip_is_not_credited_to_two_lines_too_close_to_tell_apart():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """A lone H-gamma dip must not also be reported as the G band.
+
+    The G band (4300 A) is 40 A from H-gamma (4340 A), less than the
+    instrument's resolution element, and each feature searches 30 A either
+    side of its rest wavelength, so both find the same dip. Seen on real
+    Vega, Albireo B and Deneb spectra, where the G band came out with the
+    same depth and p-value as H-gamma.
+    """
+    wavelength, intensity = _spectrum_with_dip(center=4335.0, depth=0.3, half_width=20.0)
+
+    features = detect_named_features(wavelength, intensity)
+
+    h_gamma = _entry(features, "H-gamma")
+    g_band = _entry(features, "G band")
+    assert h_gamma["verdict"] == VERDICT_DETECTED
+    assert h_gamma["blended_with"] is None
+    assert g_band["verdict"] == VERDICT_INCONCLUSIVE
+    assert g_band["blended_with"] == h_gamma["feature"]
+
+
+def test_a_real_g_band_away_from_h_gamma_is_still_detected():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """A dip at the G band that H-gamma cannot also claim keeps its verdict."""
+    wavelength, intensity = _spectrum_with_dip(center=4285.0, depth=0.3, half_width=20.0)
+
+    features = detect_named_features(wavelength, intensity, resolution_element_angstrom=20.0)
+
+    g_band = _entry(features, "G band")
+    assert g_band["verdict"] == VERDICT_DETECTED
+    assert g_band["blended_with"] is None
+
+
+def test_a_feature_that_was_not_detected_is_never_marked_as_blended():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Only a feature that would have been reported can be blended away."""
+    wavelength, intensity = _spectrum_with_dip(center=6563.0, depth=0.3, half_width=25.0)
+
+    features = detect_named_features(wavelength, intensity)
+
+    assert all(entry.get("blended_with") is None for entry in features)
+
+
+def test_an_a_type_star_gives_a_shared_dip_to_h_gamma_despite_distance():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """The reference type's expected depths break the tie, not the distance.
+
+    A dip at 4314 A is 14 A from the G band and 26 A from H-gamma, but an
+    A0V star shows H-gamma (expected depth 0.13) and not the G band (0.0).
+    """
+    wavelength, intensity = _spectrum_with_dip(center=4314.0, depth=0.3, half_width=20.0)
+
+    features = detect_named_features(wavelength, intensity, reference_spectral_type="A0V")
+
+    h_gamma = _entry(features, "H-gamma")
+    g_band = _entry(features, "G band")
+    assert h_gamma["blended_with"] is None
+    assert h_gamma["verdict"] in (VERDICT_DETECTED, VERDICT_POSSIBLE)
+    assert g_band["verdict"] == VERDICT_INCONCLUSIVE
+    assert g_band["blended_with"] == h_gamma["feature"]
+
+
+def test_a_k_type_star_gives_a_shared_dip_to_the_g_band_despite_distance():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """A K giant expects the G band, not H-gamma, so the G band keeps it.
+
+    A dip at 4322 A is 18 A from H-gamma and 22 A from the G band.
+    """
+    wavelength, intensity = _spectrum_with_dip(center=4322.0, depth=0.3, half_width=20.0)
+
+    features = detect_named_features(wavelength, intensity, reference_spectral_type="K0III")
+
+    h_gamma = _entry(features, "H-gamma")
+    g_band = _entry(features, "G band")
+    assert g_band["blended_with"] is None
+    assert g_band["verdict"] in (VERDICT_DETECTED, VERDICT_POSSIBLE)
+    assert h_gamma["verdict"] == VERDICT_INCONCLUSIVE
+    assert h_gamma["blended_with"] == g_band["feature"]
+
+
+def _blurred_line_spectrum(
+    depth: float, fwhm_angstrom: float, noise_fraction: float = 0.002, seed: int = 3
+) -> tuple[np.ndarray, np.ndarray]:
+    """Build a flat continuum with a blurred Gaussian H-beta dip.
+
+    Returns
+    -------
+    wavelength_angstrom, intensity : `tuple` [`np.ndarray`, `np.ndarray`]
+        A spectrum 3800-8000 A at 10.9 A spacing (the real sampling).
+    """
+    wavelength = np.arange(3800.0, 8000.0, 10.9)
+    sigma = fwhm_angstrom / 2.355
+    intensity = 1000.0 * (1.0 - depth * np.exp(-0.5 * ((wavelength - 4861.0) / sigma) ** 2))
+    rng = np.random.default_rng(seed)
+    return wavelength, intensity * (1.0 + rng.normal(0.0, noise_fraction, size=intensity.size))
+
+
+def test_the_continuum_bands_start_beyond_the_wings_of_a_blurred_line():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Bands start 1.5 resolution elements out, or a half-window if more."""
+    assert _shoulder_edges(25.0, 49.0) == (73.5, 148.5)
+    assert _shoulder_edges(35.0, 45.0) == (67.5, 172.5)
+    assert _shoulder_edges(25.0, 10.0) == (25.0, 100.0)
+
+
+def test_a_line_blurred_to_the_instrument_resolution_reads_its_true_depth():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """A 49 A wide dip of depth 0.20 reads as its core average.
+
+    With continuum bands starting at the core's edge (25 A) the wings were
+    fitted as continuum and this read about 0.09 instead.
+    """
+    wavelength, intensity = _blurred_line_spectrum(depth=0.20, fwhm_angstrom=49.0)
+    sigma = 49.0 / 2.355
+    core = np.abs(wavelength - 4861.0) <= 25.0
+    true_core_depth = float(np.mean(0.20 * np.exp(-0.5 * ((wavelength[core] - 4861.0) / sigma) ** 2)))
+
+    entry = _entry(detect_named_features(wavelength, intensity, resolution_element_angstrom=49.0), "H-beta")
+
+    assert entry["depth"] == pytest.approx(true_core_depth, rel=0.08)
+
+
+def test_the_wings_of_a_line_do_not_inflate_its_uncertainty():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """A line's depth uncertainty stays that of the noise.
+
+    The uncertainty comes from how the continuum band samples scatter about
+    the fitted curve. With the bands on the wings that scatter included the
+    dip itself, and the same line read 0.031 against 0.017 in two spectra of
+    Vega.
+    """
+    wavelength, without_line = _blurred_line_spectrum(depth=0.0, fwhm_angstrom=49.0)
+    _, with_line = _blurred_line_spectrum(depth=0.20, fwhm_angstrom=49.0)
+
+    quiet = _entry(
+        detect_named_features(wavelength, without_line, resolution_element_angstrom=49.0), "H-beta"
+    )
+    lined = _entry(detect_named_features(wavelength, with_line, resolution_element_angstrom=49.0), "H-beta")
+
+    assert lined["depth_uncertainty"] < 1.5 * quiet["depth_uncertainty"]
+    assert lined["verdict"] == VERDICT_DETECTED
+
+
+def test_controls_cover_the_blue_but_never_reach_a_feature_core():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Controls lie in the blue too, and clear of every named feature's core.
+
+    With continuum bands kept fully clear of features no control lay below
+    4558 A, so the crowded blue features (Ca H & K, H-delta) were tested
+    against controls from a different part of the spectrum and came out at
+    5-6% "detected" in pure noise.
+    """
+    wavelength = np.arange(3800.0, 8000.0, 10.9)
+
+    controls = _control_centers(wavelength, 25.0, CENTER_SEARCH_TOLERANCE_ANGSTROM, 45.0)
+
+    assert controls.min() < 4400.0
+    for feature in NAMED_FEATURES:
+        rest = float(feature["wavelength_angstrom"])
+        window = float(feature["window_angstrom"])
+        assert np.all(np.abs(controls - rest) > CENTER_SEARCH_TOLERANCE_ANGSTROM + 25.0 + window)

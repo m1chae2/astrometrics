@@ -38,6 +38,12 @@ export interface SpectralFeatureResult {
   expected_depth?: number | null;
   /** A model-based chance the line is present, or null without a reference type. */
   probability_present?: number | null;
+  /**
+   * The name of a nearby feature that keeps the same dip, or null. The two lines are closer together
+   * than the instrument can separate, so the dip is credited to the one nearer its rest wavelength and
+   * this feature's verdict is capped at "inconclusive".
+   */
+  blended_with?: string | null;
 }
 
 /**

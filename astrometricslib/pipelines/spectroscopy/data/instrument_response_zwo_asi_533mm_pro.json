@@ -1,14 +1,14 @@
 {
   "camera_name": "ZWO ASI 533MM Pro",
   "coefficients": [
-    0.28248553421449635,
-    0.52482130045285,
-    -0.5607808870127381,
-    -0.5665893719337067,
-    1.5445849059296686
+    0.5602507438581683,
+    0.3404877034609968,
+    -0.7919529091993089,
+    -0.3507439892419524,
+    10.890395770115468
   ],
   "minimum_wavelength_angstrom": 4200.0,
   "maximum_wavelength_angstrom": 8000.0,
   "reference_type": "A0V",
-  "source": "Vega master spectral stack Vega_SPEC_Stacked_ZWO_ASI_533MM_Pro_405mm.fits, star at pixel (1493, 1502), derived 2026-09-23"
+  "source": "Vega spectroscopy set A: 40 frames at 0.25 s (unclipped), dark-subtracted, zero order tracked from a plate solve of the first frame; derived 2026-09-25"
 }

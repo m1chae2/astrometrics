@@ -113,7 +113,9 @@ def _spectrum_with_a_dip_in_noise() -> np.ndarray:
         The spectrum. The dip is real but the depth is only known to about
         20%, so the detector's raw p-value is small.
     """
-    rng = np.random.default_rng(4)
+    # Seed 2 draws a depth uncertainty of 0.118, above the 0.11 cap. (Seed 4
+    # did with the old, nearer continuum bands, and now gives 0.106.)
+    rng = np.random.default_rng(2)
     spectrum = 1.0 + rng.normal(0.0, 0.15, WAVELENGTHS.size)
     return spectrum * (1.0 - 0.7 * np.exp(-0.5 * ((WAVELENGTHS - 5175.0) / 25.0) ** 2))
 

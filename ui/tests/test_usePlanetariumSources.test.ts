@@ -153,4 +153,45 @@ describe('usePlanetariumSources', () => {
     expect(result.current.error).toBe('backend down');
     expect(result.current.loading).toBe(false);
   });
+
+  it('passes extended timeout and silent options to callBackend to tolerate backend load', async () => {
+    mockedCallBackend.mockResolvedValue([star('load_test')] as never);
+    renderHook(() => usePlanetariumSources(10, 10, 5, 12, true));
+
+    await act(async () => {
+      vi.advanceTimersByTime(LOCAL_CATALOG_QUERY_DEBOUNCE_MS);
+    });
+    await flushPromises();
+
+    expect(mockedCallBackend).toHaveBeenCalledTimes(1);
+    expect(mockedCallBackend.mock.calls[0][2]).toMatchObject({
+      timeoutMs: 30000,
+      silent: true,
+    });
+  });
+
+  it('preserves existing sources when a subsequent request fails with a timeout', async () => {
+    mockedCallBackend.mockResolvedValueOnce([star('initial')] as never);
+    mockedCallBackend.mockRejectedValueOnce(new Error('Request timed out for planetarium:get_sources'));
+    const { result, rerender } = renderHook(({ radius }) => usePlanetariumSources(10, 10, radius, 12, true), {
+      initialProps: { radius: 5 },
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(LOCAL_CATALOG_QUERY_DEBOUNCE_MS);
+    });
+    await flushPromises();
+
+    expect(result.current.sources.map(s => s.id)).toEqual(['initial']);
+
+    rerender({ radius: 8 });
+    await act(async () => {
+      vi.advanceTimersByTime(LOCAL_CATALOG_QUERY_DEBOUNCE_MS);
+    });
+    await flushPromises();
+
+    expect(result.current.sources.map(s => s.id)).toEqual(['initial']);
+    expect(result.current.error).toBe('Request timed out for planetarium:get_sources');
+    expect(result.current.loading).toBe(false);
+  });
 });

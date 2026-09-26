@@ -314,6 +314,10 @@
   color: var(--white, #ffffff);
 }
 
+.header__telemetry-value--exposing {
+  color: #38bdf8;
+}
+
 .header__telemetry-value--coord {
   display: inline-block;
 }

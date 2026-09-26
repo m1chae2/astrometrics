@@ -86,6 +86,9 @@ export interface TelescopeStatus {
   focuserPosition?: number;
   filter?: string;
   guidingHistory?: any;
+  cameraTemperature?: string;
+  cameraStatus?: string;
+  targetName?: string | null;
   /** Flexible index to accommodate additional data from the backend. */
   [key: string]: any;
 }
@@ -339,6 +342,10 @@ export interface TelescopePulse {
   guidingHistory?: Record<string, any>[];
   alignmentAttempts?: any[];
   alignmentActive?: boolean;
+  polarAlignment?: PolarAlignmentStatus | null;
+  cameraTemperature?: string | null;
+  cameraStatus?: string | null;
+  targetName?: string | null;
 }
 
 /**
@@ -379,6 +386,84 @@ export interface AlignmentAttempt {
   status: string;
   deltaRaArcsec?: number | null;
   deltaDecArcsec?: number | null;
+  ra?: number | null;
+  dec?: number | null;
+  pointingErrorArcsec?: number | null;
+  timestamp?: number | null;
+  targetName?: string | null;
+}
+
+/**
+ * Status and measurement metrics from Polar Alignment Assistant (PAA).
+ */
+export interface PolarAlignmentStatus {
+  status?: string;
+  totalErrorArcsec?: number | null;
+  altErrorArcsec?: number | null;
+  azErrorArcsec?: number | null;
+  poleRa?: number | null;
+  poleDec?: number | null;
+  paaPoints?: Record<string, any>[];
+  timestamp?: number | null;
+}
+
+/**
+ * Summary of a past observing session's alignment and polar telemetry.
+ */
+export interface AlignmentSessionSummary {
+  sessionId: string;
+  sessionDate: string;
+  syncCount?: number;
+  targetCount?: number | null;
+  startTime?: number | null;
+  endTime?: number | null;
+  avgErrorArcsec?: number | null;
+  polarErrorArcsec?: number | null;
+  polarAltErrorArcsec?: number | null;
+  polarAzErrorArcsec?: number | null;
+}
+
+/**
+ * Decomposed geometric mount pointing model terms from plate solves.
+ */
+export interface MountPointingModel {
+  sampleCount: number;
+  rawRmsArcsec: number;
+  residualRmsArcsec: number;
+  improvementPercent?: number;
+  ihArcsec?: number;
+  idArcsec?: number;
+  meArcsec?: number;
+  maArcsec?: number;
+  chArcsec?: number;
+  tfArcsec?: number;
+  totalPolarErrorArcsec?: number;
+  confidence?: string;
+  message?: string;
+}
+
+/**
+ * A dominant harmonic frequency identified in guiding telemetry.
+ */
+export interface GuidingSpectrumPeak {
+  periodSeconds: number;
+  amplitudeArcsec: number;
+  power: number;
+  probableSource?: string;
+}
+
+/**
+ * Periodic error, worm harmonic spectrum, and backlash diagnostics.
+ */
+export interface GuidingSpectrumAnalysis {
+  sampleCount: number;
+  durationSeconds: number;
+  periodicErrorPeakToPeakArcsec?: number;
+  dominantPeriodSeconds?: number | null;
+  decBacklashEstimateMs?: number | null;
+  peaks?: GuidingSpectrumPeak[];
+  psdCurve?: Record<string, number>[];
+  message?: string;
 }
 
 /**

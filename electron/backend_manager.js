@@ -1,5 +1,6 @@
 import { spawn } from 'child_process';
 import crypto from 'crypto';
+import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import log from 'electron-log';
@@ -160,10 +161,63 @@ export class BackendManager {
     return false;
   }
 
+  /**
+   * Terminates the backend process.
+   *
+   * If the backend was spawned by this manager, terminates its process tree.
+   * In addition, cleans up any external backend or Vite processes recorded in
+   * `.run_pids/` so closing the desktop application leaves no orphaned child
+   * or background services lingering.
+   */
   stop() {
     if (this.backendProcess && !this.backendProcess.killed) {
       log.info('Terminating backend process tree...');
       this.platform.terminateProcessTree(this.backendProcess);
+    }
+
+    this._cleanupOrphanedRunPids();
+  }
+
+  /**
+   * Reads PID files created by developer run scripts and terminates any running
+   * backend or Vite dev processes before removing the PID files.
+   *
+   * @private
+   */
+  _cleanupOrphanedRunPids() {
+    try {
+      const appRoot = this.app?.getAppPath ? this.app.getAppPath() : process.cwd();
+      const pidDir = path.join(appRoot, '.run_pids');
+      if (!fs.existsSync(pidDir)) return;
+
+      const pidFiles = ['backend.pid', 'vite.pid'];
+      for (const file of pidFiles) {
+        const filePath = path.join(pidDir, file);
+        if (!fs.existsSync(filePath)) continue;
+
+        try {
+          const raw = fs.readFileSync(filePath, 'utf8').trim();
+          const targetPid = parseInt(raw, 10);
+          if (targetPid && !isNaN(targetPid)) {
+            log.info(`Cleaning up background process from ${file} (pid: ${targetPid})...`);
+            // Attempt to kill process group first, fallback to individual PID
+            try {
+              process.kill(-targetPid, 'SIGTERM');
+            } catch {
+              try {
+                process.kill(targetPid, 'SIGTERM');
+              } catch {
+                // Already dead
+              }
+            }
+          }
+          fs.unlinkSync(filePath);
+        } catch (err) {
+          log.debug(`Failed to cleanly process ${filePath}:`, err);
+        }
+      }
+    } catch (err) {
+      log.debug('Failed to inspect .run_pids directory:', err);
     }
   }
 

@@ -527,7 +527,32 @@ def list_remote_files_with_sizes(api, folder_name: str) -> list[tuple[str, int]]
     return driver.list_remote_files_with_sizes(folder_name)
 
 
-def sync_calibration_folder(api, remote_folder_name: str) -> bool:  # ruff: ignore[missing-type-function-argument]
+def _library_fits_paths(frames_path: str) -> set[str]:
+    """List every FITS file path in the calibration library folders.
+
+    Used to work out which files a calibration sync added, by taking a
+    snapshot before and after the download and sorting step.
+
+    Parameters
+    ----------
+    frames_path : `str`
+        The image library's root folder.
+
+    Returns
+    -------
+    paths : `set` [`str`]
+        Absolute path of every ``.fits``/``.fit`` file found.
+    """
+    paths: set[str] = set()
+    for library_folder in ("darks", "biases", "flats"):
+        for root, _, files in os.walk(os.path.join(frames_path, library_folder)):
+            for file_name in files:
+                if file_name.lower().endswith((".fits", ".fit")):
+                    paths.add(os.path.join(root, file_name))
+    return paths
+
+
+def sync_calibration_folder(api, remote_folder_name: str) -> dict[str, Any]:  # ruff: ignore[missing-type-function-argument]
     """Download a Bias/Dark/Flat remote folder into the calibration library.
 
     Fetches `remote_folder_name` into a temporary staging directory
@@ -551,9 +576,15 @@ def sync_calibration_folder(api, remote_folder_name: str) -> bool:  # ruff: igno
 
     Returns
     -------
-    success : `bool`
-        `True` if the download, classification, and reindex all
-        succeeded.
+    summary : `dict` [`str`, `Any`]
+        What the sync did, with keys ``success`` (`bool`, whether the
+        download, classification, and reindex all succeeded),
+        ``remote_count`` (files on the telescope), ``already_held_count``
+        (files skipped because the library already has them),
+        ``transferred_count`` (files requested from the telescope), and
+        ``added_by_folder`` (`dict` [`str`, `int`] mapping each library
+        folder, relative to the library root, to the number of new
+        frames sorted into it).
 
     Raises
     ------
@@ -581,6 +612,7 @@ def sync_calibration_folder(api, remote_folder_name: str) -> bool:  # ruff: igno
     # baseline has to be assembled from those directories explicitly.
     remote_files = list_remote_files_with_sizes(api, remote_folder_name)
     files_to_transfer = None
+    library_paths_before = _library_fits_paths(frames_path)
     if remote_files:
         already_held = local_fits_fingerprints([
             staging_dir,
@@ -606,14 +638,30 @@ def sync_calibration_folder(api, remote_folder_name: str) -> bool:  # ruff: igno
             remote_target_name=remote_folder_name,
             local_subfolder="lights",
         )
+    # No filtered list means everything was requested (or the remote
+    # listing was empty and rsync fetched the whole folder).
+    transferred_count = len(files_to_transfer) if files_to_transfer is not None else len(remote_files)
+    summary: dict[str, Any] = {
+        "success": bool(success),
+        "remote_count": len(remote_files),
+        "already_held_count": len(remote_files) - transferred_count,
+        "transferred_count": transferred_count,
+        "added_by_folder": {},
+    }
     if not success:
-        return False
+        return summary
 
     classify_and_sort_fits_files([staging_dir], "Calibration", config, _DEFAULT_TELESCOPE_NAME)
 
     astrometrics.processing.calibration.refresh(kind)
     astrometrics.processing.calibration.save()
-    return True
+
+    added_by_folder: dict[str, int] = {}
+    for added_path in _library_fits_paths(frames_path) - library_paths_before:
+        folder = os.path.relpath(os.path.dirname(added_path), frames_path)
+        added_by_folder[folder] = added_by_folder.get(folder, 0) + 1
+    summary["added_by_folder"] = dict(sorted(added_by_folder.items()))
+    return summary
 
 
 def sync_all_remote_folders(
@@ -773,7 +821,7 @@ def sync_all_remote_folders(
         for folder_name in calibration_folder_names:
             log(f"Syncing calibration folder '{folder_name}'...")
             try:
-                if sync_calibration_folder(api, folder_name):
+                if sync_calibration_folder(api, folder_name)["success"]:
                     succeeded.append(folder_name)
                     log(f"Calibration folder '{folder_name}' synced.")
                 else:

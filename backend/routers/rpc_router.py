@@ -71,6 +71,24 @@ def _start_alignment(target_ra: str, target_dec: str) -> bool:
     return container.alignment_service.start_alignment(ra_deg, dec_deg)
 
 
+def _get_session_alignment(session_id: str = "") -> dict:
+    """Fetch alignment attempts and polar alignment data for a session.
+
+    Parameters
+    ----------
+    session_id : `str`
+        Session identifier or date string.
+
+    Returns
+    -------
+    data : `dict`
+        Dictionary containing alignmentAttempts and polarAlignment.
+    """
+    if hasattr(container, "alignment_service") and container.alignment_service:
+        return container.alignment_service.get_session_data(session_id)
+    return {"alignmentAttempts": [], "polarAlignment": None}
+
+
 class RPCHandlerRegistry:
     """Registry for dynamic RPC action dispatching.
 
@@ -158,6 +176,15 @@ class RPCHandlerRegistry:
         # --- Alignment (Infrastructure level) ---
         self.register("telescope:alignment_start", _start_alignment)
         self.register("telescope:alignment_stop", ("alignment_service", "cancel_alignment"))
+        self.register("telescope:list_alignment_sessions", ("alignment_service", "list_sessions"))
+        self.register("telescope:get_session_alignment", _get_session_alignment)
+        self.register(
+            "telescope:get_cumulative_tracking_data",
+            ("alignment_service", "get_cumulative_tracking_data"),
+        )
+        self.register("telescope:sync_logs", ("sync_service", "sync_telescope_logs"))
+        self.register("telescope:get_pointing_model", ("alignment_service", "compute_pointing_model"))
+        self.register("telescope:get_guiding_spectrum", ("guiding_service", "analyze_guiding_spectrum"))
 
         # --- Ingestion (Infrastructure level) ---
         self.register("ingestion:start", ("ingestion_service", "start_ingestion_by_args"))

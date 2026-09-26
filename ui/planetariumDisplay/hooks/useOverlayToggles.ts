@@ -23,6 +23,7 @@ export const DEFAULT_OVERLAY_TOGGLES = {
   showCatalog: true,
   showConstellations: true,
   showTelescope: true,
+  showAlignment: true,
   showSpectraPlot: false,
   showPhotometryPlot: false,
 } as const;
@@ -55,6 +56,9 @@ export interface OverlayToggles {
   /** Show telescope pointing crosshair overlay. */
   showTelescope: boolean;
   setShowTelescope: (value: boolean) => void;
+  /** Show telescope alignment pointing vectors and polar alignment overlay. */
+  showAlignment: boolean;
+  setShowAlignment: (value: boolean) => void;
   /** Whether the full spectroscopy plot panel is visible. */
   showSpectraPlot: boolean;
   setShowSpectraPlot: (value: boolean) => void;
@@ -79,6 +83,7 @@ export const useOverlayToggles = (): OverlayToggles => {
   const [showCatalog, setShowCatalog] = useState<boolean>(DEFAULT_OVERLAY_TOGGLES.showCatalog);
   const [showConstellations, setShowConstellations] = useState<boolean>(DEFAULT_OVERLAY_TOGGLES.showConstellations);
   const [showTelescope, setShowTelescope] = useState<boolean>(DEFAULT_OVERLAY_TOGGLES.showTelescope);
+  const [showAlignment, setShowAlignment] = useState<boolean>(DEFAULT_OVERLAY_TOGGLES.showAlignment);
   const [showSpectraPlot, setShowSpectraPlot] = useState<boolean>(DEFAULT_OVERLAY_TOGGLES.showSpectraPlot);
   const [showPhotometryPlot, setShowPhotometryPlot] = useState<boolean>(DEFAULT_OVERLAY_TOGGLES.showPhotometryPlot);
 
@@ -91,6 +96,7 @@ export const useOverlayToggles = (): OverlayToggles => {
     showCatalog, setShowCatalog,
     showConstellations, setShowConstellations,
     showTelescope, setShowTelescope,
+    showAlignment, setShowAlignment,
     showSpectraPlot, setShowSpectraPlot,
     showPhotometryPlot, setShowPhotometryPlot,
   };

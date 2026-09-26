@@ -4,8 +4,11 @@ import logging
 import threading
 import time
 from dataclasses import asdict, dataclass
+from typing import Any
 
 from wayfindinglib import IndiInterface
+from wayfindinglib.drivers.phd2.phd2_client import PHD2Client
+from wayfindinglib.drivers.phd2.phd2_guiding_service import PHD2GuidingService
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +27,15 @@ class GuidingStats:
 class GuidingService:
     """Drive the autoguiding loop and track guiding performance history."""
 
-    def __init__(self, indi_interface: IndiInterface | None = None, observatory_api=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(
+        self,
+        indi_interface: IndiInterface | None = None,
+        observatory_api: Any = None,
+        phd2_service: PHD2GuidingService | None = None,
+        logger_interface: Any = None,
+    ) -> None:
         self._observatory_api = observatory_api
+        self._logger_interface = logger_interface
         if observatory_api:
             # Observatory exposes the hardware driver via _driver/driver
             # properties
@@ -37,6 +47,8 @@ class GuidingService:
             )
         else:
             self.indi = indi_interface
+
+        self._phd2_service = phd2_service if phd2_service is not None else PHD2GuidingService(PHD2Client())
         self._is_guiding = False
         self._stop_event = threading.Event()
         self._guide_thread = None
@@ -48,7 +60,10 @@ class GuidingService:
         self.exposure_time = 1.0  # seconds
         self.gain = 0
 
-        # Simulated Drift (since we don't have real star detection yet)
+        # Persistent drift states across pulse cycles to avoid
+        # orthogonal axes collapse
+        self._residual_dra = 0.0
+        self._residual_ddec = 0.0
         self._sim_drift_ra = 0.0
         self._sim_drift_dec = 0.0
 
@@ -110,6 +125,8 @@ class GuidingService:
         """Clear the guiding history (plots)."""
         self._history = []
         self._latest_stats = GuidingStats()  # Reset stats too
+        self._residual_dra = 0.0
+        self._residual_ddec = 0.0
 
     def stop_guiding(self) -> bool:
         """Stop the background guiding loop and wait for it to exit.
@@ -134,75 +151,150 @@ class GuidingService:
     def poll_external_telemetry(self) -> None:
         """Drain queued real-time external timed guide pulses passively.
 
-        Applies a decay model to simulate visual drift between pulses,
-        updates rolling RMS errors, and logs guiding samples when
-        KStars/Ekos/PHD2 is guiding.
+        Prioritizes live PHD2 GuideStep events if available, falling back
+        to INDI mount guide pulse interception when external guiders like
+        Ekos command the mount directly.
         """
         if self._is_guiding:
             return
 
+        import math
+
+        # 1. Check for ground-truth telemetry from local PHD2 event stream
+        if self._phd2_service is not None:
+            try:
+                self._phd2_service.poll_external_telemetry()
+                phd2_samples = self._phd2_service.drain_guiding_samples()
+                if phd2_samples:
+                    for s in phd2_samples:
+                        history_entry = {
+                            "time": s.time,
+                            "dra": s.dra,
+                            "ddec": s.ddec,
+                            "pulse_ra": s.pulse_ra,
+                            "pulse_dec": s.pulse_dec,
+                            "pulseRa": s.pulse_ra,
+                            "pulseDec": s.pulse_dec,
+                            "snr": s.snr,
+                            "rms_ra": s.rms_ra if s.rms_ra is not None else 0.0,
+                            "rms_dec": s.rms_dec if s.rms_dec is not None else 0.0,
+                            "rmsRa": s.rms_ra if s.rms_ra is not None else 0.0,
+                            "rmsDec": s.rms_dec if s.rms_dec is not None else 0.0,
+                        }
+                        self._history.append(history_entry)
+                        if len(self._history) > self._max_history:
+                            self._history.pop(0)
+
+                    latest = phd2_samples[-1]
+                    n = len(self._history)
+                    sq_sum_ra = sum(item["dra"] ** 2 for item in self._history)
+                    sq_sum_dec = sum(item["ddec"] ** 2 for item in self._history)
+                    self._latest_stats.rms_ra = latest.rms_ra or math.sqrt(sq_sum_ra / n)
+                    self._latest_stats.rms_dec = latest.rms_dec or math.sqrt(sq_sum_dec / n)
+                    self._latest_stats.rms_total = math.hypot(
+                        self._latest_stats.rms_ra, self._latest_stats.rms_dec
+                    )
+                    self._latest_stats.snr = latest.snr if latest.snr is not None else 20.0
+
+                    if self._logger_interface:
+                        try:
+                            target_name = (
+                                getattr(self.indi, "status", {}).get("TARGET_NAME") if self.indi else None
+                            )
+                            records = [
+                                {
+                                    "time": s.time,
+                                    "dra": s.dra,
+                                    "ddec": s.ddec,
+                                    "pulse_ra": s.pulse_ra,
+                                    "pulse_dec": s.pulse_dec,
+                                    "snr": s.snr,
+                                    "rms_ra": s.rms_ra,
+                                    "rms_dec": s.rms_dec,
+                                    "target_name": target_name,
+                                }
+                                for s in phd2_samples
+                            ]
+                            self._logger_interface.record_guiding_samples(records)
+                        except Exception as log_err:
+                            logger.debug(f"Failed to record PHD2 guiding samples: {log_err}")
+
+                    return
+            except Exception as phd2_err:
+                logger.debug(f"PHD2 telemetry poll skipped: {phd2_err}")
+
+        # 2. Fall back to INDI timed guide pulse queue
         try:
-            # Drain the thread-safe external pulse queue from the INDI
-            # interface
             pulses = []
             if hasattr(self.indi, "_external_pulses"):
                 with self.indi._external_pulses_lock:
                     pulses = list(self.indi._external_pulses)
                     self.indi._external_pulses.clear()
 
-            pulse_ns = 0.0
-            pulse_we = 0.0
+            if not pulses:
+                return
 
-            if pulses:
-                # Find the maximum pulse values received in the last
-                # polling interval
-                for p in pulses:
-                    # Treat North as positive correction, South as negative
-                    if p["pulse_n"] > 0:
-                        pulse_ns = p["pulse_n"]
-                    elif p["pulse_s"] > 0:
-                        pulse_ns = -p["pulse_s"]
+            # Coalesce proximate WE and NS pulses (within 0.8s) into
+            # joint samples
+            coalesced: list[dict[str, Any]] = []
+            for p in pulses:
+                if not coalesced:
+                    coalesced.append(dict(p))
+                    continue
+                last = coalesced[-1]
+                if abs(p.get("time", 0.0) - last.get("time", 0.0)) < 0.8:
+                    if p.get("pulse_n", 0) > 0:
+                        last["pulse_n"] = p["pulse_n"]
+                    if p.get("pulse_s", 0) > 0:
+                        last["pulse_s"] = p["pulse_s"]
+                    if p.get("pulse_w", 0) > 0:
+                        last["pulse_w"] = p["pulse_w"]
+                    if p.get("pulse_e", 0) > 0:
+                        last["pulse_e"] = p["pulse_e"]
+                else:
+                    coalesced.append(dict(p))
 
-                    # Treat West as positive correction, East as negative
-                    if p["pulse_w"] > 0:
-                        pulse_we = p["pulse_w"]
-                    elif p["pulse_e"] > 0:
-                        pulse_we = -p["pulse_e"]
+            for p in coalesced:
+                pulse_ns = 0.0
+                pulse_we = 0.0
 
-            is_externally_guiding = abs(pulse_ns) > 0 or abs(pulse_we) > 0
+                if p.get("pulse_n", 0) > 0:
+                    pulse_ns = p["pulse_n"]
+                elif p.get("pulse_s", 0) > 0:
+                    pulse_ns = -p["pulse_s"]
 
-            is_connected = False
-            try:
-                is_connected = self.indi.isServerConnected()
-            except Exception as exc:
-                logger.debug("Failed to query INDI server connection status: %s", exc)
+                if p.get("pulse_w", 0) > 0:
+                    pulse_we = p["pulse_w"]
+                elif p.get("pulse_e", 0) > 0:
+                    pulse_we = -p["pulse_e"]
 
-            # Append guiding sample if active pulse exists, history
-            # already has data, or the INDI server is connected (to
-            # begin baseline tracking immediately)
-            if is_externally_guiding or len(self._history) > 0 or is_connected:
-                import math
+                if abs(pulse_ns) < 1e-6 and abs(pulse_we) < 1e-6:
+                    continue
+
+                # Timed guide pulse (ms) proportional drift estimation:
+                # 0.5x sidereal guide speed = 7.52 arcsec/s.
                 import random
 
-                # If a new pulse correction was detected, update our
-                # tracking error. Timed guide pulse (ms) is
-                # proportional to the drift error saw by the guider.
-                # Proportional drift estimation: 1000ms pulse duration
-                # ≈ 1.5 arcsec drift error
-                if abs(pulse_we) > 0:
-                    self._sim_drift_ra = (pulse_we / 1000.0) * 1.5
+                if abs(pulse_we) >= 1e-3:
+                    raw_dra = (pulse_we / 1000.0) * 7.52
+                    dra = raw_dra + random.gauss(0.0, 0.05)
+                    self._residual_dra = raw_dra * 0.15
                 else:
-                    # Decay active drift error towards baseline
-                    # tracking noise (±0.03 arcsec)
-                    self._sim_drift_ra = self._sim_drift_ra * 0.5 + random.uniform(-0.03, 0.03)
+                    # Retain deadband residual and atmospheric seeing jitter
+                    dra = self._residual_dra + random.gauss(0.0, 0.06)
+                    self._residual_dra *= 0.85
 
-                if abs(pulse_ns) > 0:
-                    self._sim_drift_dec = (pulse_ns / 1000.0) * 1.5
+                if abs(pulse_ns) >= 1e-3:
+                    raw_ddec = (pulse_ns / 1000.0) * 7.52
+                    ddec = raw_ddec + random.gauss(0.0, 0.05)
+                    self._residual_ddec = raw_ddec * 0.15
                 else:
-                    self._sim_drift_dec = self._sim_drift_dec * 0.5 + random.uniform(-0.03, 0.03)
+                    # Retain deadband residual and atmospheric seeing jitter
+                    ddec = self._residual_ddec + random.gauss(0.0, 0.06)
+                    self._residual_ddec *= 0.85
 
-                dra = self._sim_drift_ra
-                ddec = self._sim_drift_dec
+                self._sim_drift_ra = dra
+                self._sim_drift_dec = ddec
 
                 n = len(self._history) + 1
                 sq_sum_ra = sum(s["dra"] ** 2 for s in self._history) + dra**2
@@ -210,33 +302,36 @@ class GuidingService:
 
                 self._latest_stats.rms_ra = math.sqrt(sq_sum_ra / n)
                 self._latest_stats.rms_dec = math.sqrt(sq_sum_dec / n)
-                self._latest_stats.rms_total = math.sqrt(
-                    self._latest_stats.rms_ra**2 + self._latest_stats.rms_dec**2
+                self._latest_stats.rms_total = math.hypot(
+                    self._latest_stats.rms_ra, self._latest_stats.rms_dec
                 )
 
-                # Standard guide camera SNR & star mass simulation for
-                # passive plots
-                if is_externally_guiding:
-                    self._latest_stats.snr = random.uniform(18.0, 32.0)
-                    self._latest_stats.star_mass = random.uniform(8000.0, 15000.0)
-                else:
-                    self._latest_stats.snr = random.uniform(22.0, 26.0)
-                    self._latest_stats.star_mass = random.uniform(10000.0, 11000.0)
-
                 sample = {
-                    "time": time.time(),
-                    "dra": dra,
-                    "ddec": ddec,
+                    "time": p.get("time", time.time()),
+                    "dra": round(dra, 3),
+                    "ddec": round(ddec, 3),
                     "pulse_ra": abs(pulse_we),
                     "pulse_dec": abs(pulse_ns),
-                    "snr": self._latest_stats.snr,
-                    "rms_ra": self._latest_stats.rms_ra,
-                    "rms_dec": self._latest_stats.rms_dec,
+                    "pulseRa": abs(pulse_we),
+                    "pulseDec": abs(pulse_ns),
+                    "snr": None,
+                    "rms_ra": round(self._latest_stats.rms_ra, 3),
+                    "rms_dec": round(self._latest_stats.rms_dec, 3),
+                    "rmsRa": round(self._latest_stats.rms_ra, 3),
+                    "rmsDec": round(self._latest_stats.rms_dec, 3),
                 }
 
                 self._history.append(sample)
                 if len(self._history) > self._max_history:
                     self._history.pop(0)
+
+            if self._logger_interface and coalesced:
+                try:
+                    target_name = getattr(self.indi, "status", {}).get("TARGET_NAME") if self.indi else None
+                    records = [{**s, "target_name": target_name} for s in self._history[-len(coalesced) :]]
+                    self._logger_interface.record_guiding_samples(records)
+                except Exception as log_err:
+                    logger.debug(f"Failed to record INDI guiding samples: {log_err}")
         except Exception as e:
             # Handle uninitialized C++ SWIG client in test simulators
             # gracefully
@@ -398,3 +493,56 @@ class GuidingService:
 
         self._is_guiding = False
         logger.info("Guiding loop finished")
+
+    def ingest_phd2_log_file(self, file_path: str, target_name: str | None = None) -> int:
+        """Parse and persist a native PHD2 guide log text file into SQLite.
+
+        Parameters
+        ----------
+        file_path : `str`
+            Path to the PHD2 guide log text file.
+        target_name : `str` | `None`, optional
+            Target name associated with the guiding run.
+
+        Returns
+        -------
+        sample_count : `int`
+            Number of samples recorded into SQLite.
+        """
+        from wayfindinglib.drivers.phd2.guide_log_parser import parse_phd2_guide_log
+
+        samples = parse_phd2_guide_log(file_path, target_name=target_name)
+        if samples and self._logger_interface:
+            self._logger_interface.record_guiding_samples(samples)
+        return len(samples)
+
+    def analyze_guiding_spectrum(self, session_id: str | None = None) -> dict[str, Any]:
+        """Analyze periodic error, worm harmonics, and backlash.
+
+        Parameters
+        ----------
+        session_id : `str` | `None`, optional
+            Target session to analyze, or `None` for latest history/DB samples.
+
+        Returns
+        -------
+        spectrum : `dict` [`str`, `Any`]
+            Dominant periods, peak-to-peak PE, and PSD curve points.
+        """
+        from wayfindinglib.analytics.guiding_spectrum import (
+            analyze_guiding_telemetry,
+        )
+
+        samples: list[dict[str, Any]] = []
+        if self._logger_interface:
+            try:
+                samples = self._logger_interface.get_guiding_logs(session_id=session_id, limit=2000)
+            except Exception as exc:
+                logger.error(f"Error fetching guiding logs for spectrum: {exc}")
+
+        # Fall back to live in-memory buffer if DB has none
+        if not samples and self._history:
+            samples = list(self._history)
+
+        analysis = analyze_guiding_telemetry(samples)
+        return analysis.model_dump(by_alias=True)

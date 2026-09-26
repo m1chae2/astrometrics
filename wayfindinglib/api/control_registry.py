@@ -968,7 +968,7 @@ class ObservatoryControl:
             target_id, selected_files, log_callback, local_path, incremental
         )
 
-    def sync_calibration_folder(self, remote_folder_name: str) -> bool:
+    def sync_calibration_folder(self, remote_folder_name: str) -> dict[str, Any]:
         """Download a Bias/Dark/Flat folder into the calibration library.
 
         Never registers `remote_folder_name` as an astronomical
@@ -978,9 +978,10 @@ class ObservatoryControl:
 
         Returns
         -------
-        success : `bool`
-            Whether the download, classification, and reindex all
-            succeeded.
+        summary : `dict` [`str`, `Any`]
+            ``success``, ``remote_count``, ``already_held_count``,
+            ``transferred_count`` and ``added_by_folder`` -- see
+            `remote_transfer_tasks.sync_calibration_folder`.
         """
         from wayfindinglib.tasks.control_tasks import remote_transfer_tasks
 

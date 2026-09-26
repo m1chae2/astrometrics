@@ -390,7 +390,7 @@ case "$CMD" in
     echo "Starting in foreground..."
     kill_port_pids
 
-    trap 'stop_what_this_run_started' EXIT INT TERM
+    trap 'stop_all' EXIT INT TERM
 
     if ! launch_backend_bg; then
         echo "Backend failed to launch."

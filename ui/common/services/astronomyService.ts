@@ -71,9 +71,12 @@ export async function fetchAstronomyData(
     signal?: AbortSignal
 ): Promise<any> {
     try {
-        const data = await callBackend("astronomy:get", { object_id: name.trim() });
+        const data = await callBackend("astronomy:get", { object_id: name.trim() }, { signal });
         return data || null;
     } catch (err: unknown) {
+        if ((err as any)?.name === 'AbortError') {
+            return null;
+        }
         const errorMessage = err instanceof Error ? err.message : String(err);
         reportError(err instanceof Error ? err : new Error(errorMessage), 'backend');
         throw err;

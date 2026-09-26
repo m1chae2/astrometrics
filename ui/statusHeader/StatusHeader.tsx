@@ -16,10 +16,58 @@ export const StatusHeader: React.FC = () => {
     selectedMode, chooseMode
   } = useStatusData();
 
-  const { config } = useAstrometrics();
+  const { config, telescope } = useAstrometrics();
 
   const { open: settingsOpen, closing: settingsClosing, handleOpen: handleOpenSettings, handleClose: handleCloseSettings } = useSettingsModal();
-  const { altitude, azimuth, temperature, humidity, ra, dec } = telemetry;
+  const { altitude, azimuth, temperature, humidity, ra, dec, cameraTemperature, cameraStatus } = telemetry;
+  const targetName = telescope?.targetName;
+
+  // Real-time camera exposure countdown clock
+  const [displayCameraStatus, setDisplayCameraStatus] = useState<string>(cameraStatus || 'Idle');
+  const targetEndTimeRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!cameraStatus) {
+      setDisplayCameraStatus('Idle');
+      targetEndTimeRef.current = null;
+      return;
+    }
+
+    const match = cameraStatus.match(/expos.*?([\d.]+)/i);
+    if (match) {
+      const remainingSec = parseFloat(match[1]);
+      const now = Date.now();
+      const newEndTime = now + remainingSec * 1000;
+
+      if (
+        targetEndTimeRef.current === null ||
+        Math.abs(targetEndTimeRef.current - newEndTime) > 1200
+      ) {
+        targetEndTimeRef.current = newEndTime;
+      }
+      setDisplayCameraStatus(`Exposing (${remainingSec.toFixed(1)}s)`);
+    } else {
+      targetEndTimeRef.current = null;
+      setDisplayCameraStatus(cameraStatus);
+    }
+  }, [cameraStatus]);
+
+  useEffect(() => {
+    if (!targetEndTimeRef.current) return;
+
+    const timer = setInterval(() => {
+      if (!targetEndTimeRef.current) return;
+      const remainingMs = targetEndTimeRef.current - Date.now();
+      if (remainingMs > 0) {
+        setDisplayCameraStatus(`Exposing (${(remainingMs / 1000).toFixed(1)}s)`);
+      } else {
+        setDisplayCameraStatus('Downloading');
+        targetEndTimeRef.current = null;
+      }
+    }, 100);
+
+    return () => clearInterval(timer);
+  }, [cameraStatus]);
 
   // Mode Dropdown State
   const [modeOpen, setModeOpen] = useState(false);
@@ -166,6 +214,47 @@ export const StatusHeader: React.FC = () => {
                 {trackVal}
               </span>
             </div>
+
+            {targetName && (
+              <>
+                <span className="header__divider" aria-hidden="true" />
+                <div className="header__telemetry-item" title="Identified Target Pointing">
+                  <span className="header__telemetry-label">TARGET</span>
+                  <span className="header__telemetry-value header__telemetry-value--coord" style={{ color: '#00ffff', fontWeight: 600 }}>
+                    {targetName}
+                  </span>
+                </div>
+              </>
+            )}
+
+            {(displayCameraStatus || cameraTemperature) && (
+              <>
+                <span className="header__divider hide-mobile" aria-hidden="true" />
+                <div className="header__telemetry-item hide-mobile" title="Camera Telemetry">
+                  <span className="header__telemetry-label">CAM</span>
+                  <span
+                    className={`header__telemetry-value ${
+                      displayCameraStatus && /expos/i.test(displayCameraStatus)
+                        ? 'header__telemetry-value--exposing'
+                        : ''
+                    }`}
+                    style={{
+                      color: displayCameraStatus && /expos/i.test(displayCameraStatus) ? '#38bdf8' : '#e2e8f0',
+                    }}
+                  >
+                    {displayCameraStatus || 'Idle'}
+                  </span>
+                  {cameraTemperature && cameraTemperature !== '-' && (
+                    <span
+                      className="header__telemetry-value"
+                      style={{ color: 'rgba(255, 255, 255, 0.6)', marginLeft: '2px' }}
+                    >
+                      ({cameraTemperature})
+                    </span>
+                  )}
+                </div>
+              </>
+            )}
 
             <span className="header__divider" aria-hidden="true" />
 

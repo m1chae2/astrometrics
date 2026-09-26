@@ -187,6 +187,11 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
             already_dropped=True,
         )
 
+        # The stars solved and saved from the stacked image are the ones
+        # this target "has"; photometry later finds more, but only from
+        # per-frame detection, so they do not describe the stack.
+        target.number_of_stars = len(context.stellar_objects)
+
         return Result(
             context=context,
             stellar_objects=context.stellar_objects,

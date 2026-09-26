@@ -22,7 +22,7 @@ export interface PlanetariumSource {
   magnitude?: number;
   hasSpectra: boolean;
   hasPhotometry: boolean;
-  type?: "star" | "target";
+  type?: "star" | "target" | "alignment";
   altitude?: number;
   azimuth?: number;
   hourAngle?: number;
@@ -36,6 +36,10 @@ export interface PlanetariumSource {
   catalogSource?: 'deep_stars' | 'hipparcos';
   stackedImage?: string;
   fieldOfView?: string;
+  /** Associated alignment attempt metadata when type === 'alignment'. */
+  alignmentAttempt?: import('./backendTypes').AlignmentAttempt;
+  /** Clustered alignment session telemetry when type === 'alignment'. */
+  alignmentSession?: import('../../planetariumDisplay/utils/alignmentClustering').ClusteredAlignmentSession;
 }
 
 /**

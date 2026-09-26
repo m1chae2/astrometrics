@@ -67,7 +67,11 @@ export const usePlanetariumSources = (
             limiting_magnitude: limitingMagnitude,
             include_stars_without_catalog_magnitude: includeStarsWithoutCatalogMagnitude,
           },
-          { signal: abortController.signal },
+          {
+            signal: abortController.signal,
+            timeoutMs: 30000,
+            silent: true,
+          },
         );
         if (active) {
           setSources(data);

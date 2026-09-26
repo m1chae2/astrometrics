@@ -143,7 +143,10 @@ class Container:
 
         from backend.services.observatory.guiding_service import GuidingService
 
-        self.guiding_service = GuidingService(observatory_api=self.wayfinder.control)
+        self.guiding_service = GuidingService(
+            observatory_api=self.wayfinder.control,
+            logger_interface=self.job_repository,
+        )
         self.wayfinder.control.guiding_service = self.guiding_service
 
         # 5. Initialize Domain Services with proper DI
@@ -181,7 +184,12 @@ class Container:
             astrometrics=self.astrometrics,
         )
 
-        self.sync_service = SyncService(stellarmate=self.stellarmate_interface)
+        self.sync_service = SyncService(
+            stellarmate=self.stellarmate_interface,
+            config_service=self.config_service,
+            guiding_service=self.guiding_service,
+            logger_interface=self.job_repository,
+        )
 
         from backend.services.observatory.imaging_service import ImagingService
 
@@ -208,6 +216,7 @@ class Container:
             indi_interface=self.indi_driver,
             imaging_service=self.imaging_service,
             star_identifier=star_identifier,
+            logger_interface=self.job_repository,
         )
         self.telescope_service._alignment_service = self.alignment_service
 

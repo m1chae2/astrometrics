@@ -5,6 +5,8 @@ and download_remote_frames's science-astrometrics indexing call, using a fake
 StellarMateInterface driver rather than a real SSH-reachable host.
 """
 
+import os
+from pathlib import Path
 from unittest.mock import ANY, patch
 
 from wayfindinglib.tasks.control_tasks import remote_transfer_tasks as remote_operations
@@ -509,3 +511,61 @@ def test_sync_all_remote_folders_without_job_registration_records_nothing(tmp_pa
 
     assert result["job_id"] is None
     assert len(_our_log_handlers("wayfindinglib")) == handlers_before
+
+
+def test_sync_calibration_folder_summarises_what_was_added(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify the sync reports counts and the folders new frames landed in.
+
+    The remote listing has three files and the library already holds
+    one, so two are requested; the stubbed sorting step then drops them
+    into a per-exposure folder, which the summary must report.
+    """
+    import astrometricslib
+
+    frames_path = tmp_path / "library"
+    held_folder = frames_path / "darks" / "Cam" / "0.0" / "60.0"
+    held_folder.mkdir(parents=True)
+    (held_folder / "Dark_001.fits").write_bytes(b"x" * 10)
+
+    class _Configuration:
+        def get_frames_path(self) -> Path:
+            return frames_path
+
+    class _Catalog:
+        def refresh(self, kind: str) -> None:
+            pass
+
+        def save(self) -> None:
+            pass
+
+    class _Astrometrics:
+        def __init__(self, config: object) -> None:
+            self.processing = type("Processing", (), {"calibration": _Catalog()})()
+
+    class _Api:
+        def download_remote_frames(self, target: object, **kwargs: object) -> bool:
+            return True
+
+    def fake_classify(scan_list: list[str], target_id: str, config: object, telescope_name: str) -> int:
+        for name in ("Dark_002.fits", "Dark_003.fits"):
+            (held_folder / name).write_bytes(b"y" * 10)
+        return 2
+
+    monkeypatch.setattr(astrometricslib, "get_configuration", lambda: _Configuration())
+    monkeypatch.setattr(astrometricslib, "Astrometrics", _Astrometrics)
+    monkeypatch.setattr(astrometricslib, "classify_and_sort_fits_files", fake_classify)
+    monkeypatch.setattr(
+        remote_operations,
+        "list_remote_files_with_sizes",
+        lambda api, folder: [("Dark_001.fits", 10), ("Dark_002.fits", 10), ("Dark_003.fits", 10)],
+    )
+
+    summary = remote_operations.sync_calibration_folder(_Api(), "Dark")
+
+    assert summary == {
+        "success": True,
+        "remote_count": 3,
+        "already_held_count": 1,
+        "transferred_count": 2,
+        "added_by_folder": {os.path.join("darks", "Cam", "0.0", "60.0"): 2},
+    }

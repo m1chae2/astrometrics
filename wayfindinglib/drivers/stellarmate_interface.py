@@ -420,3 +420,63 @@ class StellarMateInterface:
                     pass
             logger.error(f"rsync execution error for {remote_target_name}: {e}")
             return False
+
+    def list_remote_guide_logs(self) -> list[str]:
+        """List all remote PHD2 guide log filenames found on StellarMate.
+
+        Searches common locations where PHD2 and Ekos store guide logs:
+        ``/home/stellarmate/PHD2/`` and ``/home/stellarmate/.phd2/logs/``.
+
+        Returns
+        -------
+        log_files : `list` [`str`]
+            List of absolute paths to remote PHD2 guide log files.
+        """
+        try:
+            cmd = (
+                "find /home/stellarmate/PHD2/ /home/stellarmate/.phd2/logs/ "
+                "-maxdepth 2 -type f -name 'PHD2_GuideLog_*.txt' 2>/dev/null | sort"
+            )
+            output = self._run_command(["ssh", self.host_alias, cmd])
+            files = [line.strip() for line in output.split("\n") if line.strip()]
+            return files
+        except Exception as e:
+            if self._last_connection_status is not False:
+                logger.error(f"Failed to list remote guide logs: {e}")
+            return []
+
+    def download_guide_logs(self, destination_dir: str) -> list[str]:
+        """Download remote PHD2 guide logs to a local directory.
+
+        Parameters
+        ----------
+        destination_dir : `str`
+            Local directory to write downloaded log files into.
+
+        Returns
+        -------
+        downloaded_paths : `list` [`str`]
+            Local file paths of downloaded log files.
+        """
+        os.makedirs(destination_dir, exist_ok=True)
+        remote_files = self.list_remote_guide_logs()
+        if not remote_files:
+            return []
+
+        downloaded: list[str] = []
+        for remote_file in remote_files:
+            fname = os.path.basename(remote_file)
+            local_path = os.path.join(destination_dir, fname)
+            try:
+                scp_cmd = [
+                    "scp",
+                    "-o",
+                    "ConnectTimeout=5",
+                    f"{self.host_alias}:{remote_file}",
+                    local_path,
+                ]
+                subprocess.run(scp_cmd, capture_output=True, text=True, check=True, timeout=10.0)
+                downloaded.append(local_path)
+            except Exception as e:
+                logger.warning(f"Failed to download guide log {remote_file}: {e}")
+        return downloaded

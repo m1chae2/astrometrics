@@ -77,10 +77,15 @@ from wayfindinglib.drivers.indi_interface import TelescopeStatus
 from wayfindinglib.models.session.observation_session import WeatherSample
 from wayfindinglib.models.session.telemetry import (
     AlignmentAttempt,
+    AlignmentSessionSummary,
     GuidingSample,
+    GuidingSpectrumAnalysis,
+    GuidingSpectrumPeak,
     GuidingStats,
     GuidingStatus,
     IndiStatus,
+    MountPointingModel,
+    PolarAlignmentStatus,
 )
 from wayfindinglib.observation import (
     CalibrationEntry,
@@ -271,6 +276,11 @@ def main() -> None:
         generate_interface(SystemPulse, "SystemPulse"),
         generate_interface(GuidingSample, "GuidingSample"),
         generate_interface(AlignmentAttempt, "AlignmentAttempt"),
+        generate_interface(PolarAlignmentStatus, "PolarAlignmentStatus"),
+        generate_interface(AlignmentSessionSummary, "AlignmentSessionSummary"),
+        generate_interface(MountPointingModel, "MountPointingModel"),
+        generate_interface(GuidingSpectrumPeak, "GuidingSpectrumPeak"),
+        generate_interface(GuidingSpectrumAnalysis, "GuidingSpectrumAnalysis"),
         generate_interface(ProcessStatus, "ProcessStatus"),
         generate_interface(ProcessingJob, "ProcessingJob"),
         generate_interface(AnalysisResult, "AnalysisResult"),

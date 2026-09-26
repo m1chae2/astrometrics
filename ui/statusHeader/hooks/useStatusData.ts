@@ -9,6 +9,8 @@ export interface StatusTelemetry {
     humidity: string;
     ra: string;
     dec: string;
+    cameraTemperature?: string;
+    cameraStatus?: string;
 }
 
 export const useStatusData = () => {
@@ -81,7 +83,9 @@ export const useStatusData = () => {
             altitude: stripDecimals(normalize(telescope.altitude)),
             azimuth: stripDecimals(normalize(telescope.azimuth)),
             temperature: stripDecimals(normalize(telescope.temperature).replace(/\s*°C$/, '')),
-            humidity: stripDecimals(normalize(telescope.humidity).replace(/\s*%$/, ''))
+            humidity: stripDecimals(normalize(telescope.humidity).replace(/\s*%$/, '')),
+            cameraTemperature: telescope.cameraTemperature ?? undefined,
+            cameraStatus: telescope.cameraStatus ?? undefined,
         });
 
         // Status Logic

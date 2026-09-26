@@ -31,6 +31,12 @@ export interface TelescopePulse {
     humidity: string;
     filter: string;
     focuserPosition: number;
+    cameraTemperature?: string;
+    cameraStatus?: string;
+    targetName?: string;
+    alignmentAttempts?: any[];
+    alignmentActive?: boolean;
+    guidingHistory?: Record<string, any>[];
 }
 
 export interface SystemPulse {

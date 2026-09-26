@@ -62,11 +62,12 @@ export const GuidingTrendsPlot: React.FC<GuidingStatusProps> = ({ history }) => 
             });
         }
 
-        if (showSNR) {
+        const hasValidSNR = slicedHistory.some(s => s.snr != null && s.snr > 0 && Math.abs(s.snr - 22.0) > 1e-3);
+        if (showSNR && hasValidSNR) {
             datasets.push({
                 name: 'SNR',
                 color: '#34c759',
-                values: slicedHistory.map(s => s.snr ?? 0),
+                values: slicedHistory.map(s => (s.snr != null && Math.abs(s.snr - 22.0) > 1e-3 ? s.snr : null)),
                 timestamps,
                 yaxis: 'y2'
             });
@@ -76,13 +77,13 @@ export const GuidingTrendsPlot: React.FC<GuidingStatusProps> = ({ history }) => 
             datasets.push({
                 name: 'RMS RA',
                 color: '#ff9500',
-                values: slicedHistory.map(s => s.rmsRa ?? 0),
+                values: slicedHistory.map(s => s.rmsRa ?? (s as any).rms_ra ?? 0),
                 timestamps
             });
             datasets.push({
                 name: 'RMS DEC',
                 color: '#af52de',
-                values: slicedHistory.map(s => s.rmsDec ?? 0),
+                values: slicedHistory.map(s => s.rmsDec ?? (s as any).rms_dec ?? 0),
                 timestamps
             });
         }
@@ -91,13 +92,13 @@ export const GuidingTrendsPlot: React.FC<GuidingStatusProps> = ({ history }) => 
             datasets.push({
                 name: 'Corr RA (s)',
                 color: '#007aff',
-                values: slicedHistory.map(s => (s.pulseRa ?? 0) / 1000),
+                values: slicedHistory.map(s => (s.pulseRa ?? (s as any).pulse_ra ?? 0) / 1000),
                 timestamps
             });
             datasets.push({
                 name: 'Corr DEC (s)',
                 color: '#5856d6',
-                values: slicedHistory.map(s => (s.pulseDec ?? 0) / 1000),
+                values: slicedHistory.map(s => (s.pulseDec ?? (s as any).pulse_dec ?? 0) / 1000),
                 timestamps
             });
         }
@@ -105,10 +106,25 @@ export const GuidingTrendsPlot: React.FC<GuidingStatusProps> = ({ history }) => 
         return datasets;
     }, [slicedHistory, showRA, showDEC, showSNR, showRMS, showCorr]);
 
+    // Adaptive yRange to keep small guide trends crisp and visible
+    const yRange = useMemo<[number, number]>(() => {
+        let maxVal = 0.5;
+        for (const s of slicedHistory) {
+            if (s.dra != null) maxVal = Math.max(maxVal, Math.abs(s.dra));
+            if (s.ddec != null) maxVal = Math.max(maxVal, Math.abs(s.ddec));
+            const rRa = s.rmsRa ?? (s as any).rms_ra;
+            if (rRa != null) maxVal = Math.max(maxVal, Math.abs(rRa));
+            const rDec = s.rmsDec ?? (s as any).rms_dec;
+            if (rDec != null) maxVal = Math.max(maxVal, Math.abs(rDec));
+        }
+        const limit = Math.max(1.5, Math.min(5.0, Math.ceil(maxVal * 1.3 * 2) / 2));
+        return [-limit, limit];
+    }, [slicedHistory]);
+
     return (
         <div id="guiding-trends-plot" className="guiding-status__plot" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
             <div style={{ flex: 1, minHeight: 0 }}>
-                <TimeSeriesPlot data={data} yLabel="arcsec / seconds" yRange={[-3, 3]} />
+                <TimeSeriesPlot data={data} yLabel="arcsec / seconds" yRange={yRange} />
             </div>
 
             {/* Interactive Control Panel */}

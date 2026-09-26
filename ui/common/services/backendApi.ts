@@ -23,7 +23,10 @@ import {
     SequencePlan,
     CalibrationStats,
     MosaicPanel,
-    FrameRecord
+    FrameRecord,
+    AlignmentAttempt,
+    PolarAlignmentStatus,
+    AlignmentSessionSummary
 } from '../types/backendTypes';
 
 import {
@@ -152,6 +155,12 @@ export interface ActionRegistry {
     "telescope:is_syncing": { payload: { object_id: string }; response: boolean };
     "telescope:alignment_start": { payload: { target_ra: string; target_dec: string }; response: boolean };
     "telescope:alignment_stop": { payload: Record<string, never>; response: boolean };
+    "telescope:list_alignment_sessions": { payload: Record<string, never>; response: AlignmentSessionSummary[] };
+    "telescope:get_session_alignment": { payload: { session_id?: string }; response: { alignmentAttempts: AlignmentAttempt[]; polarAlignment: PolarAlignmentStatus | null } };
+    "telescope:get_cumulative_tracking_data": { payload: { limit?: number } | Record<string, never>; response: { alignmentAttempts: AlignmentAttempt[]; polarAlignment: PolarAlignmentStatus | null } };
+    "telescope:sync_logs": { payload: Record<string, never>; response: { status: string; guideLogsDownloaded: number; guidingSamplesIngested: number; fitsSolvesRecorded: number; message: string } };
+    "telescope:get_pointing_model": { payload: { session_id?: string }; response: import('../types/backendTypes').MountPointingModel };
+    "telescope:get_guiding_spectrum": { payload: { session_id?: string }; response: import('../types/backendTypes').GuidingSpectrumAnalysis };
 
     // Guiding
     "guiding:status": { payload: Record<string, never>; response: GuidingStatus };
@@ -365,6 +374,10 @@ export interface CallBackendOptions {
      * Milliseconds to wait before aborting the request. Defaults to 15000ms.
      */
     timeoutMs?: number;
+    /**
+     * When true, does not emit a toast notification on timeout or error (useful for background polling).
+     */
+    silent?: boolean;
 }
 
 /**
@@ -436,7 +449,9 @@ export async function callBackend<A extends keyof ActionRegistry>(
     } catch (error: any) {
         if (didTimeout) {
             const msg = `Request timed out for ${action}`;
-            emitToast(msg, 'error', `API:${action}`);
+            if (!options?.silent) {
+                emitToast(msg, 'error', `API:${action}`);
+            }
             throw new Error(msg);
         }
         // A deliberate cancel is not a failure worth telling the user about.
@@ -444,7 +459,9 @@ export async function callBackend<A extends keyof ActionRegistry>(
             throw error;
         }
         const msg = error?.message || String(error);
-        emitToast(msg, 'error', `API:${action}`);
+        if (!options?.silent) {
+            emitToast(msg, 'error', `API:${action}`);
+        }
         throw error;
     } finally {
         if (timeoutId) {

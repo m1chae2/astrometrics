@@ -23,6 +23,20 @@ export const DirectionalControl: React.FC<DirectionalControlProps> = ({
     onStopMove,
     onSetSlewRate
 }) => {
+    const [activeDirection, setActiveDirection] = React.useState<string | null>(null);
+
+    const handleStart = (direction: string) => {
+        setActiveDirection(direction);
+        onStartMove(direction);
+    };
+
+    const handleEnd = (direction: string) => {
+        if (activeDirection === direction) {
+            setActiveDirection(null);
+            onStopMove(direction);
+        }
+    };
+
     const handleRateChange = (event: React.ChangeEvent<HTMLInputElement>) => {
         const value = parseInt(event.target.value, 10);
         onSetSlewRate(value);
@@ -35,10 +49,10 @@ export const DirectionalControl: React.FC<DirectionalControlProps> = ({
                     id="btn-move-nw"
                     className="navigator__btn nw"
                     // REQ: OBS-2.2: The display SHALL provide diagonal slew buttons for combined motion (NW, NE, SW, SE).
-                    onMouseDown={() => onStartMove('NW')} onMouseUp={() => onStopMove('NW')}
-                    onMouseLeave={() => onStopMove('NW')}
-                    onTouchStart={(e) => { e.preventDefault(); onStartMove('NW'); }}
-                    onTouchEnd={(e) => { e.preventDefault(); onStopMove('NW'); }}
+                    onMouseDown={() => handleStart('NW')} onMouseUp={() => handleEnd('NW')}
+                    onMouseLeave={() => handleEnd('NW')}
+                    onTouchStart={(e) => { e.preventDefault(); handleStart('NW'); }}
+                    onTouchEnd={(e) => { e.preventDefault(); handleEnd('NW'); }}
                     type="button"
                 >
                     ↖
@@ -49,10 +63,10 @@ export const DirectionalControl: React.FC<DirectionalControlProps> = ({
                     // REQ: OBS-2.1: The display SHALL provide directional slew buttons for North, South, East, and West commands.
                     // REQ: OBS-2.3: The display SHALL initiate movement in the selected direction immediately upon button press.
                     // REQ: OBS-2.4: The display SHALL halt movement immediately upon button release.
-                    onMouseDown={() => onStartMove('N')} onMouseUp={() => onStopMove('N')}
-                    onMouseLeave={() => onStopMove('N')}
-                    onTouchStart={(e) => { e.preventDefault(); onStartMove('N'); }}
-                    onTouchEnd={(e) => { e.preventDefault(); onStopMove('N'); }}
+                    onMouseDown={() => handleStart('N')} onMouseUp={() => handleEnd('N')}
+                    onMouseLeave={() => handleEnd('N')}
+                    onTouchStart={(e) => { e.preventDefault(); handleStart('N'); }}
+                    onTouchEnd={(e) => { e.preventDefault(); handleEnd('N'); }}
                     type="button"
                 >
                     ↑
@@ -60,10 +74,10 @@ export const DirectionalControl: React.FC<DirectionalControlProps> = ({
                 <button
                     id="btn-move-ne"
                     className="navigator__btn ne"
-                    onMouseDown={() => onStartMove('NE')} onMouseUp={() => onStopMove('NE')}
-                    onMouseLeave={() => onStopMove('NE')}
-                    onTouchStart={(e) => { e.preventDefault(); onStartMove('NE'); }}
-                    onTouchEnd={(e) => { e.preventDefault(); onStopMove('NE'); }}
+                    onMouseDown={() => handleStart('NE')} onMouseUp={() => handleEnd('NE')}
+                    onMouseLeave={() => handleEnd('NE')}
+                    onTouchStart={(e) => { e.preventDefault(); handleStart('NE'); }}
+                    onTouchEnd={(e) => { e.preventDefault(); handleEnd('NE'); }}
                     type="button"
                 >
                     ↗
@@ -72,10 +86,10 @@ export const DirectionalControl: React.FC<DirectionalControlProps> = ({
                 <button
                     id="btn-move-w"
                     className="navigator__btn w"
-                    onMouseDown={() => onStartMove('W')} onMouseUp={() => onStopMove('W')}
-                    onMouseLeave={() => onStopMove('W')}
-                    onTouchStart={(e) => { e.preventDefault(); onStartMove('W'); }}
-                    onTouchEnd={(e) => { e.preventDefault(); onStopMove('W'); }}
+                    onMouseDown={() => handleStart('W')} onMouseUp={() => handleEnd('W')}
+                    onMouseLeave={() => handleEnd('W')}
+                    onTouchStart={(e) => { e.preventDefault(); handleStart('W'); }}
+                    onTouchEnd={(e) => { e.preventDefault(); handleEnd('W'); }}
                     type="button"
                 >
                     ←
@@ -83,7 +97,10 @@ export const DirectionalControl: React.FC<DirectionalControlProps> = ({
                 <button
                     id="btn-manual-stop"
                     className="navigator__stop"
-                    onClick={onStop}
+                    onClick={() => {
+                        setActiveDirection(null);
+                        onStop();
+                    }}
                     // REQ: OBS-2.5: The display SHALL provide a "STOP" button to immediately halt all telescope movement.
                     type="button"
                 >
@@ -92,10 +109,10 @@ export const DirectionalControl: React.FC<DirectionalControlProps> = ({
                 <button
                     id="btn-move-e"
                     className="navigator__btn e"
-                    onMouseDown={() => onStartMove('E')} onMouseUp={() => onStopMove('E')}
-                    onMouseLeave={() => onStopMove('E')}
-                    onTouchStart={(e) => { e.preventDefault(); onStartMove('E'); }}
-                    onTouchEnd={(e) => { e.preventDefault(); onStopMove('E'); }}
+                    onMouseDown={() => handleStart('E')} onMouseUp={() => handleEnd('E')}
+                    onMouseLeave={() => handleEnd('E')}
+                    onTouchStart={(e) => { e.preventDefault(); handleStart('E'); }}
+                    onTouchEnd={(e) => { e.preventDefault(); handleEnd('E'); }}
                     type="button"
                 >
                     →
@@ -104,10 +121,10 @@ export const DirectionalControl: React.FC<DirectionalControlProps> = ({
                 <button
                     id="btn-move-sw"
                     className="navigator__btn sw"
-                    onMouseDown={() => onStartMove('SW')} onMouseUp={() => onStopMove('SW')}
-                    onMouseLeave={() => onStopMove('SW')}
-                    onTouchStart={(e) => { e.preventDefault(); onStartMove('SW'); }}
-                    onTouchEnd={(e) => { e.preventDefault(); onStopMove('SW'); }}
+                    onMouseDown={() => handleStart('SW')} onMouseUp={() => handleEnd('SW')}
+                    onMouseLeave={() => handleEnd('SW')}
+                    onTouchStart={(e) => { e.preventDefault(); handleStart('SW'); }}
+                    onTouchEnd={(e) => { e.preventDefault(); handleEnd('SW'); }}
                     type="button"
                 >
                     ↙
@@ -115,10 +132,10 @@ export const DirectionalControl: React.FC<DirectionalControlProps> = ({
                 <button
                     id="btn-move-s"
                     className="navigator__btn s"
-                    onMouseDown={() => onStartMove('S')} onMouseUp={() => onStopMove('S')}
-                    onMouseLeave={() => onStopMove('S')}
-                    onTouchStart={(e) => { e.preventDefault(); onStartMove('S'); }}
-                    onTouchEnd={(e) => { e.preventDefault(); onStopMove('S'); }}
+                    onMouseDown={() => handleStart('S')} onMouseUp={() => handleEnd('S')}
+                    onMouseLeave={() => handleEnd('S')}
+                    onTouchStart={(e) => { e.preventDefault(); handleStart('S'); }}
+                    onTouchEnd={(e) => { e.preventDefault(); handleEnd('S'); }}
                     type="button"
                 >
                     ↓
@@ -126,10 +143,10 @@ export const DirectionalControl: React.FC<DirectionalControlProps> = ({
                 <button
                     id="btn-move-se"
                     className="navigator__btn se"
-                    onMouseDown={() => onStartMove('SE')} onMouseUp={() => onStopMove('SE')}
-                    onMouseLeave={() => onStopMove('SE')}
-                    onTouchStart={(e) => { e.preventDefault(); onStartMove('SE'); }}
-                    onTouchEnd={(e) => { e.preventDefault(); onStopMove('SE'); }}
+                    onMouseDown={() => handleStart('SE')} onMouseUp={() => handleEnd('SE')}
+                    onMouseLeave={() => handleEnd('SE')}
+                    onTouchStart={(e) => { e.preventDefault(); handleStart('SE'); }}
+                    onTouchEnd={(e) => { e.preventDefault(); handleEnd('SE'); }}
                     type="button"
                 >
                     ↘

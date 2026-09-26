@@ -112,4 +112,17 @@ describe('BackendManager.waitUntilWarm', () => {
     expect(await manager.waitUntilWarm({ timeoutMs: 5000, ...FAST_POLL })).toBe(true);
     expect(manager.warmUpFailureReason).toBeNull();
   });
+
+  it('stop() terminates spawned backend process and cleans up any run pids', () => {
+    const mockTerminate = vi.fn();
+    const mockPlatform = { terminateProcessTree: mockTerminate };
+    const manager = new BackendManager({}, mockPlatform as any);
+    manager.backendProcess = { killed: false, pid: 1234 } as any;
+
+    const cleanupSpy = vi.spyOn(manager as any, '_cleanupOrphanedRunPids');
+    manager.stop();
+
+    expect(mockTerminate).toHaveBeenCalledWith(manager.backendProcess);
+    expect(cleanupSpy).toHaveBeenCalled();
+  });
 });

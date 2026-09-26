@@ -5,6 +5,7 @@
 
 import { PlanetariumSource, PlanetariumTarget, ConstellationLineSegment } from '../../common/types/planetariumTypes';
 import { LoadedFitsEntry } from '../components/FitsLoaderItem';
+import { AlignmentAttempt, PolarAlignmentStatus } from '../../common/types/backendTypes';
 
 /**
  * Interface representing the read-only projection, coordinates, and view configuration
@@ -44,10 +45,22 @@ export interface ProjectionContext {
   telescopeRa?: number | null;
   telescopeDec?: number | null;
   showTelescope?: boolean;
+  /** Show alignment pointing vectors and polar alignment overlay. */
+  showAlignment?: boolean;
+  /** Plate-solve alignment attempts to project onto the celestial sphere. */
+  alignmentAttempts?: AlignmentAttempt[];
+  /** Polar Alignment Assistant (PAA) status and coordinates. */
+  polarAlignment?: PolarAlignmentStatus | null;
+  /** Selected historical session identifier being reviewed. */
+  selectedSessionId?: string | null;
   /** Sensor FOV width in degrees from active equipment configuration. */
   sensorFovWidthDeg?: number;
   /** Sensor FOV height in degrees from active equipment configuration. */
   sensorFovHeightDeg?: number;
+  /** Show mount tracking mechanical risk heatmap. */
+  showTrackingRisk?: boolean;
+  /** Cumulative tracking and alignment attempts across all recorded observing sessions. */
+  cumulativeTrackingAttempts?: AlignmentAttempt[];
 }
 
 /**

@@ -1362,6 +1362,7 @@ class IndiInterface(IndiClient):
 
                             if pointing_error < 36000.0:
                                 status = "aligned" if pointing_error <= 120.0 else "warning"
+                                ra_deg = (ra_val * 15.0) % 360.0 if ra_val is not None else None
                                 with self._external_syncs_lock:
                                     self._external_syncs.append({
                                         "time": time.time(),
@@ -1369,18 +1370,18 @@ class IndiInterface(IndiClient):
                                         "delta_ra_arcsec": round(delta_ra_arcsec, 2),
                                         "delta_dec_arcsec": round(delta_dec_arcsec, 2),
                                         "pointing_error_arcsec": round(pointing_error, 2),
-                                        "ra": ra_val,
+                                        "ra": ra_deg,
                                         "dec": dec_val,
                                     })
-                                if abs(dec_val) > 65.0:
+                                if abs(dec_val) > 65.0 and ra_deg is not None:
                                     with self._polar_alignment_lock:
                                         pts = self._polar_alignment_status.get("paa_points", [])
                                         if not any(
-                                            abs(p.get("ra", 0) - ra_val) < 0.01
+                                            abs(p.get("ra", 0) - ra_deg) < 0.01
                                             and abs(p.get("dec", 0) - dec_val) < 0.01
                                             for p in pts
                                         ):
-                                            pts.append({"ra": ra_val, "dec": dec_val, "time": time.time()})
+                                            pts.append({"ra": ra_deg, "dec": dec_val, "time": time.time()})
                                             self._polar_alignment_status["paa_points"] = pts[-5:]
                             self._sync_mode_active = False
                             self._pre_sync_ra = None
@@ -1402,9 +1403,9 @@ class IndiInterface(IndiClient):
                         dec_val = elem.getValue()
 
                 if ra_val is not None and dec_val is not None:
-                    # In INDI, RA is typically in hours (0..24); convert to
-                    # degrees if <= 24.
-                    ra_deg = (ra_val * 15.0) if ra_val <= 24.0 else ra_val
+                    # In INDI, RA is reported in hours (0..24); convert
+                    # to decimal degrees (0..360).
+                    ra_deg = (ra_val * 15.0) % 360.0
                     with self._polar_alignment_lock:
                         pts = self._polar_alignment_status.get("paa_points", [])
                         if not any(

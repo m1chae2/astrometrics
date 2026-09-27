@@ -362,3 +362,71 @@ def test_a_brighter_catalog_entry_wins_over_a_companion_a_few_pixels_away():  # 
     reference_stars.append(companion)
     identify_spectral_stars_via_solution(spectral_stars, reference_stars, wcs)
     assert spectral_stars[0].id == "Bright"
+
+
+def _add_companion(reference_stars, separation_px):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    """Add a fainter catalog star a given number of pixels from the bright one.
+
+    Parameters
+    ----------
+    reference_stars : `list` [`StellarObject`]
+        The catalog stars; the first is the bright one. The companion is
+        added to the list.
+    separation_px : `float`
+        How far the companion sits from the bright star, in pixels (the
+        solution's scale is 5e-4 degrees per pixel).
+
+    Returns
+    -------
+    companion : `StellarObject`
+        The new star.
+    """
+    bright = reference_stars[0]
+    bright.magnitude = 3.1
+    companion = _reference_star("Companion", 0.0, 0.0)
+    companion.magnitude = 5.1
+    # A step in right ascension is shorter on the sky by the cosine of the
+    # declination, so it is divided out to get the separation in pixels.
+    cosine_declination = np.cos(np.radians(bright.declination))
+    companion.right_ascension = bright.right_ascension + separation_px * 5e-4 / cosine_declination
+    companion.declination = bright.declination
+    reference_stars.append(companion)
+    return companion
+
+
+def test_two_resolved_stars_sharing_one_detection_are_both_named_and_placed():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Regression for Albireo: A and B, 17 px apart, were one detection.
+
+    The blob took the nearer star's name and the other star was left out. Both
+    must now be named, each at its own projected position, with the second
+    added as a new detection.
+    """
+    wcs, reference_stars, spectral_stars = _solution_field()
+    _add_companion(reference_stars, 17.0)
+    before = len(spectral_stars)
+
+    identify_spectral_stars_via_solution(spectral_stars, reference_stars, wcs)
+
+    names = [star.id for star in spectral_stars]
+    assert len(spectral_stars) == before + 1
+    assert names.count("Bright") == 1
+    assert names.count("Companion") == 1
+    bright = next(star for star in spectral_stars if star.id == "Bright")
+    companion = next(star for star in spectral_stars if star.id == "Companion")
+    separation = np.hypot(
+        bright.star_data["xcentroid"] - companion.star_data["xcentroid"],
+        bright.star_data["ycentroid"] - companion.star_data["ycentroid"],
+    )
+    assert separation == pytest.approx(17.0, abs=0.5)
+
+
+def test_a_companion_closer_than_a_zero_order_stays_one_star():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Navi's primary and companion, 4 px apart, are not split into two."""
+    wcs, reference_stars, spectral_stars = _solution_field()
+    _add_companion(reference_stars, 4.0)
+    before = len(spectral_stars)
+
+    identify_spectral_stars_via_solution(spectral_stars, reference_stars, wcs)
+
+    assert len(spectral_stars) == before
+    assert [star.id for star in spectral_stars].count("Companion") == 0

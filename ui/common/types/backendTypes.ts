@@ -263,6 +263,7 @@ export interface SpectroscopyResult {
   extractionRadius?: number | null;
   neighborWingFraction?: number[] | null;
   neighborWingStatus?: string | null;
+  countsPerSecondFactor?: number | null;
 }
 
 /**

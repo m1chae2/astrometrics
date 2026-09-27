@@ -325,23 +325,46 @@ stop_what_this_run_started() {
 
 status_check() {
   local running=0
+  local epid=""
   if [ -f "$ELECTRON_PID_FILE" ] && kill -0 "$(cat "$ELECTRON_PID_FILE" 2>/dev/null)" 2>/dev/null; then
-    echo "Electron is running (pid $(cat "$ELECTRON_PID_FILE"))."
+    epid="$(cat "$ELECTRON_PID_FILE")"
+  else
+    epid=$(pgrep -f "electron .*astrometrics|electron \." | head -n 1 || true)
+  fi
+
+  if [ -n "$epid" ] && kill -0 "$epid" 2>/dev/null; then
+    echo "Electron is running (pid $epid)."
     running=1
   else
     echo "Electron is NOT running."
   fi
+
+  local vpid=""
   if [ -f "$VITE_PID_FILE" ] && kill -0 "$(cat "$VITE_PID_FILE" 2>/dev/null)" 2>/dev/null; then
-    echo "Vite is running (pid $(cat "$VITE_PID_FILE"))."
+    vpid="$(cat "$VITE_PID_FILE")"
+  else
+    vpid=$(pgrep -f "vite --port ${PORT}|vite" | head -n 1 || true)
+  fi
+
+  if [ -n "$vpid" ] || curl -s -o /dev/null --max-time 1 "http://127.0.0.1:${PORT}"; then
+    if [ -n "$vpid" ]; then
+      echo "Vite is running (pid $vpid, port ${PORT})."
+    else
+      echo "Vite is running (port ${PORT})."
+    fi
     running=1
   else
     echo "Vite is NOT running."
   fi
+
   if backend_is_running; then
     echo "Backend is running."
     running=1
   else
     echo "Backend is NOT running."
+  fi
+  if [ -x "$ASSISTANT_LAUNCHER" ]; then
+    "$ASSISTANT_LAUNCHER" status
   fi
   return 0
 }

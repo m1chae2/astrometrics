@@ -421,6 +421,7 @@ def _stack_exposure_groups(
         SPECTRAL_ALIGNMENT_CENTER_CROP_FRACTION,
         align_images_to_reference,
     )
+    from astrometricslib.pipelines.stacking.group_derotation import derotate_groups_to_common_tilt
 
     logger.info(
         "Stacking '%s' as %d exposure groups (%s s) and combining them.",
@@ -464,6 +465,34 @@ def _stack_exposure_groups(
         exposures.append(group.exposure_seconds)
         counts.append(int(diagnostics.get("images_stacked") or len(group.frames)))
     kept_groups = [group for group, _, _ in results]
+
+    # A slitless spectrum's trail tilt is not fixed from one session to the
+    # next (see `group_derotation`); mixing tilts smears the merged trail
+    # and biases every line depth along it. Groups are lined up onto one
+    # common tilt before they are shifted onto each other. Only worth doing
+    # with more than one group, and a camera name is needed to measure a
+    # trail at all.
+    camera_name = next(
+        (
+            getattr(frame, "camera", None)
+            for group in kept_groups
+            for frame in group.frames
+            if getattr(frame, "camera", None)
+        ),
+        None,
+    )
+    if is_spectral and len(images) > 1 and camera_name:
+        image_paths = [path for _, path, _ in results]
+        images, trail_angles = derotate_groups_to_common_tilt(images, image_paths, camera_name)
+        for group, angle in zip(kept_groups, trail_angles, strict=True):
+            if angle is None:
+                logger.warning(
+                    "The %g s exposure group of '%s' had no trustworthy trail tilt to line up; "
+                    "it is combined without derotation.",
+                    group.exposure_seconds,
+                    target_id,
+                )
+
     try:
         frame_noises, frame_zero_fractions = measure_group_frames(kept_groups)
     except OSError as read_error:

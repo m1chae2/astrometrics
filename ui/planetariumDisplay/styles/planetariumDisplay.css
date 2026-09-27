@@ -415,28 +415,6 @@
   color: var(--text-dimmest, #555);
 }
 
-/* Inline spectrum preview inside the details card */
-.planetarium-info-card__embedded-plot {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
-}
-
-.planetarium-info-card__embedded-plot h5 {
-  margin: 0 0 6px 0;
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-  color: var(--text-dim, #aaa);
-}
-
-.planetarium-info-card__embedded-plot-canvas {
-  width: 100%;
-  height: 120px;
-  overflow: hidden;
-}
-
 /* Checkbox alignment for Photometry/Spectroscopy curves */
 .planetarium-checkboxes {
   display: flex;

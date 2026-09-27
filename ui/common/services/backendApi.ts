@@ -361,6 +361,65 @@ export async function parseResponseError(response: Response): Promise<string> {
 
 import { emitToast } from '../utils/emitToast';
 
+/** Default timeout in milliseconds for standard RPC requests (45 seconds). */
+export const DEFAULT_RPC_TIMEOUT_MS = 45000;
+
+/** Extended timeout in milliseconds for heavy analytics or batch processing requests (90 seconds). */
+export const EXTENDED_RPC_TIMEOUT_MS = 90000;
+
+/** Actions that perform heavy database aggregations, plate solving, or frame analysis. */
+const HEAVY_ACTIONS: ReadonlySet<string> = new Set([
+    'telescope:get_session_alignment',
+    'telescope:get_cumulative_tracking_data',
+    'telescope:sync_logs',
+    'processing:stack',
+    'processing:status',
+    'astronomy:visible',
+    'astronomy:get_visible_targets',
+    'images:last',
+    'telescope:start_alignment',
+    'observatory:slew_to_target',
+    'observatory:slew_to_coordinates',
+]);
+
+/**
+ * Idempotent read actions that are safe to deduplicate (in-flight request coalescing)
+ * and safe to automatically retry on transient network or timeout failures.
+ */
+const IDEMPOTENT_READ_ACTIONS: ReadonlySet<string> = new Set([
+    'telescope:list_alignment_sessions',
+    'execution:list_sessions',
+    'telescope:list_sessions',
+    'telescope:get_session_alignment',
+    'telescope:get_cumulative_tracking_data',
+    'planetarium:get_constellation_lines',
+    'planetarium:get_sources',
+    'planetarium:get_online_catalog_status',
+    'planetarium:get_deep_catalog_status',
+    'target:list',
+    'targets:list',
+    'target:get',
+    'target:get_targets',
+    'target:get_frames',
+    'target:get_frames_grouped',
+    'target:get_header',
+    'target:get_frame_header',
+    'astronomy:list',
+    'astronomy:get',
+    'astronomy:get_status',
+    'astronomy:get_target_status',
+    'astronomy:visible',
+    'astronomy:get_visible_targets',
+    'observatory:get_telescope_status',
+    'observatory:get_equipment_configuration',
+    'observatory:list_cameras',
+    'system:get_status',
+    'config:get',
+]);
+
+/** In-flight request map for coalescing identical concurrent idempotent read queries. */
+const inFlightRequests = new Map<string, Promise<any>>();
+
 /**
  * Optional settings for a single callBackend request.
  */
@@ -371,25 +430,36 @@ export interface CallBackendOptions {
      */
     signal?: AbortSignal;
     /**
-     * Milliseconds to wait before aborting the request. Defaults to 15000ms.
+     * Milliseconds to wait before aborting the request. Defaults to 45000ms
+     * (or 90000ms for heavy processing/session aggregations).
      */
     timeoutMs?: number;
     /**
      * When true, does not emit a toast notification on timeout or error (useful for background polling).
      */
     silent?: boolean;
+    /**
+     * Maximum number of automatic retries on transient network/timeout failure.
+     * Defaults to 1 for idempotent read actions, 0 for mutating commands.
+     */
+    maxRetries?: number;
 }
 
 /**
- * Unified type-safe JSON-RPC 2.0 network client.
- * Dispatches a POST request to '/api/rpc'.
+ * Dispatches a single RPC attempt with individual timeout handling.
+ *
+ * @param {string} action - RPC action name.
+ * @param {unknown} params - Action parameters payload.
+ * @param {number} timeoutMs - Timeout duration in milliseconds.
+ * @param {AbortSignal} [signal] - Optional parent cancellation signal.
+ * @returns {Promise<unknown>} Result data on success.
  */
-export async function callBackend<A extends keyof ActionRegistry>(
+async function executeRpcAttempt<A extends keyof ActionRegistry>(
     action: A,
     params: ActionRegistry[A]["payload"],
-    options?: CallBackendOptions
+    timeoutMs: number,
+    signal?: AbortSignal
 ): Promise<ActionRegistry[A]["response"]> {
-    const timeoutMs = options?.timeoutMs ?? 15000;
     const controller = new AbortController();
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     let didTimeout = false;
@@ -401,13 +471,13 @@ export async function callBackend<A extends keyof ActionRegistry>(
         }, timeoutMs);
     }
 
-    if (options?.signal) {
-        if (options.signal.aborted) {
-            controller.abort(options.signal.reason);
+    if (signal) {
+        if (signal.aborted) {
+            controller.abort(signal.reason);
         } else {
-            options.signal.addEventListener('abort', () => {
-                controller.abort(options.signal?.reason);
-            });
+            signal.addEventListener('abort', () => {
+                controller.abort(signal.reason);
+            }, { once: true });
         }
     }
 
@@ -439,8 +509,6 @@ export async function callBackend<A extends keyof ActionRegistry>(
             throw new Error(body.error.message || `RPC Error: ${JSON.stringify(body.error)}`);
         }
 
-        // Unpack the ApiResponse structure nested inside JSON-RPC's result field:
-        // { "result": { "status": "success", "data": ... } }
         if (body.result && body.result.status === 'success') {
             return body.result.data;
         }
@@ -448,19 +516,9 @@ export async function callBackend<A extends keyof ActionRegistry>(
         throw new Error('Malformed RPC response envelope');
     } catch (error: any) {
         if (didTimeout) {
-            const msg = `Request timed out for ${action}`;
-            if (!options?.silent) {
-                emitToast(msg, 'error', `API:${action}`);
-            }
-            throw new Error(msg);
-        }
-        // A deliberate cancel is not a failure worth telling the user about.
-        if (error?.name === 'AbortError') {
-            throw error;
-        }
-        const msg = error?.message || String(error);
-        if (!options?.silent) {
-            emitToast(msg, 'error', `API:${action}`);
+            const timeoutError = new Error(`Request timed out for ${action}`);
+            (timeoutError as any).didTimeout = true;
+            throw timeoutError;
         }
         throw error;
     } finally {
@@ -468,6 +526,118 @@ export async function callBackend<A extends keyof ActionRegistry>(
             clearTimeout(timeoutId);
         }
     }
+}
+
+/**
+ * Handles retries with backoff for idempotent RPC calls.
+ *
+ * @param {string} action - RPC action name.
+ * @param {unknown} params - Action parameters payload.
+ * @param {CallBackendOptions} [options] - Call options.
+ * @returns {Promise<unknown>} Result data.
+ */
+async function callBackendInternal<A extends keyof ActionRegistry>(
+    action: A,
+    params: ActionRegistry[A]["payload"],
+    options?: CallBackendOptions
+): Promise<ActionRegistry[A]["response"]> {
+    const isIdempotent = IDEMPOTENT_READ_ACTIONS.has(action);
+    const defaultTimeout = HEAVY_ACTIONS.has(action) ? EXTENDED_RPC_TIMEOUT_MS : DEFAULT_RPC_TIMEOUT_MS;
+    const timeoutMs = options?.timeoutMs ?? defaultTimeout;
+    const maxRetries = options?.maxRetries ?? (isIdempotent ? 1 : 0);
+
+    let attempt = 0;
+    while (true) {
+        try {
+            return await executeRpcAttempt(action, params, timeoutMs, options?.signal);
+        } catch (error: any) {
+            attempt++;
+            const isAbortedByUser = options?.signal?.aborted;
+            const isTransient = error?.didTimeout || error?.name === 'TypeError' || error?.message?.includes('fetch');
+
+            if (!isAbortedByUser && isIdempotent && attempt <= maxRetries && isTransient) {
+                // Linear backoff before retry (1000ms * attempt)
+                await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+                continue;
+            }
+
+            if (error?.didTimeout) {
+                const msg = `Request timed out for ${action}`;
+                if (!options?.silent) {
+                    emitToast(msg, 'error', `API:${action}`);
+                }
+                throw new Error(msg);
+            }
+
+            if (error?.name === 'AbortError') {
+                throw error;
+            }
+
+            const msg = error?.message || String(error);
+            if (!options?.silent) {
+                emitToast(msg, 'error', `API:${action}`);
+            }
+            throw error;
+        }
+    }
+}
+
+/**
+ * Unified type-safe JSON-RPC 2.0 network client.
+ * Dispatches a POST request to '/api/rpc'.
+ * Coalesces in-flight duplicate idempotent reads and auto-retries transient timeouts.
+ *
+ * @param {string} action - RPC method identifier.
+ * @param {unknown} params - Action payload.
+ * @param {CallBackendOptions} [options] - Request options.
+ * @returns {Promise<unknown>} Response payload.
+ */
+export async function callBackend<A extends keyof ActionRegistry>(
+    action: A,
+    params: ActionRegistry[A]["payload"],
+    options?: CallBackendOptions
+): Promise<ActionRegistry[A]["response"]> {
+    const isIdempotent = IDEMPOTENT_READ_ACTIONS.has(action);
+
+    // If idempotent read, deduplicate in-flight concurrent requests
+    if (isIdempotent) {
+        const cacheKey = `${action}:${JSON.stringify(params ?? {})}`;
+        let existingPromise = inFlightRequests.get(cacheKey);
+
+        if (!existingPromise) {
+            existingPromise = callBackendInternal(action, params, options)
+                .finally(() => {
+                    inFlightRequests.delete(cacheKey);
+                });
+            inFlightRequests.set(cacheKey, existingPromise);
+        }
+
+        // If caller passed a custom abort signal, attach listener to caller's signal
+        // without cancelling the shared underlying fetch
+        if (options?.signal) {
+            if (options.signal.aborted) {
+                return Promise.reject(options.signal.reason);
+            }
+            return new Promise((resolve, reject) => {
+                const onAbort = () => reject(options.signal!.reason);
+                options.signal!.addEventListener('abort', onAbort, { once: true });
+                existingPromise!.then(
+                    (res) => {
+                        options.signal!.removeEventListener('abort', onAbort);
+                        resolve(res);
+                    },
+                    (err) => {
+                        options.signal!.removeEventListener('abort', onAbort);
+                        reject(err);
+                    }
+                );
+            });
+        }
+
+        return existingPromise;
+    }
+
+    return callBackendInternal(action, params, options);
 }
 
 /**

@@ -666,6 +666,7 @@ export const PlanetariumDisplay: React.FC = () => {
         onCenterChange={handleCenterChange}
         sensorFovWidthDeg={equipmentConfig?.fovWidthDeg}
         sensorFovHeightDeg={equipmentConfig?.fovHeightDeg}
+        plateScaleArcsecPerPx={equipmentConfig?.plateScaleArcsecPerPx}
       />
 
       <EquipmentConfigPanel
@@ -702,9 +703,6 @@ export const PlanetariumDisplay: React.FC = () => {
           onShowSpectraPlotChange={setShowSpectraPlot}
           showPhotometryPlot={showPhotometryPlot}
           onShowPhotometryPlotChange={setShowPhotometryPlot}
-          astronomyData={astronomyData}
-          plotLoading={plotLoading}
-          plotError={plotError}
         />
       )}
 

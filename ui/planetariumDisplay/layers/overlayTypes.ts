@@ -57,6 +57,8 @@ export interface ProjectionContext {
   sensorFovWidthDeg?: number;
   /** Sensor FOV height in degrees from active equipment configuration. */
   sensorFovHeightDeg?: number;
+  /** Sensor plate scale in arcseconds per pixel from active equipment configuration. */
+  plateScaleArcsecPerPx?: number;
   /** Show mount tracking mechanical risk heatmap. */
   showTrackingRisk?: boolean;
   /** Cumulative tracking and alignment attempts across all recorded observing sessions. */

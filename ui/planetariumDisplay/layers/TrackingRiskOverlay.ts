@@ -24,25 +24,29 @@ import { clusterAlignmentAttempts, ClusteredAlignmentSession } from '../utils/al
 function computeMechanicalPriorRisk(haDeg: number, decDeg: number, altDeg: number): number {
   if (altDeg < 0) return 1.0;
 
-  let risk = 0.05; // Base minimal mechanical risk
+  let risk = 0.05; // Base minimal mechanical risk (firm tracking, green)
 
   // 1. East vs West Meridian Bias:
-  // With East-heavy balance, HA > 0 (West of meridian) pulls gear teeth apart (gear float)
+  // With East-heavy balance, HA > 0 (West of meridian) has slight gear-float potential.
+  // Subtle prior increase that stays well within the green (safe) zone.
   if (haDeg > 0) {
     const westFactor = Math.min(1.0, haDeg / 75.0);
-    risk += 0.55 * westFactor;
+    risk += 0.10 * westFactor;
   }
 
-  // 2. High Declination (Bushing Stiction):
-  if (decDeg > 55.0) {
-    const polarFactor = Math.min(1.0, (decDeg - 55.0) / 30.0);
-    risk += 0.45 * polarFactor;
+  // 2. High Declination:
+  // Near the celestial pole, RA motor error on sky is reduced by cos(Dec).
+  // Slight bushing stiction at extreme Dec (> 75°) adds mild prior.
+  if (decDeg > 75.0) {
+    const polarFactor = Math.min(1.0, (decDeg - 75.0) / 15.0);
+    risk += 0.08 * polarFactor;
   }
 
-  // 3. Low Altitude (Seeing & Long Moment Arm):
-  if (altDeg < 30.0) {
-    const altFactor = (30.0 - altDeg) / 30.0;
-    risk += 0.4 * altFactor;
+  // 3. Low Altitude (Seeing degradation below 20°):
+  // Atmospheric turbulence degrades FWHM below 20°, becoming high risk near the horizon.
+  if (altDeg < 20.0) {
+    const altFactor = (20.0 - altDeg) / 20.0;
+    risk += 0.40 * altFactor;
   }
 
   return Math.min(1.0, Math.max(0.0, risk));
@@ -73,19 +77,43 @@ function angularDistanceDeg(ra1: number, dec1: number, ra2: number, dec2: number
 
 /**
  * Maps measured empirical tracking RMS in arcseconds into a normalized risk score (0.0 to 1.0).
- * - <= 0.05" RMS: Ideal tracking (0.05 risk - green)
- * - 0.20" RMS: Acceptable guiding (0.35 risk - yellow-green)
- * - 0.50" RMS: Borderline / degraded (0.65 risk - amber)
- * - >= 1.00" RMS: High jitter / trailing (0.95 risk - red)
+ * Scales dynamically against the imaging system's plate scale (arcsec/pixel) when available.
+ *
+ * For long exposures (e.g. 5 minutes):
+ * - rms <= 0.75 * plateScale: Sub-pixel guiding / optimal round stars (0.05 - 0.27 risk -> green)
+ * - 0.75 * plateScale < rms <= 1.25 * plateScale: Acceptable / seeing-limited (0.28 - 0.57 risk -> yellow-green/amber)
+ * - rms > 1.25 * plateScale: Star elongation / trailing risk (>= 0.58 risk -> red)
+ *
+ * Falls back to realistic amateur mount thresholds (1.2" / 2.0") when plate scale is not configured.
  *
  * @param {number} rmsArcsec - Measured total tracking RMS in arcseconds.
+ * @param {number} [plateScaleArcsecPerPx] - Active equipment plate scale in arcsec/pixel.
  * @returns {number} Risk score from 0.0 to 1.0.
  */
-function rmsToRiskScore(rmsArcsec: number): number {
-  if (rmsArcsec <= 0.05) return 0.05;
-  if (rmsArcsec >= 1.0) return 0.95;
-  // Non-linear perceptual scaling
-  return Math.min(0.95, Math.max(0.05, 0.05 + 0.9 * Math.sqrt((rmsArcsec - 0.05) / 0.95)));
+export function rmsToRiskScore(rmsArcsec: number, plateScaleArcsecPerPx?: number): number {
+  if (rmsArcsec <= 0.0) return 0.05;
+
+  const idealRms = plateScaleArcsecPerPx && plateScaleArcsecPerPx > 0
+    ? 0.75 * plateScaleArcsecPerPx
+    : 1.2;
+  const trailingThreshold = plateScaleArcsecPerPx && plateScaleArcsecPerPx > 0
+    ? 1.25 * plateScaleArcsecPerPx
+    : 2.0;
+
+  if (rmsArcsec <= idealRms) {
+    // 0.05 to 0.27 (Green zone: optimal for 5-minute exposures)
+    return 0.05 + 0.22 * (rmsArcsec / idealRms);
+  }
+
+  if (rmsArcsec <= trailingThreshold) {
+    // 0.28 to 0.57 (Amber/Yellow caution zone)
+    const factor = (rmsArcsec - idealRms) / (trailingThreshold - idealRms);
+    return 0.28 + 0.29 * factor;
+  }
+
+  // >= 0.58 (Red trailing zone)
+  const excess = (rmsArcsec - trailingThreshold) / trailingThreshold;
+  return Math.min(0.95, 0.58 + 0.37 * Math.min(1.0, Math.sqrt(excess)));
 }
 
 /**
@@ -181,7 +209,7 @@ export class TrackingRiskOverlay implements PlanetariumOverlay {
         if (hasEmpiricalData) {
           let totalWeight = 0;
           let weightedRiskSum = 0;
-          const influenceRadiusDeg = 45.0; // 45° Gaussian influence radius across sky
+          const influenceRadiusDeg = 25.0; // 25° Gaussian influence radius across sky
 
           for (const session of clusters) {
             const distDeg = angularDistanceDeg(
@@ -191,13 +219,16 @@ export class TrackingRiskOverlay implements PlanetariumOverlay {
               session.centroidDec
             );
 
-            if (distDeg < influenceRadiusDeg * 2.0) {
+            if (distDeg < influenceRadiusDeg * 1.8) {
               // Frame count scaling: more sub-frames = higher statistical confidence
               const confidence = Math.min(1.0, session.totalFrames / 30.0);
               // Gaussian spatial decay: e^(-0.5 * (d / sigma)^2)
               const spatialWeight = Math.exp(-0.5 * ((distDeg / influenceRadiusDeg) ** 2)) * confidence;
 
-              const empiricalScore = rmsToRiskScore(session.rmsTotal);
+              const empiricalScore = rmsToRiskScore(
+                session.rmsTotal,
+                projectionContext.plateScaleArcsecPerPx
+              );
               weightedRiskSum += empiricalScore * spatialWeight;
               totalWeight += spatialWeight;
             }
@@ -232,7 +263,7 @@ export class TrackingRiskOverlay implements PlanetariumOverlay {
     const isMultiSession = Boolean(
       projectionContext.cumulativeTrackingAttempts && projectionContext.cumulativeTrackingAttempts.length > 0
     );
-    const badgeW = isMultiSession ? 260 : 230;
+    const badgeW = isMultiSession ? 280 : 250;
     const badgeH = 54;
     const badgeX = width - badgeW - 16;
     const badgeY = height - badgeH - 16;
@@ -255,13 +286,19 @@ export class TrackingRiskOverlay implements PlanetariumOverlay {
     context.fillStyle = 'rgba(16, 185, 129, 0.85)';
     context.fillRect(badgeX + 10, badgeY + 28, 10, 10);
     context.fillStyle = '#94a3b8';
-    context.fillText('Sub-0.1" / Firm Preload', badgeX + 24, badgeY + 37);
+    const greenLabel = projectionContext.plateScaleArcsecPerPx && projectionContext.plateScaleArcsecPerPx > 0
+      ? `Sub-${(projectionContext.plateScaleArcsecPerPx * 0.5).toFixed(1)}" / Round`
+      : 'Sub-0.8" / Round';
+    context.fillText(greenLabel, badgeX + 24, badgeY + 37);
 
     // Amber/Red sample
     context.fillStyle = 'rgba(239, 68, 68, 0.85)';
-    context.fillRect(badgeX + 140, badgeY + 28, 10, 10);
+    context.fillRect(badgeX + 145, badgeY + 28, 10, 10);
     context.fillStyle = '#94a3b8';
-    context.fillText('High Jitter / Float', badgeX + 154, badgeY + 37);
+    const redLabel = projectionContext.plateScaleArcsecPerPx && projectionContext.plateScaleArcsecPerPx > 0
+      ? `>${projectionContext.plateScaleArcsecPerPx.toFixed(1)}" / Trailing`
+      : '>1.5" / Trailing';
+    context.fillText(redLabel, badgeX + 159, badgeY + 37);
 
     context.restore();
   }

@@ -19,6 +19,7 @@ from astropy.io import fits
 from astrometricslib.pipelines.stacking.exposure_groups import (
     CLIPPED_FRAME_ZERO_FRACTION,
     FULL_SCALE_COUNTS,
+    PLAUSIBLE_GAIN_RANGE,
     SATURATION_FRACTION_OF_FULL_SCALE,
     SATURATION_MASK_FRACTION_OF_CEILING,
     ExposureGroup,
@@ -473,6 +474,42 @@ def test_saturated_pixels_do_not_enter_the_gain() -> None:
     gains = estimate_group_gains([truth, clipped], [np.ones(truth.shape, bool), usable_clipped], 0)
 
     assert gains[1] == pytest.approx(2.0, rel=0.02)
+
+
+def test_an_implausible_gain_is_replaced_by_one_and_cannot_blow_up_the_image() -> None:
+    """Regression for Albireo: gains of 1e-18 made the stack peak at 1e29.
+
+    A clipped short group holds almost nothing where the reference is
+    brightest, so the median ratio there is near zero. That is a failed
+    measurement, not a scale, and it must leave the group at a gain of 1.
+    """
+    generator = np.random.default_rng(21)
+    truth = generator.uniform(0.0, 1.0, (300, 300)) ** 3
+    nearly_empty = np.full(truth.shape, 1e-20)
+
+    gains = estimate_group_gains([truth, nearly_empty], [np.ones(truth.shape, bool)] * 2, 0)
+
+    assert gains == [1.0, 1.0]
+    assert PLAUSIBLE_GAIN_RANGE[0] < 0.7 < PLAUSIBLE_GAIN_RANGE[1]
+
+
+def test_the_combined_image_stays_finite_when_a_short_group_is_nearly_empty() -> None:
+    """A group with almost no signal must not send the image to 1e29."""
+    generator = np.random.default_rng(22)
+    truth = generator.uniform(0.0, 1.0, (200, 200)) ** 3 * 0.3
+    long_group = truth * 10.0
+    short_group = np.where(generator.uniform(size=truth.shape) > 0.995, 1e-20, 0.0)
+
+    combined = combine_exposure_group_images(
+        [short_group, long_group],
+        [0.02, 10.0],
+        [30, 40],
+        frame_noises=[16.0, 16.0],
+        frame_zero_fractions=[0.9, 0.0],
+    )
+
+    assert np.isfinite(combined).all()
+    assert combined.max() < 10.0
 
 
 def test_groups_with_different_scales_and_saturation_combine_to_one_spectrum() -> None:

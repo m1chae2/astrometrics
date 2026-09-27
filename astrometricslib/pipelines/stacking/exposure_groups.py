@@ -150,6 +150,17 @@ SATURATION_FRACTION_OF_FULL_SCALE = 0.95
 GAIN_BRIGHTEST_FRACTION = 0.01
 GAIN_MINIMUM_PIXELS = 200
 
+# A measured gain outside this range is not believed and the group keeps a
+# gain of 1. The gains measured on the Vega session were 0.65 to 1 (see
+# above), so a group reading four times brighter or dimmer per second than
+# the reference is a failed measurement, not a real scale. On Albireo
+# (2026-09-25) the two shortest groups, clipped at zero, were measured
+# against the reference's brightest pixels, where they hold almost nothing:
+# their gains came out 1.4e-18 and 6e-31, dividing by them made the combined
+# image peak at 1e29, and only 32 stars were then detected in it. The range
+# is a judgement, wide enough for the real spread and far from those failures.
+PLAUSIBLE_GAIN_RANGE = (0.25, 4.0)
+
 
 @dataclass
 class ExposureGroup:
@@ -433,7 +444,8 @@ def estimate_group_gains(
     per_second_images : `list` [`numpy.ndarray`]
         Each group's image in counts per second.
     usable_masks : `list` [`numpy.ndarray`]
-        For each group, `True` where its pixels are not saturated.
+        For each group, `True` where its pixels can be trusted: not
+        saturated and, for a group clipped at zero, above its clipping floor.
     reference_index : `int`
         The group the others are compared with. Its gain is 1.
 
@@ -461,7 +473,15 @@ def estimate_group_gains(
             gains.append(1.0)
             continue
         gain = float(np.median(image[bright] / reference[bright]))
-        gains.append(gain if np.isfinite(gain) and gain > 0 else 1.0)
+        if not np.isfinite(gain) or not PLAUSIBLE_GAIN_RANGE[0] <= gain <= PLAUSIBLE_GAIN_RANGE[1]:
+            logger.warning(
+                "Exposure group %d measured a brightness gain of %.3g, outside %s; using 1 instead.",
+                index,
+                gain,
+                PLAUSIBLE_GAIN_RANGE,
+            )
+            gain = 1.0
+        gains.append(gain)
     return gains
 
 
@@ -582,7 +602,7 @@ def combine_exposure_group_images(
     # stack's signal and its noise alike, so a gain removes the same factor
     # from both and the signal-to-noise of each group is unchanged.
     reference_index = int(np.argmax(weights))
-    gains = estimate_group_gains(per_second, usable_masks, reference_index)
+    gains = estimate_group_gains(per_second, trusted_masks, reference_index)
     logger.info(
         "Exposure groups combined with brightness gains %s relative to the %g s group.",
         [round(gain, 3) for gain in gains],

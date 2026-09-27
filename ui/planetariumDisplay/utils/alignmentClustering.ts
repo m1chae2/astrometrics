@@ -39,7 +39,7 @@ export interface ClusteredAlignmentSession {
  */
 function normalizeRa(ra: number | null | undefined): number {
   if (ra == null || isNaN(ra)) return 0;
-  return ra <= 24.0 ? (ra * 15.0) % 360.0 : ra % 360.0;
+  return ((ra % 360.0) + 360.0) % 360.0;
 }
 
 /**
@@ -139,25 +139,97 @@ export function clusterAlignmentAttempts(
     const centroidRa = sumRa / group.length;
     const centroidDec = sumDec / group.length;
 
-    // Time calculations
-    const startTime = first.timestamp ?? null;
-    const endTime = last.timestamp ?? null;
-    const elapsedSeconds =
-      startTime != null && endTime != null && endTime >= startTime
-        ? endTime - startTime
-        : (group.length - 1) * 5; // Fallback estimate if timestamps missing
+    // Distinguish tracking sub-frames from coarse initial mount syncs (e.g. status='warning' or error > 120")
+    const isTrackingAttempt = (a: AlignmentAttempt) => {
+      const err = a.pointingErrorArcsec ?? Math.hypot(a.deltaRaArcsec ?? 0, a.deltaDecArcsec ?? 0);
+      return a.status !== 'warning' && err <= 120.0;
+    };
+
+    const trackingAttempts = group.filter(isTrackingAttempt);
+    // If we have actual tracking frames, use them for segmenting tracking runs and measuring jitter;
+    // otherwise fall back to group (e.g. for standalone sync reticles).
+    const activeTrackingGroup = trackingAttempts.length > 0 ? trackingAttempts : group;
+
+    // Segment into contiguous tracking runs (break on > 2 hour / 7200s gap)
+    const runs: AlignmentAttempt[][] = [];
+    let currentRun: AlignmentAttempt[] = [activeTrackingGroup[0]];
+
+    for (let i = 1; i < activeTrackingGroup.length; i++) {
+      const prev = activeTrackingGroup[i - 1];
+      const curr = activeTrackingGroup[i];
+      const prevTs = prev.timestamp ?? 0;
+      const currTs = curr.timestamp ?? 0;
+      const dt = currTs - prevTs;
+
+      // If gap exceeds 2 hours (7200 seconds), start a new tracking run
+      if (prev.timestamp != null && curr.timestamp != null && dt > 7200) {
+        runs.push(currentRun);
+        currentRun = [curr];
+      } else {
+        currentRun.push(curr);
+      }
+    }
+    runs.push(currentRun);
 
     // Initial slew error from the very first frame
     const initialDra = first.deltaRaArcsec ?? 0;
     const initialDdec = first.deltaDecArcsec ?? 0;
     const initialErrorArcsec = first.pointingErrorArcsec ?? Math.hypot(initialDra, initialDdec);
 
-    // RMS tracking dispersion (skip initial frame if N > 1 to represent tracking jitter)
-    const trackingSlice = group.length > 1 ? group.slice(1) : group;
-    let sumSqRa = 0;
-    let sumSqDec = 0;
-    let sumSqTot = 0;
+    // Compute cumulative exposure elapsed time and true tracking jitter variance across runs
+    let totalElapsedSeconds = 0;
+    let totalWeightedVarRa = 0;
+    let totalWeightedVarDec = 0;
+    let totalTrackingFrames = 0;
 
+    for (const run of runs) {
+      if (run.length > 1) {
+        const rStart = run[0].timestamp ?? 0;
+        const rEnd = run[run.length - 1].timestamp ?? 0;
+        const rElapsed = rEnd >= rStart ? rEnd - rStart : (run.length - 1) * 5;
+        totalElapsedSeconds += rElapsed;
+
+        // Skip initial slew frame when run has >= 3 frames to exclude GoTo settling
+        const trackingFrames = run.length >= 3 ? run.slice(1) : run;
+        const n = trackingFrames.length;
+
+        // Centroid of settled position for this run
+        let meanRa = 0;
+        let meanDec = 0;
+        trackingFrames.forEach((a) => {
+          meanRa += a.deltaRaArcsec ?? 0;
+          meanDec += a.deltaDecArcsec ?? 0;
+        });
+        meanRa /= n;
+        meanDec /= n;
+
+        // Variance (jitter) around the settled mean position
+        let runVarRa = 0;
+        let runVarDec = 0;
+        trackingFrames.forEach((a) => {
+          const dRa = (a.deltaRaArcsec ?? 0) - meanRa;
+          const dDec = (a.deltaDecArcsec ?? 0) - meanDec;
+          runVarRa += dRa * dRa;
+          runVarDec += dDec * dDec;
+        });
+        runVarRa /= n;
+        runVarDec /= n;
+
+        totalWeightedVarRa += runVarRa * n;
+        totalWeightedVarDec += runVarDec * n;
+        totalTrackingFrames += n;
+      }
+    }
+
+    const rmsRa = totalTrackingFrames > 0 ? Math.sqrt(totalWeightedVarRa / totalTrackingFrames) : 0;
+    const rmsDec = totalTrackingFrames > 0 ? Math.sqrt(totalWeightedVarDec / totalTrackingFrames) : 0;
+    const rmsTotal = Math.sqrt(rmsRa * rmsRa + rmsDec * rmsDec);
+
+    const startTime = first.timestamp ?? null;
+    const endTime = last.timestamp ?? null;
+    const elapsedSeconds = totalElapsedSeconds > 0 ? totalElapsedSeconds : (group.length - 1) * 5;
+
+    // Time series for telemetry charts
     const t0 = startTime ?? 0;
     const timeSeries = group.map((att, idx) => {
       const dRa = att.deltaRaArcsec ?? 0;
@@ -173,18 +245,6 @@ export function clusterAlignmentAttempts(
         timestamp: ts,
       };
     });
-
-    trackingSlice.forEach((att) => {
-      const dRa = att.deltaRaArcsec ?? 0;
-      const dDec = att.deltaDecArcsec ?? 0;
-      sumSqRa += dRa * dRa;
-      sumSqDec += dDec * dDec;
-      sumSqTot += dRa * dRa + dDec * dDec;
-    });
-
-    const rmsRa = Math.sqrt(sumSqRa / trackingSlice.length);
-    const rmsDec = Math.sqrt(sumSqDec / trackingSlice.length);
-    const rmsTotal = Math.sqrt(sumSqTot / trackingSlice.length);
 
     // Linear regression for drift slopes (arcsec / min)
     let driftSlopeRaArcsecPerMin = 0;

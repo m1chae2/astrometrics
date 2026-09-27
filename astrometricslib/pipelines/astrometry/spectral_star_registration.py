@@ -59,6 +59,25 @@ _TRANSLATION_BIN_PX = 6.0
 # 1000 px is a third of the sensor.
 _SOLUTION_MAX_TRANSLATION_OFFSET_PX = 1000.0
 
+# Two catalog stars at least this far apart are resolved (two separate zero
+# orders); closer ones are one blob to the detector. Navi's primary and
+# companion are 4 px apart and stay one star. Albireo A and B are 17 px apart
+# and the detector found a single detection for both, which took B's name and
+# left A unnamed. 8 px is about twice a zero order's width (FWHM about 4 px),
+# a judgement, not tuned.
+_RESOLVED_PAIR_MINIMUM_SEPARATION_PX = 8.0
+
+# How far from a named detection a second catalog star may be to be counted
+# as part of the same blob. A little more than a bright star's zero order
+# wings reach; Albireo's pair is 17 px apart.
+_BLENDED_PAIR_SEARCH_RADIUS_PX = 25.0
+
+# A companion is only split out if it is at most this many magnitudes
+# fainter than the star that took the detection: a much fainter star is not
+# what makes the blob and would have no zero order of its own to extract.
+# Albireo B is 2 magnitudes fainter than A.
+_BLENDED_PAIR_MAXIMUM_MAGNITUDE_DIFFERENCE = 4.0
+
 
 def _pixel_position(obj: StellarObject) -> tuple[float, float] | None:
     """Get the X and Y coordinates of a star in the image.
@@ -366,11 +385,112 @@ def identify_spectral_stars_via_solution(
         used_stars.add(star_id)
         used_detections.add(detection_index)
         matched_count += 1
+    if offset is not None:
+        matched_count += _split_blended_pairs(
+            spectral_stellar_objects, detections, used_detections, reference_by_id, placed, offset
+        )
     logger.info(
         f"Spectral field identified {matched_count} / {len(detections)} detections from the plate "
         f"solution ({how})."
     )
     return matched_count
+
+
+def _split_blended_pairs(
+    spectral_stellar_objects: list[StellarObject],
+    detections: list[tuple[StellarObject, tuple[float, float]]],
+    used_detections: set[int],
+    reference_by_id: dict[str, StellarObject],
+    placed: dict[str, tuple[float, float]],
+    offset: tuple[float, float],
+) -> int:
+    """Give each star of a resolved close pair its own place in the image.
+
+    The blind detector finds two zero orders that overlap as one blob.
+    That blob was named after the nearest catalog star, so the other star of
+    the pair was left unnamed and never extracted. Where a second catalog
+    star lies at least `_RESOLVED_PAIR_MINIMUM_SEPARATION_PX` from the star
+    that took a detection, and within `_BLENDED_PAIR_SEARCH_RADIUS_PX` of it,
+    both are moved to their own projected positions (the plate solution plus
+    the shift between the two images) and the second is added as a new
+    detection. Pairs closer than the minimum are left as one star.
+
+    Parameters
+    ----------
+    spectral_stellar_objects : `list` [`StellarObject`]
+        The detections, added to in place.
+    detections : `list` [`tuple`]
+        Each detection with its pixel position, in the same order the
+        matching used.
+    used_detections : `set` [`int`]
+        Indexes into `detections` that were named.
+    reference_by_id : `dict` [`str`, `StellarObject`]
+        The catalog stars by id.
+    placed : `dict` [`str`, `tuple`]
+        Each catalog star's pixel position in the solved image.
+    offset : `tuple` [`float`, `float`]
+        The shift from the solved image to the spectroscopy image.
+
+    Returns
+    -------
+    added_count : `int`
+        How many companions were added as new detections.
+    """
+    shift = np.array(offset)
+    added = 0
+    handled: set[str] = set()
+    for detection_index in sorted(used_detections):
+        detection, _ = detections[detection_index]
+        star = reference_by_id.get(detection.id)
+        if star is None or star.id in handled:
+            continue
+        star_position = np.array(placed[star.id]) + shift
+        for other_id, other in reference_by_id.items():
+            if other_id == star.id or other_id in handled or other_id not in placed:
+                continue
+            other_position = np.array(placed[other_id]) + shift
+            separation = float(np.hypot(*(other_position - star_position)))
+            if not _RESOLVED_PAIR_MINIMUM_SEPARATION_PX <= separation <= _BLENDED_PAIR_SEARCH_RADIUS_PX:
+                continue
+            if any(
+                other_id == used.id or float(np.hypot(*(np.array(pos) - other_position))) < 5.0
+                for used, pos in detections
+                if used.id == other_id
+            ):
+                continue
+            if (
+                star.magnitude is not None
+                and other.magnitude is not None
+                and other.magnitude - star.magnitude > _BLENDED_PAIR_MAXIMUM_MAGNITUDE_DIFFERENCE
+            ):
+                continue
+            companion = detection.model_copy(deep=True)
+            _copy_identity(companion, other)
+            _set_pixel_position(companion, other_position)
+            _set_pixel_position(detection, star_position)
+            spectral_stellar_objects.insert(spectral_stellar_objects.index(detection) + 1, companion)
+            handled.update({star.id, other_id})
+            added += 1
+            break
+    return added
+
+
+def _set_pixel_position(obj: StellarObject, position: np.ndarray) -> None:
+    """Move a detection to a pixel position.
+
+    Parameters
+    ----------
+    obj : `StellarObject`
+        The detection. Its ``star_data`` centroid is changed.
+    position : `numpy.ndarray`
+        The new ``(x, y)``.
+    """
+    star_data = obj.star_data if isinstance(obj.star_data, dict) else {}
+    x_key = "xcentroid" if "xcentroid" in star_data else "x_centroid"
+    y_key = "ycentroid" if "ycentroid" in star_data else "y_centroid"
+    star_data[x_key] = float(position[0])
+    star_data[y_key] = float(position[1])
+    obj.star_data = star_data
 
 
 # The fewest identified stars needed to trust an offset between the two star

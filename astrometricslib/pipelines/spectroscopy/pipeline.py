@@ -20,6 +20,7 @@ from astrometricslib.pipelines.shared.quality.saturation import (
     is_normalised_stack_scale,
 )
 from astrometricslib.pipelines.spectroscopy.instrument_response import load_instrument_response
+from astrometricslib.pipelines.spectroscopy.intensity_scale import counts_per_second_factor
 from astrometricslib.pipelines.spectroscopy.neighbor_wing_correction import (
     STATUS_APPLIED,
     STATUS_NOT_NEEDED,
@@ -952,6 +953,7 @@ class SpectroscopyPipeline:
             ),
             neighbor_wing_fraction=result.get("neighbor_wing_fraction"),
             neighbor_wing_status=result.get("neighbor_wing_status"),
+            counts_per_second_factor=counts_per_second_factor(getattr(image, "header", None)),
         )
 
         # Records this extraction as one more epoch in the star's own

@@ -3,16 +3,14 @@
  * @fileoverview Floating details card for a selected celestial object.
  *
  * Displays coordinates (sexagesimal and decimal), altitude/azimuth, hour angle,
- * rise/set times, meridian flip status, and inline spectrum preview for selected
- * stars. Also renders checkboxes to open the full scientific plot panels.
+ * rise/set times, and meridian flip status for selected stars and targets.
+ * Also renders checkboxes to open the full scientific plot panels.
  *
  * REQ: PLN-2.4, REQ: PLN-2.5
  */
 
 import React from 'react';
 import { PlanetariumSource, ObserverLocation } from '../../common/types/planetariumTypes';
-import { SpectrumViewer } from '../../astronomyDisplay/components/SpectrumViewer';
-import { ParsedAstronomyData } from '../../astronomyDisplay/hooks/useSpectrumData';
 import { safeParse, formatRA, formatDec, formatNumber } from '../utils/coordinateUtils';
 import { formatCatalogMagnitude } from '../layers/StarOverlay';
 
@@ -32,10 +30,6 @@ interface Props {
   /** Whether the full photometry plot panel is currently visible. */
   showPhotometryPlot: boolean;
   onShowPhotometryPlotChange: (show: boolean) => void;
-  /** Astronomy data payload from useSpectrumData, used for the inline spectrum preview. */
-  astronomyData?: ParsedAstronomyData | null;
-  plotLoading?: boolean;
-  plotError?: string | null;
 }
 
 /**
@@ -73,9 +67,6 @@ export const PlanetariumInfoCard: React.FC<Props> = ({
   onShowSpectraPlotChange,
   showPhotometryPlot,
   onShowPhotometryPlotChange,
-  astronomyData,
-  plotLoading = false,
-  plotError = null
 }) => {
   const spectralClass = (source.spectralType || 'A').charAt(0).toUpperCase();
   const starGlowColor = spectralColors[spectralClass] || '#ffffff';
@@ -95,8 +86,6 @@ export const PlanetariumInfoCard: React.FC<Props> = ({
       flipMessage = `Transit in ${minutesUntilFlip.toFixed(1)}m`;
     }
   }
-
-  const spectraHistory = astronomyData?.spectraHistory ?? [];
 
   return (
     <div className="planetarium-info-card" role="dialog" aria-label={`Information for ${source.id}`}>
@@ -166,20 +155,6 @@ export const PlanetariumInfoCard: React.FC<Props> = ({
             </tr>
           </tbody>
         </table>
-
-        {(spectraHistory.length > 0 && !isTarget) && (
-          <div className="planetarium-info-card__embedded-plot">
-            <h5>Spectrum</h5>
-            <div className="planetarium-info-card__embedded-plot-canvas">
-              <SpectrumViewer
-                astronomyData={astronomyData ?? null}
-                loading={plotLoading}
-                error={plotError}
-                active={true}
-              />
-            </div>
-          </div>
-        )}
 
         <div className="planetarium-checkboxes">
           {source.hasSpectra && (

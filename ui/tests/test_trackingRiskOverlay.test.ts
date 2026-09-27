@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { TrackingRiskOverlay } from '../planetariumDisplay/layers/TrackingRiskOverlay';
+import { TrackingRiskOverlay, rmsToRiskScore } from '../planetariumDisplay/layers/TrackingRiskOverlay';
 import { ProjectionContext } from '../planetariumDisplay/layers/overlayTypes';
 
 describe('TrackingRiskOverlay', () => {
@@ -128,5 +128,64 @@ describe('TrackingRiskOverlay', () => {
     expect(mockContext.save).toHaveBeenCalled();
     const renderedTitles = fillTextMock.mock.calls.map((call) => call[0]);
     expect(renderedTitles).toContain('Tracking Heatmap (2 targets · 4 solves)');
+  });
+
+  /**
+   * Tests that rmsToRiskScore properly normalizes tracking errors against equipment plate scale.
+   */
+  it('scales tracking risk score relative to imaging plate scale', () => {
+    // Equipment rig: 75mm f/5.4 (405mm) + 3.76um sensor -> ~1.91"/px plate scale
+    const plateScale = 1.91;
+
+    // Up to 0.75x plate scale (<=1.43" RMS) yields round stars on 5-min subs -> strictly green (<0.28)
+    const alkaidScore = rmsToRiskScore(0.82, plateScale);
+    const mirachScore = rmsToRiskScore(0.87, plateScale);
+    const schedarScore = rmsToRiskScore(0.93, plateScale);
+    const naviScore = rmsToRiskScore(1.0, plateScale);
+    const m81Score = rmsToRiskScore(1.2, plateScale);
+    expect(alkaidScore).toBeLessThan(0.28);
+    expect(mirachScore).toBeLessThan(0.28);
+    expect(schedarScore).toBeLessThan(0.28);
+    expect(naviScore).toBeLessThan(0.28);
+    expect(m81Score).toBeLessThan(0.28);
+
+    // Acceptable guiding between 0.75x and 1.25x plate scale (1.43" to 2.39") -> amber (0.28 to 0.57)
+    const cautionScore = rmsToRiskScore(1.8, plateScale);
+    expect(cautionScore).toBeGreaterThanOrEqual(0.28);
+    expect(cautionScore).toBeLessThan(0.58);
+
+    // Severe trailing (>2.39" RMS) -> red (>=0.58 risk)
+    const trailingScore = rmsToRiskScore(2.8, plateScale);
+    expect(trailingScore).toBeGreaterThanOrEqual(0.58);
+  });
+
+  /**
+   * Tests that rmsToRiskScore uses sensible real-world fallback thresholds when no plate scale is configured.
+   */
+  it('uses realistic amateur mount thresholds when plate scale is undefined', () => {
+    // <= 1.2" RMS should be green (<0.28)
+    expect(rmsToRiskScore(0.8)).toBeLessThan(0.28);
+    expect(rmsToRiskScore(1.2)).toBeLessThanOrEqual(0.28);
+
+    // 1.2" to 2.0" RMS should be amber (0.28 to 0.57)
+    const midScore = rmsToRiskScore(1.6);
+    expect(midScore).toBeGreaterThanOrEqual(0.28);
+    expect(midScore).toBeLessThan(0.58);
+
+    // > 2.0" RMS should be red (>=0.58)
+    const highScore = rmsToRiskScore(2.4);
+    expect(highScore).toBeGreaterThanOrEqual(0.58);
+  });
+
+  /**
+   * Tests that rmsToRiskScore correctly penalizes small RMS on high-magnification narrow-field rigs.
+   */
+  it('penalizes modest RMS on narrow-field planetary or SCT rigs', () => {
+    // 2000mm focal length SCT with 0.40"/px plate scale
+    const sctPlateScale = 0.4;
+
+    // 0.8" RMS is 2 full pixels of blur -> must be red (>=0.58)
+    const sctRisk = rmsToRiskScore(0.8, sctPlateScale);
+    expect(sctRisk).toBeGreaterThanOrEqual(0.58);
   });
 });

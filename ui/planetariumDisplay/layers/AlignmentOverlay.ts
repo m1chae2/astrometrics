@@ -23,8 +23,7 @@ const ARROW_HEAD_PX = 6;
  */
 function normalizeRaDeg(ra: number | null | undefined): number {
   if (ra === null || ra === undefined || isNaN(ra)) return 0;
-  // If <= 24.0, assume hours and convert to degrees
-  return ra <= 24.0 ? (ra * 15.0) % 360.0 : ra % 360.0;
+  return ((ra % 360.0) + 360.0) % 360.0;
 }
 
 /**
@@ -257,40 +256,8 @@ export class AlignmentOverlay implements PlanetariumOverlay {
   ): void {
     const isNorth = projectionContext.observerLat >= 0;
     const truePoleDec = isNorth ? 90.0 : -90.0;
-    const poleName = isNorth ? 'NCP' : 'SCP';
-
     const truePolePt = projectionContext.projectCoords(0.0, truePoleDec);
     const polarStatus: PolarAlignmentStatus | null = projectionContext.polarAlignment ?? null;
-
-    if (truePolePt.visible) {
-      // True Celestial Pole Reticle (Gold)
-      context.strokeStyle = 'rgba(251, 191, 36, 0.9)';
-      context.fillStyle = 'rgba(251, 191, 36, 0.9)';
-      context.lineWidth = 1.5;
-
-      context.beginPath();
-      context.arc(truePolePt.x, truePolePt.y, 14, 0, 2 * Math.PI);
-      context.stroke();
-
-      context.beginPath();
-      context.arc(truePolePt.x, truePolePt.y, 3, 0, 2 * Math.PI);
-      context.fill();
-
-      // Cross ticks
-      context.beginPath();
-      context.moveTo(truePolePt.x - 20, truePolePt.y);
-      context.lineTo(truePolePt.x - 14, truePolePt.y);
-      context.moveTo(truePolePt.x + 14, truePolePt.y);
-      context.lineTo(truePolePt.x + 20, truePolePt.y);
-      context.moveTo(truePolePt.x, truePolePt.y - 20);
-      context.lineTo(truePolePt.x, truePolePt.y - 14);
-      context.moveTo(truePolePt.x, truePolePt.y + 14);
-      context.lineTo(truePolePt.x, truePolePt.y + 20);
-      context.stroke();
-
-      context.font = 'bold 11px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
-      context.fillText(`True ${poleName}`, truePolePt.x + 18, truePolePt.y - 6);
-    }
 
     // If Polar Alignment Assistant telemetry is available
     if (polarStatus && polarStatus.totalErrorArcsec !== null && polarStatus.totalErrorArcsec !== undefined) {

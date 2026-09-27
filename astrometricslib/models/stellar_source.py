@@ -277,6 +277,12 @@ class SpectroscopyResult(BaseModel):
     # "applied", or "skipped: ..." with the reason (for example the fit was
     # not trustworthy). `None` when the correction was not run.
     neighbor_wing_status: str | None = Field(default=None, alias="neighborWingStatus")
+    # What the intensities above are measured in (see intensity_scale).
+    # Multiply an intensity by this to get detector counts per second, so
+    # spectra from different images and exposures can be compared for
+    # brightness. `None` when the image did not say enough (every spectrum
+    # stored before this field existed), in which case the scale is unknown.
+    counts_per_second_factor: float | None = Field(default=None, alias="countsPerSecondFactor")
 
 
 class StellarObject(BaseModel):

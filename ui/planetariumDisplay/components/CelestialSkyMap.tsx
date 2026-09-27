@@ -97,6 +97,8 @@ interface Props {
   sensorFovWidthDeg?: number;
   /** Sensor FOV height in degrees from the active equipment configuration. */
   sensorFovHeightDeg?: number;
+  /** Sensor plate scale in arcseconds per pixel from the active equipment configuration. */
+  plateScaleArcsecPerPx?: number;
 }
 
 
@@ -186,6 +188,7 @@ export const CelestialSkyMap: React.FC<Props> = ({
   onCenterChange,
   sensorFovWidthDeg,
   sensorFovHeightDeg,
+  plateScaleArcsecPerPx,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const starCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -252,6 +255,7 @@ export const CelestialSkyMap: React.FC<Props> = ({
   const currentLSTRef = useRef<number>(0.0);
   const sensorFovWidthDegRef = useRef<number | undefined>(sensorFovWidthDeg);
   const sensorFovHeightDegRef = useRef<number | undefined>(sensorFovHeightDeg);
+  const plateScaleArcsecPerPxRef = useRef<number | undefined>(plateScaleArcsecPerPx);
 
   // Tracks whether the render loop needs to redraw, so an idle, unchanged
   // view doesn't repaint every star/overlay from scratch on every rAF tick.
@@ -544,6 +548,10 @@ export const CelestialSkyMap: React.FC<Props> = ({
     sensorFovHeightDegRef.current = sensorFovHeightDeg;
   }, [sensorFovHeightDeg]);
 
+  useEffect(() => {
+    plateScaleArcsecPerPxRef.current = plateScaleArcsecPerPx;
+  }, [plateScaleArcsecPerPx]);
+
   const parentNotifyTimeout = useRef<number | null>(null);
   const notifyParentFOV = useCallback((nextFOV: number) => {
     if (parentNotifyTimeout.current !== null) {
@@ -746,6 +754,7 @@ export const CelestialSkyMap: React.FC<Props> = ({
         selectedSessionId,
         sensorFovWidthDeg: sensorFovWidthDegRef.current,
         sensorFovHeightDeg: sensorFovHeightDegRef.current,
+        plateScaleArcsecPerPx: plateScaleArcsecPerPxRef.current,
         projectCoords: (ra: number, dec: number) => {
           const { alt, az } = getAltAz(ra, dec, currentFrameLST, observerLat);
           const projection = projectAltAz(alt, az, centerAltRef.current, centerAzRef.current, localFOVRef.current, canvas.width, canvas.height);

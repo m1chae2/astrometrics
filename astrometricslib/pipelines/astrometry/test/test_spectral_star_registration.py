@@ -16,6 +16,7 @@ from astrometricslib.models.stellar_source import SpectroscopyResult, StellarObj
 from astrometricslib.pipelines.astrometry.spectral_star_registration import (
     estimate_registration_offset,
     identify_spectral_stars_via_registration,
+    identify_spectral_stars_via_solution,
     shift_wcs_to_frame,
 )
 
@@ -258,3 +259,106 @@ def test_registration_carries_the_reference_stars_catalog_colour():  # ruff: ign
 
     assert all(star.b_minus_v == pytest.approx(0.47) for star in spectral_stars if star.is_catalog_identified)
     assert any(star.is_catalog_identified for star in spectral_stars)
+
+
+def _solution_field(shift=(-163.0, 47.0), count=12):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    """Build a plate solution, catalog stars and spectral detections.
+
+    Parameters
+    ----------
+    shift : `tuple` [`float`, `float`], optional
+        How far the spectroscopy image sits from the solved image, in pixels.
+    count : `int`, optional
+        How many stars to make besides the bright one at the centre.
+
+    Returns
+    -------
+    wcs : `astropy.wcs.WCS`
+        The solved image's plate solution.
+    reference_stars : `list` [`StellarObject`]
+        The catalog stars. The first is the bright one, whose stored pixel
+        position is stale (it is the position in the spectroscopy image).
+    spectral_stars : `list` [`StellarObject`]
+        One unnamed detection per catalog star, at its spectroscopy-image
+        position.
+    """
+    wcs = WCS(naxis=2)
+    wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+    wcs.wcs.crpix = [1500.0, 1500.0]
+    wcs.wcs.crval = [310.0, 45.0]
+    wcs.wcs.cd = [[-5e-4, 0.0], [0.0, 5e-4]]
+    rng = np.random.default_rng(11)
+    reference_stars = []
+    spectral_stars = []
+    for index in range(count + 1):
+        right_ascension = 310.0 + (0.0 if index == 0 else rng.uniform(-0.3, 0.3))
+        declination = 45.0 + (0.0 if index == 0 else rng.uniform(-0.3, 0.3))
+        x_true, y_true = (float(v) for v in wcs.wcs_world2pix(right_ascension, declination, 0))
+        spectral_x, spectral_y = x_true + shift[0], y_true + shift[1]
+        # The bright star's stored position is stale: it is the position
+        # in the spectroscopy image, not the solved image.
+        stored = (spectral_x, spectral_y) if index == 0 else (x_true, y_true)
+        star = _reference_star("Bright" if index == 0 else f"HD{index}", *stored)
+        star.right_ascension = right_ascension
+        star.declination = declination
+        reference_stars.append(star)
+        spectral_stars.append(_spectral_star(f"Star_{index}", spectral_x + 0.4, spectral_y - 0.3))
+    return wcs, reference_stars, spectral_stars
+
+
+def test_a_bright_star_with_a_stale_stored_position_is_still_named_from_the_solution():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Regression for Deneb: the saturated star had a stale stored position.
+
+    Geometric registration slid the fields by the other stars' offset and put
+    the bright star 170 px from its own reference, so it stayed unnamed. The
+    solution places it by sky position, so it is named.
+    """
+    wcs, reference_stars, spectral_stars = _solution_field()
+    matched = identify_spectral_stars_via_solution(spectral_stars, reference_stars, wcs)
+    assert matched == len(reference_stars)
+    assert spectral_stars[0].id == "Bright"
+    assert [star.id for star in spectral_stars[1:]] == [star.id for star in reference_stars[1:]]
+
+
+def test_the_solution_gives_each_star_one_detection_and_each_detection_one_name():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """A trail point beside a star does not get the star's name too."""
+    wcs, reference_stars, spectral_stars = _solution_field()
+    trail_point = _spectral_star("Star_trail", spectral_stars[3].star_data["xcentroid"] + 5.0, 1500.0)
+    trail_point.star_data["ycentroid"] = spectral_stars[3].star_data["ycentroid"] + 4.0
+    spectral_stars.append(trail_point)
+    identify_spectral_stars_via_solution(spectral_stars, reference_stars, wcs)
+    names = [star.id for star in spectral_stars]
+    assert names.count("HD3") == 1
+    assert names[3] == "HD3"
+    assert trail_point.id == "Star_trail"
+
+
+def test_the_solution_declines_when_the_fields_do_not_share_one_shift():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Unrelated detections give None so the caller can fall back."""
+    wcs, reference_stars, _ = _solution_field()
+    rng = np.random.default_rng(3)
+    unrelated = [_spectral_star(f"Star_{i}", *rng.uniform(0, 3000, 2)) for i in range(15)]
+    assert identify_spectral_stars_via_solution(unrelated, reference_stars, wcs) is None
+    assert all(star.id.startswith("Star_") for star in unrelated)
+
+
+def test_a_detection_farther_than_the_limit_from_its_shifted_position_stays_unnamed():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """A detection 40 px from where the star should be is not that star."""
+    wcs, reference_stars, spectral_stars = _solution_field()
+    spectral_stars[5].star_data["xcentroid"] += 40.0
+    identify_spectral_stars_via_solution(spectral_stars, reference_stars, wcs)
+    assert spectral_stars[5].id == "Star_5"
+
+
+def test_a_brighter_catalog_entry_wins_over_a_companion_a_few_pixels_away():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Regression for Navi: the companion entry sat nearer by 2 px and won."""
+    wcs, reference_stars, spectral_stars = _solution_field()
+    primary = reference_stars[0]
+    primary.magnitude = 2.4
+    companion = _reference_star("Companion", 0.0, 0.0)
+    companion.magnitude = None
+    companion.right_ascension = primary.right_ascension + 0.0016
+    companion.declination = primary.declination
+    reference_stars.append(companion)
+    identify_spectral_stars_via_solution(spectral_stars, reference_stars, wcs)
+    assert spectral_stars[0].id == "Bright"

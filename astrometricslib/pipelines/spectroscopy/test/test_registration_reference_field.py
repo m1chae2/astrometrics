@@ -192,6 +192,43 @@ def test_nothing_is_ruled_out_when_the_field_is_unknown() -> None:
     assert candidates == [far]
 
 
+def _unflagged_star(star_id: str, ra: float | None, dec: float | None) -> StellarObject:
+    """Build a star with a sky position whose identified flag is off.
+
+    Returns
+    -------
+    star : `StellarObject`
+        The star, attached to the Albireo target.
+    """
+    star = _star(star_id, ra, dec, ["Albireo"])
+    star.is_catalog_identified = False
+    return star
+
+
+def test_a_named_star_with_a_position_is_a_reference_even_when_not_flagged() -> None:
+    """Regression: `* alf Per` and `* gam Cas` were stored unflagged."""
+    named = _unflagged_star("* alf Per", 292.7, 28.0)
+
+    candidates = _registration_reference_candidates(
+        SimpleNamespace(id="Albireo"), _Catalog([named]), FIELD_CENTER
+    )
+
+    assert [star.id for star in candidates] == ["* alf Per"]
+
+
+def test_unflagged_anonymous_detections_and_unplaced_stars_are_not_references() -> None:
+    """Only a real name with a sky position rescues an unflagged star."""
+    anonymous = [
+        _unflagged_star("Star_3", 292.7, 28.0),
+        _unflagged_star("FIELD_J292.7_28.0", 292.7, 28.0),
+        _unflagged_star("* bet Cyg", None, None),
+    ]
+
+    candidates = _registration_reference_candidates(SimpleNamespace(id="Albireo"), _Catalog(anonymous), None)
+
+    assert candidates == []
+
+
 def test_a_solved_position_is_preferred_over_the_header(tmp_path) -> None:  # ruff: ignore[missing-type-function-argument]
     """The hint from a plate-solved stack wins; the header is the fallback."""
     from astropy.io import fits

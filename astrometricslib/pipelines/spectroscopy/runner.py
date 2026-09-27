@@ -176,6 +176,39 @@ def _within_field(stellar_object: Any, field_center: tuple[float, float] | None)
     return separation_deg <= REGISTRATION_REFERENCE_FIELD_RADIUS_DEG
 
 
+# Ids that mark a detection nobody has named: the blind detector's
+# "Star_<n>" and a position-only "FIELD_<ra>_<dec>" entry. Neither is a
+# known star, so neither can be a reference to name others by.
+_ANONYMOUS_ID_PREFIXES = ("Star_", "FIELD_")
+
+
+def _can_be_a_reference_star(stellar_object: Any) -> bool:
+    """Tell whether a catalog star can be used to name spectral detections.
+
+    A star flagged as identified from a catalog can. So can a star that
+    carries a real name and a sky position even when that flag is off:
+    `* alf Per` (Mirfak) and `* gam Cas` (Navi) were stored unflagged, which
+    left each target's own brightest star out of the reference set and let
+    its detection go unnamed or take a companion's name. A detection that
+    has neither a real name nor a sky position cannot be one.
+
+    Parameters
+    ----------
+    stellar_object : `StellarObject`
+        The catalog star to test.
+
+    Returns
+    -------
+    can_be_reference : `bool`
+        `True` when the star may be used as a reference.
+    """
+    if stellar_object.is_catalog_identified:
+        return True
+    star_id = str(stellar_object.id or "")
+    has_position = stellar_object.right_ascension is not None and stellar_object.declination is not None
+    return bool(star_id) and not star_id.startswith(_ANONYMOUS_ID_PREFIXES) and has_position
+
+
 def _registration_reference_candidates(
     target: Target, catalog_access: Any, field_center: tuple[float, float] | None = None
 ) -> list:
@@ -242,7 +275,7 @@ def _registration_reference_candidates(
         catalog_identified = [
             stellar_object
             for stellar_object in catalog_access.get_by_ids("stellar_catalog", field_star_ids)
-            if stellar_object.is_catalog_identified and _within_field(stellar_object, field_center)
+            if _can_be_a_reference_star(stellar_object) and _within_field(stellar_object, field_center)
         ]
         own_target_stars = [
             stellar_object for stellar_object in catalog_identified if target.id in stellar_object.target_ids
@@ -255,7 +288,7 @@ def _registration_reference_candidates(
     own_target_stars = [
         stellar_object
         for stellar_object in catalog_access.get_by_ids("stellar_catalog", own_star_ids)
-        if stellar_object.is_catalog_identified and target.id in stellar_object.target_ids
+        if _can_be_a_reference_star(stellar_object) and target.id in stellar_object.target_ids
     ]
     if own_target_stars:
         return own_target_stars
@@ -268,7 +301,7 @@ def _registration_reference_candidates(
         for stellar_object in catalog_access.get_by_ids(
             "stellar_catalog", all_star_ids[start : start + _CATALOG_SLICE_SIZE]
         )
-        if stellar_object.is_catalog_identified
+        if _can_be_a_reference_star(stellar_object)
     ]
 
 
@@ -354,9 +387,24 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
         if reference_stellar_objects:
             from astrometricslib.pipelines.astrometry.spectral_star_registration import (
                 identify_spectral_stars_via_registration,
+                identify_spectral_stars_via_solution,
             )
 
-            identify_spectral_stars_via_registration(context.stellar_objects, reference_stellar_objects)
+            # Prefer the plate solution of the target's solved standard
+            # stack: it places every catalog star, saturated ones included,
+            # by sky position. Matching stored pixel positions by geometry
+            # is the fallback, for a target with no solved stack or whose
+            # star fields do not agree on one shift.
+            reference_wcs = resolve_solved_stack_wcs(target, request.path)
+            matched_from_solution = (
+                identify_spectral_stars_via_solution(
+                    context.stellar_objects, reference_stellar_objects, reference_wcs
+                )
+                if reference_wcs is not None
+                else None
+            )
+            if not matched_from_solution:
+                identify_spectral_stars_via_registration(context.stellar_objects, reference_stellar_objects)
             _recover_extended_source_hint(
                 astrometry, context, target, request.path, reference_stellar_objects, hint_ra, hint_dec
             )

@@ -49,6 +49,16 @@ _DEFAULT_MAX_TRANSLATION_OFFSET_PX = 300.0
 # star field wouldn't coincidentally pile up in a single bin.
 _TRANSLATION_BIN_PX = 6.0
 
+# Search window, in pixels, for the shift between a target's solved standard
+# stack and its spectral stack when the plate solution places the stars. The
+# two stacks are registered separately, so how far apart their pixel grids
+# sit depends on where the mount pointed for each set of frames: 2026-09-25
+# gave about 170 px for Deneb, 280 px for Albireo and 500 px for Mirfak. The
+# solution places every catalog star exactly, and a shift needs at least
+# `_MIN_CONTROL_POINTS` pairs to agree on it, so a wide window is safe.
+# 1000 px is a third of the sensor.
+_SOLUTION_MAX_TRANSLATION_OFFSET_PX = 1000.0
+
 
 def _pixel_position(obj: StellarObject) -> tuple[float, float] | None:
     """Get the X and Y coordinates of a star in the image.
@@ -105,6 +115,31 @@ def _estimate_translation_offset(
     return float(dx), float(dy)
 
 
+def _copy_identity(spectral_obj: StellarObject, reference_star: StellarObject) -> None:
+    """Give a spectroscopy detection the name and catalog data of a star.
+
+    The detection gets the same id as the reference star, so the catalog
+    merge adds its spectrum to that star's existing row instead of creating
+    a second row for the same star.
+
+    Parameters
+    ----------
+    spectral_obj : `StellarObject`
+        The detection in the spectroscopy image. Changed in place.
+    reference_star : `StellarObject`
+        The named catalog star it is the same star as.
+    """
+    spectral_obj.id = reference_star.id
+    spectral_obj.name = reference_star.name
+    spectral_obj.right_ascension = reference_star.right_ascension
+    spectral_obj.declination = reference_star.declination
+    spectral_obj.spectral_type = reference_star.spectral_type
+    spectral_obj.stellar_spectral_type = reference_star.stellar_spectral_type
+    spectral_obj.magnitude = reference_star.magnitude
+    spectral_obj.b_minus_v = reference_star.b_minus_v
+    spectral_obj.is_catalog_identified = reference_star.is_catalog_identified
+
+
 def _apply_matches(
     spectral_objs: list[StellarObject],
     reference_objs: list[StellarObject],
@@ -134,18 +169,7 @@ def _apply_matches(
         if distance > max_match_distance_px:
             continue
         reference_star = reference_objs[reference_index]
-        # Same id as the reference star, so the catalog merge adds this
-        # spectrum to that star's existing row instead of creating a
-        # second row for the same star.
-        spectral_obj.id = reference_star.id
-        spectral_obj.name = reference_star.name
-        spectral_obj.right_ascension = reference_star.right_ascension
-        spectral_obj.declination = reference_star.declination
-        spectral_obj.spectral_type = reference_star.spectral_type
-        spectral_obj.stellar_spectral_type = reference_star.stellar_spectral_type
-        spectral_obj.magnitude = reference_star.magnitude
-        spectral_obj.b_minus_v = reference_star.b_minus_v
-        spectral_obj.is_catalog_identified = reference_star.is_catalog_identified
+        _copy_identity(spectral_obj, reference_star)
         matched_count += 1
     return matched_count
 
@@ -236,6 +260,119 @@ def identify_spectral_stars_via_registration(
     return matched_count
 
 
+def identify_spectral_stars_via_solution(
+    spectral_stellar_objects: list[StellarObject],
+    reference_stellar_objects: list[StellarObject],
+    reference_wcs: Any,
+    max_match_distance_px: float = _DEFAULT_MAX_MATCH_DISTANCE_PX,
+) -> int | None:
+    """Name a spectroscopy image's stars from a plate solution's sky positions.
+
+    The plate solution of the target's solved standard stack turns every
+    catalog star's sky position into a pixel position, whether or not the
+    star was detected in that stack. This matters for the brightest stars:
+    they saturate the standard stack, are not detected there, and so keep a
+    stale stored pixel position that no geometric match can use (Deneb sat
+    170 px from where it was expected and was never named). The two stacks
+    are shifted apart by one offset, measured by the pairs of stars that
+    agree on it (see `estimate_registration_offset`). Each catalog star is
+    then paired with the spectroscopy detection nearest its shifted position.
+
+    A detection is given at most one name and a star at most one detection,
+    nearest pairs first (a brighter star wins a near tie), so one bright
+    star's trail cannot take a name many times.
+
+    Parameters
+    ----------
+    spectral_stellar_objects : `list` [`StellarObject`]
+        The detections in the spectroscopy image. Renamed in place.
+    reference_stellar_objects : `list` [`StellarObject`]
+        The named catalog stars. Only their sky positions are used to place
+        them, not their stored pixel positions.
+    reference_wcs : `astropy.wcs.WCS`
+        The plate solution of the solved standard stack.
+    max_match_distance_px : `float`, optional
+        How far a detection may be from a star's shifted position and still
+        be that star.
+
+    Returns
+    -------
+    matched_count : `int` or `None`
+        How many detections were named, or `None` when the two star fields
+        cannot be lined up with the solution by a shift or a
+        rotation, so the solution cannot be used.
+    """
+    reference_by_id = {
+        star.id: star for star in reference_stellar_objects if star.id and star.right_ascension is not None
+    }
+    placed = _positions_through_wcs(list(reference_by_id.values()), reference_wcs)
+    detections = [(obj, pos) for obj in spectral_stellar_objects if (pos := _pixel_position(obj))]
+    if not placed or not detections:
+        return 0
+
+    # Both star fields are compared in the solved image's pixels. A pure
+    # shift is tried first; when the fields also differ by a small rotation
+    # (the grating can turn a little from the luminance filter's angle), a
+    # similarity transform between the detections and the placed stars is
+    # tried instead.
+    detection_points = np.array([pos for _, pos in detections])
+    offset = estimate_registration_offset(
+        spectral_stellar_objects,
+        reference_stellar_objects,
+        reference_wcs,
+        _SOLUTION_MAX_TRANSLATION_OFFSET_PX,
+    )
+    if offset is not None:
+        in_solved_frame = detection_points - np.array(offset)
+        how = f"shift dx={offset[0]:.2f}, dy={offset[1]:.2f} px"
+    else:
+        import astroalign
+
+        try:
+            transform, _ = astroalign.find_transform(detection_points, np.array(list(placed.values())))
+        except astroalign.MaxIterError, ValueError:
+            return None
+        in_solved_frame = transform(detection_points)
+        how = f"rotation {np.degrees(transform.rotation):.2f} deg, scale {transform.scale:.4f}"
+
+    # Nearest pairs are made first. Two catalog entries for one bright star
+    # (a primary and a companion listed at almost the same place) are
+    # within a few pixels of the same detection (Navi's are 4 px apart), so
+    # distances are compared in whole five-pixel steps and the brighter entry
+    # wins a tie.
+    candidate_pairs = []
+    for star_id, (x, y) in placed.items():
+        magnitude = reference_by_id[star_id].magnitude
+        brightness_rank = 99.0 if magnitude is None else float(magnitude)
+        for detection_index, (detection_x, detection_y) in enumerate(in_solved_frame):
+            distance = float(np.hypot(detection_x - x, detection_y - y))
+            if distance <= max_match_distance_px:
+                candidate_pairs.append((
+                    int(distance // 5.0),
+                    brightness_rank,
+                    distance,
+                    star_id,
+                    detection_index,
+                ))
+    candidate_pairs.sort()
+
+    used_stars: set[str] = set()
+    used_detections: set[int] = set()
+    matched_count = 0
+    for _step, _brightness, _distance, star_id, detection_index in candidate_pairs:
+        if star_id in used_stars or detection_index in used_detections:
+            continue
+        _copy_identity(detections[detection_index][0], reference_by_id[star_id])
+        used_stars.add(star_id)
+        used_detections.add(detection_index)
+        matched_count += 1
+    logger.info(
+        f"Spectral field identified {matched_count} / {len(detections)} detections from the plate "
+        f"solution ({how})."
+    )
+    return matched_count
+
+
 # The fewest identified stars needed to trust an offset between the two star
 # fields. Below this, one bad match could move the median.
 _MINIMUM_OFFSET_PAIR_COUNT = 4
@@ -273,6 +410,7 @@ def estimate_registration_offset(
     spectral_stellar_objects: list[StellarObject],
     reference_stellar_objects: list[StellarObject],
     reference_wcs: Any | None = None,
+    max_offset_px: float = _DEFAULT_MAX_TRANSLATION_OFFSET_PX,
 ) -> tuple[float, float] | None:
     """Measure how far the spectroscopy image sits from the reference image.
 
@@ -302,6 +440,9 @@ def estimate_registration_offset(
         repeat one star many times (M 27 gave one name to eight points on a
         bright star's trail), which would drag a median to the wrong place.
         Counting agreeing pairs is not fooled by either.
+    max_offset_px : `float`, optional
+        The furthest shift, in pixels along either axis, that is searched
+        for when a solution is given.
 
     Returns
     -------
@@ -325,7 +466,7 @@ def estimate_registration_offset(
         return _estimate_translation_offset(
             reference_points,
             spectral_points,
-            _DEFAULT_MAX_TRANSLATION_OFFSET_PX,
+            max_offset_px,
             _TRANSLATION_BIN_PX,
         )
 

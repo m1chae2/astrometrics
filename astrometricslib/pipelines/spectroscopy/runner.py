@@ -410,7 +410,14 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
             )
 
         spectroscopy = SpectroscopyPipeline()
-        limit = request.options.get("limit", 10)
+        # No fixed count here: every candidate that clears the point-source
+        # detector's own 5-sigma threshold (`source_detection.py`) and the
+        # spurious-trail filter gets an extraction attempt. A caller can
+        # still pass `options["limit"]` to deliberately cap a run (for
+        # example a quick interactive check), but production runs should
+        # not silently drop real, fainter, already-identified stars past
+        # an arbitrary top-N count the way a fixed default of 10 used to.
+        limit = request.options.get("limit")
         stellar_objects, star_id_breakdown = record_pipeline_stars(
             spectroscopy.process(context, limit=limit),
             catalog_access=catalog_access,

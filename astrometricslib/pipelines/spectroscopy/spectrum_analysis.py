@@ -73,6 +73,15 @@ class SpectrumAnalysis:
         How strongly the spectrum stands out from its own scatter (see
         `estimate_spectrum_signal_to_noise`), `None` when it could not be
         judged.
+    response_corrected_intensity : `list` [`float`] or `None`
+        The spectrum with the instrument's own tilt removed (see
+        `apply_instrument_response`) -- the same brightness values the
+        classifier compared against reference spectra. This is the
+        physically meaningful "normalized flux" for display and for
+        measuring line depths; `None` when no instrument response was
+        available or applied (`response_applied` is `False`), in which
+        case a caller should fall back to QE-corrected or raw counts and
+        say so, rather than label them "normalized".
     """
 
     classification: dict[str, object]
@@ -83,6 +92,7 @@ class SpectrumAnalysis:
     signal_to_noise: float | None = None
     emission_lines: list[dict[str, object]] = field(default_factory=list)
     is_emission_line_source: bool = False
+    response_corrected_intensity: list[float] | None = None
 
 
 # The `stellar_spectral_type` label given to extended objects (clusters
@@ -379,4 +389,7 @@ def analyze_spectrum(
         signal_to_noise,
         emission_lines,
         is_emission_source,
+        response_corrected_intensity=(
+            corrected_intensity.tolist() if corrected_intensity is not None else None
+        ),
     )

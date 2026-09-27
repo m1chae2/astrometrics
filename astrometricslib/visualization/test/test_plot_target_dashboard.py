@@ -4,7 +4,7 @@ Description: Verifies standalone stellar plotting, target plotting,
 error checking, and layout generation.
 """
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -19,6 +19,7 @@ from astrometricslib.visualization.helpers import (
     plot_stellar_photometry,
     plot_stellar_spectroscopy,
     plot_target_dashboard,
+    plot_target_spectroscopy,
 )
 
 
@@ -235,6 +236,51 @@ def test_plot_stellar_analysis_raises_on_empty_star():  # ruff: ignore[missing-r
 
     with pytest.raises(ValueError, match="neither photometry nor spectrum"):
         plot_stellar_analysis(mock_star)
+
+
+def test_plot_target_spectroscopy_renders_raw_and_calibrated_panels_side_by_side():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify plot_target_spectroscopy draws three panels, not a toggle.
+
+    The image panel, plus a raw-counts panel and a separate calibrated
+    (response-corrected) panel, both visible at once.
+    """
+    mock_target = MagicMock()
+    mock_target.id = "Navi"
+    mock_target.stacked_spectral_target = "/fake/path/spectral_stack.fits"
+
+    mock_img_instance = MagicMock()
+    mock_img_instance.data = [[1, 2], [3, 4]]
+
+    star = MagicMock()
+    star.id = "* gam Cas"
+    star.name = "* gam Cas"
+    star.target_ids = ["Navi"]
+    star.stellar_spectral_type = "B0.5IVpe"
+    star.magnitude = 2.5
+    star.spectroscopy = SpectroscopyResult(
+        wavelengths_angstrom=[4000.0, 5000.0, 6000.0],
+        intensities=[10.0, 25.0, 15.0],
+        quantum_efficiency_corrected_intensities=[12.0, 28.0, 17.0],
+        response_corrected_intensities=[11.0, 27.0, 16.0],
+        rectangle=[100.0, 100.0, 20.0, 60.0],
+        dispersion_angle=0.0,
+        star_position_px=[100.0, 100.0],
+    )
+
+    stars = MagicMock()
+    stars.list_objects_for_target.return_value = [star]
+
+    with patch("astrometricslib.visualization.helpers.AstrometricsImage", return_value=mock_img_instance):
+        fig = plot_target_spectroscopy(mock_target, stars)
+
+    # Image + raw spectrum + calibrated spectrum.
+    assert len(fig.axes) == 3
+    raw_axis, calibrated_axis = fig.axes[1], fig.axes[2]
+    assert "Raw" in raw_axis.get_title()
+    assert raw_axis.get_ylabel() == "Raw Counts"
+    assert "Calibrated" in calibrated_axis.get_title()
+    assert calibrated_axis.get_ylabel() == "Normalized Flux"
+    plt.close(fig)
 
 
 def test_plot_target_dashboard_draws_asteroid_candidates_on_the_star_field(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]

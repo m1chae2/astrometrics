@@ -217,11 +217,11 @@ const api = {
 
 		/**
 		 * Open an independent pop-up figure window for a Matplotlib plot.
-		 * @param {string} plotPath Path to PNG figure file.
+		 * @param {string|{plotPath?: string, interactiveUrl?: string}} target Path to PNG figure or interactive descriptor.
 		 * @returns {Promise<{ windowId: number }|null>}
 		 */
-		async openFigureWindow(plotPath) {
-			return ipcRenderer.invoke('open-figure-window', plotPath);
+		async openFigureWindow(target) {
+			return ipcRenderer.invoke('open-figure-window', target);
 		}
 	},
 	tray: {

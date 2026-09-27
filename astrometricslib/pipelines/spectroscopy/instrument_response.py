@@ -65,9 +65,30 @@ _LINE_SKIP_HALF_WIDTH_ANGSTROM = 60.0
 # left Vega, HD 151023 and Alcor about as well matched (residual 0.04-0.10),
 # but pushed stars such as HD 150679 (an A2 star, so blue-bright) from
 # 0.19-0.28 to 0.5-1.8, and weighting the comparison by the sensor's
-# sensitivity did not fix that. Deriving the response over the full camera
-# range is supported (see `derive_instrument_response`) and may suit a
-# setup with a blocking filter that removes second-order light.
+# sensitivity did not fix that.
+#
+# The second-order reasoning above holds for the grism this default was
+# chosen for: a Star Analyzer 200, used with no blocking filter in front
+# of it to remove second-order light. For THAT grism, 8000 A is the
+# physically appropriate cutoff, not a conservative placeholder waiting
+# to be relaxed. A star-dependent cutoff (trusting a red star's own
+# second-order-light-poor spectrum further than a blue star's) would be
+# a possible refinement for it, since `second_order_blue_to_red_ratio`
+# already measures how much of this each star has -- but that is not a
+# fix for a wrong number here, since there is nothing wrong with 8000 A
+# for a blue star on the SA-200.
+#
+# This module has no way to check which grism is actually in use: a
+# response is looked up by camera name only (`load_instrument_response`),
+# and nothing here records the grism, its line density, or whether a
+# blocking filter is fitted. A different grism changes where second-order
+# light lands (it depends on the grism's own dispersion, not just where
+# extraction starts) and may not need this cutoff at all -- particularly
+# one built with a blocking filter, which removes second-order light at
+# its source rather than needing a cutoff to guess around it. Whoever
+# re-derives this response for a new grism should re-check this range
+# rather than assume 8000 A still applies; deriving it over the full
+# camera range is supported (see `derive_instrument_response`).
 DEFAULT_RESPONSE_WAVELENGTH_RANGE_ANGSTROM = (4200.0, 8000.0)
 
 # Degree of the polynomial fitted to the logarithm of (observed /

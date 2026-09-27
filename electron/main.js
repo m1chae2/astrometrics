@@ -479,11 +479,13 @@ function createDisplayWindow(options = {}) {
 
 /**
  * Creates an independent pop-up figure window for Matplotlib plots.
+ * Supports both interactive WebAgg URLs and fallback static PNG images.
  *
- * @param {string} plotPath Filesystem path to the saved PNG figure.
+ * @param {string|{plotPath?: string, interactiveUrl?: string}} target
+ *   Filesystem path, interactive URL, or descriptor object.
  * @returns {BrowserWindow}
  */
-function createFigureWindow(plotPath) {
+function createFigureWindow(target) {
   const figureWin = new BrowserWindow({
     width: 760,
     height: 600,
@@ -498,50 +500,78 @@ function createFigureWindow(plotPath) {
 
   figureWin.setMenuBarVisibility(false);
 
-  let imageSrc = '';
-  try {
-    if (fs.existsSync(plotPath)) {
-      const imgBuffer = fs.readFileSync(plotPath);
-      imageSrc = `data:image/png;base64,${imgBuffer.toString('base64')}`;
+  let plotPath = '';
+  let interactiveUrl = '';
+
+  if (typeof target === 'string') {
+    if (target.startsWith('http://') || target.startsWith('https://')) {
+      interactiveUrl = target;
+    } else if (target.startsWith('/figure/')) {
+      const port = process.env.ASTROMETRICS_PORT || '5000';
+      interactiveUrl = `http://127.0.0.1:${port}${target}`;
     } else {
-      log.warn(`Figure path does not exist: ${plotPath}`);
+      plotPath = target;
     }
-  } catch (err) {
-    log.error(`Failed to read figure image at ${plotPath}:`, err);
+  } else if (target && typeof target === 'object') {
+    plotPath = target.plotPath || '';
+    if (target.interactiveUrl) {
+      if (target.interactiveUrl.startsWith('http://') || target.interactiveUrl.startsWith('https://')) {
+        interactiveUrl = target.interactiveUrl;
+      } else {
+        const port = process.env.ASTROMETRICS_PORT || '5000';
+        interactiveUrl = `http://127.0.0.1:${port}${target.interactiveUrl}`;
+      }
+    }
   }
 
-  const htmlContent = `
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <title>Astrometrics Figure</title>
-        <style>
-          body {
-            margin: 0;
-            padding: 16px;
-            background-color: #0a0d14;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            height: calc(100vh - 32px);
-            overflow: auto;
-            box-sizing: border-box;
-          }
-          img {
-            max-width: 100%;
-            max-height: 100%;
-            object-fit: contain;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
-            border-radius: 4px;
-          }
-        </style>
-      </head>
-      <body>
-        ${imageSrc ? `<img src="${imageSrc}" alt="Figure" />` : '<div style="color: #e95420; font-family: monospace;">Figure image not found</div>'}
-      </body>
-    </html>
-  `;
-  figureWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
+  if (interactiveUrl) {
+    figureWin.loadURL(interactiveUrl);
+  } else {
+    let imageSrc = '';
+    try {
+      if (plotPath && fs.existsSync(plotPath)) {
+        const imgBuffer = fs.readFileSync(plotPath);
+        imageSrc = `data:image/png;base64,${imgBuffer.toString('base64')}`;
+      } else if (plotPath) {
+        log.warn(`Figure path does not exist: ${plotPath}`);
+      }
+    } catch (err) {
+      log.error(`Failed to read figure image at ${plotPath}:`, err);
+    }
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Astrometrics Figure</title>
+          <style>
+            body {
+              margin: 0;
+              padding: 16px;
+              background-color: #0a0d14;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              height: calc(100vh - 32px);
+              overflow: auto;
+              box-sizing: border-box;
+            }
+            img {
+              max-width: 100%;
+              max-height: 100%;
+              object-fit: contain;
+              box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+              border-radius: 4px;
+            }
+          </style>
+        </head>
+        <body>
+          ${imageSrc ? `<img src="${imageSrc}" alt="Figure" />` : '<div style="color: #e95420; font-family: monospace;">Figure image not found</div>'}
+        </body>
+      </html>
+    `;
+    figureWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
+  }
 
   const windowId = `figure-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   auxiliaryWindows.set(windowId, figureWin);

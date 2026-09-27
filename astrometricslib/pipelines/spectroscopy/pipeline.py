@@ -539,7 +539,7 @@ class SpectroscopyPipeline:
         self.last_run_zero_order_saturation_fractions: list[float] = []
 
     def process(
-        self, context: AnalysisContext, limit: int = 10, auto_detect_angle: bool = True
+        self, context: AnalysisContext, limit: int | None = None, auto_detect_angle: bool = True
     ) -> list[StellarObject]:
         """Process all the stars we found in an image.
 
@@ -548,7 +548,16 @@ class SpectroscopyPipeline:
         context : `AnalysisContext`
             The picture and the list of stars we found in it.
         limit : `int`, optional
-            The maximum number of stars to process (default is 10).
+            A cap on how many candidate stars to process. Left at `None`
+            (the default), every candidate that survived detection and
+            `_drop_spurious_trail_detections` is processed -- the real
+            limit on how many stars get a spectrum is the detector's own
+            5-sigma detection threshold (`source_detection.py`), not an
+            arbitrary top-N count. A fixed count used to be the default
+            here (10, brightness-ordered), which silently dropped real,
+            fainter, already-identified stars once a field had more than
+            10 detections; pass a number only to deliberately cap a run
+            (for example a quick interactive check).
         auto_detect_angle : `bool`, optional
             Whether to try and figure out the exact tilt of the camera
             automatically (default is True).
@@ -568,8 +577,9 @@ class SpectroscopyPipeline:
             self.instrument.expected_length_px,
             self.config.extraction_radius,
         )
+        target_stars = candidate_stars if limit is None else candidate_stars[:limit]
         results = self.process_image(
-            context.image, target_stars=candidate_stars[:limit], auto_detect_angle=auto_detect_angle
+            context.image, target_stars=target_stars, auto_detect_angle=auto_detect_angle
         )
         self.last_run_zero_order_saturation_fractions = [
             res["zero_order_saturated_pixel_fraction"]
@@ -644,7 +654,7 @@ class SpectroscopyPipeline:
         self,
         image: AstrometricsImage,
         target_stars: list[Any] | None = None,
-        limit: int = 10,
+        limit: int | None = None,
         auto_detect_angle: bool = True,
     ) -> list[dict[str, Any]]:
         """Process stars in an image at a lower level than `process`.
@@ -657,7 +667,9 @@ class SpectroscopyPipeline:
             A list of stars to process. These can be full data objects or
             just simple `(x, y)` coordinates.
         limit : `int`, optional
-            The maximum number of stars to process.
+            A cap on how many of `target_stars` to process. `None` (the
+            default) processes all of them; see `process` for why this
+            is no longer a fixed count.
         auto_detect_angle : `bool`, optional
             Whether to automatically find the camera tilt.
 
@@ -776,7 +788,7 @@ class SpectroscopyPipeline:
         self,
         image: AstrometricsImage,
         target_stars: list[Any],
-        limit: int,
+        limit: int | None,
         auto_detect_angle: bool,
     ) -> list[dict[str, Any]]:
         """Run single-star extraction over a batch of target stars.
@@ -788,7 +800,7 @@ class SpectroscopyPipeline:
             carrying its original `star_source` object.
         """
         extracted: list[tuple[Any, bool, dict[str, Any]]] = []
-        batch = target_stars[:limit]
+        batch = target_stars if limit is None else target_stars[:limit]
         batch_positions = [_star_pixel_position(star)[1] for star in batch]
         dispersion_vector = self.instrument.get_dispersion_vector()
         for star_index, star in enumerate(batch):
@@ -925,6 +937,7 @@ class SpectroscopyPipeline:
             wavelengths_angstrom=wavelengths_angstrom,
             intensities=intensities,
             quantum_efficiency_corrected_intensities=quantum_efficiency_corrected_intensities,
+            response_corrected_intensities=analysis.response_corrected_intensity,
             self_determined_spectral_type=classification["spectral_type"],
             self_determined_spectral_type_confidence=classification["confidence"],
             self_determined_spectral_type_rms=classification["rms"],

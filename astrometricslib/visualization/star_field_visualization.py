@@ -59,11 +59,21 @@ class _AnalysisView:
         self.mode = mode
         self.active_star_index = 0
 
-        # Initialize Figure
+        # Initialize Figure. Spectroscopy mode gets a raw and a calibrated
+        # spectrum panel side by side, rather than one panel toggled
+        # between the two views, so both are visible at once; photometry
+        # mode's light curve keeps a single panel.
+        self.ax_spectrum_corrected = None
         if fig is not None and ax_image is not None and ax_spectrum is not None:
             self.fig = fig
             self.ax_image = ax_image
             self.ax_spectrum = ax_spectrum
+        elif mode == "spectroscopy":
+            self.fig = plt.figure(figsize=(9, 13))
+            gs = self.fig.add_gridspec(3, 1, height_ratios=[2, 1, 1], hspace=0.5)
+            self.ax_image = self.fig.add_subplot(gs[0, 0])
+            self.ax_spectrum = self.fig.add_subplot(gs[1, 0])
+            self.ax_spectrum_corrected = self.fig.add_subplot(gs[2, 0])
         else:
             self.fig, (self.ax_image, self.ax_spectrum) = plt.subplots(
                 2, 1, figsize=(9, 11), gridspec_kw={"height_ratios": [2, 1], "hspace": 0.45}
@@ -74,7 +84,9 @@ class _AnalysisView:
         self.layer_stars = StarOverlay(self.ax_image, self.config)
         self.layer_selection = StarSelectionOverlay(self.ax_image, self.config)
         self.layer_dispersion = DispersionOverlay(self.ax_image, self.config)
-        self.renderer_spectrum = SpectrumOverlay(self.ax_spectrum, self.fig, self.config)
+        self.renderer_spectrum = SpectrumOverlay(
+            self.ax_spectrum, self.fig, self.config, corrected_axis=self.ax_spectrum_corrected
+        )
         self.layer_photometry = PhotometryOverlay(self.ax_spectrum, self.fig, self.config)
 
         self.interaction = InteractionHandler(self.fig, self.ax_image, self.ax_spectrum, self.config)
@@ -114,12 +126,9 @@ class _AnalysisView:
         # 4. Add Controls & Connect Events
         if add_buttons and self.mode == "spectroscopy":
             self.renderer_spectrum.add_balmer_toggle()
-            has_qe = any(
-                _get_spectroscopy_field(obj, "quantum_efficiency_corrected_intensities")
-                for obj in self.stellar_objects
-            )
-            if has_qe:
-                self.renderer_spectrum.add_quantum_efficiency_correction_toggle()
+            # With a separate calibrated-view panel (ax_spectrum_corrected),
+            # both the raw and corrected spectra are always visible, so
+            # there is nothing left for a raw/corrected toggle to switch.
 
         self.interaction.connect_events()
 
@@ -145,6 +154,7 @@ class _AnalysisView:
                 quantum_efficiency_corrected_intensities=_get_spectroscopy_field(
                     obj, "quantum_efficiency_corrected_intensities"
                 ),
+                response_corrected_intensities=_get_spectroscopy_field(obj, "response_corrected_intensities"),
             )
         else:
             photometry = getattr(obj, "photometry", None)

@@ -243,6 +243,7 @@ def recompute_star(
     )
     spectroscopy.emission_lines = analysis.emission_lines
     spectroscopy.is_emission_line_source = analysis.is_emission_line_source
+    spectroscopy.response_corrected_intensities = analysis.response_corrected_intensity
     spectroscopy.resolution_element_angstrom = (
         analysis.resolution_element_angstrom if analysis.is_resolution_measured else None
     )

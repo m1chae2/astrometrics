@@ -88,9 +88,16 @@ export const CommandConsole: React.FC = () => {
               source: 'agent',
             },
           ]);
-        } else if (action === 'terminal:plot_generated' && payload?.plot_path) {
+        } else if (action === 'terminal:plot_generated') {
           if (window.astrometrics?.dialog?.openFigureWindow) {
-            window.astrometrics.dialog.openFigureWindow(payload.plot_path);
+            if (payload?.interactive_url) {
+              window.astrometrics.dialog.openFigureWindow({
+                plotPath: payload.plot_path,
+                interactiveUrl: payload.interactive_url,
+              });
+            } else if (payload?.plot_path) {
+              window.astrometrics.dialog.openFigureWindow(payload.plot_path);
+            }
           }
         } else if (action === 'editor:sync' && payload?.code !== undefined) {
           setEditorCode(payload.code);
@@ -146,7 +153,16 @@ export const CommandConsole: React.FC = () => {
       }
 
       // Automatically open pop-up windows for generated plots
-      if (response.plots && response.plots.length > 0) {
+      if (response.interactive_plots && response.interactive_plots.length > 0) {
+        for (const item of response.interactive_plots) {
+          if (window.astrometrics?.dialog?.openFigureWindow) {
+            window.astrometrics.dialog.openFigureWindow({
+              plotPath: item.plot_path,
+              interactiveUrl: item.url,
+            });
+          }
+        }
+      } else if (response.plots && response.plots.length > 0) {
         for (const plotPath of response.plots) {
           if (window.astrometrics?.dialog?.openFigureWindow) {
             window.astrometrics.dialog.openFigureWindow(plotPath);
@@ -193,7 +209,16 @@ export const CommandConsole: React.FC = () => {
         setWorkspaceVariables(response.workspace);
       }
 
-      if (response.plots && response.plots.length > 0) {
+      if (response.interactive_plots && response.interactive_plots.length > 0) {
+        for (const item of response.interactive_plots) {
+          if (window.astrometrics?.dialog?.openFigureWindow) {
+            window.astrometrics.dialog.openFigureWindow({
+              plotPath: item.plot_path,
+              interactiveUrl: item.url,
+            });
+          }
+        }
+      } else if (response.plots && response.plots.length > 0) {
         for (const plotPath of response.plots) {
           if (window.astrometrics?.dialog?.openFigureWindow) {
             window.astrometrics.dialog.openFigureWindow(plotPath);

@@ -126,6 +126,38 @@ class ScriptingService:
         self.console = code.InteractiveConsole(locals=self._get_locals())
         self.completer = rlcompleter.Completer(self.console.locals)
         self.active_editor_code = ""
+        self.active_figure_managers: dict[int, Any] = {}
+
+    def get_figure_manager(self, fignum: int) -> Any:
+        """Return the WebAgg figure manager for the given figure number.
+
+        Parameters
+        ----------
+        fignum : `int`
+            Figure number.
+
+        Returns
+        -------
+        manager : `Any` or `None`
+            The active FigureManagerWebAgg instance if present.
+        """
+        if fignum in self.active_figure_managers:
+            return self.active_figure_managers[fignum]
+
+        try:
+            from matplotlib._pylab_helpers import Gcf
+
+            mgr = Gcf.get_fig_manager(fignum)
+            if mgr:
+                if mgr.toolbar is None:
+                    import matplotlib.backends.backend_webagg_core as webagg_core
+
+                    mgr.toolbar = webagg_core.NavigationToolbar2WebAgg(mgr.canvas)
+                    mgr.canvas.toolbar = mgr.toolbar
+                self.active_figure_managers[fignum] = mgr
+            return mgr
+        except Exception:
+            return None
 
     def get_completions(self, text: str) -> list[str]:
         """Return a list of possible completions for the given text.
@@ -182,14 +214,14 @@ class ScriptingService:
         try:
             import matplotlib
 
-            # Always use the headless Agg backend in the server. Tk must be
-            # created and destroyed on one thread, but this code runs on
-            # whichever request thread built the workspace, so a Tk window
-            # here can abort the whole backend with "Tcl_AsyncDelete: async
-            # handler deleted by the wrong thread". Plots are returned as
-            # PNG snapshots (see the figure capture in `execute_structured`)
-            # for the interface to draw.
-            matplotlib.use("Agg")
+            # Configure the interactive WebAggCore backend. Unlike GUI backends
+            # (Tk/Qt) which crash multi-threaded servers, WebAgg renders to
+            # an HTML5 canvas and streams interactive events (pan/zoom/coords)
+            # over WebSockets to the client.
+            matplotlib.use("module://matplotlib.backends.backend_webagg_core")
+            import matplotlib.backends.backend_webagg_core as webagg_core
+
+            webagg_core.FigureManagerWebAgg._toolbar2_class = webagg_core.NavigationToolbar2WebAgg
 
             import matplotlib.pyplot as plt
 
@@ -491,6 +523,7 @@ class ScriptingService:
         stdout_buf = io.StringIO()
         stderr_buf = io.StringIO()
         plots: list[str] = []
+        interactive_plots: list[dict[str, Any]] = []
         result: Any = None
         status = "success"
 
@@ -519,22 +552,24 @@ class ScriptingService:
                     except TypeError, OverflowError:
                         result = str(raw_res)
 
-                # Only capture to snapshot images if headless Agg backend
-                # is being used
-                if plt and plt.get_backend().lower() == "agg" and plt.get_fignums():
+                # Capture active figures for both interactive WebAgg display
+                # and fallback PNGs
+                if plt and plt.get_fignums():
+                    from matplotlib._pylab_helpers import Gcf
+
                     for fignum in plt.get_fignums():
                         fig = plt.figure(fignum)
+                        mgr = Gcf.get_fig_manager(fignum)
+                        if mgr:
+                            self.active_figure_managers[fignum] = mgr
                         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_file:
                             fig.savefig(tmp_file.name, bbox_inches="tight", dpi=100)
                             plots.append(tmp_file.name)
-                    plt.close("all")
-                elif plt and plt.get_backend().lower() != "agg" and plt.get_fignums():
-                    # For interactive GUI backends, flush GUI events to
-                    # display the interactive windows
-                    for fignum in plt.get_fignums():
-                        fig = plt.figure(fignum)
-                        fig.canvas.draw_idle()
-                        fig.canvas.flush_events()
+                            interactive_plots.append({
+                                "figure_id": fignum,
+                                "plot_path": tmp_file.name,
+                                "url": f"/figure/{fignum}",
+                            })
 
             except Exception:
                 status = "error"
@@ -544,7 +579,17 @@ class ScriptingService:
 
         # Broadcast plots to open figure windows in UI
         # if figures were generated
-        if plots and self.container and hasattr(self.container, "socket_manager"):
+        if interactive_plots and self.container and hasattr(self.container, "socket_manager"):
+            for item in interactive_plots:
+                self.container.socket_manager.broadcast_ui_event_sync(
+                    "terminal:plot_generated",
+                    {
+                        "plot_path": item["plot_path"],
+                        "figure_id": item["figure_id"],
+                        "interactive_url": item["url"],
+                    },
+                )
+        elif plots and self.container and hasattr(self.container, "socket_manager"):
             for plot_path in plots:
                 self.container.socket_manager.broadcast_ui_event_sync(
                     "terminal:plot_generated",
@@ -557,6 +602,7 @@ class ScriptingService:
             "stderr": stderr_buf.getvalue(),
             "result": result,
             "plots": plots,
+            "interactive_plots": interactive_plots,
             "execution_time_ms": execution_time_ms,
             "workspace": self.get_workspace_manifest(),
         }

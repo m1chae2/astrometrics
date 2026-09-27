@@ -75,9 +75,9 @@ export function registerIpcHandlers(
   });
 
   // Open Matplotlib figure window
-  ipcMain.handle('open-figure-window', (_event, plotPath) => {
+  ipcMain.handle('open-figure-window', (_event, target) => {
     if (typeof windowCoordinator.createFigureWindow === 'function') {
-      const win = windowCoordinator.createFigureWindow(plotPath);
+      const win = windowCoordinator.createFigureWindow(target);
       return { windowId: win.id };
     }
     return null;

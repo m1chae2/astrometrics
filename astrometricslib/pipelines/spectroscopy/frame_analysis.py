@@ -13,8 +13,15 @@ from astrometricslib.models.target import Target
 from astrometricslib.pipelines.shared.frame_grouping import add_frame
 
 
-def analyze_frame_spectroscopy(target: Target, path: str, limit: int = 10) -> tuple[Any, list[Any]]:
+def analyze_frame_spectroscopy(target: Target, path: str, limit: int | None = None) -> tuple[Any, list[Any]]:
     """Run spectroscopy analysis on a single frame in this target's context.
+
+    Parameters
+    ----------
+    limit : `int`, optional
+        A cap on how many detected stars to extract. `None` (the
+        default) processes every candidate that clears the point-source
+        detector's own 5-sigma threshold; see `SpectroscopyPipeline.process`.
 
     Returns
     -------

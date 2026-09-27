@@ -37,9 +37,10 @@ def _extract_spectrum_data(star: Any) -> dict[str, Any]:
     Returns
     -------
     spectrum_data : `dict`
-        With `"wavelengths_angstrom"`, `"intensities"`, and
-        `"quantum_efficiency_corrected_intensities"` if any were
-        found, or empty if this star has no spectrum yet.
+        With `"wavelengths_angstrom"`, `"intensities"`,
+        `"quantum_efficiency_corrected_intensities"` and
+        `"response_corrected_intensities"` if any were found, or empty if
+        this star has no spectrum yet.
     """
     spectroscopy = getattr(star, "spectroscopy", None)
     if spectroscopy is not None and spectroscopy.wavelengths_angstrom:
@@ -47,6 +48,7 @@ def _extract_spectrum_data(star: Any) -> dict[str, Any]:
             "wavelengths_angstrom": spectroscopy.wavelengths_angstrom,
             "intensities": spectroscopy.intensities,
             "quantum_efficiency_corrected_intensities": spectroscopy.quantum_efficiency_corrected_intensities,
+            "response_corrected_intensities": spectroscopy.response_corrected_intensities,
         }
     if isinstance(star, dict):
         return star.get("spectroscopy") or star
@@ -381,6 +383,7 @@ def plot_stellar_spectroscopy(
         wavelengths,
         intensities,
         quantum_efficiency_corrected_intensities=qe_intensities,
+        response_corrected_intensities=spectrum_data.get("response_corrected_intensities"),
     )
     return fig
 
@@ -539,15 +542,21 @@ def _find_star_index(astrometry_stars: list, x: float, y: float, config: Visuali
     int | None
         Index of the nearest star within range, or `None`.
     """
+    best_idx = None
+    best_dist = float("inf")
     for i, obj in enumerate(astrometry_stars):
         star_data = getattr(obj, "star_data", {})
         star_x = star_data.get("xcentroid", star_data.get("x_centroid"))
         star_y = star_data.get("ycentroid", star_data.get("y_centroid"))
         if star_x is None or star_y is None:
             continue
-        if (x - star_x) ** 2 + (y - star_y) ** 2 <= resolve_star_radius(obj, config.fixed_radius) ** 2:
-            return i
-    return None
+        radius = resolve_star_radius(obj, config.fixed_radius)
+        hit_radius = max(radius * 2.5, 30.0)
+        dist = ((x - star_x) ** 2 + (y - star_y) ** 2) ** 0.5
+        if dist <= hit_radius and dist < best_dist:
+            best_dist = dist
+            best_idx = i
+    return best_idx
 
 
 def _highlight_active_star(star_patches: list, index: int, config: VisualizationConfig) -> None:
@@ -832,14 +841,15 @@ def plot_target_spectroscopy(
     plt.style.use("dark_background")
 
     fig = plt.figure(figsize=figsize)
-    gs = fig.add_gridspec(1, 2, width_ratios=[1.4, 1.0], wspace=0.28)
+    gs = fig.add_gridspec(2, 2, width_ratios=[1.4, 1.0], hspace=0.4, wspace=0.28)
 
-    ax_image = fig.add_subplot(gs[0, 0])
+    ax_image = fig.add_subplot(gs[:, 0])
     ax_spectrum = fig.add_subplot(gs[0, 1])
+    ax_spectrum_corrected = fig.add_subplot(gs[1, 1])
 
     image_layer = ImageOverlay(ax_image, config)
     dispersion_layer = DispersionOverlay(ax_image, config)
-    spectrum_layer = SpectrumOverlay(ax_spectrum, fig, config)
+    spectrum_layer = SpectrumOverlay(ax_spectrum, fig, config, corrected_axis=ax_spectrum_corrected)
 
     image_layer.render(
         AstrometricsImage(target.stacked_spectral_target).data,
@@ -850,10 +860,12 @@ def plot_target_spectroscopy(
     # Circle radius is the size source detection measured for each star
     # (`radius_px`); the box sizes were already set by the extraction pipeline.
     star_circles = []
+    star_positions = []
     for star in spectral_stars:
         center_x, center_y = (
             get_spectroscopy_field(star, "star_position_px") or get_spectroscopy_field(star, "rectangle")[:2]
         )
+        star_positions.append((center_x, center_y))
         radius = resolve_star_radius(star, config.fixed_radius)
         circle = Circle((center_x, center_y), radius, edgecolor=config.inactive_color, facecolor="none", lw=2)
         ax_image.add_patch(circle)
@@ -878,31 +890,66 @@ def plot_target_spectroscopy(
             data.get("wavelengths_angstrom"),
             data.get("intensities"),
             quantum_efficiency_corrected_intensities=data.get("quantum_efficiency_corrected_intensities"),
+            response_corrected_intensities=data.get("response_corrected_intensities"),
         )
 
     def highlight_active_box(index: int) -> None:
         """Mark only the box and circle at `index` as active."""
         for i, (box, circle) in enumerate(zip(box_patches, star_circles, strict=True)):
             is_active = i == index
-            box.set_edgecolor(config.active_color if is_active else config.rectangle_color)
-            circle.set_edgecolor(config.active_color if is_active else config.inactive_color)
-            box.set_linewidth(3 if is_active else 2)
-            circle.set_linewidth(3 if is_active else 2)
+            if box is not None:
+                box.set_edgecolor(config.active_color if is_active else config.rectangle_color)
+                box.set_linewidth(3 if is_active else 2)
+            if circle is not None:
+                circle.set_edgecolor(config.active_color if is_active else config.inactive_color)
+                circle.set_linewidth(3 if is_active else 2)
 
     interaction = InteractionHandler(fig, ax_image, None, config)
 
-    def find_box(x: float, y: float) -> int | None:
-        """Find the extraction box under a click.
+    def find_star_or_box(x: float, y: float) -> int | None:
+        """Find the star marker or extraction box under a click.
+
+        Checks both star circle proximity / centroid distance and
+        extraction box containment.
+
+        Parameters
+        ----------
+        x : `float`
+            Click x-coordinate in data space.
+        y : `float`
+            Click y-coordinate in data space.
 
         Returns
         -------
         index : `int` or `None`
-            Index of the box containing the click, or `None`.
+            Index of the matched star, or `None`.
         """
         display_point = ax_image.transData.transform((x, y))
-        for i, box in enumerate(box_patches):
-            if box.contains_point(display_point):
+
+        # 1. Direct star circle containment hit-test
+        for i, circle in enumerate(star_circles):
+            if circle is not None and circle.contains_point(display_point):
                 return i
+
+        # 2. Nearest star centroid hit-test with generous tolerance
+        best_idx = None
+        best_dist = float("inf")
+        for i, (star, (cx, cy)) in enumerate(zip(spectral_stars, star_positions, strict=True)):
+            radius = resolve_star_radius(star, config.fixed_radius)
+            hit_radius = max(radius * 2.5, 35.0)
+            dist = ((x - cx) ** 2 + (y - cy) ** 2) ** 0.5
+            if dist <= hit_radius and dist < best_dist:
+                best_dist = dist
+                best_idx = i
+
+        if best_idx is not None:
+            return best_idx
+
+        # 3. Extraction box hit-test
+        for i, box in enumerate(box_patches):
+            if box is not None and box.contains_point(display_point):
+                return i
+
         return None
 
     def on_select(index: int) -> None:
@@ -911,7 +958,7 @@ def plot_target_spectroscopy(
         render_spectrum_panel(index)
         fig.canvas.draw_idle()
 
-    interaction.on_find_star = find_box
+    interaction.on_find_star = find_star_or_box
     interaction.on_star_select = on_select
     interaction.connect_events()
     # matplotlib only weak-references bound-method callbacks; keep the
@@ -1049,6 +1096,7 @@ def plot_target_dashboard(
                     quantum_efficiency_corrected_intensities=data.get(
                         "quantum_efficiency_corrected_intensities"
                     ),
+                    response_corrected_intensities=data.get("response_corrected_intensities"),
                 )
             else:
                 ax_spectrum.clear()

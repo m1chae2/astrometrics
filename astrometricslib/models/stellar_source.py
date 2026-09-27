@@ -174,6 +174,16 @@ class SpectroscopyResult(BaseModel):
     quantum_efficiency_corrected_intensities: list[float] | None = Field(
         default=None, alias="quantumEfficiencyCorrectedIntensities"
     )
+    # The spectrum with the instrument's full response (grating, optics,
+    # atmosphere -- not just the sensor's QE) removed, over the wavelength
+    # range that response is valid for; NaN outside it. See
+    # instrument_response.apply_instrument_response. Only set for a camera
+    # with a derived response on file. This is the physically meaningful
+    # normalized flux; quantum_efficiency_corrected_intensities alone is
+    # not, since it leaves the grating/optics/atmosphere tilt in place.
+    response_corrected_intensities: list[float] | None = Field(
+        default=None, alias="responseCorrectedIntensities"
+    )
     # A spectral type guessed from this star's own extracted spectrum,
     # via template matching against a reference library -- independent
     # of StellarObject.spectral_type, which comes from a catalog

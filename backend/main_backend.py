@@ -19,7 +19,7 @@ import uvicorn
 # REQ: SYS-1.4: Maintain clean logs
 from astropy.utils.exceptions import AstropyDeprecationWarning, AstropyWarning
 from astropy.wcs import FITSFixedWarning
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 
 from backend.routers import rpc_router
@@ -28,7 +28,7 @@ warnings.filterwarnings("ignore", category=FITSFixedWarning)
 warnings.filterwarnings("ignore", category=AstropyDeprecationWarning)
 warnings.filterwarnings("ignore", category=AstropyWarning, message=".*extra padding.*")
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from astrometricslib import get_configuration
@@ -131,6 +131,8 @@ origins = [
     "http://127.0.0.1:5175",
     "http://localhost:8000",  # Development Server
     "http://127.0.0.1:8000",
+    "http://localhost:5000",  # Backend Server
+    "http://127.0.0.1:5000",
     "http://localhost:3000",
     "app://.",  # Electron
 ]
@@ -204,6 +206,24 @@ _library_path = container.config_service.get_library_path()
 if _frames_path.is_dir() and _frames_path != _library_path:
     app.mount("/static/frames", StaticFiles(directory=str(_frames_path)), name="static_frames")
 app.mount("/static", StaticFiles(directory=str(_library_path)), name="static")
+
+# Mount Matplotlib WebAgg static assets and toolbar images for
+# interactive figures
+try:
+    import matplotlib
+    import matplotlib.backends.backend_webagg_core as webagg_core
+
+    webagg_core.FigureManagerWebAgg._toolbar2_class = webagg_core.NavigationToolbar2WebAgg
+
+    _mpl_static_path = webagg_core.FigureManagerWebAgg.get_static_file_path()
+    _mpl_img_path = os.path.join(matplotlib.get_data_path(), "images")
+    if os.path.isdir(_mpl_static_path):
+        app.mount("/mpl_static", StaticFiles(directory=_mpl_static_path), name="mpl_static")
+    if os.path.isdir(_mpl_img_path):
+        app.mount("/_images", StaticFiles(directory=_mpl_img_path), name="mpl_images")
+        app.mount("/figure/_images", StaticFiles(directory=_mpl_img_path), name="mpl_figure_images")
+except Exception as e:
+    logger.warning("Failed to mount Matplotlib WebAgg static assets: %s", e)
 
 
 async def authorize_websocket(websocket: WebSocket) -> bool:
@@ -521,6 +541,277 @@ async def websocket_endpoint(websocket: WebSocket):  # ruff: ignore[missing-retu
                 await websocket.send_text(output)
     except WebSocketDisconnect:
         logger.info("Terminal disconnected")
+
+
+@app.get("/figure/mpl.js")
+async def get_figure_js() -> Response:
+    """Serve complete Matplotlib WebAgg JavaScript bundle with toolbar items.
+
+    Returns
+    -------
+    response : `~fastapi.responses.Response`
+        JavaScript bundle defining figure and navigation toolbar components.
+    """
+    import matplotlib.backends.backend_webagg_core as webagg_core
+
+    return Response(
+        content=webagg_core.FigureManagerWebAgg.get_javascript(),
+        media_type="application/javascript",
+    )
+
+
+@app.get("/figure/{figure_id}/download.{fmt}")
+async def download_figure(figure_id: int, fmt: str) -> Response:
+    """Export and download the figure image in the requested graphics format.
+
+    Parameters
+    ----------
+    figure_id : `int`
+        The figure identifier.
+    fmt : `str`
+        The output graphics format extension (e.g. 'png', 'svg', 'pdf').
+
+    Returns
+    -------
+    response : `~fastapi.responses.Response`
+        Rendered figure bytes with the appropriate MIME content-type.
+
+    Raises
+    ------
+    HTTPException
+        If the figure manager is not found or export fails.
+    """
+    mgr = None
+    if container.scripting_service:
+        mgr = container.scripting_service.get_figure_manager(figure_id)
+
+    if not mgr:
+        raise HTTPException(status_code=404, detail="Figure not found")
+
+    import io
+    import mimetypes
+
+    buff = io.BytesIO()
+    try:
+        mgr.canvas.figure.savefig(buff, format=fmt)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Failed to export figure: {exc}") from exc
+
+    media_type, _ = mimetypes.guess_type(f"figure.{fmt}")
+    return Response(
+        content=buff.getvalue(),
+        media_type=media_type or "application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="figure_{figure_id}.{fmt}"'},
+    )
+
+
+@app.get("/figure/{figure_id}", response_class=HTMLResponse)
+async def get_figure_page(figure_id: int) -> HTMLResponse:
+    """Serve the interactive Matplotlib WebAgg HTML page for a figure.
+
+    Parameters
+    ----------
+    figure_id : `int`
+        The figure identifier.
+
+    Returns
+    -------
+    html : `~fastapi.responses.HTMLResponse`
+        Interactive HTML page with toolbar and HTML5 canvas.
+    """
+    token = session_auth.SESSION_TOKEN
+    html_content = f"""<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <base href="/">
+    <meta charset="utf-8">
+    <title>Astrometrics Plot #{figure_id}</title>
+    <link rel="stylesheet" href="/mpl_static/css/boilerplate.css" type="text/css">
+    <link rel="stylesheet" href="/mpl_static/css/fbm.css" type="text/css">
+    <link rel="stylesheet" href="/mpl_static/css/mpl.css" type="text/css">
+    <script src="/figure/mpl.js"></script>
+    <style>
+      body {{
+        margin: 0;
+        padding: 12px;
+        background-color: #0a0d14;
+        color: #e0e0e0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: flex-start;
+        min-height: 100vh;
+        box-sizing: border-box;
+      }}
+      .mpl-toolbar {{
+        background: #141923;
+        border: 1px solid #2a3649;
+        border-radius: 6px;
+        padding: 4px 8px;
+        margin-bottom: 8px;
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 6px;
+      }}
+      .mpl-button-group {{
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+      }}
+      .mpl-widget {{
+        background-color: #1e2638;
+        border: 1px solid #3b4c68;
+        border-radius: 4px;
+        padding: 4px 8px;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: #e0e0e0;
+      }}
+      .mpl-widget:hover {{
+        background-color: #2b374e;
+      }}
+      .mpl-widget.active {{
+        background-color: #0284c7;
+        border-color: #38bdf8;
+      }}
+      .mpl-widget img {{
+        filter: invert(90%);
+        width: 16px;
+        height: 16px;
+      }}
+      select.mpl-widget {{
+        background-color: #1e2638;
+        color: #e0e0e0;
+        border: 1px solid #3b4c68;
+        border-radius: 4px;
+        padding: 3px 6px;
+        font-size: 12px;
+      }}
+      .ui-dialog-titlebar {{
+        display: none !important;
+      }}
+      .mpl-message {{
+        color: #94a3b8;
+        font-size: 12px;
+        margin-left: 10px;
+        font-family: monospace;
+      }}
+      #figure {{
+        background: #ffffff;
+        border-radius: 6px;
+        overflow: hidden;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+      }}
+    </style>
+    <script>
+      function on_download(figure, format) {{
+        window.open('/figure/' + figure.id + '/download.' + format, '_blank');
+      }}
+
+      document.addEventListener("DOMContentLoaded", function () {{
+        var wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        var wsUrl = wsProtocol + '//' + window.location.host + '/ws/figure/{figure_id}?token={token}';
+        var websocket_type = mpl.get_websocket_type();
+        var websocket = new websocket_type(wsUrl);
+
+        var fig = new mpl.figure(
+          {figure_id},
+          websocket,
+          on_download,
+          document.getElementById("figure")
+        );
+      }});
+    </script>
+  </head>
+  <body>
+    <div id="mpl-warnings" class="mpl-warnings" style="color: #f87171; margin-bottom: 8px;"></div>
+    <div id="figure"></div>
+  </body>
+</html>"""
+    return HTMLResponse(content=html_content)
+
+
+class _FastApiWebSocketAdapter:
+    """Adapter matching FigureManagerWebAgg's expected WebSocket interface."""
+
+    def __init__(self, websocket: WebSocket, loop: asyncio.AbstractEventLoop) -> None:
+        self.websocket = websocket
+        self.loop = loop
+
+    def send_json(self, content: dict[str, Any]) -> None:
+        """Serialize and send JSON payload to the WebSocket client."""
+        asyncio.run_coroutine_threadsafe(
+            self.websocket.send_text(json.dumps(content)),
+            self.loop,
+        )
+
+    def send_binary(self, blob: bytes) -> None:
+        """Send raw binary bytes to the WebSocket client."""
+        asyncio.run_coroutine_threadsafe(
+            self.websocket.send_bytes(blob),
+            self.loop,
+        )
+
+
+@app.websocket("/ws/figure/{figure_id}")
+async def figure_websocket_endpoint(websocket: WebSocket, figure_id: int):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Handle interactive Matplotlib WebAgg WebSocket communication.
+
+    Parameters
+    ----------
+    websocket : `~fastapi.WebSocket`
+        The WebSocket connection.
+    figure_id : `int`
+        Figure number.
+    """
+    if not await authorize_websocket(websocket):
+        return
+
+    await websocket.accept()
+
+    mgr = None
+    if container.scripting_service:
+        mgr = container.scripting_service.get_figure_manager(figure_id)
+
+    if not mgr:
+        logger.warning("No active figure manager found for figure %d", figure_id)
+        await websocket.close(code=4404)
+        return
+
+    if mgr.toolbar is None:
+        import matplotlib.backends.backend_webagg_core as webagg_core
+
+        mgr.toolbar = webagg_core.NavigationToolbar2WebAgg(mgr.canvas)
+        mgr.canvas.toolbar = mgr.toolbar
+
+    loop = asyncio.get_running_loop()
+    adapter = _FastApiWebSocketAdapter(websocket, loop)
+    mgr.add_web_socket(adapter)
+
+    try:
+        while True:
+            raw_msg = await websocket.receive_text()
+            try:
+                msg = json.loads(raw_msg)
+                msg_type = msg.get("type")
+                if msg_type == "supports_binary":
+                    # Client capability advertisement, safely handled
+                    pass
+                else:
+                    mgr.handle_json(msg)
+            except Exception as exc:
+                logger.debug("Error processing figure WS message: %s", exc)
+    except WebSocketDisconnect:
+        logger.info("Figure %d client disconnected", figure_id)
+    finally:
+        try:
+            mgr.remove_web_socket(adapter)
+        except Exception as exc:
+            logger.debug("Failed removing web socket adapter: %s", exc)
 
 
 import asyncio

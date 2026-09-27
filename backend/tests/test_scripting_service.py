@@ -37,6 +37,10 @@ result = 42
     assert result["status"] == "success"
     assert result["result"] == 42
     assert len(result["plots"]) >= 1
+    assert "interactive_plots" in result
+    assert len(result["interactive_plots"]) >= 1
+    fig_id = result["interactive_plots"][0]["figure_id"]
+    assert service.get_figure_manager(fig_id) is not None
 
 
 def test_scripting_service_list_and_get_recipes() -> None:
@@ -156,3 +160,22 @@ def test_scripting_service_api_docs() -> None:
     stub_doc = service.get_doc_topic("generated/astrometricslib.Astrometrics.rst")
     assert "Astrometrics" in stub_doc["title"]
     assert "process_all_targets" in stub_doc["content"]
+
+
+def test_get_figure_manager_provides_toolbar() -> None:
+    """Verify figure managers from scripting service have an active toolbar."""
+    service = ScriptingService()
+    plt = service.console.locals.get("plt")
+    fig = plt.figure(99)
+    plt.plot([0, 1], [0, 1])
+
+    mgr = service.get_figure_manager(99)
+    assert mgr is not None
+    assert mgr.toolbar is not None
+    assert mgr.canvas.toolbar is not None
+
+    # Test toggling zoom mode via WebAgg toolbar event
+    mgr.handle_json({"type": "toolbar_button", "name": "zoom"})
+    assert mgr.toolbar.mode == "zoom rect"
+
+    plt.close(fig)

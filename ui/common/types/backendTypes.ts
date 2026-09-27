@@ -242,6 +242,7 @@ export interface SpectroscopyResult {
   wavelengthsAngstrom?: number[];
   intensities?: number[];
   quantumEfficiencyCorrectedIntensities?: number[] | null;
+  responseCorrectedIntensities?: number[] | null;
   selfDeterminedSpectralType?: string;
   selfDeterminedSpectralTypeConfidence?: number | null;
   selfDeterminedSpectralTypeRms?: number | null;

@@ -5,6 +5,7 @@ middleware, initializes the dependency injection container, and
 defines API/WebSocket routes.
 """
 
+import html
 import logging
 import os
 import socket
@@ -620,12 +621,19 @@ async def get_figure_page(figure_id: int) -> HTMLResponse:
         Interactive HTML page with toolbar and HTML5 canvas.
     """
     token = session_auth.SESSION_TOKEN
+    # FastAPI's `figure_id: int` annotation already rejects a request whose
+    # path segment cannot be parsed as an integer, so this value cannot
+    # actually hold script content. It is still escaped before being written
+    # into the page, so a static scan of this function does not have to
+    # trust that route-level validation elsewhere: the value is safe at the
+    # point it is used no matter how it got here.
+    safe_figure_id = html.escape(str(figure_id))
     html_content = f"""<!DOCTYPE html>
 <html lang="en">
   <head>
     <base href="/">
     <meta charset="utf-8">
-    <title>Astrometrics Plot #{figure_id}</title>
+    <title>Astrometrics Plot #{safe_figure_id}</title>
     <link rel="stylesheet" href="/mpl_static/css/boilerplate.css" type="text/css">
     <link rel="stylesheet" href="/mpl_static/css/fbm.css" type="text/css">
     <link rel="stylesheet" href="/mpl_static/css/mpl.css" type="text/css">
@@ -714,12 +722,12 @@ async def get_figure_page(figure_id: int) -> HTMLResponse:
 
       document.addEventListener("DOMContentLoaded", function () {{
         var wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        var wsUrl = wsProtocol + '//' + window.location.host + '/ws/figure/{figure_id}?token={token}';
+        var wsUrl = wsProtocol + '//' + window.location.host + '/ws/figure/{safe_figure_id}?token={token}';
         var websocket_type = mpl.get_websocket_type();
         var websocket = new websocket_type(wsUrl);
 
         var fig = new mpl.figure(
-          {figure_id},
+          {safe_figure_id},
           websocket,
           on_download,
           document.getElementById("figure")

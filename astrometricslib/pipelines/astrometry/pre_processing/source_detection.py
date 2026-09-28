@@ -269,7 +269,9 @@ class SourceDetector:
             # detection already claimed by an earlier group -- otherwise a
             # detection near two different group centers could be merged
             # into both groups and double-counted.
-            neighbor_indices = [i for i in tree.query_ball_point(coords[idx], r=separation_px) if not visited[i]]
+            neighbor_indices = [
+                i for i in tree.query_ball_point(coords[idx], r=separation_px) if not visited[i]
+            ]
             visited[neighbor_indices] = True
             group = [sources[i] for i in neighbor_indices]
 

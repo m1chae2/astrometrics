@@ -360,7 +360,9 @@ class MovingObjectDetector:
             The result: is it a bad pixel, a normal star, or a real moving
             object?
         """
-        mean_right_ascension_deg = _circular_mean_degrees(detection.right_ascension_deg for detection in chain)
+        mean_right_ascension_deg = _circular_mean_degrees(
+            detection.right_ascension_deg for detection in chain
+        )
         mean_declination_deg = statistics.mean(detection.declination_deg for detection in chain)
         sky_spread_arcsec = max(
             math.hypot(
@@ -413,7 +415,9 @@ class MovingObjectDetector:
             Did it pass or fail?
         """
         # Calculate the mean position to serve as a local tangent-plane origin
-        mean_right_ascension_deg = _circular_mean_degrees(detection.right_ascension_deg for detection in chain)
+        mean_right_ascension_deg = _circular_mean_degrees(
+            detection.right_ascension_deg for detection in chain
+        )
         mean_declination_deg = statistics.mean(detection.declination_deg for detection in chain)
 
         # Extract timestamps for the linear fit

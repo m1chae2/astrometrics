@@ -451,6 +451,7 @@ class ProvenanceStore:
             return None
         finally:
             conn.close()
+
     @staticmethod
     def _row_to_agent(row: sqlite3.Row) -> Agent:
         return Agent(
@@ -612,6 +613,7 @@ class ProvenanceStore:
             return []
         finally:
             conn.close()
+
     # -- Entities ----------------------------------------------------------
 
     def record_entity(self, entity: Entity) -> None:
@@ -713,6 +715,7 @@ class ProvenanceStore:
             return None
         finally:
             conn.close()
+
     # -- Relations -----------------------------------------------------
 
     def record_used(self, activity_id: str, used: Used) -> None:
@@ -822,6 +825,7 @@ class ProvenanceStore:
             logger.warning("Could not record attribution for entity %r: %s", entity_id, error)
         finally:
             conn.close()
+
     # -- Description layer -----------------------------------------------
 
     def ensure_activity_description(self, description: ActivityDescription) -> None:
@@ -1152,6 +1156,7 @@ class ProvenanceStore:
 
         finally:
             conn.close()
+
 
 def export_target_lineage_as_prov_xml(target_id: str, store: ProvenanceStore) -> str:
     """Export one target's full lineage as real W3C PROV-XML.

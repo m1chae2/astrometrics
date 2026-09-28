@@ -12,6 +12,8 @@ Guidelines and operational rules for Claude Code operating on the `astrometrics`
   - Every file must have a description block at the top defining its purpose.
   - Every class, function, method, and test block must have a docstring describing its purpose.
   - When editing functions with `# ruff: ignore[...]` / `# noqa` annotations, satisfy the underlying lint rule (e.g. add type hints) and remove the suppression.
+- **Prose Documentation (README.md and similar)**: Under `documentation/`, follow the `documentation-style` skill. Everywhere else, follow the `code-documentation-style` skill — including updating the relevant README when you touch the code it describes, even if that wasn't the primary task.
+- **Reading level (prose docs and code comments/docstrings alike)**: high school level for the UI tier (`ui/`, `backend/`, `electron/`), first-year college engineering/science level for everything else (`astrometricslib/`, `wayfindinglib/`, and other non-UI-tier code). Plain vocabulary, short sentences, spell out unfamiliar terms on first use. Per-language structural conventions (numpydoc sections, JSDoc tags, naming) are unaffected — this is about vocabulary/complexity, not format.
 
 ## 2. Architecture & Unidirectional Layering Rules
 - **Domain Library Layer (`astrometricslib/`, `wayfindinglib/`)**: Pure algorithms, spherical trig, and FITS processing. NEVER import from `backend.services`, `backend.container`, or `backend.routers`.

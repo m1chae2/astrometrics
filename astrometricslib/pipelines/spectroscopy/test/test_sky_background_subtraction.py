@@ -15,7 +15,7 @@ import pytest
 
 from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.pipelines.spectroscopy.pipeline import SpectroscopyPipeline
-from astrometricslib.pipelines.spectroscopy.spectrum_extractor import (
+from astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor import (
     SKY_BAND_GAP_PX,
     SKY_BAND_MINIMUM_SAMPLE_COUNT,
     SKY_BAND_WIDTH_PX,

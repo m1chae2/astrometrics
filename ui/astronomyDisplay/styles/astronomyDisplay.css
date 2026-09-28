@@ -5,6 +5,43 @@
     --layout-right-col-width: 340px;
 }
 
+/* Left column: a target/spectral-class mode toggle over two stacked lists
+   (the chosen scope, then the stars within it), replacing a single list
+   gated by a category dropdown. */
+.astronomy-display__browser {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    gap: 8px;
+    overflow: hidden;
+}
+
+.astronomy-display__mode-toggle {
+    display: flex;
+    gap: 4px;
+    flex: 0 0 auto;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    padding: 2px;
+}
+
+.astronomy-display__mode-toggle .segmented-btn {
+    flex: 1;
+}
+
+.manager.astronomy-display__primary-list {
+    height: auto;
+    flex: 0 0 40%;
+    min-height: 0;
+}
+
+.manager.astronomy-display__star-list {
+    height: auto;
+    flex: 1 1 60%;
+    min-height: 0;
+}
+
 .astronomy-display__plots {
     display: flex;
     flex-direction: column;
@@ -210,6 +247,12 @@
     font-size: 0.85rem;
 }
 
+.stellar-analysis-details__empty-note {
+    padding: 4px 0;
+    color: var(--text-muted, #757575);
+    font-style: italic;
+}
+
 .stellar-analysis-details__info {
     position: relative;
     display: inline-flex;
@@ -344,6 +387,12 @@
 .analysis-value {
     font-weight: 500;
     color: var(--text-primary, #ffffff);
+}
+
+/* A value that should not be read as a firm finding, such as a marginal separation
+   between candidates. Matches the amber used for a poor template match. */
+.analysis-value--caution {
+    color: #ffb74d;
 }
 
 /* Viewer Segmented Controls */

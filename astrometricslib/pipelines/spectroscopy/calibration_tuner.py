@@ -16,16 +16,18 @@ from scipy.signal import find_peaks
 
 from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.pipelines.shared.quality.saturation import compute_saturated_pixel_fraction
-from astrometricslib.pipelines.spectroscopy.optics_physics import (
-    BALMER_SERIES_NM,
-    calculate_pixel_offset,
-    calculate_wavelength,
-)
 from astrometricslib.pipelines.spectroscopy.pipeline import (
     SpectroscopyPipeline,
     _read_xy_source_position,
 )
-from astrometricslib.pipelines.spectroscopy.spectroscopy_instrument import SpectroscopyInstrument
+from astrometricslib.pipelines.spectroscopy.pre_processing.optics_physics import (
+    BALMER_SERIES_NM,
+    calculate_pixel_offset,
+    calculate_wavelength,
+)
+from astrometricslib.pipelines.spectroscopy.pre_processing.spectroscopy_instrument import (
+    SpectroscopyInstrument,
+)
 from astrometricslib.utilities.spectroscopy_models import SpectroscopyConfig
 
 logger = logging.getLogger(__name__)

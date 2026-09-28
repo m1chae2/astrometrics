@@ -9,7 +9,6 @@ in the database.
 import logging
 from typing import Any
 
-from astrometricslib.drivers import deep_star_store
 from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.utilities.config_loader import AppConfiguration
@@ -169,6 +168,25 @@ class StellarCatalog:
         """
         star_ids = [summary.id for summary in self.catalog_access.list_stars_in_region(ra, dec, radius)]
         return self.catalog_access.get_by_ids("stellar_catalog", star_ids)
+
+    def list_objects_by_ids(self, object_ids: list[str]) -> list[StellarObject]:
+        """Load the full records for a specific set of star ids.
+
+        Used when a caller already knows which stars it wants (for
+        example, from a lightweight summary scan) and needs their full
+        records -- their extracted spectra, not just the summary flags.
+
+        Parameters
+        ----------
+        object_ids : `list` [`str`]
+            The ids to load.
+
+        Returns
+        -------
+        stellar_objects : `list` [`StellarObject`]
+            The matching stars, in no particular order.
+        """
+        return self.catalog_access.get_by_ids("stellar_catalog", object_ids)
 
     def find_all_by_id_or_name(self, name: str) -> list[StellarObject]:
         """Find every star whose id or name equals `name`, ignoring case.
@@ -477,46 +495,13 @@ class StellarCatalog:
             for star in self.catalog_access.list_stars_in_region(ra, dec, radius, magnitude_range)
         ]
 
-    def find_deep_stars(
-        self, ra: float, dec: float, radius: float, magnitude_limit: float, maximum_stars: int | None = None
-    ) -> list[tuple[int, float, float, float]] | None:
-        """Look up stars in the downloaded Gaia deep-star catalog.
-
-        The catalog is a copy of Gaia DR3 saved on this computer by
-        ``python -m astrometricslib.scripts.build_deep_star_catalog``, so
-        this makes no internet request. It is meant for drawing a sky map
-        quickly; it does not touch the stars in the library itself.
-
-        Parameters
-        ----------
-        ra, dec : `float`
-            The center of the circle, in degrees.
-        radius : `float`
-            The radius of the circle, in degrees.
-        magnitude_limit : `float`
-            Only stars as bright as this Gaia G magnitude, or brighter.
-        maximum_stars : `int`, optional
-            Return at most this many stars, keeping the brightest.
-
-        Returns
-        -------
-        stars : `list` of `tuple` or `None`
-            One ``(source_id, ra, dec, magnitude)`` tuple per star, brightest
-            first, or `None` if the catalog has not been downloaded at all.
-        """
-        return deep_star_store.find_deep_stars(self._config, ra, dec, radius, magnitude_limit, maximum_stars)
-
-    def get_deep_catalog_status(self) -> dict[str, Any]:
-        """Say how much of the deep-star catalog has been downloaded.
-
-        Returns
-        -------
-        status : `dict`
-            ``installed``, ``complete``, ``star_count``, ``pixels_downloaded``,
-            ``pixels_total``, ``healpix_level``, ``magnitude_limit`` and
-            ``size_megabytes``. See `deep_star_store.get_deep_catalog_status`.
-        """
-        return deep_star_store.get_deep_catalog_status(self._config)
+    # find_deep_stars/get_deep_catalog_status used to live here, reading the
+    # downloaded Gaia deep-star catalog. That catalog exists only to feed the
+    # Planetarium's faint-star layer, a wayfindinglib-owned display -- both
+    # provisioning it (wayfindinglib.drivers.catalog.deep_star_catalog_builder)
+    # and querying it (wayfindinglib.drivers.catalog.deep_star_store, via
+    # LocalDeepStarStore) now live there instead of being reached through this
+    # facade.
 
     def get_object(self, object_id: str) -> StellarObject | None:
         """Find a single star in the catalog using its ID.
@@ -785,6 +770,6 @@ class StellarCatalog:
         sources : `list` [`dict`]
             Detected point sources, sorted by flux.
         """
-        from astrometricslib.pipelines.astrometry.source_detection import SourceDetector
+        from astrometricslib.pipelines.astrometry.pre_processing.source_detection import SourceDetector
 
         return SourceDetector(threshold_sigma=threshold_sigma, fwhm=fwhm).detect(image_data)

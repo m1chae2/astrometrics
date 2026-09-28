@@ -198,7 +198,6 @@ export interface Spectrum {
   bMinusV?: any;
   spectralType?: string;
   photometry?: PhotometryResult | null;
-  spectraHistory?: SpectralObservation[];
   starData?: any;
   radiusPx?: number | null;
   spectroscopy?: SpectroscopyResult | null;
@@ -206,6 +205,7 @@ export interface Spectrum {
   targetIds?: string[];
   sessionMatches?: StellarSessionMatch[];
   isCatalogIdentified?: boolean;
+  catalogMatchQuality?: CatalogMatchQuality | null;
   /** Flexible index to accommodate additional data from the backend. */
   [key: string]: any;
 }
@@ -222,12 +222,16 @@ export interface StellarSessionMatch {
 }
 
 /**
- * A measurement of a star's light split into its component colors.
+ * How confidently one star was matched to a catalog entry.
+ *
+ * `None` fields mean there was no catalog match to judge at all -- a
+ * star that only got a position-based ``FIELD_J...`` id was never
+ * compared against SIMBAD or Gaia in the first place.
  */
-export interface SpectralObservation {
-  timestamp: string;
-  wavelengths?: number[];
-  intensities?: number[];
+export interface CatalogMatchQuality {
+  matchedVia?: string | null;
+  separationArcsec?: number | null;
+  isAmbiguous?: boolean;
 }
 
 /**
@@ -264,7 +268,67 @@ export interface SpectroscopyResult {
   extractionRadius?: number | null;
   neighborWingFraction?: number[] | null;
   neighborWingStatus?: string | null;
+  possibleNeighborContamination?: Record<string, number | null>[] | null;
   countsPerSecondFactor?: number | null;
+  catalogComparison?: CatalogComparison | null;
+  inputQuality?: InputQualityAssessment | null;
+  outputQuality?: OutputQualityAssessment | null;
+}
+
+/**
+ * How a star's self-determined spectrum compares with its catalog entry.
+ *
+ * The catalog (SIMBAD/Gaia) already has a spectral type and a B-V colour
+ * for most stars, measured a different way. This is not used to help the
+ * classification along -- it is a check done afterward, to catch a
+ * spectrum that probably is not this star's at all (a bright neighbour's
+ * light, glare from a nearby bright star, or a name given to the wrong
+ * object).
+ */
+export interface CatalogComparison {
+  spectralTypeAgrees?: boolean | null;
+  spectralTypeNote?: string;
+  isLuminosityClassUncertain?: boolean;
+  luminosityClassNote?: string;
+  closestGiantType?: string | null;
+  closestGiantRms?: number | null;
+  colourAgrees?: boolean | null;
+  colourNote?: string;
+}
+
+/**
+ * How good the raw data behind a spectrum was, before anything was found.
+ *
+ * Answers "was this spectrum even worth analyzing?" using only signals
+ * that come from the extraction itself -- the instrument's resolution,
+ * how much of the frame was saturated, how much of the requested
+ * spectrum actually landed on the image, and how far the signal stood
+ * out from noise. None of this depends on what the classifier or the
+ * feature tests concluded.
+ */
+export interface InputQualityAssessment {
+  resolutionElementAngstrom: number;
+  isResolutionMeasured: boolean;
+  zeroOrderSaturatedPixelFraction?: number | null;
+  validFraction?: number | null;
+  signalToNoise?: number | null;
+}
+
+/**
+ * How much to trust a spectrum's classification, given everything found.
+ *
+ * Combines the classifier's own match statistics (is the winning type a
+ * weak match, or nearly tied with the runner-up) with the catalog
+ * comparison above, into one overall verdict. Unlike
+ * `InputQualityAssessment`, this depends on what classifying the
+ * spectrum actually produced.
+ */
+export interface OutputQualityAssessment {
+  isLowConfidence: boolean;
+  isAmbiguous: boolean;
+  isSubtypeFinerThanResolution?: boolean | null;
+  catalogAgrees?: boolean | null;
+  isTrustworthy: boolean;
 }
 
 /**

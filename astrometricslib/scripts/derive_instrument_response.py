@@ -3,9 +3,9 @@ r"""Derive the instrument response from a known star's master stack.
 Reads the master stacked spectral image of a standard star (Vega by
 default, type A0V), extracts its spectrum without saving anything to the
 catalog, fits the instrument response (see
-`astrometricslib.pipelines.spectroscopy.instrument_response`) and writes
-it as ``instrument_response_<camera>.json`` in the spectroscopy data
-folder.
+`astrometricslib.pipelines.spectroscopy.pre_processing.instrument_response`)
+and writes it as ``instrument_response_<camera>.json`` in the spectroscopy
+data folder.
 
     python -m astrometricslib.scripts.derive_instrument_response
 
@@ -26,12 +26,14 @@ import numpy as np
 from astrometricslib import Astrometrics
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.astrometry.pipeline import AstrometryPipeline
-from astrometricslib.pipelines.spectroscopy.instrument_response import (
+from astrometricslib.pipelines.spectroscopy.pipeline import SpectroscopyPipeline
+from astrometricslib.pipelines.spectroscopy.pre_processing.instrument_response import (
     DEFAULT_RESPONSE_WAVELENGTH_RANGE_ANGSTROM,
     derive_instrument_response,
 )
-from astrometricslib.pipelines.spectroscopy.pipeline import SpectroscopyPipeline
-from astrometricslib.pipelines.spectroscopy.spectral_resolution import resolve_resolution_element_angstrom
+from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import (
+    resolve_resolution_element_angstrom,
+)
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "pipelines" / "spectroscopy" / "data"
 

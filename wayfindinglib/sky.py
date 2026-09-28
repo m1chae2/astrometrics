@@ -78,9 +78,12 @@ class Sky:
         )
 
         from astrometricslib import Astrometrics
+        from wayfindinglib.drivers.catalog import LocalDeepStarStore
 
         self._astrometrics = Astrometrics()
-        self._catalog_driver_registry = build_catalog_driver_registry(star_source=self._astrometrics.stars)
+        self._catalog_driver_registry = build_catalog_driver_registry(
+            star_source=LocalDeepStarStore(self._config)
+        )
         # Bundled constellation stick-figure line data — not a CatalogDriver
         # since it's static cultural/artistic topology, not a live query.
         self._constellation_lines = ConstellationLineLibrary()

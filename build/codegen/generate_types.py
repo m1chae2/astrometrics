@@ -16,6 +16,7 @@ from pydantic import BaseModel
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 from astrometricslib import FilterType
+from astrometricslib.models.astrometry_quality import CatalogMatchQuality
 from astrometricslib.models.moving_object import (
     AsteroidDetectionCandidate,
     CascadeStage,
@@ -41,6 +42,11 @@ from astrometricslib.models.quality_summary import (
     StackQualitySummary,
     TargetSessionContribution,
 )
+from astrometricslib.models.spectroscopy_quality import (
+    CatalogComparison,
+    InputQualityAssessment,
+    OutputQualityAssessment,
+)
 from astrometricslib.models.stellar_source import (
     AnalysisResult,
     FileItem,
@@ -48,7 +54,6 @@ from astrometricslib.models.stellar_source import (
     PeriodogramResult,
     PhotometryResult,
     PlotData,
-    SpectralObservation,
     SpectroscopyResult,
     StellarObject,
     StellarSessionMatch,
@@ -266,8 +271,11 @@ def main() -> None:
         generate_interface(PlotData, "PlotData"),
         generate_interface(StellarObject, "Spectrum"),
         generate_interface(StellarSessionMatch, "StellarSessionMatch"),
-        generate_interface(SpectralObservation, "SpectralObservation"),
+        generate_interface(CatalogMatchQuality, "CatalogMatchQuality"),
         generate_interface(SpectroscopyResult, "SpectroscopyResult"),
+        generate_interface(CatalogComparison, "CatalogComparison"),
+        generate_interface(InputQualityAssessment, "InputQualityAssessment"),
+        generate_interface(OutputQualityAssessment, "OutputQualityAssessment"),
         generate_interface(PeriodogramResult, "PeriodogramResult"),
         generate_interface(TransitCandidate, "TransitCandidate"),
         generate_interface(PhotometryResult, "PhotometryResult"),

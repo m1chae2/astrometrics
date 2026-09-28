@@ -4,7 +4,7 @@ import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.widgets import Button
 
-from astrometricslib.pipelines.spectroscopy.optics_physics import BALMER_SERIES_NM
+from astrometricslib.pipelines.spectroscopy.pre_processing.optics_physics import BALMER_SERIES_NM
 from astrometricslib.visualization.visualization_config import VisualizationConfig
 
 

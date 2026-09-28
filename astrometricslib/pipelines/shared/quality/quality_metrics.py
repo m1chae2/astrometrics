@@ -83,7 +83,7 @@ def measure_frame_input_quality(
 
     if include_fwhm:
         try:
-            from astrometricslib.pipelines.astrometry.fwhm import measure_fwhm_from_data
+            from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_fwhm_from_data
 
             metrics["fwhm_px"] = measure_fwhm_from_data(data)
         except Exception as fwhm_error:

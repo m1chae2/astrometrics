@@ -10,15 +10,18 @@ the analysis, and a cap on the verdict of a feature measured too noisily.
 import numpy as np
 import pytest
 
-import astrometricslib.pipelines.spectroscopy.spectral_feature_detector as feature_detector
-from astrometricslib.pipelines.spectroscopy.instrument_response import load_instrument_response
-from astrometricslib.pipelines.spectroscopy.spectral_feature_detector import (
+import astrometricslib.pipelines.spectroscopy.processing.spectral_feature_detector as feature_detector
+from astrometricslib.pipelines.spectroscopy.pre_processing.instrument_response import (
+    apply_instrument_response,
+    load_instrument_response,
+)
+from astrometricslib.pipelines.spectroscopy.processing.spectral_feature_detector import (
     MAXIMUM_UNCERTAINTY_FOR_A_VERDICT,
     VERDICT_INCONCLUSIVE,
     detect_named_features,
 )
-from astrometricslib.pipelines.spectroscopy.spectrum_analysis import analyze_spectrum
-from astrometricslib.pipelines.spectroscopy.spectrum_signal import (
+from astrometricslib.pipelines.spectroscopy.processing.spectrum_analysis import analyze_spectrum
+from astrometricslib.pipelines.spectroscopy.processing.spectrum_signal import (
     MINIMUM_SPECTRUM_SIGNAL_TO_NOISE,
     estimate_spectrum_signal_to_noise,
 )
@@ -119,9 +122,7 @@ def test_a_noiseless_positive_spectrum_has_unlimited_signal() -> None:
 
 def test_the_analysis_declines_a_spectrum_that_is_only_noise() -> None:
     """No classification and no feature tests, and the reason says why."""
-    analysis = analyze_spectrum(
-        WAVELENGTHS, _noise_only_spectrum(), RESPONSE, is_quantum_efficiency_corrected=True
-    )
+    analysis = analyze_spectrum(WAVELENGTHS, _noise_only_spectrum(), None)
 
     assert analysis.classification["spectral_type"] == "Unknown"
     assert "no measurable spectrum" in str(analysis.classification["reason"])
@@ -132,8 +133,9 @@ def test_the_analysis_declines_a_spectrum_that_is_only_noise() -> None:
 
 def test_the_analysis_still_runs_on_a_real_spectrum() -> None:
     """A spectrum with a continuum is analysed as before."""
+    intensity = _star_spectrum(20.0)
     analysis = analyze_spectrum(
-        WAVELENGTHS, _star_spectrum(20.0), RESPONSE, is_quantum_efficiency_corrected=True
+        WAVELENGTHS, intensity, apply_instrument_response(WAVELENGTHS, intensity, RESPONSE)
     )
 
     assert "no measurable spectrum" not in str(analysis.classification.get("reason"))

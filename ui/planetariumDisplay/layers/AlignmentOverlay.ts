@@ -8,12 +8,7 @@ import { PlanetariumOverlay, ProjectionContext } from './overlayTypes';
 import { AlignmentAttempt, PolarAlignmentStatus } from '../../common/types/backendTypes';
 import { clusterAlignmentAttempts, formatDuration } from '../utils/alignmentClustering';
 import { pixelsPerDegree } from '../utils/projectionMath';
-
-/** Radius of the sync point reticle in pixels. */
-const RETICLE_RADIUS_PX = 8;
-
-/** Arrowhead tip size in pixels. */
-const ARROW_HEAD_PX = 6;
+import { ALIGNMENT_RETICLE_RADIUS_PX as RETICLE_RADIUS_PX, ALIGNMENT_ARROW_HEAD_PX as ARROW_HEAD_PX } from './constants';
 
 /**
  * Normalizes RA from hours (0..24) or degrees to decimal degrees (0..360).

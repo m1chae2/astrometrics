@@ -1,37 +1,39 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAstronomyListQuery } from '../../common/queries/useAstronomyListQuery';
-import { useTargetListQuery } from '../../common/queries/useTargetListQuery';
 import { useToast } from '../../common/hooks/useToast';
 import { SelectableItem } from '../../common/components/SelectableList';
 import { Spectrum } from '../../common/types/backendTypes';
 import { buildStarListSubtitle, formatStarListLabel } from '../utils/starDisplayFormat';
 
-const BASE_FILTER_OPTIONS = [
-    'All',
-    'With Spectra',
-    'With Photometry'
-];
-
+/**
+ * Fetches and paginates the star list for one scope -- a single target, or
+ * the whole catalog when `targetId` is undefined -- with text search.
+ *
+ * Owns only the star list itself: which target (or spectral class) is in
+ * scope is decided by the caller (see `useTargetBrowserItems` and
+ * `useSpectralClassBrowserItems`), not by this hook.
+ *
+ * @param targetId The target to scope the list to, or undefined for the whole catalog.
+ * @param reloadKey Changing this value re-triggers the star list fetch.
+ * @param pendingId ID of a star awaiting confirmation of selection.
+ * @param selectedId ID of the currently selected star, if any.
+ * @param setPendingId Setter invoked to auto-select the first star once loaded.
+ */
 export const useSpectrumList = (
+    targetId?: string,
     reloadKey?: number,
     pendingId?: string,
     selectedId?: string,
     setPendingId?: (t: string) => void
 ) => {
-    const [dropdown, setDropdown] = useState<string>('All');
     const [filterText, setFilterText] = useState<string>('');
     const [debouncedFilterText, setDebouncedFilterText] = useState<string>('');
     const [page, setPage] = useState<number>(1);
     const toast = useToast();
 
-    // Reset page to 1 when search or filter changes
+    // Reset page to 1 when search text changes
     const handleSetFilterText = useCallback((text: string) => {
         setFilterText(text);
-        setPage(1);
-    }, []);
-
-    const handleSetDropdown = useCallback((opt: string) => {
-        setDropdown(opt);
         setPage(1);
     }, []);
 
@@ -43,44 +45,18 @@ export const useSpectrumList = (
         return () => clearTimeout(timer);
     }, [filterText]);
 
-    // Fetch target list to dynamically populate target filter options
-    const targetListQuery = useTargetListQuery();
-    const targets = useMemo(() => (targetListQuery.data as any[]) ?? [], [targetListQuery.data]);
-
-    // Compute dynamic filter options with Target: <name> items
-    const filterOptions = useMemo(() => {
-        const targetNames = targets
-            .map((t: any) => (typeof t === 'string' ? t : String(t.name || t.id || '')))
-            .filter((n: string) => n.trim() !== '');
-
-        const uniqueTargetNames = Array.from(new Set(targetNames)).sort();
-        const targetOpts = uniqueTargetNames.map((name) => `Target: ${name}`);
-        return [...BASE_FILTER_OPTIONS, ...targetOpts];
-    }, [targets]);
-
-    // Extract active target ID if a target option is selected in the dropdown
-    const activeTargetId = useMemo(() => {
-        if (dropdown.startsWith('Target: ')) {
-            return dropdown.replace('Target: ', '').trim();
-        }
-        return undefined;
-    }, [dropdown]);
-
-    // Extract active capability category filter
-    const activeFilterType = useMemo(() => {
-        if (dropdown === 'With Spectra') return 'With Spectra';
-        if (dropdown === 'With Photometry') return 'With Photometry';
-        return undefined;
-    }, [dropdown]);
+    // Reset to page 1 whenever the scope itself changes.
+    useEffect(() => {
+        setPage(1);
+    }, [targetId]);
 
     // Fetch astronomy list capped at 100 stars with full database search and offset pagination
     const queryOptions = useMemo(() => ({
-        targetId: activeTargetId,
+        targetId,
         search: debouncedFilterText,
-        filterType: activeFilterType,
         limit: 100,
         offset: (page - 1) * 100,
-    }), [activeTargetId, debouncedFilterText, activeFilterType, page]);
+    }), [targetId, debouncedFilterText, page]);
 
     const astronomyListQuery = useAstronomyListQuery(queryOptions);
     const spectra = useMemo(() => astronomyListQuery.data ?? [], [astronomyListQuery.data]);
@@ -93,7 +69,6 @@ export const useSpectrumList = (
             return;
         }
         astronomyListQuery.refetch();
-        targetListQuery.refetch();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [reloadKey]);
 
@@ -120,7 +95,6 @@ export const useSpectrumList = (
         }
     }, [astronomyListQuery.error, toast]);
 
-    // Filtering Logic
     const applyTextFilter = useCallback(
         (s: Spectrum) => {
             if (!filterText || filterText.trim() === '') return true;
@@ -131,13 +105,11 @@ export const useSpectrumList = (
         [filterText]
     );
 
-    // Category filtering
     const checkHasSpectra = useCallback((s: Spectrum): boolean => {
         if (typeof s === 'string') return false;
         return (
             !!s.hasSpectra ||
             !!s.has_spectra ||
-            (Array.isArray(s.spectraHistory) && s.spectraHistory.length > 0) ||
             !!(s.spectroscopy && s.spectroscopy.wavelengthsAngstrom && s.spectroscopy.wavelengthsAngstrom.length > 0)
         );
     }, []);
@@ -154,46 +126,6 @@ export const useSpectrumList = (
         );
     }, []);
 
-    const applyCategoryFilter = useCallback(
-        (s: Spectrum) => {
-            if (dropdown.startsWith('Target: ')) {
-                const targetName = dropdown.replace('Target: ', '').trim().toLowerCase();
-                const starTargetIds = typeof s === 'object' && s !== null
-                    ? (s.targetIds || s.target_ids || [])
-                    : [];
-                if (Array.isArray(starTargetIds) && starTargetIds.some((t: string) => String(t).toLowerCase() === targetName)) {
-                    return true;
-                }
-
-                const starTargetId = typeof s === 'object' && s !== null
-                    ? String(s.targetId || s.target_id || s.target || '').toLowerCase()
-                    : '';
-                if (starTargetId) {
-                    return starTargetId === targetName;
-                }
-
-                const starId = typeof s === 'string' ? (s as string).toLowerCase() : String(s.id || s.label || '').toLowerCase();
-                const normalizedTarget = targetName.replace(/[\s_]/g, '');
-                const normalizedStar = starId.replace(/[\s_]/g, '');
-                return normalizedStar.startsWith(normalizedTarget);
-            }
-
-            if (dropdown === 'Latest Analysis') {
-                const latestId = localStorage.getItem('latestAnalysisTargetId');
-                if (!latestId) return false;
-                return s.targetIds?.includes(latestId) ?? false;
-            }
-            if (dropdown === 'With Spectra') {
-                return checkHasSpectra(s);
-            }
-            if (dropdown === 'With Photometry') {
-                return checkHasPhotometry(s);
-            }
-            return true;
-        },
-        [dropdown, checkHasSpectra, checkHasPhotometry]
-    );
-
     const filteredItems: SelectableItem[] = spectra
         .filter((s) => {
             const name = typeof s === 'string' ? s : (s.name || s.id || s.label || '');
@@ -203,7 +135,6 @@ export const useSpectrumList = (
             }
             return true;
         })
-        .filter((s) => applyCategoryFilter(s))
         .filter((s) => applyTextFilter(s))
         .slice(0, 100)
         .map((s) => {
@@ -216,6 +147,8 @@ export const useSpectrumList = (
             // The list column is narrow, so the label is shortened to keep the
             // part that tells stars apart; the full name and id are the hover text.
             const tooltip = fullName === value ? fullName : `${fullName} (${value})`;
+            const ra = typeof s === 'string' ? undefined : Number(s.ra);
+            const dec = typeof s === 'string' ? undefined : Number(s.dec);
 
             return {
                 id: value,
@@ -224,7 +157,9 @@ export const useSpectrumList = (
                 subtitle: typeof s === 'string' ? '' : buildStarListSubtitle(s),
                 tooltip,
                 hasSpectra,
-                hasPhotometry
+                hasPhotometry,
+                ra: Number.isFinite(ra) ? ra : undefined,
+                dec: Number.isFinite(dec) ? dec : undefined,
             };
         });
 
@@ -232,9 +167,6 @@ export const useSpectrumList = (
 
     return {
         items: filteredItems,
-        filterOptions,
-        selectedFilterOption: dropdown,
-        setFilterOption: handleSetDropdown,
         filterText,
         setFilterText: handleSetFilterText,
         page,

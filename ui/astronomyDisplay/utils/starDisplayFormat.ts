@@ -112,6 +112,43 @@ export function formatCoordinateDegrees(value: unknown, fractionDigits: number =
 }
 
 /**
+ * Formats a right ascension in decimal degrees as hours, minutes, and seconds.
+ *
+ * @param value The raw right ascension in degrees, a number or a numeric string.
+ * @returns For example "0h 56' 43.3''", or an empty string when the value is not a number.
+ */
+export function formatRightAscensionSexagesimal(value: unknown): string {
+    if (value === null || value === undefined || value === '') return '';
+    const degrees = Number(value);
+    if (!Number.isFinite(degrees)) return '';
+    const totalHours = (((degrees / 15) % 24) + 24) % 24;
+    const hours = Math.floor(totalHours);
+    const totalMinutes = (totalHours - hours) * 60;
+    const minutes = Math.floor(totalMinutes);
+    const seconds = (totalMinutes - minutes) * 60;
+    return `${hours}h ${minutes}' ${seconds.toFixed(1)}''`;
+}
+
+/**
+ * Formats a declination in decimal degrees as degrees, arcminutes, and arcseconds.
+ *
+ * @param value The raw declination in degrees, a number or a numeric string.
+ * @returns For example "+60° 42' 57.3''", or an empty string when the value is not a number.
+ */
+export function formatDeclinationSexagesimal(value: unknown): string {
+    if (value === null || value === undefined || value === '') return '';
+    const degrees = Number(value);
+    if (!Number.isFinite(degrees)) return '';
+    const sign = degrees < 0 ? '-' : '+';
+    const absoluteDegrees = Math.abs(degrees);
+    const wholeDegrees = Math.floor(absoluteDegrees);
+    const totalArcminutes = (absoluteDegrees - wholeDegrees) * 60;
+    const arcminutes = Math.floor(totalArcminutes);
+    const arcseconds = (totalArcminutes - arcminutes) * 60;
+    return `${sign}${wholeDegrees}° ${arcminutes}' ${arcseconds.toFixed(1)}''`;
+}
+
+/**
  * Describes the time between two timestamps in the largest sensible unit.
  *
  * @param firstTimestamp The earliest timestamp.
@@ -253,6 +290,72 @@ export function describeTemplateMatch(
         hoverText: parts.join(' '),
         isPoor,
         differsFromCatalog,
+    };
+}
+
+/**
+ * Formats a star's self-determined spectral match quality for the
+ * spectral-class browser's star list, where stars are ranked best-match
+ * first.
+ *
+ * @param rms How far the winning reference template is from the spectrum, or null/undefined when not yet matched.
+ * @returns For example "4% off", or "not yet matched" when `rms` is null or undefined.
+ */
+export function formatSpectralMatchQuality(rms: number | null | undefined): string {
+    if (rms === null || rms === undefined) return 'not yet matched';
+    return `${(rms * 100).toFixed(0)}% off`;
+}
+
+/** The catalog spectral classes the spectral-class browser shows, and R/N's fold into C. Mirrors the backend's _SPECTRAL_CLASS_LABELS/_SPECTRAL_CLASS_ALIASES in stellar_service.py. */
+const KNOWN_SPECTRAL_CLASSES = new Set(['O', 'B', 'A', 'F', 'G', 'K', 'M', 'C', 'W']);
+const SPECTRAL_CLASS_ALIASES: Record<string, string> = { R: 'C', N: 'C' };
+
+/**
+ * Reduces a catalog spectral type string to its primary class letter, the
+ * same way the backend's `_spectral_class_letter` does, so the Planetarium
+ * can filter its rendered star field to match a chosen spectral-class
+ * browser selection without a round trip.
+ *
+ * @param spectralType The star's catalog spectral type, e.g. "G2V".
+ * @returns The class letter (e.g. "G", "R2" -> "C"), or an empty string when the type is empty, "Unknown", or not one of the classes the browser shows.
+ */
+export function spectralClassLetter(spectralType: string | null | undefined): string {
+    const trimmed = (spectralType ?? '').trim();
+    if (!trimmed || trimmed.toLowerCase() === 'unknown') return '';
+    const letter = trimmed[0].toUpperCase();
+    if (!/[A-Z]/.test(letter)) return '';
+    const resolved = SPECTRAL_CLASS_ALIASES[letter] ?? letter;
+    return KNOWN_SPECTRAL_CLASSES.has(resolved) ? resolved : '';
+}
+
+/** RMS gap, in percentage points, between the best and runner-up candidate needed to call the type well-separated rather than marginal. */
+const WELL_SEPARATED_RMS_GAP_POINTS = 2;
+
+/** How cleanly a spectrum's best-matching type stands out from the next-closest candidate. */
+export interface CandidateSeparationDescription {
+    /** "well-separated" when the runner-up is a clearly worse fit; "marginal" when it is nearly as close. */
+    label: 'well-separated' | 'marginal';
+    /** The runner-up type and how far behind it is, e.g. "B8V within 0.3 pts". */
+    detail: string;
+}
+
+/**
+ * Describes whether the best-matching spectral type is a clear best or a close call
+ * against the next-closest candidate, so a near-tied runner-up is not read as a
+ * confidently determined type.
+ *
+ * @param candidates Candidates as ranked by the backend, closest match (lowest RMS) first.
+ * @returns The separation description, or null when fewer than two candidates were compared.
+ */
+export function describeCandidateSeparation(candidates: any[] | null | undefined): CandidateSeparationDescription | null {
+    if (!candidates || candidates.length < 2) return null;
+    const best = Number(candidates[0]?.rms);
+    const runnerUp = Number(candidates[1]?.rms);
+    if (!Number.isFinite(best) || !Number.isFinite(runnerUp)) return null;
+    const gapPoints = (runnerUp - best) * 100;
+    return {
+        label: gapPoints >= WELL_SEPARATED_RMS_GAP_POINTS ? 'well-separated' : 'marginal',
+        detail: `${candidates[1].spectral_type} within ${gapPoints.toFixed(1)} pts`,
     };
 }
 
@@ -519,6 +622,69 @@ export function splitFeaturesForTable(features: SpectralFeatureResult[] | null |
     if (nothingFoundCount > 0) parts.push(`${nothingFoundCount} tested, nothing found`);
     if (outsideSpectrumCount > 0) parts.push(`${outsideSpectrumCount} outside the spectrum`);
     return { shown, hidden, hiddenSummary: parts.join(', ') };
+}
+
+/**
+ * Combines a feature's verdict with its supporting statistics (depth, expected depth, false-alarm
+ * chance, estimated presence) into one hover sentence, so the table can show a single Result
+ * column instead of a separate column per statistic.
+ * @param feature The tested feature.
+ * @returns The verdict label for the cell and a detail sentence for its tooltip.
+ */
+export function describeFeatureDetail(feature: SpectralFeatureResult): FeatureVerdictDescription {
+    const verdictDescription = describeFeatureVerdict(feature.verdict);
+    const stats = [
+        isDepthMeaningful(feature.verdict) && feature.depth !== undefined ? `depth ${(feature.depth * 100).toFixed(0)}%` : '',
+        typeof feature.expected_depth === 'number' ? `expected ${(feature.expected_depth * 100).toFixed(0)}%` : '',
+        feature.p_value !== undefined ? `chance of noise: ${formatFalseAlarmProbability(feature.p_value)}` : '',
+        typeof feature.probability_present === 'number' ? `est. chance present: ${Math.round(feature.probability_present * 100)}%` : '',
+    ].filter((part) => part !== '').join(', ');
+    return {
+        label: verdictDescription.label,
+        explanation: [verdictDescription.explanation, stats ? `(${stats})` : ''].filter((part) => part !== '').join(' '),
+    };
+}
+
+/** How the emission-line table divides the tested lines. */
+export interface EmissionLineTableSplit {
+    /** Lines worth a row of their own: detected or unclear. */
+    shown: EmissionLineResult[];
+    /** Lines the test found nothing at, or the spectrum does not reach. */
+    hidden: EmissionLineResult[];
+    /** A short description of `hidden`, such as "5 tested, nothing found". Empty when nothing is hidden. */
+    hiddenSummary: string;
+}
+
+/**
+ * Divides the tested emission lines into those the table shows and those it folds away, the same
+ * way `splitFeaturesForTable` does for absorption features.
+ * @param emissionLines Every tested emission line or blend.
+ * @returns The lines to show, the lines to fold away, and a description of the folded ones.
+ */
+export function splitEmissionLinesForTable(emissionLines: EmissionLineResult[] | null | undefined): EmissionLineTableSplit {
+    const all = (emissionLines ?? []).filter((line) => line.verdict !== 'not_covered');
+    const shown = all.filter((line) => line.verdict === 'detected' || line.verdict === 'unclear');
+    const hidden = all.filter((line) => line.verdict === 'not_seen');
+    const outsideSpectrumCount = (emissionLines ?? []).filter((line) => line.verdict === 'not_covered').length;
+    const parts: string[] = [];
+    if (hidden.length > 0) parts.push(`${hidden.length} tested, nothing found`);
+    if (outsideSpectrumCount > 0) parts.push(`${outsideSpectrumCount} outside the spectrum`);
+    return { shown, hidden, hiddenSummary: parts.join(', ') };
+}
+
+/**
+ * Combines an emission line's verdict with its significance into one hover sentence, so the table
+ * can show a single Result column instead of a separate Strength column.
+ * @param line The tested emission line or blend.
+ * @returns The verdict label for the cell and a detail sentence for its tooltip.
+ */
+export function describeEmissionLineDetail(line: EmissionLineResult): FeatureVerdictDescription {
+    const verdictDescription = describeEmissionLineVerdict(line.verdict);
+    const strength = typeof line.significance === 'number' ? `${line.significance.toFixed(1)}σ above the continuum` : '';
+    return {
+        label: verdictDescription.label,
+        explanation: [verdictDescription.explanation, strength ? `(${strength})` : ''].filter((part) => part !== '').join(' '),
+    };
 }
 
 /**

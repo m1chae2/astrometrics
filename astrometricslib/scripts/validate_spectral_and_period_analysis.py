@@ -34,8 +34,8 @@ from astrometricslib.pipelines.photometry.periodicity_search import (
     box_search,
     lomb_scargle_search,
 )
-from astrometricslib.pipelines.spectroscopy.spectral_classifier import nearest_reference_type
-from astrometricslib.pipelines.spectroscopy.spectral_feature_detector import detect_named_features
+from astrometricslib.pipelines.spectroscopy.processing.spectral_classifier import nearest_reference_type
+from astrometricslib.pipelines.spectroscopy.processing.spectral_feature_detector import detect_named_features
 
 # The largest share of pure-noise trials allowed to be called "detected".
 # The verdict cutoff is 1%; three times that leaves room for the finite

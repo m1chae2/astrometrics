@@ -12,6 +12,11 @@
 
 import { PlanetariumOverlay, ProjectionContext } from './overlayTypes';
 import { clusterAlignmentAttempts, ClusteredAlignmentSession } from '../utils/alignmentClustering';
+import {
+  TRACKING_RISK_ALT_STEP_DEG,
+  TRACKING_RISK_AZ_STEP_DEG,
+  TRACKING_RISK_OFFSCREEN_MARGIN_PX,
+} from './constants';
 
 /**
  * Calculates mechanical tracking risk factor prior between 0.0 (optimal) and 1.0 (high risk).
@@ -165,8 +170,8 @@ export class TrackingRiskOverlay implements PlanetariumOverlay {
 
     // Sample in Horizontal (Alt / Az) space so the heatmap forms a stable,
     // seamless dome over the horizon that never clips or shifts when panning
-    const altStep = 10;
-    const azStep = 15;
+    const altStep = TRACKING_RISK_ALT_STEP_DEG;
+    const azStep = TRACKING_RISK_AZ_STEP_DEG;
 
     for (let alt = 5; alt <= 85; alt += altStep) {
       for (let az = 0; az < 360; az += azStep) {
@@ -183,7 +188,7 @@ export class TrackingRiskOverlay implements PlanetariumOverlay {
         const pTopRight = projectionContext.projectCoords(coordTopRight.ra, coordTopRight.dec);
 
         // If all 4 corners are off-screen outside margins, skip drawing this quad
-        const margin = 80;
+        const margin = TRACKING_RISK_OFFSCREEN_MARGIN_PX;
         const allOffScreen =
           (p0.x < -margin && pRight.x < -margin && pTop.x < -margin && pTopRight.x < -margin) ||
           (p0.x > width + margin && pRight.x > width + margin && pTop.x > width + margin && pTopRight.x > width + margin) ||

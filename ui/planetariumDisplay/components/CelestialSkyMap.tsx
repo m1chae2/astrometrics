@@ -29,6 +29,8 @@ import { ConstellationOverlay } from '../layers/ConstellationOverlay';
 import { AlignmentOverlay } from '../layers/AlignmentOverlay';
 import { TrackingRiskOverlay } from '../layers/TrackingRiskOverlay';
 import { StarFieldRenderer } from '../webgl/StarFieldRenderer';
+import { useTimeController } from '../hooks/useTimeController';
+import { useSkyMapInput } from '../hooks/useSkyMapInput';
 
 /**
  * Props for CelestialSkyMap.
@@ -290,21 +292,11 @@ export const CelestialSkyMap: React.FC<Props> = ({
     }
   }, [telemetry.ra, telemetry.dec, telescopeConnection]);
 
-  // Drag interaction
-  const [isDragging, setIsDragging] = useState(false);
-  const isDraggingRef = useRef(false);
-  const dragStart = useRef({ x: 0, y: 0 });
-  const dragLast = useRef({ x: 0, y: 0 });
-  const dragCenterStart = useRef({ az: 0, alt: 0 });
-
   // Time & LST state
-  const [timeOffsetMinutes, setTimeOffsetMinutes] = useState<number>(0);
-  const timeOffsetMinutesRef = useRef<number>(0);
-  useEffect(() => {
-    timeOffsetMinutesRef.current = timeOffsetMinutes;
-  }, [timeOffsetMinutes]);
-  const [isTimePlaying, setIsTimePlaying] = useState<boolean>(false);
-  const [timeSpeed, setTimeSpeed] = useState<number>(1);
+  const {
+    timeOffsetMinutes, setTimeOffsetMinutes, timeOffsetMinutesRef,
+    isTimePlaying, setIsTimePlaying, timeSpeed, setTimeSpeed,
+  } = useTimeController();
   const [trackingMode, setTrackingMode] = useState<boolean>(false);
   const trackedCoords = useRef<{ ra: number; dec: number } | null>(null);
 
@@ -346,17 +338,6 @@ export const CelestialSkyMap: React.FC<Props> = ({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
-
-  // Dynamic Sidereal Time play interval loop
-  useEffect(() => {
-    if (!isTimePlaying) return;
-    const interval = setInterval(() => {
-      setTimeOffsetMinutes(prev => prev + (timeSpeed * 0.1));
-    }, 100);
-    return () => clearInterval(interval);
-  }, [isTimePlaying, timeSpeed]);
-
-
 
   // Keep LST ref in sync
   useEffect(() => {
@@ -466,75 +447,6 @@ export const CelestialSkyMap: React.FC<Props> = ({
     setLoadedFits(prev => ({ ...prev, [id]: entry }));
   }, []);
 
-  /**
-   * Begins a canvas drag operation, capturing the pointer and disabling tracking mode.
-   *
-   * @param {React.PointerEvent} e - The pointer down event.
-   * @returns {void}
-   */
-  const onPointerDown = (e: React.PointerEvent) => {
-    isDraggingRef.current = true;
-    setIsDragging(true);
-    setTrackingMode(false);
-    // Cancel any residual recenter-on-selection easing so the drag starts from
-    // where the camera actually is, not from the still-in-flight animation
-    // target — otherwise the pan fights the leftover lerp and feels locked
-    // back toward the selected object.
-    targetAzRef.current = centerAzRef.current;
-    targetAltRef.current = centerAltRef.current;
-    try {
-      e.currentTarget.setPointerCapture(e.pointerId);
-    } catch (err) {
-      // Ignore setPointerCapture failures
-    }
-    dragStart.current = { x: e.clientX, y: e.clientY };
-    dragLast.current = { x: e.clientX, y: e.clientY };
-    dragCenterStart.current = { az: centerAzRef.current, alt: centerAltRef.current };
-  };
-
-  /**
-   * Pans the viewport by converting pointer delta to Alt/Az coordinate offsets.
-   *
-   * @param {React.PointerEvent} e - The pointer move event.
-   * @returns {void}
-   */
-  const onPointerMove = (e: React.PointerEvent) => {
-    if (!isDraggingRef.current) return;
-    const dx = e.clientX - dragLast.current.x;
-    const dy = e.clientY - dragLast.current.y;
-    dragLast.current = { x: e.clientX, y: e.clientY };
-
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const scale = pixelsPerDegree(canvas.width, canvas.height, localFOVRef.current);
-
-    const dAlt = dy / scale;
-    const dAz = -(dx / scale);
-
-    const nextAlt = Math.max(-89.9, Math.min(89.9, targetAltRef.current + dAlt));
-    const nextAz = (targetAzRef.current + dAz + 360.0) % 360.0;
-
-    targetAzRef.current = nextAz;
-    targetAltRef.current = nextAlt;
-  };
-
-  /**
-   * Ends a canvas drag operation and releases pointer capture.
-   *
-   * @param {React.PointerEvent} e - The pointer up event.
-   * @returns {void}
-   */
-  const onPointerUp = (e: React.PointerEvent) => {
-    isDraggingRef.current = false;
-    setIsDragging(false);
-    try {
-      e.currentTarget.releasePointerCapture(e.pointerId);
-    } catch (err) {
-      // Ignore releasePointerCapture failures
-    }
-  };
-
   // Sync local FOV and sensor FOV refs
   useEffect(() => {
     localFOVRef.current = fov;
@@ -577,65 +489,11 @@ export const CelestialSkyMap: React.FC<Props> = ({
     };
   }, []);
 
-  // Keyboard listener for arrow key pan (plain arrows) and zoom (Ctrl+Up/Down)
-  useEffect(() => {
-    const handleArrowKey = (e: KeyboardEvent) => {
-      const active = document.activeElement;
-      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return;
-
-      if (e.ctrlKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
-        e.preventDefault();
-        const delta = e.key === 'ArrowUp' ? 0.85 : 1.15;
-        const nextFOV = Math.max(0.05, Math.min(135.0, localFOVRef.current * delta));
-        localFOVRef.current = nextFOV;
-        notifyParentFOV(nextFOV);
-        return;
-      }
-
-      // Pan step is 10% of current FOV so it feels proportional at any zoom level
-      const panStep = localFOVRef.current * 0.1;
-
-      switch (e.key) {
-        case 'ArrowUp':
-          e.preventDefault();
-          setTrackingMode(false);
-          targetAltRef.current = Math.max(-89.9, Math.min(89.9, targetAltRef.current + panStep));
-          break;
-        case 'ArrowDown':
-          e.preventDefault();
-          setTrackingMode(false);
-          targetAltRef.current = Math.max(-89.9, Math.min(89.9, targetAltRef.current - panStep));
-          break;
-        case 'ArrowLeft':
-          e.preventDefault();
-          setTrackingMode(false);
-          targetAzRef.current = (targetAzRef.current - panStep + 360) % 360;
-          break;
-        case 'ArrowRight':
-          e.preventDefault();
-          setTrackingMode(false);
-          targetAzRef.current = (targetAzRef.current + panStep + 360) % 360;
-          break;
-      }
-    };
-
-    window.addEventListener('keydown', handleArrowKey);
-    return () => window.removeEventListener('keydown', handleArrowKey);
-  }, [notifyParentFOV]);
-
-  /**
-   * Adjusts field of view via mouse wheel, clamped to 0.05°–135°.
-   *
-   * @param {React.WheelEvent} e - The wheel event.
-   * @returns {void}
-   */
-  const onWheel = (e: React.WheelEvent) => {
-    const delta = e.deltaY < 0 ? 0.85 : 1.15;
-    const nextFOV = Math.max(0.05, Math.min(135.0, localFOVRef.current * delta));
-
-    localFOVRef.current = nextFOV;
-    notifyParentFOV(nextFOV);
-  };
+  // Pointer-drag panning, wheel zoom, and arrow-key pan/zoom
+  const { isDragging, onPointerDown, onPointerMove, onPointerUp, onWheel } = useSkyMapInput({
+    canvasRef, centerAzRef, centerAltRef, targetAzRef, targetAltRef, localFOVRef,
+    setTrackingMode, notifyParentFOV,
+  });
 
   // Main Fixed-Rate requestAnimationFrame render loop
   useEffect(() => {

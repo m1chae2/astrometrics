@@ -35,16 +35,19 @@ import sys
 import numpy as np
 
 from astrometricslib import Astrometrics
-from astrometricslib.models.stellar_source import SpectralObservation, StellarObject
-from astrometricslib.pipelines.spectroscopy.instrument_response import (
+from astrometricslib.models.stellar_source import StellarObject
+from astrometricslib.pipelines.spectroscopy.post_processing.assess_output_quality import assess_output_quality
+from astrometricslib.pipelines.spectroscopy.pre_processing.assess_input_quality import assess_input_quality
+from astrometricslib.pipelines.spectroscopy.pre_processing.instrument_response import (
     InstrumentResponse,
+    apply_instrument_response,
     load_instrument_response,
 )
-from astrometricslib.pipelines.spectroscopy.spectral_resolution import (
+from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import (
     ResolutionProfile,
     load_line_spread_profile,
 )
-from astrometricslib.pipelines.spectroscopy.spectrum_analysis import (
+from astrometricslib.pipelines.spectroscopy.processing.spectrum_analysis import (
     EXTENDED_TARGET_SPECTRAL_TYPE,
     analyze_spectrum,
 )
@@ -187,29 +190,6 @@ def recompute_star(
     spectroscopy.trail_width_px = trim(spectroscopy.trail_width_px)
     spectroscopy.second_order_blue_to_red_ratio = trim(spectroscopy.second_order_blue_to_red_ratio)
 
-    trimmed_history = []
-    for observation in star.spectra_history:
-        if (
-            observation.wavelengths
-            and observation.intensities
-            and len(observation.wavelengths) == len(observation.intensities)
-        ):
-            history_wavelengths = np.array(observation.wavelengths, dtype=float)
-            history_intensities = np.array(observation.intensities, dtype=float)
-            keep = find_measured_samples(
-                history_wavelengths,
-                history_intensities,
-                minimum_wavelength_angstrom,
-                maximum_wavelength_angstrom,
-            )
-            observation = SpectralObservation(
-                timestamp=observation.timestamp,
-                wavelengths=history_wavelengths[keep].tolist(),
-                intensities=history_intensities[keep].tolist(),
-            )
-        trimmed_history.append(observation)
-    star.spectra_history = trimmed_history
-
     if len(spectroscopy.wavelengths_angstrom) < _MINIMUM_SAMPLES_TO_ANALYZE:
         spectroscopy.self_determined_spectral_type = "Unknown"
         spectroscopy.self_determined_spectral_type_confidence = None
@@ -221,15 +201,27 @@ def recompute_star(
         spectroscopy.is_emission_line_source = False
         return True
 
+    # The instrument response was derived from QE-corrected spectra, so it
+    # is only ever applied to one -- see pipeline.py's own
+    # _apply_result_to_stellar_object, which computes this the same way.
+    best_available_intensity = (
+        spectroscopy.quantum_efficiency_corrected_intensities
+        if spectroscopy.quantum_efficiency_corrected_intensities
+        else spectroscopy.intensities
+    )
+    response = instrument_response if spectroscopy.quantum_efficiency_corrected_intensities else None
+    response_corrected_intensity = (
+        apply_instrument_response(
+            np.array(spectroscopy.wavelengths_angstrom), np.array(best_available_intensity), response
+        )
+        if response is not None
+        else None
+    )
+
     analysis = analyze_spectrum(
         np.array(spectroscopy.wavelengths_angstrom),
-        np.array(
-            spectroscopy.quantum_efficiency_corrected_intensities
-            if spectroscopy.quantum_efficiency_corrected_intensities
-            else spectroscopy.intensities
-        ),
-        instrument_response,
-        is_quantum_efficiency_corrected=bool(spectroscopy.quantum_efficiency_corrected_intensities),
+        np.array(best_available_intensity),
+        response_corrected_intensity,
         catalog_spectral_type=star.spectral_type,
         is_extended_target=star.stellar_spectral_type == EXTENDED_TARGET_SPECTRAL_TYPE,
         catalog_b_minus_v=star.b_minus_v,
@@ -240,6 +232,7 @@ def recompute_star(
             else None
         ),
         resolution_profile=resolution_profile,
+        possible_neighbor_contamination=spectroscopy.possible_neighbor_contamination,
     )
     spectroscopy.emission_lines = analysis.emission_lines
     spectroscopy.is_emission_line_source = analysis.is_emission_line_source
@@ -254,6 +247,17 @@ def recompute_star(
     spectroscopy.self_determined_spectral_type_note = str(classification.get("reason") or "")
     spectroscopy.self_determined_spectral_type_candidates = classification["ranked_types"]
     spectroscopy.probable_spectral_features = analysis.features
+    spectroscopy.catalog_comparison = analysis.catalog_comparison
+    spectroscopy.input_quality = assess_input_quality(
+        resolution_element_angstrom=analysis.resolution_element_angstrom,
+        is_resolution_measured=analysis.is_resolution_measured,
+        zero_order_saturated_pixel_fraction=None,
+        valid_fraction=spectroscopy.valid_fraction,
+        signal_to_noise=analysis.signal_to_noise,
+    )
+    spectroscopy.output_quality = assess_output_quality(
+        classification, analysis.catalog_comparison, analysis.resolution_element_angstrom
+    )
     return True
 
 

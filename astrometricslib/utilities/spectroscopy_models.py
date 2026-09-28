@@ -135,7 +135,19 @@ class SpectroscopyConfig(BaseModel):
         Whether extraction replaces narrow bright spikes in the reading box
         (other stars' trails and zero orders) by the smooth level, by
         default `False`. The pipeline turns it on for a nebula's wide box
-        only.
+        only. Turning it on for ordinary point-source extraction was tried
+        on 2026-09-27 and reverted the same day: a normal star's own reading
+        box (about 20 px wide) is narrower than the spike detector's
+        baseline window (`CONTAMINANT_BASELINE_WIDTH_PX`, 31 px), so the
+        star's own trace reads as a "narrow spike" against that wider
+        baseline and gets replaced with the background level -- confirmed
+        by a real regression
+        (``test_flare_mask_extraction_follows_a_real_tilted_trace``, 8
+        cases, extracted intensity fell to background). It is safe for a
+        nebula's box specifically because that box is much wider than the
+        crossing trails it is meant to catch; it is not safe for a star's
+        own narrow box without a different detection width or a
+        box-local (not margin-extended) baseline.
     subtract_neighbor_wings : `bool`
         Whether to take a bright neighbour's light out of a star's box, by
         default `False`. Two stars close together give side-by-side streaks,

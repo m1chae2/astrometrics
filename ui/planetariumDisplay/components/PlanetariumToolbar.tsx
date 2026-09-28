@@ -151,16 +151,16 @@ export const PlanetariumToolbar: React.FC<Props> = ({
           title="Toggle passive sky background and catalog layers"
         >
           <span>Layers</span>
-          <span className="text-[11px] opacity-80">{isLayersOpen ? '▲' : '▼'}</span>
+          <span className="planetarium-toolbar__chevron">{isLayersOpen ? '▲' : '▼'}</span>
         </button>
 
         {isLayersOpen && (
-          <div className="planetarium-toolbar__popover-menu animate-in fade-in zoom-in-95 duration-100">
-            <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider px-1 pb-1 border-b border-white/10 mb-1">
+          <div className="planetarium-toolbar__popover-menu">
+            <div className="planetarium-toolbar__popover-header">
               Sky Background
             </div>
             {passiveLayers.map(({ label, checked, onChange }) => (
-              <label key={label} className="planetarium-toolbar__item cursor-pointer hover:text-sky-300 transition-colors">
+              <label key={label} className="planetarium-toolbar__item">
                 <input
                   type="checkbox"
                   checked={checked}
@@ -178,7 +178,7 @@ export const PlanetariumToolbar: React.FC<Props> = ({
       {/* Group 2: Observation & Hardware Overlays */}
       <div className="planetarium-toolbar__group">
         {rigOverlays.map(({ label, checked, onChange }) => (
-          <label key={label} className="planetarium-toolbar__item cursor-pointer">
+          <label key={label} className="planetarium-toolbar__item">
             <input
               type="checkbox"
               checked={checked}
@@ -194,7 +194,7 @@ export const PlanetariumToolbar: React.FC<Props> = ({
         <>
           <div className="planetarium-toolbar__divider" />
           <div className="planetarium-toolbar__session-container">
-            <label htmlFor="planetarium-session-select" className="text-slate-400 text-[12px] font-medium">
+            <label htmlFor="planetarium-session-select" className="planetarium-toolbar__session-label">
               Session:
             </label>
             <select
@@ -203,9 +203,9 @@ export const PlanetariumToolbar: React.FC<Props> = ({
               onChange={(e) => onSelectSession?.(e.target.value ? e.target.value : null)}
               className="planetarium-toolbar__select"
             >
-              <option value="" className="bg-slate-900 text-slate-200">Live / Latest</option>
+              <option value="">Live / Latest</option>
               {availableSessions.length > 0 && (
-                <option value="all" className="bg-slate-900 text-slate-200">All Sessions (Cumulative)</option>
+                <option value="all">All Sessions (Cumulative)</option>
               )}
               {availableSessions.map((s) => {
                 const paStr = s.polarErrorArcsec !== null && s.polarErrorArcsec !== undefined
@@ -219,7 +219,7 @@ export const PlanetariumToolbar: React.FC<Props> = ({
                 const countStr = counts.join(', ');
 
                 return (
-                  <option key={s.sessionId} value={s.sessionId} className="bg-slate-900 text-slate-200">
+                  <option key={s.sessionId} value={s.sessionId}>
                     {s.sessionDate} ({countStr}{paStr})
                   </option>
                 );
@@ -231,7 +231,7 @@ export const PlanetariumToolbar: React.FC<Props> = ({
                 onClick={onSyncLogs}
                 disabled={isSyncingLogs}
                 title="Sync past logs and FITS solves from telescope"
-                className="planetarium-toolbar__button !py-1 !px-2.5 !text-[12px]"
+                className="planetarium-toolbar__button planetarium-toolbar__button--compact"
               >
                 {isSyncingLogs ? 'Syncing...' : 'Sync'}
               </button>

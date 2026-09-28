@@ -60,6 +60,76 @@ export const fetchAstronomyList = (optionsOrTargetId?: string | AstronomyListOpt
     return getAstronomyList(optionsOrTargetId);
 };
 
+/** Whether a target has any star with spectra and/or photometry data, and how many stars it has. */
+export interface TargetDataAvailability {
+    hasSpectra: boolean;
+    hasPhotometry: boolean;
+    starCount: number;
+}
+
+/**
+ * Fetches, per target, whether any of its stars have spectra or photometry data.
+ * @return A map from target ID to its data availability, or an empty map on failure.
+ */
+export async function fetchTargetDataAvailability(): Promise<Record<string, TargetDataAvailability>> {
+    try {
+        const data = await callBackend('astronomy:target_data_availability', {});
+        return (data as Record<string, TargetDataAvailability>) ?? {};
+    } catch (err: unknown) {
+        reportError(err instanceof Error ? err : new Error(String(err)), 'backend');
+        return {};
+    }
+}
+
+/** A catalog spectral class present in the library, with how many stars have it. */
+export interface SpectralClassSummary {
+    spectralClass: string;
+    label: string;
+    count: number;
+}
+
+/**
+ * Fetches the catalog spectral classes present in the library, with counts.
+ * @return The spectral classes, sorted alphabetically, or an empty list on failure.
+ */
+export async function fetchSpectralClassSummary(): Promise<SpectralClassSummary[]> {
+    try {
+        const data = await callBackend('astronomy:spectral_class_summary', {});
+        return Array.isArray(data) ? (data as SpectralClassSummary[]) : [];
+    } catch (err: unknown) {
+        reportError(err instanceof Error ? err : new Error(String(err)), 'backend');
+        return [];
+    }
+}
+
+/** One star in a catalog spectral class listing, ranked by self-determined match quality. */
+export interface SpectralClassStar {
+    id: string;
+    name: string;
+    ra: number | null;
+    dec: number | null;
+    magnitude: number | null;
+    spectralType: string;
+    hasSpectra: boolean;
+    hasPhotometry: boolean;
+    selfDeterminedSpectralTypeRms: number | null;
+}
+
+/**
+ * Fetches the stars in one catalog spectral class, best self-determined match first.
+ * @param spectralClass The spectral class letter (or a full catalog string such as "G2V").
+ * @return The matching stars, best match first, or an empty list on failure.
+ */
+export async function fetchStarsBySpectralClass(spectralClass: string): Promise<SpectralClassStar[]> {
+    try {
+        const data = await callBackend('astronomy:stars_by_spectral_class', { spectral_class: spectralClass });
+        return Array.isArray(data) ? (data as SpectralClassStar[]) : [];
+    } catch (err: unknown) {
+        reportError(err instanceof Error ? err : new Error(String(err)), 'backend');
+        return [];
+    }
+}
+
 /**
  * Fetches detailed astronomy data for a named object (with fuzzy matching).
  * @param name The name or ID of the object.

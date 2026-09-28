@@ -33,6 +33,7 @@ from dataclasses import dataclass
 
 import numpy as np
 from astropy.timeseries import BoxLeastSquares, LombScargle
+from scipy.stats import median_abs_deviation
 
 from astrometricslib.models.stellar_source import PeriodogramResult, TransitCandidate
 
@@ -357,7 +358,7 @@ def _robust_point_scatter(flux: np.ndarray) -> float:
         The estimated noise of one measurement, never zero.
     """
     differences = np.diff(flux)
-    spread = 1.4826 * float(np.median(np.abs(differences - np.median(differences))))
+    spread = 1.4826 * float(median_abs_deviation(differences, scale=1.0))
     # A difference of two independent measurements has sqrt(2) times the
     # noise of one, so divide it out.
     return max(spread / math.sqrt(2.0), 1e-6)

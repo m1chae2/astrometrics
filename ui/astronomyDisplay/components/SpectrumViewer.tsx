@@ -10,7 +10,7 @@ import {
 import { BasePlot } from '../../common/components/plotting/BasePlot';
 import '../styles/astronomyViewer.css';
 
-import { Spectrum, SpectralObservation } from '../../common/types/backendTypes';
+import { Spectrum } from '../../common/types/backendTypes';
 import { EmissionLineResult, SpectralFeatureResult } from '../../common/types/spectralFeatureTypes';
 import {
     assignLabelRows,
@@ -26,7 +26,6 @@ interface Props {
     loading: boolean;
     error?: string | null;
     active?: boolean;
-    selectedTimestamps?: Set<string>;
     showFeatures?: boolean;
     onToggleFeatures?: () => void;
 }
@@ -61,7 +60,6 @@ export const SpectrumViewer: React.FC<Props> = ({
     loading,
     error,
     active = false,
-    selectedTimestamps,
     showFeatures: controlledShowFeatures,
     onToggleFeatures,
 }) => {
@@ -106,7 +104,6 @@ export const SpectrumViewer: React.FC<Props> = ({
         setSelections((s) => s.filter((x) => x.id !== id));
     };
 
-    const [isOverlayingEpochs, setIsOverlayingEpochs] = useState<boolean>(true);
     const [internalShowFeatures, setInternalShowFeatures] = useState<boolean>(true);
     const showFeatures = controlledShowFeatures !== undefined ? controlledShowFeatures : internalShowFeatures;
     const handleToggleFeatures = onToggleFeatures || (() => setInternalShowFeatures((v) => !v));
@@ -144,29 +141,8 @@ export const SpectrumViewer: React.FC<Props> = ({
 
         const accent = getVar('--plot-accent', '#2196f3');
         const selectionColor = getVar('--plot-selection', '#ff4444');
-        const palette = ['#4caf50', '#ff9800', '#9c27b0', '#f44336', '#00bcd4', '#e91e63'];
 
-        // 1. Add History Traces (Spectra over time) if overlaying is enabled
-        if (isOverlayingEpochs && astronomyData.spectraHistory) {
-            astronomyData.spectraHistory.forEach((obs, i) => {
-                if (selectedTimestamps && !selectedTimestamps.has(obs.timestamp)) return;
-
-                traces.push({
-                    x: obs.wavelengths || [],
-                    y: obs.intensities || [],
-                    mode: 'lines',
-                    line: {
-                        color: palette[i % palette.length],
-                        width: 1.5,
-                        shape: 'spline'
-                    },
-                    hoverinfo: 'x+y',
-                    name: `Obs ${new Date(obs.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-                });
-            });
-        }
-
-        // 2. Add Primary Trace (most recent/main extraction)
+        // Add the main extraction's trace.
         if (Array.isArray(astronomyData.wavelength) && astronomyData.wavelength.length > 0) {
             traces.push({
                 x: astronomyData.wavelength,
@@ -178,7 +154,7 @@ export const SpectrumViewer: React.FC<Props> = ({
             });
         }
 
-        // 3. Add selection markers
+        // Add selection markers
         selections.forEach(sel => {
             traces.push({
                 x: [sel.x],
@@ -192,7 +168,7 @@ export const SpectrumViewer: React.FC<Props> = ({
         });
 
         return traces;
-    }, [astronomyData, selections, selectedTimestamps, isOverlayingEpochs]);
+    }, [astronomyData, selections]);
 
     const layout = useMemo(() => {
         const base = buildLayout({
@@ -306,10 +282,7 @@ export const SpectrumViewer: React.FC<Props> = ({
     if (loading) return <div className="astronomy-viewer-loading">Loading spectrum...</div>;
     if (error) return <div className="astronomy-viewer-error">{error}</div>;
 
-    const hasData = astronomyData && (
-        (astronomyData.wavelength?.length > 0 && astronomyData.spectrumFlux?.length > 0) ||
-        (astronomyData.spectraHistory && astronomyData.spectraHistory.length > 0)
-    );
+    const hasData = astronomyData && astronomyData.wavelength?.length > 0 && astronomyData.spectrumFlux?.length > 0;
 
     // Say so when part of the requested spectrum could not be measured (the
     // trail ran off the picture or past the camera's range), so a spectrum that
@@ -328,10 +301,9 @@ export const SpectrumViewer: React.FC<Props> = ({
         }
     }
 
-    const hasEpochs = Array.isArray(astronomyData?.spectraHistory) && (astronomyData?.spectraHistory?.length ?? 0) > 1;
     const hasFeatures = testedSpectralFeatures.length > 0 || emissionLineMarkers.length > 0;
     const hasInternalFeaturesButton = hasFeatures && !onToggleFeatures;
-    const showToolbar = hasEpochs || hasInternalFeaturesButton;
+    const showToolbar = hasInternalFeaturesButton;
 
     return (
         <div className="astronomy-viewer-root astronomy-viewer-root--full-height" ref={containerRef}>
@@ -345,24 +317,6 @@ export const SpectrumViewer: React.FC<Props> = ({
                                 onClick={handleToggleFeatures}
                             >
                                 Hide Feature Lines
-                            </button>
-                        </div>
-                    )}
-                    {hasEpochs && (
-                        <div className="astronomy-viewer__segmented-control">
-                            <button
-                                type="button"
-                                className={`segmented-btn ${!isOverlayingEpochs ? 'active' : ''}`}
-                                onClick={() => setIsOverlayingEpochs(false)}
-                            >
-                                Latest Epoch
-                            </button>
-                            <button
-                                type="button"
-                                className={`segmented-btn ${isOverlayingEpochs ? 'active' : ''}`}
-                                onClick={() => setIsOverlayingEpochs(true)}
-                            >
-                                Overlay All Epochs ({astronomyData?.spectraHistory?.length ?? 0})
                             </button>
                         </div>
                     )}

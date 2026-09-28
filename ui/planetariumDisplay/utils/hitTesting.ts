@@ -16,6 +16,7 @@ import { shouldOccludeBelowHorizon, parseTargetFovDegrees } from '../layers/over
 import { isDisplayableStar, computeLimitingMagnitude } from '../layers/StarOverlay';
 import { TARGET_RETICLE_MIN_PX } from '../layers/TargetOverlay';
 import { clusterAlignmentAttempts } from './alignmentClustering';
+import { ALIGNMENT_HIT_RADIUS_PX, STAR_HIT_RADIUS_PX, TARGET_HIT_MARGIN_PX } from '../layers/constants';
 
 /**
  * Parameters required to perform a spatial hit-test against the visible source list.
@@ -77,7 +78,7 @@ export function findNearestSource(params: HitTestParams): PlanetariumSource | nu
   if (showAlignment && alignmentAttempts.length > 0) {
     const clusters = clusterAlignmentAttempts(alignmentAttempts);
     let nearestAlignment: PlanetariumSource | null = null;
-    let minAlignDist = 24; // px threshold
+    let minAlignDist = ALIGNMENT_HIT_RADIUS_PX;
 
     clusters.forEach((cluster) => {
       const { alt, az } = getAltAz(cluster.centroidRa, cluster.centroidDec, lst, observerLat);
@@ -123,7 +124,7 @@ export function findNearestSource(params: HitTestParams): PlanetariumSource | nu
   });
 
   let nearestStar: PlanetariumSource | null = null;
-  let minStarDist = 18; // px threshold for stars
+  let minStarDist = STAR_HIT_RADIUS_PX;
 
   let nearestTarget: PlanetariumSource | null = null;
   let minTargetDist = Infinity;
@@ -143,7 +144,7 @@ export function findNearestSource(params: HitTestParams): PlanetariumSource | nu
       const sizePx = fovDeg * scale;
       const targetRadius = Math.max(TARGET_RETICLE_MIN_PX, sizePx) / 2;
 
-      if (distance <= targetRadius + 8 && distance < minTargetDist) {
+      if (distance <= targetRadius + TARGET_HIT_MARGIN_PX && distance < minTargetDist) {
         minTargetDist = distance;
         nearestTarget = source;
       }

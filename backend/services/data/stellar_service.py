@@ -4,6 +4,7 @@ import logging
 import math
 import re
 import threading
+import time
 from typing import Any
 
 from astrometricslib import Astrometrics, StellarObject
@@ -13,7 +14,7 @@ logger = logging.getLogger(__name__)
 # The command that downloads the deep-star catalog the Planetarium draws
 # from. Sent to the UI with the catalog's status so the first-launch prompt
 # shows the same command the script documents.
-DEEP_CATALOG_INSTALL_COMMAND = "python -m astrometricslib.scripts.build_deep_star_catalog"
+DEEP_CATALOG_INSTALL_COMMAND = "python -m wayfindinglib.scripts.build_deep_star_catalog"
 
 # Matches the ID suffix VariabilityAnalyzer stamps onto every per-frame point
 # source it detects during photometry (target_sessions.py's
@@ -37,6 +38,59 @@ def _is_per_frame_photometry_detection(object_id: str) -> bool:
     return bool(_PER_FRAME_DETECTION_ID_SUFFIX.search(object_id))
 
 
+# The spectral classes the Astronomy Manager's browser shows, and their
+# short descriptions. A catalog type whose letter isn't one of these (after
+# `_SPECTRAL_CLASS_ALIASES`) is left out of the browser entirely, the same
+# way an empty or "Unknown" type is.
+_SPECTRAL_CLASS_LABELS: dict[str, str] = {
+    "O": "Blue supergiants",
+    "B": "Blue giants",
+    "A": "White stars",
+    "F": "Yellow-white stars",
+    "G": "Yellow dwarfs",
+    "K": "Orange dwarfs",
+    "M": "Red dwarfs",
+    # Cooler, carbon-dominated atmospheres.
+    "C": "Carbon stars",
+    # Hot, high-mass stars shedding their outer layers in a fast wind.
+    "W": "Wolf-Rayet stars",
+}
+
+# R and N are the classical (pre-merger) Harvard subclasses of carbon star;
+# "C" is the modern unified class that superseded them. A catalog may still
+# record either, so both fold into "C" rather than appearing as their own
+# rows alongside it.
+_SPECTRAL_CLASS_ALIASES: dict[str, str] = {
+    "R": "C",
+    "N": "C",
+}
+
+
+def _spectral_class_letter(spectral_type: str) -> str:
+    """Reduce a catalog spectral type string to its primary class letter.
+
+    Returns
+    -------
+    letter : `str`
+        The first character of `spectral_type`, uppercased and passed
+        through `_SPECTRAL_CLASS_ALIASES` (e.g. "G2V" -> "G", "R5" ->
+        "C"). An empty string when `spectral_type` is empty, does not
+        start with a letter, is the literal string "Unknown" saved for a
+        star with no catalog classification (otherwise every
+        uncatalogued star would form its own bogus "U" class), or is not
+        one of the classes the Astronomy Manager's browser shows (see
+        `_SPECTRAL_CLASS_LABELS`).
+    """
+    trimmed = spectral_type.strip()
+    if not trimmed or trimmed.lower() == "unknown":
+        return ""
+    letter = trimmed[0].upper()
+    if not letter.isalpha():
+        return ""
+    letter = _SPECTRAL_CLASS_ALIASES.get(letter, letter)
+    return letter if letter in _SPECTRAL_CLASS_LABELS else ""
+
+
 # Real apparent magnitudes bottom out near -1.5 (Sirius), but photometry
 # stores instrumental magnitudes (about -10 to -17) in the same field, which
 # say nothing about how bright a star looks. Must match
@@ -50,6 +104,18 @@ _BRIGHTEST_CATALOG_MAGNITUDE = -2.0
 # never waits behind a long stacking job the way it would if it shared the
 # heavy-job slots that stacking and image analysis use.
 _MAXIMUM_CONCURRENT_PERIOD_SEARCHES = 2
+
+# How long a cached full-catalog summary scan (see
+# `_get_cached_catalog_summaries`) stays valid. A single scan measured about
+# 5 seconds on a real ~40,000-star library; sharing one scan across the
+# target-availability, spectral-class-summary and stars-by-class endpoints
+# for this long turns three redundant 5-second scans per Astronomy Manager
+# visit into effectively one, at the cost of a newly-saved star's data
+# taking up to this long to show up in those three views. Matches the
+# refetch interval the frontend already polls these endpoints on
+# (useTargetDataAvailabilityQuery, useSpectralClassSummaryQuery), so the
+# cache is never the reason a client-visible refresh looks stale.
+_CATALOG_SUMMARY_CACHE_TTL_SECONDS = 30.0
 
 # Prefix of an id given to a star that was found in an image but never
 # matched to a catalog. Must match POSITION_ONLY_STAR_ID_PREFIX in
@@ -215,6 +281,8 @@ class StellarService:
         self.astrometrics = astrometrics or Astrometrics(config)
         self._wayfinder = wayfinder
         self._period_search_slots = threading.BoundedSemaphore(_MAXIMUM_CONCURRENT_PERIOD_SEARCHES)
+        self._catalog_summary_cache: tuple[float, list[dict[str, Any]]] | None = None
+        self._catalog_summary_cache_lock = threading.Lock()
 
     @property
     def wayfinder(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
@@ -227,6 +295,35 @@ class StellarService:
 
             self._wayfinder = Wayfinder(config=self.config)
         return self._wayfinder
+
+    def _get_cached_catalog_summaries(self) -> list[dict[str, Any]]:
+        """Full-catalog star summary scan, cached for a short time.
+
+        `get_target_data_availability`, `get_spectral_class_summary`, and
+        `get_stars_by_spectral_class` each need every star's lightweight
+        summary, which costs the same one full-catalog scan regardless of
+        which of them asks for it. Sharing one cached scan means opening
+        the Astronomy Manager, switching between its target and spectral-
+        class browsers, and reopening a star's class all cost one scan
+        between them within the cache's lifetime, not one scan each.
+
+        Returns
+        -------
+        summaries : `list` [`dict`]
+            Every star's summary dict, as `list_object_summaries` returns it.
+        """
+        now = time.monotonic()
+        with self._catalog_summary_cache_lock:
+            if self._catalog_summary_cache is not None:
+                cached_at, cached_summaries = self._catalog_summary_cache
+                if now - cached_at < _CATALOG_SUMMARY_CACHE_TTL_SECONDS:
+                    return cached_summaries
+
+        summaries = self.astrometrics.stars.list_object_summaries(limit=None, apply_default_limit=False)
+
+        with self._catalog_summary_cache_lock:
+            self._catalog_summary_cache = (now, summaries)
+        return summaries
 
     def get_stellar_objects(self, target_id: str | None = None) -> list[StellarObject]:
         """Unified stellar objects getter.
@@ -628,6 +725,136 @@ class StellarService:
         if limit is not None and limit > 0:
             return filtered[start_offset : start_offset + limit]
         return filtered[start_offset:]
+
+    def get_target_data_availability(self) -> dict[str, dict[str, bool | int]]:
+        """Whether each target has spectra or photometry, and its star count.
+
+        A single pass over every star's lightweight summary, so the
+        Astronomy Manager's target picker can show a spectra/photometry
+        indicator and a star count per target without a separate database
+        query for each one. Uses the same cached full-catalog scan as
+        `get_spectral_class_summary` and `get_stars_by_spectral_class` (see
+        `_get_cached_catalog_summaries`).
+
+        Returns
+        -------
+        availability : `dict` [`str`, `dict` [`str`, `bool` or `int`]]
+            One entry per target id a star belongs to, each holding
+            ``hasSpectra`` and ``hasPhotometry`` (true if any of that
+            target's stars has that kind of data) and ``starCount`` (how
+            many stars belong to it).
+        """
+        summaries = self._get_cached_catalog_summaries()
+
+        availability: dict[str, dict[str, bool | int]] = {}
+        for summary in summaries:
+            summary_id = str(summary.get("id") or "")
+            if _is_per_frame_photometry_detection(summary_id):
+                continue
+            for target_id in summary.get("targetIds") or []:
+                entry = availability.setdefault(
+                    target_id, {"hasSpectra": False, "hasPhotometry": False, "starCount": 0}
+                )
+                if summary.get("hasSpectra"):
+                    entry["hasSpectra"] = True
+                if summary.get("hasPhotometry"):
+                    entry["hasPhotometry"] = True
+                entry["starCount"] += 1
+        return availability
+
+    def get_spectral_class_summary(self) -> list[dict[str, Any]]:
+        """List the catalog spectral classes present, with counts.
+
+        Groups stars by the first letter of their catalog `spectral_type`
+        (O, B, A, F, G, K, M, ...), rather than the exact catalog string,
+        which would produce nearly as many groups as there are stars. This
+        is the catalog lookup (`StellarObject.spectral_type`), not a
+        star's own self-determined type from its extracted spectrum.
+
+        Returns
+        -------
+        classes : `list` [`dict`]
+            One entry per spectral class present, sorted alphabetically,
+            each with ``spectralClass`` (the letter), ``label`` (a short
+            description), and ``count`` (how many stars have that class).
+        """
+        summaries = self._get_cached_catalog_summaries()
+
+        counts: dict[str, int] = {}
+        for summary in summaries:
+            summary_id = str(summary.get("id") or "")
+            if _is_per_frame_photometry_detection(summary_id):
+                continue
+            letter = _spectral_class_letter(str(summary.get("spectralType") or ""))
+            if not letter:
+                continue
+            counts[letter] = counts.get(letter, 0) + 1
+
+        return [
+            {"spectralClass": letter, "label": _SPECTRAL_CLASS_LABELS[letter], "count": count}
+            for letter, count in sorted(counts.items())
+        ]
+
+    def get_stars_by_spectral_class(self, spectral_class: str) -> list[dict[str, Any]]:
+        """List a catalog spectral class's stars, best matched first.
+
+        Stars are ranked by `self_determined_spectral_type_rms` -- how
+        closely a star's own extracted spectrum matched its winning
+        reference template, independent of the catalog classification used
+        to group them here. Lower is a closer match. A star with a catalog
+        type but no self-determined match yet (spectrum not analyzed, or
+        analysis found no match) is listed last, in catalog order.
+
+        Parameters
+        ----------
+        spectral_class : `str`
+            The spectral class letter, as `get_spectral_class_summary`
+            returns it (e.g. "G"). Only the first letter is used, so
+            passing a full catalog string like "G2V" also works.
+
+        Returns
+        -------
+        stars : `list` [`dict`]
+            One entry per matching star, best match first, with ``id``,
+            ``name``, ``ra``, ``dec``, ``magnitude``, ``spectralType`` (the
+            catalog type), ``hasSpectra``, ``hasPhotometry``, and
+            ``selfDeterminedSpectralTypeRms`` (`None` when not yet matched).
+            ``ra``/``dec`` let a caller (e.g. the Planetarium) center on a
+            chosen star directly, without a second lookup.
+        """
+        letter = _spectral_class_letter(spectral_class)
+        if not letter:
+            return []
+
+        summaries = self._get_cached_catalog_summaries()
+        matching_ids = [
+            str(summary.get("id") or "")
+            for summary in summaries
+            if _spectral_class_letter(str(summary.get("spectralType") or "")) == letter
+            and not _is_per_frame_photometry_detection(str(summary.get("id") or ""))
+        ]
+
+        stars = self.astrometrics.stars.list_objects_by_ids(matching_ids)
+
+        def match_rms(star: StellarObject) -> float | None:
+            return star.spectroscopy.self_determined_spectral_type_rms if star.spectroscopy else None
+
+        stars.sort(key=lambda star: (match_rms(star) is None, match_rms(star) or 0.0))
+
+        return [
+            {
+                "id": star.id,
+                "name": star.name,
+                "ra": star.right_ascension,
+                "dec": star.declination,
+                "magnitude": star.magnitude,
+                "spectralType": star.spectral_type,
+                "hasSpectra": star.has_spectra,
+                "hasPhotometry": star.has_photometry,
+                "selfDeterminedSpectralTypeRms": match_rms(star),
+            }
+            for star in stars
+        ]
 
     def load_stellar_objects(self) -> None:
         """No-op retained for backward compatibility.
@@ -1083,7 +1310,7 @@ class StellarService:
             stars API),
             plus ``installCommand``: the command that downloads it.
         """
-        status = dict(self.astrometrics.stars.get_deep_catalog_status())
+        status = dict(self.wayfinder.planning.get_deep_catalog_status())
         status["installCommand"] = DEEP_CATALOG_INSTALL_COMMAND
         return status
 

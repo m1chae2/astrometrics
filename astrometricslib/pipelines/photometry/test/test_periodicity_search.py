@@ -8,6 +8,7 @@ curves is checked in validate_spectral_and_period_analysis.py;
 these tests pin the behavior on fixed cases.
 """
 
+import math
 import time as time_module
 
 import numpy as np
@@ -19,6 +20,7 @@ from astrometricslib.pipelines.photometry.periodicity_search import (
     VERDICT_INSUFFICIENT_DATA,
     VERDICT_NOT_DETECTED,
     _cap_grid_size,
+    _robust_point_scatter,
     box_search,
     build_search_grid,
     lomb_scargle_search,
@@ -35,6 +37,23 @@ def _times(count: int, cadence_days: float, seed: int = 0) -> np.ndarray:
     """
     rng = np.random.default_rng(seed)
     return np.arange(count) * cadence_days + rng.normal(0.0, cadence_days * 0.05, count)
+
+
+def test_robust_point_scatter_matches_a_hand_computed_scaled_mad():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Pins the scatter value, now via a library MAD, not a hand-rolled one.
+
+    Uses `scipy.stats.median_abs_deviation` for the raw MAD, but keeps this
+    file's own `1.4826 *` scale factor and `/ sqrt(2)` correction unchanged,
+    so the result must still match the old hand-rolled formula exactly.
+    """
+    flux = np.array([1.0, 1.02, 0.98, 1.05, 0.90, 1.10, 1.01])
+
+    scatter = _robust_point_scatter(flux)
+
+    differences = np.diff(flux)
+    hand_rolled_spread = 1.4826 * float(np.median(np.abs(differences - np.median(differences))))
+    expected = max(hand_rolled_spread / math.sqrt(2.0), 1e-6)
+    assert scatter == pytest.approx(expected)
 
 
 def test_the_search_grid_needs_two_full_cycles():  # ruff: ignore[missing-return-type-undocumented-public-function]

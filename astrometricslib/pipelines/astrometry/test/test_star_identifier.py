@@ -10,12 +10,13 @@ fallback path used when plate solving is skipped.
 
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 from astropy.table import Column, MaskedColumn, Table
 
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.astrometry import star_identifier as star_identifier_module
-from astrometricslib.pipelines.astrometry.star_identifier import StarIdentifier
+from astrometricslib.pipelines.astrometry.star_identifier import StarIdentifier, _block_average
 
 # Real-world J2000 coordinates for Vega (alf Lyr), in degrees.
 VEGA_RA_DEG = 279.23473479
@@ -547,3 +548,27 @@ def test_simbad_match_without_b_or_v_leaves_the_colour_unknown():  # ruff: ignor
     """A missing B or V gives `None`, never a made-up colour."""
     assert _apply_simbad_match_for_colour([12.05], [True], [11.58], [False]).b_minus_v is None
     assert _apply_simbad_match_for_colour([12.05], [False], [11.58], [True]).b_minus_v is None
+
+
+def test_block_average_matches_hand_computed_2x2_blocks():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """A known 4x4 image averages into the 2x2 blocks worked out by hand."""
+    data = np.array([
+        [0.0, 0.0, 2.0, 2.0],
+        [0.0, 0.0, 2.0, 2.0],
+        [4.0, 4.0, 6.0, 6.0],
+        [4.0, 4.0, 6.0, 6.0],
+    ])
+
+    binned = _block_average(data, 2)
+
+    assert binned == pytest.approx(np.array([[0.0, 2.0], [4.0, 6.0]]))
+
+
+def test_block_average_crops_a_size_not_divisible_by_the_factor():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """A non-divisible 5x5 image drops its last row/col, like the old code."""
+    data = np.arange(25, dtype=float).reshape(5, 5)
+
+    binned = _block_average(data, 2)
+
+    assert binned.shape == (2, 2)
+    assert binned[0, 0] == pytest.approx(data[:2, :2].mean())

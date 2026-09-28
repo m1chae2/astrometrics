@@ -13,16 +13,30 @@ import numpy as np
 import pytest
 from scipy.ndimage import gaussian_filter1d
 
-from astrometricslib.pipelines.spectroscopy.instrument_response import load_instrument_response
-from astrometricslib.pipelines.spectroscopy.spectral_classifier import (
+from astrometricslib.pipelines.spectroscopy.pre_processing.instrument_response import (
+    apply_instrument_response,
+    load_instrument_response,
+)
+from astrometricslib.pipelines.spectroscopy.processing.spectral_classifier import (
     _get_reference_templates,
     classify_spectral_type,
 )
-from astrometricslib.pipelines.spectroscopy.spectrum_analysis import analyze_spectrum
+from astrometricslib.pipelines.spectroscopy.processing.spectrum_analysis import analyze_spectrum
 
 RESOLUTION_ELEMENT_ANGSTROM = 50.0
 WAVELENGTHS = np.arange(3800.0, 9000.0, 11.0)
 RESPONSE = load_instrument_response("ZWO ASI 533MM Pro")
+
+
+def _response_corrected(observed: np.ndarray) -> np.ndarray:
+    """Undo `RESPONSE`, the way the pipeline does before `analyze_spectrum`.
+
+    Returns
+    -------
+    corrected : `numpy.ndarray`
+        `observed` with the instrument's response removed.
+    """
+    return apply_instrument_response(WAVELENGTHS, observed, RESPONSE)
 
 
 def _reference_with_emission(
@@ -82,8 +96,7 @@ def test_the_analysis_leaves_a_detected_emission_line_out_of_the_classification(
     analysis = analyze_spectrum(
         WAVELENGTHS,
         observed,
-        RESPONSE,
-        is_quantum_efficiency_corrected=True,
+        _response_corrected(observed),
         catalog_spectral_type="B0V",
     )
 
@@ -105,8 +118,7 @@ def test_a_spectrum_without_emission_excludes_nothing() -> None:
     analysis = analyze_spectrum(
         WAVELENGTHS,
         observed,
-        RESPONSE,
-        is_quantum_efficiency_corrected=True,
+        _response_corrected(observed),
         catalog_spectral_type="B0V",
     )
 
@@ -122,8 +134,7 @@ def test_a_weak_possible_emission_bump_is_also_left_out_but_an_inconclusive_one_
     analysis = analyze_spectrum(
         WAVELENGTHS,
         observed,
-        RESPONSE,
-        is_quantum_efficiency_corrected=True,
+        _response_corrected(observed),
         catalog_spectral_type="B0V",
     )
 
@@ -142,3 +153,77 @@ def test_the_classifier_still_treats_no_windows_as_before() -> None:
     assert result["spectral_type"] == "B0V"
     assert result["excluded_windows_angstrom"] == []
     assert result["rms"] == pytest.approx(0.0, abs=0.02)
+
+
+def _add_bump_at(spectrum: np.ndarray, centre_angstrom: float, height: float) -> np.ndarray:
+    """Add a narrow Gaussian bump to a spectrum.
+
+    Stands in for a different star's light landing in the box at that
+    wavelength.
+
+    Returns
+    -------
+    bumped : `numpy.ndarray`
+        `spectrum` plus the bump.
+    """
+    level = float(np.interp(centre_angstrom, WAVELENGTHS, spectrum))
+    return spectrum + height * level * np.exp(-0.5 * ((WAVELENGTHS - centre_angstrom) / 34.0) ** 2)
+
+
+def test_a_severe_flagged_neighbor_window_is_excluded_alongside_emission() -> None:
+    """A high-flux-ratio neighbour window is left out, same as emission.
+
+    Confirms the two exclusion sources combine rather than one replacing
+    the other: an emission line AND a flagged neighbour window, at
+    different wavelengths, must both end up excluded.
+    """
+    intensity = _reference_with_emission(emission_height=0.5)
+    combined = _add_bump_at(intensity, centre_angstrom=5500.0, height=0.6)
+    observed = combined * RESPONSE.value_at(WAVELENGTHS)
+
+    analysis = analyze_spectrum(
+        WAVELENGTHS,
+        observed,
+        _response_corrected(observed),
+        catalog_spectral_type="B0V",
+        possible_neighbor_contamination=[
+            {
+                "wavelength_low_angstrom": 5450.0,
+                "wavelength_high_angstrom": 5550.0,
+                "neighbor_flux_ratio": 1.0,
+            }
+        ],
+    )
+
+    windows = analysis.classification["excluded_windows_angstrom"]
+    assert any(low < 6563.0 < high for low, high in windows), "emission window missing"
+    assert any(low <= 5450.0 and high >= 5550.0 for low, high in windows), "neighbour window missing"
+    assert analysis.classification["spectral_type"] == "B0V"
+
+
+def test_a_negligible_flagged_neighbor_window_is_not_excluded() -> None:
+    """A neighbour far too faint to matter is not added to excluded windows.
+
+    Geometric overlap alone is not enough -- a neighbour orders of
+    magnitude fainter than the target (below
+    `NEIGHBOR_CONTAMINATION_MINIMUM_FLUX_RATIO`) leaves the comparison
+    untouched, since it cannot realistically shift the shape.
+    """
+    intensity = _reference_with_emission(emission_height=0.0)
+    observed = intensity * RESPONSE.value_at(WAVELENGTHS)
+
+    analysis = analyze_spectrum(
+        WAVELENGTHS,
+        observed,
+        _response_corrected(observed),
+        catalog_spectral_type="B0V",
+        possible_neighbor_contamination=[
+            {
+                "wavelength_low_angstrom": 5450.0,
+                "wavelength_high_angstrom": 5550.0,
+                "neighbor_flux_ratio": 0.001,
+            }
+        ],
+    )
+
+    assert analysis.classification["excluded_windows_angstrom"] == []

@@ -11,13 +11,13 @@ import numpy as np
 import pytest
 from scipy.ndimage import gaussian_filter1d
 
-from astrometricslib.pipelines.spectroscopy.instrument_response import (
+from astrometricslib.pipelines.spectroscopy.pre_processing.instrument_response import (
     apply_instrument_response,
     derive_instrument_response,
     load_instrument_response,
 )
-from astrometricslib.pipelines.spectroscopy.spectral_classifier import _get_reference_templates
-from astrometricslib.pipelines.spectroscopy.spectrum_analysis import analyze_spectrum
+from astrometricslib.pipelines.spectroscopy.processing.spectral_classifier import _get_reference_templates
+from astrometricslib.pipelines.spectroscopy.processing.spectrum_analysis import analyze_spectrum
 
 
 def _blurred(spectral_type: str) -> tuple[np.ndarray, np.ndarray]:
@@ -94,7 +94,10 @@ def test_analysis_recovers_the_type_of_a_spectrum_the_instrument_would_record():
     recorded = flux * response.value_at(wavelength)
 
     analysis = analyze_spectrum(
-        wavelength, recorded, load_instrument_response("ZWO ASI 533MM Pro"), True, catalog_spectral_type="K2"
+        wavelength,
+        recorded,
+        apply_instrument_response(wavelength, recorded, response),
+        catalog_spectral_type="K2",
     )
 
     assert analysis.response_applied is True
@@ -107,7 +110,7 @@ def test_analysis_without_a_response_does_not_classify_but_still_tests_features(
     """Verify an unknown camera gets features but no spectral type."""
     wavelength, flux = _blurred("A0V")
 
-    analysis = analyze_spectrum(wavelength, flux, load_instrument_response("Some Other Camera"), True)
+    analysis = analyze_spectrum(wavelength, flux, None)
 
     assert analysis.response_applied is False
     assert analysis.classification["spectral_type"] == "Unknown"

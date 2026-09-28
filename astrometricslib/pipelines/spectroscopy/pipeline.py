@@ -5,23 +5,27 @@ of stars, and returns the final, cleaned-up color data (spectra) for each star.
 """
 
 import logging
-from datetime import UTC, datetime
 from typing import Any
 
 import numpy as np
 
 from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib.drivers.image import AstrometricsImage
-from astrometricslib.models.stellar_source import SpectralObservation, SpectroscopyResult, StellarObject
+from astrometricslib.models.stellar_source import SpectroscopyResult, StellarObject
 from astrometricslib.pipelines.shared.analysis_context import AnalysisContext
 from astrometricslib.pipelines.shared.quality.saturation import (
     compute_saturated_pixel_fraction,
     compute_stack_saturated_pixel_fraction,
     is_normalised_stack_scale,
 )
-from astrometricslib.pipelines.spectroscopy.instrument_response import load_instrument_response
-from astrometricslib.pipelines.spectroscopy.intensity_scale import counts_per_second_factor
-from astrometricslib.pipelines.spectroscopy.neighbor_wing_correction import (
+from astrometricslib.pipelines.spectroscopy.post_processing.assess_output_quality import assess_output_quality
+from astrometricslib.pipelines.spectroscopy.pre_processing.assess_input_quality import assess_input_quality
+from astrometricslib.pipelines.spectroscopy.pre_processing.instrument_response import (
+    apply_instrument_response,
+    load_instrument_response,
+)
+from astrometricslib.pipelines.spectroscopy.pre_processing.intensity_scale import counts_per_second_factor
+from astrometricslib.pipelines.spectroscopy.pre_processing.neighbor_wing_correction import (
     STATUS_APPLIED,
     STATUS_NOT_NEEDED,
     StoredCrossTrailBlur,
@@ -29,21 +33,23 @@ from astrometricslib.pipelines.spectroscopy.neighbor_wing_correction import (
     load_cross_trail_blur,
     star_trace_from_result,
 )
-from astrometricslib.pipelines.spectroscopy.quantum_efficiency_correction import (
+from astrometricslib.pipelines.spectroscopy.pre_processing.quantum_efficiency_correction import (
     apply_quantum_efficiency_correction,
     curve_from_profile_record,
 )
-from astrometricslib.pipelines.spectroscopy.second_order_risk import compute_second_order_blue_to_red_ratio
-from astrometricslib.pipelines.spectroscopy.spectral_resolution import load_line_spread_profile
-from astrometricslib.pipelines.spectroscopy.spectroscopy_instrument import (
+from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import load_line_spread_profile
+from astrometricslib.pipelines.spectroscopy.pre_processing.spectroscopy_instrument import (
     SpectroscopyInstrument,
 )
-from astrometricslib.pipelines.spectroscopy.spectrum_analysis import (
+from astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_calibrator import SpectrumCalibrator
+from astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor import SpectrumExtractor
+from astrometricslib.pipelines.spectroscopy.processing.second_order_risk import (
+    compute_second_order_blue_to_red_ratio,
+)
+from astrometricslib.pipelines.spectroscopy.processing.spectrum_analysis import (
     EXTENDED_TARGET_SPECTRAL_TYPE,
     analyze_spectrum,
 )
-from astrometricslib.pipelines.spectroscopy.spectrum_calibrator import SpectrumCalibrator
-from astrometricslib.pipelines.spectroscopy.spectrum_extractor import SpectrumExtractor
 from astrometricslib.utilities import SpectroscopyConfig
 
 logger = logging.getLogger(__name__)
@@ -329,6 +335,37 @@ def _star_sharpness(star: Any) -> float | None:
     return float(sharpness) if sharpness is not None else None
 
 
+def _project_onto_dispersion_axis(
+    candidate_pos: tuple[float, float],
+    origin_pos: tuple[float, float],
+    dispersion_vector: np.ndarray,
+) -> tuple[float, float]:
+    """Split a position's offset from a point into along- and off-axis parts.
+
+    Parameters
+    ----------
+    candidate_pos : `tuple` [`float`, `float`]
+        The position being measured, `(x, y)`.
+    origin_pos : `tuple` [`float`, `float`]
+        The point to measure from, `(x, y)`.
+    dispersion_vector : `numpy.ndarray`
+        Unit vector `(x, y)` along the dispersion direction.
+
+    Returns
+    -------
+    along_axis : `float`
+        How far `candidate_pos` sits from `origin_pos`, measured along
+        `dispersion_vector`. Negative means the opposite direction.
+    off_axis : `float`
+        How far `candidate_pos` sits from `origin_pos`, measured
+        perpendicular to `dispersion_vector`. Always non-negative.
+    """
+    delta = np.array([candidate_pos[0] - origin_pos[0], candidate_pos[1] - origin_pos[1]])
+    along_axis = float(np.dot(delta, dispersion_vector))
+    off_axis = float(np.linalg.norm(delta - along_axis * dispersion_vector))
+    return along_axis, off_axis
+
+
 def _is_inside_dispersion_trail(
     candidate_pos: tuple[float, float],
     trail_owner_pos: tuple[float, float],
@@ -350,10 +387,135 @@ def _is_inside_dispersion_trail(
     is_inside : `bool`
         Whether `candidate_pos` falls within that rectangle.
     """
-    delta = np.array([candidate_pos[0] - trail_owner_pos[0], candidate_pos[1] - trail_owner_pos[1]])
-    along_trail = float(np.dot(delta, dispersion_vector))
-    off_trail = float(np.linalg.norm(delta - along_trail * dispersion_vector))
+    along_trail, off_trail = _project_onto_dispersion_axis(candidate_pos, trail_owner_pos, dispersion_vector)
     return offset_px <= along_trail <= offset_px + length_px and off_trail <= perpendicular_tolerance_px
+
+
+def _star_flux(star: Any) -> float | None:
+    """Read a detected source's instrumental flux, if it has one.
+
+    A plain `(x, y)` tuple (a caller-supplied position with no detection
+    metadata behind it) has no flux at all, so this returns `None` for it
+    rather than guessing.
+
+    Returns
+    -------
+    flux : `float` or `None`
+        The source detector's own (uncalibrated) flux estimate, or `None`
+        if `star` carries no such measurement.
+    """
+    source = star.star_data if hasattr(star, "star_data") else star
+    flux = source.get("flux") if hasattr(source, "get") else None
+    return float(flux) if flux is not None else None
+
+
+def _star_brightness_for_comparison(star: Any) -> float | None:
+    """Read the best available brightness for comparing two stars.
+
+    Prefers the star's own calibrated photometry (`photometry.mean_flux`,
+    measured across many frames by the photometry stage, which the batch
+    pipeline already runs before spectroscopy and which
+    `_copy_identity` in `spectral_star_registration` carries onto a fresh
+    spectroscopy detection) over the spectral image's own single-frame,
+    uncalibrated detection flux (`_star_flux`). Falls back to the latter
+    only when no photometry is on file for this star -- for example a
+    star seen for the first time in this spectroscopy frame, with no
+    prior photometry run.
+
+    Returns
+    -------
+    brightness : `float` or `None`
+        A brightness usable to compare two stars, or `None` when neither
+        source has one.
+    """
+    photometry = getattr(star, "photometry", None)
+    mean_flux = getattr(photometry, "mean_flux", None) if photometry is not None else None
+    return float(mean_flux) if mean_flux is not None else _star_flux(star)
+
+
+def find_neighbor_contamination_windows(
+    star_pos: tuple[float, float],
+    star_flux: float | None,
+    neighbor_stars: list[Any],
+    dispersion_vector: np.ndarray,
+    offset_px: float,
+    length_px: float,
+    perpendicular_tolerance_px: float,
+    instrument: Any,
+) -> list[dict[str, Any]]:
+    """Find wavelengths where another known star's position lands in this box.
+
+    Two stars' trails run parallel (`_capped_extraction_radius_px` already
+    keeps those apart), but a star sitting further along the *same*
+    dispersion direction as this one is a different case: its own image
+    (its zero order, or a bright point on its own trail) can fall inside
+    this star's reading box at one specific position, adding light that
+    belongs to a different star. This checks every other star astrometry
+    already found and knows the position of -- it never guesses from the
+    spectrum's own shape, so it can't mistake this star's own signal for a
+    neighbour's the way a shape-based spike detector can (see
+    `SpectroscopyConfig.reject_narrow_contaminants` for that failure).
+
+    A neighbour's own image is treated as roughly as wide along the
+    dispersion axis as this star's own box is across it
+    (`perpendicular_tolerance_px`), since a star's image is close to
+    circularly symmetric; there is no separate measurement of a neighbour's
+    width to use instead.
+
+    Parameters
+    ----------
+    star_pos : `tuple` [`float`, `float`]
+        This star's own position, `(x, y)`.
+    star_flux : `float`, optional
+        This star's own brightness (see `_star_brightness_for_comparison`),
+        for judging how much a neighbour's flux matters by comparison.
+        `None` when unknown.
+    neighbor_stars : `list`
+        Every other star in the frame (not this one), in whatever form
+        `_star_pixel_position` and `_star_brightness_for_comparison` accept.
+    dispersion_vector : `numpy.ndarray`
+        Unit vector `(x, y)` along the dispersion direction.
+    offset_px : `float`
+        How far this star's own trail starts from its position.
+    length_px : `float`
+        How long this star's own trail runs.
+    perpendicular_tolerance_px : `float`
+        This star's own box half-width, across the dispersion direction.
+    instrument : `SpectroscopyInstrument`
+        Used to turn a pixel offset into a wavelength
+        (`wavelength_at_pixel_offset`).
+
+    Returns
+    -------
+    windows : `list` [`dict`]
+        One entry per neighbour whose position falls inside this box:
+        ``"wavelength_low_angstrom"``, ``"wavelength_high_angstrom"``
+        (the window a neighbour's own image width could reach),
+        ``"neighbor_flux_ratio"`` (neighbour flux / this star's flux, or
+        `None` when either flux is unknown).
+    """
+    windows: list[dict[str, Any]] = []
+    for neighbor in neighbor_stars:
+        _, neighbor_pos = _star_pixel_position(neighbor)
+        if neighbor_pos[0] is None or neighbor_pos[1] is None:
+            continue
+        neighbor_pos = (float(neighbor_pos[0]), float(neighbor_pos[1]))
+        along_trail, off_trail = _project_onto_dispersion_axis(neighbor_pos, star_pos, dispersion_vector)
+        if not (offset_px <= along_trail <= offset_px + length_px):
+            continue
+        if off_trail > perpendicular_tolerance_px:
+            continue
+        low_wavelength_nm = instrument.wavelength_at_pixel_offset(along_trail - perpendicular_tolerance_px)
+        high_wavelength_nm = instrument.wavelength_at_pixel_offset(along_trail + perpendicular_tolerance_px)
+        neighbor_flux = _star_brightness_for_comparison(neighbor)
+        windows.append({
+            "wavelength_low_angstrom": min(low_wavelength_nm, high_wavelength_nm) * 10.0,
+            "wavelength_high_angstrom": max(low_wavelength_nm, high_wavelength_nm) * 10.0,
+            "neighbor_flux_ratio": (
+                neighbor_flux / star_flux if neighbor_flux is not None and star_flux else None
+            ),
+        })
+    return windows
 
 
 def _drop_spurious_trail_detections(
@@ -567,32 +729,13 @@ class SpectroscopyPipeline:
         processed_stellar_objects : `List[StellarObject]`
             The list of stars, now updated with their color data (spectra).
         """
-        # Filter before slicing to `limit`: a spurious trail detection
-        # sitting near the top of the brightness-sorted list would
-        # otherwise take a slot a real, fainter star should have had.
-        candidate_stars = _drop_spurious_trail_detections(
-            context.stellar_objects,
-            self.instrument.get_dispersion_vector(),
-            self.instrument.zero_order_offset_px,
-            self.instrument.expected_length_px,
-            self.config.extraction_radius,
-        )
-        target_stars = candidate_stars if limit is None else candidate_stars[:limit]
-        results = self.process_image(
-            context.image, target_stars=target_stars, auto_detect_angle=auto_detect_angle
-        )
-        self.last_run_zero_order_saturation_fractions = [
-            res["zero_order_saturated_pixel_fraction"]
-            for res in results
-            if "zero_order_saturated_pixel_fraction" in res
-        ]
-        valid_objects = [res["star_source"] for res in results if "error" not in res]
-
         # If astrometry noticed the target is a large object like a nebula
         # instead of a star, turn that plain fact into a StellarObject
         # sized for our own dispersion geometry -- astrometry knows where
         # the object is and how big it looks, but not how wide a
-        # measurement box our spectrograph needs for it.
+        # measurement box our spectrograph needs for it. Done before the
+        # trail-detection filter below, so the new object can be folded
+        # into the same batch as everything else.
         if context.extended_target is None and context.extended_source_hint is not None:
             try:
                 hint = context.extended_source_hint
@@ -605,48 +748,43 @@ class SpectroscopyPipeline:
             except Exception as e:
                 logger.warning(f"Failed to build extended target StellarObject from hint: {e}")
 
-        # If the user is targeting a large object like a nebula instead of a
-        # star,
-        # we process it automatically using a wider measuring area.
-        if context.extended_target:
-            try:
-                ext_radius = getattr(context.extended_target.spectroscopy, "extraction_radius", 60)
-                if ext_radius is None:
-                    ext_radius = 60
+        # Filter before slicing to `limit`: a spurious trail detection
+        # sitting near the top of the brightness-sorted list would
+        # otherwise take a slot a real, fainter star should have had. The
+        # extended target is never a spurious-trail candidate itself (it
+        # is a synthesized placeholder, not a detection), so it is added
+        # only after this filter runs.
+        candidate_stars = _drop_spurious_trail_detections(
+            context.stellar_objects,
+            self.instrument.get_dispersion_vector(),
+            self.instrument.zero_order_offset_px,
+            self.instrument.expected_length_px,
+            self.config.extraction_radius,
+        )
 
-                # Dynamic wide pipeline for the extended target's
-                # large aperture
-                from astrometricslib.pipelines.spectroscopy.pipeline import (
-                    SpectroscopyPipeline,
-                )
+        # A target like a nebula or cluster is processed in the very same
+        # batch as every ordinary star, not by spinning up a second
+        # pipeline: it needs its own wider aperture and skips some
+        # per-star steps that assume a point source (see
+        # `_process_target_stars` and `_subtract_neighbor_wings`), but the
+        # extraction, calibration and dispersion-angle code underneath is
+        # exactly the same. Inserted at the front so the returned list's
+        # order matches what callers have always seen.
+        if context.extended_target is not None and context.extended_target not in candidate_stars:
+            candidate_stars = [context.extended_target, *candidate_stars]
+            if context.extended_target not in context.stellar_objects:
+                context.stellar_objects.insert(0, context.extended_target)
 
-                wide_pipeline = SpectroscopyPipeline(
-                    config=self.config.with_overrides(
-                        extraction_radius=ext_radius, reject_narrow_contaminants=True
-                    )
-                )
-                # The tilt is never re-detected here: a nebula has no single
-                # streak to measure (its "trail" is a chain of ring images), so
-                # a fit on it returns a meaningless angle (on M 57, -3 degrees
-                # where the real tilt is about +2). `wide_pipeline` already
-                # holds the angle measured from the stars above, or the
-                # configured one when no star gave a clear streak.
-                ext_results = wide_pipeline.process_image(
-                    context.image, target_stars=[context.extended_target], auto_detect_angle=False
-                )
-                if ext_results and "error" not in ext_results[0]:
-                    # Insert the successfully extracted extended
-                    # target at the beginning
-                    valid_objects.insert(0, context.extended_target)
-                    # Keep context.stellar_objects synced
-                    if context.extended_target not in context.stellar_objects:
-                        context.stellar_objects.insert(0, context.extended_target)
-            except Exception as e:
-                import logging
-
-                logging.getLogger(__name__).warning(
-                    f"Failed to automatically extract extended target spectrum: {e}"
-                )
+        target_stars = candidate_stars if limit is None else candidate_stars[:limit]
+        results = self.process_image(
+            context.image, target_stars=target_stars, auto_detect_angle=auto_detect_angle
+        )
+        self.last_run_zero_order_saturation_fractions = [
+            res["zero_order_saturated_pixel_fraction"]
+            for res in results
+            if "zero_order_saturated_pixel_fraction" in res
+        ]
+        valid_objects = [res["star_source"] for res in results if "error" not in res]
 
         return valid_objects
 
@@ -711,8 +849,15 @@ class SpectroscopyPipeline:
         direc = self.config.dispersion_direction
         h, w = image.data.shape
 
+        # An extended target (a nebula or cluster) has no single streak to
+        # measure -- its "trail" is a chain of ring images, not one line --
+        # so it is never itself a candidate for the angle fit below, only
+        # ever a recipient of whatever angle the real stars in the batch
+        # resolve to.
         all_positions: list[tuple[float, float]] = []
         for star in target_stars:
+            if getattr(star, "stellar_spectral_type", None) == EXTENDED_TARGET_SPECTRAL_TYPE:
+                continue
             _, pos = _star_pixel_position(star)
             if pos[0] is not None and pos[1] is not None:
                 all_positions.append((float(pos[0]), float(pos[1])))
@@ -751,7 +896,15 @@ class SpectroscopyPipeline:
                     candidate_positions.append((x_star, y_star))
 
         if not candidate_positions:
-            _, fallback_pos = _star_pixel_position(target_stars[0])
+            fallback_star = next(
+                (
+                    star
+                    for star in target_stars
+                    if getattr(star, "stellar_spectral_type", None) != EXTENDED_TARGET_SPECTRAL_TYPE
+                ),
+                target_stars[0],
+            )
+            _, fallback_pos = _star_pixel_position(fallback_star)
             if fallback_pos[0] is not None and fallback_pos[1] is not None:
                 candidate_positions.append((float(fallback_pos[0]), float(fallback_pos[1])))
 
@@ -811,19 +964,51 @@ class SpectroscopyPipeline:
                 for other_index, other in enumerate(batch_positions)
                 if other_index != star_index and other[0] is not None and other[1] is not None
             ]
-            extraction_radius = _capped_extraction_radius_px(
-                (float(pos[0]), float(pos[1])),
-                neighbor_positions,
-                dispersion_vector,
-                self.instrument.expected_length_px,
-                int(self.config.extraction_radius),
-            )
+            is_extended = getattr(star, "stellar_spectral_type", None) == EXTENDED_TARGET_SPECTRAL_TYPE
+            if is_extended:
+                # A nebula or cluster's own aperture is deliberately much
+                # wider than a point source's (see
+                # `create_extended_target_object`); shrinking it for a
+                # nearby real star, the way `_capped_extraction_radius_px`
+                # would, defeats the whole point of asking for a wide
+                # aperture, so it is never applied here.
+                configured_radius = star.spectroscopy.extraction_radius
+                extraction_radius = (
+                    int(configured_radius)
+                    if configured_radius is not None
+                    else int(self.config.extraction_radius)
+                )
+            else:
+                extraction_radius = _capped_extraction_radius_px(
+                    (float(pos[0]), float(pos[1])),
+                    neighbor_positions,
+                    dispersion_vector,
+                    self.instrument.expected_length_px,
+                    int(self.config.extraction_radius),
+                )
             result = self._process_single_star(
-                image, pos, auto_detect_angle=auto_detect_angle, extraction_radius=extraction_radius
+                image,
+                pos,
+                auto_detect_angle=auto_detect_angle,
+                extraction_radius=extraction_radius,
+                reject_narrow_contaminants=True if is_extended else None,
             )
             if "error" not in result:
                 # Attach the original star object if possible for reference
                 result["star_source"] = star
+                neighbor_stars = [
+                    other for other_index, other in enumerate(batch) if other_index != star_index
+                ]
+                result["possible_neighbor_contamination"] = find_neighbor_contamination_windows(
+                    (float(pos[0]), float(pos[1])),
+                    _star_brightness_for_comparison(star),
+                    neighbor_stars,
+                    dispersion_vector,
+                    self.instrument.zero_order_offset_px,
+                    self.instrument.expected_length_px,
+                    extraction_radius,
+                    self.instrument,
+                )
                 extracted.append((star, is_stellar_obj, result))
 
         # Every star is read first, so each one's neighbours' light can be
@@ -858,11 +1043,22 @@ class SpectroscopyPipeline:
             Every star's extraction result. Changed in place: a corrected
             star's ``"intensities"`` are replaced, and every star with a
             neighbour gets ``"neighbor_wing_status"`` and, when it was
-            corrected, ``"neighbor_wing_fraction"``.
+            corrected, ``"neighbor_wing_fraction"``. An extended target
+            (a nebula or cluster) is left out entirely, in both roles:
+            its own spectrum is never corrected, and it is never treated
+            as a "neighbour" whose blur reaches into a real star's box --
+            the blur-fit math here assumes a point source's narrow streak,
+            which a diffuse, wide-aperture target does not have.
         """
-        traces = [star_trace_from_result(result) for result in results]
+        correctable = [
+            result
+            for result in results
+            if getattr(result.get("star_source"), "stellar_spectral_type", None)
+            != EXTENDED_TARGET_SPECTRAL_TYPE
+        ]
+        traces = [star_trace_from_result(result) for result in correctable]
         first_vector = next(
-            (result["dispersion_vector"] for result in results if result.get("dispersion_vector")),
+            (result["dispersion_vector"] for result in correctable if result.get("dispersion_vector")),
             None,
         )
         if first_vector is None:
@@ -870,7 +1066,7 @@ class SpectroscopyPipeline:
         outcomes = correct_neighbor_wings(
             image.data, traces, self.cross_trail_blur, (float(first_vector[0]), float(first_vector[1]))
         )
-        for result, outcome in zip(results, outcomes, strict=True):
+        for result, outcome in zip(correctable, outcomes, strict=True):
             if outcome.status == STATUS_NOT_NEEDED:
                 continue
             result["neighbor_wing_status"] = outcome.status
@@ -903,6 +1099,24 @@ class SpectroscopyPipeline:
                 curve=self.quantum_efficiency_curve,
             ).tolist()
 
+        # The instrument response was derived from QE-corrected spectra, so
+        # it is only ever applied to one -- same rule the classifier used
+        # to apply internally, now applied here alongside QE correction,
+        # right next to it, as one coherent equipment-calibration step.
+        best_available_intensity = (
+            quantum_efficiency_corrected_intensities
+            if quantum_efficiency_corrected_intensities is not None
+            else intensities
+        )
+        response = self.instrument_response if quantum_efficiency_corrected_intensities is not None else None
+        response_corrected_intensity = (
+            apply_instrument_response(
+                np.array(wavelengths_angstrom), np.array(best_available_intensity), response
+            )
+            if response is not None
+            else None
+        )
+
         # Compute the visual overlay rectangle and total rotated
         # dispersion angle
         rectangle, dispersion_angle = self._dispersion_overlay_geometry(
@@ -911,27 +1125,34 @@ class SpectroscopyPipeline:
             dispersion_angle_degrees=result["detected_angle"],
         )
 
-        # Classify and test features on the QE-corrected spectrum when
-        # available -- it better reflects the star's true color than raw
-        # sensor counts.
+        # Classify and test features on the response-corrected spectrum
+        # when available -- it better reflects the star's true color than
+        # QE-corrected or raw sensor counts.
         analysis = analyze_spectrum(
             np.array(wavelengths_angstrom),
-            np.array(
-                quantum_efficiency_corrected_intensities
-                if quantum_efficiency_corrected_intensities is not None
-                else intensities
-            ),
-            self.instrument_response,
-            is_quantum_efficiency_corrected=quantum_efficiency_corrected_intensities is not None,
+            np.array(best_available_intensity),
+            response_corrected_intensity,
             catalog_spectral_type=star.spectral_type,
             is_extended_target=star.stellar_spectral_type == EXTENDED_TARGET_SPECTRAL_TYPE,
             catalog_b_minus_v=star.b_minus_v,
             trail_width_px=result.get("trail_width_px"),
             extraction_box_width_px=float(rectangle[3]) if rectangle is not None else None,
             resolution_profile=self.line_spread_profile,
+            possible_neighbor_contamination=result.get("possible_neighbor_contamination"),
         )
         classification = analysis.classification
         probable_spectral_features = analysis.features
+
+        input_quality = assess_input_quality(
+            resolution_element_angstrom=analysis.resolution_element_angstrom,
+            is_resolution_measured=analysis.is_resolution_measured,
+            zero_order_saturated_pixel_fraction=result.get("zero_order_saturated_pixel_fraction"),
+            valid_fraction=result.get("valid_fraction"),
+            signal_to_noise=analysis.signal_to_noise,
+        )
+        output_quality = assess_output_quality(
+            classification, analysis.catalog_comparison, analysis.resolution_element_angstrom
+        )
 
         star.spectroscopy = SpectroscopyResult(
             wavelengths_angstrom=wavelengths_angstrom,
@@ -966,26 +1187,12 @@ class SpectroscopyPipeline:
             ),
             neighbor_wing_fraction=result.get("neighbor_wing_fraction"),
             neighbor_wing_status=result.get("neighbor_wing_status"),
+            possible_neighbor_contamination=result.get("possible_neighbor_contamination"),
             counts_per_second_factor=counts_per_second_factor(getattr(image, "header", None)),
+            catalog_comparison=analysis.catalog_comparison,
+            input_quality=input_quality,
+            output_quality=output_quality,
         )
-
-        # Records this extraction as one more epoch in the star's own
-        # spectral history, so a caller can see how its spectrum has
-        # changed across observing sessions -- not just the latest one
-        # above. merge_spectroscopy_stellar_object folds this single
-        # new entry into the catalog's running history for this star.
-        observation_timestamp = image.timestamp
-        star.spectra_history = [
-            SpectralObservation(
-                timestamp=(
-                    datetime.fromtimestamp(observation_timestamp, tz=UTC)
-                    if observation_timestamp is not None
-                    else datetime.now(UTC)
-                ),
-                wavelengths=wavelengths_angstrom,
-                intensities=intensities,
-            )
-        ]
 
         if isinstance(star.star_data, dict):
             star.star_data["xcentroid"] = result["target_pos"][0]
@@ -997,6 +1204,7 @@ class SpectroscopyPipeline:
         pos: tuple[float, float],
         auto_detect_angle: bool = True,
         extraction_radius: int | None = None,
+        reject_narrow_contaminants: bool | None = None,
     ) -> dict[str, Any]:
         """Process just one star.
 
@@ -1011,7 +1219,13 @@ class SpectroscopyPipeline:
         extraction_radius : `int`, optional
             This star's own aperture radius, in pixels, when it must be
             smaller than the configured one to keep clear of a neighbour's
-            trail. Defaults to `config.extraction_radius`.
+            trail, or larger (for an extended target). Defaults to
+            `config.extraction_radius`.
+        reject_narrow_contaminants : `bool`, optional
+            Overrides `config.reject_narrow_contaminants` for this one
+            star, when given. An extended target's much wider box is more
+            likely to catch a genuine narrow contaminant worth rejecting
+            than an ordinary point source's is.
 
         Returns
         -------
@@ -1024,11 +1238,15 @@ class SpectroscopyPipeline:
             int(extraction_radius) if extraction_radius is not None else int(self.config.extraction_radius)
         )
         extractor = self.extractor
-        if radius != self.extractor.radius:
+        if radius != self.extractor.radius or reject_narrow_contaminants is not None:
             extractor = SpectrumExtractor(
                 radius=radius,
                 subtract_sky_background=self.config.subtract_sky_background,
-                reject_narrow_contaminants=self.config.reject_narrow_contaminants,
+                reject_narrow_contaminants=(
+                    self.config.reject_narrow_contaminants
+                    if reject_narrow_contaminants is None
+                    else reject_narrow_contaminants
+                ),
             )
 
         # 1. Auto-detect angle if requested

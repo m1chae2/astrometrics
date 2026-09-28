@@ -126,7 +126,7 @@ def test_max_extraction_length_none_when_star_already_past_the_edge():  # ruff: 
 
 def test_the_spectrum_start_offset_uses_the_configs_start_wavelength():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """The spectrum start moves when the config sets another wavelength."""
-    from astrometricslib.pipelines.spectroscopy.optics_physics import calculate_pixel_offset
+    from astrometricslib.pipelines.spectroscopy.pre_processing.optics_physics import calculate_pixel_offset
     from astrometricslib.utilities import CameraConfig, SpectroscopyConfig
 
     camera = CameraConfig(name="TestCam", pixel_size_μm=3.76, sensor_width_px=3008, sensor_height_px=3008)

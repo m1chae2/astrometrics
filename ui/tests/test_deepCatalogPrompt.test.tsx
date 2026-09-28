@@ -20,7 +20,7 @@ import {
 } from '../planetariumDisplay/components/DeepCatalogPrompt';
 import { useDeepCatalogStatus } from '../planetariumDisplay/hooks/useDeepCatalogStatus';
 
-const INSTALL_COMMAND = 'python -m astrometricslib.scripts.build_deep_star_catalog';
+const INSTALL_COMMAND = 'python -m wayfindinglib.scripts.build_deep_star_catalog';
 
 const statusOf = (overrides: Partial<DeepCatalogStatus> = {}): DeepCatalogStatus => ({
   installed: false,

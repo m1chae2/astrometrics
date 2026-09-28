@@ -420,7 +420,7 @@ def _process_single_spectroscopy_frame_worker_v2(
             if "zero_order_saturated_pixel_fraction" in res
         ]
 
-        from astrometricslib.pipelines.spectroscopy.spectral_classifier import (
+        from astrometricslib.pipelines.spectroscopy.post_processing.assess_output_quality import (
             build_spectral_classification_concerns,
         )
 
@@ -486,7 +486,7 @@ def process_spectroscopy_frames_by_session(
         star identification data.
     """
     from astrometricslib.drivers.image import AstrometricsImage
-    from astrometricslib.pipelines.astrometry.session_identification import (
+    from astrometricslib.pipelines.astrometry.processing.session_identification import (
         identify_session_stars,
     )
     from astrometricslib.pipelines.astrometry.star_identifier import StarIdentifier

@@ -226,6 +226,11 @@ class RPCHandlerRegistry:
         self.register("target:get_frame_header", ("target_service", "get_frame_header"))
 
         self.register("astronomy:list", ("stellar_service", "get_displayable_stellar_object_summaries"))
+        self.register(
+            "astronomy:target_data_availability", ("stellar_service", "get_target_data_availability")
+        )
+        self.register("astronomy:spectral_class_summary", ("stellar_service", "get_spectral_class_summary"))
+        self.register("astronomy:stars_by_spectral_class", ("stellar_service", "get_stars_by_spectral_class"))
         self.register("astronomy:get", ("stellar_service", "get_object_fuzzy_by_id"))
         self.register("astronomy:save", ("stellar_service", "save_objects"))
         self.register("astronomy:analyze_periodicity", ("stellar_service", "analyze_periodicity"))

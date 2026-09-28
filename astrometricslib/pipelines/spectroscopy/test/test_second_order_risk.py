@@ -14,7 +14,7 @@ import pytest
 
 from astrometricslib.models.stellar_source import SpectroscopyResult, StellarObject
 from astrometricslib.pipelines.spectroscopy.pipeline import SpectroscopyPipeline
-from astrometricslib.pipelines.spectroscopy.second_order_risk import (
+from astrometricslib.pipelines.spectroscopy.processing.second_order_risk import (
     MAXIMUM_STORED_RATIO,
     compute_second_order_blue_to_red_ratio,
     is_second_order_risky,

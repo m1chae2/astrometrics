@@ -9,7 +9,7 @@ import pytest
 
 from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.pipelines.spectroscopy.pipeline import SpectroscopyPipeline
-from astrometricslib.pipelines.spectroscopy.spectrum_extractor import SpectrumExtractor
+from astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor import SpectrumExtractor
 from astrometricslib.utilities import CameraConfig, SpectroscopyConfig
 
 

@@ -1,6 +1,9 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { RadioListManager } from '../common/radioList/RadioListManager';
 import { useSpectrumList } from './hooks/useSpectrumList';
+import { useTargetBrowserItems } from './hooks/useTargetBrowserItems';
+import { useSpectralClassBrowserItems, ALL_SPECTRAL_CLASSES_VALUE } from './hooks/useSpectralClassBrowserItems';
+import { useStarsBySpectralClassList } from './hooks/useStarsBySpectralClassList';
 import { useSpectrumData } from './hooks/useSpectrumData';
 import { SpectrumViewer } from './components/SpectrumViewer';
 import { PhotometryViewer } from './components/PhotometryViewer';
@@ -41,25 +44,53 @@ export const AstronomyDisplay: React.FC = () => {
   });
   const [selectedTimestamps, setSelectedTimestamps] = useState<Set<string>>(new Set());
 
-    const {
-    items,
-    filterOptions,
-    selectedFilterOption,
-    setFilterOption,
-    filterText,
-    setFilterText,
-    page,
-    setPage,
-    hasMore,
-  } = useSpectrumList(undefined, pendingId, selectedSpectrum, setPendingId);
+  // Two ways to browse the catalog: drill into a target's own stars, or
+  // browse by catalog spectral classification with stars ranked by how
+  // well their own extracted spectrum matched. There is no unscoped "All
+  // targets" -- target mode always drills into one target; "All" in
+  // spectral-class mode is the equivalent whole-catalog browse.
+  const [navigationMode, setNavigationMode] = useState<'target' | 'spectralClass'>('target');
+  const [selectedTarget, setSelectedTarget] = useState<string>('');
+  const [selectedSpectralClass, setSelectedSpectralClass] = useState<string>(ALL_SPECTRAL_CLASSES_VALUE);
+
+  const targetBrowser = useTargetBrowserItems();
+  const spectralClassBrowser = useSpectralClassBrowserItems();
+
+  // Auto-select the first target once the list loads, unless one is
+  // already chosen (including via the ?target= hand-off below).
+  useEffect(() => {
+    if (!selectedTarget && targetBrowser.items.length > 0) {
+      setSelectedTarget(targetBrowser.items[0].id);
+    }
+  }, [selectedTarget, targetBrowser.items]);
+
+  const activeTargetId = navigationMode === 'target' ? selectedTarget || undefined : undefined;
+  const activeSpectralClass =
+    navigationMode === 'spectralClass' && selectedSpectralClass !== ALL_SPECTRAL_CLASSES_VALUE
+      ? selectedSpectralClass
+      : undefined;
+  const isSpectralClassScoped = !!activeSpectralClass;
+
+  const starsByTarget = useSpectrumList(activeTargetId, undefined, pendingId, selectedSpectrum, setPendingId);
+  const starsBySpectralClass = useStarsBySpectralClassList(activeSpectralClass);
+  const starList = isSpectralClassScoped ? starsBySpectralClass : starsByTarget;
+
+  const starListTitle = isSpectralClassScoped
+    ? `Class ${activeSpectralClass} stars`
+    : navigationMode === 'spectralClass'
+    ? 'All stars'
+    : activeTargetId
+    ? `Stars in ${activeTargetId}`
+    : 'Select a target';
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const targetParam = params.get('target');
     if (targetParam) {
-      setFilterOption(`Target: ${targetParam}`);
+      setNavigationMode('target');
+      setSelectedTarget(targetParam);
     }
-  }, [setFilterOption]);
+  }, []);
 
   // Picks up a star handed off from Planetarium's "Open in Astronomy Manager"
   // action while this panel is already mounted. The `?star=`/localStorage
@@ -116,8 +147,7 @@ export const AstronomyDisplay: React.FC = () => {
   const isStarLoaded = !!astronomyData && !loading && !error;
   const hasSpectrum =
     (astronomyData?.spectroscopy?.wavelengthsAngstrom?.length ?? 0) > 0 ||
-    (astronomyData?.wavelength?.length ?? 0) > 0 ||
-    (astronomyData?.spectraHistory?.length ?? 0) > 0;
+    (astronomyData?.wavelength?.length ?? 0) > 0;
   const hasPhotometry = selectLightCurveSeries(astronomyData?.photometry).values.length > 0;
 
   // Extract all available timestamps from both photometry and spectroscopy
@@ -126,9 +156,6 @@ export const AstronomyDisplay: React.FC = () => {
     const times = new Set<string>();
     if (astronomyData?.photometry?.timestamps) {
       astronomyData.photometry.timestamps.forEach(t => times.add(t));
-    }
-    if (astronomyData?.spectraHistory) {
-      astronomyData.spectraHistory.forEach(s => times.add(s.timestamp));
     }
     const sorted = Array.from(times).sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
 
@@ -166,29 +193,80 @@ export const AstronomyDisplay: React.FC = () => {
   };
 
   const leftPanel = (
-    <RadioListManager
-      title="Identified Stars"
-      // REQ: AST-1.1: The display SHALL present a selectable list of all identified stellar objects.
-      items={items}
-      selectedId={selectedSpectrum}
-      pendingId={pendingId}
-      onSelect={setPendingId}
-      filterOptions={filterOptions}
-      selectedFilterOption={selectedFilterOption}
-      onFilterOptionChange={setFilterOption}
-      // REQ: AST-1.2: The display SHALL allow filtering of the data list by text search.
-      filterText={filterText}
-      onFilterTextChange={setFilterText}
-      legend={
-        <>
-          <span><span className="selectable-list__badge selectable-list__badge--spectra">S</span> spectrum</span>
-          <span><span className="selectable-list__badge selectable-list__badge--photometry">P</span> photometry</span>
-        </>
-      }
-      page={page}
-      onPageChange={setPage}
-      hasMore={hasMore}
-    />
+    <div className="astronomy-display__browser">
+      <div className="astronomy-display__mode-toggle">
+        <button
+          type="button"
+          className={`segmented-btn ${navigationMode === 'target' ? 'active' : ''}`}
+          onClick={() => setNavigationMode('target')}
+        >
+          By target
+        </button>
+        <button
+          type="button"
+          className={`segmented-btn ${navigationMode === 'spectralClass' ? 'active' : ''}`}
+          onClick={() => setNavigationMode('spectralClass')}
+        >
+          By spectral class
+        </button>
+      </div>
+
+      {navigationMode === 'target' ? (
+        <RadioListManager
+          title="Targets"
+          className="astronomy-display__primary-list"
+          items={targetBrowser.items}
+          selectedId={selectedTarget}
+          pendingId={selectedTarget}
+          onSelect={setSelectedTarget}
+          filterText={targetBrowser.filterText}
+          onFilterOptionChange={() => {}}
+          onFilterTextChange={targetBrowser.setFilterText}
+          filterPlaceholder="Search targets..."
+        />
+      ) : (
+        <RadioListManager
+          title="Spectral classes"
+          className="astronomy-display__primary-list"
+          items={spectralClassBrowser.items}
+          selectedId={selectedSpectralClass}
+          pendingId={selectedSpectralClass}
+          onSelect={setSelectedSpectralClass}
+          filterText={spectralClassBrowser.filterText}
+          onFilterOptionChange={() => {}}
+          onFilterTextChange={spectralClassBrowser.setFilterText}
+          filterPlaceholder="Search classes..."
+          legend={
+            spectralClassBrowser.isLoading
+              ? 'Scanning the catalog for spectral classes…'
+              : undefined
+          }
+        />
+      )}
+
+      <RadioListManager
+        title={starListTitle}
+        className="astronomy-display__star-list"
+        // REQ: AST-1.1: The display SHALL present a selectable list of all identified stellar objects.
+        items={starList.items}
+        selectedId={selectedSpectrum}
+        pendingId={pendingId}
+        onSelect={setPendingId}
+        onFilterOptionChange={() => {}}
+        // REQ: AST-1.2: The display SHALL allow filtering of the data list by text search.
+        filterText={starList.filterText}
+        onFilterTextChange={starList.setFilterText}
+        legend={
+          <>
+            <span><span className="selectable-list__badge selectable-list__badge--spectra">S</span> spectrum</span>
+            <span><span className="selectable-list__badge selectable-list__badge--photometry">P</span> photometry</span>
+          </>
+        }
+        page={isSpectralClassScoped ? undefined : starsByTarget.page}
+        onPageChange={isSpectralClassScoped ? undefined : starsByTarget.setPage}
+        hasMore={isSpectralClassScoped ? false : starsByTarget.hasMore}
+      />
+    </div>
   );
 
   const rightPanel = (
@@ -243,7 +321,6 @@ export const AstronomyDisplay: React.FC = () => {
             loading={loading}
             error={error}
             active={!!selectedSpectrum}
-            selectedTimestamps={selectedTimestamps}
             showFeatures={showFeatures}
             onToggleFeatures={() => setShowFeatures((v) => !v)}
           />

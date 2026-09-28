@@ -9,7 +9,8 @@ import {
     describePatternBadges,
     describeStarTypeBadges,
     formatCatalogMagnitude,
-    formatCoordinateDegrees,
+    formatDeclinationSexagesimal,
+    formatRightAscensionSexagesimal,
 } from '../utils/starDisplayFormat';
 import { useOptionalTargetContext } from '../../common/context/TargetContext';
 import { emitToast } from '../../common/utils/emitToast';
@@ -23,21 +24,23 @@ export interface StarSummaryCardProps {
 }
 
 /**
- * Formats right ascension and declination as degrees rounded to five decimals.
+ * Formats right ascension and declination as sexagesimal hours/degrees, minutes, and seconds.
  * @param ra RA coordinate in degrees or string.
  * @param dec DEC coordinate in degrees or string.
  * @returns Formatted coordinate string with dot separator, or empty if either is missing.
  */
 function formatCoordinates(ra?: any, dec?: any): string {
-    const rightAscensionText = formatCoordinateDegrees(ra);
-    const declinationText = formatCoordinateDegrees(dec);
+    const rightAscensionText = formatRightAscensionSexagesimal(ra);
+    const declinationText = formatDeclinationSexagesimal(dec);
     if (rightAscensionText === '' || declinationText === '') return '';
-    return `${rightAscensionText}° • ${declinationText}°`;
+    return `${rightAscensionText} • ${declinationText}`;
 }
 
 /**
  * Switches the app to Planetarium, centered on the given star, in place --
- * the reverse of Planetarium's "Open in Astronomy Manager" action.
+ * the reverse of Planetarium's "Open in Astronomy Manager" action. Routed
+ * through the shared displayCoordinator navigation intent so this handoff
+ * works the same whether Planetarium is open in this window or another one.
  *
  * @param id Star identifier to select once Planetarium mounts.
  * @param name Display name for the star.
@@ -55,15 +58,11 @@ function locateInPlanetarium(
     hasSpectra: boolean,
     hasPhotometry: boolean
 ): void {
-    const payload = { id, name, ra, dec, hasSpectra, hasPhotometry };
-    try {
-        window.localStorage.setItem('astronomyLocateStar', JSON.stringify(payload));
-        window.localStorage.setItem('appMode', 'Planetarium');
-    } catch {
-        // Ignore localStorage access failures (e.g. in private browsing)
-    }
-    window.dispatchEvent(new CustomEvent('astrometrics:modeChange', { detail: 'Planetarium' }));
-    window.dispatchEvent(new CustomEvent('astrometrics:planetariumLocateStar', { detail: payload }));
+    navigateToElement({
+        targetDisplay: 'Planetarium',
+        action: 'locateStar',
+        payload: { id, name, ra, dec, hasSpectra, hasPhotometry },
+    });
 }
 
 /**

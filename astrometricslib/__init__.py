@@ -53,7 +53,6 @@ from astrometricslib.models.stellar_source import (
     GroupedFrameStat,
     PhotometryResult,
     PlotData,
-    SpectralObservation,
     SpectroscopyResult,
     StellarObject,
     TargetFilesResponse,
@@ -78,12 +77,16 @@ if TYPE_CHECKING:
     from astrometricslib.api.stars import StellarCatalog
     from astrometricslib.api.targets import TargetCatalog
     from astrometricslib.api.visualization import Visualization
+    from astrometricslib.pipelines.astrometry.catalog_seeding import (
+        derive_field_centers,
+    )
     from astrometricslib.pipelines.astrometry.pipeline import AstrometryPipeline
     from astrometricslib.pipelines.astrometry.star_identifier import StarIdentifier
 
 _DEFERRED_EXPORTS = {
     "AstrometryPipeline": "astrometricslib.pipelines.astrometry.pipeline",
     "StarIdentifier": "astrometricslib.pipelines.astrometry.star_identifier",
+    "derive_field_centers": "astrometricslib.pipelines.astrometry.catalog_seeding",
     "CalibrationCatalog": "astrometricslib.api.processing",
     "ProcessingPipelines": "astrometricslib.api.processing",
     "QualityDiagnostics": "astrometricslib.api.processing",
@@ -235,7 +238,6 @@ __all__ = [
     "ProcessingPipelines",
     "QualityDiagnostics",
     "RenderedImage",
-    "SpectralObservation",
     "SpectroscopyResult",
     "StarIdentifier",
     "StellarCatalog",
@@ -248,6 +250,7 @@ __all__ = [
     "Visualization",
     "capture_job_logs",
     "classify_and_sort_fits_files",
+    "derive_field_centers",
     "derive_target_sessions",
     "frame_is_spectral",
     "get_configuration",

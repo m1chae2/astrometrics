@@ -7,17 +7,18 @@
 import React, { useState } from 'react';
 import '../styles/astronomyDisplay.css';
 import {
-    describeEmissionLineVerdict,
-    describeFeatureVerdict,
+    describeCandidateSeparation,
+    describeEmissionLineDetail,
+    describeFeatureDetail,
     describeMissingPattern,
     describeTemplateMatch,
     formatFalseAlarmProbability,
     formatPeriod,
     formatTimestampsSpan,
-    hasReferenceExpectations,
     isSignificantVerdict,
     isDepthMeaningful,
     shortFeatureName,
+    splitEmissionLinesForTable,
     splitFeaturesForTable,
 } from '../utils/starDisplayFormat';
 import { EmissionLineResult, SpectralFeatureResult } from '../../common/types/spectralFeatureTypes';
@@ -119,8 +120,6 @@ export const StellarAnalysisDetails: React.FC<StellarAnalysisDetailsProps> = ({
     const periodogram = photometry?.periodogram;
     const transitCandidate = photometry?.transitCandidate;
     const spectroscopy = astronomyData?.spectroscopy;
-    // Features the test found nothing at are folded away until asked for.
-    const [showNothingFoundFeatures, setShowNothingFoundFeatures] = useState<boolean>(false);
 
     const timestamps: string[] = photometry?.timestamps ?? [];
     const pointCount = timestamps.length;
@@ -130,15 +129,15 @@ export const StellarAnalysisDetails: React.FC<StellarAnalysisDetailsProps> = ({
     const spectralRms = spectroscopy?.selfDeterminedSpectralTypeRms;
     const templateMatch = describeTemplateMatch(spectroscopy, astronomyData?.spectralType);
     const spectralCandidates: any[] = spectroscopy?.selfDeterminedSpectralTypeCandidates ?? [];
+    const candidateSeparation = describeCandidateSeparation(spectralCandidates);
     const testedFeatures = (spectroscopy?.probableSpectralFeatures ?? []) as SpectralFeatureResult[];
     // A glowing-gas source (such as a nebula) is described by its emission lines, not by a star type.
     const emissionLines = (spectroscopy?.emissionLines ?? []) as EmissionLineResult[];
     const isGlowingGas = spectroscopy?.isEmissionLineSource === true;
-    const listedEmissionLines = emissionLines.filter((line) => line.verdict !== 'not_covered');
+    const emissionLineTable = splitEmissionLinesForTable(emissionLines);
+    const listedEmissionLines = emissionLineTable.shown;
     const featureTable = splitFeaturesForTable(testedFeatures);
-    // Expect and Present compare with a reference spectrum, so they are only listed when the star has one.
-    const showReferenceColumns = hasReferenceExpectations(testedFeatures);
-    const listedFeatures = showNothingFoundFeatures ? testedFeatures : featureTable.shown;
+    const listedFeatures = featureTable.shown;
     const periodogramIsSignificant = isSignificantVerdict(periodogram?.verdict);
     const transitIsSignificant = isSignificantVerdict(transitCandidate?.verdict);
     const hasSearchResult = !!periodogram || !!transitCandidate;
@@ -201,7 +200,7 @@ export const StellarAnalysisDetails: React.FC<StellarAnalysisDetailsProps> = ({
                 <div className="stellar-analysis-details__section">
                     <div className="stellar-analysis-details__section-title">
                         Stellar Classification
-                        <InfoTip text="Sorts the star by type (O, B, A, F, G, K, M, hottest to coolest) by comparing the shape of its spectrum with reference stars of known type. Each percentage is how far off the shape is; lower is closer. More than 15% off counts as no good match." />
+                        <InfoTip text="Compares this spectrum's shape against reference stars, O (hottest) to M (coolest). Lower percentages indicate a closer match; above 15% is considered no match. Separation indicates whether the runner-up candidate is a clearly worse fit or nearly as close." />
                     </div>
                     <div className="stellar-analysis-details__grid">
                         <div
@@ -219,6 +218,25 @@ export const StellarAnalysisDetails: React.FC<StellarAnalysisDetailsProps> = ({
                                     : `${measuredSpectralType}${typeof spectralRms === 'number' ? ` (${(spectralRms * 100).toFixed(0)}% off)` : ''}`}
                             </span>
                         </div>
+                        {candidateSeparation && !templateMatch?.isPoor && (
+                            <div
+                                className="analysis-row"
+                                title={
+                                    candidateSeparation.label === 'well-separated'
+                                        ? 'The next-closest candidate is a clearly worse fit.'
+                                        : 'The next-closest candidate is nearly as close a fit, so this type is not firmly distinguished from it.'
+                                }
+                            >
+                                <span className="analysis-label">Separation:</span>
+                                <span
+                                    className={`analysis-value${
+                                        candidateSeparation.label === 'marginal' ? ' analysis-value--caution' : ''
+                                    }`}
+                                >
+                                    {candidateSeparation.label === 'well-separated' ? 'Well-separated' : 'Marginal'} ({candidateSeparation.detail})
+                                </span>
+                            </div>
+                        )}
                         {spectralCandidates.slice(0, LISTED_SPECTRAL_TYPE_CANDIDATES).map((candidate) => (
                             <div
                                 className="analysis-row"
@@ -248,37 +266,37 @@ export const StellarAnalysisDetails: React.FC<StellarAnalysisDetailsProps> = ({
                 </div>
             )}
 
-            {listedEmissionLines.length > 0 && (
+            {emissionLines.length > 0 && (
                 <div className="stellar-analysis-details__section">
                     <div className="stellar-analysis-details__section-title">
                         Emission Lines
-                        <InfoTip text="Bright humps in the spectrum where glowing gas gives off light. Only light below 8,000 Å is used. Hover a result for what it means." />
+                        <InfoTip text="Bright humps in the spectrum where glowing gas gives off light. Only light below 8,000 Å is used. Hover a result for its significance." />
                     </div>
-                    <div className="stellar-analysis-details__table-wrapper">
-                        <table className="stellar-analysis-details__table">
-                            <thead>
-                                <tr>
-                                    <th>Line</th>
-                                    <th>Result</th>
-                                    <th title="How many error bars the hump stands above the continuum.">Strength</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {listedEmissionLines.map((line) => {
-                                    const verdictDescription = describeEmissionLineVerdict(line.verdict);
-                                    return (
-                                        <tr key={line.line} className={`feature-row feature-row--${line.verdict}`}>
-                                            <td className="feature-name-cell">{line.line}</td>
-                                            <td title={verdictDescription.explanation}>{verdictDescription.label}</td>
-                                            <td>
-                                                {typeof line.significance === 'number' ? `${line.significance.toFixed(1)}σ` : '–'}
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
-                    </div>
+                    {listedEmissionLines.length > 0 ? (
+                        <div className="stellar-analysis-details__table-wrapper">
+                            <table className="stellar-analysis-details__table">
+                                <thead>
+                                    <tr>
+                                        <th>Line</th>
+                                        <th>Result</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {listedEmissionLines.map((line) => {
+                                        const detail = describeEmissionLineDetail(line);
+                                        return (
+                                            <tr key={line.line} className={`feature-row feature-row--${line.verdict}`}>
+                                                <td className="feature-name-cell">{line.line}</td>
+                                                <td title={detail.explanation}>{detail.label}</td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    ) : (
+                        <div className="stellar-analysis-details__empty-note">No detected emission lines</div>
+                    )}
                 </div>
             )}
 
@@ -288,7 +306,7 @@ export const StellarAnalysisDetails: React.FC<StellarAnalysisDetailsProps> = ({
                         Absorption Features
                         <InfoTip text="Dips in the spectrum where an element absorbs light. Green lines on the plot are found features; red lines are dips the noise is too large to confirm. Hover a result for what it means." />
                     </div>
-                    {listedFeatures.length > 0 && (
+                    {listedFeatures.length > 0 ? (
                         <div className="stellar-analysis-details__table-wrapper">
                             <table className="stellar-analysis-details__table">
                                 <thead>
@@ -296,69 +314,31 @@ export const StellarAnalysisDetails: React.FC<StellarAnalysisDetailsProps> = ({
                                         <th>Feature</th>
                                         <th>Result</th>
                                         <th title="How far the dip goes below the spectrum around it.">Depth</th>
-                                        {showReferenceColumns && (
-                                            <th title="How deep this dip should be for the matched star type.">Expect</th>
-                                        )}
-                                        <th title="How often random noise alone makes a dip this deep. Lower means more likely real.">
-                                            Noise
-                                        </th>
-                                        {showReferenceColumns && (
-                                            <th title="Estimated chance the feature is present, if the star is the matched type. Not a precise probability.">
-                                                Present
-                                            </th>
-                                        )}
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {listedFeatures.map((feature) => {
-                                        const verdictDescription = describeFeatureVerdict(feature.verdict);
+                                        const detail = describeFeatureDetail(feature);
                                         return (
                                             <tr key={feature.feature} className={`feature-row feature-row--${feature.verdict}`}>
                                                 <td className="feature-name-cell">
                                                     {shortFeatureName(feature.feature)}
                                                     {feature.kind === 'emission' ? ' (emission)' : ''}
                                                 </td>
-                                                <td title={verdictDescription.explanation}>{verdictDescription.label}</td>
+                                                <td title={detail.explanation}>{detail.label}</td>
                                                 <td>
                                                     {isDepthMeaningful(feature.verdict) && feature.depth !== undefined
                                                         ? `${(feature.depth * 100).toFixed(0)}%`
                                                         : '–'}
                                                 </td>
-                                                {showReferenceColumns && (
-                                                    <td>
-                                                        {typeof feature.expected_depth === 'number'
-                                                            ? `${(feature.expected_depth * 100).toFixed(0)}%`
-                                                            : '–'}
-                                                    </td>
-                                                )}
-                                                <td>
-                                                    {feature.p_value !== undefined
-                                                        ? formatFalseAlarmProbability(feature.p_value)
-                                                        : '–'}
-                                                </td>
-                                                {showReferenceColumns && (
-                                                    <td>
-                                                        {typeof feature.probability_present === 'number'
-                                                            ? `${Math.round(feature.probability_present * 100)}%`
-                                                            : '–'}
-                                                    </td>
-                                                )}
                                             </tr>
                                         );
                                     })}
                                 </tbody>
                             </table>
                         </div>
-                    )}
-                    {featureTable.hidden.length > 0 && (
-                        <button
-                            type="button"
-                            className="stellar-analysis-details__run-btn"
-                            title={featureTable.hiddenSummary}
-                            onClick={() => setShowNothingFoundFeatures((shown) => !shown)}
-                        >
-                            {showNothingFoundFeatures ? 'Hide' : 'Show'} {featureTable.hidden.length} more
-                        </button>
+                    ) : (
+                        <div className="stellar-analysis-details__empty-note">No detected features</div>
                     )}
                 </div>
             )}

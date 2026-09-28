@@ -2,7 +2,7 @@
 
 The Planetarium draws faint stars from a copy of the Gaia DR3 catalog that
 was downloaded once with ``python -m
-astrometricslib.scripts.build_deep_star_catalog``. Looking stars up in it is
+wayfindinglib.scripts.build_deep_star_catalog``. Looking stars up in it is
 a local database read, so it takes milliseconds and never touches the
 internet.
 
@@ -12,7 +12,7 @@ REQ: PLN-3.2
 """
 
 import logging
-from typing import Protocol
+from typing import Any, Protocol
 
 from astrometricslib import StellarObject
 from wayfindinglib.drivers.catalog.base_catalog_driver import CatalogDriver
@@ -39,14 +39,53 @@ _NO_MAGNITUDE_LIMIT = 99.0
 class DeepStarSource(Protocol):
     """Where the driver reads the downloaded stars from.
 
-    `astrometricslib.api.stars.StellarCatalog` provides this, so the driver
-    reaches the catalog through the `Astrometrics` facade.
+    `LocalDeepStarStore` provides this, reading from wayfindinglib's own
+    local deep-star catalog (`wayfindinglib.drivers.catalog.deep_star_store`).
     """
 
     def find_deep_stars(
         self, ra: float, dec: float, radius: float, magnitude_limit: float, maximum_stars: int | None = None
     ) -> list[tuple[int, float, float, float]] | None:
         """Return ``(source_id, ra, dec, magnitude)`` for stars in a circle."""
+
+
+class LocalDeepStarStore:
+    """Adapts the local deep-star store to the `DeepStarSource` protocol.
+
+    Binds a config object once so a caller (`Sky`) doesn't have to thread
+    it through every lookup. Provisioning (downloading the catalog) lives
+    in `deep_star_catalog_builder.py`; this only reads what has already
+    been saved.
+
+    Parameters
+    ----------
+    config : `Any`, optional
+        The application settings, used to find the catalog file. Defaults
+        to `astrometricslib.get_configuration()` when not given.
+    """
+
+    def __init__(self, config: Any = None) -> None:
+        if config is None:
+            from astrometricslib import get_configuration
+
+            config = get_configuration()
+        self._config = config
+
+    def find_deep_stars(
+        self, ra: float, dec: float, radius: float, magnitude_limit: float, maximum_stars: int | None = None
+    ) -> list[tuple[int, float, float, float]] | None:
+        """Look up the saved stars inside a circle of sky.
+
+        Returns
+        -------
+        stars : `list` [`tuple`] or `None`
+            One ``(source_id, ra, dec, magnitude)`` tuple per star, or
+            `None` if no catalog has been downloaded at all. See
+            `deep_star_store.find_deep_stars`.
+        """
+        from wayfindinglib.drivers.catalog import deep_star_store
+
+        return deep_star_store.find_deep_stars(self._config, ra, dec, radius, magnitude_limit, maximum_stars)
 
 
 class DeepStarCatalogDriver(CatalogDriver):

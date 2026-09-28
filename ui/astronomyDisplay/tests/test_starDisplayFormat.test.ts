@@ -9,9 +9,13 @@ import {
     emissionLineMarks,
     formatCatalogMagnitude,
     formatCoordinateDegrees,
+    formatDeclinationSexagesimal,
+    formatRightAscensionSexagesimal,
+    formatSpectralMatchQuality,
     formatStarListLabel,
     formatTimeSpan,
     selectLightCurveSeries,
+    spectralClassLetter,
 } from '../utils/starDisplayFormat';
 
 describe('formatStarListLabel', () => {
@@ -76,6 +80,61 @@ describe('formatCoordinateDegrees', () => {
     it('returns an empty string for a value that is not a number', () => {
         expect(formatCoordinateDegrees(undefined)).toBe('');
         expect(formatCoordinateDegrees('abc')).toBe('');
+    });
+});
+
+describe('formatRightAscensionSexagesimal', () => {
+    it('converts decimal degrees to hours, minutes, and seconds', () => {
+        expect(formatRightAscensionSexagesimal(14.18034)).toBe("0h 56' 43.3''");
+    });
+
+    it('returns an empty string for a value that is not a number', () => {
+        expect(formatRightAscensionSexagesimal(undefined)).toBe('');
+        expect(formatRightAscensionSexagesimal('abc')).toBe('');
+    });
+});
+
+describe('formatDeclinationSexagesimal', () => {
+    it('converts decimal degrees to degrees, arcminutes, and arcseconds', () => {
+        expect(formatDeclinationSexagesimal(60.71593)).toBe("+60° 42' 57.3''");
+        expect(formatDeclinationSexagesimal(-35.53198)).toBe("-35° 31' 55.1''");
+    });
+
+    it('returns an empty string for a value that is not a number', () => {
+        expect(formatDeclinationSexagesimal(undefined)).toBe('');
+        expect(formatDeclinationSexagesimal('abc')).toBe('');
+    });
+});
+
+describe('formatSpectralMatchQuality', () => {
+    it('formats an rms as a percent off', () => {
+        expect(formatSpectralMatchQuality(0.0432)).toBe('4% off');
+    });
+
+    it('says not yet matched when there is no rms', () => {
+        expect(formatSpectralMatchQuality(null)).toBe('not yet matched');
+        expect(formatSpectralMatchQuality(undefined)).toBe('not yet matched');
+    });
+});
+
+describe('spectralClassLetter', () => {
+    it('reduces a catalog type to its primary class letter', () => {
+        expect(spectralClassLetter('G2V')).toBe('G');
+        expect(spectralClassLetter('M0III')).toBe('M');
+    });
+
+    it('folds the classical carbon-star subclasses into C', () => {
+        expect(spectralClassLetter('R5')).toBe('C');
+        expect(spectralClassLetter('N3')).toBe('C');
+        expect(spectralClassLetter('C6')).toBe('C');
+    });
+
+    it('returns empty for unknown, blank, or unsupported classes', () => {
+        expect(spectralClassLetter('Unknown')).toBe('');
+        expect(spectralClassLetter('')).toBe('');
+        expect(spectralClassLetter(undefined)).toBe('');
+        expect(spectralClassLetter('DA')).toBe(''); // white dwarf, not in the browser's set
+        expect(spectralClassLetter('S5')).toBe('');
     });
 });
 

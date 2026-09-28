@@ -23,6 +23,7 @@ from typing import Any
 import numpy as np
 from astropy import units as u
 from astropy.coordinates import SkyCoord
+from astropy.nddata import block_reduce
 from astropy.wcs import WCS, FITSFixedWarning
 
 from astrometricslib.drivers import simbad_interface
@@ -30,8 +31,9 @@ from astrometricslib.drivers.fits_access import collapse_to_2d
 from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.drivers.plate_solve_interface import PlateSolver
 from astrometricslib.models.stellar_source import StellarObject
-from astrometricslib.pipelines.astrometry.fwhm import measure_fwhm_from_data
-from astrometricslib.pipelines.astrometry.source_detection import SourceDetector
+from astrometricslib.pipelines.astrometry.post_processing.assess_match_quality import assess_match_quality
+from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_fwhm_from_data
+from astrometricslib.pipelines.astrometry.pre_processing.source_detection import SourceDetector
 from astrometricslib.utilities.config_loader import AppConfiguration
 from astrometricslib.utilities.exceptions import AstroLibError
 
@@ -261,13 +263,7 @@ def _block_average(data: np.ndarray, factor: int) -> np.ndarray:
     binned : `numpy.ndarray`
         The shrunk image.
     """
-    height, width = data.shape
-    cropped_height = height - height % factor
-    cropped_width = width - width % factor
-    cropped = data[:cropped_height, :cropped_width]
-    return cropped.reshape(cropped_height // factor, factor, cropped_width // factor, factor).mean(
-        axis=(1, 3)
-    )
+    return block_reduce(data, factor, func=np.mean)
 
 
 def _rescale_source_centroids(sources: list[dict], factor: int) -> None:
@@ -367,6 +363,25 @@ def brightest_unresolved_entry_index(
         key=lambda position: math.inf if magnitudes[position] is None else magnitudes[position],
     )
     return int(candidates[brightest])
+
+
+def _is_unresolved_match(star_coord: SkyCoord, simbad_coords: SkyCoord) -> bool:
+    """Check whether a star's SIMBAD match was ambiguous.
+
+    Shares `UNRESOLVED_COMPANION_RADIUS_ARCSEC` with
+    `brightest_unresolved_entry_index`, which is the function that
+    actually resolves the ambiguity by picking the brightest candidate;
+    this only reports whether that resolution happened, so a caller can
+    record it on `CatalogMatchQuality.is_ambiguous`.
+
+    Returns
+    -------
+    is_ambiguous : `bool`
+        True if two or more catalog entries sat within
+        `UNRESOLVED_COMPANION_RADIUS_ARCSEC` of the star.
+    """
+    separations = star_coord.separation(simbad_coords).arcsec
+    return int(np.count_nonzero(separations <= UNRESOLVED_COMPANION_RADIUS_ARCSEC)) >= 2
 
 
 class StarIdentifier:
@@ -1307,6 +1322,7 @@ class StarIdentifier:
             if simbad_coords is not None and result_table is not None:
                 idx, d2d, _ = star_coord.match_to_catalog_sky(simbad_coords)
                 if d2d < CATALOG_MATCH_RADIUS_ARCSEC * u.arcsec:
+                    is_ambiguous = _is_unresolved_match(star_coord, simbad_coords)
                     idx = brightest_unresolved_entry_index(
                         star_coord, int(np.ravel(idx)[0]), simbad_coords, result_table
                     )
@@ -1316,7 +1332,11 @@ class StarIdentifier:
                     # only direct measure of how good the solution is.
                     # match_to_catalog_sky returns an array-like even for
                     # a single coordinate, so ravel before taking a scalar.
-                    self.catalog_match_separations_arcsec.append(float(np.ravel(d2d.arcsec)[0]))
+                    separation_arcsec = float(np.ravel(d2d.arcsec)[0])
+                    self.catalog_match_separations_arcsec.append(separation_arcsec)
+                    stellar_object.catalog_match_quality = assess_match_quality(
+                        "simbad", separation_arcsec, is_ambiguous=is_ambiguous
+                    )
                     logger.info(f"  SIMBAD match: {stellar_object.name} at ({ra:.4f}, {dec:.4f})")
                     continue
 
@@ -1391,7 +1411,13 @@ class StarIdentifier:
                     # Same reason as the SIMBAD match above: the residual
                     # RMS must cover every catalog match, not just
                     # whichever catalog happened to resolve a star first.
-                    self.catalog_match_separations_arcsec.append(float(np.ravel(d2d.arcsec)[0]))
+                    separation_arcsec = float(np.ravel(d2d.arcsec)[0])
+                    self.catalog_match_separations_arcsec.append(separation_arcsec)
+                    # Gaia matching runs no unresolved-companion check
+                    # today (see _is_unresolved_match/
+                    # brightest_unresolved_entry_index, SIMBAD-only), so
+                    # is_ambiguous is always False here, not unknown.
+                    stellar_object.catalog_match_quality = assess_match_quality("gaia", separation_arcsec)
                     logger.info(f"  Gaia match: {stellar_object.name} at ({ra:.4f}, {dec:.4f})")
                 else:
                     still_unmatched.append(stellar_object)

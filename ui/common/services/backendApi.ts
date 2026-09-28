@@ -107,6 +107,9 @@ export interface ActionRegistry {
     "astronomy:create": { payload: { object_id: string; ra?: string; dec?: string }; response: Spectrum | null };
     "astronomy:get_audit": { payload: Record<string, never>; response: Record<string, any>[] };
     "astronomy:get_overlay_stars": { payload: { target_id: string; limit?: number }; response: any[] };
+    "astronomy:target_data_availability": { payload: Record<string, never>; response: Record<string, { hasSpectra: boolean; hasPhotometry: boolean; starCount: number }> };
+    "astronomy:spectral_class_summary": { payload: Record<string, never>; response: { spectralClass: string; label: string; count: number }[] };
+    "astronomy:stars_by_spectral_class": { payload: { spectral_class: string }; response: { id: string; name: string; ra: number | null; dec: number | null; magnitude: number | null; spectralType: string; hasSpectra: boolean; hasPhotometry: boolean; selfDeterminedSpectralTypeRms: number | null }[] };
     "planetarium:get_sources": { payload: { ra: number; dec: number; radius: number; limiting_magnitude?: number; include_stars_without_catalog_magnitude?: boolean }; response: PlanetariumSource[] };
     "planetarium:get_targets": { payload: Record<string, never>; response: PlanetariumTarget[] };
     "planetarium:get_visibility": { payload: { objects: Array<{ id: string; type?: string }>; time?: string }; response: PlanetariumVisibilityItem[] };
@@ -376,6 +379,9 @@ const HEAVY_ACTIONS: ReadonlySet<string> = new Set([
     'processing:status',
     'astronomy:visible',
     'astronomy:get_visible_targets',
+    'astronomy:target_data_availability',
+    'astronomy:spectral_class_summary',
+    'astronomy:stars_by_spectral_class',
     'images:last',
     'telescope:start_alignment',
     'observatory:slew_to_target',
@@ -410,6 +416,9 @@ const IDEMPOTENT_READ_ACTIONS: ReadonlySet<string> = new Set([
     'astronomy:get_target_status',
     'astronomy:visible',
     'astronomy:get_visible_targets',
+    'astronomy:target_data_availability',
+    'astronomy:spectral_class_summary',
+    'astronomy:stars_by_spectral_class',
     'observatory:get_telescope_status',
     'observatory:get_equipment_configuration',
     'observatory:list_cameras',

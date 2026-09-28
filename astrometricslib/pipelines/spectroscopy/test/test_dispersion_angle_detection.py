@@ -32,7 +32,7 @@ import numpy as np
 import pytest
 
 from astrometricslib.drivers.image import AstrometricsImage
-from astrometricslib.models.stellar_source import StellarObject
+from astrometricslib.models.stellar_source import PhotometryResult, StellarObject
 from astrometricslib.pipelines.spectroscopy.pipeline import (
     DISPERSION_ANGLE_ROI_HALF_WIDTH_PX,
     DISPERSION_ANGLE_ROI_MINIMUM_HALF_WIDTH_PX,
@@ -41,7 +41,10 @@ from astrometricslib.pipelines.spectroscopy.pipeline import (
     _drop_spurious_trail_detections,
     _is_inside_dispersion_trail,
     _safe_dispersion_angle_roi_half_width_px,
+    _star_brightness_for_comparison,
+    find_neighbor_contamination_windows,
 )
+from astrometricslib.pipelines.spectroscopy.processing.spectrum_analysis import EXTENDED_TARGET_SPECTRAL_TYPE
 from astrometricslib.utilities import CameraConfig, SpectroscopyConfig
 
 
@@ -491,41 +494,43 @@ def test_the_extended_target_never_re_detects_the_tilt_on_the_nebula(monkeypatch
 
     Reproduces the real M 57 bug: the nebula's extraction ran with
     `auto_detect_angle=True`, fitted a line through its ring images and
-    stored -3 degrees, where the stars' trails leaned +2 degrees.
+    stored -3 degrees, where the stars' trails leaned +2 degrees. The
+    nebula and the ordinary stars are now processed in the very same
+    batch (no separate `wide_pipeline` instance), so this checks the
+    same guarantee at its new source: `_resolve_global_dispersion_angle`
+    must never submit the extended target's own position for its own
+    tilt fit, only real stars.
     """
     pipeline = _build_pipeline("vertical")
-    calls = []
+    measured_positions: list[tuple[float, float]] = []
 
-    def record_call(
+    def record_measurement(
         self: SpectroscopyPipeline,
         image: AstrometricsImage,
-        target_stars: list,
-        limit: int = 10,
-        auto_detect_angle: bool = True,
-    ) -> list:
-        """Record how the extraction was requested, without extracting.
+        star_pos: tuple[float, float],
+        roi_half_width_px: float = DISPERSION_ANGLE_ROI_HALF_WIDTH_PX,
+    ) -> tuple[float, float]:
+        """Record which position was offered for a tilt fit, without fitting.
 
         Returns
         -------
-        results : `list`
-            Always empty, since nothing is extracted.
+        angle_degrees, contrast_sigma : `tuple` [`float`, `float`]
+            A fixed, confident measurement, so this position always wins.
         """
-        calls.append((list(target_stars), auto_detect_angle))
-        return []
+        measured_positions.append(star_pos)
+        return 5.0, 50.0
 
-    monkeypatch.setattr(SpectroscopyPipeline, "process_image", record_call)
-    nebula = _star(400.0, 400.0)
-    context = SimpleNamespace(
-        image=MockAstrometricsImage(np.zeros((10, 10))),
-        stellar_objects=[],
-        extended_target=nebula,
-        extended_source_hint=None,
-    )
+    monkeypatch.setattr(SpectroscopyPipeline, "measure_dispersion_trail", record_measurement)
+    nebula = _star(700.0, 700.0)
+    nebula.stellar_spectral_type = EXTENDED_TARGET_SPECTRAL_TYPE
+    star = _star(400.0, 400.0)
+    image = MockAstrometricsImage(np.zeros((900, 900)))
 
-    pipeline.process(context, auto_detect_angle=True)
+    pipeline._resolve_global_dispersion_angle(image, [nebula, star])
 
-    nebula_calls = [auto_detect for targets, auto_detect in calls if nebula in targets]
-    assert nebula_calls == [False]
+    assert (700.0, 700.0) not in measured_positions
+    assert (400.0, 400.0) in measured_positions
+    assert pipeline.config.dispersion_angle_degrees == pytest.approx(5.0)
 
 
 def _build_trace_through_the_star(
@@ -584,19 +589,22 @@ def test_pure_noise_scores_low_contrast_even_with_a_narrow_strip() -> None:
     assert contrast_sigma < 5.0
 
 
-def _star(x: float, y: float, sharpness: float | None = None) -> StellarObject:
-    """Build a minimal `StellarObject` carrying only a position and sharpness.
+def _star(x: float, y: float, sharpness: float | None = None, flux: float | None = None) -> StellarObject:
+    """Build a minimal `StellarObject` carrying a position, sharpness, flux.
 
     Returns
     -------
     star : `StellarObject`
-        A stand-in for a detected source, as `_drop_spurious_trail_detections`
-        and `_is_inside_dispersion_trail` read it.
+        A stand-in for a detected source, as `_drop_spurious_trail_detections`,
+        `_is_inside_dispersion_trail` and `find_neighbor_contamination_windows`
+        read it.
     """
     star = StellarObject()
     star.star_data = {"xcentroid": x, "ycentroid": y}
     if sharpness is not None:
         star.star_data["sharpness"] = sharpness
+    if flux is not None:
+        star.star_data["flux"] = flux
     return star
 
 
@@ -710,3 +718,146 @@ def test_drop_spurious_trail_detections_keeps_a_dim_star_outside_any_trail() -> 
     )
 
     assert kept == [bright_star, faint_unrelated_star]
+
+
+def _linear_instrument() -> SimpleNamespace:
+    """Build a fake instrument whose wavelength grows 1 nm per pixel of offset.
+
+    Returns
+    -------
+    instrument : `SimpleNamespace`
+        Stands in for `SpectroscopyInstrument`, giving
+        `find_neighbor_contamination_windows` a deterministic, easy to
+        hand-check `wavelength_at_pixel_offset`.
+    """
+    return SimpleNamespace(wavelength_at_pixel_offset=lambda px_offset: 500.0 + px_offset)
+
+
+def test_find_neighbor_contamination_windows_flags_a_star_on_the_trail() -> None:
+    """A neighbour whose position lands inside the box is flagged.
+
+    The neighbour sits 300 px along the trail and dead-centre across it,
+    so its own (assumed box-width-wide) image should be flagged across
+    280-320 px -- 780-820 nm at 1 nm/px, i.e. 7800-8200 Angstrom -- with
+    its flux read relative to the target's own.
+    """
+    neighbor = _star(1000.0, 1300.0, flux=50.0)
+
+    windows = find_neighbor_contamination_windows(
+        (1000.0, 1000.0),
+        200.0,
+        [neighbor],
+        dispersion_vector=np.array([0.0, 1.0]),
+        offset_px=120.0,
+        length_px=630.0,
+        perpendicular_tolerance_px=20.0,
+        instrument=_linear_instrument(),
+    )
+
+    assert len(windows) == 1
+    assert windows[0]["wavelength_low_angstrom"] == pytest.approx(7800.0)
+    assert windows[0]["wavelength_high_angstrom"] == pytest.approx(8200.0)
+    assert windows[0]["neighbor_flux_ratio"] == pytest.approx(0.25)
+
+
+def test_find_neighbor_contamination_windows_ignores_a_star_beyond_the_trail() -> None:
+    """A neighbour past where the trail ends is not flagged."""
+    windows = find_neighbor_contamination_windows(
+        (1000.0, 1000.0),
+        200.0,
+        [_star(1000.0, 3000.0, flux=50.0)],
+        dispersion_vector=np.array([0.0, 1.0]),
+        offset_px=120.0,
+        length_px=630.0,
+        perpendicular_tolerance_px=20.0,
+        instrument=_linear_instrument(),
+    )
+
+    assert windows == []
+
+
+def test_find_neighbor_contamination_windows_ignores_a_star_off_to_the_side() -> None:
+    """A neighbour on-length but far across the trail is not flagged."""
+    windows = find_neighbor_contamination_windows(
+        (1000.0, 1000.0),
+        200.0,
+        [_star(1100.0, 1300.0, flux=50.0)],
+        dispersion_vector=np.array([0.0, 1.0]),
+        offset_px=120.0,
+        length_px=630.0,
+        perpendicular_tolerance_px=20.0,
+        instrument=_linear_instrument(),
+    )
+
+    assert windows == []
+
+
+def test_find_neighbor_contamination_windows_gives_no_ratio_without_flux() -> None:
+    """A flagged neighbour with no known flux gets a `None` ratio, not a guess.
+
+    A missing input must not be silently treated as a zero or a match.
+    """
+    windows = find_neighbor_contamination_windows(
+        (1000.0, 1000.0),
+        200.0,
+        [_star(1000.0, 1300.0)],
+        dispersion_vector=np.array([0.0, 1.0]),
+        offset_px=120.0,
+        length_px=630.0,
+        perpendicular_tolerance_px=20.0,
+        instrument=_linear_instrument(),
+    )
+
+    assert len(windows) == 1
+    assert windows[0]["neighbor_flux_ratio"] is None
+
+
+def test_find_neighbor_contamination_windows_never_flags_the_target_itself() -> None:
+    """A star's own trace does not flag itself, unlike a shape-based detector.
+
+    This is the property that makes this approach immune to the failure
+    that `reject_narrow_contaminants` had: a target is never included in
+    its own `neighbor_stars` list, and even if it were, its own position
+    projects to `along_trail == 0`, outside `offset_px` (which starts past
+    zero), so it could never be geometrically "inside its own trail".
+    """
+    target_pos = (1000.0, 1000.0)
+    windows = find_neighbor_contamination_windows(
+        target_pos,
+        200.0,
+        [_star(*target_pos, flux=200.0)],
+        dispersion_vector=np.array([0.0, 1.0]),
+        offset_px=120.0,
+        length_px=630.0,
+        perpendicular_tolerance_px=20.0,
+        instrument=_linear_instrument(),
+    )
+
+    assert windows == []
+
+
+def test_star_brightness_for_comparison_prefers_calibrated_photometry() -> None:
+    """Calibrated photometry wins over the spectral image's own raw flux.
+
+    A star carrying both a prior photometry run and this frame's own
+    single-frame detection flux should compare on the calibrated,
+    multi-frame value -- the more reliable one.
+    """
+    star = _star(100.0, 100.0, flux=999.0)
+    star.photometry = PhotometryResult(mean_flux=42.0)
+
+    assert _star_brightness_for_comparison(star) == pytest.approx(42.0)
+
+
+def test_star_brightness_for_comparison_falls_back_without_photometry() -> None:
+    """A star with no prior photometry compares on its raw detection flux."""
+    star = _star(100.0, 100.0, flux=17.0)
+
+    assert _star_brightness_for_comparison(star) == pytest.approx(17.0)
+
+
+def test_star_brightness_for_comparison_is_none_with_neither() -> None:
+    """A star with no photometry and no detection flux compares as unknown."""
+    star = _star(100.0, 100.0)
+
+    assert _star_brightness_for_comparison(star) is None

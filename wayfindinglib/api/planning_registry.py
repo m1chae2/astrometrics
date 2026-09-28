@@ -213,6 +213,82 @@ class ObservationPlanning:
         """
         return self._sky_engine.get_constellation_lines()
 
+    # -- Deep-star catalog (Planetarium faint-star layer provisioning) ----
+
+    def get_deep_catalog_status(self) -> dict[str, Any]:
+        """Say how much of the downloaded deep-star catalog is installed.
+
+        Returns
+        -------
+        status : `dict`
+            ``installed``, ``complete``, ``star_count``, ``pixels_downloaded``,
+            ``pixels_total``, ``healpix_level``, ``magnitude_limit`` and
+            ``size_megabytes``. See
+            `wayfindinglib.drivers.catalog.deep_star_store.get_deep_catalog_status`.
+        """
+        from wayfindinglib.drivers.catalog import deep_star_store
+
+        return deep_star_store.get_deep_catalog_status(self._butler.config)
+
+    def build_deep_star_catalog(self, **kwargs: Any) -> dict[str, Any]:
+        """Download the deep-star catalog the Planetarium draws from.
+
+        A thin pass-through to
+        `wayfindinglib.drivers.catalog.deep_star_catalog_builder.build_deep_star_catalog`,
+        binding this instance's own configuration. See that function for
+        the accepted keyword arguments and the returned report's shape.
+
+        Returns
+        -------
+        report : `dict`
+            The download report. See
+            `deep_star_catalog_builder.build_deep_star_catalog`.
+        """
+        from wayfindinglib.drivers.catalog.deep_star_catalog_builder import (
+            build_deep_star_catalog as _build_deep_star_catalog,
+        )
+
+        return _build_deep_star_catalog(self._butler.config, **kwargs)
+
+    def estimate_deep_catalog_size(self, **kwargs: Any) -> dict[str, Any]:
+        """Guess how big the finished deep-star catalog will be.
+
+        A thin pass-through to
+        `wayfindinglib.drivers.catalog.deep_star_catalog_builder.estimate_deep_catalog_size`.
+        Nothing is saved by this call.
+
+        Returns
+        -------
+        estimate : `dict`
+            The size estimate. See
+            `deep_star_catalog_builder.estimate_deep_catalog_size`.
+        """
+        from wayfindinglib.drivers.catalog.deep_star_catalog_builder import (
+            estimate_deep_catalog_size as _estimate_deep_catalog_size,
+        )
+
+        return _estimate_deep_catalog_size(**kwargs)
+
+    def get_imaged_field_centers(self) -> list[dict[str, Any]]:
+        """List the sky positions of every target the library has imaged.
+
+        Used to scope a deep-star catalog download to only the fields
+        actually imaged, instead of the whole sky (see
+        `build_deep_star_catalog`'s ``pixels`` argument, combined with
+        `wayfindinglib.drivers.catalog.deep_star_catalog_builder.pixels_near_circles`).
+
+        Returns
+        -------
+        field_centers : `list` [`dict`]
+            One entry per unique imaged field, with keys
+            ``right_ascension_deg``, ``declination_deg``, ``target_ids``
+            and ``frames_examined``. See
+            `astrometricslib`'s ``derive_field_centers`` for the exact shape.
+        """
+        from astrometricslib import Astrometrics, derive_field_centers
+
+        return derive_field_centers(Astrometrics(self._butler.config).targets.list())
+
     def get_meridian_status(self, ra_deg: float, dec_deg: float, time_input: Any) -> dict[str, Any]:
         """Return meridian proximity/flip status for one coordinate/time.
 

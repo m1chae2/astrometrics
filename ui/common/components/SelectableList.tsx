@@ -12,6 +12,9 @@ export interface SelectableItem {
     subtitle?: string;
     /** Optional hover text, such as the full name when the label is shortened. */
     tooltip?: string;
+    /** Optional sky coordinates, in degrees, for a caller that needs to center a map on this item directly. */
+    ra?: number;
+    dec?: number;
 }
 
 export interface SelectableListProps {

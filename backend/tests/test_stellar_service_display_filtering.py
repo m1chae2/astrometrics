@@ -202,7 +202,7 @@ def test_get_deep_catalog_status_adds_the_install_command():  # ruff: ignore[mis
     from backend.services.data.stellar_service import DEEP_CATALOG_INSTALL_COMMAND
 
     service = _make_service()
-    service.astrometrics.stars.get_deep_catalog_status.return_value = {
+    service.wayfinder.planning.get_deep_catalog_status.return_value = {
         "installed": False,
         "complete": False,
         "star_count": 0,
@@ -445,6 +445,244 @@ def test_get_displayable_stellar_object_summaries_offset_pagination() -> None:
     assert len(page_3) == 50
     assert page_3[0]["id"] == "HD_200"
     assert page_3[49]["id"] == "HD_249"
+
+
+def test_get_target_data_availability_aggregates_across_a_target_s_stars() -> None:
+    """Verify a target is marked available if one of its stars has that data.
+
+    A target with several stars should show hasSpectra/hasPhotometry true
+    as soon as one star has it, even if the others do not, and a target
+    whose stars have neither should be reported as having neither.
+    """
+    mock_stars = [
+        {"id": "Star_A", "targetIds": ["M 81"], "hasSpectra": True, "hasPhotometry": False},
+        {"id": "Star_B", "targetIds": ["M 81"], "hasSpectra": False, "hasPhotometry": False},
+        {"id": "Star_C", "targetIds": ["M 13"], "hasSpectra": False, "hasPhotometry": True},
+        {"id": "Star_D", "targetIds": ["NGC 2403"], "hasSpectra": False, "hasPhotometry": False},
+    ]
+    astrometrics = MagicMock()
+    astrometrics.stars.list_object_summaries.return_value = mock_stars
+    service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
+
+    availability = service.get_target_data_availability()
+
+    assert availability["M 81"] == {"hasSpectra": True, "hasPhotometry": False, "starCount": 2}
+    assert availability["M 13"] == {"hasSpectra": False, "hasPhotometry": True, "starCount": 1}
+    assert availability["NGC 2403"] == {"hasSpectra": False, "hasPhotometry": False, "starCount": 1}
+    astrometrics.stars.list_object_summaries.assert_called_once_with(limit=None, apply_default_limit=False)
+
+
+def test_get_target_data_availability_excludes_per_frame_detections() -> None:
+    """Verify a per-frame detection stub never marks a target as having data.
+
+    A per-frame photometry detection (id ending ``:Star_<n>``) is an
+    internal artifact, not a real catalog star, and should not make a
+    target look like it has photometry data.
+    """
+    mock_stars = [
+        {
+            "id": "M 81:2026-01-14:0:0:Star_60",
+            "targetIds": ["M 81"],
+            "hasSpectra": False,
+            "hasPhotometry": True,
+        },
+    ]
+    astrometrics = MagicMock()
+    astrometrics.stars.list_object_summaries.return_value = mock_stars
+    service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
+
+    assert service.get_target_data_availability() == {}
+
+
+def test_get_spectral_class_summary_groups_by_primary_letter() -> None:
+    """Verify stars are grouped by the catalog type's first letter.
+
+    "G2V" and "G5V" both belong to class "G"; a star with no catalog type,
+    or whose catalog type is the literal string "Unknown", is left out
+    entirely rather than forming an empty-string or bogus "U" group.
+    """
+    mock_stars = [
+        {"id": "Star_A", "spectralType": "G2V"},
+        {"id": "Star_B", "spectralType": "G5V"},
+        {"id": "Star_C", "spectralType": "M0"},
+        {"id": "Star_D", "spectralType": ""},
+        {"id": "Star_E", "spectralType": "Unknown"},
+    ]
+    astrometrics = MagicMock()
+    astrometrics.stars.list_object_summaries.return_value = mock_stars
+    service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
+
+    classes = service.get_spectral_class_summary()
+
+    assert classes == [
+        {"spectralClass": "G", "label": "Yellow dwarfs", "count": 2},
+        {"spectralClass": "M", "label": "Red dwarfs", "count": 1},
+    ]
+
+
+def test_get_spectral_class_summary_folds_r_and_n_into_carbon_and_drops_others() -> None:
+    """Verify the browser only ever shows OBAFGKM plus Carbon and Wolf-Rayet.
+
+    "R" and "N" are the classical Harvard carbon-star subclasses and merge
+    into "C" rather than appearing as their own rows; a class outside
+    O/B/A/F/G/K/M/C/W (here "S" and "D") is left out of the browser
+    entirely rather than showing up as a rare, unlabeled extra row.
+    """
+    mock_stars = [
+        {"id": "Star_R", "spectralType": "R5"},
+        {"id": "Star_N", "spectralType": "N3"},
+        {"id": "Star_C", "spectralType": "C6"},
+        {"id": "Star_W", "spectralType": "WC8"},
+        {"id": "Star_S", "spectralType": "S5"},
+        {"id": "Star_D", "spectralType": "DA"},
+    ]
+    astrometrics = MagicMock()
+    astrometrics.stars.list_object_summaries.return_value = mock_stars
+    service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
+
+    classes = service.get_spectral_class_summary()
+
+    assert classes == [
+        {"spectralClass": "C", "label": "Carbon stars", "count": 3},
+        {"spectralClass": "W", "label": "Wolf-Rayet stars", "count": 1},
+    ]
+
+
+def test_get_stars_by_spectral_class_accepts_the_r_and_n_aliases_for_carbon() -> None:
+    """Verify asking for "R" or "N" finds the same carbon-star group as "C"."""
+    mock_stars = [
+        {"id": "Star_R", "spectralType": "R5"},
+        {"id": "Star_C", "spectralType": "C6"},
+    ]
+    astrometrics = MagicMock()
+    astrometrics.stars.list_object_summaries.return_value = mock_stars
+    astrometrics.stars.list_objects_by_ids.return_value = [
+        StellarObject(id="Star_R", spectral_type="R5"),
+        StellarObject(id="Star_C", spectral_type="C6"),
+    ]
+    service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
+
+    for query in ("R", "N", "C"):
+        results = service.get_stars_by_spectral_class(query)
+        assert {r["id"] for r in results} == {"Star_R", "Star_C"}
+    astrometrics.stars.list_objects_by_ids.assert_called_with(["Star_R", "Star_C"])
+
+
+def test_catalog_summary_scan_is_cached_across_the_three_browser_endpoints() -> None:
+    """Verify one full-catalog scan serves all three browser endpoints.
+
+    The scan measured about 5 seconds on a real ~40,000-star library; the
+    Astronomy Manager calls into `get_target_data_availability`,
+    `get_spectral_class_summary`, and `get_stars_by_spectral_class`
+    independently, and none of them should trigger their own scan within
+    the cache's lifetime.
+    """
+    astrometrics = MagicMock()
+    astrometrics.stars.list_object_summaries.return_value = [{"id": "HD 1", "spectralType": "G2V"}]
+    astrometrics.stars.list_objects_by_ids.return_value = [StellarObject(id="HD 1", spectral_type="G2V")]
+    service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
+
+    service.get_target_data_availability()
+    service.get_spectral_class_summary()
+    service.get_stars_by_spectral_class("G")
+
+    astrometrics.stars.list_object_summaries.assert_called_once_with(limit=None, apply_default_limit=False)
+
+
+def test_catalog_summary_scan_refreshes_after_the_cache_expires(mocker) -> None:  # ruff: ignore[missing-type-function-argument]
+    """Verify the cached scan is retaken once its TTL has passed."""
+    from backend.services.data import stellar_service as stellar_service_module
+
+    astrometrics = MagicMock()
+    astrometrics.stars.list_object_summaries.return_value = []
+    service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
+
+    fake_time = [1000.0]
+    mocker.patch.object(stellar_service_module.time, "monotonic", side_effect=lambda: fake_time[0])
+
+    service.get_target_data_availability()
+    fake_time[0] += stellar_service_module._CATALOG_SUMMARY_CACHE_TTL_SECONDS + 1
+    service.get_target_data_availability()
+
+    assert astrometrics.stars.list_object_summaries.call_count == 2
+
+
+def test_get_spectral_class_summary_excludes_per_frame_detections() -> None:
+    """Verify a per-frame detection stub never counts toward a class."""
+    mock_stars = [
+        {"id": "M 81:2026-01-14:0:0:Star_60", "spectralType": "G2V"},
+    ]
+    astrometrics = MagicMock()
+    astrometrics.stars.list_object_summaries.return_value = mock_stars
+    service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
+
+    assert service.get_spectral_class_summary() == []
+
+
+def test_get_stars_by_spectral_class_sorts_by_match_quality() -> None:
+    """Verify stars come back best self-determined match first, unmatched last.
+
+    A star's catalog class (used to select the group) and its
+    self-determined match quality (used to rank within it) are
+    independent -- a star that is catalogued as class G but has no
+    self-determined match yet still belongs in the group, just at the end.
+    """
+    good_match = StellarObject(
+        id="HD 20630",
+        ra=48.87,
+        dec=34.99,
+        spectral_type="G2V",
+        spectroscopy=SpectroscopyResult(self_determined_spectral_type_rms=0.04),
+    )
+    weaker_match = StellarObject(
+        id="HD 143761",
+        spectral_type="G0V",
+        spectroscopy=SpectroscopyResult(self_determined_spectral_type_rms=0.13),
+    )
+    unmatched = StellarObject(id="HD 190406", spectral_type="G1V")
+    other_class = StellarObject(id="Betelgeuse", spectral_type="M2")
+
+    astrometrics = MagicMock()
+    astrometrics.stars.list_object_summaries.return_value = [
+        {"id": star.id, "spectralType": star.spectral_type}
+        for star in (good_match, weaker_match, unmatched, other_class)
+    ]
+    astrometrics.stars.list_objects_by_ids.return_value = [unmatched, weaker_match, good_match]
+    service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
+
+    results = service.get_stars_by_spectral_class("G")
+
+    assert [r["id"] for r in results] == ["HD 20630", "HD 143761", "HD 190406"]
+    assert results[0]["selfDeterminedSpectralTypeRms"] == pytest.approx(0.04)
+    assert results[0]["ra"] == pytest.approx(48.87)
+    assert results[0]["dec"] == pytest.approx(34.99)
+    assert results[2]["selfDeterminedSpectralTypeRms"] is None
+    astrometrics.stars.list_objects_by_ids.assert_called_once_with(["HD 20630", "HD 143761", "HD 190406"])
+
+
+def test_get_stars_by_spectral_class_accepts_a_full_catalog_string() -> None:
+    """Verify passing "G2V" instead of "G" still selects the right class."""
+    astrometrics = MagicMock()
+    astrometrics.stars.list_object_summaries.return_value = [{"id": "HD 20630", "spectralType": "G2V"}]
+    astrometrics.stars.list_objects_by_ids.return_value = [StellarObject(id="HD 20630", spectral_type="G2V")]
+    service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
+
+    results = service.get_stars_by_spectral_class("G2V")
+
+    assert [r["id"] for r in results] == ["HD 20630"]
+
+
+def test_get_stars_by_spectral_class_excludes_per_frame_detections() -> None:
+    """Verify a per-frame detection stub is never sent to be fully loaded."""
+    astrometrics = MagicMock()
+    astrometrics.stars.list_object_summaries.return_value = [
+        {"id": "M 81:2026-01-14:0:0:Star_60", "spectralType": "G2V"},
+    ]
+    astrometrics.stars.list_objects_by_ids.return_value = []
+    service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
+
+    assert service.get_stars_by_spectral_class("G") == []
+    astrometrics.stars.list_objects_by_ids.assert_called_once_with([])
 
 
 def test_has_catalog_magnitude_rejects_missing_and_instrumental_values():  # ruff: ignore[missing-return-type-undocumented-public-function]

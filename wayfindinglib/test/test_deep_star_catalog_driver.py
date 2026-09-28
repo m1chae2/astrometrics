@@ -3,16 +3,14 @@
 The Planetarium's faint-star layer reads from a copy of Gaia DR3 saved on
 this computer. These tests check what the driver hands the map, that it
 copes with the catalog not being downloaded yet, and (end to end, through
-the real stars API and database) that a downloaded star comes back.
+the real local store and database) that a downloaded star comes back.
 """
 
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
 
-from astrometricslib import Astrometrics
 from wayfindinglib.drivers.catalog import deep_star_catalog_driver
 from wayfindinglib.drivers.catalog.deep_star_catalog_driver import DeepStarCatalogDriver
 from wayfindinglib.skylib.catalog_operations import build_catalog_driver_registry
@@ -111,19 +109,23 @@ def test_registry_holds_only_drivers_that_read_from_this_computer():  # ruff: ig
     assert registry["deep_stars"].driver_name == "deep_stars"
 
 
-def test_downloaded_stars_come_back_through_the_real_stars_api(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """End to end: save stars, then read them through the facade and driver."""
-    # The stars API only reads the catalog; the download script is what
-    # writes it. This test seeds it the same way the script does.
-    from astrometricslib.drivers import deep_star_store  # ruff: ignore[banned-api]
+def test_downloaded_stars_come_back_through_the_local_store(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """End to end: save stars, then read them through the driver's own store.
+
+    The deep-star catalog is provisioned and queried entirely within
+    wayfindinglib now (see `LocalDeepStarStore`) -- the download script
+    is what writes it in real use; this test seeds it the same way.
+    """
+    from wayfindinglib.drivers.catalog import deep_star_store
+    from wayfindinglib.drivers.catalog.deep_star_catalog_driver import LocalDeepStarStore
 
     config = _LibraryConfig(tmp_path)
-    astrometrics = Astrometrics(config=config, catalog_access=MagicMock())
-    driver = DeepStarCatalogDriver(star_source=astrometrics.stars)
+    star_source = LocalDeepStarStore(config)
+    driver = DeepStarCatalogDriver(star_source=star_source)
 
     # Nothing downloaded yet.
     assert driver.query_region(250.0, 36.0, 2.0, 16.0) == []
-    assert astrometrics.stars.get_deep_catalog_status()["installed"] is False
+    assert deep_star_store.get_deep_catalog_status(config)["installed"] is False
 
     deep_star_store.record_downloaded_pixel(
         config,
@@ -137,5 +139,5 @@ def test_downloaded_stars_come_back_through_the_real_stars_api(tmp_path):  # ruf
     stars = driver.query_region(250.2, 36.1, 1.0, 15.0)
 
     assert [star.id for star in stars] == ["Gaia DR3 111", "Gaia DR3 222"]
-    assert astrometrics.stars.get_deep_catalog_status()["installed"] is True
-    assert astrometrics.stars.find_deep_stars(100.0, -20.0, 0.5, 16.0) == [(333, 100.0, -20.0, 12.0)]
+    assert deep_star_store.get_deep_catalog_status(config)["installed"] is True
+    assert star_source.find_deep_stars(100.0, -20.0, 0.5, 16.0) == [(333, 100.0, -20.0, 12.0)]

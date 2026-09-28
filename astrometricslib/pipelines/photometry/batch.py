@@ -71,7 +71,7 @@ def _run_variability_analysis_for_session(
     identify_result = None
     if use_astrometry_seed and star_identifier is not None and target is not None:
         from astrometricslib.drivers.image import AstrometricsImage
-        from astrometricslib.pipelines.astrometry.session_identification import (
+        from astrometricslib.pipelines.astrometry.processing.session_identification import (
             identify_session_stars,
         )
 
@@ -111,7 +111,7 @@ def _solve_session_wcs(session: Any, target: Target) -> Any | None:
         failed.
     """
     from astrometricslib.drivers.image import AstrometricsImage
-    from astrometricslib.pipelines.astrometry.session_identification import resolve_frame_wcs
+    from astrometricslib.pipelines.astrometry.processing.session_identification import resolve_frame_wcs
     from astrometricslib.pipelines.astrometry.star_identifier import StarIdentifier
 
     reference_path = session.frame_paths[0]

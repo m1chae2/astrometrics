@@ -12,12 +12,12 @@ import numpy as np
 import pytest
 from scipy.ndimage import gaussian_filter1d
 
-from astrometricslib.pipelines.spectroscopy.atmospheric_mask import (
+from astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_mask import (
     ATMOSPHERIC_BANDS_ANGSTROM,
     atmospheric_band_mask,
     mask_atmospheric_bands,
 )
-from astrometricslib.pipelines.spectroscopy.spectral_classifier import (
+from astrometricslib.pipelines.spectroscopy.processing.spectral_classifier import (
     _get_reference_templates,
     classify_spectral_type,
 )

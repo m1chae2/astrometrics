@@ -13,6 +13,7 @@ import React, { useMemo } from 'react';
 import { PlanetariumSource, ObserverLocation } from '../../common/types/planetariumTypes';
 import { safeParse, formatRA, formatDec } from '../utils/coordinateUtils';
 import { formatDuration } from '../utils/alignmentClustering';
+import { computeChartMaxBound, computeRingStep } from '../utils/chartScale';
 
 interface Props {
   /** The selected alignment source object. */
@@ -21,6 +22,13 @@ interface Props {
   observerLocation: ObserverLocation | null;
   /** Callback to close the card and deselect. */
   onClose: () => void;
+}
+
+/** Error-magnitude threshold classes matching planetarium-info-card__badge semantics. */
+function errorClassFor(totalError: number): string {
+  return totalError <= 30 ? 'planetarium-alignment-chart__value--good'
+    : totalError <= 90 ? 'planetarium-alignment-chart__value--warn'
+    : 'planetarium-alignment-chart__value--bad';
 }
 
 /**
@@ -85,17 +93,7 @@ export const AlignmentPointCard: React.FC<Props> = ({
     });
 
     // Provide 25% padding above peak error, with minimum scale of 0.04"
-    let maxRadius = Math.max(0.04, peakError * 1.25);
-    // Round to a clean decimal depending on magnitude
-    if (maxRadius < 0.2) {
-      maxRadius = Math.ceil(maxRadius * 100) / 100;
-    } else if (maxRadius < 1.0) {
-      maxRadius = Math.ceil(maxRadius * 20) / 20;
-    } else if (maxRadius < 10.0) {
-      maxRadius = Math.ceil(maxRadius * 2) / 2;
-    } else {
-      maxRadius = Math.ceil(maxRadius / 5) * 5;
-    }
+    const maxRadius = computeChartMaxBound(peakError);
 
     // SVG coordinate mapping: center is (80, 80)
     const size = 160;
@@ -103,17 +101,7 @@ export const AlignmentPointCard: React.FC<Props> = ({
     const scale = (center - 14) / maxRadius; // pixels per arcsec
 
     // Generate 2 or 3 clean concentric rings regardless of maxRadius magnitude
-    let rawStep = maxRadius / 3;
-    let ringStep = 0.5;
-    if (rawStep < 0.05) ringStep = 0.02;
-    else if (rawStep < 0.15) ringStep = 0.05;
-    else if (rawStep < 0.35) ringStep = 0.2;
-    else if (rawStep < 0.75) ringStep = 0.5;
-    else if (rawStep < 2.5) ringStep = 1.0;
-    else if (rawStep < 7.5) ringStep = 5.0;
-    else if (rawStep < 25.0) ringStep = 10.0;
-    else if (rawStep < 75.0) ringStep = 50.0;
-    else ringStep = Math.ceil(rawStep / 50) * 50;
+    const ringStep = computeRingStep(maxRadius);
 
     const rings: number[] = [];
     for (let r = ringStep; r <= maxRadius * 0.95; r += ringStep) {
@@ -164,16 +152,7 @@ export const AlignmentPointCard: React.FC<Props> = ({
       peakVal = Math.max(peakVal, Math.abs(relRa), Math.abs(relDec));
     });
 
-    let maxVal = Math.max(0.04, peakVal * 1.25);
-    if (maxVal < 0.2) {
-      maxVal = Math.ceil(maxVal * 100) / 100;
-    } else if (maxVal < 1.0) {
-      maxVal = Math.ceil(maxVal * 20) / 20;
-    } else if (maxVal < 10.0) {
-      maxVal = Math.ceil(maxVal * 2) / 2;
-    } else {
-      maxVal = Math.ceil(maxVal / 5) * 5;
-    }
+    const maxVal = computeChartMaxBound(peakVal);
 
     const toX = (sec: number) => padX + (sec / maxT) * (width - padX - 8);
     const toY = (val: number) => height / 2 - (val / maxVal) * (height / 2 - padY);
@@ -195,28 +174,18 @@ export const AlignmentPointCard: React.FC<Props> = ({
 
   return (
     <div
-      className="planetarium-info-card planetarium-info-card--top-right"
-      style={{ width: '320px', maxHeight: '88vh', overflowY: 'auto' }}
+      className="planetarium-info-card planetarium-info-card--top-right planetarium-info-card--alignment"
       role="dialog"
       aria-label={`Alignment sync info for ${titleText}`}
     >
       {/* Header */}
       <div className="planetarium-info-card__header">
         <div className="planetarium-info-card__avatar-container">
-          <div
-            className="planetarium-info-card__avatar"
-            style={{
-              border: '2px solid #10b981',
-              boxShadow: '0 0 10px rgba(16, 185, 129, 0.4)',
-            }}
-          >
-            <div
-              className="planetarium-info-card__star-dot"
-              style={{ backgroundColor: '#10b981', transform: 'rotate(45deg)', borderRadius: '2px' }}
-            />
+          <div className="planetarium-info-card__avatar planetarium-info-card__avatar--alignment">
+            <div className="planetarium-info-card__star-dot planetarium-info-card__star-dot--alignment" />
           </div>
           <div className="planetarium-info-card__title-group">
-            <h3 className="planetarium-info-card__title" style={{ fontSize: '14px', lineHeight: '1.2' }}>{titleText}</h3>
+            <h3 className="planetarium-info-card__title planetarium-info-card__title--compact">{titleText}</h3>
             <div className="planetarium-info-card__subtitle">
               <span>{isMultiFrame ? `${session?.totalFrames} Frames Session` : 'Plate Solve Sync'}</span>
               <span className="planetarium-info-card__divider">&bull;</span>
@@ -235,13 +204,13 @@ export const AlignmentPointCard: React.FC<Props> = ({
 
       {/* 2D Polar Target Graphics */}
       {polarData && isMultiFrame && (
-        <div style={{ padding: '8px 16px 0', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>
-            <span style={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>2D Dispersion Target</span>
+        <div className="planetarium-alignment-chart">
+          <div className="planetarium-alignment-chart__header">
+            <span className="planetarium-alignment-chart__label">2D Dispersion Target</span>
             <span>Scale: &plusmn;{polarData.maxRadius}&Prime;</span>
           </div>
 
-          <svg width={polarData.size} height={polarData.size} style={{ background: 'rgba(15, 23, 42, 0.6)', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.06)' }}>
+          <svg width={polarData.size} height={polarData.size} className="planetarium-alignment-chart__svg">
             {/* Concentric Calibration Rings */}
             {polarData.rings.map((r) => (
               <g key={r}>
@@ -249,16 +218,12 @@ export const AlignmentPointCard: React.FC<Props> = ({
                   cx={polarData.center}
                   cy={polarData.center}
                   r={r * polarData.scale}
-                  fill="none"
-                  stroke="rgba(255, 255, 255, 0.12)"
-                  strokeDasharray="3 3"
+                  className="planetarium-alignment-chart__ring"
                 />
                 <text
                   x={polarData.center + r * polarData.scale + 2}
                   y={polarData.center - 3}
-                  fill="rgba(148, 163, 184, 0.6)"
-                  fontSize="9px"
-                  fontFamily="monospace"
+                  className="planetarium-alignment-chart__ring-label"
                 >
                   {r}&Prime;
                 </text>
@@ -266,8 +231,8 @@ export const AlignmentPointCard: React.FC<Props> = ({
             ))}
 
             {/* Crosshair Axes */}
-            <line x1={0} y1={polarData.center} x2={polarData.size} y2={polarData.center} stroke="rgba(255, 255, 255, 0.15)" strokeWidth={1} />
-            <line x1={polarData.center} y1={0} x2={polarData.center} y2={polarData.size} stroke="rgba(255, 255, 255, 0.15)" strokeWidth={1} />
+            <line x1={0} y1={polarData.center} x2={polarData.size} y2={polarData.center} className="planetarium-alignment-chart__axis" />
+            <line x1={polarData.center} y1={0} x2={polarData.center} y2={polarData.size} className="planetarium-alignment-chart__axis" />
 
             {/* 1-Sigma Dispersion Ellipse */}
             <ellipse
@@ -275,10 +240,7 @@ export const AlignmentPointCard: React.FC<Props> = ({
               cy={polarData.center}
               rx={polarData.ellipseRx}
               ry={polarData.ellipseRy}
-              fill="rgba(16, 185, 129, 0.08)"
-              stroke="#10b981"
-              strokeWidth={1.2}
-              strokeDasharray="4 2"
+              className="planetarium-alignment-chart__ellipse"
             />
 
             {/* Scatter Points */}
@@ -288,52 +250,51 @@ export const AlignmentPointCard: React.FC<Props> = ({
                 cx={pt.x}
                 cy={pt.y}
                 r={3.5}
-                fill={`rgba(56, 189, 248, ${pt.alpha})`}
-                stroke="rgba(255, 255, 255, 0.4)"
-                strokeWidth={0.75}
+                className="planetarium-alignment-chart__point"
+                opacity={pt.alpha}
               />
             ))}
           </svg>
 
-          <div style={{ display: 'flex', gap: '12px', fontSize: '10px', color: '#94a3b8', marginTop: '4px' }}>
-            <span style={{ color: '#10b981' }}>&bull; 1&sigma; Error Ellipse</span>
-            <span style={{ color: '#38bdf8' }}>&bull; Solved Frame Centroid</span>
+          <div className="planetarium-alignment-chart__legend">
+            <span className="planetarium-alignment-chart__legend-item planetarium-alignment-chart__legend-item--ellipse">&bull; 1&sigma; Error Ellipse</span>
+            <span className="planetarium-alignment-chart__legend-item planetarium-alignment-chart__legend-item--point">&bull; Solved Frame Centroid</span>
           </div>
         </div>
       )}
 
       {/* Time-Series Tracking Chart */}
       {timeData && isMultiFrame && (
-        <div style={{ padding: '10px 16px 0' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>
-            <span style={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Tracking Drift vs Time</span>
-            <span style={{ color: '#38bdf8' }}>&Delta;RA (cyan)</span>
-            <span style={{ color: '#f43f5e' }}>&Delta;Dec (red)</span>
+        <div className="planetarium-alignment-chart planetarium-alignment-chart--time">
+          <div className="planetarium-alignment-chart__header">
+            <span className="planetarium-alignment-chart__label">Tracking Drift vs Time</span>
+            <span className="planetarium-alignment-chart__legend-item--ra">&Delta;RA (cyan)</span>
+            <span className="planetarium-alignment-chart__legend-item--dec">&Delta;Dec (red)</span>
           </div>
 
-          <svg width={timeData.width} height={timeData.height} style={{ background: 'rgba(15, 23, 42, 0.6)', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.06)' }}>
+          <svg width={timeData.width} height={timeData.height} className="planetarium-alignment-chart__svg">
             {/* Zero Axis */}
-            <line x1={timeData.padX} y1={timeData.zeroY} x2={timeData.width} y2={timeData.zeroY} stroke="rgba(255, 255, 255, 0.15)" strokeDasharray="2 2" />
-            <text x={4} y={timeData.zeroY + 3} fill="rgba(148, 163, 184, 0.6)" fontSize="9px" fontFamily="monospace">0&Prime;</text>
-            <text x={4} y={12} fill="rgba(148, 163, 184, 0.5)" fontSize="9px" fontFamily="monospace">+{timeData.maxVal}&Prime;</text>
-            <text x={4} y={timeData.height - 4} fill="rgba(148, 163, 184, 0.5)" fontSize="9px" fontFamily="monospace">-{timeData.maxVal}&Prime;</text>
+            <line x1={timeData.padX} y1={timeData.zeroY} x2={timeData.width} y2={timeData.zeroY} className="planetarium-alignment-chart__zero-axis" />
+            <text x={4} y={timeData.zeroY + 3} className="planetarium-alignment-chart__ring-label">0&Prime;</text>
+            <text x={4} y={12} className="planetarium-alignment-chart__axis-label">+{timeData.maxVal}&Prime;</text>
+            <text x={4} y={timeData.height - 4} className="planetarium-alignment-chart__axis-label">-{timeData.maxVal}&Prime;</text>
 
             {/* Traces */}
-            <path d={timeData.raPath} fill="none" stroke="#38bdf8" strokeWidth={1.5} opacity={0.85} />
-            <path d={timeData.decPath} fill="none" stroke="#f43f5e" strokeWidth={1.5} opacity={0.85} />
+            <path d={timeData.raPath} className="planetarium-alignment-chart__trace planetarium-alignment-chart__trace--ra" />
+            <path d={timeData.decPath} className="planetarium-alignment-chart__trace planetarium-alignment-chart__trace--dec" />
           </svg>
         </div>
       )}
 
       {/* Structured Content Table */}
-      <div className="planetarium-info-card__content" style={{ paddingTop: '10px' }}>
+      <div className="planetarium-info-card__content planetarium-info-card__content--tight">
         <table className="planetarium-info-card__table">
           <tbody>
             {isMultiFrame ? (
               <>
                 <tr>
                   <td>Tracking Dispersion (RMS)</td>
-                  <td style={{ color: totalError <= 30 ? '#4ade80' : totalError <= 90 ? '#facc15' : '#f87171', fontWeight: 600 }}>
+                  <td className={errorClassFor(totalError)}>
                     {session.rmsTotal.toFixed(2)}&Prime;
                   </td>
                 </tr>
@@ -345,7 +306,7 @@ export const AlignmentPointCard: React.FC<Props> = ({
                 </tr>
                 <tr>
                   <td>Initial Slew Error</td>
-                  <td style={{ color: '#facc15' }}>
+                  <td className="planetarium-alignment-chart__value--warn">
                     {session.initialErrorArcsec >= 60
                       ? `${(session.initialErrorArcsec / 60).toFixed(1)}'`
                       : `${session.initialErrorArcsec.toFixed(1)}"`}
@@ -370,7 +331,7 @@ export const AlignmentPointCard: React.FC<Props> = ({
               <>
                 <tr>
                   <td>Pointing Error</td>
-                  <td style={{ color: totalError <= 30 ? '#4ade80' : totalError <= 90 ? '#facc15' : '#f87171', fontWeight: 600 }}>
+                  <td className={errorClassFor(totalError)}>
                     {totalError.toFixed(1)}&Prime;
                   </td>
                 </tr>

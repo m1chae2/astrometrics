@@ -10,6 +10,13 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
+from astrometricslib.models.astrometry_quality import CatalogMatchQuality
+from astrometricslib.models.spectroscopy_quality import (
+    CatalogComparison,
+    InputQualityAssessment,
+    OutputQualityAssessment,
+)
+
 # Declares this module's own public surface. Without it, sphinx-automodapi
 # documents every imported name too, which is what produced the
 # "stub file not found" warnings for re-exports and typing helpers.
@@ -20,7 +27,6 @@ __all__ = [
     "PeriodogramResult",
     "PhotometryResult",
     "PlotData",
-    "SpectralObservation",
     "StellarObject",
     "StellarSessionMatch",
     "TargetFilesResponse",
@@ -144,16 +150,6 @@ class StellarSessionMatch(BaseModel):
 
     session_id: str = Field(alias="sessionId")
     angular_separation_arcsec: float = Field(alias="angularSeparationArcsec")
-
-
-class SpectralObservation(BaseModel):
-    """A measurement of a star's light split into its component colors."""
-
-    model_config = ConfigDict(populate_by_name=True)
-
-    timestamp: datetime = Field(alias="timestamp")
-    wavelengths: list[float] = Field(default_factory=list, alias="wavelengths")
-    intensities: list[float] = Field(default_factory=list, alias="intensities")
 
 
 class SpectroscopyResult(BaseModel):
@@ -287,12 +283,37 @@ class SpectroscopyResult(BaseModel):
     # "applied", or "skipped: ..." with the reason (for example the fit was
     # not trustworthy). `None` when the correction was not run.
     neighbor_wing_status: str | None = Field(default=None, alias="neighborWingStatus")
+    # An audit warning: wavelength windows where a different, independently
+    # detected star's own known position lands inside this star's reading
+    # box (see `find_neighbor_contamination_windows`), each with the
+    # neighbour's flux relative to this star's own (`None` when either is
+    # unknown). Geometric, not a guess from this spectrum's shape, so it
+    # cannot mistake this star's own signal for a neighbour's. Changes
+    # nothing in the spectrum; a reader (or `classify_spectral_type`'s
+    # `excluded_windows_angstrom`) decides what to do with a flagged
+    # window. Empty when no neighbour's position falls inside the box.
+    possible_neighbor_contamination: list[dict[str, float | None]] | None = Field(
+        default=None, alias="possibleNeighborContamination"
+    )
     # What the intensities above are measured in (see intensity_scale).
     # Multiply an intensity by this to get detector counts per second, so
     # spectra from different images and exposures can be compared for
     # brightness. `None` when the image did not say enough (every spectrum
     # stored before this field existed), in which case the scale is unknown.
     counts_per_second_factor: float | None = Field(default=None, alias="countsPerSecondFactor")
+    # How this spectrum's self-determined type and colour compare with the
+    # star's catalog entry (see `post_processing.compare_to_catalog`).
+    # `None` for a spectrum saved before this was recorded, or one that was
+    # never classified.
+    catalog_comparison: CatalogComparison | None = Field(default=None, alias="catalogComparison")
+    # How good the raw data behind this spectrum was, before anything was
+    # found in it (see `pre_processing.assess_input_quality`). `None` for a
+    # spectrum saved before this was recorded.
+    input_quality: InputQualityAssessment | None = Field(default=None, alias="inputQuality")
+    # How much to trust the classification above, given everything found
+    # (see `post_processing.assess_output_quality`). `None` for a spectrum
+    # saved before this was recorded, or one that was never classified.
+    output_quality: OutputQualityAssessment | None = Field(default=None, alias="outputQuality")
 
 
 class StellarObject(BaseModel):
@@ -338,7 +359,6 @@ class StellarObject(BaseModel):
     # Mirrors spectroscopy below: one nested result per domain, instead
     # of that domain's fields loose on the star.
     photometry: PhotometryResult | None = Field(default_factory=PhotometryResult, alias="photometry")
-    spectra_history: list[SpectralObservation] = Field(default_factory=list, alias="spectraHistory")
     # The star's raw pixel position and shape info from source detection
     # (e.g. its centroid coordinates), used to relocate it in later
     # pictures. Defaults to an empty dict, not a list -- every real
@@ -359,6 +379,10 @@ class StellarObject(BaseModel):
     target_ids: list[str] = Field(default_factory=list, alias="targetIds")
     session_matches: list[StellarSessionMatch] = Field(default_factory=list, alias="sessionMatches")
     is_catalog_identified: bool = Field(default=False, alias="isCatalogIdentified")
+    # How confidently this star was matched to its SIMBAD/Gaia entry --
+    # see CatalogMatchQuality. `None` for a star that was never matched
+    # (a FIELD_J... position-only id).
+    catalog_match_quality: CatalogMatchQuality | None = Field(default=None, alias="catalogMatchQuality")
 
     @computed_field(alias="variabilityScore")
     @property
@@ -378,10 +402,7 @@ class StellarObject(BaseModel):
     @property
     def has_spectra(self) -> bool:
         """Check if this star's light spectrum has been measured."""
-        return bool(
-            (self.spectroscopy and self.spectroscopy.wavelengths_angstrom)
-            or (self.spectra_history and len(self.spectra_history) > 0)
-        )
+        return bool(self.spectroscopy and self.spectroscopy.wavelengths_angstrom)
 
     @computed_field(alias="hasPhotometry")
     @property
@@ -416,10 +437,6 @@ class StellarObject(BaseModel):
             if wls and len(wls) > 0 and max(wls) < 2000:
                 wls = [float(w) * 10 for w in wls]
             return {"wavelengths": [float(w) for w in wls], "intensities": [float(f) for f in flux]}
-
-        if self.spectra_history:
-            latest = self.spectra_history[-1]
-            return normalize(latest.wavelengths, latest.intensities)
 
         if self.spectroscopy and self.spectroscopy.wavelengths_angstrom and self.spectroscopy.intensities:
             return normalize(self.spectroscopy.wavelengths_angstrom, self.spectroscopy.intensities)

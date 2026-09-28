@@ -30,7 +30,7 @@ from astrometricslib.pipelines.asteroid_detection.ephemeris import EphemerisCros
 from astrometricslib.pipelines.asteroid_detection.frame_wcs_composer import (
     estimate_frame_wcs_from_mount_pointing,
 )
-from astrometricslib.pipelines.astrometry.source_detection import SourceDetector
+from astrometricslib.pipelines.astrometry.pre_processing.source_detection import SourceDetector
 
 logger = logging.getLogger(__name__)
 

@@ -17,22 +17,13 @@ import pytest
 from scipy.ndimage import gaussian_filter1d
 
 from astrometricslib.models.stellar_source import StellarObject
-from astrometricslib.pipelines.spectroscopy.instrument_response import (
+from astrometricslib.pipelines.spectroscopy.pipeline import SpectroscopyPipeline
+from astrometricslib.pipelines.spectroscopy.pre_processing.instrument_response import (
+    apply_instrument_response,
     derive_instrument_response,
     load_instrument_response,
 )
-from astrometricslib.pipelines.spectroscopy.pipeline import SpectroscopyPipeline
-from astrometricslib.pipelines.spectroscopy.spectral_classifier import (
-    _get_blurred_templates,
-    _get_reference_templates,
-    classify_spectral_type,
-    unclassified_result,
-)
-from astrometricslib.pipelines.spectroscopy.spectral_feature_detector import (
-    detect_named_features,
-    expected_feature_depth,
-)
-from astrometricslib.pipelines.spectroscopy.spectral_resolution import (
+from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import (
     FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
     FWHM_PER_SIGMA,
     MINIMUM_FITTED_TRAIL_WIDTH_SAMPLES,
@@ -45,7 +36,17 @@ from astrometricslib.pipelines.spectroscopy.spectral_resolution import (
     load_line_spread_profile,
     resolve_resolution_element_angstrom,
 )
-from astrometricslib.pipelines.spectroscopy.spectrum_analysis import analyze_spectrum
+from astrometricslib.pipelines.spectroscopy.processing.spectral_classifier import (
+    _get_blurred_templates,
+    _get_reference_templates,
+    classify_spectral_type,
+    unclassified_result,
+)
+from astrometricslib.pipelines.spectroscopy.processing.spectral_feature_detector import (
+    detect_named_features,
+    expected_feature_depth,
+)
+from astrometricslib.pipelines.spectroscopy.processing.spectrum_analysis import analyze_spectrum
 from astrometricslib.utilities import CameraConfig, SpectroscopyConfig
 
 ANGSTROM_PER_PIXEL = 11.0
@@ -202,8 +203,8 @@ def test_analysis_measures_the_resolution_from_the_trail_width() -> None:
     wavelength_angstrom, widths = _trail(2.5)
     flux = np.ones(SAMPLE_COUNT)
 
-    measured = analyze_spectrum(wavelength_angstrom, flux, None, True, trail_width_px=widths.tolist())
-    fallback = analyze_spectrum(wavelength_angstrom, flux, None, True)
+    measured = analyze_spectrum(wavelength_angstrom, flux, None, trail_width_px=widths.tolist())
+    fallback = analyze_spectrum(wavelength_angstrom, flux, None)
 
     assert measured.is_resolution_measured is True
     assert measured.resolution_element_angstrom == pytest.approx(FWHM_PER_SIGMA * 2.5 * ANGSTROM_PER_PIXEL)
@@ -220,9 +221,7 @@ def test_analysis_expects_shallower_lines_for_a_blurrier_spectrum() -> None:
 
     def expected_h_beta(sigma_px: float) -> float:
         widths = np.full(wavelength_angstrom.size, sigma_px)
-        analysis = analyze_spectrum(
-            wavelength_angstrom, flux, None, True, "A0V", trail_width_px=widths.tolist()
-        )
+        analysis = analyze_spectrum(wavelength_angstrom, flux, None, "A0V", trail_width_px=widths.tolist())
         entry = next(feature for feature in analysis.features if "H-beta" in str(feature["feature"]))
         return float(entry["expected_depth"])
 
@@ -242,15 +241,19 @@ def test_analysis_gives_the_classifier_the_measured_resolution(monkeypatch) -> N
         return unclassified_result("stand-in classifier")
 
     monkeypatch.setattr(
-        "astrometricslib.pipelines.spectroscopy.spectrum_analysis.classify_spectral_type", fake_classify
+        "astrometricslib.pipelines.spectroscopy.processing.spectrum_analysis.classify_spectral_type",
+        fake_classify,
     )
     wavelength_angstrom, widths = _trail(2.5)
+    flux = np.ones(SAMPLE_COUNT)
+    response_corrected = apply_instrument_response(
+        wavelength_angstrom, flux, load_instrument_response("ZWO ASI 533MM Pro")
+    )
 
     analyze_spectrum(
         wavelength_angstrom,
-        np.ones(SAMPLE_COUNT),
-        load_instrument_response("ZWO ASI 533MM Pro"),
-        True,
+        flux,
+        response_corrected,
         trail_width_px=widths.tolist(),
     )
 

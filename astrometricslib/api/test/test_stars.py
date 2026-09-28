@@ -246,6 +246,14 @@ class TestQueriesNeverLoadTheWholeCatalog:
 
         assert sorted(star.id for star in found) == ["* alf Lyr", "HD 172167"]
 
+    def test_list_objects_by_ids_returns_only_the_requested_stars(self, tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+        """Verify only the given ids are loaded, in full."""
+        catalog = self._catalog_that_fails_on_a_full_read(tmp_path, mocker)
+
+        found = catalog.list_objects_by_ids(["HD 172167", "Missing"])
+
+        assert [star.id for star in found] == ["HD 172167"]
+
     def test_ids_and_audit_are_answered_without_loading_stars(self, tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
         """Verify ids, existence checks and the audit load no stars."""
         catalog = self._catalog_that_fails_on_a_full_read(tmp_path, mocker)

@@ -48,7 +48,6 @@ from astrometricslib.pipelines.shared.catalog_star_identity import (
     catalog_family,
     choose_survivor_id,
 )
-from astrometricslib.pipelines.shared.star_recording import merge_spectra_history
 from astrometricslib.scripts.reconcile_position_only_star_catalog import (
     _backup_catalog_database,
     _merge_duplicate_into_survivor,
@@ -198,8 +197,8 @@ def merge_cluster(stars: dict[str, StellarObject], survivor_id: str) -> tuple[St
 
     # Keep the spectrum with the most measured samples, wherever it is held
     # (the survivor may have none at all, and the fill rule below cannot
-    # move it: an empty spectrum result still counts as "set"), and join the
-    # spectral histories. The survivor is listed first, so it wins a tie.
+    # move it: an empty spectrum result still counts as "set"). The
+    # survivor is listed first, so it wins a tie.
     spectra_holders = [star for star in [survivor, *others] if star.has_spectra]
     if spectra_holders:
         best_holder = max(spectra_holders, key=lambda star: len(star.spectroscopy.wavelengths_angstrom))
@@ -207,11 +206,6 @@ def merge_cluster(stars: dict[str, StellarObject], survivor_id: str) -> tuple[St
             survivor.spectroscopy.wavelengths_angstrom
         ):
             survivor.spectroscopy = best_holder.spectroscopy
-        for holder in spectra_holders:
-            if holder is not survivor:
-                survivor.spectra_history = merge_spectra_history(
-                    survivor.spectra_history, holder.spectra_history
-                )
 
     merged_curve = survivor.photometry
     for other in others:

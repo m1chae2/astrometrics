@@ -94,7 +94,7 @@ def _recover_extended_source_hint(
     if context.extended_source_hint is not None:
         return
 
-    from astrometricslib.pipelines.astrometry.spectral_star_registration import (
+    from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_star_registration import (
         estimate_registration_offset,
         shift_wcs_to_frame,
     )
@@ -385,7 +385,7 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
         field_center = _field_center_for_registration(request.path, hint_ra, hint_dec)
         reference_stellar_objects = _registration_reference_candidates(target, catalog_access, field_center)
         if reference_stellar_objects:
-            from astrometricslib.pipelines.astrometry.spectral_star_registration import (
+            from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_star_registration import (
                 identify_spectral_stars_via_registration,
                 identify_spectral_stars_via_solution,
             )
@@ -442,7 +442,7 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
             significantly saturated.
         """
         from astrometricslib.pipelines.shared.quality.saturation import is_saturation_significant
-        from astrometricslib.pipelines.spectroscopy.spectral_classifier import (
+        from astrometricslib.pipelines.spectroscopy.post_processing.assess_output_quality import (
             build_spectral_classification_concerns,
         )
 

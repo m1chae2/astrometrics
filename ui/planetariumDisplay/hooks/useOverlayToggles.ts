@@ -22,7 +22,6 @@ export const DEFAULT_OVERLAY_TOGGLES = {
   showCatalog: true,
   showConstellations: true,
   showTelescope: true,
-  showAlignment: true,
 } as const;
 
 /**
@@ -50,9 +49,6 @@ export interface OverlayToggles {
   /** Show telescope pointing crosshair overlay. */
   showTelescope: boolean;
   setShowTelescope: (value: boolean) => void;
-  /** Show telescope alignment pointing vectors and polar alignment overlay. */
-  showAlignment: boolean;
-  setShowAlignment: (value: boolean) => void;
 }
 
 /**
@@ -70,7 +66,6 @@ export const useOverlayToggles = (): OverlayToggles => {
   const [showCatalog, setShowCatalog] = useState<boolean>(DEFAULT_OVERLAY_TOGGLES.showCatalog);
   const [showConstellations, setShowConstellations] = useState<boolean>(DEFAULT_OVERLAY_TOGGLES.showConstellations);
   const [showTelescope, setShowTelescope] = useState<boolean>(DEFAULT_OVERLAY_TOGGLES.showTelescope);
-  const [showAlignment, setShowAlignment] = useState<boolean>(DEFAULT_OVERLAY_TOGGLES.showAlignment);
 
   return {
     showStars, setShowStars,
@@ -80,6 +75,5 @@ export const useOverlayToggles = (): OverlayToggles => {
     showCatalog, setShowCatalog,
     showConstellations, setShowConstellations,
     showTelescope, setShowTelescope,
-    showAlignment, setShowAlignment,
   };
 };

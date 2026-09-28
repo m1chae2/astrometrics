@@ -38,9 +38,6 @@ interface Props {
   /** Show telescope pointing crosshair. */
   showTelescope: boolean;
   onToggleTelescope: (value: boolean) => void;
-  /** Show telescope alignment pointing vectors and polar alignment overlay. */
-  showAlignment: boolean;
-  onToggleAlignment: (value: boolean) => void;
   /** Show mount tracking mechanical risk heatmap overlay. */
   showTrackingRisk?: boolean;
   onToggleTrackingRisk?: (value: boolean) => void;
@@ -50,10 +47,6 @@ interface Props {
   selectedSessionId?: string | null;
   /** Callback when user selects a different session. */
   onSelectSession?: (sessionId: string | null) => void;
-  /** Callback to trigger syncing logs from the telescope. */
-  onSyncLogs?: () => void;
-  /** Whether a log synchronization is currently in progress. */
-  isSyncingLogs?: boolean;
   /** Current field of view in degrees, displayed as a readout. */
   currentFOV: number;
   /** Opens the date/time simulation modal. */
@@ -86,15 +79,11 @@ export const PlanetariumToolbar: React.FC<Props> = ({
   onToggleConstellations,
   showTelescope,
   onToggleTelescope,
-  showAlignment,
-  onToggleAlignment,
   showTrackingRisk = false,
   onToggleTrackingRisk,
   availableSessions = [],
   selectedSessionId = null,
   onSelectSession,
-  onSyncLogs,
-  isSyncingLogs = false,
   currentFOV,
   onOpenTimeModal,
 }) => {
@@ -116,6 +105,53 @@ export const PlanetariumToolbar: React.FC<Props> = ({
     };
   }, [isLayersOpen]);
 
+  // A native <select>'s open dropdown is drawn by the OS's own widget toolkit
+  // on Linux (GTK), which follows the system theme rather than this page's
+  // CSS `color-scheme: dark` — the popup keeps coming back light regardless
+  // of what's declared here. Using our own popover (like the Layers menu
+  // above) keeps the session picker themed consistently everywhere.
+  const [isSessionOpen, setIsSessionOpen] = useState(false);
+  const sessionRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (sessionRef.current && !sessionRef.current.contains(event.target as Node)) {
+        setIsSessionOpen(false);
+      }
+    };
+    if (isSessionOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isSessionOpen]);
+
+  /**
+   * Builds the display label for a historical session option, e.g.
+   * "2026-09-24 (8 targets, 1 sync)".
+   */
+  const getSessionLabel = (s: NonNullable<Props['availableSessions']>[number]): string => {
+    const paStr = s.polarErrorArcsec !== null && s.polarErrorArcsec !== undefined
+      ? ` • PA: ${(s.polarErrorArcsec / 60).toFixed(1)}'`
+      : '';
+    const counts: string[] = [];
+    if (s.targetCount) {
+      counts.push(`${s.targetCount} target${s.targetCount === 1 ? '' : 's'}`);
+    }
+    counts.push(`${s.syncCount} sync${s.syncCount === 1 ? '' : 's'}`);
+    return `${s.sessionDate} (${counts.join(', ')}${paStr})`;
+  };
+
+  const selectedSession = selectedSessionId
+    ? availableSessions.find((s) => s.sessionId === selectedSessionId)
+    : undefined;
+  const selectedSessionLabel = selectedSessionId === null
+    ? 'No Session Selected'
+    : selectedSessionId === 'all'
+      ? 'All Sessions (Cumulative)'
+      : (selectedSession ? getSessionLabel(selectedSession) : 'No Session Selected');
+
   const passiveLayers = [
     { label: 'Stars', checked: showStars, onChange: onToggleStars },
     { label: 'Constellations', checked: showConstellations, onChange: onToggleConstellations },
@@ -128,7 +164,6 @@ export const PlanetariumToolbar: React.FC<Props> = ({
   const rigOverlays = [
     { label: 'Telescope', checked: showTelescope, onChange: onToggleTelescope },
     { label: 'FOV Outline', checked: showFOV, onChange: onToggleFOV },
-    { label: 'Alignment', checked: showAlignment, onChange: onToggleAlignment },
   ];
 
   return (
@@ -180,56 +215,51 @@ export const PlanetariumToolbar: React.FC<Props> = ({
         ))}
       </div>
 
-      {/* Group 3: Session Selector & Log Sync (when Alignment or Tracking Heatmap is active) */}
-      {(showAlignment || showTrackingRisk) && (
-        <>
-          <div className="planetarium-toolbar__divider" />
-          <div className="planetarium-toolbar__session-container">
-            <label htmlFor="planetarium-session-select" className="planetarium-toolbar__session-label">
-              Session:
-            </label>
-            <select
-              id="planetarium-session-select"
-              value={selectedSessionId || ''}
-              onChange={(e) => onSelectSession?.(e.target.value ? e.target.value : null)}
-              className="planetarium-toolbar__select"
-            >
-              <option value="">Live / Latest</option>
-              {availableSessions.length > 0 && (
-                <option value="all">All Sessions (Cumulative)</option>
-              )}
-              {availableSessions.map((s) => {
-                const paStr = s.polarErrorArcsec !== null && s.polarErrorArcsec !== undefined
-                  ? ` • PA: ${(s.polarErrorArcsec / 60).toFixed(1)}'`
-                  : '';
-                const counts = [];
-                if (s.targetCount) {
-                  counts.push(`${s.targetCount} target${s.targetCount === 1 ? '' : 's'}`);
-                }
-                counts.push(`${s.syncCount} sync${s.syncCount === 1 ? '' : 's'}`);
-                const countStr = counts.join(', ');
+      {/* Group 3: Session Selector — alignment is always active, so this is always shown. */}
+      <div className="planetarium-toolbar__divider" />
+      <div className="planetarium-toolbar__session-container">
+        <div className="planetarium-toolbar__popover-container" ref={sessionRef}>
+          <button
+            type="button"
+            onClick={() => setIsSessionOpen((prev) => !prev)}
+            className={`planetarium-toolbar__button planetarium-toolbar__select ${isSessionOpen ? 'planetarium-toolbar__button--active' : ''}`}
+          >
+            <span>{selectedSessionLabel}</span>
+            <span className="planetarium-toolbar__chevron">{isSessionOpen ? '▲' : '▼'}</span>
+          </button>
 
-                return (
-                  <option key={s.sessionId} value={s.sessionId}>
-                    {s.sessionDate} ({countStr}{paStr})
-                  </option>
-                );
-              })}
-            </select>
-            {onSyncLogs && (
+          {isSessionOpen && (
+            <div className="planetarium-toolbar__popover-menu planetarium-toolbar__popover-menu--sessions">
               <button
                 type="button"
-                onClick={onSyncLogs}
-                disabled={isSyncingLogs}
-                title="Sync past logs and FITS solves from telescope"
-                className="planetarium-toolbar__button planetarium-toolbar__button--compact"
+                className={`planetarium-toolbar__session-option ${selectedSessionId === null ? 'planetarium-toolbar__session-option--selected' : ''}`}
+                onClick={() => { onSelectSession?.(null); setIsSessionOpen(false); }}
               >
-                {isSyncingLogs ? 'Syncing...' : 'Sync'}
+                No Session Selected
               </button>
-            )}
-          </div>
-        </>
-      )}
+              {availableSessions.length > 0 && (
+                <button
+                  type="button"
+                  className={`planetarium-toolbar__session-option ${selectedSessionId === 'all' ? 'planetarium-toolbar__session-option--selected' : ''}`}
+                  onClick={() => { onSelectSession?.('all'); setIsSessionOpen(false); }}
+                >
+                  All Sessions (Cumulative)
+                </button>
+              )}
+              {availableSessions.map((s) => (
+                <button
+                  type="button"
+                  key={s.sessionId}
+                  className={`planetarium-toolbar__session-option ${selectedSessionId === s.sessionId ? 'planetarium-toolbar__session-option--selected' : ''}`}
+                  onClick={() => { onSelectSession?.(s.sessionId); setIsSessionOpen(false); }}
+                >
+                  {getSessionLabel(s)}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
 
       <div className="planetarium-toolbar__divider" />
 

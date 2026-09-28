@@ -74,19 +74,16 @@ export const PlanetariumDisplay: React.FC = () => {
     showCatalog, setShowCatalog,
     showConstellations, setShowConstellations,
     showTelescope, setShowTelescope,
-    showAlignment, setShowAlignment,
   } = useOverlayToggles();
 
   // Mount tracking risk heatmap toggle state
   const [showTrackingRisk, setShowTrackingRisk] = useState<boolean>(false);
 
-  // Historical session review, cumulative tracking data, and telescope log sync
+  // Historical session review and cumulative tracking data
   const {
     availableSessions,
     selectedSessionId,
     setSelectedSessionId,
-    isSyncingLogs,
-    handleSyncLogs,
     activeAlignmentAttempts,
     activeCumulativeTrackingAttempts,
     activePolarAlignment,
@@ -551,15 +548,11 @@ export const PlanetariumDisplay: React.FC = () => {
         onToggleConstellations={setShowConstellations}
         showTelescope={showTelescope}
         onToggleTelescope={setShowTelescope}
-        showAlignment={showAlignment}
-        onToggleAlignment={setShowAlignment}
         showTrackingRisk={showTrackingRisk}
         onToggleTrackingRisk={setShowTrackingRisk}
         availableSessions={availableSessions}
         selectedSessionId={selectedSessionId}
         onSelectSession={setSelectedSessionId}
-        onSyncLogs={handleSyncLogs}
-        isSyncingLogs={isSyncingLogs}
         currentFOV={currentFOV}
         onOpenTimeModal={() => setIsTimeModalOpen(true)}
       />
@@ -577,7 +570,6 @@ export const PlanetariumDisplay: React.FC = () => {
         showConstellations={showConstellations}
         constellationLines={constellationLines}
         showTelescope={showTelescope}
-        showAlignment={showAlignment}
         showTrackingRisk={showTrackingRisk}
         alignmentAttempts={activeAlignmentAttempts}
         cumulativeTrackingAttempts={activeCumulativeTrackingAttempts}

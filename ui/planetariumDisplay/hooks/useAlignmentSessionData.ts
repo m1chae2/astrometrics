@@ -29,10 +29,6 @@ export interface AlignmentSessionData {
   /** Currently selected historical session id, or null for live telemetry. */
   selectedSessionId: string | null;
   setSelectedSessionId: (id: string | null) => void;
-  /** Whether a manual telescope-log sync is in progress. */
-  isSyncingLogs: boolean;
-  /** Triggers a telescope log sync, then refreshes session lists. */
-  handleSyncLogs: () => Promise<void>;
   /** Alignment attempts for the active view: historical session if selected, else live telemetry. */
   activeAlignmentAttempts: AlignmentAttempt[];
   /** All recorded historical sessions' attempts merged with live telemetry. */
@@ -47,8 +43,8 @@ export interface AlignmentSessionData {
  * alignment/tracking-risk overlays.
  *
  * Each of the three fetches (session list, cumulative tracking, per-session
- * detail) is called from more than one place — mount, a manual sync, and a
- * session-selection change — so each keeps its own AbortController, aborting
+ * detail) is called from more than one place — mount and a session-selection
+ * change — so each keeps its own AbortController, aborting
  * its own previous in-flight call before starting a new one. That way a rapid
  * session-picker change or an unmount never leaves a superseded request
  * running in the background.
@@ -65,7 +61,6 @@ export const useAlignmentSessionData = (
   const [sessionAlignmentAttempts, setSessionAlignmentAttempts] = useState<AlignmentAttempt[] | null>(null);
   const [sessionPolarAlignment, setSessionPolarAlignment] = useState<PolarAlignmentStatus | null>(null);
   const [cumulativeTrackingAttempts, setCumulativeTrackingAttempts] = useState<AlignmentAttempt[] | null>(null);
-  const [isSyncingLogs, setIsSyncingLogs] = useState<boolean>(false);
 
   const sessionsControllerRef = useRef<AbortController | null>(null);
   const trackingControllerRef = useRef<AbortController | null>(null);
@@ -113,19 +108,6 @@ export const useAlignmentSessionData = (
       sessionsControllerRef.current?.abort();
       trackingControllerRef.current?.abort();
     };
-  }, [refreshSessions, refreshCumulativeTracking]);
-
-  const handleSyncLogs = useCallback(async () => {
-    setIsSyncingLogs(true);
-    try {
-      await callBackend('telescope:sync_logs', {});
-      await refreshSessions();
-      await refreshCumulativeTracking();
-    } catch (err) {
-      console.error('Failed to sync telescope logs:', err);
-    } finally {
-      setIsSyncingLogs(false);
-    }
   }, [refreshSessions, refreshCumulativeTracking]);
 
   useEffect(() => {
@@ -186,8 +168,6 @@ export const useAlignmentSessionData = (
     availableSessions,
     selectedSessionId,
     setSelectedSessionId,
-    isSyncingLogs,
-    handleSyncLogs,
     activeAlignmentAttempts,
     activeCumulativeTrackingAttempts,
     activePolarAlignment,

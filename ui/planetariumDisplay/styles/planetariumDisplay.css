@@ -3,6 +3,10 @@
 .planetarium-display {
   height: 100%;
   width: 100%;
+  /* Matches Astronomy Manager's target/star list column width (see
+     .astronomy-display in astronomyManager.css) — both views share the same
+     RadioListManager sidebar component and should read the same width. */
+  --layout-left-col-width: 300px;
 }
 
 .planetarium-viewer-container {
@@ -81,12 +85,6 @@
   margin-bottom: 4px;
 }
 
-.planetarium-toolbar__session-label {
-  color: var(--text-dim, #94a3b8);
-  font-size: 12px;
-  font-weight: 500;
-}
-
 .planetarium-toolbar__item input[type="checkbox"] {
   accent-color: var(--status-cyan, #38bdf8);
   cursor: pointer;
@@ -113,36 +111,49 @@
   z-index: 110;
 }
 
+/* Session picker: a button + our own popover (see .planetarium-toolbar__popover-menu
+   below), not a native <select> — its open dropdown popup is drawn by the OS's
+   own widget toolkit on Linux (GTK) and follows the system theme rather than
+   this page's CSS, so it kept rendering light regardless of `color-scheme`. */
 .planetarium-toolbar__select {
-  appearance: none;
-  -webkit-appearance: none;
-  -moz-appearance: none;
-  color-scheme: dark;
-  background-color: rgba(255, 255, 255, 0.07);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23eaeaea' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 10px center;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  color: var(--text-primary, #eaeaea);
-  padding: 5px 26px 5px 12px;
-  border-radius: 5px;
-  outline: none;
-  font-size: 13px;
-  font-family: var(--font-family-base);
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.planetarium-toolbar__select:hover {
-  background: rgba(255, 255, 255, 0.14);
-  border-color: rgba(255, 255, 255, 0.22);
+  justify-content: space-between;
+  min-width: 180px;
 }
 
 .planetarium-toolbar__session-container {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.planetarium-toolbar__popover-menu--sessions {
+  max-height: 320px;
+  overflow-y: auto;
+  min-width: 240px;
+}
+
+.planetarium-toolbar__session-option {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--text-primary, #eaeaea);
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  font-family: var(--font-family-base);
+  white-space: nowrap;
+}
+
+.planetarium-toolbar__session-option:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.planetarium-toolbar__session-option--selected {
+  background: rgba(79, 193, 255, 0.16);
+  color: var(--status-cyan, #4fc1ff);
 }
 
 .planetarium-toolbar__readout {
@@ -734,11 +745,6 @@
   background: rgba(56, 189, 248, 0.18) !important;
   border-color: rgba(56, 189, 248, 0.5) !important;
   color: #bae6fd !important;
-}
-
-.planetarium-toolbar__button--compact {
-  padding: 4px 10px;
-  font-size: 12px;
 }
 
 /* Canvas element inside the sky map container */

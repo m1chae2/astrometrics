@@ -951,7 +951,11 @@
   min-width: 0;
 }
 
-@media (max-width: 1450px) {
+/* The window's own minWidth (see electron/main.js#getWindowOptions) is
+   1024px, and the full telemetry row comfortably fits down to ~900px, so
+   this only needs to guard genuinely small contexts (a resized auxiliary
+   window, or a narrow companion-app browser view), not the normal range. */
+@media (max-width: 820px) {
   .hide-mobile {
     display: none !important;
   }

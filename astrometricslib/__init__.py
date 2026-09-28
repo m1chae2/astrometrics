@@ -77,16 +77,16 @@ if TYPE_CHECKING:
     from astrometricslib.api.stars import StellarCatalog
     from astrometricslib.api.targets import TargetCatalog
     from astrometricslib.api.visualization import Visualization
-    from astrometricslib.pipelines.astrometry.catalog_seeding import (
+    from astrometricslib.pipelines.astrometry.pipeline import AstrometryPipeline
+    from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
+    from astrometricslib.pipelines.astrometry.utilities.catalog_seeding import (
         derive_field_centers,
     )
-    from astrometricslib.pipelines.astrometry.pipeline import AstrometryPipeline
-    from astrometricslib.pipelines.astrometry.star_identifier import StarIdentifier
 
 _DEFERRED_EXPORTS = {
     "AstrometryPipeline": "astrometricslib.pipelines.astrometry.pipeline",
-    "StarIdentifier": "astrometricslib.pipelines.astrometry.star_identifier",
-    "derive_field_centers": "astrometricslib.pipelines.astrometry.catalog_seeding",
+    "StarIdentifier": "astrometricslib.pipelines.astrometry.processing.star_identifier",
+    "derive_field_centers": "astrometricslib.pipelines.astrometry.utilities.catalog_seeding",
     "CalibrationCatalog": "astrometricslib.api.processing",
     "ProcessingPipelines": "astrometricslib.api.processing",
     "QualityDiagnostics": "astrometricslib.api.processing",

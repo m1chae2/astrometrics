@@ -147,7 +147,7 @@ class QualityDiagnostics:
             A list the same length as values, `True` where the
             corresponding entry is an outlier.
         """
-        from astrometricslib.pipelines.spectroscopy.registration_quality import flag_outliers
+        from astrometricslib.pipelines.spectroscopy.utilities.registration_quality import flag_outliers
 
         return flag_outliers(values, sigma_threshold, low_is_bad)
 

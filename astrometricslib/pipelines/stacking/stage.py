@@ -685,7 +685,7 @@ def _check_spectral_registration_quality(summary, stacked_path: str, diagnostics
     """
     from astrometricslib.drivers.siril_output_parsing import parse_seq_file
     from astrometricslib.models.quality_summary import ExcludedFrame
-    from astrometricslib.pipelines.spectroscopy.registration_quality import (
+    from astrometricslib.pipelines.spectroscopy.utilities.registration_quality import (
         evaluate_spectral_registration_quality,
     )
 

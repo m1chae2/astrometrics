@@ -734,7 +734,7 @@ def test_target_analyze_target_photometry_runs_each_session_independently(tmp_pa
                 )
             )
 
-    from astrometricslib.pipelines.astrometry.processing import session_identification
+    from astrometricslib.pipelines.shared import session_identification
 
     # Sky offsets are 190 degrees apart, far beyond the 5 arcsec
     # cross-session match tolerance, so no session A/B star can ever
@@ -837,7 +837,7 @@ def test_target_analyze_target_photometry_with_astrometry_seed_uses_identified_s
     # catalog-matched, not position-only, by _drop_unresolved_stars.
     seed_star.is_catalog_identified = True
 
-    from astrometricslib.pipelines.astrometry.processing import session_identification
+    from astrometricslib.pipelines.shared import session_identification
 
     fake_wcs = object()
 

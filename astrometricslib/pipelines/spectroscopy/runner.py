@@ -23,13 +23,12 @@ from astrometricslib.pipelines.pipeline_base import (
     Result,
     run_pipeline,
 )
-from astrometricslib.pipelines.shared.star_recording import (
-    merge_spectroscopy_stellar_object,
-    record_pipeline_stars,
-)
 from astrometricslib.pipelines.shared.target_center_hint import (
     resolve_solved_stack_center_hint,
     resolve_solved_stack_wcs,
+)
+from astrometricslib.pipelines.spectroscopy.record_and_flag_spectroscopy_stars import (
+    record_and_flag_spectroscopy_stars,
 )
 
 # How far from the frame centre, in degrees, a reference star may be and still
@@ -418,18 +417,22 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
         # not silently drop real, fainter, already-identified stars past
         # an arbitrary top-N count the way a fixed default of 10 used to.
         limit = request.options.get("limit")
-        stellar_objects, star_id_breakdown = record_pipeline_stars(
-            spectroscopy.process(context, limit=limit),
-            catalog_access=catalog_access,
-            target_id=target.id,
-            merge_function=merge_spectroscopy_stellar_object,
-            pipeline_name="spectroscopy",
+        stellar_objects, star_id_breakdown, flagged_spectral_classifications = (
+            record_and_flag_spectroscopy_stars(
+                spectroscopy.process(context, limit=limit),
+                catalog_access=catalog_access,
+                target_id=target.id,
+            )
         )
 
         return Result(
             context=context,
             stellar_objects=stellar_objects,
-            payload={"star_id_breakdown": star_id_breakdown, "spectroscopy": spectroscopy},
+            payload={
+                "star_id_breakdown": star_id_breakdown,
+                "spectroscopy": spectroscopy,
+                "flagged_spectral_classifications": flagged_spectral_classifications,
+            },
         )
 
     def validate_output(self, request: PipelineRequest, result: Result) -> SpectroscopyQualitySummary:
@@ -442,9 +445,6 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
             significantly saturated.
         """
         from astrometricslib.pipelines.shared.quality.saturation import is_saturation_significant
-        from astrometricslib.pipelines.spectroscopy.post_processing.assess_output_quality import (
-            build_spectral_classification_concerns,
-        )
 
         stellar_objects = result.stellar_objects
         star_id_breakdown = result.payload["star_id_breakdown"]
@@ -472,7 +472,7 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
         trail_width_profile_available = bool(all_trail_widths)
         median_trail_width_px = statistics.median(all_trail_widths) if trail_width_profile_available else None
 
-        flagged_spectral_classifications = build_spectral_classification_concerns(stellar_objects)
+        flagged_spectral_classifications = result.payload["flagged_spectral_classifications"]
         low_confidence_count = sum(
             1 for concern in flagged_spectral_classifications if "low_confidence" in concern["reason"]
         )

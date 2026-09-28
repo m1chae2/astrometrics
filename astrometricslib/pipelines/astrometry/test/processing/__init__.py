@@ -1,1 +1,1 @@
-"""Tests for astrometry's processing stage (per-session identification)."""
+"""Tests for astrometry's processing stage (star identification)."""

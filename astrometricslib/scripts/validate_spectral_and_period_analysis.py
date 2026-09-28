@@ -29,7 +29,7 @@ import numpy as np
 from scipy.ndimage import gaussian_filter1d
 
 from astrometricslib import Astrometrics
-from astrometricslib.pipelines.photometry.periodicity_search import (
+from astrometricslib.pipelines.photometry.processing.periodicity_search import (
     VERDICT_DETECTED,
     box_search,
     lomb_scargle_search,

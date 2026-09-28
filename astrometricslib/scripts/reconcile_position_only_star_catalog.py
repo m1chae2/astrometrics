@@ -47,7 +47,7 @@ from typing import Any
 from astrometricslib import Astrometrics
 from astrometricslib.drivers.catalog_access import StarPosition
 from astrometricslib.models.stellar_source import StellarObject
-from astrometricslib.pipelines.astrometry.star_identifier import CATALOG_MATCH_RADIUS_ARCSEC
+from astrometricslib.pipelines.astrometry.processing.star_identifier import CATALOG_MATCH_RADIUS_ARCSEC
 
 logger = logging.getLogger(__name__)
 

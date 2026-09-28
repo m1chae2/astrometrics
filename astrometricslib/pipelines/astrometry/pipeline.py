@@ -10,7 +10,7 @@ import os
 from typing import Any
 
 from astrometricslib.drivers.image import AstrometricsImage
-from astrometricslib.pipelines.astrometry.star_identifier import StarIdentifier
+from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 from astrometricslib.pipelines.shared.analysis_context import AnalysisContext, ExtendedSourceHint
 from astrometricslib.pipelines.shared.target_center_hint import resolve_center_hint
 from astrometricslib.utilities.config_loader import AppConfiguration

@@ -22,7 +22,7 @@ from astrometricslib.pipelines.photometry.batch import (
     search_periods_and_save,
     select_period_search_stars,
 )
-from astrometricslib.pipelines.photometry.variability_analyzer import VariabilityAnalyzer
+from astrometricslib.pipelines.photometry.processing.variability_analyzer import VariabilityAnalyzer
 from astrometricslib.utilities.config_loader import AppConfiguration
 
 _CENTER_RA = 250.4225

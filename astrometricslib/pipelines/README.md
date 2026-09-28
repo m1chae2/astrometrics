@@ -33,7 +33,8 @@ way, and is the reference to copy from:
 
 ```
 spectroscopy/
-├── pipeline.py, runner.py, frame_analysis.py, batch.py, calibration_tuner.py
+├── pipeline.py, runner.py, frame_analysis.py, batch.py,
+│   record_and_flag_spectroscopy_stars.py
 │   # orchestration: spans multiple stages, or drives a whole batch/session.
 │   # stays at the package root, not inside any one stage's folder.
 ├── pre_processing/
@@ -41,14 +42,21 @@ spectroscopy/
 │   # how good that raw data was (resolution, saturation, coverage).
 ├── processing/
 │   # finding things in the calibrated data (features, a classification).
-└── post_processing/
-    # judging the result: does it agree with independent, external
-    # knowledge (a catalog), and how much should it be trusted overall.
+├── post_processing/
+│   # judging the result: does it agree with independent, external
+│   # knowledge (a catalog), and how much should it be trusted overall.
+└── utilities/
+    # standalone tools nothing in the per-run pipeline calls: deriving
+    # camera calibration constants ahead of time, checking stack
+    # alignment quality after the fact. Not a stage, not orchestration.
 ```
 
 A file goes at the root only if it genuinely spans stages or drives a batch —
 not by default. Something that fits one stage goes in that stage's folder,
-even if it's the only file there.
+even if it's the only file there. A standalone tool that isn't part of the
+per-run pipeline at all (not called by `pipeline.py`/`runner.py`/`batch.py`/
+`frame_analysis.py`) goes in `utilities/` instead of the root, so the root
+stays limited to the actual orchestration chain.
 
 ### The structured-object pattern
 

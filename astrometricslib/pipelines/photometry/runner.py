@@ -252,7 +252,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         use_astrometry_seed = bool(options.get("use_astrometry_seed", True))
         star_identifier = None
         if use_astrometry_seed:
-            from astrometricslib.pipelines.astrometry.star_identifier import StarIdentifier
+            from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 
             star_identifier = StarIdentifier()
 
@@ -306,7 +306,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                 )
             )
             if cross_session_match_count > 0:
-                from astrometricslib.pipelines.photometry.variability_analyzer import (
+                from astrometricslib.pipelines.photometry.processing.variability_analyzer import (
                     identify_long_term_variable_candidates,
                 )
 
@@ -376,7 +376,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             PhotometryPipelineQualityMetrics,
             PhotometryQualitySummary,
         )
-        from astrometricslib.pipelines.photometry.variability_analyzer import (
+        from astrometricslib.pipelines.photometry.processing.variability_analyzer import (
             median_light_curve_scatter_mag,
         )
         from astrometricslib.pipelines.shared.target_sessions import build_target_session_breakdown

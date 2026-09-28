@@ -1,8 +1,6 @@
 """Astrometry's processing stage: turning detections into named stars.
 
-Plate-solving a reference frame and matching its detected sources
-against SIMBAD/Gaia, scoped to one session's reference frame
-(`session_identification.py`). The main per-target entry point,
-`star_identifier.py`, stays at the package root -- see its own
-docstring for why.
+Takes the sources `pre_processing/source_detection.py` found and the WCS
+the plate solver produced, and matches them against SIMBAD and Gaia to
+give each one a stable, permanent name (`star_identifier.py`).
 """

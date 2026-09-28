@@ -391,6 +391,8 @@ export interface PhotometryResult {
   transitCandidate?: TransitCandidate | null;
   meanFlux?: number | null;
   coefficientOfVariation?: number | null;
+  inputQuality?: InputQualityAssessment | null;
+  outputQuality?: OutputQualityAssessment | null;
 }
 
 /**

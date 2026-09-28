@@ -542,7 +542,7 @@ class StellarCatalog:
             star exists. A star with too few measurements is returned
             unchanged.
         """
-        from astrometricslib.pipelines.photometry.variability_analyzer import VariabilityAnalyzer
+        from astrometricslib.pipelines.photometry.processing.variability_analyzer import VariabilityAnalyzer
 
         star = self.get_object(object_id)
         if star is None or not star.photometry:

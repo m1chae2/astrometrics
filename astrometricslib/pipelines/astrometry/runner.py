@@ -142,7 +142,7 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
         from astrometricslib.pipelines.astrometry.pipeline import (
             AstrometryPipeline,
         )
-        from astrometricslib.pipelines.astrometry.star_identifier import (
+        from astrometricslib.pipelines.astrometry.processing.star_identifier import (
             get_gaia_query_statistics,
             reset_gaia_query_statistics,
         )

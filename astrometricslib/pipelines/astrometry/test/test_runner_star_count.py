@@ -11,7 +11,8 @@ import pytest
 from astrometricslib.drivers import plate_solve_interface
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.astrometry import pipeline as astrometry_pipeline
-from astrometricslib.pipelines.astrometry import runner, star_identifier
+from astrometricslib.pipelines.astrometry import runner
+from astrometricslib.pipelines.astrometry.processing import star_identifier
 from astrometricslib.pipelines.pipeline_base import PipelineRequest
 
 

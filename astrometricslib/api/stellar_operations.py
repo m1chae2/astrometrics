@@ -144,7 +144,7 @@ def tune_spectroscopy_calibration(
         The calculated settings that make the spectroscope data line up
         with reality.
     """
-    from astrometricslib.pipelines.spectroscopy.calibration_tuner import (
+    from astrometricslib.pipelines.spectroscopy.utilities.calibration_tuner import (
         SpectroscopyCalibrationTuner,
     )
 

@@ -273,7 +273,7 @@ class TestProcessSpectroscopyFramesBySession:
 
         target = Target(id="SessionGroupingTestTarget", frames=frame_records)
 
-        from astrometricslib.pipelines.astrometry.processing import session_identification
+        from astrometricslib.pipelines.shared import session_identification
 
         identify_calls = []
 
@@ -345,7 +345,7 @@ class TestProcessSpectroscopyFramesBySession:
 
         target = Target(id="NoTimestampTestTarget", frames=frame_records)
 
-        from astrometricslib.pipelines.astrometry.processing import session_identification
+        from astrometricslib.pipelines.shared import session_identification
 
         monkeypatch.setattr(
             session_identification,

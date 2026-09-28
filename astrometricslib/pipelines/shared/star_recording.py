@@ -165,7 +165,7 @@ def _reconcile_position_only_star_ids(
     from astropy import units as u
     from astropy.coordinates import SkyCoord
 
-    from astrometricslib.pipelines.astrometry.star_identifier import (
+    from astrometricslib.pipelines.astrometry.processing.star_identifier import (
         CATALOG_MATCH_RADIUS_ARCSEC,
     )
 

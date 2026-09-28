@@ -357,7 +357,6 @@ def _process_single_spectroscopy_frame_worker_v2(
     try:
         from astrometricslib import Astrometrics
         from astrometricslib.drivers.image import AstrometricsImage
-        from astrometricslib.pipelines.shared.star_recording import merge_spectroscopy_stellar_object
 
         astrometrics = Astrometrics()
 
@@ -393,12 +392,14 @@ def _process_single_spectroscopy_frame_worker_v2(
         )
         stellar_objects = [res["star_source"] for res in extraction_results if "error" not in res]
 
-        for obj in stellar_objects:
-            if target_id not in obj.target_ids:
-                obj.target_ids.append(target_id)
+        from astrometricslib.pipelines.spectroscopy.record_and_flag_spectroscopy_stars import (
+            record_and_flag_spectroscopy_stars,
+        )
 
-        astrometrics.catalog_access.merge_and_record(
-            "stellar_catalog", stellar_objects, merge_spectroscopy_stellar_object
+        stellar_objects, _breakdown, result["spectral_classification_concerns"] = (
+            record_and_flag_spectroscopy_stars(
+                stellar_objects, catalog_access=astrometrics.catalog_access, target_id=target_id
+            )
         )
 
         result["stars_processed"] = len(stellar_objects)
@@ -420,11 +421,6 @@ def _process_single_spectroscopy_frame_worker_v2(
             if "zero_order_saturated_pixel_fraction" in res
         ]
 
-        from astrometricslib.pipelines.spectroscopy.post_processing.assess_output_quality import (
-            build_spectral_classification_concerns,
-        )
-
-        result["spectral_classification_concerns"] = build_spectral_classification_concerns(stellar_objects)
         result["status"] = "success"
     except Exception as processing_error:
         result["error"] = str(processing_error)
@@ -486,10 +482,10 @@ def process_spectroscopy_frames_by_session(
         star identification data.
     """
     from astrometricslib.drivers.image import AstrometricsImage
-    from astrometricslib.pipelines.astrometry.processing.session_identification import (
+    from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
+    from astrometricslib.pipelines.shared.session_identification import (
         identify_session_stars,
     )
-    from astrometricslib.pipelines.astrometry.star_identifier import StarIdentifier
     from astrometricslib.pipelines.shared.target_center_hint import resolve_target_center_hint
     from astrometricslib.pipelines.shared.target_sessions import derive_target_sessions
 

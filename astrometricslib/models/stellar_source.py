@@ -11,6 +11,12 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from astrometricslib.models.astrometry_quality import CatalogMatchQuality
+from astrometricslib.models.photometry_quality import (
+    InputQualityAssessment as PhotometryInputQuality,
+)
+from astrometricslib.models.photometry_quality import (
+    OutputQualityAssessment as PhotometryOutputQuality,
+)
 from astrometricslib.models.spectroscopy_quality import (
     CatalogComparison,
     InputQualityAssessment,
@@ -137,6 +143,16 @@ class PhotometryResult(BaseModel):
     # variability_score below is just this same number on a different
     # scale, computed rather than stored so the two can never drift apart.
     coefficient_of_variation: float | None = Field(default=None, alias="coefficientOfVariation")
+    # How good the raw per-frame measurements behind this light curve
+    # were (see `pre_processing.assess_input_quality`). `None` for a
+    # light curve saved before this was recorded.
+    input_quality: PhotometryInputQuality | None = Field(default=None, alias="inputQuality")
+    # How much to trust this star's variability verdict, given its own
+    # CV against the population cutoff (see
+    # `post_processing.assess_output_quality`). `None` for a light
+    # curve saved before this was recorded, or one that was never
+    # evaluated for variability.
+    output_quality: PhotometryOutputQuality | None = Field(default=None, alias="outputQuality")
 
 
 class StellarSessionMatch(BaseModel):

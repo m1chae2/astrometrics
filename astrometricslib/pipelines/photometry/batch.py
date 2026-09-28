@@ -63,7 +63,7 @@ def _run_variability_analysis_for_session(
         The result of looking up the stars, if we tried to do it.
         Useful for getting the sky coordinate map (WCS) later.
     """
-    from astrometricslib.pipelines.photometry.variability_analyzer import (
+    from astrometricslib.pipelines.photometry.processing.variability_analyzer import (
         VariabilityAnalyzer,
     )
 
@@ -71,7 +71,7 @@ def _run_variability_analysis_for_session(
     identify_result = None
     if use_astrometry_seed and star_identifier is not None and target is not None:
         from astrometricslib.drivers.image import AstrometricsImage
-        from astrometricslib.pipelines.astrometry.processing.session_identification import (
+        from astrometricslib.pipelines.shared.session_identification import (
             identify_session_stars,
         )
 
@@ -111,8 +111,8 @@ def _solve_session_wcs(session: Any, target: Target) -> Any | None:
         failed.
     """
     from astrometricslib.drivers.image import AstrometricsImage
-    from astrometricslib.pipelines.astrometry.processing.session_identification import resolve_frame_wcs
-    from astrometricslib.pipelines.astrometry.star_identifier import StarIdentifier
+    from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
+    from astrometricslib.pipelines.shared.session_identification import resolve_frame_wcs
 
     reference_path = session.frame_paths[0]
     try:
@@ -573,7 +573,7 @@ def search_periods_and_save(
     searched_count : `int`
         How many stars had a search result saved.
     """
-    from astrometricslib.pipelines.photometry.variability_analyzer import VariabilityAnalyzer
+    from astrometricslib.pipelines.photometry.processing.variability_analyzer import VariabilityAnalyzer
 
     center_ra, center_dec = resolve_target_center_hint(target)
     chosen = select_period_search_stars(stellar_objects, center_ra, center_dec, limit)

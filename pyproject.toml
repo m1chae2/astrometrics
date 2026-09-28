@@ -66,6 +66,8 @@ dependencies = [
     "websockets",
     "psutil",
     "pandas",
+    "prov", # W3C PROV-XML export/validation for ProvenanceStore.export_target_lineage_as_prov_xml
+    "lxml", # validates exported PROV-XML against the vendored W3C schema in tests
 ]
 
 [project.optional-dependencies]

@@ -159,32 +159,3 @@ export async function getSystemPulse(): Promise<SystemPulse | null> {
         return null;
     }
 }
-
-/**
- * Resolves the configured agent command palette keyboard shortcut.
- * @return The shortcut string (e.g. 'Ctrl+Space').
- */
-export function getAgentShortcut(): string {
-    try {
-        if (typeof window === 'undefined') return 'Ctrl+Space';
-        return window.localStorage.getItem('agentShortcut') || 'Ctrl+Space';
-    } catch {
-        return 'Ctrl+Space';
-    }
-}
-
-/**
- * Persists the agent command palette keyboard shortcut.
- * @param shortcut Keyboard combination shortcut string.
- */
-export function setAgentShortcut(shortcut: string): void {
-    if (typeof window === 'undefined') return;
-    try {
-        window.localStorage.setItem('agentShortcut', shortcut);
-        window.dispatchEvent(
-            new CustomEvent('astrometrics:shortcutChange', { detail: shortcut })
-        );
-    } catch {
-        // Ignore persistence failures.
-    }
-}

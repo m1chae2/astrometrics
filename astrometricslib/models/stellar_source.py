@@ -153,6 +153,11 @@ class PhotometryResult(BaseModel):
     # curve saved before this was recorded, or one that was never
     # evaluated for variability.
     output_quality: PhotometryOutputQuality | None = Field(default=None, alias="outputQuality")
+    # The id of the job (see astrometricslib.models.provenance.Activity)
+    # that last wrote this light curve, so its exact pipeline version can
+    # be looked up. `None` for a light curve saved before this was
+    # recorded, or written outside a tracked job.
+    generated_by_job_id: str | None = Field(default=None, alias="generatedByJobId")
 
 
 class StellarSessionMatch(BaseModel):
@@ -330,6 +335,11 @@ class SpectroscopyResult(BaseModel):
     # (see `post_processing.assess_output_quality`). `None` for a spectrum
     # saved before this was recorded, or one that was never classified.
     output_quality: OutputQualityAssessment | None = Field(default=None, alias="outputQuality")
+    # The id of the job (see astrometricslib.models.provenance.Activity)
+    # that last wrote this spectrum, so its exact pipeline version can be
+    # looked up. `None` for a spectrum saved before this was recorded, or
+    # written outside a tracked job.
+    generated_by_job_id: str | None = Field(default=None, alias="generatedByJobId")
 
 
 class StellarObject(BaseModel):

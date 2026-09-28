@@ -1,6 +1,7 @@
 import React, { useState, useEffect, Suspense, Profiler, ProfilerOnRenderCallback } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StatusHeader } from './statusHeader/StatusHeader';
+import { TitleBar } from './titleBar/TitleBar';
 import { TargetProvider } from './common/context/TargetContext';
 import { PlanningProvider } from './observationManager/context/PlanningContext';
 import { TerminalProvider } from './statusHeader/context/TerminalContext';
@@ -263,6 +264,7 @@ const AppContent: React.FC = () => {
 
   return (
     <div className="app">
+      <TitleBar />
       <TerminalProvider>
         <Profiler id="StatusHeader" onRender={onRenderProfile}>
           <StatusHeader />

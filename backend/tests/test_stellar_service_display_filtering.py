@@ -447,6 +447,25 @@ def test_get_displayable_stellar_object_summaries_offset_pagination() -> None:
     assert page_3[49]["id"] == "HD_249"
 
 
+def test_count_displayable_stellar_objects_matches_the_unpaginated_total() -> None:
+    """Verify the count RPC reports every match, not one capped page.
+
+    Regression test for the star-list pagination footer: it needs the
+    total count of a scoped/filtered listing even though the listing
+    itself only ever returns one page at a time.
+    """
+    mock_stars = [
+        {"id": f"HD_{i:03d}", "name": f"Star {i}", "hasSpectra": True, "hasPhotometry": True}
+        for i in range(250)
+    ]
+    astrometrics = MagicMock()
+    astrometrics.stars.list_object_summaries.return_value = mock_stars
+    service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
+
+    assert service.count_displayable_stellar_objects(search="Star") == 250
+    assert len(service.get_displayable_stellar_object_summaries(search="Star", limit=100, offset=0)) == 100
+
+
 def test_get_target_data_availability_aggregates_across_a_target_s_stars() -> None:
     """Verify a target is marked available if one of its stars has that data.
 

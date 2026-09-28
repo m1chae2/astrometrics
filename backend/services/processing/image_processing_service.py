@@ -126,7 +126,7 @@ class ImageProcessingService(BaseBackgroundService):
             return False
 
         # Prioritize the stacked image if it exists
-        path = target.stacked_image or target.stacked_spectral_target
+        path = target.stacking.stacked_image or target.spectral_stacking.stacked_image
 
         if not path or not os.path.exists(path):
             # Fallback: if no stacked image, try to find the first
@@ -307,9 +307,9 @@ def start_siril_processing_task(
             target = target_service.get_target(target_id)
             if target:
                 if is_spectral:
-                    target.stacked_spectral_target = final_path
+                    target.spectral_stacking.stacked_image = final_path
                 else:
-                    target.stacked_image = final_path
+                    target.stacking.stacked_image = final_path
                 target_service.save_targets()
                 if logger:
                     logger.info(f"Updated target {target_id} metadata with stacked image: {final_path}")

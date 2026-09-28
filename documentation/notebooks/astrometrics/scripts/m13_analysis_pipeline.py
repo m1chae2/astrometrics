@@ -3,10 +3,10 @@
 Populates the persisted stellar catalog that `09_end_to_end_pipeline_M13.ipynb`
 section 9 and `m13_combined_dashboard.py` read from -- both only display
 already-persisted results, neither runs any pipeline stage itself. Assumes
-`stacked_image` (Luminance) and `stacked_spectral_target` (SPEC) already
-exist for the target (i.e. stacking, sections 3-4 of the notebook, has
-already been done); this script only runs the three analysis stages and
-saves.
+`stacking.stacked_image` (Luminance) and `spectral_stacking.stacked_image`
+(SPEC) already exist for the target (i.e. stacking, sections 3-4 of the
+notebook, has already been done); this script only runs the three
+analysis stages and saves.
 
 **Architecture Note:** This script demonstrates the **Domain Logic Layer**.
 The pipeline acts as a client orchestrating underlying scientific domain
@@ -38,15 +38,15 @@ def run_pipeline(target_id: str = "M 13") -> None:
     ------
     ValueError
         Raised if `target_id` doesn't exist, or is missing
-        `stacked_image` or `stacked_spectral_target`.
+        `stacking.stacked_image` or `spectral_stacking.stacked_image`.
     """
     astrometrics = Astrometrics()
     target = astrometrics.targets.get(target_id)
     if not target:
         raise ValueError(f"Target {target_id!r} not found in the library.")
-    if not target.stacked_image:
+    if not target.stacking.stacked_image:
         raise ValueError(f"Target {target_id!r} has no stacked_image; stack the Luminance frames first.")
-    if not target.stacked_spectral_target:
+    if not target.spectral_stacking.stacked_image:
         raise ValueError(f"Target {target_id!r} has no stacked_spectral_target; stack the SPEC frames first.")
 
     l_frames = [

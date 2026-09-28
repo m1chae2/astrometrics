@@ -36,11 +36,11 @@ def run_spectroscopy_validation(astrometrics: Astrometrics, camera_name: str) ->
 
     # Target 1: Vega calibration tuning
     vega_target = astrometrics.targets.get("Vega")
-    if vega_target and vega_target.stacked_spectral_target:
-        print(f"Executing Vega calibration tuning on: {vega_target.stacked_spectral_target}")
+    if vega_target and vega_target.spectral_stacking.stacked_image:
+        print(f"Executing Vega calibration tuning on: {vega_target.spectral_stacking.stacked_image}")
         try:
             tune_res = astrometrics.stars.tune_spectroscopy_calibration(
-                vega_target.stacked_spectral_target, camera_name=camera_name
+                vega_target.spectral_stacking.stacked_image, camera_name=camera_name
             )
             rms_err = tune_res.get("rms_error_nm", 0.0)
             print(f"  Vega Calibration RMS Error: {rms_err:.3f} nm")
@@ -56,7 +56,7 @@ def run_spectroscopy_validation(astrometrics: Astrometrics, camera_name: str) ->
             try:
                 res = astrometrics.processing.run_spectroscopy(t, limit=10)
                 if res and "context" in res:
-                    summary = getattr(t, "spectroscopy_quality_summary", None)
+                    summary = t.quality.spectroscopy
                     flagged = summary.flagged if summary else False
                     print(f"  Target {t.id} Spectroscopy Completed. Flagged: {flagged}")
                     results[t.id] = {"status": "success", "flagged": flagged}
@@ -154,7 +154,7 @@ def run_asteroid_detection_validation(astrometrics: Astrometrics, camera_name: s
 
     for tid in ["NGC 2403", "M 81", "M 1", "M 45", "M 67", "NGC 2903", "M 16", "NGC 1893"]:
         target = astrometrics.targets.get(tid)
-        if target and target.stacked_image:
+        if target and target.stacking.stacked_image:
             print(f"Running Asteroid Detection Analysis on target: {target.id}")
             try:
                 candidates = astrometrics.moving_objects.detect_asteroids(target)
@@ -199,7 +199,7 @@ def run_astrometry_validation(astrometrics: Astrometrics, camera_name: str) -> d
 
     for tid in ["NGC 1893", "M 45", "NGC 2403", "M 81"]:
         target = astrometrics.targets.get(tid)
-        if target and target.stacked_image:
+        if target and target.stacking.stacked_image:
             print(f"Running Astrometry WCS Plate-Solve on target: {target.id}")
             try:
                 res = astrometrics.processing.run_astrometry(target)
@@ -244,7 +244,7 @@ def run_stacking_validation(astrometrics: Astrometrics, camera_name: str) -> dic
     for tid in ["NGC 2403", "M 81", "M 13"]:
         target = astrometrics.targets.get(tid)
         if target:
-            summary = getattr(target, "stack_quality_summary", None)
+            summary = target.stacking.quality_summary
             if summary:
                 print(f"  Target {target.id} Stack Quality Summary Found:")
                 print(f"    Flagged: {summary.flagged}, Reasons: {summary.flag_reasons}")

@@ -560,6 +560,10 @@ def run_spectroscopy_analysis(
         Has ``"context"`` (the `AnalysisContext` the astrometry pass
         built) and ``"stellar_objects"``.
     """
+    from astrometricslib.pipelines.shared.provenance_recording import note_stacked_image_upstream
+
+    note_stacked_image_upstream(kwargs, target.id, target.spectral_stacking.stacked_image, "input_image")
+
     request = PipelineRequest(
         target=target,
         catalog_access=catalog_access,

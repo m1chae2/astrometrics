@@ -104,7 +104,7 @@ def plot_fits_star_field(  # ruff: ignore[missing-return-type-undocumented-publi
         stellar_objects = []
 
     if image_data is None and target is not None:
-        fits_path = getattr(target, "stacked_image", None) or fits_path
+        fits_path = target.stacking.stacked_image or fits_path
 
     if image_data is None and fits_path:
         from astropy.io import fits
@@ -487,7 +487,7 @@ def _load_target_stars(target: Any, stars: Any, limit: int) -> tuple[list, list,
     ValueError
         If stacked image or catalog stars are missing.
     """
-    if not getattr(target, "stacked_image", None):
+    if not getattr(getattr(target, "stacking", None), "stacked_image", None):
         raise ValueError(f"Target {getattr(target, 'id', 'unknown')!r} has no stacked_image.")
 
     target_id = getattr(target, "id", "")
@@ -665,7 +665,7 @@ def plot_astrometry(
     star_layer = StarOverlay(ax_astrometry, config)
 
     image_layer.render(
-        AstrometricsImage(target.stacked_image).data,
+        AstrometricsImage(target.stacking.stacked_image).data,
         config.default_percentile,
         title=f"{target.id} - Astrometry Solved Star Field",
     )
@@ -701,7 +701,7 @@ def plot_asteroid_detection(target: Any, figsize: tuple[int, int] = (10, 10)) ->
     """
     from .layers import TrackOverlay
 
-    if not getattr(target, "stacked_image", None):
+    if not getattr(getattr(target, "stacking", None), "stacked_image", None):
         raise ValueError(f"Target {getattr(target, 'id', 'unknown')!r} has no stacked_image.")
 
     config = VisualizationConfig()
@@ -710,14 +710,14 @@ def plot_asteroid_detection(target: Any, figsize: tuple[int, int] = (10, 10)) ->
     fig, ax = plt.subplots(figsize=figsize)
     image_layer = ImageOverlay(ax, config)
 
-    stacked_image = AstrometricsImage(target.stacked_image)
+    stacked_image = AstrometricsImage(target.stacking.stacked_image)
     image_layer.render(
         stacked_image.data,
         config.default_percentile,
         title=f"{target.id} - Asteroid Detection Candidates",
     )
     if stacked_image.wcs is not None:
-        candidates = getattr(target, "asteroid_candidates", None) or []
+        candidates = getattr(getattr(target, "asteroid_detection", None), "candidates", None) or []
         TrackOverlay(ax, config).render(candidates, stacked_image.wcs)
 
     return fig
@@ -763,7 +763,7 @@ def plot_target_photometry(
     photometry_layer = PhotometryOverlay(ax_photometry, fig, config)
 
     image_layer.render(
-        AstrometricsImage(target.stacked_image).data,
+        AstrometricsImage(target.stacking.stacked_image).data,
         config.default_percentile,
         title=f"{target.id} - Astrometry Solved Star Field",
     )
@@ -824,7 +824,7 @@ def plot_target_spectroscopy(
         If the target has no stacked spectral image, or no extracted
         spectrum has an extraction box.
     """
-    if not getattr(target, "stacked_spectral_target", None):
+    if not getattr(getattr(target, "spectral_stacking", None), "stacked_image", None):
         raise ValueError(f"Target {getattr(target, 'id', 'unknown')!r} has no stacked_spectral_target.")
 
     _, spectral_stars, _ = _load_target_stars(target, stars, limit)
@@ -852,7 +852,7 @@ def plot_target_spectroscopy(
     spectrum_layer = SpectrumOverlay(ax_spectrum, fig, config, corrected_axis=ax_spectrum_corrected)
 
     image_layer.render(
-        AstrometricsImage(target.stacked_spectral_target).data,
+        AstrometricsImage(target.spectral_stacking.stacked_image).data,
         config.default_percentile,
         title=f"{target.id} - Stacked Spectral Image (extraction boxes)",
     )
@@ -1047,7 +1047,7 @@ def plot_target_dashboard(
     photometry_layer = PhotometryOverlay(ax_photometry, fig, config) if ax_photometry is not None else None
     spectrum_layer = SpectrumOverlay(ax_spectrum, fig, config) if ax_spectrum is not None else None
 
-    stacked_image = AstrometricsImage(target.stacked_image)
+    stacked_image = AstrometricsImage(target.stacking.stacked_image)
     image_layer.render(
         stacked_image.data,
         config.default_percentile,
@@ -1055,7 +1055,7 @@ def plot_target_dashboard(
     )
     star_patches = star_layer.render(astrometry_stars, active_index=active_index)
 
-    asteroid_candidates = getattr(target, "asteroid_candidates", None)
+    asteroid_candidates = getattr(getattr(target, "asteroid_detection", None), "candidates", None)
     if isinstance(asteroid_candidates, list) and asteroid_candidates and stacked_image.wcs is not None:
         from .layers import TrackOverlay
 

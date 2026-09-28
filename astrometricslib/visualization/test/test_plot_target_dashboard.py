@@ -93,7 +93,7 @@ def test_plot_target_dashboard_raises_on_missing_stacked_image():  # ruff: ignor
     """
     mock_target = MagicMock()
     mock_target.id = "M 13"
-    mock_target.stacked_image = None
+    mock_target.stacking.stacked_image = None
     mock_astrometrics = MagicMock()
 
     with pytest.raises(ValueError, match="has no stacked_image"):
@@ -107,7 +107,7 @@ def test_plot_target_dashboard_raises_on_no_catalog_stars():  # ruff: ignore[mis
     """
     mock_target = MagicMock()
     mock_target.id = "M 13"
-    mock_target.stacked_image = "/fake/path/stacked.fits"
+    mock_target.stacking.stacked_image = "/fake/path/stacked.fits"
 
     mock_star_synthetic = MagicMock()
     mock_star_synthetic.id = "Star_1"
@@ -128,7 +128,7 @@ def test_plot_target_dashboard_dynamic_layout_cases(monkeypatch):  # ruff: ignor
     """
     mock_target = MagicMock()
     mock_target.id = "M 13"
-    mock_target.stacked_image = "/fake/path/stacked.fits"
+    mock_target.stacking.stacked_image = "/fake/path/stacked.fits"
 
     # Mock AstrometricsImage so no disk read occurs
     mock_img_instance = MagicMock()
@@ -246,7 +246,7 @@ def test_plot_target_spectroscopy_renders_raw_and_calibrated_panels_side_by_side
     """
     mock_target = MagicMock()
     mock_target.id = "Navi"
-    mock_target.stacked_spectral_target = "/fake/path/spectral_stack.fits"
+    mock_target.spectral_stacking.stacked_image = "/fake/path/spectral_stack.fits"
 
     mock_img_instance = MagicMock()
     mock_img_instance.data = [[1, 2], [3, 4]]
@@ -284,7 +284,7 @@ def test_plot_target_spectroscopy_renders_raw_and_calibrated_panels_side_by_side
 
 
 def test_plot_target_dashboard_draws_asteroid_candidates_on_the_star_field(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify a target's asteroid_candidates are drawn on the astrometry panel.
+    """Verify a target's asteroid candidates are drawn on the astrometry panel.
 
     Uses a real stacked-image FITS file (with a real WCS) rather than
     the monkeypatched `AstrometricsImage` the layout-cases test uses,
@@ -325,8 +325,8 @@ def test_plot_target_dashboard_draws_asteroid_candidates_on_the_star_field(tmp_p
 
     mock_target = MagicMock()
     mock_target.id = "M 13"
-    mock_target.stacked_image = str(stack_path)
-    mock_target.asteroid_candidates = [candidate]
+    mock_target.stacking.stacked_image = str(stack_path)
+    mock_target.asteroid_detection.candidates = [candidate]
 
     star_catalog_bare = MagicMock()
     star_catalog_bare.id = "Gaia DR3 88888"

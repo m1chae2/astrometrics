@@ -24,6 +24,9 @@ export class LinuxPlatform extends BasePlatform {
     // Auto-detect Wayland vs X11 session for crisp HiDPI rendering and native gestures
     app.commandLine.appendSwitch('ozone-platform-hint', 'auto');
     app.commandLine.appendSwitch('enable-features', 'WaylandWindowDecorations,WebRTCPipeWireCapturer');
+    // Use GTK4 for native dialogs (Open File, print) so they match the GTK4/libadwaita
+    // stack Ubuntu ships by default from 24.04 onward, instead of falling back to GTK3.
+    app.commandLine.appendSwitch('gtk-version', '4');
   }
 
   /**
@@ -152,6 +155,19 @@ export class LinuxPlatform extends BasePlatform {
         // Process already terminated
       }
     }
+  }
+
+  /**
+   * Uses a frameless window with an in-app title bar (icon, drag region, and
+   * custom minimize/maximize/close buttons) instead of GNOME/Wayland's native
+   * decorations, matching the look of apps like VS Code.
+   *
+   * @returns {Electron.BrowserWindowConstructorOptions}
+   */
+  getWindowOptions() {
+    return {
+      frame: false
+    };
   }
 
   /**

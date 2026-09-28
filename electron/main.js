@@ -17,6 +17,7 @@ import { BackendManager } from './backend_manager.js';
 import { createTrayPopoverWindow } from './tray_window.js';
 import { getPlatform } from './platforms/index.js';
 import { PythonTerminalManager } from './python_terminal_manager.js';
+import { loadWindowState, trackWindowState } from './window_state.js';
 
 const platform = getPlatform();
 const pythonTerminalManager = new PythonTerminalManager({ platform });
@@ -200,6 +201,9 @@ let splashWindow = null;
 let trayPopoverWindow = null;
 let splashShownAt = 0;
 let isOpeningMainWindow = false;
+// Whether the main window should maximize on first show: true unless a saved
+// window-state file says the user last left it un-maximized at a specific size.
+let shouldMaximizeMainWindow = true;
 let tray = null;
 const backendManager = new BackendManager(app);
 
@@ -252,7 +256,7 @@ function dismissSplashAndShowMainWindow() {
     if (mainWindow && !mainWindow.isDestroyed()) {
       // maximize() before the window is shown; calling it while show:false is
       // still pending, some Linux window managers map (show) the window early.
-      mainWindow.maximize();
+      if (shouldMaximizeMainWindow) mainWindow.maximize();
       mainWindow.show();
     }
   }, remaining);
@@ -301,23 +305,62 @@ async function openMainWindowWhenBackendIsWarm() {
  * enabling `contextIsolation`. Exposes only the whitelisted IPC API defined
  * in `preload.js` to the React renderer context.
  */
-const getWindowOptions = () => ({
-  show: true,
-  width: 1280,
-  height: 800,
-  minWidth: 1024,
-  minHeight: 700,
-  frame: true,
-  backgroundColor: '#181818',
-  icon: getAppPath('assets', 'orbit-smooth-256.png'),
-  resizable: true,
-  ...platform.getWindowOptions(),
-  webPreferences: {
-    nodeIntegration: false,
-    contextIsolation: true,
-    preload: path.join(__dirname, 'preload.js')
-  }
-});
+const getWindowOptions = () => {
+  const platformWindowOptions = platform.getWindowOptions();
+  // Passed through as a renderer command-line flag (rather than an IPC round
+  // trip) so the custom title bar's presence is known synchronously at first
+  // paint, with no flash of the wrong chrome.
+  const isFrameless = platformWindowOptions.frame === false;
+
+  return {
+    show: true,
+    width: 1280,
+    height: 800,
+    minWidth: 1024,
+    minHeight: 700,
+    frame: true,
+    backgroundColor: '#181818',
+    icon: getAppPath('assets', 'orbit-smooth-256.png'),
+    resizable: true,
+    ...platformWindowOptions,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js'),
+      additionalArguments: [`--astrometrics-frameless=${isFrameless}`]
+    }
+  };
+};
+
+/**
+ * Wires a BrowserWindow's maximize, focus, and fullscreen transitions to
+ * notify its own renderer, so a custom title bar stays in sync with real
+ * window state it doesn't otherwise observe directly: the maximize/restore
+ * button icon (including transitions triggered outside that button, e.g. a
+ * window-manager double-click or edge-snap), dimming to match OS-native title
+ * bars when the window loses focus, and hiding itself in fullscreen the way
+ * native chrome would.
+ *
+ * @param {Electron.BrowserWindow} win
+ */
+function watchWindowChromeState(win) {
+  const send = (channel, value) => {
+    if (!win.isDestroyed() && win.webContents) {
+      win.webContents.send(channel, value);
+    }
+  };
+
+  const notifyMaximized = () => send('window-maximized-changed', win.isMaximized());
+  win.on('maximize', notifyMaximized);
+  win.on('unmaximize', notifyMaximized);
+
+  win.on('focus', () => send('window-focus-changed', true));
+  win.on('blur', () => send('window-focus-changed', false));
+
+  const notifyFullscreen = () => send('window-fullscreen-changed', win.isFullScreen());
+  win.on('enter-full-screen', notifyFullscreen);
+  win.on('leave-full-screen', notifyFullscreen);
+}
 
 /**
  * Creates the main application window.
@@ -326,9 +369,34 @@ const getWindowOptions = () => ({
  * the renderer process to the Python backend process (`backendManager`).
  */
 async function createMainWindow() {
-  mainWindow = new BrowserWindow({ ...getWindowOptions(), show: false });
+  const savedState = loadWindowState(app);
+  const windowOptions = { ...getWindowOptions(), show: false };
+  if (savedState) {
+    windowOptions.width = savedState.width;
+    windowOptions.height = savedState.height;
+    // Only reuse the saved position if it still lands on a currently connected
+    // display; a monitor removed/reconfigured since the last run (or an
+    // absolute position Wayland never actually honored) could otherwise place
+    // the window off-screen with no way for the user to reach it.
+    const savedPositionIsOnScreen =
+      typeof savedState.x === 'number' &&
+      typeof savedState.y === 'number' &&
+      screen.getAllDisplays().some((display) => {
+        const { x, y, width, height } = display.workArea;
+        return savedState.x >= x && savedState.y >= y && savedState.x < x + width && savedState.y < y + height;
+      });
+    if (savedPositionIsOnScreen) {
+      windowOptions.x = savedState.x;
+      windowOptions.y = savedState.y;
+    }
+  }
+  shouldMaximizeMainWindow = !savedState || savedState.isMaximized;
+
+  mainWindow = new BrowserWindow(windowOptions);
   mainWindow.setMenuBarVisibility(false);
   mainWindow.once('ready-to-show', dismissSplashAndShowMainWindow);
+  trackWindowState(mainWindow, app);
+  watchWindowChromeState(mainWindow);
 
   if (isDev) {
     const devUrl = process.env.ELECTRON_RENDERER_URL || 'http://127.0.0.1:5173';
@@ -428,6 +496,7 @@ function createDisplayWindow(options = {}) {
 
   const win = new BrowserWindow(windowOptions);
   win.setMenuBarVisibility(false);
+  watchWindowChromeState(win);
   const winId = win.id;
   auxiliaryWindows.set(winId, win);
 
@@ -709,18 +778,10 @@ function updateTrayMenu(status = {}) {
 // App Initialization
 
 app.on('ready', () => {
-  // Ensure window manager uses dark frame background and widgets
+  // Astrometrics always renders dark (night-vision friendly for observatory use),
+  // independent of the desktop's own light/dark setting, so OS theme changes are
+  // not forwarded to renderers.
   nativeTheme.themeSource = 'dark';
-
-  // Listen to OS theme changes and notify open windows
-  nativeTheme.on('updated', () => {
-    const isDark = nativeTheme.shouldUseDarkColors;
-    BrowserWindow.getAllWindows().forEach((win) => {
-      if (!win.isDestroyed() && win.webContents) {
-        win.webContents.send('system-theme-changed', isDark);
-      }
-    });
-  });
 
   createSplashWindow();
 

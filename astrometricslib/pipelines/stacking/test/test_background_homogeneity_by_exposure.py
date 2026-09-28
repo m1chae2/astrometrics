@@ -25,7 +25,11 @@ def frames(exposure: str, levels: list[float]) -> list[SimpleNamespace]:
         Frames with an exposure and a measured background level.
     """
     return [
-        SimpleNamespace(exposure=exposure, background_level=level, name=f"{exposure}_{index}")
+        SimpleNamespace(
+            exposure=exposure,
+            measurements=SimpleNamespace(background_level=level),
+            name=f"{exposure}_{index}",
+        )
         for index, level in enumerate(levels)
     ]
 

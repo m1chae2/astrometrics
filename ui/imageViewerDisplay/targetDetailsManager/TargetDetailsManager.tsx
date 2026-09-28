@@ -133,7 +133,7 @@ export const TargetDetailsManager: React.FC<TargetDetailsManagerProps> = ({
 
     setFilterGroups(parsedFilterGroups);
 
-    const processedPath = obj.processedImage || obj.stackedImage || obj.stackedSpectralTarget || obj.processed_image || obj.stacked_image || obj.stacked_spectral_target;
+    const processedPath = obj.stacking?.processedImage || obj.stacking?.stackedImage || obj.spectralStacking?.stackedImage;
 
     let exptimeSec: number | null = null;
     const isFits = typeof processedPath === 'string' && (processedPath.toLowerCase().endsWith('.fits') || processedPath.toLowerCase().endsWith('.fit'));

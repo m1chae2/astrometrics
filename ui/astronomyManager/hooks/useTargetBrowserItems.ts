@@ -58,5 +58,5 @@ export const useTargetBrowserItems = () => {
         });
     }, [targets, targetDataAvailability, isAvailabilityLoading, filterText]);
 
-    return { items, filterText, setFilterText };
+    return { items, filterText, setFilterText, isLoading: targetListQuery.isLoading };
 };

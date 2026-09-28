@@ -242,9 +242,9 @@ class TargetCatalog:
         """
         if target is not None:
             belongs_to_target = any(f.path == path for f in target.frames) or path in (
-                target.processed_image,
-                target.stacked_image,
-                target.stacked_spectral_target,
+                target.stacking.processed_image,
+                target.stacking.stacked_image,
+                target.spectral_stacking.stacked_image,
             )
             if not belongs_to_target:
                 raise ValueError(f"Path {path} does not belong to target {target.id}")

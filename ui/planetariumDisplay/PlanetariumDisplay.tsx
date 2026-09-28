@@ -476,6 +476,7 @@ export const PlanetariumDisplay: React.FC = () => {
           onFilterTextChange={targetBrowser.setFilterText}
           filterPlaceholder="Search targets..."
           highlightedIds={targetList.highlightedIds}
+          legend={targetBrowser.isLoading ? 'Loading targets…' : undefined}
         />
       ) : (
         <RadioListManager
@@ -516,14 +517,19 @@ export const PlanetariumDisplay: React.FC = () => {
         filterText={scopedStarList.filterText}
         onFilterTextChange={scopedStarList.setFilterText}
         legend={
-          <>
-            <span><span className="selectable-list__badge selectable-list__badge--spectra">S</span> spectrum</span>
-            <span><span className="selectable-list__badge selectable-list__badge--photometry">P</span> photometry</span>
-          </>
+          scopedStarList.isLoading && scopedStarList.items.length === 0 ? (
+            'Loading stars…'
+          ) : (
+            <>
+              <span><span className="selectable-list__badge selectable-list__badge--spectra">S</span> spectrum</span>
+              <span><span className="selectable-list__badge selectable-list__badge--photometry">P</span> photometry</span>
+            </>
+          )
         }
         page={activeSpectralClass ? undefined : starsInScopedTarget.page}
         onPageChange={activeSpectralClass ? undefined : starsInScopedTarget.setPage}
         hasMore={activeSpectralClass ? false : starsInScopedTarget.hasMore}
+        totalPages={activeSpectralClass ? undefined : starsInScopedTarget.totalPages}
       />
     </div>
   );

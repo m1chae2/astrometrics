@@ -29,6 +29,8 @@ export interface RadioListManagerProps {
     page?: number;
     onPageChange?: (newPage: number) => void;
     hasMore?: boolean;
+    /** Total number of pages, if known, shown as "Page X / Y" instead of just "Page X". */
+    totalPages?: number;
 
     // New
     highlightedIds?: Set<string>;
@@ -59,6 +61,7 @@ export const RadioListManager: React.FC<RadioListManagerProps> = ({
     page = 1,
     onPageChange,
     hasMore = false,
+    totalPages,
     highlightedIds,
     legend,
     noWrapper = false,
@@ -106,13 +109,13 @@ export const RadioListManager: React.FC<RadioListManagerProps> = ({
                         &larr; Prev
                     </button>
                     <span className="manager__pagination-label">
-                        Page {page}
+                        Page {page}{totalPages !== undefined ? ` / ${totalPages}` : ''}
                     </span>
                     <button
                         type="button"
                         className="manager__pagination-btn"
                         onClick={() => onPageChange(page + 1)}
-                        disabled={!hasMore}
+                        disabled={totalPages !== undefined ? page >= totalPages : !hasMore}
                         aria-label="Next Page"
                     >
                         Next &rarr;

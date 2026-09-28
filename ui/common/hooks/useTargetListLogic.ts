@@ -7,6 +7,7 @@ import { SelectableItem } from '../components/SelectableList';
 interface Target {
     id?: string;
     name?: string;
+    stacking?: { processedImage?: string; stackedImage?: string };
     [key: string]: unknown;
 }
 
@@ -100,7 +101,7 @@ export const useTargetListLogic = (
         (t: Target) => {
             const processedPath = typeof t === 'string'
                 ? ''
-                : (t.processed_image || t.processedImage || '');
+                : (t.stacking?.processedImage || t.stacking?.stackedImage || '');
             const isProcessed = typeof processedPath === 'string' && processedPath.trim() !== '';
 
             if (dropdown === 'No Image') {
@@ -142,7 +143,7 @@ export const useTargetListLogic = (
             if (!filterProcessedOnly) return true;
             const processedPath = typeof t === 'string'
                 ? ''
-                : (t.processed_image || t.processedImage || '');
+                : (t.stacking?.processedImage || t.stacking?.stackedImage || '');
             return typeof processedPath === 'string' && processedPath.trim() !== '';
         },
         [filterProcessedOnly]
@@ -204,8 +205,10 @@ export const useTargetListLogic = (
                     ? undefined
                     : (typeof target === 'string'
                         ? false
-                        : typeof (target.processed_image || target.processedImage) === 'string' &&
-                          (target.processed_image || target.processedImage).trim() !== '')
+                        : (() => {
+                              const image = target.stacking?.processedImage || target.stacking?.stackedImage;
+                              return typeof image === 'string' && image.trim() !== '';
+                          })())
             };
         });
     }, [filteredTargets, dropdown]);

@@ -217,7 +217,7 @@ def _serialize_target_for_planetarium(target, local_target_ids: set | None = Non
 
     # Resolve display image: stacked first, then longest-exposure LIGHT
     # frame fallback.
-    stacked_image = target.stacked_image
+    stacked_image = target.stacking.stacked_image
     if not stacked_image and target.frames:
         light_frames = [f for f in target.frames if f.role == "LIGHT"]
         candidate_frames = light_frames if light_frames else target.frames
@@ -239,8 +239,10 @@ def _serialize_target_for_planetarium(target, local_target_ids: set | None = Non
         "commonName": getattr(target, "common_name", None) or target.id,
         "spectralType": None,
         "magnitude": None,
-        "hasSpectra": bool(getattr(target, "stacked_spectral_target", None)),
-        "hasPhotometry": bool(stacked_image or getattr(target, "processed_image", None)),
+        "hasSpectra": bool(getattr(getattr(target, "spectral_stacking", None), "stacked_image", None)),
+        "hasPhotometry": bool(
+            stacked_image or getattr(getattr(target, "stacking", None), "processed_image", None)
+        ),
         "type": "target",
         "global": is_global,
         "stackedImage": stacked_image or None,
@@ -669,6 +671,36 @@ class StellarService:
 
         return fallback_results
 
+    def count_displayable_stellar_objects(
+        self,
+        target_id: str | None = None,
+        search: str | None = None,
+        filter_type: str | None = None,
+    ) -> int:
+        """Total number of stars a scoped, filtered listing would return.
+
+        Runs the same filtering as `get_displayable_stellar_object_summaries`
+        but returns the count of every match instead of one capped page, so
+        a caller can compute how many pages a paginated listing has.
+
+        Parameters
+        ----------
+        target_id : `str`, optional
+            Restrict to stars belonging to this target.
+        search : `str`, optional
+            Search query to filter star ID or name across the catalog.
+        filter_type : `str`, optional
+            Filter category, e.g. "With Spectra" / "spectra" or
+            "With Photometry" / "photometry".
+
+        Returns
+        -------
+        total : `int`
+            Number of stars matching `target_id`, `search`, and
+            `filter_type`.
+        """
+        return len(self._get_filtered_stellar_object_summaries(target_id, search, filter_type))
+
     def get_displayable_stellar_object_summaries(
         self,
         target_id: str | None = None,
@@ -715,6 +747,51 @@ class StellarService:
             then photometry, then brightest first (see
             `_summary_sort_key`); an unfiltered listing keeps database
             order.
+        """
+        filtered = self._get_filtered_stellar_object_summaries(
+            target_id, search, filter_type, offset=offset, limit=limit
+        )
+
+        start_offset = max(0, offset or 0)
+        if limit is not None and limit > 0:
+            return filtered[start_offset : start_offset + limit]
+        return filtered[start_offset:]
+
+    def _get_filtered_stellar_object_summaries(
+        self,
+        target_id: str | None,
+        search: str | None,
+        filter_type: str | None,
+        *,
+        offset: int | None = 0,
+        limit: int | None = 100,
+    ) -> list[dict]:
+        """Every displayable star summary matching a scope, unpaginated.
+
+        Shared by `get_displayable_stellar_object_summaries` (which slices
+        this to one page) and `count_displayable_stellar_objects` (which
+        just counts it).
+
+        Parameters
+        ----------
+        target_id : `str`, optional
+            Restrict to stars belonging to this target.
+        search : `str`, optional
+            Search query to filter star ID or name across the catalog.
+        filter_type : `str`, optional
+            Filter category, e.g. "With Spectra" / "spectra" or
+            "With Photometry" / "photometry".
+        offset : `int`, optional
+            Whether a later slice will use a nonzero offset. A nonzero
+            offset forces a full scan, same as `search`/`filter_type`.
+        limit : `int`, optional
+            The `limit` a later slice will use, unused for counting.
+
+        Returns
+        -------
+        filtered : `list` [`dict`]
+            Every matching summary, sorted the same way a scoped or
+            filtered listing is sorted.
         """
         # A target's own stars are cheap to read in full, and the sort below
         # needs all of them, so they count as a full scan too.
@@ -769,10 +846,7 @@ class StellarService:
         if target_id or search_needle or filter_type:
             filtered.sort(key=_summary_sort_key)
 
-        start_offset = max(0, offset or 0)
-        if limit is not None and limit > 0:
-            return filtered[start_offset : start_offset + limit]
-        return filtered[start_offset:]
+        return filtered
 
     def warm_catalog_summary_cache(self) -> None:
         """Run the full-catalog summary scan now, so the result is cached.

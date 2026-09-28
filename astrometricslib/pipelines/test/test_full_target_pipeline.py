@@ -69,7 +69,7 @@ def test_run_full_pipeline_runs_astrometry_and_photometry_exactly_once(monkeypat
         filter_type=None,  # ruff: ignore[missing-type-function-argument]
         **kwargs: Any,
     ) -> str:
-        target.stacked_image = stacked_path
+        target.stacking.stacked_image = stacked_path
         return stacked_path
 
     monkeypatch.setattr(stacking_stage, "stack_frames", _fake_stack_frames)

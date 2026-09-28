@@ -1,11 +1,12 @@
 @import '../common/styles/theme.css';
 @import '../common/styles/scrollbars.css';
 @import '../common/styles/animations.css';
+@import '../common/styles/button.css';
 
 /* Core Status Header Block */
 .header {
-  height: env(titlebar-area-height, 48px);
-  flex: 0 0 env(titlebar-area-height, 48px);
+  height: 48px;
+  flex: 0 0 48px;
   width: 100%;
   box-sizing: border-box;
   background-color: var(--grey-dark);
@@ -13,7 +14,6 @@
   display: flex;
   align-items: center;
   padding: 0 16px;
-  padding-right: calc(16px + env(titlebar-area-width, 0px));
   border-bottom: 1px solid rgba(0, 0, 0, 0.6);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
   z-index: 100;
@@ -483,7 +483,7 @@
 
 /* Settings Panel Block */
 .settings {
-  width: 600px;
+  width: 760px;
   max-width: 100%;
   background: var(--cmd-bg-dark); /* Force opaque to keep app content behind it */
   color: var(--white, #fff);
@@ -544,11 +544,32 @@
   color: var(--white);
 }
 
-.settings__content {
+/* Body: left sidebar of section tabs + scrollable content panel, so the
+   tab list never needs to scroll horizontally regardless of tab count. */
+.settings__body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
   margin-top: 12px;
+  gap: 16px;
+}
+
+.settings__sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 168px;
+  flex-shrink: 0;
+  padding-right: 12px;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  overflow-y: auto;
+}
+
+.settings__content {
   display: flex;
   flex-direction: column;
   flex: 1;
+  min-width: 0;
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
@@ -567,34 +588,26 @@
   margin-top: 12px;
 }
 
+.settings__footer .btn {
+  width: auto;
+  flex: 0 0 auto;
+  padding: 0 20px;
+}
+
 /* Settings Elements */
-.settings__tabs {
-  display: flex;
-  gap: 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  padding-bottom: 12px;
-}
-
-.settings__tabs--sub {
-  margin-bottom: 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  overflow-x: auto;
-  padding-bottom: 0;
-  flex-shrink: 0;
-}
-
 .settings__tab-button {
   background: transparent;
   border: 1px solid transparent;
   color: var(--text-dim, #aaa);
   cursor: pointer;
-  padding: 6px 10px;
+  padding: 8px 10px;
   font-size: 13px;
   font-weight: 600;
   font-family: var(--font-family-base);
   border-radius: 4px;
+  text-align: left;
+  width: 100%;
   transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-  flex-shrink: 0;
 }
 
 .settings__tab-button:hover {
@@ -610,8 +623,8 @@
 
 .settings__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 12px 24px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
 }
 
 .settings__form {
@@ -655,6 +668,12 @@
   justify-content: flex-start;
   gap: 10px;
   cursor: pointer;
+  padding: 4px 0;
+}
+
+.settings__field--row + .settings__field--row,
+.settings__field--checkbox + .settings__field--checkbox {
+  margin-top: 2px;
 }
 
 .settings__field--checkbox .settings__label {
@@ -682,11 +701,48 @@
 }
 
 .settings__checkbox {
-  width: 16px;
-  height: 16px;
+  appearance: none;
+  -webkit-appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
   margin: 0;
+  flex-shrink: 0;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.03);
   cursor: pointer;
-  accent-color: var(--adwaita-blue-light, #3584e4);
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.settings__checkbox:hover {
+  border-color: rgba(53, 132, 228, 0.5);
+}
+
+.settings__checkbox:checked {
+  background-color: var(--adwaita-blue-light, #3584e4);
+  border-color: var(--adwaita-blue-light, #3584e4);
+}
+
+.settings__checkbox:checked::after {
+  content: '';
+  width: 5px;
+  height: 9px;
+  border: solid white;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg) translate(-1px, -1px);
+}
+
+.settings__checkbox:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.settings__checkbox:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(53, 132, 228, 0.4);
 }
 
 .settings__help {
@@ -743,6 +799,68 @@
 
 .settings__group--nested {
   margin-left: 12px;
+}
+
+.settings__collection {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.settings__collection-row {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.settings__collection-row__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.settings__collection-row__title {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-primary, #eaeaea);
+}
+
+.settings__collection-row__remove {
+  width: auto !important;
+  padding: 0 10px !important;
+  height: 26px !important;
+  font-size: 12px !important;
+}
+
+.settings__collection-row__calibration {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings__collection-row__calibration-item {
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  color: var(--text-dim, #aaa);
+}
+
+.settings__collection-add {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.settings__collection-add .btn {
+  width: auto !important;
+  padding: 0 14px !important;
+  flex: 0 0 auto !important;
 }
 
 .terminal-integration__file-input {

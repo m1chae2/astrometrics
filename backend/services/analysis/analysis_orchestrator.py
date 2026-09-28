@@ -394,7 +394,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
         present), and extracts spectra for those same identified stars
         from every frame in that session -- see
         `Astrometrics.processing.run_spectroscopy_by_session`.
-        Builds `target.spectroscopy_quality_summary` here, in this
+        Builds `target.quality.spectroscopy` here, in this
         (parent) process, from the aggregated per-frame results:
         earlier, each frame worker built its own quality summary
         against its own freshly-fetched `Target` copy inside its own
@@ -452,7 +452,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
         # wavelengths, features, spectral type) that stage two relies on.
         # Stage two (the raw per-session frames, below) then follows how
         # the spectra change over time.
-        stacked_spectral_path = getattr(target, "stacked_spectral_target", None)
+        stacked_spectral_path = getattr(getattr(target, "spectral_stacking", None), "stacked_image", None)
         master_paths = [
             path for path in paths if stacked_spectral_path and _is_same_file(path, stacked_spectral_path)
         ]
@@ -513,7 +513,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
         for path, error_message in summary.failed:
             log.error(f"[{target_id}] Failed to process {path} for spectroscopy: {error_message}")
 
-        # target.spectroscopy_quality_summary is now built and attached
+        # target.quality.spectroscopy is now built and attached
         # by run_spectroscopy_by_session itself.
 
         try:

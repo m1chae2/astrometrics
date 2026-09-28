@@ -1,9 +1,12 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAstronomyListQuery } from '../../common/queries/useAstronomyListQuery';
+import { fetchAstronomyCount } from '../../common/services/astronomyService';
 import { reportError } from '../../common/utils/reportError';
 import { SelectableItem } from '../../common/components/SelectableList';
 import { Spectrum } from '../../common/types/backendTypes';
 import { buildStarListSubtitle, formatStarListLabel } from '../utils/starDisplayFormat';
+
+const STARS_PER_PAGE = 100;
 
 /**
  * Fetches and paginates the star list for one scope -- a single target, or
@@ -53,12 +56,29 @@ export const useSpectrumList = (
     const queryOptions = useMemo(() => ({
         targetId,
         search: debouncedFilterText,
-        limit: 100,
-        offset: (page - 1) * 100,
+        limit: STARS_PER_PAGE,
+        offset: (page - 1) * STARS_PER_PAGE,
     }), [targetId, debouncedFilterText, page]);
 
     const astronomyListQuery = useAstronomyListQuery(queryOptions);
     const spectra = useMemo(() => astronomyListQuery.data ?? [], [astronomyListQuery.data]);
+
+    // Total match count for this scope, used to show "Page X / Y" instead of
+    // just "Page X" -- a separate, unpaginated RPC since the list query
+    // itself only ever sees one capped page of results.
+    const [totalCount, setTotalCount] = useState<number | undefined>(undefined);
+    useEffect(() => {
+        let cancelled = false;
+        fetchAstronomyCount({ targetId, search: debouncedFilterText }).then((count) => {
+            if (!cancelled) setTotalCount(count);
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [targetId, debouncedFilterText]);
+    const totalPages = totalCount !== undefined
+        ? Math.max(1, Math.ceil(totalCount / STARS_PER_PAGE))
+        : undefined;
 
     // Callers change reloadKey to force a refresh.
     const isFirstReloadKeyRender = useRef(true);
@@ -161,6 +181,8 @@ export const useSpectrumList = (
         page,
         setPage,
         hasMore,
+        totalPages,
+        isLoading: astronomyListQuery.isLoading,
         hasPrevious: page > 1,
         nextPage: () => setPage((p) => p + 1),
         prevPage: () => setPage((p) => Math.max(1, p - 1)),

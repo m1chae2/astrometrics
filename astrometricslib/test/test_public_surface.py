@@ -2,11 +2,10 @@
 
 `astrometricslib/__init__.py` is the only door into this library that
 anything outside it is supposed to use. The UI backend imports from
-`astrometricslib` directly at 35 call sites and never reaches into a
-submodule, and the Sphinx documentation only ever documents this
-top-level namespace -- so the 46 names listed in `__all__` are, in a
-very real sense, the entire contract this library makes with the rest
-of the repository.
+`astrometricslib` directly and never reaches into a submodule, and the
+Sphinx documentation only ever documents this top-level namespace --
+so the names listed in `__all__` are, in a very real sense, the entire
+contract this library makes with the rest of the repository.
 
 That contract is easy to break by accident during a refactor. Moving a
 class to a new home, renaming it, or forgetting to re-export it after
@@ -36,6 +35,10 @@ import astrometricslib
 # code around internally.
 EXPECTED_PUBLIC_NAMES = frozenset({
     "AbstractCatalogAccess",
+    "Activity",
+    "ActivityDescription",
+    "Agent",
+    "AgentType",
     "AnalysisResult",
     "AppConfiguration",
     "AppliedCameraProfile",
@@ -47,22 +50,33 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "BatchRunSummary",
     "CalibrationCatalog",
     "CatalogAccess",
+    "Collection",
+    "ConfigFile",
+    "ConfigFileDescription",
+    "DatasetDescription",
+    "DatasetEntity",
     "DbLogHandler",
+    "Entity",
+    "EntityDescription",
     "ExposureGroupSummary",
     "FileItem",
     "FilterType",
     "FitsHeaderEntry",
     "FrameRecord",
+    "GenerationDescription",
     "GroupedFrameStat",
     "ImageProcessing",
     "JobHandle",
     "LoggerInterface",
     "MovingObjectConfig",
     "MovingObjectRecovery",
+    "Parameter",
+    "ParameterDescription",
     "PhotometryResult",
     "PlotData",
     "ProcessingJob",
     "ProcessingPipelines",
+    "ProvenanceStore",
     "QualityDiagnostics",
     "RenderedImage",
     "SpectroscopyResult",
@@ -73,12 +87,21 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "TargetCatalog",
     "TargetFilesResponse",
     "TargetSessionContribution",
+    "UsageDescription",
+    "Used",
+    "ValueDescription",
+    "ValueEntity",
     "VariableCandidate",
     "Visualization",
+    "WasAssociatedWith",
+    "WasAttributedTo",
+    "WasConfiguredBy",
+    "WasGeneratedBy",
     "capture_job_logs",
     "classify_and_sort_fits_files",
     "derive_field_centers",
     "derive_target_sessions",
+    "export_target_lineage_as_prov_xml",
     "frame_is_spectral",
     "get_configuration",
     "parse_coordinate_string",

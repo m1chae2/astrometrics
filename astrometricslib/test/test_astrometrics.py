@@ -96,7 +96,7 @@ def test_astrometry_pulls_solved_coordinates_when_unpopulated(tmp_path):  # ruff
         # Ensure coordinates are unpopulated
         target.ra = "0h 0m 0s"
         target.dec = "0° 0′ 0′′"
-        target.stacked_image = "dummy.fits"
+        target.stacking.stacked_image = "dummy.fits"
 
         # Mock AstrometryPipeline
         mock_pipeline_class = MagicMock()

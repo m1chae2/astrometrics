@@ -223,6 +223,7 @@ export const AstronomyManager: React.FC = () => {
           onFilterOptionChange={() => {}}
           onFilterTextChange={targetBrowser.setFilterText}
           filterPlaceholder="Search targets..."
+          legend={targetBrowser.isLoading ? 'Loading targets…' : undefined}
         />
       ) : (
         <RadioListManager
@@ -257,14 +258,19 @@ export const AstronomyManager: React.FC = () => {
         filterText={starList.filterText}
         onFilterTextChange={starList.setFilterText}
         legend={
-          <>
-            <span><span className="selectable-list__badge selectable-list__badge--spectra">S</span> spectrum</span>
-            <span><span className="selectable-list__badge selectable-list__badge--photometry">P</span> photometry</span>
-          </>
+          starList.isLoading && starList.items.length === 0 ? (
+            'Loading stars…'
+          ) : (
+            <>
+              <span><span className="selectable-list__badge selectable-list__badge--spectra">S</span> spectrum</span>
+              <span><span className="selectable-list__badge selectable-list__badge--photometry">P</span> photometry</span>
+            </>
+          )
         }
         page={isSpectralClassScoped ? undefined : starsByTarget.page}
         onPageChange={isSpectralClassScoped ? undefined : starsByTarget.setPage}
         hasMore={isSpectralClassScoped ? false : starsByTarget.hasMore}
+        totalPages={isSpectralClassScoped ? undefined : starsByTarget.totalPages}
       />
     </div>
   );

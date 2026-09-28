@@ -3,9 +3,36 @@
  */
 
 import path from 'path';
+import fs from 'fs';
+import os from 'os';
+import { execFileSync } from 'child_process';
 
 // __dirname replacement for ESM (now at project root)
 const __dirname = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1'));
+
+/**
+ * Injects the AppStream metainfo file into a built .deb package.
+ *
+ * electron-installer-debian (the engine behind @electron-forge/maker-deb) has
+ * no config option for shipping arbitrary extra files, so the only way to get
+ * a file under /usr/share/metainfo/ into the package is to unpack the .deb it
+ * produced, add the file, and repack it in place with dpkg-deb.
+ *
+ * @param {string} debPath Absolute path to the built .deb artifact.
+ */
+function injectAppStreamMetainfo(debPath) {
+  const metainfoSource = path.join(__dirname, 'assets', 'metainfo', 'astrometrics.metainfo.xml');
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'astrometrics-deb-'));
+  try {
+    execFileSync('dpkg-deb', ['-R', debPath, workDir]);
+    const metainfoDestDir = path.join(workDir, 'usr', 'share', 'metainfo');
+    fs.mkdirSync(metainfoDestDir, { recursive: true });
+    fs.copyFileSync(metainfoSource, path.join(metainfoDestDir, 'astrometrics.metainfo.xml'));
+    execFileSync('dpkg-deb', ['-b', workDir, debPath]);
+  } finally {
+    fs.rmSync(workDir, { recursive: true, force: true });
+  }
+}
 
 export default {
   // Ensure packager includes the Linux icon. electron-packager will pick this
@@ -107,6 +134,9 @@ export default {
           Comment: 'Astrometrics Image Viewer and Analyzer',
           Categories: 'Science;Education;Graphics;',
           MimeType: 'image/fits;application/fits;application/x-fits;',
+          // Matches app.name in electron/platforms/linux.js#configureIdentity so GNOME
+          // Shell reliably groups the running window under this launcher's icon.
+          StartupWMClass: 'astrometrics',
           Actions: 'Planetarium;Observatory;Processing;',
           'Desktop Action Planetarium': {
             Name: 'Open Planetarium',
@@ -140,5 +170,19 @@ export default {
       name: '@electron-forge/maker-zip',
       platforms: ['darwin', 'win32']
     }
-  ]
+  ],
+
+  hooks: {
+    async postMake(_forgeConfig, makeResults) {
+      for (const result of makeResults) {
+        if (result.platform !== 'linux') continue;
+        for (const artifactPath of result.artifacts) {
+          if (artifactPath.endsWith('.deb')) {
+            injectAppStreamMetainfo(artifactPath);
+          }
+        }
+      }
+      return makeResults;
+    }
+  }
 };

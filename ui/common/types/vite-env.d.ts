@@ -31,6 +31,18 @@ interface Window {
       routeDisplayAction?: (intent: any) => Promise<{ handledRemotely: boolean; targetWindowId?: number }>;
       onRemoteAction?: (callback: (data: { action: string; payload: any; intent?: any }) => void) => () => void;
     };
+    window: {
+      hasCustomTitleBar: boolean;
+      minimize: () => void;
+      toggleMaximize: () => void;
+      close: () => void;
+      isMaximized: () => Promise<boolean>;
+      onMaximizedChange: (callback: (isMaximized: boolean) => void) => () => void;
+      isFocused: () => Promise<boolean>;
+      onFocusChange: (callback: (isFocused: boolean) => void) => () => void;
+      isFullscreen: () => Promise<boolean>;
+      onFullscreenChange: (callback: (isFullscreen: boolean) => void) => () => void;
+    };
     backend: {
       ping: (targetUrl?: string) => Promise<{ ok: boolean; status: number; statusText: string }>;
     };

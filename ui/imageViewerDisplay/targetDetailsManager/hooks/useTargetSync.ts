@@ -26,7 +26,7 @@ export const useTargetSync = (
                         onSyncComplete(obj);
 
                         const commonName = obj.commonName ?? '';
-                        const processed = obj.processedImage ?? '';
+                        const processed = obj.stacking?.processedImage ?? '';
                         let msg = 'Sync complete';
                         if (commonName) msg += `: ${commonName}`;
                         emitToast(msg, 'success', 'sync');

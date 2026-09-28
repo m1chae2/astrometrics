@@ -24,6 +24,7 @@ def stack_frames(
     stack_weight: str | None = None,
     generate_rejmap: bool | None = None,
     output_file: str | None = None,
+    job_id: str | None = None,
 ) -> str | None:
     """Run the main stacking process using the ImageProcessing driver.
 
@@ -57,6 +58,9 @@ def stack_frames(
         Whether to save a picture showing exactly which pixels were thrown out.
     output_file : `str` or `None`, optional
         Where to save the final stacked image.
+    job_id : `str` or `None`, optional
+        The tracked job this stack is running under, if any -- recorded
+        as this run's IVOA provenance Activity when given.
 
     Returns
     -------
@@ -195,11 +199,11 @@ def stack_frames(
                 # Computed once, recorded onto the FrameRecord (which
                 # rides along with Target's normal save path) -- later
                 # pipelines/runs read these instead of recomputing them.
-                if frame.background_level is None:
-                    frame.background_level = measure_frame_background_level(frame.path)
-                if frame.saturated_pixel_fraction is None:
+                if frame.measurements.background_level is None:
+                    frame.measurements.background_level = measure_frame_background_level(frame.path)
+                if frame.measurements.saturated_pixel_fraction is None:
                     camera_profile = resolve_camera_profile(frame.camera)
-                    frame.saturated_pixel_fraction = measure_frame_saturated_pixel_fraction(
+                    frame.measurements.saturated_pixel_fraction = measure_frame_saturated_pixel_fraction(
                         frame.path, camera_profile.saturation_threshold_adu.value
                     )
             except Exception as exc:
@@ -275,15 +279,36 @@ def stack_frames(
     )
 
     if has_spectral:
-        target.spectral_stack_quality_summary = summary
+        target.spectral_stacking.quality_summary = summary
     else:
-        target.stack_quality_summary = summary
+        target.stacking.quality_summary = summary
 
     if stacked_path:
         if has_spectral:
-            target.stacked_spectral_target = stacked_path
+            target.spectral_stacking.stacked_image = stacked_path
         elif _record_configuration_stack(target, target_frames, stacked_path):
-            target.stacked_image = stacked_path
+            target.stacking.stacked_image = stacked_path
+
+        from astrometricslib.models.provenance import DatasetEntity
+        from astrometricslib.models.quality_summary import STACKING_PIPELINE_VERSION
+        from astrometricslib.pipelines.shared.provenance_recording import (
+            record_pipeline_run,
+            stacked_image_entity_id,
+        )
+
+        entity_id = stacked_image_entity_id(target.id, stacked_path)
+        record_pipeline_run(
+            summary=summary,
+            job_id=job_id,
+            target_id=target.id,
+            pipeline_name="stacking",
+            pipeline_version=STACKING_PIPELINE_VERSION,
+            generated_entities={
+                entity_id: DatasetEntity(
+                    id=entity_id, location=stacked_path, entity_description="entitydesc:stacked-image"
+                )
+            },
+        )
 
     return stacked_path
 
@@ -404,7 +429,7 @@ def _record_configuration_stack(target, target_frames, stacked_path) -> bool:  #
     camera_matches = bool(primary_camera and camera and _camera_names_match(camera, primary_camera))
     is_preferred = optic_matches and camera_matches
 
-    target.stacks_by_configuration[configuration_key] = StackConfigurationResult(
+    target.stacking.stacks_by_configuration[configuration_key] = StackConfigurationResult(
         configuration_key=configuration_key,
         camera=camera,
         focal_length_mm=focal_length,
@@ -421,7 +446,7 @@ def _record_configuration_stack(target, target_frames, stacked_path) -> bool:  #
     # primary must still have a stacked_image.
     return not any(
         recorded.is_preferred
-        for key, recorded in target.stacks_by_configuration.items()
+        for key, recorded in target.stacking.stacks_by_configuration.items()
         if key != configuration_key
     )
 
@@ -608,18 +633,20 @@ def _update_frame_registration_results(
             # through. A genuine reference frame also has
             # dx=dy=0, but this run offers 0 for it too, so it is
             # never rewritten.
-            has_existing_facts = frame.registration_fwhm_x_px is not None
-            stored_shift_is_degenerate = not frame.registration_dx_px and not frame.registration_dy_px
+            has_existing_facts = frame.measurements.registration_fwhm_x_px is not None
+            stored_shift_is_degenerate = (
+                not frame.measurements.registration_dx_px and not frame.measurements.registration_dy_px
+            )
             run_offers_real_shift = bool(registration_facts["dx"] or registration_facts["dy"])
             if has_existing_facts and not (stored_shift_is_degenerate and run_offers_real_shift):
                 continue
-            frame.registration_fwhm_x_px = registration_facts["fwhm_x"]
-            frame.registration_fwhm_y_px = registration_facts["fwhm_y"]
-            frame.registration_roundness = registration_facts["roundness"]
-            frame.registration_rmse = registration_facts["rmse"]
-            frame.registration_star_count = registration_facts["nb_stars"]
-            frame.registration_dx_px = registration_facts["dx"]
-            frame.registration_dy_px = registration_facts["dy"]
+            frame.measurements.registration_fwhm_x_px = registration_facts["fwhm_x"]
+            frame.measurements.registration_fwhm_y_px = registration_facts["fwhm_y"]
+            frame.measurements.registration_roundness = registration_facts["roundness"]
+            frame.measurements.registration_rmse = registration_facts["rmse"]
+            frame.measurements.registration_star_count = registration_facts["nb_stars"]
+            frame.measurements.registration_dx_px = registration_facts["dx"]
+            frame.measurements.registration_dy_px = registration_facts["dy"]
 
 
 def _measure_fwhm_degradation(summary, stacked_path: str, target_frames: list[Any]) -> None:  # ruff: ignore[missing-type-function-argument]

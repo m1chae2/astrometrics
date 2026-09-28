@@ -107,16 +107,16 @@ def find_dominant_background_subset(
     if not frames:
         return [], [], None
 
-    measured = [frame for frame in frames if getattr(frame, "background_level", None) is not None]
+    measured = [frame for frame in frames if frame.measurements.background_level is not None]
     split_summary = detect_background_split(
-        [frame.background_level for frame in measured], gap_ratio_threshold
+        [frame.measurements.background_level for frame in measured], gap_ratio_threshold
     )
     if not split_summary:
         return frames, [], None
 
     threshold = split_summary["split_threshold"]
-    low_group = [frame for frame in measured if frame.background_level < threshold]
-    high_group = [frame for frame in measured if frame.background_level >= threshold]
+    low_group = [frame for frame in measured if frame.measurements.background_level < threshold]
+    high_group = [frame for frame in measured if frame.measurements.background_level >= threshold]
 
     keep_low = len(low_group) >= len(high_group)
     excluded = high_group if keep_low else low_group

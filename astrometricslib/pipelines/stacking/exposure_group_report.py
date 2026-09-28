@@ -77,7 +77,7 @@ def measure_group_saturation(
         path = _attribute(frame, "path")
         if not path:
             continue
-        fwhm = _attribute(frame, "measured_fwhm_px") or DEFAULT_STAR_FWHM_PIXELS
+        fwhm = _attribute(_attribute(frame, "measurements"), "measured_fwhm_px") or DEFAULT_STAR_FWHM_PIXELS
         try:
             data = np.asarray(read_data(str(path)))
         except OSError as read_error:

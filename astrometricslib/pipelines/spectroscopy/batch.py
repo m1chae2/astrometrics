@@ -451,6 +451,7 @@ def process_spectroscopy_frames_by_session(
     frame_records: list[FrameRecord],
     max_workers: int | None = None,
     on_item_complete: Callable[[str, dict, int, int], None] | None = None,
+    job_id: str | None = None,
 ) -> tuple[parallel_batch.BatchRunSummary, list]:
     """Process a target's spectroscopy images, grouped by observing session.
 
@@ -472,6 +473,9 @@ def process_spectroscopy_frames_by_session(
         How many processes to run at once.
     on_item_complete : `Callable`, optional
         A function called every time an image finishes processing.
+    job_id : `str`, optional
+        The tracked job this run is running under, if any -- recorded
+        as this run's IVOA provenance Activity when given.
 
     Returns
     -------
@@ -534,12 +538,12 @@ def process_spectroscopy_frames_by_session(
         )
 
     merged_summary = _merge_batch_summaries(session_summaries)
-    _attach_spectroscopy_quality_summary(target, merged_summary, session_results)
+    _attach_spectroscopy_quality_summary(target, merged_summary, session_results, job_id)
     return merged_summary, session_results
 
 
 def _attach_spectroscopy_quality_summary(
-    target: Target, summary: parallel_batch.BatchRunSummary, session_results: list
+    target: Target, summary: parallel_batch.BatchRunSummary, session_results: list, job_id: str | None = None
 ) -> None:
     """Gather up all the worker results into a single quality report.
 
@@ -585,7 +589,7 @@ def _attach_spectroscopy_quality_summary(
     sessions = [session for session, _identify_result in session_results]
     target_session_breakdown = build_target_session_breakdown(sessions, failed_paths)
 
-    target.spectroscopy_quality_summary = SpectroscopyQualitySummary(
+    target.quality.spectroscopy = SpectroscopyQualitySummary(
         target_id=target.id,
         target_session_ids=[session.id for session, _identify_result in session_results],
         target_session_breakdown=target_session_breakdown,
@@ -605,13 +609,11 @@ def _attach_spectroscopy_quality_summary(
         ),
     )
     if zero_order_flagged:
-        target.spectroscopy_quality_summary.flagged = True
-        target.spectroscopy_quality_summary.flag_reasons.append(
-            "zero-order saturated in at least one processed star"
-        )
+        target.quality.spectroscopy.flagged = True
+        target.quality.spectroscopy.flag_reasons.append("zero-order saturated in at least one processed star")
     if all_spectral_classification_concerns:
-        target.spectroscopy_quality_summary.flagged = True
-        target.spectroscopy_quality_summary.flag_reasons.append(
+        target.quality.spectroscopy.flagged = True
+        target.quality.spectroscopy.flag_reasons.append(
             f"spectral classification uncertain for {len(all_spectral_classification_concerns)} star(s)"
         )
 
@@ -621,6 +623,17 @@ def _attach_spectroscopy_quality_summary(
     )
 
     record_camera_profile(
-        target.spectroscopy_quality_summary,
+        target.quality.spectroscopy,
         camera_name_for_paths(target.frames, [path for session in sessions for path in session.frame_paths]),
+    )
+
+    from astrometricslib.models.quality_summary import SPECTROSCOPY_PIPELINE_VERSION
+    from astrometricslib.pipelines.shared.provenance_recording import record_pipeline_run
+
+    record_pipeline_run(
+        summary=target.quality.spectroscopy,
+        job_id=job_id,
+        target_id=target.id,
+        pipeline_name="spectroscopy",
+        pipeline_version=SPECTROSCOPY_PIPELINE_VERSION,
     )

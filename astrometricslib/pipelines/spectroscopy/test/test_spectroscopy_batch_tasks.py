@@ -372,7 +372,7 @@ class TestAttachSpectroscopyQualitySummary:
 
     Ported from backend/tests/test_analysis_orchestrator.py when this
     aggregation moved from AnalysisOrchestrator into astrometricslib
-    itself, so `target.spectroscopy_quality_summary` is attached by
+    itself, so `target.quality.spectroscopy` is attached by
     the library run, not built by the backend after the fact.
     """
 
@@ -405,19 +405,19 @@ class TestAttachSpectroscopyQualitySummary:
 
         batch._attach_spectroscopy_quality_summary(target, summary, session_results)
 
-        assert target.spectroscopy_quality_summary is not None
-        metrics = target.spectroscopy_quality_summary.spectroscopy_metrics
+        assert target.quality.spectroscopy is not None
+        metrics = target.quality.spectroscopy.spectroscopy_metrics
         assert metrics.dispersion_angle_deg == pytest.approx(12.5)
         assert metrics.trail_width_profile_available is True
         assert metrics.median_trail_width_px == pytest.approx(4.0)
         assert metrics.zero_order_saturated_pixel_fraction == pytest.approx(0.2)
 
-        assert target.spectroscopy_quality_summary.target_session_ids == [session.id]
-        breakdown = target.spectroscopy_quality_summary.target_session_breakdown
+        assert target.quality.spectroscopy.target_session_ids == [session.id]
+        breakdown = target.quality.spectroscopy.target_session_breakdown
         assert len(breakdown) == 1
         assert breakdown[0].frames_contributed == 2
         assert breakdown[0].frames_clipped == 0
-        assert target.spectroscopy_quality_summary.upstream_quality_summary_reference == "raw_frames"
+        assert target.quality.spectroscopy.upstream_quality_summary_reference == "raw_frames"
 
     def test_records_the_camera_profile_of_the_frames_that_were_processed(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """The summary names the camera of the session's frames."""
@@ -432,7 +432,7 @@ class TestAttachSpectroscopyQualitySummary:
 
         batch._attach_spectroscopy_quality_summary(target, summary, [(session, SimpleNamespace())])
 
-        recorded = target.spectroscopy_quality_summary
+        recorded = target.quality.spectroscopy
         assert recorded.camera_profile is not None
         assert recorded.camera_profile.profile_name == "ZWO ASI533MM Pro"
         assert recorded.flagged is False
@@ -459,8 +459,8 @@ class TestAttachSpectroscopyQualitySummary:
 
         batch._attach_spectroscopy_quality_summary(target, summary, session_results)
 
-        assert target.spectroscopy_quality_summary.flagged is True
-        assert "zero-order saturated" in target.spectroscopy_quality_summary.flag_reasons[0]
+        assert target.quality.spectroscopy.flagged is True
+        assert "zero-order saturated" in target.quality.spectroscopy.flag_reasons[0]
 
     def test_flags_target_when_spectral_classification_uncertain(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Verify per-frame classification concerns aggregate and flag."""
@@ -507,17 +507,17 @@ class TestAttachSpectroscopyQualitySummary:
 
         batch._attach_spectroscopy_quality_summary(target, summary, session_results)
 
-        metrics = target.spectroscopy_quality_summary.spectroscopy_metrics
+        metrics = target.quality.spectroscopy.spectroscopy_metrics
         assert metrics.low_confidence_classification_count == 1
         assert metrics.ambiguous_classification_count == 1
         assert {c.star_id for c in metrics.flagged_spectral_classifications} == {
             "HD 150579",
             "HD 150998",
         }
-        assert target.spectroscopy_quality_summary.flagged is True
+        assert target.quality.spectroscopy.flagged is True
         assert any(
             "spectral classification uncertain" in reason
-            for reason in target.spectroscopy_quality_summary.flag_reasons
+            for reason in target.quality.spectroscopy.flag_reasons
         )
 
     def test_frames_clipped_counts_failed_paths_per_session(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
@@ -545,7 +545,7 @@ class TestAttachSpectroscopyQualitySummary:
 
         breakdown_by_session = {
             contribution.session_id: contribution
-            for contribution in target.spectroscopy_quality_summary.target_session_breakdown
+            for contribution in target.quality.spectroscopy.target_session_breakdown
         }
         assert breakdown_by_session[session_a.id].frames_contributed == 2
         assert breakdown_by_session[session_a.id].frames_clipped == 1
@@ -560,12 +560,9 @@ class TestAttachSpectroscopyQualitySummary:
 
         batch._attach_spectroscopy_quality_summary(target, summary, [])
 
-        assert target.spectroscopy_quality_summary.flagged is False
-        assert (
-            target.spectroscopy_quality_summary.spectroscopy_metrics.zero_order_saturated_pixel_fraction
-            is None
-        )
-        assert target.spectroscopy_quality_summary.spectroscopy_metrics.median_trail_width_px is None
+        assert target.quality.spectroscopy.flagged is False
+        assert target.quality.spectroscopy.spectroscopy_metrics.zero_order_saturated_pixel_fraction is None
+        assert target.quality.spectroscopy.spectroscopy_metrics.median_trail_width_px is None
 
 
 if __name__ == "__main__":

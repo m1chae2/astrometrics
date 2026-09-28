@@ -109,7 +109,7 @@ def _stack_with_job_tracking(target: Target, frames_to_stack: list[FrameRecord])
 
         from astrometricslib.pipelines.stacking import stage as stacking_tasks
 
-        stacked_path = stacking_tasks.stack_frames(target, frames_to_stack=frames_to_stack)
+        stacked_path = stacking_tasks.stack_frames(target, frames_to_stack=frames_to_stack, job_id=job.job_id)
         # Stacking can finish without raising and still produce no
         # image, so the outcome is decided here rather than left to the
         # context manager's "no exception means success" default.
@@ -192,7 +192,7 @@ def stack_frames_with_timeout(
         # reading the run's output. The summary may be absent entirely --
         # stack_frames builds it, and this stack never got that far -- in
         # which case the timeout stays a log-only fact.
-        summary = getattr(target, "stack_quality_summary", None)
+        summary = target.stacking.quality_summary
         metrics = getattr(summary, "stacking_metrics", None) if summary else None
         if metrics is not None:
             metrics.timed_out = True
@@ -276,10 +276,10 @@ def analyze_target(
         if not path and pipeline_type in ("astrometry", "spectroscopy"):
             if frames:
                 path = frames[0].path
-            elif pipeline_type == "spectroscopy" and target.stacked_spectral_target:
-                path = target.stacked_spectral_target
-            elif pipeline_type == "astrometry" and target.stacked_image:
-                path = target.stacked_image
+            elif pipeline_type == "spectroscopy" and target.spectral_stacking.stacked_image:
+                path = target.spectral_stacking.stacked_image
+            elif pipeline_type == "astrometry" and target.stacking.stacked_image:
+                path = target.stacking.stacked_image
             elif target.frames:
                 path = target.frames[0].path
             else:
@@ -288,6 +288,7 @@ def analyze_target(
                     f" on target {target.id}."
                 )
 
+        kwargs["job_id"] = job.job_id
         return _run_analysis_pipeline_match(
             target, frames, pipeline_type, filter_type, catalog_access, path, **kwargs
         )

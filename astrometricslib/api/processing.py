@@ -401,6 +401,7 @@ class ProcessingPipelines:
                 stack_weight=stack_weight,
                 generate_rejmap=generate_rejmap,
                 output_file=output_file,
+                job_id=job.job_id,
             )
             # Stacking can finish without raising and still produce no
             # image, so the outcome is decided here rather than left to
@@ -420,17 +421,17 @@ class ProcessingPipelines:
 
         See `astrometricslib.pipelines.tasks.analyze_target` for the full
         return documentation. Astrometry resolves its own input image from
-        `target.stacked_image` (falling back to the target's first frame)
-        when `path` is omitted, so a bare `run_astrometry(target)` call is
-        normally enough.
+        `target.stacking.stacked_image` (falling back to the target's first
+        frame) when `path` is omitted, so a bare `run_astrometry(target)` call
+        is normally enough.
 
         Parameters
         ----------
         target : `Target`
             The target to run astrometry against.
         path : `str`, optional
-            The FITS image to plate-solve; `target.stacked_image` (or the
-            target's first frame) is used when omitted.
+            The FITS image to plate-solve; `target.stacking.stacked_image`
+            (or the target's first frame) is used when omitted.
         catalog_access : `Any`, optional
             Override for the star catalog reader/writer; the default is
             used when omitted.
@@ -525,7 +526,7 @@ class ProcessingPipelines:
 
         See `astrometricslib.pipelines.tasks.analyze_target` for the full
         return documentation. Spectroscopy resolves its own input image
-        from `target.stacked_spectral_target` (falling back to the
+        from `target.spectral_stacking.stacked_image` (falling back to the
         target's first frame) when `path` is omitted.
 
         Parameters
@@ -534,8 +535,8 @@ class ProcessingPipelines:
             The target to run spectroscopy against.
         path : `str`, optional
             The spectral FITS image to extract from;
-            `target.stacked_spectral_target` (or the target's first frame)
-            is used when omitted.
+            `target.spectral_stacking.stacked_image` (or the target's
+            first frame) is used when omitted.
         limit : `int`, optional
             A cap on how many candidate stars to process; pass a number
             only to deliberately cap a run (for example a quick
@@ -629,7 +630,7 @@ class ProcessingPipelines:
             )
 
         if "spectroscopy" in stages:
-            has_spectral_input = bool(target.stacked_spectral_target) or any(
+            has_spectral_input = bool(target.spectral_stacking.stacked_image) or any(
                 frame_is_spectral(frame) for frame in target.frames or []
             )
             if has_spectral_input:
@@ -683,9 +684,21 @@ class ProcessingPipelines:
             batch as spectroscopy_batch_operations,
         )
 
-        return spectroscopy_batch_operations.process_spectroscopy_frames_by_session(
-            astrometrics, target, frame_records, max_workers=max_workers, on_item_complete=on_item_complete
-        )
+        with registered_job(
+            enabled=True,
+            job_type="spectroscopy_session",
+            target_id=target.id,
+            completed_message=f"[{target.id}] Session-based spectroscopy completed successfully.",
+            failed_message=f"[{target.id}] Session-based spectroscopy failed.",
+        ) as job:
+            return spectroscopy_batch_operations.process_spectroscopy_frames_by_session(
+                astrometrics,
+                target,
+                frame_records,
+                max_workers=max_workers,
+                on_item_complete=on_item_complete,
+                job_id=job.job_id,
+            )
 
     def scan_target_directory(self, target: Target, frames_root_path: str) -> None:
         """Scan a folder to find and catalog any new image frames for a target.

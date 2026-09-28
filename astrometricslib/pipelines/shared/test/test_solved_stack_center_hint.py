@@ -46,10 +46,12 @@ def _write_stack(path: Path, focal_length: float = 405.0, camera: str = CAMERA, 
 
 def _target(stacked_image: str = "", **configurations: str) -> SimpleNamespace:
     return SimpleNamespace(
-        stacked_image=stacked_image,
-        stacks_by_configuration={
-            key: SimpleNamespace(stacked_image=path) for key, path in configurations.items()
-        },
+        stacking=SimpleNamespace(
+            stacked_image=stacked_image,
+            stacks_by_configuration={
+                key: SimpleNamespace(stacked_image=path) for key, path in configurations.items()
+            },
+        )
     )
 
 

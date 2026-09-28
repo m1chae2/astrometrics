@@ -12,16 +12,27 @@ from typing import NamedTuple
 
 from astrometricslib import Astrometrics, TargetSessionContribution
 
-# Every quality-summary field name that might carry a matching
-# target_session_breakdown entry -- kept as an explicit list rather than
-# introspecting Target's fields, since only these four are quality summaries.
-_QUALITY_SUMMARY_FIELDS = (
-    "stack_quality_summary",
-    "spectral_stack_quality_summary",
-    "astrometry_quality_summary",
-    "photometry_quality_summary",
-    "spectroscopy_quality_summary",
-)
+
+# Every place on a Target that might carry a quality summary with a
+# matching target_session_breakdown entry -- kept as an explicit list
+# rather than introspecting Target's fields, since only these five are
+# quality summaries.
+def _quality_summaries(target) -> list:  # ruff: ignore[missing-type-function-argument]
+    """List every quality summary a target currently carries.
+
+    Returns
+    -------
+    summaries : `list`
+        The non-`None` quality summaries found on `target`.
+    """
+    candidates = (
+        target.stacking.quality_summary,
+        target.spectral_stacking.quality_summary,
+        target.quality.astrometry,
+        target.quality.photometry,
+        target.quality.spectroscopy,
+    )
+    return [summary for summary in candidates if summary is not None]
 
 
 class QualityContribution(NamedTuple):
@@ -59,10 +70,7 @@ def find_quality_contributions_for_session(
     """
     contributions: list[QualityContribution] = []
     for target in Astrometrics(app_config).targets.list():
-        for field_name in _QUALITY_SUMMARY_FIELDS:
-            summary = getattr(target, field_name, None)
-            if summary is None:
-                continue
+        for summary in _quality_summaries(target):
             for entry in summary.target_session_breakdown:
                 if entry.session_id == target_session_id:
                     contributions.append(

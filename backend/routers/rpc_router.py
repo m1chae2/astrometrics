@@ -227,6 +227,7 @@ class RPCHandlerRegistry:
         self.register("target:get_frame_header", ("target_service", "get_frame_header"))
 
         self.register("astronomy:list", ("stellar_service", "get_displayable_stellar_object_summaries"))
+        self.register("astronomy:count", ("stellar_service", "count_displayable_stellar_objects"))
         self.register(
             "astronomy:target_data_availability", ("stellar_service", "get_target_data_availability")
         )

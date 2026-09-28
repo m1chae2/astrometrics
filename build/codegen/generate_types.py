@@ -62,12 +62,16 @@ from astrometricslib.models.stellar_source import (
     VariableCandidate,
 )
 from astrometricslib.models.target import (
+    AsteroidDetectionResult,
     FitsHeaderEntry,
+    FrameMeasurements,
     FrameRecord,
     ImageType,
     RenderedImage,
     StackConfigurationResult,
     Target,
+    TargetQualitySummaries,
+    TargetStackingResult,
 )
 from astrometricslib.utilities.pipeline_models import ProcessingJob, ProcessStatus
 from backend.services.infrastructure.system_status_service import (
@@ -261,9 +265,13 @@ def main() -> None:
     interfaces = [
         generate_enum(FilterType, "FilterType"),
         generate_enum(ImageType, "ImageType"),
+        generate_interface(FrameMeasurements, "FrameMeasurements"),
         generate_interface(FrameRecord, "FrameRecord"),
         generate_interface(TelescopeStatus, "TelescopeStatus"),
         generate_interface(StackConfigurationResult, "StackConfigurationResult"),
+        generate_interface(TargetStackingResult, "TargetStackingResult"),
+        generate_interface(AsteroidDetectionResult, "AsteroidDetectionResult"),
+        generate_interface(TargetQualitySummaries, "TargetQualitySummaries"),
         generate_interface(Target, "TargetObject"),
         generate_interface(FileItem, "FileItem"),
         generate_interface(TargetFilesResponse, "TargetFilesResponse"),

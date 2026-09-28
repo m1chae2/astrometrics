@@ -160,7 +160,7 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
 
         pipeline = AstrometryPipeline()
         context = pipeline.process(
-            path, attempt_plate_solving=True, target_ra=target.ra, target_dec=target.dec, **request.options
+            path, attempt_plate_solving=True, target_ra=target.ra, target_dec=target.dec
         )
 
         context.stellar_objects, star_id_breakdown = _drop_unresolved_stars(
@@ -306,6 +306,10 @@ def run_astrometry_analysis(
         Has ``"context"`` (the `AnalysisContext` the pipeline built),
         ``"stellar_objects"``, ``"wcs"``, and ``"image_stats"``.
     """
+    from astrometricslib.pipelines.shared.provenance_recording import note_stacked_image_upstream
+
+    note_stacked_image_upstream(kwargs, target.id, target.stacking.stacked_image, "input_image")
+
     request = PipelineRequest(
         target=target,
         catalog_access=catalog_access,

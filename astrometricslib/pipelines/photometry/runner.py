@@ -542,7 +542,7 @@ def run_photometry_analysis(
         The completed dict carrying every brightness-tracking metric,
         even when there was no usable data -- in that case every metric
         is zero/empty and the reason surfaces as a flag in
-        `target.photometry_quality_summary.flag_reasons` rather than as
+        `target.quality.photometry.flag_reasons` rather than as
         a differently-structured return value.
     """
     request = PipelineRequest(

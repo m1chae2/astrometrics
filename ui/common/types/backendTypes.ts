@@ -34,6 +34,30 @@ export enum ImageType {
 }
 
 /**
+ * Per-frame statistics our own code computed from the pixels.
+ *
+ * Unlike `FrameRecord`'s other fields, which are recorded straight
+ * from the camera at capture time with zero analysis, every field
+ * here is the output of some pipeline stage (frame scanning,
+ * registration) running our own code against the pixels. Split out so
+ * "what the instrument wrote down" and "what we calculated" are two
+ * distinct, separately named things rather than fields interleaved in
+ * one flat model.
+ */
+export interface FrameMeasurements {
+  backgroundLevel?: number | null;
+  saturatedPixelFraction?: number | null;
+  measuredFwhmPx?: number | null;
+  registrationFwhmXPx?: number | null;
+  registrationFwhmYPx?: number | null;
+  registrationRoundness?: number | null;
+  registrationRmse?: number | null;
+  registrationStarCount?: number | null;
+  registrationDxPx?: number | null;
+  registrationDyPx?: number | null;
+}
+
+/**
  * A single raw photograph and its settings (like ISO, exposure).
  */
 export interface FrameRecord {
@@ -57,16 +81,7 @@ export interface FrameRecord {
   sensorTemperatureC?: number | null;
   focuserPosition?: number | null;
   focuserTemperatureC?: number | null;
-  registrationFwhmXPx?: number | null;
-  registrationFwhmYPx?: number | null;
-  registrationRoundness?: number | null;
-  registrationRmse?: number | null;
-  registrationStarCount?: number | null;
-  registrationDxPx?: number | null;
-  registrationDyPx?: number | null;
-  backgroundLevel?: number | null;
-  saturatedPixelFraction?: number | null;
-  measuredFwhmPx?: number | null;
+  measurements?: FrameMeasurements;
 }
 
 /**
@@ -109,6 +124,44 @@ export interface StackConfigurationResult {
 }
 
 /**
+ * One stacking pass's output and quality assessment, nested together.
+ *
+ * `Target` has two of these -- `stacking` for the ordinary imaging
+ * stack, `spectral_stacking` for the spectroscopy stack -- rather than
+ * the previous six loosely related flat fields (three of them
+ * ambiguously named around which stack they belonged to).
+ */
+export interface TargetStackingResult {
+  stackedImage?: string;
+  processedImage?: string;
+  stacksByConfiguration?: Record<string, StackConfigurationResult>;
+  qualitySummary?: StackQualitySummary | null;
+}
+
+/**
+ * One asteroid-detection run's candidates and quality assessment.
+ */
+export interface AsteroidDetectionResult {
+  candidates?: AsteroidDetectionCandidate[];
+  qualitySummary?: AsteroidDetectionQualitySummary | null;
+}
+
+/**
+ * The three per-pipeline quality summaries `Target` keeps by itself.
+ *
+ * Astrometry, photometry, and spectroscopy each write their per-star
+ * findings onto `StellarObject`, not `Target` -- they don't own a
+ * result the way stacking and asteroid detection do -- so `Target`
+ * only needs to keep each pipeline's run-level summary, grouped here
+ * instead of as three flat sibling fields.
+ */
+export interface TargetQualitySummaries {
+  astrometry?: AstrometryQualitySummary | null;
+  photometry?: PhotometryQualitySummary | null;
+  spectroscopy?: SpectroscopyQualitySummary | null;
+}
+
+/**
  * The main record for an astronomical target (like a galaxy or nebula).
  *
  * This class only stores data. If stacking images or analyzing
@@ -123,17 +176,10 @@ export interface TargetObject {
   fieldOfView?: string;
   mainCamera?: string;
   mainScope?: string;
-  processedImage?: string;
-  stackedImage?: string;
-  stacksByConfiguration?: Record<string, StackConfigurationResult>;
-  stackedSpectralTarget?: string;
-  stackQualitySummary?: StackQualitySummary | null;
-  spectralStackQualitySummary?: StackQualitySummary | null;
-  astrometryQualitySummary?: AstrometryQualitySummary | null;
-  photometryQualitySummary?: PhotometryQualitySummary | null;
-  spectroscopyQualitySummary?: SpectroscopyQualitySummary | null;
-  asteroidCandidates?: AsteroidDetectionCandidate[];
-  asteroidDetectionQualitySummary?: AsteroidDetectionQualitySummary | null;
+  stacking?: TargetStackingResult;
+  spectralStacking?: TargetStackingResult;
+  asteroidDetection?: AsteroidDetectionResult;
+  quality?: TargetQualitySummaries;
   exposureTime?: number;
   numberOfStars?: number;
   frames?: FrameRecord[];
@@ -232,6 +278,7 @@ export interface CatalogMatchQuality {
   matchedVia?: string | null;
   separationArcsec?: number | null;
   isAmbiguous?: boolean;
+  generatedByJobId?: string | null;
 }
 
 /**
@@ -273,6 +320,7 @@ export interface SpectroscopyResult {
   catalogComparison?: CatalogComparison | null;
   inputQuality?: InputQualityAssessment | null;
   outputQuality?: OutputQualityAssessment | null;
+  generatedByJobId?: string | null;
 }
 
 /**
@@ -393,6 +441,7 @@ export interface PhotometryResult {
   coefficientOfVariation?: number | null;
   inputQuality?: InputQualityAssessment | null;
   outputQuality?: OutputQualityAssessment | null;
+  generatedByJobId?: string | null;
 }
 
 /**
@@ -883,6 +932,8 @@ export interface StackQualitySummary {
   flagged?: boolean;
   flagReasons?: string[];
   createdAt?: string;
+  provenanceActivityId?: string | null;
+  upstreamEntityId?: string | null;
   stackingMetrics: StackingPipelineQualityMetrics;
 }
 
@@ -925,6 +976,8 @@ export interface AstrometryQualitySummary {
   flagged?: boolean;
   flagReasons?: string[];
   createdAt?: string;
+  provenanceActivityId?: string | null;
+  upstreamEntityId?: string | null;
   astrometryMetrics: AstrometryPipelineQualityMetrics;
 }
 
@@ -982,6 +1035,8 @@ export interface PhotometryQualitySummary {
   flagged?: boolean;
   flagReasons?: string[];
   createdAt?: string;
+  provenanceActivityId?: string | null;
+  upstreamEntityId?: string | null;
   photometryMetrics: PhotometryPipelineQualityMetrics;
 }
 
@@ -1038,6 +1093,8 @@ export interface SpectroscopyQualitySummary {
   flagged?: boolean;
   flagReasons?: string[];
   createdAt?: string;
+  provenanceActivityId?: string | null;
+  upstreamEntityId?: string | null;
   spectroscopyMetrics: SpectroscopyPipelineQualityMetrics;
 }
 
@@ -1142,6 +1199,8 @@ export interface AsteroidDetectionQualitySummary {
   flagged?: boolean;
   flagReasons?: string[];
   createdAt?: string;
+  provenanceActivityId?: string | null;
+  upstreamEntityId?: string | null;
   asteroidDetectionMetrics: AsteroidDetectionPipelineQualityMetrics;
 }
 

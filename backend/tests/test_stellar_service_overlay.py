@@ -176,8 +176,8 @@ def test_get_astrometry_overlay_stars_projects_celestial_coords_with_wcs() -> No
     mock_astrometrics.stars.list_objects.return_value = [star]
 
     mock_target = MagicMock()
-    mock_target.stacked_image = None
-    mock_target.processed_image = None
+    mock_target.stacking.stacked_image = None
+    mock_target.stacking.processed_image = None
     mock_astrometrics.targets.get.return_value = mock_target
 
     service = StellarService(config=MagicMock(), astrometrics=mock_astrometrics, wayfinder=MagicMock())

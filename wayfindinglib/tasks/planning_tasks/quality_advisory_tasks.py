@@ -46,12 +46,12 @@ def build_target_quality_advisory(astrometrics, target_id: str) -> TargetQuality
 
     quality_flags = []
     for pipeline_name, summary in (
-        ("stacking", target.stack_quality_summary),
-        ("spectral_stacking", target.spectral_stack_quality_summary),
-        ("astrometry", target.astrometry_quality_summary),
-        ("photometry", target.photometry_quality_summary),
-        ("spectroscopy", target.spectroscopy_quality_summary),
-        ("asteroid_detection", target.asteroid_detection_quality_summary),
+        ("stacking", target.stacking.quality_summary),
+        ("spectral_stacking", target.spectral_stacking.quality_summary),
+        ("astrometry", target.quality.astrometry),
+        ("photometry", target.quality.photometry),
+        ("spectroscopy", target.quality.spectroscopy),
+        ("asteroid_detection", target.asteroid_detection.quality_summary),
     ):
         if summary is not None:
             quality_flags.append(
@@ -62,9 +62,9 @@ def build_target_quality_advisory(astrometrics, target_id: str) -> TargetQuality
                 )
             )
 
-    asteroid_candidate_count = len(target.asteroid_candidates)
+    asteroid_candidate_count = len(target.asteroid_detection.candidates)
     confirmed_asteroid_candidate_count = sum(
-        1 for c in target.asteroid_candidates if c.cascade_stage.value == "ephemeris_matched"
+        1 for c in target.asteroid_detection.candidates if c.cascade_stage.value == "ephemeris_matched"
     )
 
     return TargetQualityAdvisory(

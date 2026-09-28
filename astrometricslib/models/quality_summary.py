@@ -151,6 +151,19 @@ class PipelineQualitySummaryBase(BaseModel):
     flagged: bool = Field(default=False, alias="flagged")
     flag_reasons: list[str] = Field(default_factory=list, alias="flagReasons")
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), alias="createdAt")
+    # The id of the IVOA provenance Activity (see
+    # astrometricslib.models.provenance) this run was recorded as --
+    # always the same id as the run's job_id. `None` when no job was
+    # open for this run (register_job=False), matching the job log's
+    # own behavior of recording nothing in that case.
+    provenance_activity_id: str | None = Field(default=None, alias="provenanceActivityId")
+    # The id of the upstream provenance Entity this run actually
+    # consumed (for example the specific stacked image astrometry
+    # solved), superseding upstream_quality_summary_reference's plain
+    # category name with a real, resolvable reference. `None` when this
+    # run has no upstream entity (for example stacking itself, or a run
+    # with no provenance recorded).
+    upstream_entity_id: str | None = Field(default=None, alias="upstreamEntityId")
 
 
 # ---------------------------------------------------------------------------

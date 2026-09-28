@@ -78,8 +78,8 @@ def _run_variability_analysis_for_session(
         center_ra, center_dec = resolve_target_center_hint(target)
 
         reference_image = AstrometricsImage(session.frame_paths[0])
-        if reference_image.wcs is None and target and target.stacked_image:
-            stacked_img = AstrometricsImage(target.stacked_image)
+        if reference_image.wcs is None and target and target.stacking.stacked_image:
+            stacked_img = AstrometricsImage(target.stacking.stacked_image)
             swcs = stacked_img.wcs
             if swcs is not None and (swcs.is_celestial or swcs.has_celestial):
                 reference_image.wcs = swcs

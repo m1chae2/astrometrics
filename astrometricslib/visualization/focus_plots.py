@@ -59,8 +59,9 @@ def _collect_focus_samples(target: Any) -> dict[str, np.ndarray]:
         temperature = getattr(frame, "focuser_temperature_c", None)
         if temperature is None:
             continue
-        width_x = getattr(frame, "registration_fwhm_x_px", None)
-        width_y = getattr(frame, "registration_fwhm_y_px", None)
+        measurements = getattr(frame, "measurements", None)
+        width_x = getattr(measurements, "registration_fwhm_x_px", None)
+        width_y = getattr(measurements, "registration_fwhm_y_px", None)
         timestamps.append(np.nan if getattr(frame, "timestamp", None) is None else float(frame.timestamp))
         temperatures.append(float(temperature))
         position = getattr(frame, "focuser_position", None)

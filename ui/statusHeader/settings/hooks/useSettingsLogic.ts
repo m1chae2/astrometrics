@@ -1,57 +1,46 @@
-import { useState, useEffect, useMemo } from 'react';
-import { getBackendBase, setBackendBase } from '../../../common/services/backendApi';
-import { getSystemConfig, saveSystemConfig, getAgentShortcut, setAgentShortcut } from '../../../common/services/systemService';
+import { useState, useEffect } from 'react';
+import { getSystemConfig, saveSystemConfig } from '../../../common/services/systemService';
 import { useToast } from '../../../common/hooks/useToast';
-import { groupConfig, ConfigData } from '../utils/configUtils';
+import { reportError } from '../../../common/utils/reportError';
+import { useBackendFetch } from '../../../common/hooks/useBackendFetch';
+import { ConfigData } from '../utils/configUtils';
+
+export const DEFAULT_SETTINGS_TAB = 'General';
 
 export const useSettingsLogic = (open: boolean, closing: boolean, onClose: () => void) => {
     const { show: showToast } = useToast();
 
     // UI State
-    const [activeConfigTab, setActiveConfigTab] = useState<string>('System');
-    const [validationError, setValidationError] = useState<string | null>(null);
+    const [activeConfigTab, setActiveConfigTab] = useState<string>(DEFAULT_SETTINGS_TAB);
 
     // Form State
-    const [backendInput, setBackendInput] = useState<string>(() => {
-        try { return getBackendBase(); } catch { return ''; }
-    });
     const [secondaryWindowEnabled, setSecondaryWindowEnabled] = useState(false);
-    const [agentShortcut, setAgentShortcutInput] = useState<string>(() => {
-        try { return getAgentShortcut(); } catch { return 'Ctrl+Space'; }
-    });
 
-    // Config Data
+    // Config Data: `configData` is the editable working copy shown in every
+    // form; `configPatch` mirrors only the fields the user actually changed
+    // (via handleConfigChange) and is the only thing ever sent to
+    // saveSystemConfig. Sending the full fetched blob back on every save
+    // used to round-trip untouched, already-stringified structured values
+    // (e.g. camera calibration inline tables) through `update_config`'s
+    // configparser-style `str(value)` writer, silently corrupting them.
     const [configData, setConfigData] = useState<ConfigData>({});
-    const [loadingConfig, setLoadingConfig] = useState(false);
+    const [configPatch, setConfigPatch] = useState<ConfigData>({});
 
-    // Fetch Config on Open
+    const {
+        data: fetchedConfig,
+        loading: loadingConfig,
+    } = useBackendFetch(
+        (signal) => getSystemConfig({ signal, timeoutMs: 10000 }),
+        [open, closing],
+        { enabled: open && !closing, errorMessage: 'Failed to load configuration' }
+    );
+
     useEffect(() => {
-        if (open && !closing) {
-            setLoadingConfig(true);
-            const controller = new AbortController();
-
-            getSystemConfig({ signal: controller.signal, timeoutMs: 10000 })
-                .then((data) => {
-                    setConfigData(data as ConfigData);
-                    setLoadingConfig(false);
-                })
-                .catch(() => {
-                    setLoadingConfig(false);
-                });
-
-            // Re-read backend base incase changed externally?
-            // Usually not, but good practice.
-            try {
-                setBackendInput(getBackendBase());
-                setAgentShortcutInput(getAgentShortcut());
-            } catch { /* ignore */ }
-
-            return () => {
-                controller.abort();
-            };
+        if (fetchedConfig) {
+            setConfigData(fetchedConfig as ConfigData);
+            setConfigPatch({});
         }
-        return undefined;
-    }, [open, closing]);
+    }, [fetchedConfig]);
 
     // Sync Secondary Window
     useEffect(() => {
@@ -62,19 +51,6 @@ export const useSettingsLogic = (open: boolean, closing: boolean, onClose: () =>
             });
         }
     }, []);
-
-    // Group Config
-    const groupedConfig = useMemo(() => groupConfig(configData), [configData]);
-
-    // Ensure valid activeConfigTab
-    useEffect(() => {
-        if (groupedConfig.length > 0 &&
-            !groupedConfig.find(g => g.name === activeConfigTab) &&
-            activeConfigTab !== 'System') {
-            setActiveConfigTab(groupedConfig[0].name);
-        }
-    }, [groupedConfig, activeConfigTab]);
-
 
     const [reindexingJobId, setReindexingJobId] = useState<string | null>(null);
     const [reindexingStatus, setReindexingStatus] = useState<string | null>(null);
@@ -139,6 +115,13 @@ export const useSettingsLogic = (open: boolean, closing: boolean, onClose: () =>
                 [key]: value
             }
         }));
+        setConfigPatch(prev => ({
+            ...prev,
+            [section]: {
+                ...prev[section],
+                [key]: value
+            }
+        }));
     };
 
     const handleReindex = async () => {
@@ -151,7 +134,7 @@ export const useSettingsLogic = (open: boolean, closing: boolean, onClose: () =>
             const jobId = await startReindex();
             setReindexingJobId(jobId);
         } catch (err) {
-            showToast(err instanceof Error ? err.message : 'Failed to start re-index', 'error');
+            reportError(err instanceof Error ? err : new Error(String(err)), 'settings');
             setIsReindexing(false);
         }
     };
@@ -163,62 +146,32 @@ export const useSettingsLogic = (open: boolean, closing: boolean, onClose: () =>
             const preferredMode = configData['Frontend']?.['secondary_window_mode'] || 'Image Processing';
             app.toggleSecondaryWindow(enabled, preferredMode);
         } else {
-            showToast('Multi-window not supported in this environment', 'error');
+            reportError(new Error('Multi-window not supported in this environment'), 'settings');
         }
     };
 
     const handleRevertBackend = () => {
-        try {
-            setBackendInput(getBackendBase());
-        } catch {
-            setBackendInput('');
-        }
-        setLoadingConfig(true);
+        setConfigPatch({});
         getSystemConfig({ timeoutMs: 10000 })
             .then((data) => {
                 setConfigData(data as ConfigData);
-                setLoadingConfig(false);
                 showToast('Configuration reverted', 'success');
                 window.dispatchEvent(new CustomEvent('astrometrics:configChange'));
             })
-            .catch(() => {
-                setLoadingConfig(false);
+            .catch((err) => {
+                reportError(err instanceof Error ? err : new Error(String(err)), 'settings');
             });
     };
 
     const handleSaveBackend = () => {
-        const raw = backendInput && backendInput.trim() ? backendInput.trim() : '';
-        setAgentShortcut(agentShortcut); // Persist shortcut
-
-        if (!raw) {
-            setBackendBase(null);
-            setValidationError(null);
-            showToast('Backend override cleared', 'success');
-        } else {
-            let parsed: URL | null = null;
-            try {
-                parsed = new URL(raw);
-            } catch {
-                try {
-                    parsed = new URL(`http://${raw}`);
-                } catch {
-                    parsed = null;
-                }
-            }
-
-            if (!parsed) {
-                setValidationError('Invalid URL or IP');
-                return;
-            }
-
-            const value = parsed.href.replace(/\/$/, '');
-            setBackendBase(value);
-            setValidationError(null);
-            showToast('Backend URL saved', 'success');
+        if (Object.keys(configPatch).length === 0) {
+            onClose();
+            return;
         }
 
-        saveSystemConfig(configData).then(success => {
+        saveSystemConfig(configPatch).then(success => {
             if (success) {
+                setConfigPatch({});
                 showToast('Configuration saved', 'success');
                 window.dispatchEvent(new CustomEvent('astrometrics:configChange'));
                 onClose();
@@ -230,15 +183,11 @@ export const useSettingsLogic = (open: boolean, closing: boolean, onClose: () =>
 
     return {
         activeConfigTab, setActiveConfigTab,
-        validationError,
-        backendInput, setBackendInput,
-        agentShortcut, setAgentShortcutInput,
         secondaryWindowEnabled, handleToggleSecondaryWindow,
         configData, loadingConfig,
-        groupedConfig,
         handleConfigChange,
         handleSaveBackend,
         handleRevertBackend,
-        isReindexing, reindexingStatus, reindexingProgress, handleReindex
+        isReindexing, reindexingStatus, reindexingProgress, handleReindex,
     };
 };

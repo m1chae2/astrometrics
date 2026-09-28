@@ -180,7 +180,7 @@ def validate_standards(astrometrics: Astrometrics) -> None:
     print(f"Standard stars from their master spectral stacks (camera {camera_name}):")
     for target_id, truth in (("Vega", "A0V"), ("Alcor", "A5V or A2V"), ("Alnath", "B7III")):
         target = astrometrics.targets.get(target_id)
-        path = getattr(target, "stacked_spectral_target", None) if target else None
+        path = getattr(getattr(target, "spectral_stacking", None), "stacked_image", None) if target else None
         if not path:
             print(f"  {target_id}: no master spectral stack")
             continue

@@ -100,6 +100,7 @@ export interface ActionRegistry {
     "astronomy:get_status": { payload: { target_id: string }; response: TelescopeStatus };
     "astronomy:visible": { payload: Record<string, never>; response: Spectrum[] };
     "astronomy:list": { payload: { target_id?: string; limit?: number; search?: string; filter_type?: string }; response: Spectrum[] };
+    "astronomy:count": { payload: { target_id?: string; search?: string; filter_type?: string }; response: number };
     "astronomy:get": { payload: { object_id: string }; response: Spectrum | null };
     "astronomy:analyze_periodicity": { payload: { object_id: string }; response: Spectrum | null };
     "astronomy:delete": { payload: { object_id: string }; response: boolean };
@@ -197,7 +198,9 @@ export interface ActionRegistry {
     "processing:get_job": { payload: { job_id: string }; response: ProcessingJob | null };
     "processing:delete_job": { payload: { job_id: string }; response: boolean };
     "processing:jobs_for_target": { payload: { target_id: string }; response: ProcessingJob[] };
-    "processing:active_jobs": { payload: Record<string, never>; response: ProcessStatus[] };
+    // Backed by JobService.get_active_jobs(), which returns full ProcessingJob
+    // records (with progressCurrent/progressTotal), not the lighter ProcessStatus.
+    "processing:active_jobs": { payload: Record<string, never>; response: ProcessingJob[] };
     "processing:job_log_tail": { payload: { job_id: string; lines?: number }; response: string[] };
 
     // Analysis
@@ -412,6 +415,7 @@ const IDEMPOTENT_READ_ACTIONS: ReadonlySet<string> = new Set([
     'target:get_header',
     'target:get_frame_header',
     'astronomy:list',
+    'astronomy:count',
     'astronomy:get',
     'astronomy:get_status',
     'astronomy:get_target_status',

@@ -50,7 +50,7 @@ export function useStackingJob(
     shouldFetch: boolean = true
 ): StackingJobResult {
     const { framesReloadKey, invalidate } = useTargetContext();
-    const { processing } = useAstrometrics();
+    const { activeJobs } = useAstrometrics();
     const [lightFrames, setLightFrames] = useState<LightFrameRow[]>([]);
     const [logLines, setLogLines] = useState<string[]>([]);
     const [isProcessing, setIsProcessing] = useState<boolean>(false);
@@ -126,52 +126,36 @@ export function useStackingJob(
         return () => { mounted = false; };
     }, [selectedTarget, shouldFetch, framesReloadKey]);
 
-    // Global Process Monitoring
+    // Global Process Monitoring: derived from AstrometricsContext's shared
+    // active-jobs feed (one poll for the whole app) instead of this hook
+    // running its own competing poll against the same backend data. Still
+    // catches jobs started out-of-band (e.g. a standalone script), since the
+    // context's feed isn't scoped to jobs this hook itself started.
     useEffect(() => {
-        let mounted = true;
-        let timer: any = null;
+        if (!selectedTarget) return;
 
-        const checkStatus = async () => {
-            if (!mounted || !selectedTarget) return;
-            try {
-                const jobs = await fetchJobs(selectedTarget);
-                if (!mounted) return;
-                setJobHistory(jobs);
-                // Scoped to stacking jobs only: useAnalysisJob owns its own
-                // isAnalyzing/activeAnalysisJobId state and log stream, so an
-                // in-flight analysis job must not also flip stacking's
-                // isProcessing (which would start a second, redundant poller
-                // against the same job's log).
-                const activeJob = jobs.find((j: any) => j.status === 'started' && j.jobType === 'stacking');
-                const currentlyProcessing = !!activeJob;
+        // Scoped to stacking jobs only: useAnalysisJob owns its own
+        // isAnalyzing/activeAnalysisJobId state and log stream, so an
+        // in-flight analysis job must not also flip stacking's isProcessing
+        // (which would start a second, redundant poller against the same
+        // job's log).
+        const activeJob = activeJobs.find((j) => j.targetId === selectedTarget && j.jobType === 'stacking');
+        const currentlyProcessing = !!activeJob;
 
-                // Detect transition from processing to finished to trigger a refresh
-                if (prevIsProcessing.current && !currentlyProcessing) {
-                    invalidate('frames');
-                }
+        // Detect transition from processing to finished to trigger a refresh
+        // of frames and job history (a one-off fetch, not a recurring poll).
+        if (prevIsProcessing.current && !currentlyProcessing) {
+            invalidate('frames');
+            fetchJobs(selectedTarget).then(setJobHistory).catch(() => { /* Ignore */ });
+        }
 
-                setIsProcessing(currentlyProcessing);
-                prevIsProcessing.current = currentlyProcessing;
+        setIsProcessing(currentlyProcessing);
+        prevIsProcessing.current = currentlyProcessing;
 
-                if (activeJob) {
-                    setActiveJobId(activeJob.id);
-                }
-            } catch { /* Ignore */ }
-        };
-
-        checkStatus();
-        // Always poll, not just while a stacking job is active: jobHistory
-        // must also pick up analysis (or other) jobs created out-of-band,
-        // e.g. from a standalone script rather than this hook's own
-        // startProcessing(). Poll less aggressively than the 2s stacking
-        // cadence above since this covers the idle case too.
-        timer = setInterval(checkStatus, isProcessing ? 2000 : 4000);
-
-        return () => {
-            mounted = false;
-            if (timer) clearInterval(timer);
-        };
-    }, [selectedTarget, invalidate, isProcessing]);
+        if (activeJob) {
+            setActiveJobId(activeJob.id);
+        }
+    }, [selectedTarget, invalidate, activeJobs]);
 
 
     // Log Streaming

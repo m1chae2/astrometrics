@@ -91,7 +91,7 @@ class TestRunSpectroscopyAnalysis:
 
         assert results["starsProcessed"] == 5
         assert results["spectraExtracted"] == 5
-        # target.spectroscopy_quality_summary is now attached by the
+        # target.quality.spectroscopy is now attached by the
         # library's run_spectroscopy_by_session itself (mocked here, so
         # not exercised) -- see test_spectroscopy_batch_tasks.py's
         # TestAttachSpectroscopyQualitySummary for that coverage.

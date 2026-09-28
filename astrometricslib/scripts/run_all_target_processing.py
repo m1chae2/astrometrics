@@ -283,8 +283,8 @@ def run_full_processing(argv: list[str] | None = None) -> None:
     Runs one pass per camera, in the order given by the config's setups
     (the primary camera first; see `camera_pass_order`). A later pass runs
     only across targets no earlier pass touched
-    -- `Target.stacked_image`, `processed_image`, and every quality-
-    summary field are single-valued, not per-camera, so running a
+    -- `Target.stacking.stacked_image`/`processed_image` and every
+    quality-summary field are single-valued, not per-camera, so running a
     second camera's pass on a target an earlier pass already processed
     would silently overwrite that target's first-camera stack reference
     and quality summaries with the second camera's results (the first

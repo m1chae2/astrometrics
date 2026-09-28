@@ -163,7 +163,9 @@ def run_derivation(argv: list[str] | None = None) -> int:
 
     astrometrics = Astrometrics()
     target = astrometrics.targets.get(arguments.target)
-    stacked_path = getattr(target, "stacked_spectral_target", None) if target else None
+    stacked_path = (
+        getattr(getattr(target, "spectral_stacking", None), "stacked_image", None) if target else None
+    )
     if not stacked_path:
         print(f"Target {arguments.target!r} has no master stacked spectral image.")
         return 1

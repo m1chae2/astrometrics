@@ -3,7 +3,8 @@
 Verifies that start_siril_processing_task accurately determines spectral frame
 status from input metadata (including catalog filter names like
 'Star Analyzer 200'), passes is_spectral to the Siril driver, and routes
-stacked outputs to target.stacked_spectral_target or target.stacked_image
+stacked outputs to target.spectral_stacking.stacked_image or
+target.stacking.stacked_image
 appropriately.
 """
 
@@ -55,8 +56,8 @@ def test_start_siril_processing_task_with_spectral_frames() -> None:
         job_id="test-job-spec",
         spectral_star_detection="standard",
     )
-    assert target.stacked_spectral_target == stacked_output_path
-    assert target.stacked_image == ""
+    assert target.spectral_stacking.stacked_image == stacked_output_path
+    assert target.stacking.stacked_image == ""
     mock_target_service.save_targets.assert_called_once()
 
 
@@ -96,6 +97,6 @@ def test_start_siril_processing_task_with_standard_frames() -> None:
         is_spectral=False,
         job_id="test-job-lum",
     )
-    assert target.stacked_image == stacked_output_path
-    assert target.stacked_spectral_target == ""
+    assert target.stacking.stacked_image == stacked_output_path
+    assert target.spectral_stacking.stacked_image == ""
     mock_target_service.save_targets.assert_called_once()

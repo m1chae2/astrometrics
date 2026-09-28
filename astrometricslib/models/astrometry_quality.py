@@ -34,3 +34,8 @@ class CatalogMatchQuality(BaseModel):
     # Always False for a Gaia match: Gaia matching does not run this
     # disambiguation check today, so there is nothing to flag.
     is_ambiguous: bool = Field(default=False, alias="isAmbiguous")
+    # The id of the job (see astrometricslib.models.provenance.Activity)
+    # that last wrote this match, so its exact pipeline version can be
+    # looked up. `None` for a match recorded before this was tracked, or
+    # written outside a tracked job.
+    generated_by_job_id: str | None = Field(default=None, alias="generatedByJobId")

@@ -58,11 +58,29 @@ def test_detect_background_split_handles_too_few_frames():  # ruff: ignore[missi
 
 
 @dataclass
+class _Measurements:
+    """Minimal stand-in for `FrameMeasurements`."""
+
+    background_level: float | None
+
+
+@dataclass
 class _Frame:
     """Minimal stand-in for a FrameRecord's background fields."""
 
     path: str
     background_level: float | None
+
+    @property
+    def measurements(self) -> _Measurements:
+        """Wrap `background_level` as a `FrameMeasurements` stand-in.
+
+        Returns
+        -------
+        measurements : `_Measurements`
+            A stand-in carrying this frame's `background_level`.
+        """
+        return _Measurements(background_level=self.background_level)
 
 
 def test_a_lone_washed_out_frame_is_excluded_not_stacked():  # ruff: ignore[missing-return-type-undocumented-public-function]

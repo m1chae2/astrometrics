@@ -9,7 +9,7 @@ happens elsewhere to keep the code organized and avoid import errors.
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from astrometricslib.models.moving_object import AsteroidDetectionCandidate
 from astrometricslib.models.quality_summary import (
@@ -25,11 +25,15 @@ from astrometricslib.utilities.enums import FilterType
 # documents every imported name too, which is what produced the
 # "stub file not found" warnings for re-exports and typing helpers.
 __all__ = [
+    "AsteroidDetectionResult",
     "FitsHeaderEntry",
+    "FrameMeasurements",
     "FrameRecord",
     "ImageType",
     "RenderedImage",
     "Target",
+    "TargetQualitySummaries",
+    "TargetStackingResult",
 ]
 
 
@@ -38,6 +42,44 @@ class ImageType(StrEnum):
 
     STAR_FIELD = "star_field"
     TARGET_IMAGE = "target_image"
+
+
+class FrameMeasurements(BaseModel):
+    """Per-frame statistics our own code computed from the pixels.
+
+    Unlike `FrameRecord`'s other fields, which are recorded straight
+    from the camera at capture time with zero analysis, every field
+    here is the output of some pipeline stage (frame scanning,
+    registration) running our own code against the pixels. Split out so
+    "what the instrument wrote down" and "what we calculated" are two
+    distinct, separately named things rather than fields interleaved in
+    one flat model.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    # Statistics calculated straight from the raw picture, even if it
+    # hasn't been aligned or stacked yet.
+    background_level: float | None = Field(default=None, alias="backgroundLevel")
+    saturated_pixel_fraction: float | None = Field(default=None, alias="saturatedPixelFraction")
+    # Star sharpness measured directly by the code, rather than by Siril.
+    # This number cannot be directly compared to `registration_fwhm_x_px`.
+    measured_fwhm_px: float | None = Field(default=None, alias="measuredFwhmPx")
+
+    # Alignment data. When the pipeline aligns the images (registration),
+    # it calculates these values (like how far the stars shifted).
+    # They stay None until that pipeline runs.
+    registration_fwhm_x_px: float | None = Field(default=None, alias="registrationFwhmXPx")
+    registration_fwhm_y_px: float | None = Field(default=None, alias="registrationFwhmYPx")
+    # How round the stars look after alignment (1.0 is a perfect circle).
+    # A lower number can mean the telescope drifted during the photo.
+    registration_roundness: float | None = Field(default=None, alias="registrationRoundness")
+    # How far off, on average, the alignment was when lining this
+    # picture up with the others, in pixels. Lower is better.
+    registration_rmse: float | None = Field(default=None, alias="registrationRmse")
+    registration_star_count: int | None = Field(default=None, alias="registrationStarCount")
+    registration_dx_px: float | None = Field(default=None, alias="registrationDxPx")
+    registration_dy_px: float | None = Field(default=None, alias="registrationDyPx")
 
 
 class FrameRecord(BaseModel):
@@ -81,28 +123,39 @@ class FrameRecord(BaseModel):
     focuser_position: int | None = Field(default=None, alias="focuserPosition")
     focuser_temperature_c: float | None = Field(default=None, alias="focuserTemperatureC")
 
-    # Alignment data. When the pipeline aligns the images (registration),
-    # it calculates these values (like how far the stars shifted).
-    # They stay None until that pipeline runs.
-    registration_fwhm_x_px: float | None = Field(default=None, alias="registrationFwhmXPx")
-    registration_fwhm_y_px: float | None = Field(default=None, alias="registrationFwhmYPx")
-    # How round the stars look after alignment (1.0 is a perfect circle).
-    # A lower number can mean the telescope drifted during the photo.
-    registration_roundness: float | None = Field(default=None, alias="registrationRoundness")
-    # How far off, on average, the alignment was when lining this
-    # picture up with the others, in pixels. Lower is better.
-    registration_rmse: float | None = Field(default=None, alias="registrationRmse")
-    registration_star_count: int | None = Field(default=None, alias="registrationStarCount")
-    registration_dx_px: float | None = Field(default=None, alias="registrationDxPx")
-    registration_dy_px: float | None = Field(default=None, alias="registrationDyPx")
+    # Everything our own code calculated from this frame's pixels
+    # (background level, registration facts), as opposed to the fields
+    # above, which are recorded straight from the camera at capture time.
+    measurements: FrameMeasurements = Field(default_factory=FrameMeasurements, alias="measurements")
 
-    # Statistics calculated straight from the raw picture, even if it
-    # hasn't been aligned or stacked yet.
-    background_level: float | None = Field(default=None, alias="backgroundLevel")
-    saturated_pixel_fraction: float | None = Field(default=None, alias="saturatedPixelFraction")
-    # Star sharpness measured directly by the code, rather than by Siril.
-    # This number cannot be directly compared to `registration_fwhm_x_px`.
-    measured_fwhm_px: float | None = Field(default=None, alias="measuredFwhmPx")
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_flat_measurement_fields(cls, data: Any) -> Any:
+        """Reshape an old, flat-measurement-fields record into `measurements`.
+
+        Frames stored before `FrameMeasurements` existed have
+        ``backgroundLevel``, ``registrationFwhmXPx``, etc. as siblings
+        of ``path``/``camera``/etc. instead of nested under
+        ``measurements``. This moves them there before validation, so
+        an old row loads into the new shape with no database rewrite.
+
+        Returns
+        -------
+        data : `Any`
+            `data` unchanged if it is not an old-shaped mapping,
+            otherwise a copy with the measurement fields nested.
+        """
+        if not isinstance(data, dict) or "measurements" in data:
+            return data
+        measurement_keys = set(FrameMeasurements.model_fields) | {
+            field.alias for field in FrameMeasurements.model_fields.values() if field.alias
+        }
+        found = {key: data[key] for key in measurement_keys if key in data}
+        if not found:
+            return data
+        migrated = {key: value for key, value in data.items() if key not in found}
+        migrated["measurements"] = found
+        return migrated
 
     @field_validator("filter", mode="before")
     @classmethod
@@ -156,6 +209,53 @@ class StackConfigurationResult(BaseModel):
     is_preferred: bool = Field(default=False, alias="isPreferred")
 
 
+class TargetStackingResult(BaseModel):
+    """One stacking pass's output and quality assessment, nested together.
+
+    `Target` has two of these -- `stacking` for the ordinary imaging
+    stack, `spectral_stacking` for the spectroscopy stack -- rather than
+    the previous six loosely related flat fields (three of them
+    ambiguously named around which stack they belonged to).
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    stacked_image: str = Field(default="", alias="stackedImage")
+    processed_image: str = Field(default="", alias="processedImage")
+    # A dictionary tracking the finished pictures from every telescope
+    # setup used on this target. The key is a label like "CameraName@300mm".
+    stacks_by_configuration: dict[str, StackConfigurationResult] = Field(
+        default_factory=dict, alias="stacksByConfiguration"
+    )
+    quality_summary: StackQualitySummary | None = Field(default=None, alias="qualitySummary")
+
+
+class AsteroidDetectionResult(BaseModel):
+    """One asteroid-detection run's candidates and quality assessment."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    candidates: list[AsteroidDetectionCandidate] = Field(default_factory=list, alias="candidates")
+    quality_summary: AsteroidDetectionQualitySummary | None = Field(default=None, alias="qualitySummary")
+
+
+class TargetQualitySummaries(BaseModel):
+    """The three per-pipeline quality summaries `Target` keeps by itself.
+
+    Astrometry, photometry, and spectroscopy each write their per-star
+    findings onto `StellarObject`, not `Target` -- they don't own a
+    result the way stacking and asteroid detection do -- so `Target`
+    only needs to keep each pipeline's run-level summary, grouped here
+    instead of as three flat sibling fields.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    astrometry: AstrometryQualitySummary | None = Field(default=None, alias="astrometry")
+    photometry: PhotometryQualitySummary | None = Field(default=None, alias="photometry")
+    spectroscopy: SpectroscopyQualitySummary | None = Field(default=None, alias="spectroscopy")
+
+
 class Target(BaseModel):
     """The main record for an astronomical target (like a galaxy or nebula).
 
@@ -173,38 +273,114 @@ class Target(BaseModel):
     field_of_view: str = Field(default="0′", alias="fieldOfView")
     main_camera: str = Field(default="", alias="mainCamera")
     main_scope: str = Field(default="", alias="mainScope")
-    processed_image: str = Field(default="", alias="processedImage")
-    # The main, finished picture for this target. If multiple telescopes
-    # were used, this points to the picture from the 'primary' telescope.
-    stacked_image: str = Field(default="", alias="stackedImage")
-    # A dictionary tracking the finished pictures from every telescope
-    # setup used on this target. The key is a label like "CameraName@300mm".
-    stacks_by_configuration: dict[str, StackConfigurationResult] = Field(
-        default_factory=dict, alias="stacksByConfiguration"
+    # The ordinary imaging stack -- its finished picture(s) and quality
+    # summary, nested together (see `TargetStackingResult`).
+    stacking: TargetStackingResult = Field(default_factory=TargetStackingResult, alias="stacking")
+    # The spectroscopy stack -- same shape as `stacking`, kept separate
+    # since a target can be both imaged and spectroscoped independently.
+    spectral_stacking: TargetStackingResult = Field(
+        default_factory=TargetStackingResult, alias="spectralStacking"
     )
-    stacked_spectral_target: str = Field(default="", alias="stackedSpectralTarget")
-    stack_quality_summary: StackQualitySummary | None = Field(default=None, alias="stackQualitySummary")
-    spectral_stack_quality_summary: StackQualitySummary | None = Field(
-        default=None, alias="spectralStackQualitySummary"
+    asteroid_detection: AsteroidDetectionResult = Field(
+        default_factory=AsteroidDetectionResult, alias="asteroidDetection"
     )
-    astrometry_quality_summary: AstrometryQualitySummary | None = Field(
-        default=None, alias="astrometryQualitySummary"
-    )
-    photometry_quality_summary: PhotometryQualitySummary | None = Field(
-        default=None, alias="photometryQualitySummary"
-    )
-    spectroscopy_quality_summary: SpectroscopyQualitySummary | None = Field(
-        default=None, alias="spectroscopyQualitySummary"
-    )
-    asteroid_candidates: list[AsteroidDetectionCandidate] = Field(
-        default_factory=list, alias="asteroidCandidates"
-    )
-    asteroid_detection_quality_summary: AsteroidDetectionQualitySummary | None = Field(
-        default=None, alias="asteroidDetectionQualitySummary"
-    )
+    # The astrometry/photometry/spectroscopy run-level quality summaries,
+    # grouped together (see `TargetQualitySummaries`).
+    quality: TargetQualitySummaries = Field(default_factory=TargetQualitySummaries, alias="quality")
     exposure_sec: float = Field(default=0, alias="exposureTime")
     number_of_stars: int = Field(default=0, alias="numberOfStars")
     frames: list[FrameRecord] = Field(default_factory=list, alias="frames")
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_flat_result_fields(cls, data: Any) -> Any:
+        """Reshape an old, flat-field target record into the tiered shape.
+
+        A `Target` stored before this reorganization has its stacking,
+        spectral-stacking, asteroid-detection, and per-pipeline quality
+        fields as top-level siblings of `id`/`ra`/`dec` instead of
+        nested under `stacking`/`spectral_stacking`/`asteroid_detection`/
+        `quality`. This reshapes an old-shaped dict into the new one
+        before pydantic validates it, so a target stored under the old
+        field layout loads correctly with no database rewrite -- it is
+        written back out in the new shape the next time it is saved.
+
+        Returns
+        -------
+        data : `Any`
+            `data` unchanged if it is not an old-shaped mapping,
+            otherwise a copy reshaped into the tiered structure.
+        """
+        if not isinstance(data, dict):
+            return data
+        if any(key in data for key in ("stacking", "spectral_stacking", "asteroid_detection", "quality")):
+            return data
+
+        migrated = dict(data)
+
+        def pop_any(*names: str) -> Any:
+            for name in names:
+                if name in migrated:
+                    return migrated.pop(name)
+            return None
+
+        stacking = {
+            key: value
+            for key, value in (
+                ("stackedImage", pop_any("stackedImage", "stacked_image")),
+                ("processedImage", pop_any("processedImage", "processed_image")),
+                ("stacksByConfiguration", pop_any("stacksByConfiguration", "stacks_by_configuration")),
+                ("qualitySummary", pop_any("stackQualitySummary", "stack_quality_summary")),
+            )
+            if value is not None
+        }
+        if stacking:
+            migrated["stacking"] = stacking
+
+        spectral_stacking = {
+            key: value
+            for key, value in (
+                ("stackedImage", pop_any("stackedSpectralTarget", "stacked_spectral_target")),
+                (
+                    "qualitySummary",
+                    pop_any("spectralStackQualitySummary", "spectral_stack_quality_summary"),
+                ),
+            )
+            if value is not None
+        }
+        if spectral_stacking:
+            migrated["spectral_stacking"] = spectral_stacking
+
+        asteroid_detection = {
+            key: value
+            for key, value in (
+                ("candidates", pop_any("asteroidCandidates", "asteroid_candidates")),
+                (
+                    "qualitySummary",
+                    pop_any("asteroidDetectionQualitySummary", "asteroid_detection_quality_summary"),
+                ),
+            )
+            if value is not None
+        }
+        if asteroid_detection:
+            migrated["asteroid_detection"] = asteroid_detection
+
+        quality = {
+            key: value
+            for key, value in (
+                ("astrometry", pop_any("astrometryQualitySummary", "astrometry_quality_summary")),
+                ("photometry", pop_any("photometryQualitySummary", "photometry_quality_summary")),
+                (
+                    "spectroscopy",
+                    pop_any("spectroscopyQualitySummary", "spectroscopy_quality_summary"),
+                ),
+            )
+            if value is not None
+        }
+        if quality:
+            migrated["quality"] = quality
+
+        return migrated
 
     def serialize(self) -> dict[str, Any]:
         """Package the target's data into a basic dictionary format.
@@ -214,12 +390,7 @@ class Target(BaseModel):
         data : `dict[str, Any]`
             The target's fields, using their JSON-friendly names.
         """
-        data = self.model_dump(mode="python", by_alias=True)
-        if "stackedSpectralTarget" not in data and hasattr(self, "stacked_spectral_target"):
-            data["stackedSpectralTarget"] = self.stacked_spectral_target
-        if "stackedImage" not in data and hasattr(self, "stacked_image"):
-            data["stackedImage"] = self.stacked_image
-        return data
+        return self.model_dump(mode="python", by_alias=True)
 
     def recalculate_total_exposure(self) -> float:
         """Add up the exposure times of all the individual frames.

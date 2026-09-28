@@ -376,6 +376,43 @@ export function registerIpcHandlers(
     mainWindow.setProgressBar(progress, { mode: mode || 'normal' });
   });
 
+  // Custom Title Bar — window chrome controls for frameless windows (see
+  // BasePlatform#getWindowOptions). Act on the sender's own window rather
+  // than always mainWindow, so secondary/auxiliary windows (which share the
+  // same frameless window options) get working controls too.
+  ipcMain.on('window-minimize', (event) => {
+    BrowserWindow.fromWebContents(event.sender)?.minimize();
+  });
+
+  ipcMain.on('window-toggle-maximize', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win) return;
+    if (win.isMaximized()) {
+      win.unmaximize();
+    } else {
+      win.maximize();
+    }
+  });
+
+  ipcMain.on('window-close', (event) => {
+    BrowserWindow.fromWebContents(event.sender)?.close();
+  });
+
+  ipcMain.handle('window-is-maximized', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    return win ? win.isMaximized() : false;
+  });
+
+  ipcMain.handle('window-is-focused', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    return win ? win.isFocused() : true;
+  });
+
+  ipcMain.handle('window-is-fullscreen', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    return win ? win.isFullScreen() : false;
+  });
+
   // Tray Popover Actions — routed from the TrayPopover React component
   // Emergency Park intentionally keeps the popover open so the user can
   // confirm mount state after triggering the park command.

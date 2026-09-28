@@ -5,13 +5,11 @@ searching through a series of images to find things that move (like asteroids)
 against the fixed background stars.
 """
 
-from astrometricslib.drivers.job_logging import registered_job
+from typing import Any
+
 from astrometricslib.models.moving_object import AsteroidDetectionCandidate
 from astrometricslib.models.moving_object_config import MovingObjectConfig
 from astrometricslib.models.target import Target
-from astrometricslib.pipelines.asteroid_detection.pipeline import (
-    AsteroidDetectionPipeline,
-)
 
 __all__ = ["MovingObjectRecovery"]
 
@@ -42,7 +40,7 @@ class MovingObjectRecovery:
             run needs it.
         """
         self._config = config
-        self._pipeline = AsteroidDetectionPipeline(config=config)
+        self._last_run_metrics: dict[str, Any] = {}
 
     def detect_asteroids(self, target: Target) -> list[AsteroidDetectionCandidate]:
         """Run the full search for asteroids on a specific target.
@@ -52,6 +50,12 @@ class MovingObjectRecovery:
         already be plate-solved (stars matched to a database) so the system can
         accurately measure true movement in the sky.
 
+        Goes through `analyze_target`, the same entry point the other
+        three pipelines use -- this both records a real
+        `AsteroidDetectionQualitySummary` on `target` (this method used
+        to bypass that entirely) and gives the run a tracked job, so it
+        gets IVOA provenance recorded like every other pipeline.
+
         Parameters
         ----------
         target : `astrometricslib.models.target.Target`
@@ -60,29 +64,24 @@ class MovingObjectRecovery:
         Returns
         -------
         candidates : `list` [`AsteroidDetectionCandidate`]
-            Every candidate the discrimination cascade produced,
-            including rejected ones.
+            The candidates that survived the discrimination cascade,
+            already written onto `target.asteroid_detection.candidates`.
+        """
+        from astrometricslib.pipelines.tasks import analyze_target
 
-        Raises
-        ------
-        ValueError
-            If the target has no `stacked_image`.
-        """  # ruff: ignore[docstring-extraneous-exception] -- genuinely propagated from self._pipeline.process
-        light_frames = [
-            (frame.path, frame.timestamp)
-            for frame in target.frames
-            if frame.role == "LIGHT" and frame.timestamp is not None
-        ]
-        with registered_job(
-            enabled=True,
-            job_type="asteroid_detection",
-            target_id=target.id,
-            completed_message=f"[{target.id}] Asteroid detection completed successfully.",
-            failed_message=f"[{target.id}] Asteroid detection failed.",
-        ):
-            return self._pipeline.process(target.id, target.stacked_image, light_frames)
+        analyze_target(
+            target,
+            pipeline_type="asteroid_detection",
+            register_job=True,
+            moving_object_config=self._config,
+        )
+        summary = target.asteroid_detection.quality_summary
+        self._last_run_metrics = (
+            summary.asteroid_detection_metrics.model_dump() if summary is not None else {}
+        )
+        return target.asteroid_detection.candidates
 
     @property
-    def last_run_metrics(self) -> dict[str, int]:
+    def last_run_metrics(self) -> dict[str, Any]:
         """Per-stage candidate counts from the most recent recovery run."""
-        return self._pipeline.last_run_metrics
+        return self._last_run_metrics

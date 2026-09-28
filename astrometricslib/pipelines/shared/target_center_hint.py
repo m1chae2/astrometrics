@@ -107,8 +107,8 @@ def _find_matching_solved_stack(target: Any, spectral_stack_path: str) -> tuple[
     if not spectral_camera or spectral_focal_length is None:
         return None
 
-    candidate_paths = [target.stacked_image] + [
-        configuration.stacked_image for configuration in target.stacks_by_configuration.values()
+    candidate_paths = [target.stacking.stacked_image] + [
+        configuration.stacked_image for configuration in target.stacking.stacks_by_configuration.values()
     ]
     for candidate_path in dict.fromkeys(path for path in candidate_paths if path):
         if not os.path.exists(candidate_path):

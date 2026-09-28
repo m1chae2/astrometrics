@@ -11,6 +11,16 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 /**
+ * Whether this window was created without native OS decorations (see
+ * BasePlatform#getWindowOptions), i.e. whether the renderer must draw its
+ * own title bar. Passed as a command-line flag on window creation
+ * (main.js#getWindowOptions) rather than fetched over IPC, so it's known
+ * synchronously at first paint — no flash of the wrong chrome while an
+ * async round trip resolves.
+ */
+const hasCustomTitleBar = process.argv.includes('--astrometrics-frameless=true');
+
+/**
  * Public API exposed to the renderer at window.astrometrics.
  * Provides access to restricted main-process functionality.
  */
@@ -175,6 +185,88 @@ const api = {
 			return () => ipcRenderer.removeListener('open-file', handler);
 		}
 	},
+	window: {
+		/**
+		 * Whether this window has no native title bar and must render its own
+		 * (icon, drag region, minimize/maximize/close buttons).
+		 */
+		hasCustomTitleBar,
+
+		/** Minimize the current window. */
+		minimize() {
+			ipcRenderer.send('window-minimize');
+		},
+
+		/** Toggle the current window between maximized and restored. */
+		toggleMaximize() {
+			ipcRenderer.send('window-toggle-maximize');
+		},
+
+		/** Close the current window. */
+		close() {
+			ipcRenderer.send('window-close');
+		},
+
+		/**
+		 * Query whether the current window is currently maximized.
+		 * @returns {Promise<boolean>}
+		 */
+		async isMaximized() {
+			return ipcRenderer.invoke('window-is-maximized');
+		},
+
+		/**
+		 * Subscribe to maximize/restore transitions of the current window,
+		 * including ones triggered outside a custom title bar's own button
+		 * (e.g. a window-manager double-click or edge-snap).
+		 * @param {Function} callback (isMaximized: boolean) => void
+		 * @returns {Function} Unsubscribe function
+		 */
+		onMaximizedChange(callback) {
+			const handler = (_event, isMaximized) => callback(isMaximized);
+			ipcRenderer.on('window-maximized-changed', handler);
+			return () => ipcRenderer.removeListener('window-maximized-changed', handler);
+		},
+
+		/**
+		 * Query whether the current window currently has OS focus.
+		 * @returns {Promise<boolean>}
+		 */
+		async isFocused() {
+			return ipcRenderer.invoke('window-is-focused');
+		},
+
+		/**
+		 * Subscribe to focus/blur transitions of the current window, so a
+		 * custom title bar can dim to match native OS-drawn title bars.
+		 * @param {Function} callback (isFocused: boolean) => void
+		 * @returns {Function} Unsubscribe function
+		 */
+		onFocusChange(callback) {
+			const handler = (_event, isFocused) => callback(isFocused);
+			ipcRenderer.on('window-focus-changed', handler);
+			return () => ipcRenderer.removeListener('window-focus-changed', handler);
+		},
+
+		/**
+		 * Query whether the current window is currently fullscreen.
+		 * @returns {Promise<boolean>}
+		 */
+		async isFullscreen() {
+			return ipcRenderer.invoke('window-is-fullscreen');
+		},
+
+		/**
+		 * Subscribe to fullscreen enter/leave transitions of the current window.
+		 * @param {Function} callback (isFullscreen: boolean) => void
+		 * @returns {Function} Unsubscribe function
+		 */
+		onFullscreenChange(callback) {
+			const handler = (_event, isFullscreen) => callback(isFullscreen);
+			ipcRenderer.on('window-fullscreen-changed', handler);
+			return () => ipcRenderer.removeListener('window-fullscreen-changed', handler);
+		}
+	},
 	backend: {
 		/**
 		 * Ping a backend URL (GET) and return the response status.
@@ -313,6 +405,7 @@ const api = {
 // Freeze surface to prevent tampering from renderer scripts.
 Object.freeze(api);
 Object.freeze(api.app);
+Object.freeze(api.window);
 Object.freeze(api.dialog);
 Object.freeze(api.tray);
 Object.freeze(api.terminal);

@@ -21,7 +21,7 @@ export async function fetchProcessedImage(
             return null;
         }
 
-        let imagePath = target.processedImage || target.stackedImage || target.stackedSpectralTarget || target.processed_image || target.stacked_image;
+        let imagePath = target.stacking?.processedImage || target.stacking?.stackedImage || target.spectralStacking?.stackedImage;
 
         if (!imagePath && target.frames) {
             const stackedFrame = target.frames.find(f =>

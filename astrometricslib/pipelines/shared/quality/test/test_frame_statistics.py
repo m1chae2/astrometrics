@@ -106,8 +106,8 @@ def test_task_populates_every_frame(tmp_path):  # ruff: ignore[missing-type-func
     counts = frame_statistics.measure_frame_input_quality(target)
 
     assert counts == {"measured": 2, "skipped": 0, "failed": 0}
-    assert target.frames[0].background_level == pytest.approx(100.0)
-    assert target.frames[1].background_level == pytest.approx(900.0)
+    assert target.frames[0].measurements.background_level == pytest.approx(100.0)
+    assert target.frames[1].measurements.background_level == pytest.approx(900.0)
 
 
 def test_task_is_incremental_by_default(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
@@ -140,8 +140,8 @@ def test_unreadable_frames_are_counted_not_raised(tmp_path):  # ruff: ignore[mis
     counts = frame_statistics.measure_frame_input_quality(target)
 
     assert counts == {"measured": 1, "skipped": 0, "failed": 1}
-    assert target.frames[0].background_level is not None
-    assert target.frames[1].background_level is None
+    assert target.frames[0].measurements.background_level is not None
+    assert target.frames[1].measurements.background_level is None
 
 
 def test_camera_filter_restricts_measurement(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
@@ -159,8 +159,8 @@ def test_camera_filter_restricts_measurement(tmp_path):  # ruff: ignore[missing-
     counts = frame_statistics.measure_frame_input_quality(target, camera_name="Nikon")
 
     assert counts["measured"] == 1
-    assert target.frames[0].background_level is None
-    assert target.frames[1].background_level is not None
+    assert target.frames[0].measurements.background_level is None
+    assert target.frames[1].measurements.background_level is not None
 
 
 def test_measured_fwhm_is_kept_apart_from_registration_fwhm(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
@@ -171,13 +171,13 @@ def test_measured_fwhm_is_kept_apart_from_registration_fwhm(tmp_path):  # ruff: 
     seeing change caused purely by which stage did the measuring.
     """
     target = _target_with_frames([_write_frame(tmp_path / "a.fits")])
-    target.frames[0].registration_fwhm_x_px = 3.2
-    target.frames[0].registration_fwhm_y_px = 3.4
+    target.frames[0].measurements.registration_fwhm_x_px = 3.2
+    target.frames[0].measurements.registration_fwhm_y_px = 3.4
 
     frame_statistics.measure_frame_input_quality(target, include_fwhm=True)
 
-    assert target.frames[0].registration_fwhm_x_px == pytest.approx(3.2)
-    assert target.frames[0].registration_fwhm_y_px == pytest.approx(3.4)
+    assert target.frames[0].measurements.registration_fwhm_x_px == pytest.approx(3.2)
+    assert target.frames[0].measurements.registration_fwhm_y_px == pytest.approx(3.4)
 
 
 def test_each_frames_saturation_uses_its_own_cameras_threshold(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
@@ -220,5 +220,5 @@ def test_each_frames_saturation_uses_its_own_cameras_threshold(tmp_path, monkeyp
 
     frame_statistics.measure_frame_input_quality(target)
 
-    assert target.frames[0].saturated_pixel_fraction == pytest.approx(0.125)
-    assert target.frames[1].saturated_pixel_fraction == pytest.approx(0.0)
+    assert target.frames[0].measurements.saturated_pixel_fraction == pytest.approx(0.125)
+    assert target.frames[1].measurements.saturated_pixel_fraction == pytest.approx(0.0)

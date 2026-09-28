@@ -16,38 +16,61 @@ export interface AstronomyListOptions {
     offset?: number;
 }
 
+/** Builds the `target_id`/`search`/`filter_type` scoping params shared by the list and count RPCs. */
+function buildAstronomyScopeParams(optionsOrTargetId?: string | AstronomyListOptions): Record<string, unknown> {
+    const params: Record<string, unknown> = {};
+    if (typeof optionsOrTargetId === 'string') {
+        if (optionsOrTargetId.trim() !== '') {
+            params.target_id = optionsOrTargetId.trim();
+        }
+    } else if (optionsOrTargetId && typeof optionsOrTargetId === 'object') {
+        if (optionsOrTargetId.targetId && optionsOrTargetId.targetId.trim() !== '') {
+            params.target_id = optionsOrTargetId.targetId.trim();
+        }
+        if (optionsOrTargetId.search && optionsOrTargetId.search.trim() !== '') {
+            params.search = optionsOrTargetId.search.trim();
+        }
+        if (optionsOrTargetId.filterType && optionsOrTargetId.filterType.trim() !== '') {
+            params.filter_type = optionsOrTargetId.filterType.trim();
+        }
+    }
+    return params;
+}
+
 async function getAstronomyList(optionsOrTargetId?: string | AstronomyListOptions): Promise<Spectrum[]> {
     try {
-        const params: Record<string, unknown> = {};
-        if (typeof optionsOrTargetId === 'string') {
-            if (optionsOrTargetId.trim() !== '') {
-                params.target_id = optionsOrTargetId.trim();
-            }
+        const params = buildAstronomyScopeParams(optionsOrTargetId);
+        if (typeof optionsOrTargetId === 'string' || !optionsOrTargetId || typeof optionsOrTargetId !== 'object') {
             params.limit = 100;
             params.offset = 0;
-        } else if (optionsOrTargetId && typeof optionsOrTargetId === 'object') {
-            if (optionsOrTargetId.targetId && optionsOrTargetId.targetId.trim() !== '') {
-                params.target_id = optionsOrTargetId.targetId.trim();
-            }
-            if (optionsOrTargetId.search && optionsOrTargetId.search.trim() !== '') {
-                params.search = optionsOrTargetId.search.trim();
-            }
-            if (optionsOrTargetId.filterType && optionsOrTargetId.filterType.trim() !== '') {
-                params.filter_type = optionsOrTargetId.filterType.trim();
-            }
+        } else {
             params.limit = optionsOrTargetId.limit !== undefined ? optionsOrTargetId.limit : 100;
             if (optionsOrTargetId.offset !== undefined) {
                 params.offset = optionsOrTargetId.offset;
             }
-        } else {
-            params.limit = 100;
-            params.offset = 0;
         }
         const data = await callBackend("astronomy:list", params);
         return Array.isArray(data) ? (data as Spectrum[]) : [];
     } catch (err: unknown) {
         reportError(err instanceof Error ? err : new Error(String(err)), 'backend');
         return [];
+    }
+}
+
+/**
+ * Fetches how many stars match a scope (target, search, and/or filter), unpaginated.
+ * Used to compute how many pages a paginated star listing has.
+ * @param optionsOrTargetId Optional target identifier or options object.
+ * @return The total matching count, or 0 on failure.
+ */
+export async function fetchAstronomyCount(optionsOrTargetId?: string | AstronomyListOptions): Promise<number> {
+    try {
+        const params = buildAstronomyScopeParams(optionsOrTargetId);
+        const data = await callBackend("astronomy:count", params);
+        return typeof data === 'number' ? data : 0;
+    } catch (err: unknown) {
+        reportError(err instanceof Error ? err : new Error(String(err)), 'backend');
+        return 0;
     }
 }
 

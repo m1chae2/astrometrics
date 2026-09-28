@@ -26,12 +26,12 @@ export async function processTarget(
 }
 
 /**
- * Fetches all active processing jobs.
+ * Fetches all active processing jobs, including their progress.
  */
-export async function fetchAllProcesses(): Promise<ProcessStatus[]> {
+export async function fetchAllProcesses(): Promise<ProcessingJob[]> {
     try {
         const result = await callBackend('processing:active_jobs', {});
-        return (result || []) as ProcessStatus[];
+        return result || [];
     } catch {
         return [];
     }

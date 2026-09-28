@@ -147,7 +147,10 @@ describe('useDeepCatalogStatus', () => {
     expect(result.current.status).toBeNull();
     await waitFor(() => expect(result.current.status?.installed).toBe(true));
     expect(callBackend).toHaveBeenCalledTimes(1);
-    expect(callBackend).toHaveBeenCalledWith('planetarium:get_deep_catalog_status', {});
+    expect(callBackend).toHaveBeenCalledWith('planetarium:get_deep_catalog_status', {}, {
+      signal: expect.any(AbortSignal),
+      silent: true,
+    });
   });
 
   it('leaves the status null, without throwing, when the request fails', async () => {

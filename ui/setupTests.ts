@@ -79,10 +79,10 @@ beforeAll(async () => {
     fs.mkdirSync(framesDir, { recursive: true });
 
     // Write sandbox config file
-    const configPath = path.join(tempDir, 'astrometrics.config');
-    fs.writeFileSync(configPath, `[Image Library]
-path = ${libDir}
-frames_path = ${framesDir}
+    const configPath = path.join(tempDir, 'astrometrics.config.toml');
+    fs.writeFileSync(configPath, `["Image Library"]
+path = "${libDir}"
+frames_path = "${framesDir}"
 `);
 
     // Configure test environment variables

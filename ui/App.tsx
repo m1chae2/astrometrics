@@ -21,12 +21,12 @@ const queryClient = new QueryClient({
 
 
 // Lazy load main display components with named export handling.
-const TargetDisplay = React.lazy(() =>
-  import('./targetDisplay/TargetDisplay').then((m) => ({ default: m.TargetDisplay }))
+const ImageViewerDisplay = React.lazy(() =>
+  import('./imageViewerDisplay/ImageViewerDisplay').then((m) => ({ default: m.ImageViewerDisplay }))
 );
-const AstronomyDisplay = React.lazy(() =>
-  import('./astronomyDisplay/AstronomyDisplay').then((m) => ({
-    default: m.AstronomyDisplay,
+const AstronomyManager = React.lazy(() =>
+  import('./astronomyManager/AstronomyManager').then((m) => ({
+    default: m.AstronomyManager,
   }))
 );
 const ImageProcessingDisplay = React.lazy(() =>
@@ -34,9 +34,9 @@ const ImageProcessingDisplay = React.lazy(() =>
     default: m.ImageProcessingDisplay,
   }))
 );
-const ObservatoryDisplay = React.lazy(() =>
-  import('./observatoryDisplay/ObservatoryDisplay').then((m) => ({
-    default: m.ObservatoryDisplay,
+const ObservatoryManager = React.lazy(() =>
+  import('./observatoryManager/ObservatoryManager').then((m) => ({
+    default: m.ObservatoryManager,
   }))
 );
 const ObservationManager = React.lazy(() =>
@@ -79,11 +79,11 @@ const onRenderProfile: ProfilerOnRenderCallback = (
 // its data. Adding a future display here automatically gets this same
 // on-demand mounting for free; no other file needs to change.
 const MODE_PANELS: { mode: string; id: string; Component: React.ComponentType }[] = [
-  { mode: 'Image Viewer', id: 'TargetDisplay', Component: TargetDisplay },
-  { mode: 'Astronomy Manager', id: 'AstronomyDisplay', Component: AstronomyDisplay },
+  { mode: 'Image Viewer', id: 'ImageViewerDisplay', Component: ImageViewerDisplay },
+  { mode: 'Astronomy Manager', id: 'AstronomyManager', Component: AstronomyManager },
   { mode: 'Planetarium', id: 'PlanetariumDisplay', Component: PlanetariumDisplay },
   { mode: 'Image Processing', id: 'ImageProcessingDisplay', Component: ImageProcessingDisplay },
-  { mode: 'Observatory Manager', id: 'ObservatoryDisplay', Component: ObservatoryDisplay },
+  { mode: 'Observatory Manager', id: 'ObservatoryManager', Component: ObservatoryManager },
   { mode: 'Observation Manager', id: 'ObservationManager', Component: ObservationManager },
   { mode: 'Command Console', id: 'CommandConsole', Component: CommandConsole },
 ];

@@ -4,41 +4,25 @@
  * Provides real-time tracking of altitude, azimuth, and set times for the library.
  * REQ: OBM-1.5: The system SHALL display visibility status for targets.
  */
-import { useState, useEffect } from 'react';
+import { useBackendFetch } from '../../common/hooks/useBackendFetch';
+import { usePollTick } from '../../common/hooks/usePollTick';
 import { fetchVisibleTargets, VisibleTarget } from '../../common/services/targetService';
+
+/** How often to re-poll visible targets, in milliseconds. */
+const VISIBILITY_POLL_INTERVAL_MS = 30000;
 
 /**
  * Hook to fetch and poll for currently visible targets.
  * REQ: OBM-1.5: The system SHALL display visibility status for targets.
  */
 export const useTargetVisibility = () => {
-    const [visibleTargets, setVisibleTargets] = useState<VisibleTarget[]>([]);
-    const [loading, setLoading] = useState<boolean>(true);
+    const pollTick = usePollTick(VISIBILITY_POLL_INTERVAL_MS);
 
-    useEffect(() => {
-        let isMounted = true;
+    const { data, loading } = useBackendFetch<VisibleTarget[]>(
+        () => fetchVisibleTargets(),
+        [pollTick],
+        { errorMessage: 'Failed to load visible targets' }
+    );
 
-        const loadVisible = async () => {
-            try {
-                const data = await fetchVisibleTargets();
-                if (isMounted) {
-                    setVisibleTargets(data);
-                    setLoading(false);
-                }
-            } catch (err) {
-                console.error("Error loading visible targets", err);
-                if (isMounted) setLoading(false);
-            }
-        };
-
-        loadVisible();
-        const intervalId = setInterval(loadVisible, 30000); // Pulse every 30s
-
-        return () => {
-            isMounted = false;
-            clearInterval(intervalId);
-        };
-    }, []);
-
-    return { visibleTargets, loading };
+    return { visibleTargets: data ?? [], loading };
 };

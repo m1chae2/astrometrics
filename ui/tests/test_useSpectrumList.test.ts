@@ -5,7 +5,7 @@
 
 import { renderHook, act } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
-import { useSpectrumList } from '../astronomyDisplay/hooks/useSpectrumList';
+import { useSpectrumList } from '../astronomyManager/hooks/useSpectrumList';
 import { Spectrum } from '../common/types/backendTypes';
 
 // Mock TanStack Query hooks and toast hook

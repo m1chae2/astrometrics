@@ -4,20 +4,20 @@ Checks the shipped example config, that a mistake in one section skips just
 that section with a warning, and that a config with no optics is not an error.
 """
 
-import configparser
 import logging
 from pathlib import Path
 
 import pytest
 
+from astrometricslib.utilities.config_loader import _TomlSectionedConfig
 from astrometricslib.utilities.observatory_setups import load_observatory_setups
 from astrometricslib.utilities.warn_once import warn_once
 
-EXAMPLE_CONFIG_PATH = Path(__file__).resolve().parents[2] / "astrometrics.config.example"
+EXAMPLE_CONFIG_PATH = Path(__file__).resolve().parents[2] / "astrometrics.config.example.toml"
 
 
 class ConfigParserAdapter:
-    """Give a `ConfigParser` the ``get_value`` method the loader asks for."""
+    """Give a config the ``get_value`` method the loader asks for."""
 
     def __init__(self, text: str) -> None:
         """Parse config text.
@@ -27,7 +27,7 @@ class ConfigParserAdapter:
         text : `str`
             The contents of a config file.
         """
-        self.parser = configparser.ConfigParser()
+        self.parser = _TomlSectionedConfig()
         self.parser.read_string(text)
 
     def get_value(self, section: str, key: str, fallback: str | None = None) -> str | None:
@@ -69,7 +69,7 @@ def test_the_shipped_example_config_describes_the_observatorys_optics_and_pairin
 
 def test_the_example_config_gives_the_d5300_a_default_iso() -> None:
     """Check the key that replaces the old forced ISO 800."""
-    parser = configparser.ConfigParser()
+    parser = _TomlSectionedConfig()
     parser.read_string(EXAMPLE_CONFIG_PATH.read_text(encoding="utf-8"))
     assert parser.get("Observatory.Camera.Nikon D5300", "default_iso") == "800"
 
@@ -79,7 +79,7 @@ def test_a_config_with_no_optics_gives_empty_results_and_no_warning(
 ) -> None:
     """Check that an older config file, without these sections, still loads."""
     with caplog.at_level(logging.WARNING):
-        result = load_observatory_setups(ConfigParserAdapter("[Image Library]\npath = x\n"))
+        result = load_observatory_setups(ConfigParserAdapter('["Image Library"]\npath = "x"\n'))
     assert result.optics == ()
     assert result.setups == ()
     assert caplog.records == []
@@ -90,12 +90,12 @@ def test_an_optic_without_a_focal_length_is_skipped_with_one_warning(
 ) -> None:
     """Check that one broken optic does not spoil the others."""
     text = """
-[Observatory.Optics]
-available = Good Scope, Broken Scope
-[Observatory.Optic.Good Scope]
-focal_length_mm = 400
-[Observatory.Optic.Broken Scope]
-focal_ratio = 5
+["Observatory.Optics"]
+available = "Good Scope, Broken Scope"
+["Observatory.Optic.Good Scope"]
+focal_length_mm = "400"
+["Observatory.Optic.Broken Scope"]
+focal_ratio = "5"
 """
     with caplog.at_level(logging.WARNING):
         result = load_observatory_setups(ConfigParserAdapter(text))
@@ -110,18 +110,18 @@ def test_a_setup_naming_an_unlisted_optic_is_skipped_with_a_warning(
 ) -> None:
     """Check that a typo in a setup's optic name is reported, not ignored."""
     text = """
-[Observatory.Optics]
-available = Good Scope
-[Observatory.Optic.Good Scope]
-focal_length_mm = 400
-[Observatory.Setups]
-available = Camera on Typo, Camera on Good
-[Observatory.Setup.Camera on Typo]
-camera = Some Camera
-optic = Goood Scope
-[Observatory.Setup.Camera on Good]
-camera = Some Camera
-optic = Good Scope
+["Observatory.Optics"]
+available = "Good Scope"
+["Observatory.Optic.Good Scope"]
+focal_length_mm = "400"
+["Observatory.Setups"]
+available = "Camera on Typo, Camera on Good"
+["Observatory.Setup.Camera on Typo"]
+camera = "Some Camera"
+optic = "Goood Scope"
+["Observatory.Setup.Camera on Good"]
+camera = "Some Camera"
+optic = "Good Scope"
 """
     with caplog.at_level(logging.WARNING):
         result = load_observatory_setups(ConfigParserAdapter(text))
@@ -135,12 +135,12 @@ def test_a_focal_length_that_is_not_a_positive_number_is_skipped(
 ) -> None:
     """Check that zero and text are both refused."""
     text = """
-[Observatory.Optics]
-available = Zero Scope, Text Scope
-[Observatory.Optic.Zero Scope]
-focal_length_mm = 0
-[Observatory.Optic.Text Scope]
-focal_length_mm = long
+["Observatory.Optics"]
+available = "Zero Scope, Text Scope"
+["Observatory.Optic.Zero Scope"]
+focal_length_mm = "0"
+["Observatory.Optic.Text Scope"]
+focal_length_mm = "long"
 """
     with caplog.at_level(logging.WARNING):
         result = load_observatory_setups(ConfigParserAdapter(text))

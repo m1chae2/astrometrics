@@ -9,15 +9,16 @@ a = Analysis(
     pathex=['.'], # Add project root to path so 'backend' and 'astrolib' are found
     binaries=[],
     datas=[
-        # Ship the tracked template, not a real astrometrics.config: the latter
-        # is gitignored (machine-specific frames_path plus an astrometry.net API
-        # key), so referencing it fails the build on a clean checkout and would
-        # bake a personal key into the binary. This path had also been stale --
-        # it named backend/, where no config has ever lived.
-        # The frozen app finds no astrometrics.config next to itself and so
-        # falls back to AppConfiguration._populate_defaults(); the template
-        # travels alongside as the reference to copy from.
-        ('astrometricslib/astrometrics.config.example', '.'),
+        # Ship the tracked template, not a real astrometrics.config.toml: the
+        # latter is gitignored (machine-specific frames_path plus an
+        # astrometry.net API key), so referencing it fails the build on a
+        # clean checkout and would bake a personal key into the binary. This
+        # path had also been stale -- it named backend/, where no config has
+        # ever lived.
+        # The frozen app finds no astrometrics.config.toml next to itself and
+        # so falls back to AppConfiguration._populate_defaults(); the
+        # template travels alongside as the reference to copy from.
+        ('astrometricslib/astrometrics.config.example.toml', '.'),
     ] + collect_data_files('astroquery') + collect_data_files('photutils') +
         collect_data_files('astropy') + collect_data_files('scipy'),
     hiddenimports=[

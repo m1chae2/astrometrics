@@ -6,7 +6,6 @@ and the telescope chosen by looking for "Nikkor 300mm" in the file path. They
 now come from the config file and the camera profiles.
 """
 
-import configparser
 import logging
 from pathlib import Path
 
@@ -19,10 +18,10 @@ from astrometricslib.pipelines.shared.frame_scanning import (
     classify_and_sort_fits_files,
     create_frame_record_from_fits,
 )
-from astrometricslib.utilities.config_loader import AppConfiguration
+from astrometricslib.utilities.config_loader import AppConfiguration, _TomlSectionedConfig
 from astrometricslib.utilities.warn_once import warn_once
 
-EXAMPLE_CONFIG_PATH = Path(__file__).resolve().parents[3] / "astrometrics.config.example"
+EXAMPLE_CONFIG_PATH = Path(__file__).resolve().parents[3] / "astrometrics.config.example.toml"
 
 
 @pytest.fixture(autouse=True)
@@ -44,10 +43,10 @@ def make_config(frames_root: Path | None = None) -> AppConfiguration:
     config : `AppConfiguration`
         The configuration.
     """
-    parser = configparser.ConfigParser()
+    parser = _TomlSectionedConfig()
     parser.read_string(EXAMPLE_CONFIG_PATH.read_text(encoding="utf-8"))
     if frames_root is not None:
-        parser["Image Library"]["path"] = str(frames_root)
+        parser.set("Image Library", "path", str(frames_root))
     config = AppConfiguration()
     config.app_config = parser
     return config
@@ -136,8 +135,8 @@ def test_a_d5300_frame_without_a_focal_length_uses_the_folder_name(tmp_path: Pat
 
 def test_a_config_without_setups_records_the_telescope_as_unknown(tmp_path: Path) -> None:
     """Check what happens until an older config gets the new sections."""
-    parser = configparser.ConfigParser()
-    parser.read_string("[Image Library]\npath = x\n")
+    parser = _TomlSectionedConfig()
+    parser.read_string('["Image Library"]\npath = "x"\n')
     config = AppConfiguration()
     config.app_config = parser
     path = write_frame(tmp_path / "a.fits", INSTRUME="ZWO CCD ASI533MM Pro", GAIN=0.0, FOCALLEN=405.0)

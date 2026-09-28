@@ -6,7 +6,7 @@
 
 import { renderHook, act } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
-import { useStarsBySpectralClassList } from '../astronomyDisplay/hooks/useStarsBySpectralClassList';
+import { useStarsBySpectralClassList } from '../astronomyManager/hooks/useStarsBySpectralClassList';
 
 vi.mock('../common/queries/useStarsBySpectralClassQuery', () => ({
     useStarsBySpectralClassQuery: vi.fn(),

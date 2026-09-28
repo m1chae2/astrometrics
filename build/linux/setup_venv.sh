@@ -88,13 +88,14 @@ done
 
 log "Repository root: $ROOT_DIR"
 
-# Seed the local configuration from the tracked template. astrometrics.config
-# holds machine-specific paths and an API key, so it is gitignored; without
-# this a fresh clone (and CI) would start with no configuration at all.
-CONFIG_FILE="$ROOT_DIR/astrometricslib/astrometrics.config"
-CONFIG_TEMPLATE="$ROOT_DIR/astrometricslib/astrometrics.config.example"
+# Seed the local configuration from the tracked template.
+# astrometrics.config.toml holds machine-specific paths and an API key, so
+# it is gitignored; without this a fresh clone (and CI) would start with no
+# configuration at all.
+CONFIG_FILE="$ROOT_DIR/astrometricslib/astrometrics.config.toml"
+CONFIG_TEMPLATE="$ROOT_DIR/astrometricslib/astrometrics.config.example.toml"
 if [ ! -f "$CONFIG_FILE" ] && [ -f "$CONFIG_TEMPLATE" ]; then
-  log "No astrometrics.config found; seeding one from astrometrics.config.example"
+  log "No astrometrics.config.toml found; seeding one from astrometrics.config.example.toml"
   cp "$CONFIG_TEMPLATE" "$CONFIG_FILE"
   log "Edit $CONFIG_FILE to set frames_path and, if using the online solver, api_key"
 fi

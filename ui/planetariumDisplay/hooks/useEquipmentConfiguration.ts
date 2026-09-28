@@ -7,16 +7,15 @@
  *
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useBackendFetch } from '../../common/hooks/useBackendFetch';
 import { callBackend, EquipmentCameraProfile, EquipmentConfigurationResult } from '../../common/services/backendApi';
 
 export type { EquipmentCameraProfile, EquipmentConfigurationResult };
 export type CameraProfile = EquipmentCameraProfile;
 export type EquipmentConfiguration = EquipmentConfigurationResult;
 
-/**
- * Return value of useEquipmentConfiguration.
- */
+/** Return value of useEquipmentConfiguration. */
 export interface UseEquipmentConfigurationResult {
   /** Active equipment configuration with computed FOV, or null while loading. */
   configuration: EquipmentConfiguration | null;
@@ -35,46 +34,46 @@ export interface UseEquipmentConfigurationResult {
   setActiveCamera: (cameraName: string) => Promise<void>;
 }
 
+interface FetchedEquipment {
+  configuration: EquipmentConfiguration | null;
+  availableCameras: CameraProfile[];
+}
+
 /**
  * Fetches the active equipment configuration and available cameras from the backend.
- *
- * Re-fetches whenever the active camera changes via setActiveCamera.
  *
  * @func useEquipmentConfiguration
  * @returns {UseEquipmentConfigurationResult}
  */
 export const useEquipmentConfiguration = (): UseEquipmentConfigurationResult => {
-  const [configuration, setConfiguration] = useState<EquipmentConfiguration | null>(null);
-  const [availableCameras, setAvailableCameras] = useState<CameraProfile[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const fetchConfiguration = useCallback(async () => {
-    try {
+  const { data, loading, error } = useBackendFetch<FetchedEquipment>(
+    async (signal) => {
       const [equipmentConfig, cameras] = await Promise.all([
-        callBackend('observatory:get_equipment_configuration', {}),
-        callBackend('observatory:list_cameras', {}),
+        callBackend('observatory:get_equipment_configuration', {}, { signal }),
+        callBackend('observatory:list_cameras', {}, { signal }),
       ]);
-      setConfiguration(equipmentConfig ?? null);
-      setAvailableCameras(cameras ?? []);
-      setError(null);
-    } catch (error) {
-      setError(error instanceof Error ? error.message : 'Failed to load equipment configuration');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+      return { configuration: equipmentConfig ?? null, availableCameras: cameras ?? [] };
+    },
+    [],
+    { errorMessage: 'Failed to load equipment configuration' }
+  );
 
+  // Optimistic override applied by setActiveCamera, computed instantly from
+  // already-known local data rather than waiting on a round trip. Cleared
+  // whenever a fresh fetch lands so it never outlives the data it overrides.
+  const [configOverride, setConfigOverride] = useState<EquipmentConfiguration | null>(null);
   useEffect(() => {
-    fetchConfiguration();
-  }, [fetchConfiguration]);
+    setConfigOverride(null);
+  }, [data]);
+
+  const configuration = configOverride ?? data?.configuration ?? null;
+  const availableCameras = useMemo(() => data?.availableCameras ?? [], [data]);
 
   const setActiveCamera = useCallback(async (cameraName: string) => {
-    // Compute and apply the new FOV immediately from already-known local data
     const camera = availableCameras.find(candidateCamera => candidateCamera.name === cameraName);
     if (camera && configuration) {
       const plateScale = 206.265 * camera.pixelSizeUm / configuration.telescope.focalLengthMm;
-      setConfiguration({
+      setConfigOverride({
         ...configuration,
         camera,
         plateScaleArcsecPerPx: Math.round(plateScale * 10000) / 10000,

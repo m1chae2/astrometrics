@@ -23,9 +23,6 @@ interface Props {
   /** Show sensor FOV outline. */
   showFOV: boolean;
   onToggleFOV: (value: boolean) => void;
-  /** Show FITS image overlays. */
-  showFITS: boolean;
-  onToggleFITS: (value: boolean) => void;
   /** Show local horizon and ground shading. */
   showEnvironment: boolean;
   onToggleEnvironment: (value: boolean) => void;
@@ -61,8 +58,6 @@ interface Props {
   currentFOV: number;
   /** Opens the date/time simulation modal. */
   onOpenTimeModal: () => void;
-  /** Opens the telescope performance diagnostics modal. */
-  onOpenDiagnostics?: () => void;
 }
 
 /**
@@ -81,8 +76,6 @@ export const PlanetariumToolbar: React.FC<Props> = ({
   onToggleStars,
   showFOV,
   onToggleFOV,
-  showFITS,
-  onToggleFITS,
   showEnvironment,
   onToggleEnvironment,
   showGrid,
@@ -104,7 +97,6 @@ export const PlanetariumToolbar: React.FC<Props> = ({
   isSyncingLogs = false,
   currentFOV,
   onOpenTimeModal,
-  onOpenDiagnostics,
 }) => {
   const [isLayersOpen, setIsLayersOpen] = useState(false);
   const layersRef = useRef<HTMLDivElement>(null);
@@ -136,7 +128,6 @@ export const PlanetariumToolbar: React.FC<Props> = ({
   const rigOverlays = [
     { label: 'Telescope', checked: showTelescope, onChange: onToggleTelescope },
     { label: 'FOV Outline', checked: showFOV, onChange: onToggleFOV },
-    { label: 'FITS Solves', checked: showFITS, onChange: onToggleFITS },
     { label: 'Alignment', checked: showAlignment, onChange: onToggleAlignment },
   ];
 
@@ -242,19 +233,8 @@ export const PlanetariumToolbar: React.FC<Props> = ({
 
       <div className="planetarium-toolbar__divider" />
 
-      {/* Group 4: Diagnostics, Time & Readouts */}
+      {/* Group 4: Time & Readouts */}
       <div className="planetarium-toolbar__group">
-        {onOpenDiagnostics && (
-          <button
-            type="button"
-            className="planetarium-toolbar__button"
-            onClick={onOpenDiagnostics}
-            title="Open Mount Pointing Model & Periodic Error Diagnostics"
-          >
-            Diagnostics
-          </button>
-        )}
-
         <button
           type="button"
           className="planetarium-toolbar__button"

@@ -61,6 +61,7 @@ dependencies = [
     "setuptools",
     "tk",
     "tksheet",
+    "tomlkit", # format-preserving TOML read/write for astrometrics.config.toml
     "uvicorn",
     "websockets",
     "psutil",

@@ -60,7 +60,7 @@ Next, run the setup script to create the Python environment and install the appl
 
 ## 4. Configuration
 
-After installation, the setup script creates a configuration file at `astrometricslib/astrometrics.config`. Its values suit the default install, but four of them depend on choices only you can make. Check each one before proceeding:
+After installation, the setup script creates a configuration file at `astrometricslib/astrometrics.config.toml`. Its values suit the default install, but four of them depend on choices only you can make. Check each one before proceeding:
 
 - `frames_path` (under `[Image Library]`): The path to the folder where images are saved. Set this to your own folder.
 - `api_key` (under `[Processing.Astrometry.Online Solver]`): An astrometry.net API key. Set this if you did not install the local solver.

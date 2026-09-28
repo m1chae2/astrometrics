@@ -8,7 +8,7 @@ import { useFitsLoader } from './hooks/useFitsLoader';
 import { useCanvasInteraction } from './hooks/useCanvasInteraction';
 import { useCanvasDrawer } from './hooks/useCanvasDrawer';
 import { AstrometryOverlayStar } from '../services/astronomyService';
-import { formatStarListLabel } from '../../astronomyDisplay/utils/starDisplayFormat';
+import { formatStarListLabel } from '../../astronomyManager/utils/starDisplayFormat';
 
 /**
  * Shortens long catalog identifiers for HUD reticle badges.

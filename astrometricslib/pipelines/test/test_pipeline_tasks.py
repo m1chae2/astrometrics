@@ -296,7 +296,7 @@ def test_target_analyze_target(tmp_path: Any) -> None:
     Confirms the pipeline correctly identifies stars in the frame.
     """
     config = AppConfiguration()
-    original_path = config.get_value("Image Library", "path", fallback="./libraryIndex")
+    original_path = config.get_value("Image Library", "path", fallback="./library")
     config.update_config({"Image Library": {"path": str(tmp_path)}})
 
     try:
@@ -415,7 +415,7 @@ def test_target_analyze_frame_spectroscopy(tmp_path, mocker):  # ruff: ignore[mi
     original_instance = config_loader._instance
     config_loader._instance = config
 
-    original_path = config.get_value("Image Library", "path", fallback="./libraryIndex")
+    original_path = config.get_value("Image Library", "path", fallback="./library")
     config.update_config({"Image Library": {"path": str(tmp_path)}})
 
     try:
@@ -482,7 +482,7 @@ def test_analyze_frame_spectroscopy_does_not_disturb_other_stars_indexed_columns
     original_instance = config_loader._instance
     config_loader._instance = config
 
-    original_path = config.get_value("Image Library", "path", fallback="./libraryIndex")
+    original_path = config.get_value("Image Library", "path", fallback="./library")
     config.update_config({"Image Library": {"path": str(tmp_path)}})
 
     try:
@@ -702,7 +702,7 @@ def test_target_analyze_target_photometry_runs_each_session_independently(tmp_pa
     bug), only one session's reference frame would ever be identified
     against, so the total would be 12 or 18, never the sum of both.
     """
-    monkeypatch.setenv("ASTROMETRICS_CONFIG_PATH", str(tmp_path / "astrometrics.config"))
+    monkeypatch.setenv("ASTROMETRICS_CONFIG_PATH", str(tmp_path / "astrometrics.config.toml"))
     config = AppConfiguration()
     config.update_config({"Image Library": {"path": str(tmp_path)}})
     catalog_access = CatalogAccess(config=config)
@@ -813,7 +813,7 @@ def test_target_analyze_target_photometry_with_astrometry_seed_uses_identified_s
     star carries its real astrometry-derived id) without depending on
     solve-field or a network SIMBAD query.
     """
-    monkeypatch.setenv("ASTROMETRICS_CONFIG_PATH", str(tmp_path / "astrometrics.config"))
+    monkeypatch.setenv("ASTROMETRICS_CONFIG_PATH", str(tmp_path / "astrometrics.config.toml"))
     config = AppConfiguration()
     config.update_config({"Image Library": {"path": str(tmp_path)}})
     catalog_access = CatalogAccess(config=config)
@@ -895,7 +895,7 @@ def test_target_analyze_target_photometry_without_astrometry_seed_persists_nothi
     meaningfully merged back into the physical star it came from on a
     later run.
     """
-    monkeypatch.setenv("ASTROMETRICS_CONFIG_PATH", str(tmp_path / "astrometrics.config"))
+    monkeypatch.setenv("ASTROMETRICS_CONFIG_PATH", str(tmp_path / "astrometrics.config.toml"))
     config = AppConfiguration()
     config.update_config({"Image Library": {"path": str(tmp_path)}})
     catalog_access = CatalogAccess(config=config)

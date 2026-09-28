@@ -33,11 +33,7 @@ export class TargetOverlay implements PlanetariumOverlay {
     const filteredTargets = projectionContext.showCatalog ? validTargets : [];
 
     filteredTargets.forEach(target => {
-      const entry = projectionContext.loadedFits[target.id] || null;
-      const centerRA = entry?.crval1 !== undefined ? entry.crval1 : target.ra;
-      const centerDec = entry?.crval2 !== undefined ? entry.crval2 : target.dec;
-
-      const point = projectionContext.projectCoords(centerRA, centerDec);
+      const point = projectionContext.projectCoords(target.ra, target.dec);
       if (!point.visible) return;
 
       const fovDeg = parseTargetFovDegrees(target);

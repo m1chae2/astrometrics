@@ -589,6 +589,23 @@ def test_catalog_summary_scan_is_cached_across_the_three_browser_endpoints() -> 
     astrometrics.stars.list_object_summaries.assert_called_once_with(limit=None, apply_default_limit=False)
 
 
+def test_warm_catalog_summary_cache_serves_the_next_call_from_cache() -> None:
+    """Verify warming the cache up front means the first real call is free.
+
+    Called once during backend startup, while the splash screen is up, so
+    the scan's cost lands there instead of on whichever browser endpoint a
+    user happens to open first.
+    """
+    astrometrics = MagicMock()
+    astrometrics.stars.list_object_summaries.return_value = [{"id": "HD 1", "spectralType": "G2V"}]
+    service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
+
+    service.warm_catalog_summary_cache()
+    service.get_target_data_availability()
+
+    astrometrics.stars.list_object_summaries.assert_called_once_with(limit=None, apply_default_limit=False)
+
+
 def test_catalog_summary_scan_refreshes_after_the_cache_expires(mocker) -> None:  # ruff: ignore[missing-type-function-argument]
     """Verify the cached scan is retaken once its TTL has passed."""
     from backend.services.data import stellar_service as stellar_service_module

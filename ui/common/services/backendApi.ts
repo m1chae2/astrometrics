@@ -745,9 +745,9 @@ export function resolveImageSrc(absolutePath: string | null | undefined): string
     const parts = absolutePath.replace(/\\/g, '/').split('/');
 
     // Frame roots live under the external library (served at /static/frames/).
-    // Library roots live under libraryIndex (served at /static/).
+    // Library roots live under library (served at /static/).
     const frameRoots = ['_Astrophotography', 'lights', 'darks', 'biases', 'flats', 'processed', 'spectrum'];
-    const libraryRoots = ['libraryIndex'];
+    const libraryRoots = ['library'];
     const allRoots = [...frameRoots, ...libraryRoots];
 
     let relPath = absolutePath.replace(/\\/g, '/');

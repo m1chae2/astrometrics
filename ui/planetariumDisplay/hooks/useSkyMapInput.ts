@@ -16,6 +16,38 @@ import { pixelsPerDegree } from '../utils/projectionMath';
 const MIN_FOV_DEG = 0.05;
 const MAX_FOV_DEG = 135.0;
 
+/**
+ * Wraps an altitude/azimuth pair over the zenith or nadir instead of clamping
+ * at it, so panning "up" past the top of the sky continues over the pole and
+ * down the other side (azimuth rotates 180°), matching how a real observer's
+ * gaze would continue rather than getting stuck facing straight up.
+ *
+ * @param {number} alt - Proposed altitude in degrees, may be outside [-90, 90].
+ * @param {number} az - Azimuth in degrees to rotate 180° for each pole crossed.
+ * @returns {{ alt: number; az: number }} Altitude reflected back into
+ * [-90, 90] only if it actually crossed a pole (left untouched otherwise, so
+ * approaching 90 from below doesn't get stopped short of it), and the azimuth
+ * adjusted to match.
+ */
+function wrapOverPole(alt: number, az: number): { alt: number; az: number } {
+  let wrappedAlt = alt;
+  let wrappedAz = az;
+  while (wrappedAlt > 90 || wrappedAlt < -90) {
+    if (wrappedAlt > 90) {
+      wrappedAlt = 180 - wrappedAlt;
+    } else {
+      wrappedAlt = -180 - wrappedAlt;
+    }
+    wrappedAz += 180;
+  }
+  // Only the exact pole itself is a projection singularity; nudge off of it
+  // without otherwise capping how close a pan can approach it.
+  if (wrappedAlt === 90) wrappedAlt = 89.9999;
+  if (wrappedAlt === -90) wrappedAlt = -89.9999;
+  wrappedAz = ((wrappedAz % 360) + 360) % 360;
+  return { alt: wrappedAlt, az: wrappedAz };
+}
+
 /** Dependencies useSkyMapInput needs from CelestialSkyMap's camera state. */
 export interface SkyMapInputRefs {
   canvasRef: RefObject<HTMLCanvasElement | null>;
@@ -102,11 +134,10 @@ export const useSkyMapInput = ({
     const dAlt = dy / scale;
     const dAz = -(dx / scale);
 
-    const nextAlt = Math.max(-89.9, Math.min(89.9, targetAltRef.current + dAlt));
-    const nextAz = (targetAzRef.current + dAz + 360.0) % 360.0;
+    const wrapped = wrapOverPole(targetAltRef.current + dAlt, targetAzRef.current + dAz);
 
-    targetAzRef.current = nextAz;
-    targetAltRef.current = nextAlt;
+    targetAzRef.current = wrapped.az;
+    targetAltRef.current = wrapped.alt;
   }, [canvasRef, localFOVRef, targetAzRef, targetAltRef]);
 
   /**
@@ -158,16 +189,22 @@ export const useSkyMapInput = ({
       const panStep = localFOVRef.current * 0.1;
 
       switch (e.key) {
-        case 'ArrowUp':
+        case 'ArrowUp': {
           e.preventDefault();
           setTrackingMode(false);
-          targetAltRef.current = Math.max(-89.9, Math.min(89.9, targetAltRef.current + panStep));
+          const wrapped = wrapOverPole(targetAltRef.current + panStep, targetAzRef.current);
+          targetAltRef.current = wrapped.alt;
+          targetAzRef.current = wrapped.az;
           break;
-        case 'ArrowDown':
+        }
+        case 'ArrowDown': {
           e.preventDefault();
           setTrackingMode(false);
-          targetAltRef.current = Math.max(-89.9, Math.min(89.9, targetAltRef.current - panStep));
+          const wrapped = wrapOverPole(targetAltRef.current - panStep, targetAzRef.current);
+          targetAltRef.current = wrapped.alt;
+          targetAzRef.current = wrapped.az;
           break;
+        }
         case 'ArrowLeft':
           e.preventDefault();
           setTrackingMode(false);

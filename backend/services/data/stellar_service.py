@@ -726,6 +726,17 @@ class StellarService:
             return filtered[start_offset : start_offset + limit]
         return filtered[start_offset:]
 
+    def warm_catalog_summary_cache(self) -> None:
+        """Run the full-catalog summary scan now, so the result is cached.
+
+        Call this once during backend startup. It does the same scan that
+        `get_target_data_availability`, `get_spectral_class_summary`, and
+        `get_stars_by_spectral_class` would otherwise each trigger on their
+        own first call, so a user who opens the Astronomy Manager first
+        doesn't pay for it there instead.
+        """
+        self._get_cached_catalog_summaries()
+
     def get_target_data_availability(self) -> dict[str, dict[str, bool | int]]:
         """Whether each target has spectra or photometry, and its star count.
 

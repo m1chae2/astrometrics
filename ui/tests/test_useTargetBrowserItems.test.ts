@@ -6,7 +6,7 @@
 
 import { renderHook, act } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
-import { useTargetBrowserItems } from '../astronomyDisplay/hooks/useTargetBrowserItems';
+import { useTargetBrowserItems } from '../astronomyManager/hooks/useTargetBrowserItems';
 
 vi.mock('../common/queries/useTargetListQuery', () => ({
     useTargetListQuery: vi.fn(),

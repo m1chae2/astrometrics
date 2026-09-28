@@ -358,12 +358,14 @@ def run_full_processing(argv: list[str] | None = None) -> None:
     # omitting them makes `process_all_targets` walk the entire catalog, which
     # would silently ignore a --target selection and reprocess everything.
     camera_names = camera_pass_order(
-        astrometrics.config.get_observatory_setups(), astrometrics.config.get_primary_camera_name()
+        astrometrics.config.get_observatory_setups(),
+        astrometrics.config.get_primary_camera_name(),
+        astrometrics.config,
     )
     if not camera_names:
         print(
             "The config lists no [Observatory.Setups], so there are no cameras to process. "
-            "Add the camera-and-optic pairings you use (see astrometrics.config.example)."
+            "Add the camera-and-optic pairings you use (see astrometrics.config.example.toml)."
         )
         return
     assignments = assign_targets_to_cameras(targets, camera_names)

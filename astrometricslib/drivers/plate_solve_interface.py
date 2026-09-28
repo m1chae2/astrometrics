@@ -250,9 +250,10 @@ class PlateSolver:
             solver_config = {}
 
         index_path = solver_config.get("index_path", "/usr/share/astrometry")
-        autoindex = True
-        if hasattr(solver_config, "getboolean"):
-            autoindex = solver_config.getboolean("autoindex", fallback=True)
+        autoindex_raw = solver_config.get("autoindex", True)
+        autoindex = (
+            autoindex_raw if isinstance(autoindex_raw, bool) else str(autoindex_raw).strip().lower() == "true"
+        )
         cpulimit = solver_config.get("cpulimit", "300")
 
         config_lines = [f"add_path {index_path}"]

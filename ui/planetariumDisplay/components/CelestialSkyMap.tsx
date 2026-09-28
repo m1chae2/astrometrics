@@ -11,14 +11,13 @@ import { PlanetariumSource, PlanetariumTarget, ObserverLocation, ConstellationLi
 import { getAltAz, getRaDec, projectAltAz, pixelsPerDegree } from '../utils/projectionMath';
 import { safeParse } from '../utils/coordinateUtils';
 import { findNearestSource } from '../utils/hitTesting';
-import { FitsLoaderItem, LoadedFitsEntry } from './FitsLoaderItem';
 import { useTelescopeStatus } from '../../common/hooks/useTelescopeStatus';
+import { emitToast } from '../../common/utils/emitToast';
 import type { ProjectionContext } from '../layers/overlayTypes';
 import { BackgroundOverlay } from '../layers/BackgroundOverlay';
 import { StarOverlay } from '../layers/StarOverlay';
 import { StarSelectionOverlay } from '../layers/StarSelectionOverlay';
 import { TargetOverlay } from '../layers/TargetOverlay';
-import { ImageOverlay } from '../layers/ImageOverlay';
 import { EnvironmentOverlay } from '../layers/EnvironmentOverlay';
 import { GridOverlay } from '../layers/GridOverlay';
 import { FovOverlay } from '../layers/FovOverlay';
@@ -48,8 +47,6 @@ interface Props {
   showStars: boolean;
   /** Show sensor FOV outline overlay. */
   showFOV: boolean;
-  /** Show FITS image overlays. */
-  showFITS: boolean;
   /** Show horizon and ground environment overlay. */
   showEnvironment: boolean;
   /** Show RA/Dec coordinate grid overlay. */
@@ -167,7 +164,6 @@ export const CelestialSkyMap: React.FC<Props> = ({
   location,
   showStars,
   showFOV,
-  showFITS,
   showEnvironment,
   showGrid,
   showCatalog,
@@ -218,6 +214,14 @@ export const CelestialSkyMap: React.FC<Props> = ({
       setStarRenderMode('webgl');
     } catch (error) {
       console.warn('WebGL2 star field renderer unavailable; falling back to 2D star rendering.', error);
+      // A one-time, mount-only check (empty deps below) — safe to surface to
+      // the user, unlike the per-frame render errors further down this file,
+      // which would spam a toast on every animation frame if reported the same way.
+      emitToast(
+        'WebGL2 unavailable — using slower 2D star rendering.',
+        'warning',
+        'planetarium-renderer'
+      );
       starFieldRendererRef.current = null;
       setStarRenderMode('fallback');
     }
@@ -234,7 +238,6 @@ export const CelestialSkyMap: React.FC<Props> = ({
   const overlays = useMemo(() => [
     new BackgroundOverlay(),
     new TrackingRiskOverlay(),
-    new ImageOverlay(),
     new GridOverlay(),
     new ConstellationOverlay(),
     new CompassOverlay(),
@@ -427,26 +430,6 @@ export const CelestialSkyMap: React.FC<Props> = ({
     };
   }, []);
 
-  const [loadedFits, setLoadedFits] = useState<Record<string, LoadedFitsEntry>>({});
-
-  // Targets (with a stackedImage) currently on screen -- only these get a
-  // FitsLoaderItem mounted. Recomputed inside the render loop below (see
-  // "Determine which stacked-image targets are on screen"), gated on the
-  // camera/overlay-inputs redraw check so it doesn't run every frame, and
-  // only committed to state when the set actually changes so it doesn't
-  // trigger a React re-render on every redrawn frame either. Without this,
-  // showFITS mounted a FitsLoaderItem for every target the (up to
-  // near-whole-sky) source query returned -- confirmed to spawn dozens of
-  // concurrent Web Worker FITS parses all racing to draw onto
-  // FitsLoaderItem's single shared offscreen MTF-stretch canvas, corrupting
-  // each other's output.
-  const [visibleFitsTargetIds, setVisibleFitsTargetIds] = useState<Set<string>>(new Set());
-  const visibleFitsTargetIdsRef = useRef<Set<string>>(new Set());
-
-  const handleFitsLoaded = useCallback((id: string, entry: LoadedFitsEntry) => {
-    setLoadedFits(prev => ({ ...prev, [id]: entry }));
-  }, []);
-
   // Sync local FOV and sensor FOV refs
   useEffect(() => {
     localFOVRef.current = fov;
@@ -588,12 +571,10 @@ export const CelestialSkyMap: React.FC<Props> = ({
         observerLat,
         observerLon,
         selectedTargetId,
-        loadedFits,
         sources,
         targets,
         showStars,
         showFOV,
-        showFITS,
         showEnvironment,
         showGrid,
         showCatalog,
@@ -621,33 +602,6 @@ export const CelestialSkyMap: React.FC<Props> = ({
         getAltAz: (ra: number, dec: number) => getAltAz(ra, dec, currentFrameLST, observerLat),
         getRaDec: (alt: number, az: number) => getRaDec(alt, az, currentFrameLST, observerLat)
       };
-
-      // Determine which stacked-image targets are on screen, so only those
-      // get a FitsLoaderItem mounted below (see visibleFitsTargetIds above).
-      // Only recomputed on a real redraw (this point is unreached otherwise,
-      // per the cameraChanged/overlayInputsChanged early-return above), and
-      // only committed to state when the set of IDs actually changed.
-      if (showFITS) {
-        const nextVisibleFitsTargetIds = new Set<string>();
-        targets.forEach(target => {
-          if (!target.stackedImage) return;
-          if (target.ra === 0 && target.dec === 0) return;
-          if (projectionContext.projectCoords(target.ra, target.dec).visible) {
-            nextVisibleFitsTargetIds.add(target.id);
-          }
-        });
-        const previousIds = visibleFitsTargetIdsRef.current;
-        const idsChanged =
-          nextVisibleFitsTargetIds.size !== previousIds.size ||
-          [...nextVisibleFitsTargetIds].some(id => !previousIds.has(id));
-        if (idsChanged) {
-          visibleFitsTargetIdsRef.current = nextVisibleFitsTargetIds;
-          setVisibleFitsTargetIds(nextVisibleFitsTargetIds);
-        }
-      } else if (visibleFitsTargetIdsRef.current.size > 0) {
-        visibleFitsTargetIdsRef.current = new Set();
-        setVisibleFitsTargetIds(new Set());
-      }
 
       // 5. Execute overlay draw stack sequentially
       overlays.forEach(overlay => {
@@ -683,12 +637,12 @@ export const CelestialSkyMap: React.FC<Props> = ({
     animFrameId = requestAnimationFrame(renderLoop);
     return () => cancelAnimationFrame(animFrameId);
   }, [
-    sources, targets, showStars, showFOV, showFITS,
+    sources, targets, showStars, showFOV,
     showEnvironment, showGrid, showCatalog, showTelescope, selectedTargetId,
     showConstellations, constellationLines,
     showAlignment, showTrackingRisk, alignmentAttempts, cumulativeTrackingAttempts, polarAlignment, selectedSessionId,
     simulationDate,
-    loadedFits, trackingMode, observerLat, observerLon, overlays
+    trackingMode, observerLat, observerLon, overlays
   ]);
 
   // Click handler to select sources. REQ: PLN-2.5
@@ -798,16 +752,6 @@ export const CelestialSkyMap: React.FC<Props> = ({
           {timeOffsetMinutes === 0 ? 'Live Time' : `${(timeOffsetMinutes / 60).toFixed(1)}h Offset`}
         </span>
       </div>
-
-      {showFITS && targets.map(target => (
-        target.stackedImage && visibleFitsTargetIds.has(target.id) ? (
-          <FitsLoaderItem
-            key={target.id}
-            target={target}
-            onLoaded={handleFitsLoaded}
-          />
-        ) : null
-      ))}
     </div>
   );
 };

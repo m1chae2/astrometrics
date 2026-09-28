@@ -47,7 +47,7 @@ def butler(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argumen
     """
     from astrometricslib import AppConfiguration
 
-    config_path = tmp_path / "astrometrics.config"
+    config_path = tmp_path / "astrometrics.config.toml"
     monkeypatch.setattr(AppConfiguration, "_find_config_file", lambda self: config_path)
     config = AppConfiguration()
     config.update_config({"Wayfinding Library": {"path": str(tmp_path / "wayfinding_library")}})

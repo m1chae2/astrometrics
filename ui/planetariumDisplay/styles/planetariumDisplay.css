@@ -114,30 +114,35 @@
 }
 
 .planetarium-toolbar__select {
-  background: rgba(15, 23, 42, 0.85);
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  color-scheme: dark;
+  background-color: rgba(255, 255, 255, 0.07);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23eaeaea' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
   border: 1px solid rgba(255, 255, 255, 0.14);
-  color: var(--status-cyan, #38bdf8);
-  padding: 3px 8px;
-  border-radius: 4px;
+  color: var(--text-primary, #eaeaea);
+  padding: 5px 26px 5px 12px;
+  border-radius: 5px;
   outline: none;
-  font-size: 12px;
+  font-size: 13px;
   font-family: var(--font-family-base);
+  font-weight: 500;
   cursor: pointer;
-  transition: border-color 0.15s ease;
+  transition: all 0.15s ease;
 }
 
 .planetarium-toolbar__select:hover {
-  border-color: rgba(56, 189, 248, 0.4);
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.22);
 }
 
 .planetarium-toolbar__session-container {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 2px 8px;
-  border-radius: 6px;
-  background: rgba(15, 23, 42, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .planetarium-toolbar__readout {
@@ -690,22 +695,7 @@
   text-align: right;
 }
 
-.celestial-fits-status {
-  position: absolute;
-  bottom: 50px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 99;
-  background: rgba(0, 0, 0, 0.85);
-  color: var(--warning-amber, #ffb300);
-  font-size: 11px;
-  font-family: var(--font-family-mono), monospace;
-  padding: 4px 10px;
-  border-radius: 4px;
-  border: 1px solid rgba(255, 179, 0, 0.2);
-}
-
-/* Toolbar buttons (Layers, Diagnostics, Date & Time, Sync) */
+/* Toolbar buttons (Layers, Date & Time, Sync) */
 .planetarium-toolbar__button {
   display: inline-flex;
   align-items: center;

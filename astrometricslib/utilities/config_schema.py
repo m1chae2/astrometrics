@@ -65,7 +65,7 @@ class ProcessingConfig(BaseModel):
         Path or command to invoke the Siril executable, by default
         `None`.
     path : `str`
-        Library index storage path, by default ``"libraryIndex"``.
+        Library storage path, by default ``"library"``.
     frames_path : `str` or `None`
         Filesystem path where captured frames are stored -- always a
         `"frames"` subfolder of `path`, not independently
@@ -93,7 +93,7 @@ class ProcessingConfig(BaseModel):
     """
 
     siril_executable: str | None = None
-    path: str = "libraryIndex"
+    path: str = "library"
     frames_path: str | None = None
     rejection_sigma_mode: str = "adaptive"
     rejection_sigma_low: float = 3.0

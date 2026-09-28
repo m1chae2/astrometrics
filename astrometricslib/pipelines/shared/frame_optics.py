@@ -76,6 +76,7 @@ def resolve_frame_telescope(
     focal_length_mm: float | None,
     path: str | None,
     observatory_setups: ObservatorySetups,
+    config: object = None,
 ) -> TelescopeResolution:
     """Choose the optic that took a frame.
 
@@ -103,6 +104,9 @@ def resolve_frame_telescope(
         The frame's file path.
     observatory_setups : `ObservatorySetups`
         The optics and setups from the config.
+    config : `AppConfiguration`, optional
+        The config to read camera profiles from. The process-wide
+        singleton is used when this is left out.
 
     Returns
     -------
@@ -112,10 +116,10 @@ def resolve_frame_telescope(
     if not camera_name:
         return TelescopeResolution(UNKNOWN_TELESCOPE_NAME, REASON_UNRESOLVED)
 
-    frame_camera_identity = camera_identity(camera_name)
+    frame_camera_identity = camera_identity(camera_name, config)
     candidate_optics: list[OpticConfig] = []
     for setup in observatory_setups.setups:
-        if camera_identity(setup.camera_name) != frame_camera_identity:
+        if camera_identity(setup.camera_name, config) != frame_camera_identity:
             continue
         optic = observatory_setups.optic_named(setup.optic_name)
         if optic is not None and optic not in candidate_optics:

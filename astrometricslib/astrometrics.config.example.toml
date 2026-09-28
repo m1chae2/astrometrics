@@ -1,0 +1,241 @@
+# Astrometrics configuration template.
+#
+# build/linux/setup_venv.sh copies this file to astrometrics.config.toml on
+# first run if no configuration exists yet. astrometrics.config.toml itself
+# is excluded from version control because it holds machine-specific paths
+# and an astrometry.net API key; edit the copy, not this template.
+#
+# Every value below is a working default for the standard install
+# (build/linux/install_ubuntu_deps.sh with no options), except the two
+# marked EDIT ME. Installing Siril from Flatpak instead requires the two
+# changes noted under ["Processing.Siril"].
+#
+# Format note: this file is TOML, not INI. Every section name is written as
+# a single quoted string (e.g. ["Observatory.Camera.Nikon D5300"]) rather
+# than real nested tables, so it reads the same as it always did -- the dots
+# are just part of the section's name, not real nesting. Plain values are
+# quoted strings, same as before. The one real difference is the camera
+# sections below, which now hold inline tables like
+# `clip_ceiling_adu = { value = 65532.0, kind = "measured", source = "..." }`
+# -- see the comment above ["Observatory.Camera.Nikon D5300"] for what these
+# mean and how to add a camera of your own.
+
+["Image Library"]
+# EDIT ME: absolute path to your own library. Captured frames always
+# live in a "frames" subfolder underneath this path.
+path = "./library"
+
+["Observatory.Filters"]
+# Filters this observatory's filter wheel is actually loaded with, as
+# FilterType member names (see astrometricslib/utilities/enums.py).
+available = "NONE, L, SPEC"
+
+["Observatory.Telescope"]
+hostname = "localhost"
+focal_length_mm = "405"
+focal_ratio = "5.4"
+allow_commands = "true"
+indi_port = "7624"
+remote_pictures_path = "/home/stellarmate/Pictures"
+
+["Observatory.Optics"]
+# Every telescope or camera lens you use, by name. The name is stored as the
+# "telescope" of each frame, so it decides which flat frames are used and
+# which library folder a frame goes in. Each name needs its own
+# ["Observatory.Optic.<name>"] section below.
+available = "Apertura 75Q, Nikkor 300mm"
+
+["Observatory.Optic.Apertura 75Q"]
+focal_length_mm = "405"
+focal_ratio = "5.4"
+
+["Observatory.Optic.Nikkor 300mm"]
+focal_length_mm = "300"
+focal_ratio = "5.6"
+
+["Observatory.Setups"]
+# The camera-and-optic pairings you really use. A camera may appear in
+# several setups (the D5300 below), and an optic may be used by several
+# cameras (the Apertura below). Each name needs its own
+# ["Observatory.Setup.<name>"] section.
+#
+# A frame's optic is chosen from the setups that use its camera: first by
+# matching the FOCALLEN in its header to an optic's focal_length_mm (within
+# 2%), then, when the header has no FOCALLEN, by the camera's only setup, then
+# by an optic's name appearing in the file path. Otherwise it is "Unknown",
+# and a warning is logged.
+available = "ASI533 on Apertura, D5300 on Apertura, D5300 on Nikkor"
+
+["Observatory.Setup.ASI533 on Apertura"]
+camera = "ZWO ASI533MM Pro"
+optic = "Apertura 75Q"
+
+["Observatory.Setup.D5300 on Apertura"]
+camera = "Nikon D5300"
+optic = "Apertura 75Q"
+
+["Observatory.Setup.D5300 on Nikkor"]
+camera = "Nikon D5300"
+optic = "Nikkor 300mm"
+
+["Observatory.Constraints"]
+min_altitude = "0.0"
+max_altitude = "90.0"
+
+["Observatory.Camera"]
+models = "Nikon D5300, ZWO ASI533MM Pro, ZWO ASI120MC-S"
+default_primary_camera = "ZWO ASI533MM Pro"
+default_secondary_camera = "ZWO ASI120MC-S"
+
+# --- Camera profiles -------------------------------------------------------
+#
+# Each camera section below holds two kinds of fact together: per-setup
+# facts (pixel size, sensor dimensions, grating geometry -- true for your
+# specific rig) and per-model facts (clip_ceiling_adu, saturation_threshold_adu,
+# photometric_linearity_limit_adu, quantum_efficiency -- true for anyone who
+# owns that exact camera model). The model-level facts are written as inline
+# tables with three parts:
+#   value = the number itself
+#   kind  = "datasheet" (read from the manufacturer's published spec/graph),
+#           "measured" (a real measurement, on this library's own frames or
+#           in a paper), or "assumed" (nobody has checked it -- prefer
+#           replacing these with a measured value when the chance comes up)
+#   source = a short note on where the number actually came from
+#
+# To add a camera of your own: copy one of the sections below, rename it to
+# ["Observatory.Camera.<your camera's name>"], and fill in every field with
+# its own value and provenance. `name_aliases` (optional, comma-separated)
+# lists other spellings that show up in your FITS headers -- case, spaces,
+# and punctuation are ignored when names are compared, so you only need an
+# alias for a genuinely different spelling. `record_name` (optional) is the
+# spelling frame records and library folder names should use, if you want it
+# to differ from whatever your FITS header says.
+
+["Observatory.Camera.Nikon D5300"]
+name = "Nikon D5300"
+name_aliases = "Nikon DSLR DSC D5300"
+record_name = "Nikon DSLR DSC D5300"
+"pixel_size_μm" = "3.89"
+sensor_width_px = "6000"
+sensor_height_px = "4000"
+grating_distance_mm = "75"
+sensor_min_wavelength = "350"
+sensor_max_wavelength = "900"
+# The ISO to record for an image whose header has neither ISOSPEED nor GAIN.
+# An ISO that the header does give is always used instead.
+default_iso = "800"
+clip_ceiling_adu = { value = 16383.0, kind = "measured", source = "Maximum of saturated raw frames in this library. The sensor is 14-bit, so a clipped frame reaches 16383." }
+# OPEN QUESTION: this threshold sits above the clip ceiling of 16383, so a
+# saturated pixel could never reach it, and saturation checks that use it
+# would always report none for raw D5300 frames read at their native 14-bit
+# scale. Not yet checked against real D5300 frames. Kept as it was so
+# behavior does not change while this is unresolved.
+saturation_threshold_adu = { value = 65000.0, kind = "assumed", source = "Long-standing pipeline default for raw frames: just under the 16-bit maximum of 65535. Never measured per camera." }
+
+["Observatory.Camera.ZWO ASI533MM Pro"]
+name = "ZWO ASI533MM Pro"
+name_aliases = "ZWO CCD ASI533MM Pro"
+record_name = "ZWO ASI 533MM Pro"
+"pixel_size_μm" = "3.76"
+sensor_width_px = "3008"
+sensor_height_px = "3008"
+sensor_min_wavelength = "300"
+sensor_max_wavelength = "1000"
+dispersion_orientation = "vertical"
+dispersion_direction = "positive"
+grating_lines_per_mm = "200"
+dispersion_offset_x = "0.0"
+clip_ceiling_adu = { value = 65532.0, kind = "measured", source = "Maximum of saturated raw frames in this library. The sensor is 14-bit, stored as 16-bit in steps of 4, so a clipped frame reaches 65532." }
+saturation_threshold_adu = { value = 65000.0, kind = "assumed", source = "Long-standing pipeline default for raw frames: just under the 16-bit maximum of 65535. Never measured per camera." }
+photometric_linearity_limit_adu = { value = 60000.0, kind = "measured", source = "Antonov 2026: the response turns non-linear above about 60,000 ADU at Gain 0 / Offset 10, before hard clipping." }
+quantum_efficiency = { wavelength_nm = [400.0, 420.0, 440.0, 460.0, 480.0, 500.0, 520.0, 550.0, 600.0, 650.0, 700.0, 750.0, 800.0, 850.0, 900.0, 950.0, 1000.0], quantum_efficiency_fraction = [0.7, 0.82, 0.88, 0.91, 0.92, 0.9, 0.89, 0.88, 0.78, 0.62, 0.48, 0.36, 0.27, 0.19, 0.13, 0.08, 0.06], kind = "datasheet", source = "Read off the sensitivity graph published by ZWO." }
+# Optional. The wavelength, in nm, that calibration treats as the start of
+# the spectrum. Leave it out to use the default of 380.
+# extraction_start_wavelength_nm = "380"
+# CALCULATED -- everything below this line, and only what's below this
+# line, is fitted from a calibration frame by
+# SpectroscopyCalibrationTuner.tune_calibration()
+# (astrometricslib/pipelines/spectroscopy/utilities/calibration_tuner.py)
+# and overwritten on every re-run. Don't hand-edit these; re-run calibration
+# instead. The values below are this camera's own last calibration
+# result, kept as a working starting point.
+grating_distance_mm = "16.49"
+dispersion_start_px = "334.4"
+# True if the calibration frame showed the star's own flare/astigmatism
+# still saturating the pixels where extraction begins.
+use_flare_mask_extraction = "true"
+# Only present when the calibration frame showed the physics-derived
+# extraction length running past the usable sensor area; absent means
+# uncapped.
+max_extraction_length_px = "750.0"
+
+["Observatory.Camera.ZWO ASI120MC-S"]
+name = "ZWO ASI120MC-S"
+name_aliases = "ZWO CCD ASI120MC-S"
+"pixel_size_μm" = "3.75"
+sensor_width_px = "1280"
+sensor_height_px = "960"
+grating_distance_mm = "0"
+sensor_min_wavelength = "400"
+sensor_max_wavelength = "700"
+clip_ceiling_adu = { value = 65532.0, kind = "assumed", source = "Never measured on this camera. It is the value the pipeline used for any camera whose name contains ZWO, before camera profiles existed." }
+saturation_threshold_adu = { value = 65000.0, kind = "assumed", source = "Long-standing pipeline default for raw frames: just under the 16-bit maximum of 65535. Never measured per camera." }
+
+# The fallback profile used for any camera without its own section above.
+# Results computed with this profile rest on assumptions about the sensor
+# and should be treated with care. Exactly one camera section must have
+# is_generic_fallback = "true".
+["Observatory.Camera.Generic unlisted camera"]
+name = "Generic unlisted camera"
+is_generic_fallback = "true"
+clip_ceiling_adu = { value = 65535.0, kind = "assumed", source = "The top of a 16-bit range. What the pipeline used for a camera it did not recognise, before camera profiles existed." }
+saturation_threshold_adu = { value = 65000.0, kind = "assumed", source = "Long-standing pipeline default for raw frames: just under the 16-bit maximum of 65535." }
+
+["Processing.Astrometry.Online Solver"]
+# EDIT ME: your astrometry.net API key, from
+# https://nova.astrometry.net/api_help. Plate solving needs either this key
+# or the local solver below; the standard install provides neither, so set
+# one of the two before running astrometry. Leaving this blank falls back to
+# the local solver, which requires installing it first with
+# build/linux/install_ubuntu_deps.sh --with-local-solver.
+api_key = ""
+
+["Processing.Astrometry.Local Solver"]
+index_path = "/usr/share/astrometry"
+autoindex = "true"
+cpulimit = "300"
+
+["Processing.Siril"]
+# Match this to whichever --siril-source you passed to
+# build/linux/install_ubuntu_deps.sh (the script prints the right value
+# when it finishes; it does not edit this file for you):
+#   apt (default):  siril-cli
+#   flatpak:        flatpak run --command=siril-cli org.siril.Siril
+# Either way, use the -cli entry point, not plain "siril" or
+# "flatpak run org.siril.Siril" -- those launch the GUI build, which
+# needs a display connection even for headless pipe-mode stacking.
+siril_executable = "siril-cli"
+# Blank by default, because the default apt install cannot use it:
+# weighting requires a Siril new enough to support `stack`'s -weight=
+# argument, and Ubuntu's package (1.2.1) is not, so stacking fails with
+# "Unexpected argument to stacking `-weight=wfwhm'". If you installed via
+# --siril-source=flatpak (see build/linux/install_ubuntu_deps.sh), set
+# this to wfwhm to weight each frame by its measured star sharpness.
+stack_weight = ""
+
+["Processing.Parallelism"]
+target_workers = "auto"
+photometry_workers = "auto"
+worker_niceness = "10"
+# Max concurrent heavy jobs, system-wide. Shared by Siril stacking and
+# photometry/spectroscopy analysis -- both draw on this one pool rather
+# than being tuned separately. See
+# astrometricslib/scripts/benchmark_siril_concurrency.py to measure the
+# best value for this machine.
+max_concurrent_jobs = "2"
+
+["Frontend"]
+enable_observatory = "true"
+enable_planetarium = "true"
+enable_astronomy = "true"
+enable_observation = "false"

@@ -4,7 +4,6 @@
  */
 
 import { PlanetariumSource, PlanetariumTarget, ConstellationLineSegment } from '../../common/types/planetariumTypes';
-import { LoadedFitsEntry } from '../components/FitsLoaderItem';
 import { AlignmentAttempt, PolarAlignmentStatus } from '../../common/types/backendTypes';
 
 /**
@@ -22,13 +21,10 @@ export interface ProjectionContext {
   observerLat: number;
   observerLon: number;
   selectedTargetId: string;
-  /** Pre-loaded and pixel-stretched FITS image data keyed by target ID. */
-  loadedFits: Record<string, LoadedFitsEntry>;
   sources: PlanetariumSource[];
   targets: PlanetariumTarget[];
   showStars: boolean;
   showFOV: boolean;
-  showFITS: boolean;
   showEnvironment: boolean;
   showGrid: boolean;
   showCatalog: boolean;

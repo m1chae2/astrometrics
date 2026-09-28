@@ -209,9 +209,9 @@ def test_concurrent_processes_do_not_clobber_each_others_target_edits(tmp_path):
     local_database.save_target(app_config=config, target=Target(id="Target Alpha"))
     local_database.save_target(app_config=config, target=Target(id="Target Beta"))
 
-    config_path = tmp_path / "astrometrics.config"
+    config_path = tmp_path / "astrometrics.config.toml"
     library_path = tmp_path / "library"
-    config_path.write_text(f"[Image Library]\npath = {library_path}\n")
+    config_path.write_text(f'["Image Library"]\npath = "{library_path}"\n')
 
     worker_script = tmp_path / "_concurrent_save_worker.py"
     worker_script.write_text(_SUBPROCESS_WORKER)

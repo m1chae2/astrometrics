@@ -17,7 +17,6 @@ import { useState } from 'react';
 export const DEFAULT_OVERLAY_TOGGLES = {
   showStars: true,
   showFOVOutline: false,
-  showFITSOverlays: false,
   showEnvironment: true,
   showGrid: true,
   showCatalog: true,
@@ -36,9 +35,6 @@ export interface OverlayToggles {
   /** Show sensor FOV outline overlay. */
   showFOVOutline: boolean;
   setShowFOVOutline: (value: boolean) => void;
-  /** Show FITS image overlays. */
-  showFITSOverlays: boolean;
-  setShowFITSOverlays: (value: boolean) => void;
   /** Show local horizon and ground environment overlay. */
   showEnvironment: boolean;
   setShowEnvironment: (value: boolean) => void;
@@ -69,7 +65,6 @@ export interface OverlayToggles {
 export const useOverlayToggles = (): OverlayToggles => {
   const [showStars, setShowStars] = useState<boolean>(DEFAULT_OVERLAY_TOGGLES.showStars);
   const [showFOVOutline, setShowFOVOutline] = useState<boolean>(DEFAULT_OVERLAY_TOGGLES.showFOVOutline);
-  const [showFITSOverlays, setShowFITSOverlays] = useState<boolean>(DEFAULT_OVERLAY_TOGGLES.showFITSOverlays);
   const [showEnvironment, setShowEnvironment] = useState<boolean>(DEFAULT_OVERLAY_TOGGLES.showEnvironment);
   const [showGrid, setShowGrid] = useState<boolean>(DEFAULT_OVERLAY_TOGGLES.showGrid);
   const [showCatalog, setShowCatalog] = useState<boolean>(DEFAULT_OVERLAY_TOGGLES.showCatalog);
@@ -80,7 +75,6 @@ export const useOverlayToggles = (): OverlayToggles => {
   return {
     showStars, setShowStars,
     showFOVOutline, setShowFOVOutline,
-    showFITSOverlays, setShowFITSOverlays,
     showEnvironment, setShowEnvironment,
     showGrid, setShowGrid,
     showCatalog, setShowCatalog,

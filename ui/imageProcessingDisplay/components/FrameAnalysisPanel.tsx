@@ -2,7 +2,7 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { TabView } from '../../common/components/TabView';
 import { SectionPanel } from '../../common/components/SectionPanel';
 
-import { useCalibrationStats } from '../hooks/useCalibrationStats';
+import { useCalibrationStats } from '../../common/hooks/useCalibrationStats';
 import { useTargetContext } from '../../common/context/TargetContext';
 import { ProcessingStatus } from './ProcessingStatus';
 import { AnalysisResults } from '../analysisResults/AnalysisResults';

@@ -118,7 +118,7 @@ def _camera_default_iso(camera_name: str, config: Any) -> str | None:
         none. Every known spelling of the camera is tried, because the config
         section may be named differently from the image header.
     """
-    profile = resolve_camera_profile(camera_name)
+    profile = resolve_camera_profile(camera_name, config)
     names = [camera_name]
     if not profile.is_generic_fallback:
         names += [profile.camera_name, *profile.name_aliases]
@@ -189,10 +189,10 @@ def _record_camera_name(header_camera_name: str, config: Any) -> str:
         primary camera is used, or ``"Unknown"`` if none is configured.
     """
     if header_camera_name and header_camera_name != "Unknown":
-        return record_name_for_camera(header_camera_name)
+        return record_name_for_camera(header_camera_name, config)
     primary_camera_name = config.get_primary_camera_name()
     if primary_camera_name:
-        return record_name_for_camera(primary_camera_name)
+        return record_name_for_camera(primary_camera_name, config)
     warn_once(
         logger,
         "An image header names no camera and no default_primary_camera is configured; "
@@ -271,7 +271,7 @@ def create_frame_record_from_fits(path: str, camera: str | None = None, config: 
         # the optic is chosen by matching it.
         _populate_acquisition_conditions(record, header)
         record.telescope = resolve_frame_telescope(
-            record.camera, record.focal_length_mm, path, config.get_observatory_setups()
+            record.camera, record.focal_length_mm, path, config.get_observatory_setups(), config
         ).telescope_name
     except Exception as e:
         logger.warning(f"Failed to parse FITS header for {filename}: {e}")

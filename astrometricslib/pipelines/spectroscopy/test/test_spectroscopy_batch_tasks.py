@@ -252,7 +252,7 @@ class TestProcessSpectroscopyFramesBySession:
 
     def test_identifies_once_per_session_and_dispatches_that_sessions_frames(self, tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
         """Verify each session identifies once, dispatches its own frames."""
-        monkeypatch.setenv("ASTROMETRICS_CONFIG_PATH", str(tmp_path / "astrometrics.config"))
+        monkeypatch.setenv("ASTROMETRICS_CONFIG_PATH", str(tmp_path / "astrometrics.config.toml"))
         config = AppConfiguration()
         config.update_config({"Image Library": {"path": str(tmp_path)}})
 
@@ -335,7 +335,7 @@ class TestProcessSpectroscopyFramesBySession:
 
     def test_excludes_frames_with_no_timestamp(self, tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
         """Verify a frame with no timestamp is excluded from sessions."""
-        monkeypatch.setenv("ASTROMETRICS_CONFIG_PATH", str(tmp_path / "astrometrics.config"))
+        monkeypatch.setenv("ASTROMETRICS_CONFIG_PATH", str(tmp_path / "astrometrics.config.toml"))
         config = AppConfiguration()
         config.update_config({"Image Library": {"path": str(tmp_path)}})
 

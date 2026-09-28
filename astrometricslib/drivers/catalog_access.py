@@ -8,6 +8,7 @@ worry about where the data actually lives.
 import logging
 import math
 import os
+import threading
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Any
@@ -530,6 +531,47 @@ class CatalogAccess(AbstractCatalogAccess):
             config = get_configuration()
         self.config = config
         self._generic = self._build_generic_butler(config)
+        self._dataset_versions: dict[str, int] = {}
+        self._dataset_versions_lock = threading.Lock()
+
+    def get_dataset_version(self, dataset_type: str) -> int:
+        """Report how many writes `dataset_type` has had in this process.
+
+        A caller that wants to know whether a dataset has changed since it
+        last looked -- e.g. a cache deciding whether to redo an expensive
+        scan -- can keep the number it saw last time and compare it to this
+        one, instead of re-reading the whole dataset or guessing from a
+        timer. Every `put`, `merge_and_record`, and `delete_by_ids` call on
+        `dataset_type` counts as one write. Starts at 0 for a dataset this
+        process hasn't written to yet.
+
+        This is one in-memory counter per running backend process, not a
+        durable value: it does not see a write made by a different process
+        (e.g. a maintenance script run from the command line while the app
+        isn't running), and it resets on restart. A caller relying on it
+        for correctness, not just avoiding unnecessary work, should still
+        keep a coarse time-based fallback for that case.
+
+        Parameters
+        ----------
+        dataset_type : `str`
+            The kind of data to check (e.g. "stellar_catalog").
+
+        Returns
+        -------
+        version : `int`
+            The number of writes made to `dataset_type` in this process.
+        """
+        with self._dataset_versions_lock:
+            return self._dataset_versions.get(dataset_type, 0)
+
+    def _bump_dataset_version(self, dataset_type: str) -> None:
+        """Record one more write to `dataset_type`.
+
+        Call after a write to it succeeds.
+        """
+        with self._dataset_versions_lock:
+            self._dataset_versions[dataset_type] = self._dataset_versions.get(dataset_type, 0) + 1
 
     @staticmethod
     def _build_generic_butler(config: Any) -> _GenericButler:
@@ -683,6 +725,7 @@ class CatalogAccess(AbstractCatalogAccess):
             self._generic.put_all("stellar_catalog", obj)
         else:
             raise ValueError(f"Write operation not supported on dataset type: {dataset_type}")
+        self._bump_dataset_version("target_catalog" if dataset_type == "target_record" else dataset_type)
 
     def merge_and_record(
         self,
@@ -715,6 +758,7 @@ class CatalogAccess(AbstractCatalogAccess):
             raise ValueError(f"merge_and_record is not supported for dataset type: {dataset_type}")
 
         self._generic.merge_and_record(dataset_type, objects, merge_function)
+        self._bump_dataset_version(dataset_type)
 
     def delete_by_ids(self, dataset_type: str, ids: list[str]) -> None:
         """Delete specific records from the database using their IDs.
@@ -735,6 +779,7 @@ class CatalogAccess(AbstractCatalogAccess):
             raise ValueError(f"delete_by_ids is not supported for dataset type: {dataset_type}")
 
         self._generic.delete_by_ids(dataset_type, ids)
+        self._bump_dataset_version(dataset_type)
 
     def get_by_ids(self, dataset_type: str, ids: list[str]) -> list[Any]:
         """Load only specific records from the database instead of everything.

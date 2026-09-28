@@ -21,7 +21,7 @@ def test_astrometrics_target_access(tmp_path):  # ruff: ignore[missing-type-func
     library_path = tmp_path / "library"
     library_path.mkdir()
     (library_path / "targets").mkdir()
-    original_path = config.get_value("Image Library", "path", fallback="./libraryIndex")
+    original_path = config.get_value("Image Library", "path", fallback="./library")
     config.update_config({"Image Library": {"path": str(library_path)}})
 
     try:
@@ -54,7 +54,7 @@ def test_astrometrics_keeps_no_copy_of_the_star_catalog(tmp_path, monkeypatch): 
     library_path = tmp_path / "library"
     library_path.mkdir()
     (library_path / "targets").mkdir()
-    original_path = config.get_value("Image Library", "path", fallback="./libraryIndex")
+    original_path = config.get_value("Image Library", "path", fallback="./library")
     config.update_config({"Image Library": {"path": str(library_path)}})
 
     try:
@@ -87,7 +87,7 @@ def test_astrometry_pulls_solved_coordinates_when_unpopulated(tmp_path):  # ruff
     library_path = tmp_path / "library"
     library_path.mkdir()
     (library_path / "targets").mkdir()
-    original_path = config.get_value("Image Library", "path", fallback="./libraryIndex")
+    original_path = config.get_value("Image Library", "path", fallback="./library")
     config.update_config({"Image Library": {"path": str(library_path)}})
 
     try:

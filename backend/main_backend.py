@@ -887,6 +887,14 @@ def _warm_sky_catalog() -> None:
         _warm_earth_orientation_data()
     except Exception as warm_error:
         logger.warning("Earth-orientation warm-up failed; the first star click will be slow: %s", warm_error)
+    try:
+        stellar_started_at = time.monotonic()
+        container.stellar_service.warm_catalog_summary_cache()
+        logger.info("Stellar catalog summary warmed in %.1fs", time.monotonic() - stellar_started_at)
+    except Exception as warm_error:
+        logger.warning(
+            "Stellar summary warm-up failed; first Astronomy Manager load will be slow: %s", warm_error
+        )
     finally:
         sky_catalog_warmup_finished.set()
 

@@ -9,7 +9,7 @@
  * layout/composition rather than backend session-data bookkeeping.
  */
 
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { callBackend } from '../../common/services/backendApi';
 import { AlignmentSessionSummary, AlignmentAttempt, PolarAlignmentStatus } from '../../common/types/backendTypes';
 
@@ -46,6 +46,13 @@ export interface AlignmentSessionData {
  * selection logic shared by the toolbar's session picker and the sky map's
  * alignment/tracking-risk overlays.
  *
+ * Each of the three fetches (session list, cumulative tracking, per-session
+ * detail) is called from more than one place — mount, a manual sync, and a
+ * session-selection change — so each keeps its own AbortController, aborting
+ * its own previous in-flight call before starting a new one. That way a rapid
+ * session-picker change or an unmount never leaves a superseded request
+ * running in the background.
+ *
  * @func useAlignmentSessionData
  * @param {AlignmentSessionTelemetry | undefined} telemetry - Live telescope telemetry.
  * @returns {AlignmentSessionData} Session list, selection state, and active attempt/polar-alignment views.
@@ -60,35 +67,52 @@ export const useAlignmentSessionData = (
   const [cumulativeTrackingAttempts, setCumulativeTrackingAttempts] = useState<AlignmentAttempt[] | null>(null);
   const [isSyncingLogs, setIsSyncingLogs] = useState<boolean>(false);
 
+  const sessionsControllerRef = useRef<AbortController | null>(null);
+  const trackingControllerRef = useRef<AbortController | null>(null);
+
   const refreshSessions = useCallback(async () => {
+    sessionsControllerRef.current?.abort();
+    const controller = new AbortController();
+    sessionsControllerRef.current = controller;
     try {
-      const sessions = await callBackend('telescope:list_alignment_sessions', {});
+      const sessions = await callBackend('telescope:list_alignment_sessions', {}, { signal: controller.signal });
       if (sessions) {
         setAvailableSessions(sessions);
       }
     } catch (err) {
-      console.error('Failed to list alignment sessions:', err);
+      if (!(err instanceof Error && err.name === 'AbortError')) {
+        console.error('Failed to list alignment sessions:', err);
+      }
     }
   }, []);
 
   const refreshCumulativeTracking = useCallback(async () => {
+    trackingControllerRef.current?.abort();
+    const controller = new AbortController();
+    trackingControllerRef.current = controller;
     try {
       const res = await callBackend(
         'telescope:get_session_alignment',
         { session_id: 'all' },
-        { silent: true }
+        { silent: true, signal: controller.signal }
       );
       if (res && res.alignmentAttempts) {
         setCumulativeTrackingAttempts(res.alignmentAttempts);
       }
     } catch (err) {
-      console.error('Failed to load cumulative tracking data:', err);
+      if (!(err instanceof Error && err.name === 'AbortError')) {
+        console.error('Failed to load cumulative tracking data:', err);
+      }
     }
   }, []);
 
   useEffect(() => {
     refreshSessions();
     refreshCumulativeTracking();
+    return () => {
+      sessionsControllerRef.current?.abort();
+      trackingControllerRef.current?.abort();
+    };
   }, [refreshSessions, refreshCumulativeTracking]);
 
   const handleSyncLogs = useCallback(async () => {
@@ -110,20 +134,30 @@ export const useAlignmentSessionData = (
       setSessionPolarAlignment(null);
       return;
     }
+    const controller = new AbortController();
     let active = true;
     const fetchSessionData = async () => {
       try {
-        const res = await callBackend('telescope:get_session_alignment', { session_id: selectedSessionId });
+        const res = await callBackend(
+          'telescope:get_session_alignment',
+          { session_id: selectedSessionId },
+          { signal: controller.signal }
+        );
         if (active && res) {
           setSessionAlignmentAttempts(res.alignmentAttempts || []);
           setSessionPolarAlignment(res.polarAlignment || null);
         }
       } catch (err) {
-        console.error(`Failed to fetch alignment for session ${selectedSessionId}:`, err);
+        if (!(err instanceof Error && err.name === 'AbortError')) {
+          console.error(`Failed to fetch alignment for session ${selectedSessionId}:`, err);
+        }
       }
     };
     fetchSessionData();
-    return () => { active = false; };
+    return () => {
+      active = false;
+      controller.abort();
+    };
   }, [selectedSessionId]);
 
   const activeAlignmentAttempts = useMemo(() => {

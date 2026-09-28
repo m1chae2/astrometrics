@@ -18,7 +18,6 @@ import { AlignmentPointCard } from './components/AlignmentPointCard';
 import { PlanetariumToolbar } from './components/PlanetariumToolbar';
 import { PlanetariumContextMenu } from './components/PlanetariumContextMenu';
 import { PlanetariumDateTimeModal } from './components/PlanetariumDateTimeModal';
-import { TelescopeDiagnosticsModal } from './components/TelescopeDiagnosticsModal';
 import { useConstellationLines } from './hooks/useConstellationLines';
 import { useObserverLocation } from './hooks/useObserverLocation';
 import { useOverlayToggles } from './hooks/useOverlayToggles';
@@ -35,12 +34,12 @@ import { useTelescopeStatus } from '../common/hooks/useTelescopeStatus';
 import { safeParse } from './utils/coordinateUtils';
 import { DeepCatalogPrompt } from './components/DeepCatalogPrompt';
 import { useNavigationTarget, NavigationIntent } from '../common/utils/displayCoordinator';
-import { useTargetBrowserItems } from '../astronomyDisplay/hooks/useTargetBrowserItems';
-import { useSpectralClassBrowserItems, ALL_SPECTRAL_CLASSES_VALUE } from '../astronomyDisplay/hooks/useSpectralClassBrowserItems';
-import { useSpectrumList } from '../astronomyDisplay/hooks/useSpectrumList';
-import { useStarsBySpectralClassList } from '../astronomyDisplay/hooks/useStarsBySpectralClassList';
-import { spectralClassLetter } from '../astronomyDisplay/utils/starDisplayFormat';
-import '../astronomyDisplay/styles/astronomyDisplay.css';
+import { useTargetBrowserItems } from '../astronomyManager/hooks/useTargetBrowserItems';
+import { useSpectralClassBrowserItems, ALL_SPECTRAL_CLASSES_VALUE } from '../astronomyManager/hooks/useSpectralClassBrowserItems';
+import { useSpectrumList } from '../astronomyManager/hooks/useSpectrumList';
+import { useStarsBySpectralClassList } from '../astronomyManager/hooks/useStarsBySpectralClassList';
+import { spectralClassLetter } from '../astronomyManager/utils/starDisplayFormat';
+import '../common/styles/segmentedToggle.css';
 import './styles/planetariumDisplay.css';
 
 /**
@@ -70,7 +69,6 @@ export const PlanetariumDisplay: React.FC = () => {
   const {
     showStars, setShowStars,
     showFOVOutline, setShowFOVOutline,
-    showFITSOverlays, setShowFITSOverlays,
     showEnvironment, setShowEnvironment,
     showGrid, setShowGrid,
     showCatalog, setShowCatalog,
@@ -100,7 +98,6 @@ export const PlanetariumDisplay: React.FC = () => {
   // Date and Time controls
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
   const [isTimeModalOpen, setIsTimeModalOpen] = useState<boolean>(false);
-  const [isDiagnosticsModalOpen, setIsDiagnosticsModalOpen] = useState<boolean>(false);
   // When true, currentDate ticks forward with the system clock every second
   const [isLiveTime, setIsLiveTime] = useState<boolean>(true);
 
@@ -538,8 +535,6 @@ export const PlanetariumDisplay: React.FC = () => {
         onToggleStars={setShowStars}
         showFOV={showFOVOutline}
         onToggleFOV={setShowFOVOutline}
-        showFITS={showFITSOverlays}
-        onToggleFITS={setShowFITSOverlays}
         showEnvironment={showEnvironment}
         onToggleEnvironment={setShowEnvironment}
         showGrid={showGrid}
@@ -561,7 +556,6 @@ export const PlanetariumDisplay: React.FC = () => {
         isSyncingLogs={isSyncingLogs}
         currentFOV={currentFOV}
         onOpenTimeModal={() => setIsTimeModalOpen(true)}
-        onOpenDiagnostics={() => setIsDiagnosticsModalOpen(true)}
       />
 
       <CelestialSkyMap
@@ -571,7 +565,6 @@ export const PlanetariumDisplay: React.FC = () => {
         location={location}
         showStars={showStars}
         showFOV={showFOVOutline}
-        showFITS={showFITSOverlays}
         showEnvironment={showEnvironment}
         showGrid={showGrid}
         showCatalog={showCatalog}
@@ -645,12 +638,6 @@ export const PlanetariumDisplay: React.FC = () => {
           }}
         />
       )}
-
-      <TelescopeDiagnosticsModal
-        isOpen={isDiagnosticsModalOpen}
-        onClose={() => setIsDiagnosticsModalOpen(false)}
-        selectedSessionId={selectedSessionId}
-      />
     </div>
   );
 

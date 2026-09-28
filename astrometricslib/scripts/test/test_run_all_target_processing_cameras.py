@@ -5,12 +5,31 @@ the config's setups. These tests use stand-in objects, so they never touch the
 real library, the real config, or Siril.
 """
 
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+from astrometricslib.utilities.config_loader import _TomlSectionedConfig
 from astrometricslib.utilities.observatory_setups import ObservatorySetups, OpticConfig, SetupConfig
+
+_EXAMPLE_CONFIG_PATH = Path(__file__).resolve().parents[2] / "astrometrics.config.example.toml"
+
+
+def _shipped_camera_sections() -> _TomlSectionedConfig:
+    """Parse the real camera sections out of the shipped config template.
+
+    Returns
+    -------
+    app_config : `_TomlSectionedConfig`
+        A config carrying the shipped cameras, so name resolution in
+        `camera_profile_store` has real profiles to match against.
+    """
+    parser = _TomlSectionedConfig()
+    parser.read_string(_EXAMPLE_CONFIG_PATH.read_text(encoding="utf-8"))
+    return parser
+
 
 SETUPS = ObservatorySetups(
     optics=(OpticConfig(name="Apertura 75Q", focal_length_mm=405.0),),
@@ -34,6 +53,56 @@ def make_target(target_id: str, *cameras: str) -> SimpleNamespace:
     return SimpleNamespace(id=target_id, frames=[SimpleNamespace(camera=camera) for camera in cameras])
 
 
+class FakeConfig:
+    """A hashable stand-in for `AppConfiguration`.
+
+    `camera_profile_store.load_camera_profiles` caches on its `config`
+    argument with `functools.cache`, which requires a hashable key --
+    `types.SimpleNamespace` isn't one, so this uses a plain object instead.
+    """
+
+    def __init__(self, setups: ObservatorySetups) -> None:
+        """Store the setups this fake config should report.
+
+        Parameters
+        ----------
+        setups : `ObservatorySetups`
+            The setups the config describes.
+        """
+        self._setups = setups
+        self.app_config = _shipped_camera_sections()
+
+    def get_observatory_setups(self) -> ObservatorySetups:
+        """Return the setups given at construction.
+
+        Returns
+        -------
+        setups : `ObservatorySetups`
+            The setups the config describes.
+        """
+        return self._setups
+
+    def get_primary_camera_name(self) -> str:
+        """Return the stand-in primary camera name.
+
+        Returns
+        -------
+        name : `str`
+            The fixed primary camera name used by these tests.
+        """
+        return ASI
+
+    def get_primary_focal_length_mm(self) -> float | None:
+        """Return the stand-in primary focal length.
+
+        Returns
+        -------
+        focal_length_mm : `None`
+            Always `None`; these tests don't exercise focal length.
+        """
+        return None
+
+
 class FakeAstrometrics:
     """A stand-in for `Astrometrics` that records the passes asked for."""
 
@@ -52,11 +121,7 @@ class FakeAstrometrics:
             reindex_frames=lambda *args, **kwargs: None,
             save=lambda: None,
         )
-        self.config = SimpleNamespace(
-            get_observatory_setups=lambda: setups,
-            get_primary_camera_name=lambda: ASI,
-            get_primary_focal_length_mm=lambda: None,
-        )
+        self.config = FakeConfig(setups)
         self.calls: list[dict[str, Any]] = []
 
     def process_all_targets(self, **keywords: Any) -> SimpleNamespace:

@@ -5,11 +5,153 @@ import logging
 import os
 from pathlib import Path
 
+import tomlkit
+
 from .camera_names import normalize_camera_name
 from .enums import FilterType
 from .observatory_setups import ObservatorySetups, load_observatory_setups
 
 _instance = None
+
+_UNSET = object()
+
+
+class _TomlSectionedConfig:
+    """A configparser-compatible view over a flat-sectioned TOML document.
+
+    Every section is stored as a single top-level TOML table keyed by its
+    full historical dotted name (e.g. ``"Observatory.Camera.Nikon D5300"``)
+    rather than as real nested TOML tables, so every accessor on
+    `AppConfiguration` written against `configparser`'s flat-section model
+    keeps working unchanged -- this class only swaps what parses/writes the
+    file on disk. Plain values are stored and returned as strings, matching
+    `configparser`'s own everything-is-a-string behavior, so existing
+    `float()`/`int()`/`.lower()` conversions elsewhere keep working. Inline
+    tables (used by camera profile fields such as `clip_ceiling_adu`) are
+    the one exception: they come back as `tomlkit`'s own dict-like objects
+    with real, native types, since those are read by a purpose-built loader
+    (`camera_profile_store.py`), not by these generic string-based getters.
+    """
+
+    def __init__(self) -> None:
+        """Start with an empty TOML document."""
+        self._document: tomlkit.TOMLDocument = tomlkit.document()
+
+    def read(self, path: str, encoding: str = "utf-8") -> list[str]:
+        """Parse a TOML file into this config, `configparser.read`-style.
+
+        Returns
+        -------
+        read_paths : `list` [`str`]
+            `[path]` if the file was read successfully, `[]` otherwise.
+        """
+        try:
+            text = Path(path).read_text(encoding=encoding)
+        except OSError:
+            return []
+        self._document = tomlkit.parse(text)
+        return [path]
+
+    def write(self, fileobj) -> None:  # ruff: ignore[missing-type-function-argument]
+        """Serialize this config to `fileobj`, keeping comments/formatting."""
+        fileobj.write(tomlkit.dumps(self._document))
+
+    def read_string(self, text: str) -> None:
+        """Parse TOML text into this config, `configparser`-style."""
+        self._document = tomlkit.parse(text)
+
+    def sections(self) -> list[str]:
+        """Return every section's full flat name.
+
+        Returns
+        -------
+        section_names : `list` [`str`]
+            Every top-level section name, in document order.
+        """
+        return list(self._document.keys())
+
+    def has_section(self, section: str) -> bool:
+        """Return whether `section` exists.
+
+        Returns
+        -------
+        exists : `bool`
+            `True` if `section` is present.
+        """
+        return section in self._document
+
+    def add_section(self, section: str) -> None:
+        """Add an empty section named `section`."""
+        self._document[section] = tomlkit.table()
+
+    def set(self, section: str, key: str, value: object) -> None:
+        """Set `key` within `section` to `str(value)`."""
+        self._document[section][key] = str(value)
+
+    def get(self, section: str, key: str, fallback: object = _UNSET) -> object:
+        """Return `section`'s `key`, `configparser.get`-style.
+
+        Returns
+        -------
+        value : `Any`
+            The stored value, stringified, or `fallback` if `section`/`key`
+            does not exist and `fallback` was given.
+
+        Raises
+        ------
+        KeyError
+            If `section`/`key` does not exist and no `fallback` was given.
+        """
+        try:
+            return str(self._document[section][key])
+        except KeyError:
+            if fallback is _UNSET:
+                raise
+            return fallback
+
+    def getboolean(self, section: str, key: str, fallback: object = _UNSET) -> object:
+        """Return `section`'s `key` as a bool, `configparser.getboolean`-style.
+
+        Returns
+        -------
+        value : `bool` or `Any`
+            The stored value interpreted as a bool, or `fallback` if
+            `section`/`key` does not exist and `fallback` was given.
+
+        Raises
+        ------
+        KeyError
+            If `section`/`key` does not exist and no `fallback` was given.
+        """
+        try:
+            raw = self._document[section][key]
+        except KeyError:
+            if fallback is _UNSET:
+                raise
+            return fallback
+        if isinstance(raw, bool):
+            return raw
+        return str(raw).strip().lower() in ("true", "1", "yes", "on")
+
+    def __contains__(self, section: str) -> bool:
+        """Return whether `section` exists.
+
+        Returns
+        -------
+        exists : `bool`
+            `True` if `section` is present.
+        """
+        return section in self._document
+
+    def __getitem__(self, section: str) -> object:
+        """Return `section`'s table.
+
+        Returns
+        -------
+        table : `Any`
+            The section's underlying TOML table.
+        """
+        return self._document[section]
 
 
 def get_configuration() -> AppConfiguration:
@@ -37,7 +179,7 @@ class AppConfiguration:
     def __init__(self):  # ruff: ignore[missing-return-type-special-method]
         # Get the directory of the current script
         self.base_dir = Path(__file__).parent.absolute()
-        self.app_config = configparser.ConfigParser()
+        self.app_config = _TomlSectionedConfig()
         self.config_file_path: Path | None = None
         self.load_configuration()
 
@@ -64,10 +206,10 @@ class AppConfiguration:
 
         candidates = [
             self.base_dir.parent
-            / "astrometrics.config",  # astrometricslib/astrometrics.config (primary user location)
+            / "astrometrics.config.toml",  # astrometricslib/astrometrics.config.toml (primary user location)
             self.base_dir.parent.parent
             / "backend"
-            / "astrometrics.config",  # Backend root folder (Repo/backend/astrometrics.config)
+            / "astrometrics.config.toml",  # Backend root folder (Repo/backend/astrometrics.config.toml)
         ]
 
         for p in candidates:
@@ -95,7 +237,7 @@ class AppConfiguration:
         """Populate the config with sensible defaults if it's empty."""
         defaults = {
             "Image Library": {
-                "path": "./libraryIndex",
+                "path": "./library",
             },
             "Observatory.Telescope": {
                 "hostname": "localhost",
@@ -108,7 +250,7 @@ class AppConfiguration:
             "Observatory.Camera": {"default_primary_camera": "Unknown", "models": "Unknown"},
             "Observatory.Constraints": {"min_altitude": "0.0", "max_altitude": "90.0"},
             "Processing.Siril": {
-                # The -cli entry point, matching astrometrics.config.example.
+                # The -cli entry point, matching the config template.
                 # Plain "siril" is the GUI build: it needs a display
                 # connection and so fails in headless pipe mode, which is how
                 # every stack runs. This default is what a configuration
@@ -120,7 +262,7 @@ class AppConfiguration:
                 "rejection_sigma_high": "3.0",
                 "filter_wfwhm_percentile": "",
                 "filter_round_percentile": "",
-                # Blank, matching astrometrics.config.example: -weight= needs
+                # Blank, matching the config template: -weight= needs
                 # a newer Siril than the default apt install provides, and a
                 # default that breaks the default install is not a default.
                 "stack_weight": "",
@@ -591,7 +733,7 @@ class AppConfiguration:
         return self.base_dir.parent.parent.absolute()
 
     def get_library_path(self) -> Path:
-        """Return the absolute path to the image library libraryIndex path.
+        """Return the absolute path to the image library's `library` path.
 
         Returns
         -------
@@ -603,7 +745,7 @@ class AppConfiguration:
             path = Path(path_str)
             if not path.is_absolute():
                 # If path starts with ./, resolve relative to project root.
-                # If libraryIndex was moved to astrometricslib/libraryIndex,
+                # If `library` was moved to astrometricslib/library,
                 # check there.
                 check_path = self.get_project_root() / "astrometricslib" / path
                 if check_path.exists():
@@ -611,10 +753,10 @@ class AppConfiguration:
                 return (self.get_project_root() / path).absolute()
             return path.absolute()
         except configparser.NoSectionError, configparser.NoOptionError, KeyError:
-            check_path = self.get_project_root() / "astrometricslib" / "libraryIndex"
+            check_path = self.get_project_root() / "astrometricslib" / "library"
             if check_path.exists():
                 return check_path.absolute()
-            return (self.get_project_root() / "libraryIndex").absolute()
+            return (self.get_project_root() / "library").absolute()
 
     def get_frames_path(self) -> Path:
         """Return the absolute path to the frames directory.
@@ -657,7 +799,7 @@ class AppConfiguration:
         return self.get_library_path() / "frames"
 
     def get_library_file_path(self, filename: str) -> Path:
-        """Return the absolute path to a file within libraryIndex.
+        """Return the absolute path to a file within `library`.
 
         Returns
         -------
@@ -725,7 +867,7 @@ class AppConfiguration:
         try:
             val = self.app_config.get("Observatory.Telescope", "allow_commands")
             return val.lower() == "true"
-        except configparser.NoSectionError, configparser.NoOptionError:
+        except configparser.NoSectionError, configparser.NoOptionError, KeyError:
             return self.app_config.getboolean("Telescope", "allow_commands", fallback=False)
 
     def get_min_altitude(self) -> float:

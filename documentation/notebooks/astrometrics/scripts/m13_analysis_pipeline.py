@@ -1,6 +1,6 @@
 """Run the full M 13 analysis pipeline and save the results.
 
-Populates the persisted stellar catalog that `m13_full_target_analysis.ipynb`
+Populates the persisted stellar catalog that `09_end_to_end_pipeline_M13.ipynb`
 section 9 and `m13_combined_dashboard.py` read from -- both only display
 already-persisted results, neither runs any pipeline stage itself. Assumes
 `stacked_image` (Luminance) and `stacked_spectral_target` (SPEC) already
@@ -58,7 +58,7 @@ def run_pipeline(target_id: str = "M 13") -> None:
     logger.info(f"{len(l_frames)} Luminance frames for photometry.")
 
     logger.info("Running astrometry analysis...")
-    astrometry_result = astrometrics.processing.run_astrometry(target, filter_type="L")
+    astrometry_result = astrometrics.processing.run_astrometry(target)
     logger.info(
         f"Astrometry solved: {astrometry_result.get('wcs') is not None}; "
         f"{len(astrometry_result.get('stellar_objects', []))} stars identified."

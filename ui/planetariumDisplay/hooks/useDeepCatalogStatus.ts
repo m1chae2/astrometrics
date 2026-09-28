@@ -8,7 +8,7 @@
  * to know whether that has happened in order to prompt for it.
  */
 
-import { useState, useEffect } from 'react';
+import { useBackendFetch } from '../../common/hooks/useBackendFetch';
 import { callBackend, DeepCatalogStatus } from '../../common/services/backendApi';
 
 /**
@@ -16,27 +16,17 @@ import { callBackend, DeepCatalogStatus } from '../../common/services/backendApi
  *
  * The status is only used to decide whether to show a prompt, so a failed
  * request is not an error worth interrupting the user for: it simply leaves
- * the status null, and no prompt is shown.
+ * the status null, and no prompt is shown. `silent: true` keeps this
+ * consistent by suppressing the toast callBackend would otherwise raise.
  *
  * @func useDeepCatalogStatus
  * @returns {{ status: DeepCatalogStatus | null }} The status, or null until it has loaded (or if it could not be).
  */
 export const useDeepCatalogStatus = () => {
-  const [status, setStatus] = useState<DeepCatalogStatus | null>(null);
+  const { data } = useBackendFetch<DeepCatalogStatus>(
+    (signal) => callBackend('planetarium:get_deep_catalog_status', {}, { signal, silent: true }),
+    []
+  );
 
-  useEffect(() => {
-    let active = true;
-    callBackend('planetarium:get_deep_catalog_status', {})
-      .then((loadedStatus) => {
-        if (active) setStatus(loadedStatus);
-      })
-      .catch(() => {
-        // Leave the status null: without it the prompt just doesn't appear.
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  return { status };
+  return { status: data };
 };

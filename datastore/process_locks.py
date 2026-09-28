@@ -78,7 +78,7 @@ def acquire_resource_slot(  # ruff: ignore[missing-return-type-undocumented-publ
     """Acquire one of a limited number of OS-level slots for a resource.
 
     Round-robins over max_slots lock files (one per resource) under
-    libraryIndex/locks/, attempting a non-blocking file_lock() on each
+    library/locks/, attempting a non-blocking file_lock() on each
     in turn, and sleeps briefly between full sweeps if every slot is
     currently held elsewhere. Unlike an in-process
     multiprocessing.Semaphore, this is respected by any process on the

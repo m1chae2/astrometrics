@@ -17,7 +17,9 @@ from astrometricslib.pipelines.shared.frame_grouping import select_frames_for_ca
 from astrometricslib.utilities.observatory_setups import ObservatorySetups
 
 
-def camera_pass_order(observatory_setups: ObservatorySetups, primary_camera_name: str | None) -> list[str]:
+def camera_pass_order(
+    observatory_setups: ObservatorySetups, primary_camera_name: str | None, config: Any = None
+) -> list[str]:
     """List the cameras to process, best first.
 
     The primary camera comes first when it is used in a setup. The others
@@ -30,6 +32,9 @@ def camera_pass_order(observatory_setups: ObservatorySetups, primary_camera_name
         The optics and setups from the config.
     primary_camera_name : `str` or `None`
         The observer's primary camera, written in any spelling.
+    config : `AppConfiguration`, optional
+        The config to read camera profiles from. The process-wide
+        singleton is used when this is left out.
 
     Returns
     -------
@@ -41,10 +46,10 @@ def camera_pass_order(observatory_setups: ObservatorySetups, primary_camera_name
     names_by_identity: dict[str, str] = {}
     for setup in observatory_setups.setups:
         names_by_identity.setdefault(
-            camera_identity(setup.camera_name), record_name_for_camera(setup.camera_name)
+            camera_identity(setup.camera_name, config), record_name_for_camera(setup.camera_name, config)
         )
 
-    primary_identity = camera_identity(primary_camera_name) if primary_camera_name else None
+    primary_identity = camera_identity(primary_camera_name, config) if primary_camera_name else None
     ordered_identities = list(names_by_identity)
     if primary_identity in names_by_identity:
         ordered_identities.remove(primary_identity)

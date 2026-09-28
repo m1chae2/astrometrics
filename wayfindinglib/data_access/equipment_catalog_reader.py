@@ -1,7 +1,7 @@
 """Purpose: Equipment Catalog Resolution.
 
 Description: Resolves the configured `Telescope`/`Camera` specifications
-and which of each is active, from `astrometrics.config`. Foundation
+and which of each is active, from `astrometrics.config.toml`. Foundation
 concern -- both peer functions need the active specifications; changing
 which entry is active is a Control operation
 (`Wayfinding_Library_Architecture.md` §2.2.2, §2.5.2).

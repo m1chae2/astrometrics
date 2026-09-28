@@ -6,7 +6,7 @@
 
 import { renderHook, act } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
-import { useSpectralClassBrowserItems } from '../astronomyDisplay/hooks/useSpectralClassBrowserItems';
+import { useSpectralClassBrowserItems } from '../astronomyManager/hooks/useSpectralClassBrowserItems';
 
 vi.mock('../common/queries/useSpectralClassSummaryQuery', () => ({
     useSpectralClassSummaryQuery: vi.fn(),

@@ -23,7 +23,7 @@ matching original `<type>.dat.gz` file in the source catalog:
    usual field width, so the columns cannot be split on whitespace.
 2. The conversion trims each spectrum to 3000-10000 A, the wavelength range
    of the ZWO ASI 533MM Pro sensor (`sensor_min_wavelength` and
-   `sensor_max_wavelength` in `astrometrics.config`), at the library's
+   `sensor_max_wavelength` in `astrometrics.config.toml`), at the library's
    native 5 A sampling.
 3. The conversion keeps only wavelength and flux. Classification does not
    use the source catalog's per-component columns or its

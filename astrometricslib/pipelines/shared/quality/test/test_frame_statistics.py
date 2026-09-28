@@ -6,8 +6,6 @@ These tests verify that we now measure frame quality independently, so we can
 judge how good a frame is before we even try to stack it.
 """
 
-import json
-
 import numpy as np
 import pytest
 from astropy.io import fits
@@ -185,25 +183,28 @@ def test_measured_fwhm_is_kept_apart_from_registration_fwhm(tmp_path):  # ruff: 
 def test_each_frames_saturation_uses_its_own_cameras_threshold(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """A frame is judged against the threshold in its camera's profile."""
     from astrometricslib.drivers import camera_profile_store
+    from astrometricslib.utilities.config_loader import AppConfiguration
 
-    profile_folder = tmp_path / "profiles"
-    profile_folder.mkdir()
-    source = {"kind": "assumed", "source": "a test"}
+    config_path = tmp_path / "profiles.config.toml"
+    config_path.write_text(
+        '["Observatory.Camera.Generic"]\n'
+        'is_generic_fallback = "true"\n'
+        'clip_ceiling_adu = { value = 65535.0, kind = "assumed", source = "a test" }\n'
+        'saturation_threshold_adu = { value = 65000.0, kind = "assumed", source = "a test" }\n'
+        "\n"
+        '["Observatory.Camera.Fourteen Bit Camera"]\n'
+        'clip_ceiling_adu = { value = 65535.0, kind = "assumed", source = "a test" }\n'
+        'saturation_threshold_adu = { value = 15000.0, kind = "assumed", source = "a test" }\n'
+    )
+    profile_config = AppConfiguration.__new__(AppConfiguration)
+    profile_config._find_config_file = lambda: config_path
+    profile_config.base_dir = tmp_path
+    profile_config.config_file_path = None
+    from astrometricslib.utilities.config_loader import _TomlSectionedConfig
 
-    def write_profile(file_name, camera_name, threshold_adu, generic=False):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
-        """Write one profile file into the temporary profile folder."""
-        (profile_folder / file_name).write_text(
-            json.dumps({
-                "camera_name": camera_name,
-                "is_generic_fallback": generic,
-                "clip_ceiling_adu": {"value": 65535.0, "provenance": source},
-                "saturation_threshold_adu": {"value": threshold_adu, "provenance": source},
-            })
-        )
-
-    write_profile("generic.json", "Generic", 65000.0, generic=True)
-    write_profile("fourteen_bit.json", "Fourteen Bit Camera", 15000.0)
-    monkeypatch.setattr(camera_profile_store, "CAMERA_PROFILE_DIRECTORY", profile_folder)
+    profile_config.app_config = _TomlSectionedConfig()
+    profile_config.app_config.read(str(config_path))
+    monkeypatch.setattr(camera_profile_store, "get_configuration", lambda: profile_config)
 
     data = np.full((64, 64), 500.0, dtype=np.float32)
     data[:8, :] = 16000.0

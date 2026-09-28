@@ -1,12 +1,11 @@
 """Tests for finding and loading camera profiles.
 
-Covers name matching, the generic fallback, the checks on a profile
-folder, and a parity check against the constants the pipelines still use.
+Covers name matching, the generic fallback, the checks on a config's camera
+sections, and a parity check against the constants the pipelines still use.
 While the pipelines are being moved onto profiles, the parity tests prove
-that the profile files hold exactly the numbers the code used before.
+that the shipped config holds exactly the numbers the code used before.
 """
 
-import json
 import logging
 from pathlib import Path
 
@@ -14,46 +13,92 @@ import pytest
 
 from astrometricslib.drivers import camera_profile_store
 from astrometricslib.drivers.camera_profile_store import (
-    CAMERA_PROFILE_DIRECTORY,
     camera_identity,
     load_camera_profiles,
     record_name_for_camera,
     resolve_camera_profile,
 )
+from astrometricslib.utilities.config_loader import _TomlSectionedConfig
+
+EXAMPLE_CONFIG_PATH = Path(__file__).resolve().parents[2] / "astrometrics.config.example.toml"
+
+
+class _FakeConfig:
+    """A minimal, hashable stand-in offering the `.app_config` attribute.
+
+    `load_camera_profiles` and friends only ever read `.app_config` off
+    whatever they are given, and cache by identity -- a real
+    `AppConfiguration` is overkill for these tests, but it must still be
+    hashable, unlike `types.SimpleNamespace`.
+    """
+
+    def __init__(self, app_config: _TomlSectionedConfig) -> None:
+        """Store the parsed config."""
+        self.app_config = app_config
+
+
+def _config_from_text(text: str) -> _FakeConfig:
+    """Build a minimal config-like object from TOML text.
+
+    Returns
+    -------
+    config : `_FakeConfig`
+        An object with the `.app_config` attribute `load_camera_profiles`
+        and friends need.
+    """
+    parser = _TomlSectionedConfig()
+    parser.read_string(text)
+    return _FakeConfig(parser)
+
+
+def _shipped_config() -> _FakeConfig:
+    """Build a config from the shipped example file.
+
+    Returns
+    -------
+    config : `_FakeConfig`
+        A config holding the real, shipped camera profiles.
+    """
+    return _config_from_text(EXAMPLE_CONFIG_PATH.read_text(encoding="utf-8"))
 
 
 def write_profile(
-    directory: Path, file_name: str, camera_name: str, aliases: tuple[str, ...] = (), generic: bool = False
-) -> None:
-    """Write a small valid profile file into a folder.
+    camera_name: str, aliases: tuple[str, ...] = (), generic: bool = False, record_name: str | None = None
+) -> str:
+    """Build one camera section's TOML text.
 
     Parameters
     ----------
-    directory : `pathlib.Path`
-        The folder to write into.
-    file_name : `str`
-        The name of the JSON file.
     camera_name : `str`
         The camera name to store.
     aliases : `tuple` [`str`, ...], optional
         Other spellings to store.
     generic : `bool`, optional
         Whether this is the generic fallback profile.
+    record_name : `str`, optional
+        The spelling frame records should use.
+
+    Returns
+    -------
+    section_text : `str`
+        One ``[Observatory.Camera.<name>]`` section, ready to append to a
+        config's text.
     """
-    provenance = {"kind": "assumed", "source": "a test"}
-    profile = {
-        "camera_name": camera_name,
-        "name_aliases": list(aliases),
-        "is_generic_fallback": generic,
-        "clip_ceiling_adu": {"value": 65535.0, "provenance": provenance},
-        "saturation_threshold_adu": {"value": 65000.0, "provenance": provenance},
-    }
-    (directory / file_name).write_text(json.dumps(profile))
+    lines = [f'["Observatory.Camera.{camera_name}"]', f'name = "{camera_name}"']
+    if aliases:
+        lines.append(f'name_aliases = "{", ".join(aliases)}"')
+    if record_name:
+        lines.append(f'record_name = "{record_name}"')
+    if generic:
+        lines.append('is_generic_fallback = "true"')
+    lines.append('clip_ceiling_adu = { value = 65535.0, kind = "assumed", source = "a test" }')
+    lines.append('saturation_threshold_adu = { value = 65000.0, kind = "assumed", source = "a test" }')
+    return "\n".join(lines) + "\n"
 
 
-def test_the_shipped_profile_folder_loads_and_has_one_generic_fallback() -> None:
-    """Check that the real profile files are valid together."""
-    profiles = load_camera_profiles()
+def test_the_shipped_config_loads_and_has_one_generic_fallback() -> None:
+    """Check that the real, shipped camera sections are valid together."""
+    profiles = load_camera_profiles(_shipped_config())
     assert sum(profile.is_generic_fallback for profile in profiles) == 1
     assert {profile.camera_name for profile in profiles if not profile.is_generic_fallback} == {
         "ZWO ASI533MM Pro",
@@ -76,7 +121,7 @@ def test_the_shipped_profile_folder_loads_and_has_one_generic_fallback() -> None
 )
 def test_every_known_spelling_of_a_camera_finds_its_profile(spelling: str, expected_camera: str) -> None:
     """Check the spellings that appear in headers, frame records and config."""
-    profile = resolve_camera_profile(spelling)
+    profile = resolve_camera_profile(spelling, _shipped_config())
     assert profile.camera_name == expected_camera
     assert profile.is_generic_fallback is False
 
@@ -87,7 +132,7 @@ def test_a_missing_name_gives_the_generic_profile_without_a_warning(
 ) -> None:
     """Check that no name at all is not treated as an unlisted camera."""
     with caplog.at_level(logging.WARNING):
-        profile = resolve_camera_profile(camera_name)
+        profile = resolve_camera_profile(camera_name, _shipped_config())
     assert profile.is_generic_fallback is True
     assert caplog.records == []
 
@@ -97,10 +142,11 @@ def test_an_unlisted_camera_gets_the_generic_profile_and_one_warning(
 ) -> None:
     """Check that the warning appears once per name, not once per frame."""
     camera_profile_store._warn_once_about_unlisted_camera.cache_clear()
+    config = _shipped_config()
     with caplog.at_level(logging.WARNING):
-        first = resolve_camera_profile("Acme Imager 9000")
-        second = resolve_camera_profile("Acme Imager 9000")
-        resolve_camera_profile("Other Imager 1")
+        first = resolve_camera_profile("Acme Imager 9000", config)
+        second = resolve_camera_profile("Acme Imager 9000", config)
+        resolve_camera_profile("Other Imager 1", config)
     assert first.is_generic_fallback and second.is_generic_fallback
     warned_names = [record.getMessage() for record in caplog.records]
     assert len(warned_names) == 2
@@ -115,7 +161,7 @@ def test_an_unlisted_zwo_camera_gets_the_generic_profile_not_the_zwo_family_ceil
     on the ASI533 (65532). A profile says only what was measured or assumed
     for that exact model, so an unlisted ZWO camera gets the generic value.
     """
-    profile = resolve_camera_profile("ZWO ASI2600MM Pro")
+    profile = resolve_camera_profile("ZWO ASI2600MM Pro", _shipped_config())
     assert profile.is_generic_fallback
     assert profile.clip_ceiling_adu.value == pytest.approx(65535.0)
 
@@ -128,39 +174,44 @@ def test_the_nikon_threshold_is_known_to_sit_above_its_ceiling() -> None:
     the threshold is fixed, this test should be changed to expect True.
     """
     profiles = [
-        profile for profile in load_camera_profiles() if not profile.saturation_threshold_can_be_reached
+        profile
+        for profile in load_camera_profiles(_shipped_config())
+        if not profile.saturation_threshold_can_be_reached
     ]
     assert [profile.camera_name for profile in profiles] == ["Nikon D5300"]
 
 
-def test_a_folder_without_a_generic_fallback_is_rejected(tmp_path: Path) -> None:
-    """Check that the folder must say what to do with an unlisted camera."""
-    write_profile(tmp_path, "one.json", "Camera One")
+def test_a_config_without_a_generic_fallback_is_rejected() -> None:
+    """Check that the config must say what to do with an unlisted camera."""
+    config = _config_from_text(write_profile("Camera One"))
     with pytest.raises(ValueError, match="exactly one generic fallback"):
-        load_camera_profiles(tmp_path)
+        load_camera_profiles(config)
 
 
-def test_a_folder_with_two_generic_fallbacks_is_rejected(tmp_path: Path) -> None:
+def test_a_config_with_two_generic_fallbacks_is_rejected() -> None:
     """Check that there cannot be two competing fallbacks."""
-    write_profile(tmp_path, "a.json", "Fallback A", generic=True)
-    write_profile(tmp_path, "b.json", "Fallback B", generic=True)
+    text = write_profile("Fallback A", generic=True) + write_profile("Fallback B", generic=True)
+    config = _config_from_text(text)
     with pytest.raises(ValueError, match="exactly one generic fallback"):
-        load_camera_profiles(tmp_path)
+        load_camera_profiles(config)
 
 
-def test_two_profiles_claiming_the_same_name_are_rejected(tmp_path: Path) -> None:
+def test_two_profiles_claiming_the_same_name_are_rejected() -> None:
     """Check that one spelling cannot belong to two cameras."""
-    write_profile(tmp_path, "fallback.json", "Fallback", generic=True)
-    write_profile(tmp_path, "one.json", "Camera One", aliases=("Shared Name",))
-    write_profile(tmp_path, "two.json", "Camera Two", aliases=("shared-name",))
+    text = (
+        write_profile("Fallback", generic=True)
+        + write_profile("Camera One", aliases=("Shared Name",))
+        + write_profile("Camera Two", aliases=("shared-name",))
+    )
+    config = _config_from_text(text)
     with pytest.raises(ValueError, match="claimed by both"):
-        load_camera_profiles(tmp_path)
+        load_camera_profiles(config)
 
 
 # ---- The numbers the pipelines used before they read profiles --------------
 # The constants these values came from have been removed from the pipelines,
-# so the values are pinned here. A change to a profile file that alters one
-# of them must be a deliberate decision.
+# so the values are pinned here. A change to a profile that alters one of
+# them must be a deliberate decision.
 
 
 @pytest.mark.parametrize(
@@ -180,12 +231,13 @@ def test_the_clip_ceiling_is_the_value_the_old_lookup_gave(
     camera_name: str | None, expected_ceiling_adu: float
 ) -> None:
     """Check each camera's ceiling against the old lookup's answer."""
-    assert resolve_camera_profile(camera_name).clip_ceiling_adu.value == pytest.approx(expected_ceiling_adu)
+    profile = resolve_camera_profile(camera_name, _shipped_config())
+    assert profile.clip_ceiling_adu.value == pytest.approx(expected_ceiling_adu)
 
 
 def test_every_saturation_threshold_is_the_value_the_old_constants_had() -> None:
     """Check that every profile keeps the 65000 the old constants held."""
-    for profile in load_camera_profiles():
+    for profile in load_camera_profiles(_shipped_config()):
         assert profile.saturation_threshold_adu.value == pytest.approx(65000.0)
 
 
@@ -193,7 +245,7 @@ def test_only_the_asi533_has_a_linearity_limit() -> None:
     """Check the one camera that has a measured linearity limit."""
     limits = {
         profile.camera_name: profile.photometric_linearity_limit_adu
-        for profile in load_camera_profiles()
+        for profile in load_camera_profiles(_shipped_config())
         if profile.photometric_linearity_limit_adu is not None
     }
     assert list(limits) == ["ZWO ASI533MM Pro"]
@@ -202,8 +254,9 @@ def test_only_the_asi533_has_a_linearity_limit() -> None:
 
 def test_the_asi533_quantum_efficiency_curve_is_the_one_read_off_the_zwo_graph() -> None:
     """Pin the curve that used to live in quantum_efficiency_curves.py."""
+    config = _shipped_config()
     for spelling in ("ZWO ASI533MM Pro", "ZWO ASI 533MM Pro", "ZWO CCD ASI533MM Pro"):
-        curve = resolve_camera_profile(spelling).quantum_efficiency
+        curve = resolve_camera_profile(spelling, config).quantum_efficiency
         assert curve is not None
         assert len(curve.wavelength_nm) == 17
         assert curve.wavelength_nm[0] == pytest.approx(400.0)
@@ -217,13 +270,7 @@ def test_the_asi533_quantum_efficiency_curve_is_the_one_read_off_the_zwo_graph()
 @pytest.mark.parametrize("camera_name", ["Nikon D5300", "ZWO ASI120MC-S", "Acme Imager 9000"])
 def test_only_the_asi533_has_a_quantum_efficiency_curve(camera_name: str) -> None:
     """Check that every other camera has no curve, so none is applied."""
-    assert resolve_camera_profile(camera_name).quantum_efficiency is None
-
-
-def test_the_profile_folder_constant_points_at_the_shipped_files() -> None:
-    """Check that the folder the loader uses exists and holds JSON files."""
-    assert CAMERA_PROFILE_DIRECTORY.is_dir()
-    assert list(CAMERA_PROFILE_DIRECTORY.glob("*.json"))
+    assert resolve_camera_profile(camera_name, _shipped_config()).quantum_efficiency is None
 
 
 @pytest.mark.parametrize(
@@ -239,13 +286,14 @@ def test_the_record_name_is_the_spelling_the_library_has_always_used(
     header_name: str, expected_record_name: str
 ) -> None:
     """Check the two names that the old string replacements produced."""
-    assert record_name_for_camera(header_name) == expected_record_name
+    assert record_name_for_camera(header_name, _shipped_config()) == expected_record_name
 
 
 def test_a_camera_without_a_record_name_keeps_its_header_text() -> None:
     """Check that cameras with no record name keep their header text."""
-    assert record_name_for_camera("ZWO CCD ASI120MC-S") == "ZWO CCD ASI120MC-S"
-    assert record_name_for_camera("Acme Imager 9000") == "Acme Imager 9000"
+    config = _shipped_config()
+    assert record_name_for_camera("ZWO CCD ASI120MC-S", config) == "ZWO CCD ASI120MC-S"
+    assert record_name_for_camera("Acme Imager 9000", config) == "Acme Imager 9000"
 
 
 @pytest.mark.parametrize(
@@ -258,11 +306,13 @@ def test_a_camera_without_a_record_name_keeps_its_header_text() -> None:
 )
 def test_every_spelling_of_a_listed_camera_has_the_same_identity(first: str, second: str) -> None:
     """Check spelling, punctuation and profile aliases."""
-    assert camera_identity(first) == camera_identity(second)
+    config = _shipped_config()
+    assert camera_identity(first, config) == camera_identity(second, config)
 
 
 def test_different_cameras_have_different_identities() -> None:
     """Check that listed and unlisted cameras are kept apart."""
-    assert camera_identity("ZWO ASI 533MM Pro") != camera_identity("Nikon D5300")
-    assert camera_identity("Acme Imager 9000") != camera_identity("Acme Imager 9001")
-    assert camera_identity("Acme Imager 9000") == camera_identity("acme-imager 9000")
+    config = _shipped_config()
+    assert camera_identity("ZWO ASI 533MM Pro", config) != camera_identity("Nikon D5300", config)
+    assert camera_identity("Acme Imager 9000", config) != camera_identity("Acme Imager 9001", config)
+    assert camera_identity("Acme Imager 9000", config) == camera_identity("acme-imager 9000", config)

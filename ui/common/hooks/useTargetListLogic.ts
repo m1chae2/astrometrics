@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useTargetListQuery } from '../queries/useTargetListQuery';
 import { useAstronomyListQuery } from '../queries/useAstronomyListQuery';
-import { useToast } from './useToast';
+import { reportError } from '../utils/reportError';
 import { SelectableItem } from '../components/SelectableList';
 
 interface Target {
@@ -45,7 +45,6 @@ export const useTargetListLogic = (
 ) => {
     const [dropdown, setDropdown] = useState<string>('Target Objects');
     const [filterText, setFilterText] = useState<string>('');
-    const toast = useToast();
 
     // Shared queries: multiple views consume the same cached target/star
     // lists instead of each independently fetching them on mount.
@@ -70,18 +69,8 @@ export const useTargetListLogic = (
 
     useEffect(() => {
         if (!targetListQuery.error) return;
-        console.error(targetListQuery.error);
-        try {
-            toast.show(
-                targetListQuery.error instanceof Error
-                    ? targetListQuery.error.message
-                    : String(targetListQuery.error),
-                'error'
-            );
-        } catch {
-            // Ignore toast errors
-        }
-    }, [targetListQuery.error, toast]);
+        reportError(targetListQuery.error, 'target-list');
+    }, [targetListQuery.error]);
 
     useEffect(() => {
         if (astronomyListQuery.error) {

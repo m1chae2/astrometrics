@@ -73,7 +73,7 @@ beforeAll(async () => {
     // 1. Create sandbox directory
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'astrometrics-test-ui-'));
 
-    const libDir = path.join(tempDir, 'libraryIndex');
+    const libDir = path.join(tempDir, 'library');
     const framesDir = path.join(libDir, 'frames');
     fs.mkdirSync(libDir, { recursive: true });
     fs.mkdirSync(framesDir, { recursive: true });

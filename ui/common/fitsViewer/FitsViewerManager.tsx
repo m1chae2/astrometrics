@@ -1,5 +1,5 @@
 import React from 'react';
-import { ImageViewer } from '../../targetDisplay/targetViewerManager/imageViewer/ImageViewer';
+import { ImageViewer } from '../../imageViewerDisplay/targetViewerManager/imageViewer/ImageViewer';
 import { FitsRenderer } from './FitsRenderer';
 import type { FitsRendererHandle } from './FitsRenderer';
 

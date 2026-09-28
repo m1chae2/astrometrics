@@ -358,7 +358,7 @@ class VariabilityAnalyzer:
         reference_path = image_paths[0]
         logger.info(f"[1/{len(image_paths)}] Processing Reference {os.path.basename(reference_path)}...")
 
-        with fits.open(reference_path) as fits_handle:
+        with fits.open(reference_path, memmap=False) as fits_handle:
             reference_data = collapse_to_2d(fits_handle[0].data.astype(float))
             reference_header = fits_handle[0].header
             # Every later frame is lined up with this one pixel for pixel,

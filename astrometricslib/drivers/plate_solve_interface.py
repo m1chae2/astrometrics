@@ -367,7 +367,7 @@ class PlateSolver:
         solved_path = os.path.join(working_directory, "input_image.new")
         if not os.path.exists(solved_path):
             return None
-        with fits.open(solved_path) as hdul:
+        with fits.open(solved_path, memmap=False) as hdul:
             return hdul[0].header.copy()
 
     def _solve_online_sources(

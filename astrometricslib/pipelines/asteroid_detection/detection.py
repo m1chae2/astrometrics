@@ -14,6 +14,7 @@ import math
 import statistics
 import uuid
 from collections import defaultdict
+from collections.abc import Iterable
 
 import numpy as np
 
@@ -33,6 +34,39 @@ _SECONDS_PER_HOUR = 3600.0
 # at all, calculating its straight-line speed would involve dividing by zero.
 # We use this to safely handle those cases.
 _LINEAR_FIT_TOTAL_SUM_OF_SQUARES_EPSILON = 1e-12
+
+# A chain's match radius grows with the time since its last match
+# (rate_max_arcsec_per_hour * elapsed_hours), which would otherwise grow
+# without bound for a chain that hasn't matched in a long time (this
+# detector is run across a target's whole multi-night history). Capping it
+# at 1 degree -- matching the field-of-view query cap used elsewhere in this
+# subsystem (asteroid_detection/pipeline.py's _FIELD_QUERY_RADIUS_CAP_DEG)
+# -- keeps a stale chain from ever claiming a detection an entire field away.
+_MAX_CHAIN_MATCH_RADIUS_ARCSEC = 3600.0
+
+
+def _circular_mean_degrees(values_deg: Iterable[float]) -> float:
+    """Average a set of angles (e.g. Right Ascension) that wrap at 360 deg.
+
+    A plain arithmetic mean of angles close to the 0/360 deg boundary (e.g.
+    359.95 and 0.05) gives a nonsense result near the opposite side of the
+    circle (180.0 instead of ~0.0). Averaging the unit vectors instead
+    handles the wraparound correctly.
+
+    Parameters
+    ----------
+    values_deg : `Iterable` [`float`]
+        Angles in degrees to average.
+
+    Returns
+    -------
+    mean_deg : `float`
+        The circular mean, in degrees, normalized to [0, 360).
+    """
+    radians = [math.radians(v) for v in values_deg]
+    mean_sin = statistics.mean(math.sin(r) for r in radians)
+    mean_cos = statistics.mean(math.cos(r) for r in radians)
+    return math.degrees(math.atan2(mean_sin, mean_cos)) % 360.0
 
 
 def _tangent_plane_offset_arcsec(
@@ -235,17 +269,27 @@ class MovingObjectDetector:
 
             ra_arr = np.array([d.right_ascension_deg for d in unmatched_detections], dtype=float)
             dec_arr = np.array([d.declination_deg for d in unmatched_detections], dtype=float)
-            matched_mask = np.zeros(len(unmatched_detections), dtype=bool)
 
-            for chain in open_chains:
-                available_indices = np.where(~matched_mask)[0]
-                if available_indices.size == 0:
-                    break
+            # Gather every (chain, detection) pair that falls within that
+            # chain's own match radius, without claiming anything yet. Each
+            # chain gets an independent, uncapped view of the frame's
+            # detections here -- claiming happens in one global pass below so
+            # that a detection is always matched to whichever open chain is
+            # truly nearest, not just to whichever chain happens to be
+            # listed first (which can silently swap track identity in a
+            # crowded field).
+            candidate_matches: list[tuple[float, int, int]] = []  # (distance, chain_index, detection_index)
 
+            for chain_index, chain in enumerate(open_chains):
                 last_detection = chain[-1]
                 elapsed_seconds = abs(unmatched_detections[0].timestamp - last_detection.timestamp)
                 elapsed_hours = elapsed_seconds / _SECONDS_PER_HOUR
-                match_radius_arcsec = self.config.rate_max_arcsec_per_hour * elapsed_hours
+                # Capped so a chain that hasn't matched in a long time can't
+                # accumulate a match radius larger than the field of view.
+                match_radius_arcsec = min(
+                    self.config.rate_max_arcsec_per_hour * elapsed_hours,
+                    _MAX_CHAIN_MATCH_RADIUS_ARCSEC,
+                )
 
                 cos_dec = math.cos(math.radians(last_detection.declination_deg))
                 max_deg = (match_radius_arcsec / 3600.0) * 1.2
@@ -261,25 +305,35 @@ class MovingObjectDetector:
                 dec_max = last_detection.declination_deg + max_deg
 
                 bbox_mask = (
-                    (ra_arr[available_indices] >= ra_min)
-                    & (ra_arr[available_indices] <= ra_max)
-                    & (dec_arr[available_indices] >= dec_min)
-                    & (dec_arr[available_indices] <= dec_max)
+                    (ra_arr >= ra_min) & (ra_arr <= ra_max) & (dec_arr >= dec_min) & (dec_arr <= dec_max)
                 )
-                candidate_sub_indices = available_indices[bbox_mask]
-                if candidate_sub_indices.size == 0:
+                candidate_indices = np.where(bbox_mask)[0]
+                if candidate_indices.size == 0:
                     continue
 
-                ra_diff = ra_arr[candidate_sub_indices] - last_detection.right_ascension_deg
+                ra_diff = ra_arr[candidate_indices] - last_detection.right_ascension_deg
                 ra_offsets = ra_diff * cos_dec * 3600.0
-                dec_offsets = (dec_arr[candidate_sub_indices] - last_detection.declination_deg) * 3600.0
+                dec_offsets = (dec_arr[candidate_indices] - last_detection.declination_deg) * 3600.0
                 distances = np.hypot(ra_offsets, dec_offsets)
 
-                min_idx_in_cand = int(np.argmin(distances))
-                if distances[min_idx_in_cand] <= match_radius_arcsec:
-                    best_global_idx = candidate_sub_indices[min_idx_in_cand]
-                    chain.append(unmatched_detections[best_global_idx])
-                    matched_mask[best_global_idx] = True
+                within_radius = distances <= match_radius_arcsec
+                for detection_index, distance in zip(
+                    candidate_indices[within_radius], distances[within_radius], strict=True
+                ):
+                    candidate_matches.append((float(distance), chain_index, int(detection_index)))
+
+            # Claim nearest-first so each detection goes to its globally
+            # closest open chain, and each chain claims at most one
+            # detection per frame.
+            candidate_matches.sort(key=lambda item: item[0])
+            matched_mask = np.zeros(len(unmatched_detections), dtype=bool)
+            claimed_chain_indices: set[int] = set()
+            for _distance, chain_index, detection_index in candidate_matches:
+                if matched_mask[detection_index] or chain_index in claimed_chain_indices:
+                    continue
+                open_chains[chain_index].append(unmatched_detections[detection_index])
+                matched_mask[detection_index] = True
+                claimed_chain_indices.add(chain_index)
 
             for idx in np.where(~matched_mask)[0]:
                 open_chains.append([unmatched_detections[idx]])
@@ -306,7 +360,7 @@ class MovingObjectDetector:
             The result: is it a bad pixel, a normal star, or a real moving
             object?
         """
-        mean_right_ascension_deg = statistics.mean(detection.right_ascension_deg for detection in chain)
+        mean_right_ascension_deg = _circular_mean_degrees(detection.right_ascension_deg for detection in chain)
         mean_declination_deg = statistics.mean(detection.declination_deg for detection in chain)
         sky_spread_arcsec = max(
             math.hypot(
@@ -359,7 +413,7 @@ class MovingObjectDetector:
             Did it pass or fail?
         """
         # Calculate the mean position to serve as a local tangent-plane origin
-        mean_right_ascension_deg = statistics.mean(detection.right_ascension_deg for detection in chain)
+        mean_right_ascension_deg = _circular_mean_degrees(detection.right_ascension_deg for detection in chain)
         mean_declination_deg = statistics.mean(detection.declination_deg for detection in chain)
 
         # Extract timestamps for the linear fit

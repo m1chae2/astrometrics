@@ -140,8 +140,8 @@ class ProvenanceStore:
 
     def _init_db(self) -> None:
         """Create every provenance table if missing, then seed registries."""
+        conn = self._connect()
         try:
-            conn = self._connect()
             cursor = conn.cursor()
 
             cursor.execute("""
@@ -369,11 +369,11 @@ class ProvenanceStore:
             """)
 
             conn.commit()
-            conn.close()
         except Exception as error:
             logger.error("Error initializing provenance database at %s: %s", self.db_path, error)
             raise error
-
+        finally:
+            conn.close()
         for entity_description in _SEEDED_ENTITY_DESCRIPTIONS:
             self.record_entity_description(entity_description)
         self.record_config_file_description(_SEEDED_CONFIG_FILE_DESCRIPTION)
@@ -392,8 +392,8 @@ class ProvenanceStore:
         agent : `Agent`
             The agent to record.
         """
+        conn = self._connect()
         try:
-            conn = self._connect()
             conn.execute(
                 """
                 INSERT OR IGNORE INTO prov_agent
@@ -413,9 +413,10 @@ class ProvenanceStore:
                 ),
             )
             conn.commit()
-            conn.close()
         except Exception as error:
             logger.warning("Could not record agent %r: %s", agent.id, error)
+        finally:
+            conn.close()
 
     def get_agent_for_activity(self, activity_id: str) -> Agent | None:
         """Find the agent responsible for one activity.
@@ -432,8 +433,8 @@ class ProvenanceStore:
             activity has none recorded (including a legacy activity
             recorded before this store existed).
         """
+        conn = self._connect()
         try:
-            conn = self._connect()
             row = conn.execute(
                 """
                 SELECT prov_agent.* FROM prov_agent
@@ -444,12 +445,12 @@ class ProvenanceStore:
                 """,
                 (activity_id,),
             ).fetchone()
-            conn.close()
             return self._row_to_agent(row) if row else None
         except Exception as error:
             logger.warning("Could not look up agent for activity %r: %s", activity_id, error)
             return None
-
+        finally:
+            conn.close()
     @staticmethod
     def _row_to_agent(row: sqlite3.Row) -> Agent:
         return Agent(
@@ -476,8 +477,8 @@ class ProvenanceStore:
         target_id : `str`
             The target this run processed.
         """
+        conn = self._connect()
         try:
-            conn = self._connect()
             conn.execute(
                 """
                 INSERT OR REPLACE INTO prov_activity
@@ -501,9 +502,10 @@ class ProvenanceStore:
                     (activity.id, informant_id),
                 )
             conn.commit()
-            conn.close()
         except Exception as error:
             logger.warning("Could not record activity %r: %s", activity.id, error)
+        finally:
+            conn.close()
 
     def get_activity(self, activity_id: str) -> Activity | None:
         """Retrieve one recorded pipeline run.
@@ -518,11 +520,10 @@ class ProvenanceStore:
         activity : `Activity` or `None`
             The matching run, or `None` if it isn't recorded.
         """
+        conn = self._connect()
         try:
-            conn = self._connect()
             row = conn.execute("SELECT * FROM prov_activity WHERE id = ?", (activity_id,)).fetchone()
             if row is None:
-                conn.close()
                 return None
             informants = [
                 informant_row["informant_activity_id"]
@@ -542,7 +543,6 @@ class ProvenanceStore:
                     (activity_id,),
                 ).fetchall()
             ]
-            conn.close()
             return Activity(
                 id=row["id"],
                 name=row["name"],
@@ -556,6 +556,8 @@ class ProvenanceStore:
         except Exception as error:
             logger.warning("Could not retrieve activity %r: %s", activity_id, error)
             return None
+        finally:
+            conn.close()
 
     def get_lineage(self, target_id: str) -> list[Activity]:
         """Return every recorded activity for one target, newest first.
@@ -571,18 +573,19 @@ class ProvenanceStore:
             The target's recorded runs, most recent first. Empty if
             none are recorded or the query fails.
         """
+        conn = self._connect()
         try:
-            conn = self._connect()
             rows = conn.execute(
                 "SELECT id FROM prov_activity WHERE target_id = ? ORDER BY start_time DESC, id DESC",
                 (target_id,),
             ).fetchall()
-            conn.close()
             activities = [self.get_activity(row["id"]) for row in rows]
             return [activity for activity in activities if activity is not None]
         except Exception as error:
             logger.warning("Could not retrieve lineage for target %r: %s", target_id, error)
             return []
+        finally:
+            conn.close()
 
     def get_generated_entity_ids(self, activity_id: str) -> list[str]:
         """List the ids of every entity one activity is recorded as generating.
@@ -598,17 +601,17 @@ class ProvenanceStore:
             Ids of the entities this activity produced. Empty if none
             are recorded or the query fails.
         """
+        conn = self._connect()
         try:
-            conn = self._connect()
             rows = conn.execute(
                 "SELECT entity_id FROM prov_was_generated_by WHERE activity_id = ?", (activity_id,)
             ).fetchall()
-            conn.close()
             return [row["entity_id"] for row in rows]
         except Exception as error:
             logger.warning("Could not list entities generated by activity %r: %s", activity_id, error)
             return []
-
+        finally:
+            conn.close()
     # -- Entities ----------------------------------------------------------
 
     def record_entity(self, entity: Entity) -> None:
@@ -627,8 +630,8 @@ class ProvenanceStore:
         elif hasattr(entity, "value"):
             kind = "value"
             value = entity.value
+        conn = self._connect()
         try:
-            conn = self._connect()
             conn.execute(
                 """
                 INSERT OR REPLACE INTO prov_entity
@@ -654,9 +657,10 @@ class ProvenanceStore:
                     (entity.id, used_entity_id),
                 )
             conn.commit()
-            conn.close()
         except Exception as error:
             logger.warning("Could not record entity %r: %s", entity.id, error)
+        finally:
+            conn.close()
 
     def get_entity(self, entity_id: str) -> Entity | None:
         """Retrieve one recorded data product.
@@ -673,11 +677,10 @@ class ProvenanceStore:
             when its kind calls for it), or `None` if it isn't
             recorded.
         """
+        conn = self._connect()
         try:
-            conn = self._connect()
             row = conn.execute("SELECT * FROM prov_entity WHERE id = ?", (entity_id,)).fetchone()
             if row is None:
-                conn.close()
                 return None
             used_entities = [
                 used_row["used_entity_id"]
@@ -686,7 +689,6 @@ class ProvenanceStore:
                     (entity_id,),
                 ).fetchall()
             ]
-            conn.close()
             fields: dict[str, Any] = {
                 "id": row["id"],
                 "name": row["name"],
@@ -709,7 +711,8 @@ class ProvenanceStore:
         except Exception as error:
             logger.warning("Could not retrieve entity %r: %s", entity_id, error)
             return None
-
+        finally:
+            conn.close()
     # -- Relations -----------------------------------------------------
 
     def record_used(self, activity_id: str, used: Used) -> None:
@@ -722,8 +725,8 @@ class ProvenanceStore:
         used : `Used`
             The consumed entity and its role.
         """
+        conn = self._connect()
         try:
-            conn = self._connect()
             conn.execute(
                 """
                 INSERT OR IGNORE INTO prov_used (activity_id, entity_id, role, time, usage_description_id)
@@ -738,9 +741,10 @@ class ProvenanceStore:
                 ),
             )
             conn.commit()
-            conn.close()
         except Exception as error:
             logger.warning("Could not record usage of %r by %r: %s", used.entity, activity_id, error)
+        finally:
+            conn.close()
 
     def record_was_generated_by(self, entity_id: str, generated_by: WasGeneratedBy) -> None:
         """Record the one activity that produced one entity.
@@ -756,8 +760,8 @@ class ProvenanceStore:
         generated_by : `WasGeneratedBy`
             The producing activity and the entity's role in it.
         """
+        conn = self._connect()
         try:
-            conn = self._connect()
             conn.execute(
                 """
                 INSERT OR REPLACE INTO prov_was_generated_by
@@ -767,9 +771,10 @@ class ProvenanceStore:
                 (entity_id, generated_by.activity, generated_by.role, generated_by.generation_description),
             )
             conn.commit()
-            conn.close()
         except Exception as error:
             logger.warning("Could not record generation of %r: %s", entity_id, error)
+        finally:
+            conn.close()
 
     def record_was_associated_with(self, activity_id: str, association: WasAssociatedWith) -> None:
         """Record that one agent is responsible for one activity.
@@ -781,17 +786,18 @@ class ProvenanceStore:
         association : `WasAssociatedWith`
             The responsible agent and its role.
         """
+        conn = self._connect()
         try:
-            conn = self._connect()
             conn.execute(
                 "INSERT OR IGNORE INTO prov_was_associated_with (activity_id, agent_id, role) "
                 "VALUES (?, ?, ?)",
                 (activity_id, association.agent, association.role),
             )
             conn.commit()
-            conn.close()
         except Exception as error:
             logger.warning("Could not record association for activity %r: %s", activity_id, error)
+        finally:
+            conn.close()
 
     def record_was_attributed_to(self, entity_id: str, agent_id: str, role: str | None = None) -> None:
         """Record that an agent is responsible for an entity with no generator.
@@ -805,17 +811,17 @@ class ProvenanceStore:
         role : `str`, optional
             The agent's function with respect to the entity.
         """
+        conn = self._connect()
         try:
-            conn = self._connect()
             conn.execute(
                 "INSERT OR IGNORE INTO prov_was_attributed_to (entity_id, agent_id, role) VALUES (?, ?, ?)",
                 (entity_id, agent_id, role),
             )
             conn.commit()
-            conn.close()
         except Exception as error:
             logger.warning("Could not record attribution for entity %r: %s", entity_id, error)
-
+        finally:
+            conn.close()
     # -- Description layer -----------------------------------------------
 
     def ensure_activity_description(self, description: ActivityDescription) -> None:
@@ -826,8 +832,8 @@ class ProvenanceStore:
         description : `ActivityDescription`
             The pipeline-and-version description to record.
         """
+        conn = self._connect()
         try:
-            conn = self._connect()
             conn.execute(
                 """
                 INSERT OR IGNORE INTO prov_activity_description
@@ -845,9 +851,10 @@ class ProvenanceStore:
                 ),
             )
             conn.commit()
-            conn.close()
         except Exception as error:
             logger.warning("Could not record activity description %r: %s", description.id, error)
+        finally:
+            conn.close()
 
     def record_entity_description(self, description: EntityDescription) -> None:
         """Record what one kind of entity looks like, if not already known.
@@ -873,8 +880,8 @@ class ProvenanceStore:
                 description.ucd,
                 description.utype,
             )
+        conn = self._connect()
         try:
-            conn = self._connect()
             conn.execute(
                 """
                 INSERT OR IGNORE INTO prov_entity_description
@@ -896,9 +903,10 @@ class ProvenanceStore:
                 ),
             )
             conn.commit()
-            conn.close()
         except Exception as error:
             logger.warning("Could not record entity description %r: %s", description.id, error)
+        finally:
+            conn.close()
 
     def record_usage_description(self, activity_description_id: str, description: UsageDescription) -> None:
         """Record what one kind of pipeline input looks like, if not known yet.
@@ -948,8 +956,8 @@ class ProvenanceStore:
     ) -> None:
         # table/join_table/id_column are always one of the two fixed literal
         # pairs passed by the two public methods above, never user input.
+        conn = self._connect()
         try:
-            conn = self._connect()
             conn.execute(
                 f"""
                 INSERT OR IGNORE INTO {table}
@@ -971,9 +979,10 @@ class ProvenanceStore:
                     (description.id, entity_description_id),
                 )
             conn.commit()
-            conn.close()
         except Exception as error:
             logger.warning("Could not record %s %r: %s", table, description.id, error)
+        finally:
+            conn.close()
 
     def record_parameter_description(self, description: ParameterDescription) -> None:
         """Record what one kind of parameter looks like, first-write-wins.
@@ -987,8 +996,8 @@ class ProvenanceStore:
         description : `ParameterDescription`
             The description to record.
         """
+        conn = self._connect()
         try:
-            conn = self._connect()
             conn.execute(
                 """
                 INSERT OR IGNORE INTO prov_parameter_description
@@ -1010,9 +1019,10 @@ class ProvenanceStore:
                 ),
             )
             conn.commit()
-            conn.close()
         except Exception as error:
             logger.warning("Could not record parameter description %r: %s", description.id, error)
+        finally:
+            conn.close()
 
     def record_parameters(self, activity_id: str, parameters: list[Parameter]) -> None:
         """Record the settings one activity was actually run with.
@@ -1024,8 +1034,8 @@ class ProvenanceStore:
         parameters : `list` [`Parameter`]
             The resolved parameter values to record.
         """
+        conn = self._connect()
         try:
-            conn = self._connect()
             for parameter in parameters:
                 conn.execute(
                     """
@@ -1042,9 +1052,10 @@ class ProvenanceStore:
                     ),
                 )
             conn.commit()
-            conn.close()
         except Exception as error:
             logger.warning("Could not record parameters for activity %r: %s", activity_id, error)
+        finally:
+            conn.close()
 
     def record_config_file_description(self, description: ConfigFileDescription) -> None:
         """Record what one kind of configuration file looks like, if new.
@@ -1054,8 +1065,8 @@ class ProvenanceStore:
         description : `ConfigFileDescription`
             The description to record.
         """
+        conn = self._connect()
         try:
-            conn = self._connect()
             conn.execute(
                 """
                 INSERT OR IGNORE INTO prov_config_file_description (id, name, description, docurl, type)
@@ -1070,9 +1081,10 @@ class ProvenanceStore:
                 ),
             )
             conn.commit()
-            conn.close()
         except Exception as error:
             logger.warning("Could not record config file description %r: %s", description.id, error)
+        finally:
+            conn.close()
 
     def record_config_file(self, config_file: ConfigFile) -> None:
         """Record one configuration file, if its content is new.
@@ -1086,8 +1098,8 @@ class ProvenanceStore:
         config_file : `ConfigFile`
             The file to record.
         """
+        conn = self._connect()
         try:
-            conn = self._connect()
             conn.execute(
                 """
                 INSERT OR IGNORE INTO prov_config_file
@@ -1103,9 +1115,10 @@ class ProvenanceStore:
                 ),
             )
             conn.commit()
-            conn.close()
         except Exception as error:
             logger.warning("Could not record config file %r: %s", config_file.id, error)
+        finally:
+            conn.close()
 
     def record_was_configured_by(self, activity_id: str, configured_by: WasConfiguredBy) -> None:
         """Record one configuration artefact -- parameters or a file -- used.
@@ -1118,8 +1131,8 @@ class ProvenanceStore:
             The artefact -- either resolved parameters or a config
             file -- and its type.
         """
+        conn = self._connect()
         try:
-            conn = self._connect()
             conn.execute(
                 """
                 INSERT OR REPLACE INTO prov_was_configured_by (activity_id, artefact_type, config_file_id)
@@ -1134,10 +1147,11 @@ class ProvenanceStore:
                     (activity_id, parameter_id),
                 )
             conn.commit()
-            conn.close()
         except Exception as error:
             logger.warning("Could not record configuration for activity %r: %s", activity_id, error)
 
+        finally:
+            conn.close()
 
 def export_target_lineage_as_prov_xml(target_id: str, store: ProvenanceStore) -> str:
     """Export one target's full lineage as real W3C PROV-XML.

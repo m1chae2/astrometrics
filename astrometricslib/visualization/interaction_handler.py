@@ -214,3 +214,35 @@ class InteractionHandler:
         if self.spectrum_cross_artist:
             self.spectrum_cross_artist.remove()
             self.spectrum_cross_artist = None
+
+    def update_image_crosshairs(self, x: float, y: float):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        """Move the image-panel crosshair marker to a data coordinate.
+
+        Parameters
+        ----------
+        x : `float`
+            Image-space X coordinate to mark.
+        y : `float`
+            Image-space Y coordinate to mark.
+        """
+        if self.image_cross_artist is not None:
+            self.image_cross_artist.remove()
+        (self.image_cross_artist,) = self.ax_image.plot(
+            [x], [y], marker="+", color=self.config.crosshair_color, markersize=14, markeredgewidth=2
+        )
+        self.fig.canvas.draw_idle()
+
+    def update_spectrum_crosshair(self, wavelength_angstrom: float):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        """Move the spectrum-panel crosshair line to a wavelength.
+
+        Parameters
+        ----------
+        wavelength_angstrom : `float`
+            Wavelength, in Angstrom, to mark on the spectrum panel.
+        """
+        if self.spectrum_cross_artist is not None:
+            self.spectrum_cross_artist.remove()
+        self.spectrum_cross_artist = self.ax_spectrum.axvline(
+            wavelength_angstrom, color=self.config.crosshair_color, lw=1, linestyle=":"
+        )
+        self.fig.canvas.draw_idle()

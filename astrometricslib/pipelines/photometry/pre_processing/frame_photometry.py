@@ -245,7 +245,7 @@ def _process_single_frame_worker(
 
     try:
         # 1. Load Header & Data
-        with fits.open(path) as fits_handle:
+        with fits.open(path, memmap=False) as fits_handle:
             header = fits_handle[0].header
             data = collapse_to_2d(fits_handle[0].data.astype(float))
             date_observed = header.get("DATE-OBS", datetime.now().isoformat())

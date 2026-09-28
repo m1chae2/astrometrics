@@ -651,9 +651,14 @@ class StarIdentifier:
         # 3. Plate Solve
         wcs = None
         if attempt_plate_solving:
-            self.solve_attempted = len(self.stellar_objects) >= 4
+            # Gated on solver_sources (built from unique_sources before the
+            # maximum_identified_stars truncation), not on self.stellar_objects
+            # (built after it) -- maximum_identified_stars is documented as
+            # only capping database lookups, so a low value must not also
+            # silently disable a solve that would otherwise succeed.
+            self.solve_attempted = len(solver_sources) >= 4
             if not self.solve_attempted:
-                logger.info(f"Skipping plate solve: only {len(self.stellar_objects)} sources detected.")
+                logger.info(f"Skipping plate solve: only {len(solver_sources)} sources detected.")
             else:
                 logger.info(f"Solving field with {len(solver_sources)} of {len(unique_sources)} sources...")
                 h, w = data.shape

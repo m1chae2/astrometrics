@@ -371,7 +371,7 @@ class CalibrationLibrary(BaseModel):
             return
 
         try:
-            with fits.open(image_file) as hdu_list:
+            with fits.open(image_file, memmap=False) as hdu_list:
                 header_info = hdu_list[0].header
                 camera = self._get_camera_name(header_info)
                 iso_speed = calibration_setting_key(
@@ -398,7 +398,7 @@ class CalibrationLibrary(BaseModel):
             return
 
         try:
-            with fits.open(image_file) as hdu_list:
+            with fits.open(image_file, memmap=False) as hdu_list:
                 header_info = hdu_list[0].header
                 camera = self._get_camera_name(header_info)
                 iso_speed = calibration_setting_key(
@@ -423,7 +423,7 @@ class CalibrationLibrary(BaseModel):
         from astrometricslib.drivers.filter_detection import get_filter_type
 
         try:
-            with fits.open(image_file) as hdu_list:
+            with fits.open(image_file, memmap=False) as hdu_list:
                 header_info = hdu_list[0].header
                 camera = self._get_camera_name(header_info)
 

@@ -413,12 +413,23 @@ def align_images_to_reference(
             covered_masks.append(np.ones(np.shape(image)[-2:], dtype=bool))
             results.append(None)
             continue
-        result = measure_alignment(
-            images[reference_index],
-            image,
-            crop_fraction=crop_fraction,
-            prefer_star_position=prefer_star_position,
-        )
+        try:
+            result = measure_alignment(
+                images[reference_index],
+                image,
+                crop_fraction=crop_fraction,
+                prefer_star_position=prefer_star_position,
+            )
+        except ValueError:
+            # Group stacks of different pixel dimensions (different
+            # binning/ROI/camera setup) can't be aligned at all. Treat this
+            # exactly like an untrusted correlation -- leave the image out
+            # rather than letting the whole call fail, so the caller can
+            # name and skip just this group.
+            aligned.append(None)
+            covered_masks.append(None)
+            results.append(AlignmentResult(shift_rows_pixels=0.0, shift_columns_pixels=0.0, correlation=0.0))
+            continue
         results.append(result)
         if not result.trusted:
             aligned.append(None)

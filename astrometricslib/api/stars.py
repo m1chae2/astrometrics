@@ -701,7 +701,9 @@ class StellarCatalog:
         total = len(summaries)
         with_names = len([s for s in summaries if s.name and "Star_" not in s.id])
         with_spectral = len([s for s in summaries if s.spectral_type and s.spectral_type != "Unknown"])
-        with_magnitude = len([s for s in summaries if s.magnitude not in (None, 0.0)])
+        # None means "not yet known"; 0.0 is a legitimate measured
+        # magnitude (see StellarObject.magnitude), so only None is excluded.
+        with_magnitude = len([s for s in summaries if s.magnitude is not None])
 
         return {
             "total_objects": total,

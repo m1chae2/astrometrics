@@ -657,6 +657,11 @@ def plot_astrometry(
     """
     astrometry_stars, _, _ = _load_target_stars(target, stars, limit)
 
+    # Close any figures left open by a previous call (e.g. from a
+    # long-running scripting console) before creating this one, so repeated
+    # calls don't accumulate Figures in pyplot's global state.
+    plt.close("all")
+
     config = VisualizationConfig()
     plt.style.use("dark_background")
 
@@ -704,6 +709,11 @@ def plot_asteroid_detection(target: Any, figsize: tuple[int, int] = (10, 10)) ->
     if not getattr(getattr(target, "stacking", None), "stacked_image", None):
         raise ValueError(f"Target {getattr(target, 'id', 'unknown')!r} has no stacked_image.")
 
+    # Close any figures left open by a previous call before creating this
+    # one, so repeated calls don't accumulate Figures in pyplot's global
+    # state.
+    plt.close("all")
+
     config = VisualizationConfig()
     plt.style.use("dark_background")
 
@@ -748,6 +758,11 @@ def plot_target_photometry(
         Matplotlib figure instance.
     """
     astrometry_stars, _, _ = _load_target_stars(target, stars, limit)
+
+    # Close any figures left open by a previous call before creating this
+    # one, so repeated calls don't accumulate Figures in pyplot's global
+    # state.
+    plt.close("all")
 
     config = VisualizationConfig()
     plt.style.use("dark_background")
@@ -836,6 +851,11 @@ def plot_target_spectroscopy(
     )[:limit]
     if not spectral_stars:
         raise ValueError(f"No extracted spectra with extraction boxes for target {target.id!r}.")
+
+    # Close any figures left open by a previous call before creating this
+    # one, so repeated calls don't accumulate Figures in pyplot's global
+    # state.
+    plt.close("all")
 
     config = VisualizationConfig()
     plt.style.use("dark_background")
@@ -1016,6 +1036,11 @@ def plot_target_dashboard(
             ):
                 active_index = idx
                 break
+
+    # Close any figures left open by a previous call before creating this
+    # one, so repeated calls don't accumulate Figures in pyplot's global
+    # state.
+    plt.close("all")
 
     config = VisualizationConfig()
     plt.style.use("dark_background")

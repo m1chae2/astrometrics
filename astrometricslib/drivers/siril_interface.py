@@ -2062,7 +2062,7 @@ class ImageProcessing:
                                 logger.debug("Skipping unparsable exposure value '%s': %s", exp, exc)
 
                     if total_exp > 0:
-                        with fits.open(res, mode="update") as hdul:
+                        with fits.open(res, mode="update", memmap=False) as hdul:
                             hdul[0].header["EXPTIME"] = total_exp
                             hdul[0].header["EXPOSURE"] = total_exp
                             hdul[0].header.add_comment(

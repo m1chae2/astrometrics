@@ -121,6 +121,22 @@ def resolve_worker_counts(
     usable_ram_mb = max(0, available_ram_mb - os_headroom_safety_buffer_mb)
     safe_worker_ram_cap = max(1, usable_ram_mb // max(1, estimated_mb_per_worker))
 
+    # An explicitly configured outer_worker_count must also respect the
+    # memory ceiling: otherwise memory_inner_workers_cap below floors at 1
+    # once outer_worker_count exceeds safe_worker_ram_cap, and
+    # outer_worker_count * 1 can still exceed the safe total. ("auto"
+    # outer_worker_count is always 1, already within any positive cap.)
+    if outer_worker_count > safe_worker_ram_cap:
+        logger.warning(
+            "Configured outer worker count (%d) exceeds safe system memory capacity "
+            "(%d workers at %d MB each). Capping to %d to prevent system memory exhaustion.",
+            outer_worker_count,
+            safe_worker_ram_cap,
+            estimated_mb_per_worker,
+            safe_worker_ram_cap,
+        )
+        outer_worker_count = safe_worker_ram_cap
+
     # Total concurrent processes = outer_worker_count * inner_worker_count.
     # Restrict inner_worker_count so total processes do not exceed safe limit.
     memory_inner_workers_cap = max(1, safe_worker_ram_cap // outer_worker_count)

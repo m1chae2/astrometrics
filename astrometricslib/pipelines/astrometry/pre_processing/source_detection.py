@@ -265,8 +265,11 @@ class SourceDetector:
             if visited[idx]:
                 continue
 
-            # Query all neighbors within separation_px
-            neighbor_indices = tree.query_ball_point(coords[idx], r=separation_px)
+            # Query all neighbors within separation_px, excluding any
+            # detection already claimed by an earlier group -- otherwise a
+            # detection near two different group centers could be merged
+            # into both groups and double-counted.
+            neighbor_indices = [i for i in tree.query_ball_point(coords[idx], r=separation_px) if not visited[i]]
             visited[neighbor_indices] = True
             group = [sources[i] for i in neighbor_indices]
 

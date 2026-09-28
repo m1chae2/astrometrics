@@ -7,7 +7,6 @@ moving dots match up with the known asteroids in that list.
 """
 
 import logging
-import statistics
 
 import astropy.units as u
 from astropy.coordinates import SkyCoord
@@ -99,13 +98,19 @@ class EphemerisCrossMatcher:
         if field_table is None or len(field_table) == 0:
             return None
 
-        mean_right_ascension_deg = statistics.mean(
-            detection.right_ascension_deg for detection in candidate.frame_detections
+        # A plain arithmetic mean of RA/Dec degrees breaks down near the
+        # 0/360 deg wraparound (e.g. averaging 359.95 and 0.05 deg gives
+        # 180.0, the opposite side of the sky) and near the poles.
+        # Averaging the unit (Cartesian) vectors instead is wraparound-safe.
+        detection_coordinates = SkyCoord(
+            ra=[detection.right_ascension_deg for detection in candidate.frame_detections] * u.deg,
+            dec=[detection.declination_deg for detection in candidate.frame_detections] * u.deg,
         )
-        mean_declination_deg = statistics.mean(
-            detection.declination_deg for detection in candidate.frame_detections
+        mean_cartesian = detection_coordinates.cartesian.xyz.mean(axis=1)
+        candidate_coordinate = SkyCoord(*mean_cartesian, representation_type="cartesian").represent_as(
+            "unitspherical"
         )
-        candidate_coordinate = SkyCoord(mean_right_ascension_deg * u.deg, mean_declination_deg * u.deg)
+        candidate_coordinate = SkyCoord(candidate_coordinate.lon, candidate_coordinate.lat)
 
         closest_row = None
         closest_separation_arcsec = None

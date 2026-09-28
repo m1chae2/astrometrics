@@ -427,6 +427,10 @@ class ConfigLoader:
             ),
             expected_fwhm=get_f("expected_fwhm", 8.0),
             extraction_radius=int(get_f("extraction_radius", 10)),
+            extraction_method=get_s("extraction_method", "traced"),
+            centerline_polynomial_degree=int(get_f("centerline_polynomial_degree", 2)),
+            subtract_sky_background=get_bool("subtract_sky_background", True),
+            reject_narrow_contaminants=get_bool("reject_narrow_contaminants", False),
             use_flare_mask_extraction=get_bool("use_flare_mask_extraction", False),
             subtract_neighbor_wings=get_bool("subtract_neighbor_wings", False),
             max_extraction_length_px=(

@@ -445,11 +445,12 @@ class AsteroidDetectionPipeline:
             `_build_reference_star_tree`'s return -- `(tree,
             reference_ra_deg, reference_dec_deg, cos_declination)`.
         """
-        stack_data = fits.getdata(stacked_image_path)
+        with fits.open(stacked_image_path, memmap=False) as hdul:
+            stack_data = np.asarray(hdul[0].data, dtype=float)
         source_detector = SourceDetector(
             fwhm=self.config.detection_fwhm_px, threshold_sigma=self.config.detection_threshold_sigma
         )
-        sources = source_detector.detect(np.asarray(stack_data, dtype=float))
+        sources = source_detector.detect(stack_data)
         reference_positions_deg = []
         for source in sources:
             pixel_x = source.get("xcentroid", source.get("x_centroid"))

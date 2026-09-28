@@ -105,7 +105,7 @@ try:
     # Python-only would add roughly 3.7 seconds of pure fit time per frame,
     # which is not negligible against a session's total processing time.
     # That's why this stays a C extension instead of being simplified away.
-    from astrometricslib.pipelines.spectroscopy._extractor_c import (
+    from astrometricslib.pipelines.spectroscopy.pre_processing._extractor_c import (
         fit_cross_section_gaussian_c as _fit_cross_section_c,
     )
 

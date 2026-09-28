@@ -128,6 +128,24 @@ class ScriptingService:
         self.active_editor_code = ""
         self.active_figure_managers: dict[int, Any] = {}
 
+    def reset_workspace(self) -> list[dict[str, Any]]:
+        """Discard every console-local variable and start a fresh console.
+
+        Rebuilds `console` and `completer` from scratch, so any
+        variables the user defined or objects loaded into scope
+        (via `execute`) are dropped. The default built-in objects
+        (`targets`, `stars`, `np`, `plt`, ...) are restored.
+
+        Returns
+        -------
+        workspace : `list` of `dict`
+            The workspace manifest for the freshly reset console,
+            same shape as `get_workspace_manifest`.
+        """
+        self.console = code.InteractiveConsole(locals=self._get_locals())
+        self.completer = rlcompleter.Completer(self.console.locals)
+        return self.get_workspace_manifest()
+
     def get_figure_manager(self, fignum: int) -> Any:
         """Return the WebAgg figure manager for the given figure number.
 
@@ -622,51 +640,6 @@ class ScriptingService:
         """
         return self.execute(command)
 
-    def load_job_into_scope(self, job_id: str) -> dict[str, Any]:
-        """Inject a processing run and target into console scope.
-
-        Parameters
-        ----------
-        job_id : `str`
-            Identifier of the ProcessingJob to load.
-
-        Returns
-        -------
-        info : `dict[str, Any]`
-            Information about loaded job and target.
-
-        Raises
-        ------
-        RuntimeError
-            If backend container is unavailable.
-        ValueError
-            If the requested job cannot be found.
-        """
-        if not self.container:
-            raise RuntimeError("Backend container unavailable.")
-
-        job = None
-        if hasattr(self.container, "job_service"):
-            job = self.container.job_service.get_job(job_id)
-
-        if not job:
-            raise ValueError(f"Job {job_id!r} not found.")
-
-        self.console.locals["run"] = job
-
-        target = None
-        target_name = getattr(job, "target_id", None) or getattr(job, "target_name", None)
-        if target_name and hasattr(self.container, "target_service"):
-            target = self.container.target_service.get_targets(target_name)
-            self.console.locals["target"] = target
-
-        return {
-            "job_id": job.id,
-            "job_type": job.job_type.value if hasattr(job.job_type, "value") else str(job.job_type),
-            "target_name": target_name,
-            "injected_variables": ["run"] + (["target"] if target is not None else []),
-        }
-
     def _get_recipe_dirs(self) -> list[Path]:
         """Return list of recipe search paths in repo.
 
@@ -887,6 +860,54 @@ class ScriptingService:
                 "category": rel_parts[0] if len(rel_parts) > 1 else "General",
             })
         return topics
+
+    def search_doc_topics(self, query: str) -> list[dict[str, Any]]:
+        """Find doc topics whose title, path, category, or body match `query`.
+
+        Parameters
+        ----------
+        query : `str`
+            Case-insensitive search text. An empty or blank query
+            returns every topic, unfiltered.
+
+        Returns
+        -------
+        matches : `list` of `dict`
+            Topics from `list_doc_topics`, in the same order, each with
+            an added `snippet` key (text surrounding the match) when
+            the match was found in the body text rather than the
+            title, path, or category.
+        """
+        topics = self.list_doc_topics()
+        trimmed = query.strip().lower()
+        if not trimmed:
+            return topics
+
+        matches: list[dict[str, Any]] = []
+        for topic in topics:
+            if (
+                trimmed in topic["title"].lower()
+                or trimmed in topic["path"].lower()
+                or trimmed in (topic.get("category") or "").lower()
+            ):
+                matches.append(topic)
+                continue
+
+            try:
+                content = self.get_doc_topic(topic["id"])["content"]
+            except FileNotFoundError:
+                continue
+
+            match_pos = content.lower().find(trimmed)
+            if match_pos == -1:
+                continue
+
+            snippet_start = max(0, match_pos - 40)
+            snippet_end = min(len(content), match_pos + len(trimmed) + 40)
+            snippet = content[snippet_start:snippet_end].replace("\n", " ").strip()
+            matches.append({**topic, "snippet": snippet})
+
+        return matches
 
     def get_doc_topic(self, topic_id: str) -> dict[str, Any]:
         """Retrieve markdown content for a documentation topic.

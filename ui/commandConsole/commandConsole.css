@@ -297,6 +297,14 @@
   font-size: 11px;
 }
 
+.terminal-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--term-border, #2e2e2e);
+}
+
 .terminal-history {
   flex: 1;
   min-height: 0;
@@ -350,6 +358,30 @@
   padding-left: 18px;
 }
 
+.terminal-completions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 14px;
+  background-color: var(--cmd-bg-medium, #1e1e1e);
+  border-top: 1px solid var(--term-border, #2e2e2e);
+}
+
+.terminal-completions__item {
+  font-family: var(--font-family-mono);
+  font-size: 12px;
+  color: var(--term-cyan, #4ec9b0);
+  background-color: var(--cmd-bg-dark, #181818);
+  border: 1px solid var(--term-border, #2e2e2e);
+  border-radius: 3px;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+
+.terminal-completions__item:hover {
+  background-color: var(--cmd-bg-light, #2a2a2a);
+}
+
 .terminal-input-bar {
   display: flex;
   align-items: center;
@@ -373,58 +405,6 @@
   font-family: var(--font-family-mono);
   font-size: 13px;
   color: var(--term-fg-bright, #ffffff);
-}
-
-/* Metrics Scorecard */
-.metrics-scorecard {
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.metrics-section {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.metrics-section__header {
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--text-dim, #aaa);
-  border-bottom: 1px solid var(--term-border, #2e2e2e);
-  padding-bottom: 4px;
-  font-weight: 600;
-}
-
-.metrics-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 10px;
-}
-
-.metric-card {
-  background-color: var(--cmd-bg-medium, #1e1e1e);
-  border: 1px solid var(--term-border, #2e2e2e);
-  border-radius: 6px;
-  padding: 10px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.metric-card__label {
-  font-size: 11px;
-  color: var(--text-dim, #aaa);
-}
-
-.metric-card__value {
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--text-primary, #eaeaea);
-  font-family: var(--font-family-mono);
 }
 
 /* Documentation Viewer */

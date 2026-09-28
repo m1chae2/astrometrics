@@ -606,8 +606,70 @@ def test_warm_catalog_summary_cache_serves_the_next_call_from_cache() -> None:
     astrometrics.stars.list_object_summaries.assert_called_once_with(limit=None, apply_default_limit=False)
 
 
-def test_catalog_summary_scan_refreshes_after_the_cache_expires(mocker) -> None:  # ruff: ignore[missing-type-function-argument]
-    """Verify the cached scan is retaken once its TTL has passed."""
+def test_catalog_summary_scan_refreshes_when_the_dataset_version_changes() -> None:
+    """Verify a version bump forces a rescan, with no time needing to pass.
+
+    This is the normal path now: a write bumps `CatalogAccess`'s dataset
+    version (see `test_dataset_version_increments_on_put_merge_and_delete`
+    in `astrometricslib`), and the next call here notices immediately,
+    rather than serving a stale cache until a timer expires.
+    """
+    astrometrics = MagicMock()
+    astrometrics.stars.list_object_summaries.return_value = []
+    service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
+
+    astrometrics.catalog_access.get_dataset_version.return_value = 1
+    service.get_target_data_availability()
+    astrometrics.catalog_access.get_dataset_version.return_value = 2
+    service.get_target_data_availability()
+
+    assert astrometrics.stars.list_object_summaries.call_count == 2
+
+
+def test_catalog_summary_rescan_broadcasts_a_ui_event() -> None:
+    """Verify a rescan notifies a connected socket manager, once set.
+
+    Lets a client refetch as soon as something changed instead of
+    rediscovering it on its own polling schedule.
+    """
+    astrometrics = MagicMock()
+    astrometrics.stars.list_object_summaries.return_value = []
+    service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
+    socket_manager = MagicMock()
+    service.set_socket_manager(socket_manager)
+
+    service.get_target_data_availability()
+
+    socket_manager.broadcast_ui_event_sync.assert_called_once_with(
+        "catalog:changed", {"dataset": "stellar_catalog"}
+    )
+
+
+def test_catalog_summary_cache_hit_does_not_broadcast() -> None:
+    """Verify serving the cache (nothing changed) does not spam a broadcast."""
+    astrometrics = MagicMock()
+    astrometrics.stars.list_object_summaries.return_value = []
+    service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
+    socket_manager = MagicMock()
+    service.set_socket_manager(socket_manager)
+
+    service.get_target_data_availability()
+    socket_manager.broadcast_ui_event_sync.reset_mock()
+    service.get_spectral_class_summary()
+
+    socket_manager.broadcast_ui_event_sync.assert_not_called()
+
+
+def test_catalog_summary_scan_refreshes_after_the_fallback_window_passes(mocker) -> None:  # ruff: ignore[missing-type-function-argument]
+    """Verify the cached scan is retaken once the fallback window has passed.
+
+    Covers a write the dataset-version counter never saw (e.g. from a
+    process other than this one): the version stays reported as unchanged
+    here (a bare `MagicMock` returns the same value every call), so this
+    is exercising the time-based fallback specifically, not the version
+    check covered by
+    `test_catalog_summary_scan_is_cached_across_the_three_browser_endpoints`.
+    """
     from backend.services.data import stellar_service as stellar_service_module
 
     astrometrics = MagicMock()
@@ -618,7 +680,7 @@ def test_catalog_summary_scan_refreshes_after_the_cache_expires(mocker) -> None:
     mocker.patch.object(stellar_service_module.time, "monotonic", side_effect=lambda: fake_time[0])
 
     service.get_target_data_availability()
-    fake_time[0] += stellar_service_module._CATALOG_SUMMARY_CACHE_TTL_SECONDS + 1
+    fake_time[0] += stellar_service_module._CATALOG_SUMMARY_CACHE_FALLBACK_MAX_AGE_SECONDS + 1
     service.get_target_data_availability()
 
     assert astrometrics.stars.list_object_summaries.call_count == 2

@@ -160,6 +160,39 @@ def test_catalog_access_put_does_not_keep_the_list_it_was_given(mocker):  # ruff
     assert result is not updated
 
 
+def test_dataset_version_increments_on_put_merge_and_delete(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify each write to a dataset bumps its version.
+
+    A cache can compare this number to the one it saw last time to tell
+    whether a dataset has changed, instead of re-reading the whole thing
+    or guessing from a timer.
+    """
+    mock_config = MagicMock()
+    catalog_access = CatalogAccess(config=mock_config)
+    mocker.patch.object(catalog_access._generic, "put_all")
+    mocker.patch.object(catalog_access._generic, "put")
+    mocker.patch.object(catalog_access._generic, "merge_and_record")
+    mocker.patch.object(catalog_access._generic, "delete_by_ids")
+
+    assert catalog_access.get_dataset_version("stellar_catalog") == 0
+
+    catalog_access.put([StellarObject(id="Star1")], "stellar_catalog", {})
+    assert catalog_access.get_dataset_version("stellar_catalog") == 1
+
+    catalog_access.merge_and_record("stellar_catalog", [], lambda _old, new: new)
+    assert catalog_access.get_dataset_version("stellar_catalog") == 2
+
+    catalog_access.delete_by_ids("stellar_catalog", ["Star1"])
+    assert catalog_access.get_dataset_version("stellar_catalog") == 3
+
+    # A different dataset's version is tracked independently, and a
+    # "target_record" write (a single target) counts toward the same
+    # version as a "target_catalog" write (the whole table).
+    catalog_access.put({}, "target_record", {})
+    assert catalog_access.get_dataset_version("target_catalog") == 1
+    assert catalog_access.get_dataset_version("stellar_catalog") == 3
+
+
 def _build_catalog_access_with_stars(tmp_path, stars) -> CatalogAccess:  # ruff: ignore[missing-type-function-argument]
     """Build a `CatalogAccess` over a temporary library holding `stars`.
 

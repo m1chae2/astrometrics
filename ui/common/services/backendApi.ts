@@ -247,8 +247,9 @@ export interface ActionRegistry {
     "terminal:list_scripts": { payload: Record<string, never>; response: Array<{ id: string; name: string; filename: string; size_bytes: number; modified_at: number }> };
     "terminal:read_script": { payload: { filename: string }; response: { filename: string; code: string } };
     "terminal:save_script": { payload: { filename: string; content: string }; response: { filename: string; size_bytes: number; status: string } };
-    "terminal:load_run": { payload: { job_id: string }; response: { job_id: string; job_type: string; target_name?: string; injected_variables: string[] } };
+    "terminal:reset_workspace": { payload: Record<string, never>; response: any[] };
     "docs:list_topics": { payload: Record<string, never>; response: Array<{ id: string; title: string; path: string; category: string }> };
+    "docs:search_topics": { payload: { query: string }; response: Array<{ id: string; title: string; path: string; category: string; snippet?: string }> };
     "docs:get_topic": { payload: { topic_id: string }; response: { id: string; title: string; content: string } };
     "ui:editor_get": { payload: Record<string, never>; response: { code: string } };
     "ui:editor_set": { payload: { code_content: string }; response: { status: string; length: number } };

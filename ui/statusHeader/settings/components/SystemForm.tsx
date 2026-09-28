@@ -1,4 +1,5 @@
 import { ConfigData } from '../utils/configUtils';
+import { DISPLAY_DEFINITIONS, isDisplayEnabled } from '../../../common/constants/displayFlags';
 
 interface SystemFormProps {
     backendInput: string;
@@ -83,12 +84,9 @@ export const SystemForm: React.FC<SystemFormProps> = ({
                             onChange={(e) => handleConfigChange('Frontend', 'secondary_window_mode', e.target.value)}
                             aria-label="Secondary Window Default Display"
                         >
-                            <option value="Image Processing">Image Processing</option>
-                            <option value="Astronomy Manager">Astronomy Manager</option>
-                            <option value="Planetarium">Planetarium</option>
-                            <option value="Observatory Manager">Observatory Manager</option>
-                            <option value="Observation Manager">Observation Manager</option>
-                            <option value="Image Viewer">Image Viewer</option>
+                            {DISPLAY_DEFINITIONS.filter(({ mode }) => isDisplayEnabled(configData, mode)).map(({ mode }) => (
+                                <option key={mode} value={mode}>{mode}</option>
+                            ))}
                         </select>
                     </label>
                 )}
@@ -101,46 +99,18 @@ export const SystemForm: React.FC<SystemFormProps> = ({
                         Loading display preferences...
                     </div>
                 )}
-                <label className="settings__field settings__field--row">
-                    <input
-                        type="checkbox"
-                        checked={configData['Frontend']?.['enable_planetarium'] !== 'false'}
-                        onChange={(e) => handleConfigChange('Frontend', 'enable_planetarium', e.target.checked ? 'true' : 'false')}
-                        className="settings__checkbox"
-                        disabled={loadingConfig}
-                    />
-                    <span>Planetarium Display</span>
-                </label>
-                <label className="settings__field settings__field--row">
-                    <input
-                        type="checkbox"
-                        checked={configData['Frontend']?.['enable_astronomy'] !== 'false'}
-                        onChange={(e) => handleConfigChange('Frontend', 'enable_astronomy', e.target.checked ? 'true' : 'false')}
-                        className="settings__checkbox"
-                        disabled={loadingConfig}
-                    />
-                    <span>Astronomy Manager</span>
-                </label>
-                <label className="settings__field settings__field--row">
-                    <input
-                        type="checkbox"
-                        checked={configData['Frontend']?.['enable_observatory'] !== 'false'}
-                        onChange={(e) => handleConfigChange('Frontend', 'enable_observatory', e.target.checked ? 'true' : 'false')}
-                        className="settings__checkbox"
-                        disabled={loadingConfig}
-                    />
-                    <span>Observatory Manager</span>
-                </label>
-                <label className="settings__field settings__field--row">
-                    <input
-                        type="checkbox"
-                        checked={configData['Frontend']?.['enable_observation'] !== 'false'}
-                        onChange={(e) => handleConfigChange('Frontend', 'enable_observation', e.target.checked ? 'true' : 'false')}
-                        className="settings__checkbox"
-                        disabled={loadingConfig}
-                    />
-                    <span>Observation Manager</span>
-                </label>
+                {DISPLAY_DEFINITIONS.map(({ mode, flag }) => (
+                    <label className="settings__field settings__field--row" key={flag}>
+                        <input
+                            type="checkbox"
+                            checked={configData['Frontend']?.[flag] !== 'false'}
+                            onChange={(e) => handleConfigChange('Frontend', flag, e.target.checked ? 'true' : 'false')}
+                            className="settings__checkbox"
+                            disabled={loadingConfig}
+                        />
+                        <span>{mode}</span>
+                    </label>
+                ))}
             </div>
 
             <div className="settings__divider">

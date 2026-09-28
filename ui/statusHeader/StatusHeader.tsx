@@ -4,6 +4,7 @@ import { useStatusData } from './hooks/useStatusData';
 import { useSettingsModal } from './hooks/useSettingsModal';
 import { SettingsPanel } from './SettingsPanel';
 import { useAstrometrics } from '../common/context/AstrometricsContext';
+import { getEnabledDisplayModes } from '../common/constants/displayFlags';
 import './statusHeader.css';
 
 /**
@@ -131,15 +132,7 @@ export const StatusHeader: React.FC = () => {
       ? 'not-tracking'
       : (telescopeConnection ? 'connected' : 'disconnected');
 
-  const availableModes = [
-    'Image Viewer',
-    'Image Processing',
-    'Command Console',
-    ...(config['Frontend']?.['enable_astronomy'] === 'true' ? ['Astronomy Manager'] : []),
-    ...(config['Frontend']?.['enable_planetarium'] === 'true' ? ['Planetarium'] : []),
-    ...(config['Frontend']?.['enable_observatory'] === 'true' ? ['Observatory Manager'] : []),
-    ...(config['Frontend']?.['enable_observation'] === 'true' ? ['Observation Manager'] : []),
-  ];
+  const availableModes = getEnabledDisplayModes(config);
 
   return (
     <>

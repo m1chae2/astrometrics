@@ -12,12 +12,19 @@ import { fetchSpectralClassSummary } from '../services/astronomyService';
  * polling and refetch-on-focus (matching `useAstronomyListQuery`) give it
  * a chance to recover instead of sticking with an empty list forever.
  *
+ * Freshness after a real catalog change no longer depends on this
+ * interval: App.tsx refetches immediately on the backend's `catalog:changed`
+ * broadcast, which fires whenever the catalog actually changed (see
+ * `StellarService._get_cached_catalog_summaries`). `refetchInterval` is
+ * only the backup for a missed broadcast (e.g. the socket briefly
+ * dropped), so it can be long.
+ *
  * @returns {import('@tanstack/react-query').UseQueryResult} The spectral class summary query result.
  */
 export const useSpectralClassSummaryQuery = () =>
     useQuery({
         queryKey: ['spectralClassSummary'],
         queryFn: fetchSpectralClassSummary,
-        refetchInterval: 30000,
+        refetchInterval: 120000,
         refetchOnWindowFocus: true,
     });

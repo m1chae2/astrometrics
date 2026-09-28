@@ -132,6 +132,10 @@ class Container:
         from backend.services.infrastructure.socket_manager import SocketManager
 
         self.socket_manager = SocketManager()
+        # stellar_object_service is constructed earlier in this method, before
+        # socket_manager exists, so it's wired in here instead of passed to
+        # the constructor.
+        self.stellar_object_service.set_socket_manager(self.socket_manager)
 
         from backend.services.infrastructure.astrometrics_service import AstrometricsService
 

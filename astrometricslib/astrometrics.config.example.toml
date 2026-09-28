@@ -235,6 +235,9 @@ worker_niceness = "10"
 max_concurrent_jobs = "2"
 
 ["Frontend"]
+enable_image_viewer = "true"
+enable_image_processing = "true"
+enable_command_console = "true"
 enable_observatory = "true"
 enable_planetarium = "true"
 enable_astronomy = "true"

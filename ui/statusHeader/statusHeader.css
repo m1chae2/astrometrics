@@ -585,24 +585,27 @@
 
 .settings__tab-button {
   background: transparent;
-  border: none;
-  color: rgba(255, 255, 255, 0.6);
+  border: 1px solid transparent;
+  color: var(--text-dim, #aaa);
   cursor: pointer;
   padding: 6px 10px;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
+  font-family: var(--font-family-base);
   border-radius: 4px;
-  transition: all 0.2s;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  flex-shrink: 0;
 }
 
 .settings__tab-button:hover {
-  color: var(--white);
-  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-primary, #fff);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .settings__tab-button--active {
-  color: var(--primary-blue, #1976d2);
-  background: rgba(25, 118, 210, 0.1);
+  background: rgba(36, 74, 112, 0.45);
+  border-color: rgba(53, 132, 228, 0.35);
+  color: var(--text-primary, #fff);
 }
 
 .settings__grid {
@@ -616,6 +619,25 @@
   flex-direction: column;
   gap: 8px;
   margin-bottom: 12px;
+}
+
+.settings__form h3,
+.settings__form h4 {
+  margin: 0 0 4px 0;
+  font-family: var(--font-family-base);
+  color: var(--text-primary, #eaeaea);
+  font-weight: 600;
+}
+
+.settings__form h3 {
+  font-size: var(--panel-header-size, 15px);
+}
+
+.settings__form h4 {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-dim, #aaa);
 }
 
 .settings__field {
@@ -655,8 +677,8 @@
 }
 
 .settings__input:focus {
-  box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.12);
-  border-color: rgba(25, 118, 210, 0.4);
+  box-shadow: 0 0 0 3px rgba(53, 132, 228, 0.12);
+  border-color: rgba(53, 132, 228, 0.4);
 }
 
 .settings__checkbox {
@@ -664,6 +686,7 @@
   height: 16px;
   margin: 0;
   cursor: pointer;
+  accent-color: var(--adwaita-blue-light, #3584e4);
 }
 
 .settings__help {

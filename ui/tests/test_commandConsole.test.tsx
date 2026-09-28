@@ -1,7 +1,7 @@
 /**
  * @file test_commandConsole.test.tsx
  * @description Unit tests for the CommandConsole component, validating 3-column workbench
- * rendering, sidebar tab switching, REPL execution, and metrics scorecard display.
+ * rendering, sidebar tab switching, and REPL execution.
  */
 
 import React from 'react';
@@ -74,20 +74,6 @@ describe('CommandConsole Component', () => {
           },
         ];
       }
-      if (method === 'processing:list_jobs') {
-        return [
-          {
-            id: 'job-101',
-            targetId: 'M31',
-            pipelineType: 'Stacking',
-            status: 'Completed',
-            currentStep: 'Done',
-            progress: 100,
-            inputMetrics: { frame_count: 20, mean_snr: 18.5 },
-            outputMetrics: { stacked_fwhm: 2.1, roundness: 0.94 },
-          },
-        ];
-      }
       if (method === 'terminal:get_workspace') {
         return [
           {
@@ -128,7 +114,6 @@ describe('CommandConsole Component', () => {
     await waitFor(() => {
       expect(mockCallBackend).toHaveBeenCalledWith('terminal:list_recipes', {});
       expect(mockCallBackend).toHaveBeenCalledWith('terminal:list_scripts', {});
-      expect(mockCallBackend).toHaveBeenCalledWith('processing:list_jobs', { limit: 25 });
       expect(mockCallBackend).toHaveBeenCalledWith('terminal:get_workspace', {});
     });
 
@@ -138,55 +123,6 @@ describe('CommandConsole Component', () => {
     // Check terminal REPL banner exists
     expect(screen.getAllByText(/Astrometrics Command Console/i).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText(/Scientific environment connected to observatory hardware/i)).toBeInTheDocument();
-  });
-
-  /**
-   * Test switching tabs to pipeline runs and viewing metrics scorecard.
-   */
-  it('allows selecting a pipeline run and switching to the Metrics Scorecard tab', async () => {
-    vi.spyOn(backendApi, 'callBackend').mockImplementation(async (method) => {
-      if (method === 'processing:list_jobs') {
-        return [
-          {
-            id: 'job-999',
-            targetId: 'NGC7000',
-            pipelineType: 'Photometry',
-            jobType: 'Photometry',
-            status: 'Completed',
-            currentStep: 'Done',
-            progress: 100,
-            inputMetrics: { frame_count: 15, mean_fwhm: 3.2 },
-            outputMetrics: { target_magnitude: 11.4, error: 0.03 },
-          },
-        ];
-      }
-      if (method === 'terminal:get_workspace') {
-        return [];
-      }
-      return [];
-    });
-
-    render(<CommandConsole />);
-
-    // Switch sidebar tab to "Pipeline Runs"
-    const runsTabBtn = await screen.findByRole('button', { name: /Pipeline Runs/i });
-    fireEvent.click(runsTabBtn);
-
-    // Verify run is visible in sidebar
-    const runItem = await screen.findByText('NGC7000');
-    expect(runItem).toBeInTheDocument();
-
-    // Click run item to select it
-    fireEvent.click(runItem);
-
-    // Switch right panel tab to "Metrics Scorecard"
-    const metricsTabBtn = screen.getByRole('button', { name: /Metrics Scorecard/i });
-    fireEvent.click(metricsTabBtn);
-
-    // Verify scorecard displays metrics
-    expect(await screen.findByText(/Run Metrics: NGC7000/i)).toBeInTheDocument();
-    expect(screen.getByText('FRAME COUNT')).toBeInTheDocument();
-    expect(screen.getByText('TARGET MAGNITUDE')).toBeInTheDocument();
   });
 
   /**

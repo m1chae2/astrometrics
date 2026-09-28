@@ -1,9 +1,9 @@
 /**
  * @file ConsoleSidebar.tsx
- * @description Sidebar for Command Console offering tabbed lists of Script Recipes, User Scripts, and Pipeline Runs.
+ * @description Sidebar for Command Console offering tabbed lists of Script Recipes and User Scripts.
  */
-import React, { useState, useMemo } from 'react';
-import { ProcessingJob } from '../common/types/backendTypes';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { callBackend } from '../common/services/backendApi';
 
 export interface ScriptRecipeItem {
   id: string;
@@ -27,54 +27,68 @@ export interface DocTopicItem {
   title: string;
   path: string;
   category: string;
+  snippet?: string;
 }
 
 interface ConsoleSidebarProps {
   recipes: ScriptRecipeItem[];
   userScripts: UserScriptItem[];
-  pipelineRuns: ProcessingJob[];
-  selectedRunId: string | null;
   docTopics?: DocTopicItem[];
   selectedDocId?: string | null;
-  activeSidebarTab?: 'scripts' | 'runs' | 'docs';
-  onTabChange?: (tab: 'scripts' | 'runs' | 'docs') => void;
+  activeSidebarTab?: 'scripts' | 'docs';
+  onTabChange?: (tab: 'scripts' | 'docs') => void;
   onSelectRecipe: (recipe: ScriptRecipeItem) => void;
   onSelectUserScript: (script: UserScriptItem) => void;
-  onSelectRun: (run: ProcessingJob) => void;
   onSelectDocTopic?: (topicId: string) => void;
-  onRefreshRuns: () => void;
   onNewScript: () => void;
 }
 
 export const ConsoleSidebar: React.FC<ConsoleSidebarProps> = ({
   recipes,
   userScripts,
-  pipelineRuns,
-  selectedRunId,
   docTopics = [],
   selectedDocId = null,
   activeSidebarTab,
   onTabChange,
   onSelectRecipe,
   onSelectUserScript,
-  onSelectRun,
   onSelectDocTopic,
-  onRefreshRuns,
   onNewScript,
 }) => {
-  const [internalTab, setInternalTab] = useState<'scripts' | 'runs' | 'docs'>('scripts');
+  const [internalTab, setInternalTab] = useState<'scripts' | 'docs'>('scripts');
   const [docFilter, setDocFilter] = useState('');
+  const [docSearchResults, setDocSearchResults] = useState<DocTopicItem[] | null>(null);
   const activeTab = activeSidebarTab !== undefined ? activeSidebarTab : internalTab;
 
+  // Search the full text of every doc/API topic on the backend, debounced,
+  // instead of only matching each topic's title/path/category client-side.
+  useEffect(() => {
+    const trimmed = docFilter.trim();
+    if (!trimmed) {
+      setDocSearchResults(null);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      callBackend('docs:search_topics', { query: trimmed })
+        .then((results) => {
+          if (!cancelled) setDocSearchResults(results || []);
+        })
+        .catch((err) => {
+          console.warn('Doc search failed:', err);
+          if (!cancelled) setDocSearchResults([]);
+        });
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [docFilter]);
+
   const categorizedDocs = useMemo(() => {
-    const filter = docFilter.trim().toLowerCase();
-    const filtered = docTopics.filter(
-      (t) =>
-        !filter ||
-        t.title.toLowerCase().includes(filter) ||
-        t.path.toLowerCase().includes(filter) ||
-        (t.category && t.category.toLowerCase().includes(filter))
-    );
+    const filtered = docFilter.trim() ? docSearchResults ?? [] : docTopics;
 
     const categoryOrder = [
       'API Reference',
@@ -88,7 +102,7 @@ export const ConsoleSidebar: React.FC<ConsoleSidebarProps> = ({
     ];
 
     const categoryLabels: Record<string, string> = {
-      'API Reference': '⚡ Python API Reference',
+      'API Reference': 'Python API Reference',
       'General': 'Getting Started & Guides',
       'Desktop Application': 'Desktop Application',
       'user_interface': 'Desktop Application',
@@ -129,9 +143,9 @@ export const ConsoleSidebar: React.FC<ConsoleSidebarProps> = ({
     }
 
     return groups;
-  }, [docTopics, docFilter]);
+  }, [docTopics, docFilter, docSearchResults]);
 
-  const handleTabSwitch = (tab: 'scripts' | 'runs' | 'docs') => {
+  const handleTabSwitch = (tab: 'scripts' | 'docs') => {
     if (onTabChange) {
       onTabChange(tab);
     } else {
@@ -148,16 +162,6 @@ export const ConsoleSidebar: React.FC<ConsoleSidebarProps> = ({
           type="button"
         >
           Scripts & Recipes
-        </button>
-        <button
-          className={`console-sidebar__tab ${activeTab === 'runs' ? 'console-sidebar__tab--active' : ''}`}
-          onClick={() => {
-            handleTabSwitch('runs');
-            onRefreshRuns();
-          }}
-          type="button"
-        >
-          Pipeline Runs ({pipelineRuns.length})
         </button>
         <button
           className={`console-sidebar__tab ${activeTab === 'docs' ? 'console-sidebar__tab--active' : ''}`}
@@ -225,38 +229,6 @@ export const ConsoleSidebar: React.FC<ConsoleSidebarProps> = ({
               </div>
             ))}
           </div>
-        ) : activeTab === 'runs' ? (
-          <div className="console-sidebar__list">
-            {pipelineRuns.length === 0 ? (
-              <div style={{ padding: '12px', fontSize: '12px', color: 'var(--text-dim)' }}>
-                No recent pipeline runs found.
-              </div>
-            ) : (
-              pipelineRuns.map((job) => (
-                <div
-                  key={job.id}
-                  className={`console-sidebar__item ${selectedRunId === job.id ? 'console-sidebar__item--active' : ''}`}
-                  onClick={() => onSelectRun(job)}
-                >
-                  <div className="console-sidebar__item-title">
-                    <span>{job.targetId || 'Target Run'}</span>
-                    <span style={{
-                      fontSize: '10px',
-                      padding: '1px 5px',
-                      borderRadius: '3px',
-                      background: job.status === 'completed' ? 'rgba(38,162,105,0.2)' : 'rgba(233,84,32,0.2)',
-                      color: job.status === 'completed' ? 'var(--ubuntu-green)' : 'var(--ubuntu-orange)',
-                    }}>
-                      {job.status}
-                    </span>
-                  </div>
-                  <div className="console-sidebar__item-sub">
-                    {job.jobType} &bull; {job.createdAt ? new Date(job.createdAt).toLocaleTimeString() : ''}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
         ) : (
           <div className="console-sidebar__list">
             <div style={{ padding: '4px 6px', marginBottom: '4px' }}>
@@ -278,7 +250,11 @@ export const ConsoleSidebar: React.FC<ConsoleSidebarProps> = ({
                 onChange={(e) => setDocFilter(e.target.value)}
               />
             </div>
-            {categorizedDocs.length === 0 ? (
+            {docFilter.trim() && docSearchResults === null ? (
+              <div style={{ padding: '12px', fontSize: '12px', color: 'var(--text-dim)' }}>
+                Searching documentation...
+              </div>
+            ) : categorizedDocs.length === 0 ? (
               <div style={{ padding: '12px', fontSize: '12px', color: 'var(--text-dim)' }}>
                 {docFilter ? 'No matching documentation topics found.' : 'No documentation topics found.'}
               </div>
@@ -310,7 +286,7 @@ export const ConsoleSidebar: React.FC<ConsoleSidebarProps> = ({
                           <span>{topic.title}</span>
                         </div>
                         <div className="console-sidebar__item-sub">
-                          {topic.path}
+                          {topic.snippet ? `…${topic.snippet}…` : topic.path}
                         </div>
                       </div>
                     ))}

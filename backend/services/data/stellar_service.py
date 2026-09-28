@@ -105,17 +105,18 @@ _BRIGHTEST_CATALOG_MAGNITUDE = -2.0
 # heavy-job slots that stacking and image analysis use.
 _MAXIMUM_CONCURRENT_PERIOD_SEARCHES = 2
 
-# How long a cached full-catalog summary scan (see
-# `_get_cached_catalog_summaries`) stays valid. A single scan measured about
-# 5 seconds on a real ~40,000-star library; sharing one scan across the
-# target-availability, spectral-class-summary and stars-by-class endpoints
-# for this long turns three redundant 5-second scans per Astronomy Manager
-# visit into effectively one, at the cost of a newly-saved star's data
-# taking up to this long to show up in those three views. Matches the
-# refetch interval the frontend already polls these endpoints on
-# (useTargetDataAvailabilityQuery, useSpectralClassSummaryQuery), so the
-# cache is never the reason a client-visible refresh looks stale.
-_CATALOG_SUMMARY_CACHE_TTL_SECONDS = 30.0
+# The cached full-catalog summary scan (see `_get_cached_catalog_summaries`)
+# is normally kept until `CatalogAccess.get_dataset_version("stellar_catalog")`
+# says a write has actually happened, rather than on a timer -- a scan
+# measured about 5 seconds on a real ~40,000-star library, and the frontend
+# used to force one every 30 seconds by polling, whether or not anything had
+# changed. This is only the fallback: how long the cache may serve a version
+# it already confirmed was current, in case a write happens outside this
+# process (e.g. a maintenance script run from the command line) that the
+# version counter never saw. Deliberately generous, since the version check
+# catches every write this process makes; this is a safety net, not the
+# usual path.
+_CATALOG_SUMMARY_CACHE_FALLBACK_MAX_AGE_SECONDS = 300.0
 
 # Prefix of an id given to a star that was found in an image but never
 # matched to a catalog. Must match POSITION_ONLY_STAR_ID_PREFIX in
@@ -281,8 +282,26 @@ class StellarService:
         self.astrometrics = astrometrics or Astrometrics(config)
         self._wayfinder = wayfinder
         self._period_search_slots = threading.BoundedSemaphore(_MAXIMUM_CONCURRENT_PERIOD_SEARCHES)
-        self._catalog_summary_cache: tuple[float, list[dict[str, Any]]] | None = None
+        self._catalog_summary_cache: tuple[float, int, list[dict[str, Any]]] | None = None
         self._catalog_summary_cache_lock = threading.Lock()
+        self._socket_manager = None
+
+    def set_socket_manager(self, socket_manager) -> None:  # ruff: ignore[missing-type-function-argument]
+        """Give this service a socket manager to notify the UI through.
+
+        Set once, after construction, by `backend.container` -- the socket
+        manager is built after this service is, so it can't be a
+        constructor argument. Notifications are silently skipped until
+        this is called (e.g. in a test that constructs `StellarService`
+        directly).
+
+        Parameters
+        ----------
+        socket_manager : `SocketManager`
+            Socket manager used to broadcast catalog-change events to
+            connected UI clients.
+        """
+        self._socket_manager = socket_manager
 
     @property
     def wayfinder(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
@@ -297,7 +316,7 @@ class StellarService:
         return self._wayfinder
 
     def _get_cached_catalog_summaries(self) -> list[dict[str, Any]]:
-        """Full-catalog star summary scan, cached for a short time.
+        """Full-catalog star summary scan, redone when the catalog changes.
 
         `get_target_data_availability`, `get_spectral_class_summary`, and
         `get_stars_by_spectral_class` each need every star's lightweight
@@ -305,25 +324,54 @@ class StellarService:
         which of them asks for it. Sharing one cached scan means opening
         the Astronomy Manager, switching between its target and spectral-
         class browsers, and reopening a star's class all cost one scan
-        between them within the cache's lifetime, not one scan each.
+        between them, not one scan each.
+
+        Freshness is checked against `CatalogAccess.get_dataset_version`
+        (see there for what it does and does not see) rather than a timer,
+        so the scan is skipped entirely while nothing has changed, however
+        long that is. `_CATALOG_SUMMARY_CACHE_FALLBACK_MAX_AGE_SECONDS` is
+        only a backstop for a write that version counter missed.
+
+        A rescan broadcasts a `"catalog:changed"` UI event (see
+        `set_socket_manager`), so a connected client can refetch instead of
+        polling on a timer to notice a change.
 
         Returns
         -------
         summaries : `list` [`dict`]
             Every star's summary dict, as `list_object_summaries` returns it.
         """
+        current_version = self.astrometrics.catalog_access.get_dataset_version("stellar_catalog")
         now = time.monotonic()
         with self._catalog_summary_cache_lock:
             if self._catalog_summary_cache is not None:
-                cached_at, cached_summaries = self._catalog_summary_cache
-                if now - cached_at < _CATALOG_SUMMARY_CACHE_TTL_SECONDS:
+                cached_at, cached_version, cached_summaries = self._catalog_summary_cache
+                cache_is_current = cached_version == current_version
+                cache_is_within_fallback_window = (
+                    now - cached_at < _CATALOG_SUMMARY_CACHE_FALLBACK_MAX_AGE_SECONDS
+                )
+                if cache_is_current and cache_is_within_fallback_window:
                     return cached_summaries
 
         summaries = self.astrometrics.stars.list_object_summaries(limit=None, apply_default_limit=False)
 
         with self._catalog_summary_cache_lock:
-            self._catalog_summary_cache = (now, summaries)
+            self._catalog_summary_cache = (now, current_version, summaries)
+        self._notify_catalog_changed()
         return summaries
+
+    def _notify_catalog_changed(self) -> None:
+        """Tell connected UI clients the stellar catalog summary was rescanned.
+
+        A no-op until `set_socket_manager` has been called. Firing this on
+        every rescan -- including one only the fallback timer triggered,
+        where nothing may actually be different -- costs an unnecessary
+        refetch on a client that's already current; that's cheap enough not
+        to bother telling the two cases apart.
+        """
+        if self._socket_manager is None:
+            return
+        self._socket_manager.broadcast_ui_event_sync("catalog:changed", {"dataset": "stellar_catalog"})
 
     def get_stellar_objects(self, target_id: str | None = None) -> list[StellarObject]:
         """Unified stellar objects getter.

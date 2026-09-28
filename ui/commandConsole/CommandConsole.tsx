@@ -1,17 +1,15 @@
 /**
  * @file CommandConsole.tsx
  * @description Central 3-column scientific workbench integrating script recipes, user scripts,
- * workspace variables, CodeMirror editor, Python REPL, pipeline quality metrics, and documentation viewer.
+ * workspace variables, CodeMirror editor, Python REPL, and documentation viewer.
  */
 import React, { useState, useEffect, useCallback } from 'react';
 import { Panel, Group, Separator } from 'react-resizable-panels';
 import { callBackend } from '../common/services/backendApi';
-import { ProcessingJob } from '../common/types/backendTypes';
 import { ConsoleSidebar, ScriptRecipeItem, UserScriptItem } from './ConsoleSidebar';
 import { WorkspaceTable, WorkspaceVariable } from './WorkspaceTable';
 import { CodeEditor } from './CodeEditor';
 import { TerminalPane, TerminalEntry } from './TerminalPane';
-import { MetricsScorecard } from './MetricsScorecard';
 import { DocViewer } from './DocViewer';
 import './commandConsole.css';
 
@@ -19,10 +17,8 @@ export const CommandConsole: React.FC = () => {
   // Left Column State
   const [recipes, setRecipes] = useState<ScriptRecipeItem[]>([]);
   const [userScripts, setUserScripts] = useState<UserScriptItem[]>([]);
-  const [pipelineRuns, setPipelineRuns] = useState<ProcessingJob[]>([]);
-  const [selectedRun, setSelectedRun] = useState<ProcessingJob | null>(null);
   const [workspaceVariables, setWorkspaceVariables] = useState<WorkspaceVariable[]>([]);
-  const [activeSidebarTab, setActiveSidebarTab] = useState<'scripts' | 'runs' | 'docs'>('scripts');
+  const [activeSidebarTab, setActiveSidebarTab] = useState<'scripts' | 'docs'>('scripts');
 
   // Center Column State (Editor)
   const [editorCode, setEditorCode] = useState<string>('# Astrometrics Scripting Workbench\nprint("Welcome to Astrometrics Command Console")\n');
@@ -30,7 +26,7 @@ export const CommandConsole: React.FC = () => {
   const [isExecutingScript, setIsExecutingScript] = useState<boolean>(false);
 
   // Right Column State (Tabs)
-  const [rightTab, setRightTab] = useState<'terminal' | 'metrics' | 'docs'>('terminal');
+  const [rightTab, setRightTab] = useState<'terminal' | 'docs'>('terminal');
   const [terminalEntries, setTerminalEntries] = useState<TerminalEntry[]>([]);
   const [isExecutingTerminal, setIsExecutingTerminal] = useState<boolean>(false);
 
@@ -43,15 +39,13 @@ export const CommandConsole: React.FC = () => {
   // Initial Data Fetch
   const loadSidebarData = useCallback(async () => {
     try {
-      const [recipeList, scriptList, jobsList, wsList] = await Promise.all([
+      const [recipeList, scriptList, wsList] = await Promise.all([
         callBackend('terminal:list_recipes', {}).catch(() => []),
         callBackend('terminal:list_scripts', {}).catch(() => []),
-        callBackend('processing:list_jobs', { limit: 25 }).catch(() => []),
         callBackend('terminal:get_workspace', {}).catch(() => []),
       ]);
       setRecipes(recipeList || []);
       setUserScripts(scriptList || []);
-      setPipelineRuns(jobsList || []);
       setWorkspaceVariables(wsList || []);
     } catch (err) {
       console.warn('Failed loading Command Console data:', err);
@@ -239,6 +233,29 @@ export const CommandConsole: React.FC = () => {
     }
   };
 
+  // Clear Terminal History (frontend only, workspace variables are untouched)
+  const handleClearTerminal = () => {
+    setTerminalEntries([]);
+  };
+
+  // Reset Workspace (discards console-local variables, keeps terminal history)
+  const handleResetWorkspace = async () => {
+    try {
+      const ws = await callBackend('terminal:reset_workspace', {});
+      setWorkspaceVariables(ws || []);
+      setTerminalEntries((prev) => [
+        ...prev,
+        {
+          id: String(Date.now()),
+          command: '# Workspace reset',
+          stdout: 'All console-local variables were cleared; built-in objects were restored.',
+        },
+      ]);
+    } catch (err) {
+      alert(`Failed to reset workspace: ${String(err)}`);
+    }
+  };
+
   // Save User Script
   const handleSaveUserScript = async () => {
     let filename = activeFilename;
@@ -283,32 +300,6 @@ export const CommandConsole: React.FC = () => {
     }
   };
 
-  // Select Pipeline Run
-  const handleSelectRun = (job: ProcessingJob) => {
-    setSelectedRun(job);
-    setRightTab('metrics');
-  };
-
-  // Load Run into REPL Scope
-  const handleLoadRunIntoRepl = async (jobId: string) => {
-    try {
-      const loadRes = await callBackend('terminal:load_run', { job_id: jobId });
-      setTerminalEntries((prev) => [
-        ...prev,
-        {
-          id: String(Date.now()),
-          command: `# Loaded job into scope: run, target (${loadRes.injected_variables.join(', ')})`,
-          stdout: `Injected run (${loadRes.job_type}) and target (${loadRes.target_name || 'N/A'}) into scope.`,
-        },
-      ]);
-      setRightTab('terminal');
-      const ws = await callBackend('terminal:get_workspace', {});
-      setWorkspaceVariables(ws || []);
-    } catch (err) {
-      alert(`Failed loading job into REPL: ${String(err)}`);
-    }
-  };
-
   return (
     <div className="command-console">
       <div className="command-console__container">
@@ -320,22 +311,15 @@ export const CommandConsole: React.FC = () => {
                 <ConsoleSidebar
                   recipes={recipes}
                   userScripts={userScripts}
-                  pipelineRuns={pipelineRuns}
-                  selectedRunId={selectedRun?.id || null}
                   docTopics={docTopics}
                   selectedDocId={selectedDocId}
                   activeSidebarTab={activeSidebarTab}
                   onTabChange={setActiveSidebarTab}
                   onSelectRecipe={handleSelectRecipe}
                   onSelectUserScript={handleSelectUserScript}
-                  onSelectRun={handleSelectRun}
                   onSelectDocTopic={(topicId) => {
                     handleSelectDoc(topicId);
                     setRightTab('docs');
-                  }}
-                  onRefreshRuns={async () => {
-                    const jobs = await callBackend('processing:list_jobs', { limit: 25 });
-                    setPipelineRuns(jobs || []);
                   }}
                   onNewScript={() => {
                     setEditorCode('# New Python Script\n');
@@ -373,7 +357,7 @@ export const CommandConsole: React.FC = () => {
 
           <Separator className="console-resize-handle console-resize-handle--vertical" />
 
-          {/* Column 3: Tabbed Panel (Terminal REPL, Metrics Scorecard, Documentation) */}
+          {/* Column 3: Tabbed Panel (Terminal, Documentation) */}
           <Panel defaultSize={35} minSize={25}>
             <div className="console-panel">
               <div className="console-panel__header" style={{ padding: 0 }}>
@@ -383,14 +367,7 @@ export const CommandConsole: React.FC = () => {
                     onClick={() => setRightTab('terminal')}
                     type="button"
                   >
-                    Terminal REPL
-                  </button>
-                  <button
-                    className={`console-sidebar__tab ${rightTab === 'metrics' ? 'console-sidebar__tab--active' : ''}`}
-                    onClick={() => setRightTab('metrics')}
-                    type="button"
-                  >
-                    Metrics Scorecard {selectedRun ? `(${selectedRun.targetId})` : ''}
+                    Terminal
                   </button>
                   <button
                     className={`console-sidebar__tab ${rightTab === 'docs' ? 'console-sidebar__tab--active' : ''}`}
@@ -410,13 +387,9 @@ export const CommandConsole: React.FC = () => {
                   <TerminalPane
                     entries={terminalEntries}
                     onExecute={handleExecuteRepl}
+                    onClear={handleClearTerminal}
+                    onReset={handleResetWorkspace}
                     isRunning={isExecutingTerminal}
-                  />
-                )}
-                {rightTab === 'metrics' && (
-                  <MetricsScorecard
-                    job={selectedRun}
-                    onLoadIntoRepl={handleLoadRunIntoRepl}
                   />
                 )}
                 {rightTab === 'docs' && (

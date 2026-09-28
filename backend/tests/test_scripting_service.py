@@ -2,13 +2,11 @@
 
 Verifies workspace manifest extraction, execution envelope generation,
 recipe discovery and retrieval, user script persistence, documentation
-topic reading, editor buffer synchronization, and job loading.
+topic reading, and editor buffer synchronization.
 """
 
 from pathlib import Path
-from unittest.mock import MagicMock
 
-from astrometricslib import ProcessingJob
 from backend.services.infrastructure.scripting_service import ScriptingService
 
 
@@ -82,6 +80,48 @@ def test_scripting_service_docs() -> None:
     assert len(topic_data["content"]) > 0
 
 
+def test_scripting_service_search_docs_matches_title_and_body() -> None:
+    """Verify search_doc_topics matches on title and on body text."""
+    service = ScriptingService()
+
+    all_topics = service.list_doc_topics()
+    assert len(all_topics) > 0
+
+    # A blank query returns every topic, unfiltered.
+    assert service.search_doc_topics("   ") == all_topics
+
+    # Matching a known title should find that topic without a snippet,
+    # since the match is in the title, not the body.
+    first_topic = all_topics[0]
+    title_matches = service.search_doc_topics(first_topic["title"][:6])
+    assert any(t["id"] == first_topic["id"] for t in title_matches)
+    matched_topic = next(t for t in title_matches if t["id"] == first_topic["id"])
+    assert "snippet" not in matched_topic
+
+    # Matching text that only appears in a topic's body should return
+    # that topic with a snippet showing where the match was found.
+    topic_data = service.get_doc_topic(first_topic["id"])
+    body_only_phrase = topic_data["content"].strip().splitlines()[-1].strip()
+    if body_only_phrase and body_only_phrase not in first_topic["title"]:
+        body_matches = service.search_doc_topics(body_only_phrase)
+        found = next((t for t in body_matches if t["id"] == first_topic["id"]), None)
+        assert found is not None
+        assert "snippet" in found
+
+
+def test_scripting_service_reset_workspace_drops_user_variables() -> None:
+    """Verify reset_workspace clears user variables but keeps built-ins."""
+    service = ScriptingService()
+    service.execute("my_custom_variable = 12345")
+    assert "my_custom_variable" in service.console.locals
+
+    manifest = service.reset_workspace()
+
+    assert "my_custom_variable" not in service.console.locals
+    assert "np" in service.console.locals
+    assert not any(item["name"] == "my_custom_variable" for item in manifest)
+
+
 def test_scripting_service_editor_sync() -> None:
     """Verify editor buffer getting and setting."""
     service = ScriptingService()
@@ -90,38 +130,6 @@ def test_scripting_service_editor_sync() -> None:
 
     buf = service.get_editor_buffer()
     assert buf["code"] == "x = 100\nprint(x)"
-
-
-def test_scripting_service_load_job_into_scope() -> None:
-    """Verify loading a ProcessingJob into console locals."""
-    mock_container = MagicMock()
-    mock_job_service = MagicMock()
-    mock_target_service = MagicMock()
-
-    job = ProcessingJob(
-        id="job-12345",
-        target_id="M 42",
-        job_type="stacking",
-        status="completed",
-        input_metrics={"snr_estimate": 14.5},
-        output_metrics={"stacked_fwhm": 2.1},
-    )
-    mock_job_service.get_job.return_value = job
-
-    mock_target = MagicMock()
-    mock_target.id = "M 42"
-    mock_target_service.get_targets.return_value = mock_target
-
-    mock_container.job_service = mock_job_service
-    mock_container.target_service = mock_target_service
-
-    service = ScriptingService(container=mock_container)
-    load_res = service.load_job_into_scope("job-12345")
-
-    assert load_res["job_id"] == "job-12345"
-    assert load_res["target_name"] == "M 42"
-    assert "run" in service.console.locals
-    assert "target" in service.console.locals
 
 
 def test_scripting_service_api_docs() -> None:

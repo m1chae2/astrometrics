@@ -6,6 +6,7 @@ import { PlanningProvider } from './observationManager/context/PlanningContext';
 import { TerminalProvider } from './statusHeader/context/TerminalContext';
 import { RemoteStatusProvider } from './common/context/RemoteStatusContext';
 import { AstrometricsProvider, useAstrometrics } from './common/context/AstrometricsContext';
+import { DISPLAY_DEFINITIONS, isDisplayEnabled } from './common/constants/displayFlags';
 import './App.css';
 
 // Single shared cache for all shared-resource queries (see ui/common/queries/),
@@ -132,21 +133,15 @@ const AppContent: React.FC = () => {
 
   useEffect(() => {
     if (!config || !config['Frontend']) return;
+    if (isDisplayEnabled(config, mode)) return;
 
-    let modeAllowed = true;
-    if (mode === 'Astronomy Manager' && config['Frontend']['enable_astronomy'] !== 'true') modeAllowed = false;
-    if (mode === 'Planetarium' && config['Frontend']['enable_planetarium'] !== 'true') modeAllowed = false;
-    if (mode === 'Observatory Manager' && config['Frontend']['enable_observatory'] !== 'true') modeAllowed = false;
-    if (mode === 'Observation Manager' && config['Frontend']['enable_observation'] !== 'true') modeAllowed = false;
-
-    if (!modeAllowed) {
-      console.log(`[App] Mode '${mode}' is disabled in settings. Falling back to 'Image Viewer'.`);
-      setMode('Image Viewer');
-      try {
-        window.localStorage.setItem('appMode', 'Image Viewer');
-      } catch {
-        // Ignore localStorage access failures (e.g. in private browsing)
-      }
+    const fallbackMode = DISPLAY_DEFINITIONS.find((d) => isDisplayEnabled(config, d.mode))?.mode || 'Image Viewer';
+    console.log(`[App] Mode '${mode}' is disabled in settings. Falling back to '${fallbackMode}'.`);
+    setMode(fallbackMode);
+    try {
+      window.localStorage.setItem('appMode', fallbackMode);
+    } catch {
+      // Ignore localStorage access failures (e.g. in private browsing)
     }
   }, [mode, config]);
 
@@ -179,6 +174,14 @@ const AppContent: React.FC = () => {
           window.dispatchEvent(new CustomEvent('astrometrics:log', { detail: payload }));
         } else if (action === 'refresh') {
           window.location.reload();
+        } else if (action === 'catalog:changed') {
+          // The backend rescanned the stellar catalog (see StellarService's
+          // dataset-version check) because a write happened somewhere --
+          // refetch now instead of waiting on these queries' own polling
+          // fallback (see useTargetDataAvailabilityQuery, useSpectralClassSummaryQuery).
+          queryClient.invalidateQueries({ queryKey: ['targetDataAvailability'] });
+          queryClient.invalidateQueries({ queryKey: ['spectralClassSummary'] });
+          queryClient.invalidateQueries({ queryKey: ['starsBySpectralClass'] });
         }
       };
 

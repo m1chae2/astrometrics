@@ -161,7 +161,7 @@ class QualityDiagnostics:
         thresholds : `dict` [`str`, `float`]
             Threshold values keyed by threshold name.
         """
-        from astrometricslib.pipelines.spectroscopy import registration_quality as srq
+        from astrometricslib.pipelines.spectroscopy.utilities import registration_quality as srq
 
         return {
             "min_matched_star_pairs": srq.MIN_MATCHED_STAR_PAIRS,

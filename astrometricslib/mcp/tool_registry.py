@@ -233,6 +233,8 @@ def register_astrometrics_reflected_tools():  # ruff: ignore[missing-return-type
         "stars": "star",
         "moving_objects": "moving_object",
         "processing": "processing",
+        "processing.diagnostics": "diagnostics",
+        "processing.calibration": "calibration",
         "visualization": "visualization",
     }
     register_astrometrics_tools(registry, astrometrics, branch_mapping)

@@ -87,6 +87,10 @@ def test_astrometricslib_mcp_reflection_registers_tools():  # ruff: ignore[missi
     assert "visualization_convert_fits_to_png" in tool_names
     assert "star_get_audit" in tool_names
 
+    # Verify nested sub-APIs (dotted branch_mapping keys) are reflected too
+    assert "diagnostics_measure_stack_fwhm" in tool_names
+    assert "calibration_stats" in tool_names
+
 
 async def test_astrometrics_reflected_tool_execution():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verify executing a reflected tool via Astrometrics registry succeeds."""

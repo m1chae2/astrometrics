@@ -172,7 +172,8 @@ def register_astrometrics_tools(
     branch_mapping : `dict` [`str`, `str`]
         Mapping of attribute name on the high-level interface
         (e.g. ``"targets"``) to its tool prefix (e.g. ``"target"``). A
-        key of ``""`` maps to root astrometrics methods.
+        key of ``""`` maps to root astrometrics methods. A dotted name
+        (e.g. ``"processing.diagnostics"``) walks nested attributes.
 
     Returns
     -------
@@ -185,7 +186,11 @@ def register_astrometrics_tools(
         if attr_name == "":
             target_obj = astrometrics_instance
         else:
-            target_obj = getattr(astrometrics_instance, attr_name, None)
+            target_obj = astrometrics_instance
+            for part in attr_name.split("."):
+                target_obj = getattr(target_obj, part, None)
+                if target_obj is None:
+                    break
 
         if not target_obj:
             continue

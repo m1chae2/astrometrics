@@ -17,6 +17,8 @@ from wayfindinglib.drivers.protocols.enclosure_driver import EnclosureDriver
 from wayfindinglib.drivers.protocols.filter_wheel_driver import FilterWheelDriver
 from wayfindinglib.drivers.protocols.focuser_driver import FocuserDriver
 from wayfindinglib.drivers.protocols.mount_driver import MountDriver
+from wayfindinglib.drivers.protocols.remote_transfer_driver import RemoteTransferDriver
+from wayfindinglib.drivers.stellarmate_interface import StellarMateInterface
 
 
 def test_mount_driver_cannot_be_instantiated_directly() -> None:
@@ -76,6 +78,19 @@ def test_indi_filter_wheel_driver_conforms_to_filter_wheel_driver() -> None:
     """
     driver = IndiFilterWheelDriver(session=object())
     assert isinstance(driver, FilterWheelDriver)
+
+
+def test_remote_transfer_driver_cannot_be_instantiated_directly() -> None:
+    """Verify `RemoteTransferDriver` cannot be instantiated missing methods."""
+    with pytest.raises(TypeError):
+        RemoteTransferDriver()  # pyrefly: ignore[bad-instantiation]
+
+
+def test_stellarmate_interface_conforms_to_remote_transfer_driver() -> None:
+    """Verify `StellarMateInterface` implements `RemoteTransferDriver`."""
+    driver = StellarMateInterface()
+    assert isinstance(driver, RemoteTransferDriver)
+    assert driver.driver_name == "stellarmate"
 
 
 def test_indi_enclosure_driver_conforms_to_enclosure_driver() -> None:

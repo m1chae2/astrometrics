@@ -8,6 +8,12 @@ Relocated here from astrometricslib per the cross-library litmus test
 (`Wayfinding_Library_Architecture.md` Design Invariant 4): pulling files
 off a telescope host requires a telescope to be present, so it belongs
 in the observatory-control library rather than the science library.
+
+The first implementation of `RemoteTransferDriver`
+(`wayfindinglib/drivers/protocols/remote_transfer_driver.py`) -- a
+separate, pluggable abstraction from the hardware-control protocol
+drivers, since retrieving files from a telescope host is not part of
+INDI or ASCOM.
 """
 
 import logging
@@ -16,10 +22,12 @@ import subprocess
 import time
 from typing import Any
 
+from wayfindinglib.drivers.protocols.remote_transfer_driver import RemoteTransferDriver
+
 logger = logging.getLogger(__name__)
 
 
-class StellarMateInterface:
+class StellarMateInterface(RemoteTransferDriver):
     """Interface driver for the remote StellarMate telescope controller.
 
     Communicates over SSH and Rsync. Configured with a host alias and
@@ -48,6 +56,11 @@ class StellarMateInterface:
         self.frames_path = frames_path
         self._last_connection_status = None  # None=Unknown, True=Online, False=Offline
         self._last_probe_time = 0.0
+
+    @property
+    def driver_name(self) -> str:
+        """Registry key for this driver."""
+        return "stellarmate"
 
     def _update_connection_status(self, is_online: bool) -> None:
         """Update the internal connection status and log state changes.

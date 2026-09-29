@@ -84,6 +84,7 @@ class ObservatoryControl:
         self.__camera_driver = None
         self.__guide_camera_driver = None
         self.__enclosure_driver = None
+        self.__remote_transfer_driver = None
         self.__indi_diagnostics = None
         self._guiding_service = None
         self._sync_service = None
@@ -279,6 +280,49 @@ class ObservatoryControl:
     def enclosure_driver(self, enclosure_driver) -> None:  # ruff: ignore[missing-type-function-argument]
         """Set the active `EnclosureDriver` (test injection)."""
         self.__enclosure_driver = enclosure_driver
+
+    @property
+    def remote_transfer_driver(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        """Lazily build or return the active `RemoteTransferDriver`.
+
+        Resolved once from `AppConfiguration.get_remote_transfer_driver_name`
+        (default ``"stellarmate"``) -- a separate, independent choice
+        from the six hardware-control protocol drivers above, since
+        retrieving files from a telescope host is not part of INDI or
+        ASCOM (§6). Cached rather than constructed fresh per call, per
+        `remote_transfer_tasks.py`'s de-duplication cleanup.
+
+        Returns
+        -------
+        remote_transfer_driver : `RemoteTransferDriver`
+            The active remote-transfer driver.
+
+        Raises
+        ------
+        NotImplementedError
+            If the configured driver name has no constructor wiring
+            yet (only ``"stellarmate"`` does today).
+        """
+        if self.__remote_transfer_driver is None:
+            from wayfindinglib.drivers.protocols.registry import build_remote_transfer_driver_registry
+
+            driver_name = self._config.get_remote_transfer_driver_name()
+            driver_class = build_remote_transfer_driver_registry()[driver_name]
+            if driver_name == "stellarmate":
+                self.__remote_transfer_driver = driver_class(
+                    host_alias=self._config.get_telescope_hostname(),
+                    remote_pictures_path=self._config.get_remote_pictures_path(),
+                )
+            else:
+                raise NotImplementedError(
+                    f"No constructor wiring yet for remote transfer driver '{driver_name}'"
+                )
+        return self.__remote_transfer_driver
+
+    @remote_transfer_driver.setter
+    def remote_transfer_driver(self, remote_transfer_driver) -> None:  # ruff: ignore[missing-type-function-argument]
+        """Set the active `RemoteTransferDriver` (test injection)."""
+        self.__remote_transfer_driver = remote_transfer_driver
 
     @property
     def indi_diagnostics(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
@@ -1069,7 +1113,7 @@ class ObservatoryControl:
         """
         from wayfindinglib.tasks.control_tasks import remote_transfer_tasks
 
-        return remote_transfer_tasks.check_for_new_remote_images(target)
+        return remote_transfer_tasks.check_for_new_remote_images(self, target)
 
     def download_remote_frames(
         self,
@@ -1088,7 +1132,7 @@ class ObservatoryControl:
         from wayfindinglib.tasks.control_tasks import remote_transfer_tasks
 
         return remote_transfer_tasks.download_remote_frames(
-            target, selected_files, remote_target_name, local_subfolder
+            self, target, selected_files, remote_target_name, local_subfolder
         )
 
     def list_remote_targets(self) -> list[str]:
@@ -1218,7 +1262,7 @@ class ObservatoryControl:
         from wayfindinglib.tasks.control_tasks import remote_transfer_tasks
 
         return remote_transfer_tasks.download_remote_targets(
-            target_id, selected_files, log_callback, local_path, incremental
+            self, target_id, selected_files, log_callback, local_path, incremental
         )
 
     def sync_calibration_folder(self, remote_folder_name: str) -> dict[str, Any]:

@@ -856,6 +856,24 @@ class AppConfiguration:
             "Observatory.Telescope", "remote_pictures_path", fallback="/home/stellarmate/Pictures"
         )
 
+    def get_remote_transfer_driver_name(self) -> str:
+        """Return the configured remote file-transfer protocol name.
+
+        Selects which `RemoteTransferDriver` implementation
+        `ObservatoryControl.remote_transfer_driver` builds
+        (`wayfindinglib/drivers/protocols/remote_transfer_driver.py`) --
+        a separate, pluggable choice from the hardware-control protocol,
+        since pulling files off a telescope host is not part of INDI or
+        ASCOM.
+
+        Returns
+        -------
+        driver_name : `str`
+            The configured remote-transfer driver name, defaulting to
+            ``"stellarmate"``.
+        """
+        return self.app_config.get("Observatory.RemoteTransfer", "driver", fallback="stellarmate")
+
     def get_allow_commands(self) -> bool:
         """Return whether commands may be sent to the telescope (Safe Mode).
 

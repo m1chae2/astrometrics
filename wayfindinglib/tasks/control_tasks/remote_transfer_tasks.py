@@ -46,7 +46,7 @@ def is_calibration_folder(folder_name: str) -> bool:
     return folder_name.strip().lower() in CALIBRATION_FOLDER_KINDS
 
 
-def check_for_new_remote_images(target) -> dict[str, Any]:  # ruff: ignore[missing-type-function-argument]
+def check_for_new_remote_images(observatory, target) -> dict[str, Any]:  # ruff: ignore[missing-type-function-argument]
     """Check for new FITS files on the telescope pictures path.
 
     Compares the remote file listing with the local target.frames
@@ -54,6 +54,8 @@ def check_for_new_remote_images(target) -> dict[str, Any]:  # ruff: ignore[missi
 
     Parameters
     ----------
+    observatory : `wayfindinglib.api.control_registry.ObservatoryControl`
+        Provides the cached `remote_transfer_driver`.
     target : `Any`
         The target whose remote pictures path is checked; its
         existing target.frames list is used as the local baseline.
@@ -65,16 +67,7 @@ def check_for_new_remote_images(target) -> dict[str, Any]:  # ruff: ignore[missi
         "remote_files_count" (`int`), and "remote_files"
         (`List[str]`, the remote-only filenames).
     """
-    from astrometricslib import get_configuration
-    from wayfindinglib.drivers.stellarmate_interface import StellarMateInterface
-
-    config = get_configuration()
-    host = config.get_telescope_hostname() or "stellarmate"
-    remote_path = config.get_remote_pictures_path() or "/home/stellarmate/Pictures"
-
-    driver = StellarMateInterface(host_alias=host, remote_pictures_path=remote_path)
-
-    remote_files = driver.list_remote_files(target.id)
+    remote_files = observatory.remote_transfer_driver.list_remote_files(target.id)
     if not remote_files:
         return {"remote_files_available": False, "remote_files_count": 0, "remote_files": []}
 
@@ -90,6 +83,7 @@ def check_for_new_remote_images(target) -> dict[str, Any]:  # ruff: ignore[missi
 
 
 def download_remote_frames(
+    observatory,  # ruff: ignore[missing-type-function-argument]
     target,  # ruff: ignore[missing-type-function-argument]
     selected_files: list[str] | None = None,
     remote_target_name: str | None = None,
@@ -97,12 +91,14 @@ def download_remote_frames(
 ) -> bool:
     """Download remote frames from the telescope, then index them.
 
-    Uses StellarMateInterface to download the frames, indexes them
-    locally through the science library's public high-level
-    interface, and updates target.frames.
+    Uses the observatory's `remote_transfer_driver` to download the
+    frames, indexes them locally through the science library's public
+    high-level interface, and updates target.frames.
 
     Parameters
     ----------
+    observatory : `wayfindinglib.api.control_registry.ObservatoryControl`
+        Provides the cached `remote_transfer_driver`.
     target : `Any`
         The target the downloaded frames belong to.
     selected_files : `List[str]`, optional
@@ -121,16 +117,11 @@ def download_remote_frames(
         `True` if the download succeeded, `False` otherwise.
     """
     from astrometricslib import Astrometrics, get_configuration
-    from wayfindinglib.drivers.stellarmate_interface import StellarMateInterface
 
     config = get_configuration()
-    host = config.get_telescope_hostname() or "stellarmate"
-    remote_path = config.get_remote_pictures_path() or "/home/stellarmate/Pictures"
     local_dest = os.path.join(config.get_frames_path(), local_subfolder)
 
-    driver = StellarMateInterface(host_alias=host, remote_pictures_path=remote_path)
-
-    success = driver.download_target_folder(
+    success = observatory.remote_transfer_driver.download_target_folder(
         remote_target_name=remote_target_name or target.id,
         local_dest_path=local_dest,
         selected_files=selected_files,
@@ -185,6 +176,7 @@ def local_fits_fingerprints(directories: list[str]) -> set[tuple[str, int]]:
 
 
 def download_remote_targets(
+    observatory,  # ruff: ignore[missing-type-function-argument]
     target_id: str,
     selected_files: list[str] | None = None,
     log_callback: Any | None = None,
@@ -199,6 +191,8 @@ def download_remote_targets(
 
     Parameters
     ----------
+    observatory : `wayfindinglib.api.control_registry.ObservatoryControl`
+        Provides the cached `remote_transfer_driver`.
     target_id : `str`
         The target id/name to resolve or create locally, and (unless
         `local_path` is given) the remote folder name to download.
@@ -241,12 +235,7 @@ def download_remote_targets(
         scan_list = [local_path]
         success = True
     else:
-        from wayfindinglib.drivers.stellarmate_interface import StellarMateInterface
-
-        host = config.get_telescope_hostname() or "stellarmate"
-        remote_path = config.get_remote_pictures_path() or "/home/stellarmate/Pictures"
-
-        driver = StellarMateInterface(host_alias=host, remote_pictures_path=remote_path)
+        driver = observatory.remote_transfer_driver
 
         # download_target_folder resolves space/underscore naming
         # mismatches internally (local "M 42" -> remote "M_42") and
@@ -393,9 +382,8 @@ def check_remote_connection(api) -> bool:  # ruff: ignore[missing-type-function-
 
     Parameters
     ----------
-    api : `Any`
-        the high-level interface (unused directly; accepted for
-        interface consistency with the other remote operations).
+    api : `wayfindinglib.api.control_registry.ObservatoryControl`
+        Provides the cached `remote_transfer_driver`.
 
     Returns
     -------
@@ -403,14 +391,7 @@ def check_remote_connection(api) -> bool:  # ruff: ignore[missing-type-function-
         `True` if the remote telescope connection is reachable,
         `False` otherwise.
     """
-    from astrometricslib import get_configuration
-    from wayfindinglib.drivers.stellarmate_interface import StellarMateInterface
-
-    config = get_configuration()
-    host = config.get_telescope_hostname() or "stellarmate"
-    remote_path = config.get_remote_pictures_path() or "/home/stellarmate/Pictures"
-    driver = StellarMateInterface(host_alias=host, remote_pictures_path=remote_path)
-    return driver.check_connection()
+    return api.remote_transfer_driver.check_connection()
 
 
 def list_remote_targets(api) -> list[str]:  # ruff: ignore[missing-type-function-argument]
@@ -418,9 +399,8 @@ def list_remote_targets(api) -> list[str]:  # ruff: ignore[missing-type-function
 
     Parameters
     ----------
-    api : `Any`
-        the high-level interface (unused directly; accepted for
-        interface consistency with the other remote operations).
+    api : `wayfindinglib.api.control_registry.ObservatoryControl`
+        Provides the cached `remote_transfer_driver`.
 
     Returns
     -------
@@ -428,14 +408,7 @@ def list_remote_targets(api) -> list[str]:  # ruff: ignore[missing-type-function
         The target directory names discovered on the remote
         telescope.
     """
-    from astrometricslib import get_configuration
-    from wayfindinglib.drivers.stellarmate_interface import StellarMateInterface
-
-    config = get_configuration()
-    host = config.get_telescope_hostname() or "stellarmate"
-    remote_path = config.get_remote_pictures_path() or "/home/stellarmate/Pictures"
-    driver = StellarMateInterface(host_alias=host, remote_pictures_path=remote_path)
-    return driver.list_remote_targets()
+    return api.remote_transfer_driver.list_remote_targets()
 
 
 def list_remote_target_folders(api) -> list[str]:  # ruff: ignore[missing-type-function-argument]
@@ -480,9 +453,8 @@ def list_remote_files(api, folder_name: str) -> list[str]:  # ruff: ignore[missi
 
     Parameters
     ----------
-    api : `Any`
-        the high-level interface (unused directly; accepted for
-        interface consistency with the other remote operations).
+    api : `wayfindinglib.api.control_registry.ObservatoryControl`
+        Provides the cached `remote_transfer_driver`.
     folder_name : `str`
         The remote target directory to list files from.
 
@@ -491,14 +463,7 @@ def list_remote_files(api, folder_name: str) -> list[str]:  # ruff: ignore[missi
     file_paths : `List[str]`
         FITS file relative paths inside the remote target directory.
     """
-    from astrometricslib import get_configuration
-    from wayfindinglib.drivers.stellarmate_interface import StellarMateInterface
-
-    config = get_configuration()
-    host = config.get_telescope_hostname() or "stellarmate"
-    remote_path = config.get_remote_pictures_path() or "/home/stellarmate/Pictures"
-    driver = StellarMateInterface(host_alias=host, remote_pictures_path=remote_path)
-    return driver.list_remote_files(folder_name)
+    return api.remote_transfer_driver.list_remote_files(folder_name)
 
 
 def list_remote_files_with_sizes(api, folder_name: str) -> list[tuple[str, int]]:  # ruff: ignore[missing-type-function-argument]
@@ -506,9 +471,8 @@ def list_remote_files_with_sizes(api, folder_name: str) -> list[tuple[str, int]]
 
     Parameters
     ----------
-    api : `Any`
-        the high-level interface (unused directly; accepted for
-        interface consistency with the other remote operations).
+    api : `wayfindinglib.api.control_registry.ObservatoryControl`
+        Provides the cached `remote_transfer_driver`.
     folder_name : `str`
         The remote target directory to list files from.
 
@@ -517,14 +481,7 @@ def list_remote_files_with_sizes(api, folder_name: str) -> list[tuple[str, int]]
     files_with_sizes : `List[Tuple[str, int]]`
         ``(relative_path, size_in_bytes)`` for each FITS file found.
     """
-    from astrometricslib import get_configuration
-    from wayfindinglib.drivers.stellarmate_interface import StellarMateInterface
-
-    config = get_configuration()
-    host = config.get_telescope_hostname() or "stellarmate"
-    remote_path = config.get_remote_pictures_path() or "/home/stellarmate/Pictures"
-    driver = StellarMateInterface(host_alias=host, remote_pictures_path=remote_path)
-    return driver.list_remote_files_with_sizes(folder_name)
+    return api.remote_transfer_driver.list_remote_files_with_sizes(folder_name)
 
 
 def _library_fits_paths(frames_path: str) -> set[str]:

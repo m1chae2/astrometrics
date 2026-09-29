@@ -17,6 +17,7 @@ from wayfindinglib.drivers.protocols.enclosure_driver import EnclosureDriver
 from wayfindinglib.drivers.protocols.filter_wheel_driver import FilterWheelDriver
 from wayfindinglib.drivers.protocols.focuser_driver import FocuserDriver
 from wayfindinglib.drivers.protocols.mount_driver import MountDriver
+from wayfindinglib.drivers.protocols.remote_transfer_driver import RemoteTransferDriver
 
 
 def build_mount_driver_registry() -> dict[str, type[MountDriver]]:
@@ -84,3 +85,21 @@ def build_enclosure_driver_registry() -> dict[str, type[EnclosureDriver]]:
     from wayfindinglib.drivers.indi.enclosure_driver import IndiEnclosureDriver
 
     return {"indi": IndiEnclosureDriver}
+
+
+def build_remote_transfer_driver_registry() -> dict[str, type[RemoteTransferDriver]]:
+    """Return the driver-name -> `RemoteTransferDriver` class registry.
+
+    A separate registry from the six hardware-control ones above --
+    remote file transfer is an independent, pluggable concern (§6),
+    keyed by `driver_name`, not `protocol_name`.
+
+    Returns
+    -------
+    registry : `dict` [`str`, `type` [`RemoteTransferDriver`]]
+        Maps a driver name (e.g. ``"stellarmate"``) to its
+        `RemoteTransferDriver` subclass.
+    """
+    from wayfindinglib.drivers.stellarmate_interface import StellarMateInterface
+
+    return {"stellarmate": StellarMateInterface}

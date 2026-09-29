@@ -220,8 +220,32 @@ def test_remote_transfer_methods_delegate_to_the_task_module(mocker, control):  
 
     assert control.download_remote_targets("M 81", local_path="/local/M81") is True
     remote_transfer_tasks.download_remote_targets.assert_called_once_with(
-        "M 81", None, None, "/local/M81", True
+        control, "M 81", None, None, "/local/M81", True
     )
+
+
+def test_remote_transfer_driver_lazily_builds_stellarmate_interface(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify remote_transfer_driver builds a cached StellarMateInterface.
+
+    M7: `ObservatoryControl.remote_transfer_driver` resolves once from
+    config (default ``"stellarmate"``) instead of every
+    `remote_transfer_tasks.py` function constructing its own instance.
+    """
+    from wayfindinglib.drivers.protocols.remote_transfer_driver import RemoteTransferDriver
+    from wayfindinglib.drivers.stellarmate_interface import StellarMateInterface
+
+    driver = control.remote_transfer_driver
+    assert isinstance(driver, StellarMateInterface)
+    assert isinstance(driver, RemoteTransferDriver)
+    assert driver.driver_name == "stellarmate"
+    assert control.remote_transfer_driver is driver
+
+
+def test_remote_transfer_driver_can_be_injected_for_tests(mocker, control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify the setter overrides the lazily-built driver."""
+    fake_driver = mocker.Mock()
+    control.remote_transfer_driver = fake_driver
+    assert control.remote_transfer_driver is fake_driver
 
 
 def test_discover_unassociated_remote_targets_delegates_via_astrometrics(mocker, control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]

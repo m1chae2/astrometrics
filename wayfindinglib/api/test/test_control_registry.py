@@ -114,6 +114,82 @@ def test_compute_guiding_correction_succeeds_with_saved_calibration(control, app
     assert correction.pulse_ra_ms > 0
 
 
+def test_save_and_active_guiding_spectrum_analysis_round_trip(control, app_config, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify the standing spectrum analysis persists keyed by telescope."""
+    from wayfindinglib.models.session.telemetry import GuidingSpectrumAnalysis
+
+    _configure_active_rig(app_config)
+    control.set_active_telescope("Rig A")
+
+    assert control.active_guiding_spectrum_analysis() is None
+
+    analysis = GuidingSpectrumAnalysis(sample_count=10, duration_seconds=60.0)
+    control.save_guiding_spectrum_analysis(analysis)
+
+    persisted = control.active_guiding_spectrum_analysis()
+    assert persisted is not None
+    assert persisted.id == "Rig A"
+    assert persisted.telescope_id == "Rig A"
+    assert persisted.sample_count == 10
+
+
+def test_ingest_guiding_log_file_delegates_to_the_task_module(mocker, control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify ingest_guiding_log_file forwards to guiding_log_ingestion."""
+    from wayfindinglib.tasks.control_tasks import guiding_log_ingestion
+
+    fake_logger_interface = mocker.Mock()
+    control._logger_interface = fake_logger_interface
+    mocker.patch.object(guiding_log_ingestion, "ingest_guide_log_file", return_value="analysis")
+
+    result = control.ingest_guiding_log_file("/tmp/log.txt", target_name="M 81")
+
+    assert result == "analysis"
+    guiding_log_ingestion.ingest_guide_log_file.assert_called_once_with(
+        control, fake_logger_interface, "/tmp/log.txt", "M 81"
+    )
+
+
+def test_fetch_and_ingest_new_guide_logs_delegates_to_the_task_module(mocker, control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify fetch_and_ingest_new_guide_logs forwards to the task module."""
+    from wayfindinglib.tasks.control_tasks import guiding_log_ingestion
+
+    fake_logger_interface = mocker.Mock()
+    control._logger_interface = fake_logger_interface
+    mocker.patch.object(guiding_log_ingestion, "fetch_and_ingest_new_guide_logs", return_value="analysis")
+
+    result = control.fetch_and_ingest_new_guide_logs("/tmp/guiding", target_name="M 81")
+
+    assert result == "analysis"
+    guiding_log_ingestion.fetch_and_ingest_new_guide_logs.assert_called_once_with(
+        control, fake_logger_interface, "/tmp/guiding", "M 81"
+    )
+
+
+def test_get_pointing_model_delegates_to_the_task_module(mocker, control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify get_pointing_model forwards to pointing_log_ingestion."""
+    from wayfindinglib.tasks.control_tasks import pointing_log_ingestion
+
+    fake_logger_interface = mocker.Mock()
+    control._logger_interface = fake_logger_interface
+    mocker.patch.object(pointing_log_ingestion, "compute_pointing_model", return_value="model")
+
+    result = control.get_pointing_model(session_id="s1")
+
+    assert result == "model"
+    pointing_log_ingestion.compute_pointing_model.assert_called_once_with(
+        control, fake_logger_interface, "s1"
+    )
+
+
+def test_logger_interface_lazily_builds_from_config(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify `_logger_interface` lazily builds a real LoggerInterface once."""
+    from astrometricslib import LoggerInterface
+
+    logger_interface = control._logger_interface
+    assert isinstance(logger_interface, LoggerInterface)
+    assert control._logger_interface is logger_interface
+
+
 def test_assess_safety_hysteresis_persists_across_calls_on_same_astrometrics(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify the interface's SafetyMonitor carries hysteresis across calls."""
     rule_set = SafetyRuleSet(

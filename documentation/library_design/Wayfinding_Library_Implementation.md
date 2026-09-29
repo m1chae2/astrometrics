@@ -13,6 +13,7 @@ Due to the internal nature of these modules, they are deliberately hidden from t
 - **Hardware safety interlocks and weather monitoring:** `safety_monitor.py` and `safe_state.py`
 - **Correction handling (Pointing, Guiding, Focus):** `pointing_correction.py`, `guiding_correction.py`, and `focus_correction.py`
 - **Enclosure and cooling control:** `enclosure_control.py` (pure interlock checks) and `cooling_control.py`; the roof/dome shutter's own INDI commands live in `wayfindinglib/drivers/indi/enclosure_controller.py`
+- **Remote file transfer and guiding/pointing log ingestion:** the pluggable `wayfindinglib/drivers/protocols/remote_transfer_driver.py` (first implemented by `wayfindinglib/drivers/stellarmate_interface.py`) retrieves files from a telescope host; `guiding_log_ingestion.py` and `pointing_log_ingestion.py` chain the download/parse/analyze/persist and analyze/expose steps that used to be hand-orchestrated separately in `backend/services/infrastructure/sync_service.py` and `backend/services/observatory/guiding_service.py`/`alignment_service.py`
 
 ### Sequence Execution
 *Located in:* `wayfindinglib/tasks/execution_tasks/`

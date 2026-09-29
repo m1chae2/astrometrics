@@ -49,6 +49,7 @@ from wayfindinglib.models.session.correction_result import (
     PointingCorrection,
 )
 from wayfindinglib.models.session.safe_state import SafeStateOutcome
+from wayfindinglib.models.session.telemetry import GuidingSpectrumAnalysis, MountPointingModel
 from wayfindinglib.tasks.control_tasks.capability_promotion import DivergenceEvidenceSummary
 from wayfindinglib.tasks.control_tasks.safe_state import SafeStateSteps
 from wayfindinglib.tasks.control_tasks.safety_monitor import SafetyMonitor, SensorReadings
@@ -88,6 +89,7 @@ class ObservatoryControl:
         self.__indi_diagnostics = None
         self._guiding_service = None
         self._sync_service = None
+        self.__logger_interface = None
         self._butler = butler or DiskButler(app_config=config)
         self._correction_config = correction_config or CorrectionConfig()
         self._safety_monitor = SafetyMonitor()
@@ -117,6 +119,34 @@ class ObservatoryControl:
     def driver(self, driver_interface) -> None:  # ruff: ignore[missing-type-function-argument]
         """Set the active INDI hardware driver interface."""
         self.__driver = driver_interface
+
+    @property
+    def _logger_interface(self):  # ruff: ignore[missing-return-type-private-function]
+        """Lazily build or return the shared `LoggerInterface`.
+
+        Cross-library dependency on `astrometricslib.LoggerInterface`
+        (already established precedent -- `remote_transfer_tasks.py`
+        imports it the same way), used by the guiding/alignment log
+        ingestion pipelines (§6a) to read/record samples and attempts.
+        Lazy, like `.driver`/`._butler`, so a dummy/sentinel `config`
+        (as some tests use) doesn't eagerly resolve a real log database
+        path.
+
+        Returns
+        -------
+        logger_interface : `astrometricslib.LoggerInterface`
+            The shared log-database interface.
+        """
+        if self.__logger_interface is None:
+            from astrometricslib import LoggerInterface
+
+            self.__logger_interface = LoggerInterface(self._config.get_logs_db_path())
+        return self.__logger_interface
+
+    @_logger_interface.setter
+    def _logger_interface(self, logger_interface) -> None:  # ruff: ignore[missing-type-function-argument]
+        """Set the shared `LoggerInterface` (test injection)."""
+        self.__logger_interface = logger_interface
 
     @property
     def mount_driver(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
@@ -885,6 +915,93 @@ class ObservatoryControl:
     def save_focus_model(self, focus_model: FocusModel) -> None:
         """Record a measured `FocusModel`."""
         self._butler.put(focus_model, "focus_model", {"id": focus_model.id})
+
+    # -- Guiding/alignment log ingestion (§6a) -------------------------------
+
+    def active_guiding_spectrum_analysis(self) -> GuidingSpectrumAnalysis | None:
+        """Return the standing `GuidingSpectrumAnalysis` for the active mount.
+
+        Returns
+        -------
+        analysis : `GuidingSpectrumAnalysis` or `None`
+            The most recently persisted spectrum analysis for the
+            active telescope, or `None` if none has been recorded yet.
+        """
+        telescope = self.active_telescope()
+        if telescope is None:
+            return None
+        return self._butler.get("guiding_spectrum_analysis", {"id": telescope.id})
+
+    def save_guiding_spectrum_analysis(self, analysis: GuidingSpectrumAnalysis) -> None:
+        """Record `analysis` as the active telescope's standing spectrum.
+
+        Mount-mechanical periodic error/backlash is a property of the
+        mount, not tonight's setup (unlike `MountPointingModel`'s
+        session-scoped terms -- see `pointing_log_ingestion.py`), so
+        this is keyed by the active telescope's id and overwritten on
+        every refit rather than accumulated as separate rows.
+        """
+        telescope = self.active_telescope()
+        analysis_id = telescope.id if telescope else "default"
+        telescope_id = telescope.id if telescope else ""
+        persisted = analysis.model_copy(update={"id": analysis_id, "telescope_id": telescope_id})
+        self._butler.put(persisted, "guiding_spectrum_analysis", {"id": analysis_id})
+
+    def ingest_guiding_log_file(
+        self, file_path: str, target_name: str | None = None
+    ) -> GuidingSpectrumAnalysis | None:
+        """Parse one PHD2 guide log file, persist its samples, and refit.
+
+        Returns
+        -------
+        analysis : `GuidingSpectrumAnalysis` | `None`
+            The refit and persisted spectrum analysis, or `None` if the
+            file contained no parseable samples -- see
+            `guiding_log_ingestion.ingest_guide_log_file`.
+        """
+        from wayfindinglib.tasks.control_tasks import guiding_log_ingestion
+
+        return guiding_log_ingestion.ingest_guide_log_file(
+            self, self._logger_interface, file_path, target_name
+        )
+
+    def fetch_and_ingest_new_guide_logs(
+        self, destination_dir: str, target_name: str | None = None
+    ) -> GuidingSpectrumAnalysis | None:
+        """Download every remote PHD2 guide log and ingest each one.
+
+        The "new-artifact" trigger point this pipeline exists to give
+        Control -- call when an exposure-complete/new-guide-data signal
+        fires, or manually for catch-up/backfill -- see
+        `guiding_log_ingestion.fetch_and_ingest_new_guide_logs`.
+
+        Returns
+        -------
+        analysis : `GuidingSpectrumAnalysis` | `None`
+            The refit and persisted spectrum analysis, or `None` if the
+            configured remote-transfer driver doesn't support guide-log
+            retrieval, or no new samples were found.
+        """
+        from wayfindinglib.tasks.control_tasks import guiding_log_ingestion
+
+        return guiding_log_ingestion.fetch_and_ingest_new_guide_logs(
+            self, self._logger_interface, destination_dir, target_name
+        )
+
+    def get_pointing_model(self, session_id: str | None = None) -> MountPointingModel:
+        """Fit the geometric pointing model from locally recorded plate solves.
+
+        Session-scoped, never persisted or fed forward across sessions
+        -- see `pointing_log_ingestion.compute_pointing_model`.
+
+        Returns
+        -------
+        model : `MountPointingModel`
+            The freshly-fit model.
+        """
+        from wayfindinglib.tasks.control_tasks import pointing_log_ingestion
+
+        return pointing_log_ingestion.compute_pointing_model(self, self._logger_interface, session_id)
 
     # -- Environmental safety -----------------------------------------------
 

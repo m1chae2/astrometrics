@@ -152,9 +152,23 @@ class GuidingSpectrumPeak(BaseModel):
 
 
 class GuidingSpectrumAnalysis(BaseModel):
-    """Periodic error, worm harmonic spectrum, and backlash diagnostics."""
+    """Periodic error, worm harmonic spectrum, and backlash diagnostics.
+
+    `id`/`telescope_id`/`schema_version` support this model's other use
+    (M7a): as standing, cross-night mount-mechanical Foundation state
+    persisted via `DiskButler`, refit cumulatively each time
+    `guiding_log_ingestion.py` processes a new guide log, the same
+    status as `GuiderCalibration`/`FocusModel`
+    (`Wayfinding_Library_Architecture.md` §2.5.1a's §6a extension). All
+    three default so existing ad hoc, non-persisted analysis results
+    (e.g. `GuidingService.analyze_guiding_spectrum`'s live RPC response)
+    are unaffected.
+    """
 
     model_config = ConfigDict(populate_by_name=True)
+    id: str = Field(default="", alias="id")
+    telescope_id: str = Field(default="", alias="telescopeId")
+    schema_version: int = Field(default=1, alias="schemaVersion")
     sample_count: int = Field(..., alias="sampleCount")
     duration_seconds: float = Field(..., alias="durationSeconds")
     periodic_error_peak_to_peak_arcsec: float = Field(default=0.0, alias="periodicErrorPeakToPeakArcsec")

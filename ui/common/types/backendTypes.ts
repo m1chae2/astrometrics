@@ -573,8 +573,21 @@ export interface GuidingSpectrumPeak {
 
 /**
  * Periodic error, worm harmonic spectrum, and backlash diagnostics.
+ *
+ * `id`/`telescope_id`/`schema_version` support this model's other use
+ * (M7a): as standing, cross-night mount-mechanical Foundation state
+ * persisted via `DiskButler`, refit cumulatively each time
+ * `guiding_log_ingestion.py` processes a new guide log, the same
+ * status as `GuiderCalibration`/`FocusModel`
+ * (`Wayfinding_Library_Architecture.md` §2.5.1a's §6a extension). All
+ * three default so existing ad hoc, non-persisted analysis results
+ * (e.g. `GuidingService.analyze_guiding_spectrum`'s live RPC response)
+ * are unaffected.
  */
 export interface GuidingSpectrumAnalysis {
+  id?: string;
+  telescopeId?: string;
+  schemaVersion?: number;
   sampleCount: number;
   durationSeconds: number;
   periodicErrorPeakToPeakArcsec?: number;

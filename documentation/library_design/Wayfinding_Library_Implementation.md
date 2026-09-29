@@ -8,11 +8,11 @@ Due to the internal nature of these modules, they are deliberately hidden from t
 
 ### Hardware Control & Telemetry
 *Located in:* `wayfindinglib/tasks/control_tasks/`
-- **INDI driver communication (Mount, Camera, Focuser, Filter Wheel):** `hardware_operations.py` and `equipment_activation.py`
+- **Hardware command orchestration (Mount, Camera, Focuser, Filter Wheel, Enclosure):** `hardware_operations.py` and `equipment_activation.py`, dispatching to the per-device-type driver interfaces in `wayfindinglib/drivers/protocols/` (`MountDriver`, `CameraDriver`, `FocuserDriver`, `FilterWheelDriver`, `EnclosureDriver`), whose first implementation is INDI (`wayfindinglib/drivers/indi/*_driver.py`, wrapping the shared session in `wayfindinglib/drivers/indi_interface.py`)
 - **Real-time telemetry monitoring:** `device_state_tasks.py`
 - **Hardware safety interlocks and weather monitoring:** `safety_monitor.py` and `safe_state.py`
 - **Correction handling (Pointing, Guiding, Focus):** `pointing_correction.py`, `guiding_correction.py`, and `focus_correction.py`
-- **Enclosure and cooling control:** `enclosure_control.py` and `cooling_control.py`
+- **Enclosure and cooling control:** `enclosure_control.py` (pure interlock checks) and `cooling_control.py`; the roof/dome shutter's own INDI commands live in `wayfindinglib/drivers/indi/enclosure_controller.py`
 
 ### Sequence Execution
 *Located in:* `wayfindinglib/tasks/execution_tasks/`

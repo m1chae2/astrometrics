@@ -1,12 +1,10 @@
 """INDI implementation of the `EnclosureDriver` protocol ABC.
 
-Genuinely new ground -- unlike mount/camera/focuser/filter-wheel, there
-is no existing `EnclosureController` to adapt (verified: no
-`enclosure_controller.py` exists under `wayfindinglib/drivers/indi/`).
-This adapter's shape is settled now so the protocol registry resolves
-``"indi"`` for every device type; wiring it to a real INDI roof/dome
-device (an `EnclosureController` + the actual property names for the
-user's hardware) is real, separate work, tracked for M6.
+Wraps the same shared `IndiInterface` session as `IndiMountDriver`,
+backed by `wayfindinglib/drivers/indi/enclosure_controller.py`'s
+`EnclosureController` (M6) -- the standard INDI Dome Interface's
+``DOME_SHUTTER`` switch, the same property both roll-off-roof and
+dome INDI drivers publish for shutter motion.
 """
 
 import asyncio
@@ -16,13 +14,7 @@ from wayfindinglib.drivers.protocols.enclosure_driver import EnclosureDriver, En
 
 
 class IndiEnclosureDriver(EnclosureDriver):
-    """Adapts a shared `IndiInterface` session to the `EnclosureDriver` ABC.
-
-    Not yet backed by a real INDI roof/dome device -- see module
-    docstring. Connection lifecycle works today; `get_state`/`open`/
-    `close` raise `NotImplementedError` until M6 adds an
-    `EnclosureController`.
-    """
+    """Adapts a shared `IndiInterface` session to the `EnclosureDriver` ABC."""
 
     def __init__(self, session: Any) -> None:
         """Wrap an existing `IndiInterface`/`SimulatorIndiInterface`.
@@ -76,31 +68,31 @@ class IndiEnclosureDriver(EnclosureDriver):
         return await asyncio.to_thread(self._session.isServerConnected)
 
     async def get_state(self) -> EnclosureState:
-        """Return the enclosure state.
+        """Return the enclosure's current motion state.
 
-        Raises
-        ------
-        NotImplementedError
-            No `EnclosureController` exists yet (tracked for M6).
+        Returns
+        -------
+        state : `EnclosureState`
+            `UNKNOWN` if no enclosure device is discovered.
         """
-        raise NotImplementedError("IndiEnclosureDriver.get_state: no EnclosureController implemented yet")
+        return await asyncio.to_thread(self._session.get_enclosure_state)
 
     async def open(self) -> bool:
         """Open the enclosure.
 
-        Raises
-        ------
-        NotImplementedError
-            No `EnclosureController` exists yet (tracked for M6).
+        Returns
+        -------
+        success : `bool`
+            Whether the open command was issued and confirmed.
         """
-        raise NotImplementedError("IndiEnclosureDriver.open: no EnclosureController implemented yet")
+        return await asyncio.to_thread(self._session.open_enclosure)
 
     async def close(self) -> bool:
         """Close the enclosure.
 
-        Raises
-        ------
-        NotImplementedError
-            No `EnclosureController` exists yet (tracked for M6).
+        Returns
+        -------
+        success : `bool`
+            Whether the close command was issued and confirmed.
         """
-        raise NotImplementedError("IndiEnclosureDriver.close: no EnclosureController implemented yet")
+        return await asyncio.to_thread(self._session.close_enclosure)

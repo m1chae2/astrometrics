@@ -83,6 +83,7 @@ class ObservatoryControl:
         self.__filter_wheel_driver = None
         self.__camera_driver = None
         self.__guide_camera_driver = None
+        self.__enclosure_driver = None
         self.__indi_diagnostics = None
         self._guiding_service = None
         self._sync_service = None
@@ -252,6 +253,32 @@ class ObservatoryControl:
     def guide_camera_driver(self, guide_camera_driver) -> None:  # ruff: ignore[missing-type-function-argument]
         """Set the active guide-camera `CameraDriver` (test injection)."""
         self.__guide_camera_driver = guide_camera_driver
+
+    @property
+    def enclosure_driver(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        """Lazily build or return the active `EnclosureDriver`.
+
+        Resolved once per configured `Enclosure`'s `protocol` (§2's
+        registry), wrapping the same shared session `.driver` already
+        lazily builds.
+
+        Returns
+        -------
+        enclosure_driver : `EnclosureDriver`
+            The active enclosure hardware-control driver.
+        """
+        if self.__enclosure_driver is None:
+            from wayfindinglib.drivers.protocols.registry import build_enclosure_driver_registry
+
+            enclosure = self.active_enclosure()
+            protocol = enclosure.protocol if enclosure else "indi"
+            self.__enclosure_driver = self._build_protocol_driver(build_enclosure_driver_registry(), protocol)
+        return self.__enclosure_driver
+
+    @enclosure_driver.setter
+    def enclosure_driver(self, enclosure_driver) -> None:  # ruff: ignore[missing-type-function-argument]
+        """Set the active `EnclosureDriver` (test injection)."""
+        self.__enclosure_driver = enclosure_driver
 
     @property
     def indi_diagnostics(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
@@ -860,6 +887,51 @@ class ObservatoryControl:
         """
         enclosures = self._butler.get_all("enclosure")
         return enclosures[0] if enclosures else None
+
+    def get_enclosure_state(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        """Return the enclosure's current motion state.
+
+        Returns
+        -------
+        state : `EnclosureState`
+            The current enclosure state (`UNKNOWN` if unavailable).
+        """
+        from wayfindinglib.tasks.control_tasks import hardware_operations
+
+        return hardware_operations.get_enclosure_state(self)
+
+    def open_enclosure(self) -> bool:
+        """Open the enclosure.
+
+        Returns
+        -------
+        success : `bool`
+            Whether the open command was issued and confirmed.
+
+        Requires `OBSERVATORY_SAFETY` to be currently `AUTHORITATIVE`.
+        """
+        from wayfindinglib.tasks.control_tasks import hardware_operations
+
+        return hardware_operations.open_enclosure(self)
+
+    def close_enclosure(self) -> bool:
+        """Close the enclosure, refusing if the mount is not clear of it.
+
+        Checks `enclosure_control.can_close_enclosure`'s geometric
+        interlock, fed the current mount position, before dispatching
+        to the driver -- the damage case this interlock exists to
+        prevent.
+
+        Returns
+        -------
+        success : `bool`
+            Whether the close command was issued and confirmed.
+
+        Requires `OBSERVATORY_SAFETY` to be currently `AUTHORITATIVE`.
+        """
+        from wayfindinglib.tasks.control_tasks import hardware_operations
+
+        return hardware_operations.close_enclosure(self)
 
     def execute_safe_state(self, trigger: str, steps: SafeStateSteps) -> SafeStateOutcome:
         """Run the ordered, bounded safe-state sequence, recording it.

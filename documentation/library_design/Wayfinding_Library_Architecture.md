@@ -412,6 +412,8 @@ Step 3 is the sequence's single point of failure: a mount that cannot park leave
 
 **Loss of the controlling process** is the failure mode a safe-state sequence inside that process cannot handle. Unattended operation therefore requires a liveness signal emitted by the running system and observed from outside it, such that its cessation triggers the same sequence. A watchdog that shares the fate of what it watches provides no protection.
 
+The enclosure's own hardware commands — reading its state and opening or closing it — are issued through an `EnclosureDriver` interface, one of several per-device-type driver interfaces Observatory Control composes so a device's hardware-control protocol is a per-device configuration choice rather than a fixed assumption (INDI is the first implementation of each). `ObservatoryControl.close_enclosure()` applies the **Interlock Before Motion** invariant directly: it evaluates the mount's current position against the configured clearance envelope before dispatching to the driver, refusing rather than commanding closure into an obstructed telescope.
+
 #### 2.5.6 Design Invariants
 
 * **No Upward Dependency:** Observatory Control never depends on Observation Planning or Observation Execution.

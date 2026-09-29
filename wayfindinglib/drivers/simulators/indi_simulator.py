@@ -47,6 +47,10 @@ class _SimulatedDeviceDiscovery:
         """Return None: the simulator has no real INDI device object."""
         return None
 
+    def find_enclosure(self):  # ruff: ignore[missing-return-type-private-function]
+        """Return None: the simulator has no real INDI device object."""
+        return None
+
     def find_device_with_property(self, property_name):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
         """Return None: the simulator has no real INDI device object."""
         return None
@@ -269,6 +273,48 @@ class _SimulatedCameraController:
         return None
 
 
+class _SimulatedEnclosureController:
+    """Stand-in for indi.enclosure_controller.EnclosureController.
+
+    No roll-off-roof/dome is simulated -- `get_state` honestly reports
+    `UNKNOWN` (the "Unknown Is Unsafe" invariant) rather than
+    fabricating an open/closed value, and `open`/`close` report failure
+    rather than pretending to move hardware that doesn't exist.
+    """
+
+    def get_state(self, enclosure_device):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+        """Return `UNKNOWN`: the simulator has no real enclosure hardware.
+
+        Returns
+        -------
+        state : `EnclosureState`
+            Always `EnclosureState.UNKNOWN`.
+        """
+        from wayfindinglib.models.equipment_and_site.enclosure import EnclosureState
+
+        return EnclosureState.UNKNOWN
+
+    def open(self, enclosure_device):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+        """Report failure: the simulator has no real enclosure hardware.
+
+        Returns
+        -------
+        success : `bool`
+            Always `False`.
+        """
+        return False
+
+    def close(self, enclosure_device):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+        """Report failure: the simulator has no real enclosure hardware.
+
+        Returns
+        -------
+        success : `bool`
+            Always `False`.
+        """
+        return False
+
+
 class _SimulatedConnectionManager:
     """Stand-in for indi.connection_manager.ConnectionManager."""
 
@@ -326,6 +372,7 @@ class SimulatorIndiInterface(IndiInterface):
         self.focuser_controller = _SimulatedFocuserController(self)
         self.filter_wheel_controller = _SimulatedFilterWheelController(self)
         self.camera_controller = _SimulatedCameraController(self)
+        self.enclosure_controller = _SimulatedEnclosureController()
         self.connection_manager = _SimulatedConnectionManager()
 
         self.status = {

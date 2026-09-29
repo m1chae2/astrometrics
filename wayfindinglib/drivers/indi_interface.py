@@ -23,6 +23,7 @@ from .indi import coordinate_utils
 from .indi.camera_controller import CameraController
 from .indi.connection_manager import ConnectionManager
 from .indi.device_discovery import DeviceDiscovery
+from .indi.enclosure_controller import EnclosureController
 from .indi.filter_wheel_controller import FilterWheelController
 from .indi.focuser_controller import FocuserController
 from .indi.mount_controller import MountController
@@ -314,6 +315,7 @@ class IndiInterface(IndiClient):
         self.focuser_controller = FocuserController(self)
         self.filter_wheel_controller = FilterWheelController(self)
         self.camera_controller = CameraController(self)
+        self.enclosure_controller = EnclosureController(self)
         self.connection_manager = ConnectionManager(config.get_indi_host(), config.get_indi_port())
         self.device_discovery = DeviceDiscovery(self)
 
@@ -677,6 +679,46 @@ class IndiInterface(IndiClient):
             The focuser device, or `None` if none is found.
         """
         return self.device_discovery.find_focuser()
+
+    def _find_enclosure_device(self):  # ruff: ignore[missing-return-type-private-function]
+        """Heuristic to find the roll-off-roof/dome device.
+
+        Returns
+        -------
+        device : `PyIndi.BaseDevice` or `None`
+            The enclosure device, or `None` if none is found.
+        """
+        return self.device_discovery.find_enclosure()
+
+    def get_enclosure_state(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        """Return the enclosure's current motion state.
+
+        Returns
+        -------
+        state : `EnclosureState`
+            The current enclosure state (`UNKNOWN` if unavailable).
+        """
+        return self.enclosure_controller.get_state(self._find_enclosure_device())
+
+    def open_enclosure(self) -> bool:
+        """Command the enclosure shutter open.
+
+        Returns
+        -------
+        success : `bool`
+            True if the open command was sent and confirmed.
+        """
+        return self.enclosure_controller.open(self._find_enclosure_device())
+
+    def close_enclosure(self) -> bool:
+        """Command the enclosure shutter closed.
+
+        Returns
+        -------
+        success : `bool`
+            True if the close command was sent and confirmed.
+        """
+        return self.enclosure_controller.close(self._find_enclosure_device())
 
     def _find_filterwheel_device(self):  # ruff: ignore[missing-return-type-private-function]
         """Heuristic to find filter wheel.

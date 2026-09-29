@@ -450,6 +450,7 @@ def connect(observatory) -> bool:  # ruff: ignore[missing-type-function-argument
     _run_sync(observatory.filter_wheel_driver.connect())
     _run_sync(observatory.camera_driver.connect())
     _run_sync(observatory.guide_camera_driver.connect())
+    _run_sync(observatory.enclosure_driver.connect())
     return True
 
 
@@ -475,7 +476,114 @@ def disconnect(observatory) -> bool:  # ruff: ignore[missing-type-function-argum
     _run_sync(observatory.filter_wheel_driver.disconnect())
     _run_sync(observatory.camera_driver.disconnect())
     _run_sync(observatory.guide_camera_driver.disconnect())
+    _run_sync(observatory.enclosure_driver.disconnect())
     return True
+
+
+def get_enclosure_state(observatory):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Return the enclosure's current motion state.
+
+    A read, not a command -- no authority check.
+
+    Returns
+    -------
+    state : `EnclosureState`
+        The current enclosure state (`UNKNOWN` if unavailable).
+    """
+    return _run_sync(observatory.enclosure_driver.get_state())
+
+
+def open_enclosure(observatory) -> bool:  # ruff: ignore[missing-type-function-argument]
+    """Open the enclosure, refusing if the mount is not clear of it.
+
+    Gated on `OBSERVATORY_SAFETY` and on
+    `enclosure_control.can_leave_park`'s current-state check applied in
+    reverse -- the mount stays parked regardless, so the interlock that
+    matters here is the same "enclosure open before mount leaves park"
+    invariant checked from the enclosure's side: nothing prevents
+    *opening* the enclosure itself, since no mount motion is implied by
+    opening -- this call has no geometric precondition of its own, only
+    the authority check. The corresponding precondition
+    (`can_leave_park`) is enforced separately when the mount is
+    actually commanded to unpark/slew.
+
+    Returns
+    -------
+    success : `bool`
+        Whether the open command was issued and confirmed.
+
+    Requires `OBSERVATORY_SAFETY` to be currently `AUTHORITATIVE`.
+    """
+    _require_authoritative(observatory, ObservatoryCapability.OBSERVATORY_SAFETY)
+    return _run_sync(observatory.enclosure_driver.open())
+
+
+def close_enclosure(observatory) -> bool:  # ruff: ignore[missing-type-function-argument]
+    """Close the enclosure, refusing if the mount is not within clearance.
+
+    Gated on `OBSERVATORY_SAFETY`, then on
+    `enclosure_control.can_close_enclosure`'s geometric interlock,
+    fed the current mount position from `mount_driver.get_status()` --
+    forcing closure with the mount outside its clearance envelope is
+    the damage case this interlock exists to prevent
+    (`wayfindinglib/tasks/control_tasks/enclosure_control.py`).
+
+    Returns
+    -------
+    success : `bool`
+        Whether the close command was issued and confirmed.
+
+    Raises
+    ------
+    AstrometryHardwareError
+        If `OBSERVATORY_SAFETY` is not currently `AUTHORITATIVE`, if no
+        `Enclosure` is configured, or if the mount is not within the
+        configured clearance envelope of the park position.
+    """
+    from wayfindinglib import AstrometryHardwareError
+    from wayfindinglib.tasks.control_tasks.enclosure_control import can_close_enclosure
+
+    _require_authoritative(observatory, ObservatoryCapability.OBSERVATORY_SAFETY)
+
+    enclosure = observatory.active_enclosure()
+    if enclosure is None:
+        raise AstrometryHardwareError("Cannot close enclosure: no Enclosure is configured")
+
+    mount_status = _run_sync(observatory.mount_driver.get_status())
+    mount_altitude_deg = _parse_dms_degrees(mount_status.altitude)
+    mount_azimuth_deg = _parse_dms_degrees(mount_status.azimuth)
+    if mount_altitude_deg is None or mount_azimuth_deg is None:
+        raise AstrometryHardwareError("Close refused: mount position is not currently known")
+    if not can_close_enclosure(enclosure, mount_altitude_deg, mount_azimuth_deg):
+        raise AstrometryHardwareError(
+            "Close refused: mount is not within the configured clearance envelope of the park position"
+        )
+    return _run_sync(observatory.enclosure_driver.close())
+
+
+def _parse_dms_degrees(dms_string: str) -> float | None:
+    """Parse a `MountStatus.altitude`/`.azimuth` D-M-S display string.
+
+    These fields are formatted for display
+    (`coordinate_utils.coordinate_decimal_to_dms`, e.g. ``"45° 12′
+    30.0″"``), not the ``"-"``/``":"``-separated form
+    `coordinate_dms_to_decimal` parses -- a plain regex extraction of
+    the three numeric components is used instead.
+
+    Returns
+    -------
+    degrees : `float` | `None`
+        The parsed decimal-degree value, or `None` if `dms_string`
+        does not contain a valid D-M-S triple (e.g. ``"Unknown"``).
+    """
+    import re
+
+    numbers = re.findall(r"-?\d+(?:\.\d+)?", dms_string or "")
+    if len(numbers) < 3:
+        return None
+    degrees, minutes, seconds = (float(number) for number in numbers[:3])
+    sign = -1.0 if dms_string.strip().startswith("-") else 1.0
+    return sign * (abs(degrees) + minutes / 60.0 + seconds / 3600.0)
 
 
 def sync(observatory, target_name: str) -> dict[str, Any]:  # ruff: ignore[missing-type-function-argument]

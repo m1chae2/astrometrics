@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 
 from wayfindinglib.exceptions import AstrometryHardwareError
+from wayfindinglib.models.equipment_and_site.enclosure import Enclosure, EnclosureState, EnclosureType
 from wayfindinglib.models.policy.delegation import (
     CapabilityDelegation,
     DelegationPolicy,
@@ -50,6 +51,8 @@ class _FakeManager:
         filter_wheel_driver: Any = None,
         camera_driver: Any = None,
         guide_camera_driver: Any = None,
+        enclosure_driver: Any = None,
+        enclosure: Any = None,
         config: Any = None,
         guiding_service: Any = None,
         sync_service: Any = None,
@@ -61,6 +64,8 @@ class _FakeManager:
         self.filter_wheel_driver = filter_wheel_driver
         self.camera_driver = camera_driver
         self.guide_camera_driver = guide_camera_driver
+        self.enclosure_driver = enclosure_driver
+        self._enclosure = enclosure
         self._config = config
         self._guiding_service = guiding_service
         self._sync_service = sync_service
@@ -85,6 +90,16 @@ class _FakeManager:
             This fake manager's configured policy.
         """
         return self._policy
+
+    def active_enclosure(self) -> Any:
+        """Return this fake manager's configured `Enclosure`.
+
+        Returns
+        -------
+        enclosure : `Any`
+            This fake manager's configured enclosure, or `None`.
+        """
+        return self._enclosure
 
 
 class _FakeMountStatus:
@@ -470,20 +485,27 @@ def test_get_focuser_position_is_a_read_with_no_authority_check(mocker):  # ruff
 
 
 def _manager_with_all_drivers(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
-    """Build a `_FakeManager` with all five connect/disconnect-capable drivers.
+    """Build a `_FakeManager` with all six connect/disconnect-capable drivers.
 
     Returns
     -------
     manager : `_FakeManager`
         A manager whose `mount_driver`/`focuser_driver`/
-        `filter_wheel_driver`/`camera_driver`/`guide_camera_driver`
-        each have mocked async `connect`/`disconnect` methods.
+        `filter_wheel_driver`/`camera_driver`/`guide_camera_driver`/
+        `enclosure_driver` each have mocked async `connect`/
+        `disconnect` methods.
     """
     drivers = {
         name: mocker.Mock(
             connect=mocker.AsyncMock(return_value=True), disconnect=mocker.AsyncMock(return_value=True)
         )
-        for name in ("mount_driver", "focuser_driver", "filter_wheel_driver", "camera_driver")
+        for name in (
+            "mount_driver",
+            "focuser_driver",
+            "filter_wheel_driver",
+            "camera_driver",
+            "enclosure_driver",
+        )
     }
     guide_camera_driver = mocker.Mock(
         connect=mocker.AsyncMock(return_value=True), disconnect=mocker.AsyncMock(return_value=True)
@@ -492,7 +514,7 @@ def _manager_with_all_drivers(mocker):  # ruff: ignore[missing-type-function-arg
 
 
 def test_connect_connects_every_configured_driver(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify connect() connects each of the five drivers and returns True."""
+    """Verify connect() connects each of the six drivers and returns True."""
     manager, guide_camera_driver = _manager_with_all_drivers(mocker)
 
     assert ops.connect(manager) is True
@@ -501,10 +523,11 @@ def test_connect_connects_every_configured_driver(mocker):  # ruff: ignore[missi
     manager.filter_wheel_driver.connect.assert_called_once()
     manager.camera_driver.connect.assert_called_once()
     guide_camera_driver.connect.assert_called_once()
+    manager.enclosure_driver.connect.assert_called_once()
 
 
 def test_disconnect_disconnects_every_configured_driver(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify disconnect() disconnects each of the five drivers."""
+    """Verify disconnect() disconnects each of the six drivers."""
     manager, guide_camera_driver = _manager_with_all_drivers(mocker)
 
     assert ops.disconnect(manager) is True
@@ -513,6 +536,7 @@ def test_disconnect_disconnects_every_configured_driver(mocker):  # ruff: ignore
     manager.filter_wheel_driver.disconnect.assert_called_once()
     manager.camera_driver.disconnect.assert_called_once()
     guide_camera_driver.disconnect.assert_called_once()
+    manager.enclosure_driver.disconnect.assert_called_once()
 
 
 def test_sync_raises_without_sync_service():  # ruff: ignore[missing-return-type-undocumented-public-function]
@@ -561,3 +585,123 @@ def test_get_observer_location_returns_dict_when_reported(mocker):  # ruff: igno
         "longitude": -104.9903,
         "elevation": 1600.0,
     }
+
+
+def _test_enclosure() -> Enclosure:
+    """Build an `Enclosure` parked at alt 45deg/az 180deg with 2deg clearance.
+
+    Returns
+    -------
+    enclosure : `Enclosure`
+        A roll-off-roof enclosure configured for the clearance tests
+        below.
+    """
+    return Enclosure(
+        id="test-enclosure",
+        enclosure_type=EnclosureType.ROLL_OFF_ROOF,
+        park_azimuth_deg=180.0,
+        park_altitude_deg=45.0,
+        clearance_tolerance_deg=2.0,
+    )
+
+
+def test_get_enclosure_state_is_a_read_with_no_authority_check(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify get_enclosure_state delegates to the driver with no gating."""
+    enclosure_driver = mocker.Mock()
+    enclosure_driver.get_state = mocker.AsyncMock(return_value=EnclosureState.OPEN)
+    manager = _FakeManager(enclosure_driver=enclosure_driver, policy=_authoritative_policy())
+
+    assert ops.get_enclosure_state(manager) == EnclosureState.OPEN
+
+
+def test_open_enclosure_delegates_to_enclosure_driver(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify open_enclosure delegates once OBSERVATORY_SAFETY is granted."""
+    enclosure_driver = mocker.Mock()
+    enclosure_driver.open = mocker.AsyncMock(return_value=True)
+    manager = _FakeManager(
+        enclosure_driver=enclosure_driver,
+        policy=_authoritative_policy(ObservatoryCapability.OBSERVATORY_SAFETY),
+    )
+
+    assert ops.open_enclosure(manager) is True
+    enclosure_driver.open.assert_called_once()
+
+
+def test_open_enclosure_raises_when_observatory_safety_not_authoritative(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify open_enclosure refuses without OBSERVATORY_SAFETY authority."""
+    enclosure_driver = mocker.Mock()
+    manager = _FakeManager(enclosure_driver=enclosure_driver, policy=_authoritative_policy())
+
+    with pytest.raises(AstrometryHardwareError, match="OBSERVATORY_SAFETY"):
+        ops.open_enclosure(manager)
+    enclosure_driver.open.assert_not_called()
+
+
+def test_close_enclosure_delegates_when_mount_is_within_clearance(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify close_enclosure dispatches when the mount is parked clear."""
+    enclosure_driver = mocker.Mock()
+    enclosure_driver.close = mocker.AsyncMock(return_value=True)
+    mount_driver = mocker.Mock()
+    mount_driver.get_status = mocker.AsyncMock(
+        return_value=_FakeMountStatus(altitude="45:00:00", azimuth="180:00:00")
+    )
+    manager = _FakeManager(
+        enclosure_driver=enclosure_driver,
+        mount_driver=mount_driver,
+        enclosure=_test_enclosure(),
+        policy=_authoritative_policy(ObservatoryCapability.OBSERVATORY_SAFETY),
+    )
+
+    assert ops.close_enclosure(manager) is True
+    enclosure_driver.close.assert_called_once()
+
+
+def test_close_enclosure_refuses_when_mount_is_outside_clearance(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify close_enclosure refuses rather than closing on the mount.
+
+    This is the damage case `enclosure_control.can_close_enclosure`
+    exists to prevent -- the mount is far from its configured park
+    position, so closing the roof/dome now would strike it.
+    """
+    enclosure_driver = mocker.Mock()
+    enclosure_driver.close = mocker.AsyncMock(return_value=True)
+    mount_driver = mocker.Mock()
+    mount_driver.get_status = mocker.AsyncMock(
+        return_value=_FakeMountStatus(altitude="10:00:00", azimuth="0:00:00")
+    )
+    manager = _FakeManager(
+        enclosure_driver=enclosure_driver,
+        mount_driver=mount_driver,
+        enclosure=_test_enclosure(),
+        policy=_authoritative_policy(ObservatoryCapability.OBSERVATORY_SAFETY),
+    )
+
+    with pytest.raises(AstrometryHardwareError, match="clearance"):
+        ops.close_enclosure(manager)
+    enclosure_driver.close.assert_not_called()
+
+
+def test_close_enclosure_raises_when_observatory_safety_not_authoritative(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify close_enclosure refuses without OBSERVATORY_SAFETY authority."""
+    enclosure_driver = mocker.Mock()
+    manager = _FakeManager(
+        enclosure_driver=enclosure_driver, enclosure=_test_enclosure(), policy=_authoritative_policy()
+    )
+
+    with pytest.raises(AstrometryHardwareError, match="OBSERVATORY_SAFETY"):
+        ops.close_enclosure(manager)
+    enclosure_driver.close.assert_not_called()
+
+
+def test_close_enclosure_raises_when_no_enclosure_configured(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify close_enclosure raises a clear error with no `Enclosure`."""
+    enclosure_driver = mocker.Mock()
+    manager = _FakeManager(
+        enclosure_driver=enclosure_driver,
+        enclosure=None,
+        policy=_authoritative_policy(ObservatoryCapability.OBSERVATORY_SAFETY),
+    )
+
+    with pytest.raises(AstrometryHardwareError, match="no Enclosure is configured"):
+        ops.close_enclosure(manager)
+    enclosure_driver.close.assert_not_called()

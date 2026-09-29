@@ -224,6 +224,30 @@ class DeviceDiscovery:
                 return candidate_device
         return candidates[0]
 
+    def find_enclosure(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        """Heuristic to find the roll-off-roof/dome device.
+
+        1. Look for the standard INDI Dome Interface's `DOME_SHUTTER`
+        switch. 2. Prefer device with 'dome', 'roof', or 'shutter' in
+        name.
+
+        Returns
+        -------
+        device
+            The enclosure device, or `None` if none is found.
+        """
+        device = self.find_device_with_property("DOME_SHUTTER")
+        if device:
+            return device
+        client = self.client
+        if not client.isServerConnected() or not client.deviceMap:
+            return None
+        for device_name, device in client.deviceMap.items():
+            lowered_name = device_name.lower()
+            if "dome" in lowered_name or "roof" in lowered_name or "shutter" in lowered_name:
+                return device
+        return None
+
     def find_main_camera(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Heuristic to find the main imaging camera.
 

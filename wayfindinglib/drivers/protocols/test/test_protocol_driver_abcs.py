@@ -173,3 +173,53 @@ async def test_indi_camera_driver_guide_role_has_no_temperature_source() -> None
     """
     guide_driver = IndiCameraDriver(session=object(), role="guide")
     assert await guide_driver.get_sensor_temperature_c() is None
+
+
+@pytest.mark.anyio
+async def test_indi_enclosure_driver_delegates_to_session_enclosure_methods() -> None:
+    """Verify `IndiEnclosureDriver` delegates to the session's M6 methods.
+
+    Regression test for M6: earlier (M1-scaffolded) versions of these
+    methods raised `NotImplementedError` -- this confirms they now
+    delegate to `IndiInterface.get_enclosure_state`/`open_enclosure`/
+    `close_enclosure`, backed by `EnclosureController` (M6).
+    """
+    from wayfindinglib.models.equipment_and_site.enclosure import EnclosureState
+
+    class _FakeSession:
+        """A stand-in session recording enclosure command calls."""
+
+        def get_enclosure_state(self):  # ruff: ignore[missing-return-type-private-function]
+            """Report a fixed `OPEN` state.
+
+            Returns
+            -------
+            state : `EnclosureState`
+                Always `EnclosureState.OPEN`.
+            """
+            return EnclosureState.OPEN
+
+        def open_enclosure(self) -> bool:
+            """Report a successful open command.
+
+            Returns
+            -------
+            success : `bool`
+                Always `True`.
+            """
+            return True
+
+        def close_enclosure(self) -> bool:
+            """Report a successful close command.
+
+            Returns
+            -------
+            success : `bool`
+                Always `True`.
+            """
+            return True
+
+    driver = IndiEnclosureDriver(session=_FakeSession())
+    assert await driver.get_state() == EnclosureState.OPEN
+    assert await driver.open() is True
+    assert await driver.close() is True

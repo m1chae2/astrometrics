@@ -527,3 +527,94 @@ def test_capture_image_and_sync_coordinates_refused_when_not_authoritative(contr
         control.guide_expose(1.0)
     with pytest.raises(AstrometryHardwareError, match="PLATE_SOLVE_ALIGNMENT"):
         control.sync_coordinates(10.0, 20.0)
+
+
+def test_enclosure_state_and_commands_against_simulator(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Exercise enclosure state/authority gating through the real driver stack.
+
+    `ObservatoryControl.get_enclosure_state()`/`.open_enclosure()`/
+    `.close_enclosure()` -> `hardware_operations` -> `EnclosureDriver` ->
+    `IndiEnclosureDriver` -> `SimulatorIndiInterface` (M6). No dome/roof
+    device is simulated today, so `get_enclosure_state()` honestly
+    reports `UNKNOWN` (the "Unknown Is Unsafe" invariant) rather than a
+    fabricated open/closed value.
+    """
+    from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
+    from wayfindinglib.models.equipment_and_site.enclosure import EnclosureState
+
+    control.driver = SimulatorIndiInterface(config=control._config)
+
+    assert control.get_enclosure_state() == EnclosureState.UNKNOWN
+
+
+def test_enclosure_commands_refused_when_not_authoritative(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify open_enclosure/close_enclosure fail closed by default."""
+    from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
+    from wayfindinglib.exceptions import AstrometryHardwareError
+
+    control.driver = SimulatorIndiInterface(config=control._config)
+
+    with pytest.raises(AstrometryHardwareError, match="OBSERVATORY_SAFETY"):
+        control.open_enclosure()
+    with pytest.raises(AstrometryHardwareError, match="OBSERVATORY_SAFETY"):
+        control.close_enclosure()
+
+
+def test_close_enclosure_refuses_when_mount_outside_clearance(control, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify close_enclosure refuses rather than closing on the mount.
+
+    Plan Verification (M6): asserts refusal, not just the happy path --
+    a mount position far from the configured park position must reject
+    the close through the real `ObservatoryControl.close_enclosure` ->
+    `hardware_operations.close_enclosure` ->
+    `enclosure_control.can_close_enclosure` interlock chain, not just
+    the unit-level fakes in `test_hardware_operations.py`. The mount's
+    reported position is stubbed directly (rather than driven through
+    the simulator's real slew physics) so the test asserts the
+    interlock wiring, not incidental simulator behavior.
+    """
+    from wayfindinglib.drivers.protocols.mount_driver import MountStatus
+    from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
+    from wayfindinglib.exceptions import AstrometryHardwareError
+    from wayfindinglib.models.equipment_and_site.enclosure import Enclosure, EnclosureType
+    from wayfindinglib.models.policy.delegation import CapabilityDelegation, DelegationPolicy
+
+    control.driver = SimulatorIndiInterface(config=control._config)
+    stub_mount_driver = mocker.Mock()
+    stub_mount_driver.get_status = mocker.AsyncMock(
+        return_value=MountStatus(
+            ra="00:00:00",
+            dec="+00:00:00",
+            altitude="0° 0′ 0″",
+            azimuth="0° 0′ 0″",
+            trackingStatus="Tracking",
+        )
+    )
+    control.mount_driver = stub_mount_driver
+    control._butler.put(
+        DelegationPolicy(
+            id="default",
+            capability_delegations=[
+                CapabilityDelegation(
+                    capability=ObservatoryCapability.OBSERVATORY_SAFETY,
+                    state=DelegationState.AUTHORITATIVE,
+                ),
+            ],
+        ),
+        "delegation_policy",
+        {"id": "default"},
+    )
+    control._butler.put(
+        Enclosure(
+            id="enc-1",
+            enclosure_type=EnclosureType.ROLL_OFF_ROOF,
+            park_azimuth_deg=180.0,
+            park_altitude_deg=45.0,
+            clearance_tolerance_deg=2.0,
+        ),
+        "enclosure",
+        {"id": "enc-1"},
+    )
+
+    with pytest.raises(AstrometryHardwareError, match="clearance"):
+        control.close_enclosure()

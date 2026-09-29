@@ -124,6 +124,10 @@ export interface ActionRegistry {
     "observatory:list_cameras": { payload: Record<string, never>; response: EquipmentCameraProfile[] };
     "observatory:get_equipment_configuration": { payload: Record<string, never>; response: EquipmentConfigurationResult | null };
     "observatory:set_active_camera": { payload: { camera_name: string }; response: boolean };
+    "telescope:apply_promotion_decision": {
+        payload: { capability: string; new_state: string; evidence_note?: string };
+        response: Record<string, any>;
+    };
 
     // System
     "system:save": { payload: Record<string, never>; response: void };

@@ -103,13 +103,24 @@ const normalizeAppMode = (m: string): string => {
  * Uses `visitedModes` to mount heavy components lazily on first visit,
  * keeping them mounted (but hidden) to preserve state during navigation.
  */
+// Whether this window is an auxiliary/secondary display (opened via "Open in
+// new window") rather than the main window. Read once at module scope since
+// it's fixed for the lifetime of a given window (its URL query string never
+// changes).
+const isAuxWindow = (() => {
+  try {
+    return Boolean(new URLSearchParams(window.location.search).get('windowId'));
+  } catch {
+    return false;
+  }
+})();
+
 const AppContent: React.FC = () => {
   const [mode, setMode] = useState<string>(() => {
     try {
       const params = new URLSearchParams(window.location.search);
       const urlMode = params.get('mode');
       if (urlMode) return normalizeAppMode(urlMode);
-      const isAuxWindow = Boolean(params.get('windowId'));
       if (isAuxWindow) return 'Image Processing';
       return normalizeAppMode(window.localStorage.getItem('appMode') || 'Image Viewer');
     } catch {
@@ -119,10 +130,17 @@ const AppContent: React.FC = () => {
 
   const { config } = useAstrometrics();
 
-  // Tracks every mode the user has switched to during this session, so a
-  // panel is mounted the first time its mode becomes active and then stays
-  // mounted (hidden via CSS) rather than being mounted again from scratch.
-  const [visitedModes, setVisitedModes] = useState<Set<string>>(() => new Set([mode]));
+  // Tracks every mode that's been mounted (and thus stays mounted, hidden via
+  // CSS, rather than remounting from scratch when revisited). The main
+  // window force-mounts every mode immediately at boot, so the splash screen
+  // (gated on every mode reporting its data loaded — see
+  // ui/common/utils/appBootReadiness.ts) covers the whole app, not just the
+  // first view shown. Auxiliary windows keep the original on-demand
+  // behavior: they only ever show one mode, so mounting the rest would be
+  // pure waste.
+  const [visitedModes, setVisitedModes] = useState<Set<string>>(
+    () => (isAuxWindow ? new Set([mode]) : new Set(MODE_PANELS.map((p) => p.mode)))
+  );
   useEffect(() => {
     setVisitedModes((previouslyVisitedModes) => {
       if (previouslyVisitedModes.has(mode)) return previouslyVisitedModes;

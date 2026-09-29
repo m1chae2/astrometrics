@@ -17,6 +17,7 @@ import { emit as emitEvent } from '../common/utils/eventBus';
 import { emitToast } from '../common/utils/emitToast';
 import { reportError } from '../common/utils/reportError';
 import { navigateToElement } from '../common/utils/displayCoordinator';
+import { useReportModeReady } from '../common/utils/appBootReadiness';
 
 /**
  * Main component for the image processing view.
@@ -60,7 +61,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
   } = useTargetContext();
 
   const {
-    items, filterOptions, selectedFilterOption, setFilterOption,
+    items, isLoading: isTargetListLoading, filterOptions, selectedFilterOption, setFilterOption,
     filterText, setFilterText,
     isLocalTarget,
     lightFrames, isProcessing, startProcessing, cancelProcessingJob,
@@ -88,6 +89,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
     loading, error, stretch, toggleStretch,
     setSelectedLightRow, selectedLightRow
   } = useViewerState(selectedTarget, lightFrames, selectedFile);
+  useReportModeReady('Image Processing', !loading);
 
   // The raw frames ticked for stacking must not stay ticked once stacking
   // ends. A leftover selection would be sent to the next Analyze run in
@@ -397,6 +399,9 @@ const ImageProcessingDisplayInner: React.FC = () => {
       filterText={filterText}
       onFilterTextChange={setFilterText}
       highlightedIds={remoteTargets}
+      isLoading={isTargetListLoading}
+      loadingMessage="Loading targets…"
+      emptyMessage="No targets in the catalog."
       // REQ: IMG-1.4 - Target management actions enclosed in a consistent panel
       actions={
         <ListActions>

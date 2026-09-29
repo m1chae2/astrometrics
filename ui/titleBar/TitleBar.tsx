@@ -54,6 +54,7 @@ export const TitleBar: React.FC = () => {
                 <button
                     className="title-bar__button"
                     aria-label="Minimize window"
+                    title="Minimize window"
                     onClick={() => windowApi.minimize()}
                     type="button"
                 >
@@ -65,6 +66,7 @@ export const TitleBar: React.FC = () => {
                 <button
                     className="title-bar__button"
                     aria-label={isMaximized ? 'Restore window' : 'Maximize window'}
+                    title={isMaximized ? 'Restore window' : 'Maximize window'}
                     onClick={() => windowApi.toggleMaximize()}
                     type="button"
                 >
@@ -83,6 +85,7 @@ export const TitleBar: React.FC = () => {
                 <button
                     className="title-bar__button title-bar__button--close"
                     aria-label="Close window"
+                    title="Close window"
                     onClick={() => windowApi.close()}
                     type="button"
                 >

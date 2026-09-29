@@ -17,6 +17,7 @@ import { useIngestionManager, IngestionState } from '../../common/hooks/useInges
 export interface ImageProcessingContextValue extends UseImageProcessingResult {
     isLocalTarget: boolean;
     items: SelectableItem[];
+    isLoading: boolean;
     filterOptions: string[];
     selectedFilterOption: string;
     setFilterOption: (option: string) => void;
@@ -34,6 +35,7 @@ interface ImageProcessingProviderProps {
     children: ReactNode;
     isLocalTarget: boolean;
     items: SelectableItem[];
+    isLoading: boolean;
     filterOptions: string[];
     selectedFilterOption: string;
     setFilterOption: (option: string) => void;
@@ -49,6 +51,7 @@ export const ImageProcessingProvider: React.FC<ImageProcessingProviderProps> = (
     children,
     isLocalTarget,
     items,
+    isLoading,
     filterOptions,
     selectedFilterOption,
     setFilterOption,
@@ -64,6 +67,7 @@ export const ImageProcessingProvider: React.FC<ImageProcessingProviderProps> = (
         ...processingResult,
         isLocalTarget,
         items,
+        isLoading,
         filterOptions,
         selectedFilterOption,
         setFilterOption,

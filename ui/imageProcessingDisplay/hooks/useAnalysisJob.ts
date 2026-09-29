@@ -3,7 +3,7 @@
  * @description Hook for managing variability analysis jobs and results.
  * REQ: IMG-4: Data Analysis Workflow
  */
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
     analyzeTarget,
     fetchAnalysisResults,
@@ -11,6 +11,7 @@ import {
 } from '../../common/services/imagingService';
 import { reportError } from '../../common/utils/reportError';
 import { AnalysisResult } from '../../common/types/backendTypes';
+import { useAstrometrics } from '../../common/context/AstrometricsContext';
 
 export interface AnalysisJobResult {
     isAnalyzing: boolean;
@@ -25,10 +26,10 @@ export function useAnalysisJob(
     onJobStarted?: (jobId: string) => void,
     onClearLogs?: () => void
 ): AnalysisJobResult {
+    const { activeJobs } = useAstrometrics();
     const [analyzingTargetId, setAnalyzingTargetId] = useState<string | null>(null);
     const [analysisResults, setAnalysisResults] = useState<AnalysisResult | null>(null);
     const [activeAnalysisJobId, setActiveAnalysisJobId] = useState<string | null>(null);
-    const analysisMonitorRef = useRef<number | null>(null);
 
     // useImageProcessing passes onLog/onJobStarted/onClearLogs as fresh inline
     // closures on every render, so callbacks here read the latest version via
@@ -44,114 +45,94 @@ export function useAnalysisJob(
         onClearLogsRef.current = onClearLogs;
     });
 
-    // analyzingTargetId is read inside the watchdog poll below without being
-    // a dependency of it, so the interval isn't torn down and recreated on
-    // every start/stop transition (monitorAnalysis already owns that
-    // lifecycle once a job is picked up).
+    // analyzingTargetId is read inside the activeJobs-driven effect below
+    // without being a dependency of it, so that effect only re-runs when the
+    // target or the shared active-jobs feed actually changes.
     const analyzingTargetIdRef = useRef(analyzingTargetId);
     useEffect(() => {
         analyzingTargetIdRef.current = analyzingTargetId;
     }, [analyzingTargetId]);
-
-    // Clear state when target changes
-    useEffect(() => {
-        setAnalysisResults(null);
-        setAnalyzingTargetId(null);
-        setActiveAnalysisJobId(null);
-    }, [selectedTarget]);
 
     const selectedTargetRef = useRef(selectedTarget);
     useEffect(() => {
         selectedTargetRef.current = selectedTarget;
     }, [selectedTarget]);
 
-    const monitorAnalysis = useCallback((targetId: string) => {
-        if (analysisMonitorRef.current) {
-            window.clearInterval(analysisMonitorRef.current);
-            analysisMonitorRef.current = null;
-        }
-        analysisMonitorRef.current = window.setInterval(async () => {
-            try {
-                const results = await fetchAnalysisResults(targetId);
-                if (results && (results.status === 'finished' || results.variableCandidates)) {
-                    if (selectedTargetRef.current === targetId) {
-                        setAnalysisResults(results);
-                        // Store this as the latest analyzed target for other views
-                        localStorage.setItem('latestAnalysisTargetId', targetId);
-                    }
-                    onLogRef.current?.(`[${new Date().toLocaleTimeString()}] Analysis complete for ${targetId}.`);
-                    setAnalyzingTargetId(null);
-                    setActiveAnalysisJobId(null);
-                    if (analysisMonitorRef.current) {
-                        window.clearInterval(analysisMonitorRef.current);
-                        analysisMonitorRef.current = null;
-                    }
-                } else if (!results || results.status === 'failed' || results.status === 'error') {
-                    const msg = results?.error || results?.message || 'Analysis failed';
-                    onLogRef.current?.(`[${new Date().toLocaleTimeString()}] ERROR: ${msg}`);
-                    setAnalyzingTargetId(null);
-                    setActiveAnalysisJobId(null);
-                    if (analysisMonitorRef.current) {
-                        window.clearInterval(analysisMonitorRef.current);
-                        analysisMonitorRef.current = null;
-                    }
-                }
-            } catch {
-                setAnalyzingTargetId(null);
-                setActiveAnalysisJobId(null);
-                if (analysisMonitorRef.current) {
-                    window.clearInterval(analysisMonitorRef.current);
-                    analysisMonitorRef.current = null;
-                }
-            }
-        }, 2000);
-    }, []);
+    // Whether the current analyzingTargetId's job has actually been observed
+    // in activeJobs at least once. Guards against the window right after
+    // startAnalysis()/an out-of-band start where the job hasn't reached the
+    // shared feed yet -- without this, "not found in activeJobs" would be
+    // indistinguishable from "already finished" and the effect below would
+    // treat a job that hasn't even registered yet as already complete.
+    const confirmedActiveJobIdRef = useRef<string | null>(null);
 
-    // Check analysis state on target switch, then keep polling: analysis
-    // jobs aren't only started from this hook's own startAnalysis() (e.g. a
-    // standalone script calling analyze_target() directly), so without a
-    // recurring check here a job started elsewhere would never be picked up
-    // -- once monitorAnalysis takes over for an in-flight job it clears this
-    // interval's work by short-circuiting on analyzingTargetIdRef.
+    // Clear state when target changes, then do a one-off check for a result
+    // an analysis already completed before this hook mounted (e.g. switching
+    // back to a previously-analyzed target). An in-flight job for the new
+    // target, if any, is picked up by the activeJobs-driven effect below.
     useEffect(() => {
-        if (!selectedTarget || !shouldFetch) {
-            setAnalysisResults(null);
+        setAnalysisResults(null);
+        setAnalyzingTargetId(null);
+        setActiveAnalysisJobId(null);
+        confirmedActiveJobIdRef.current = null;
+
+        if (!selectedTarget || !shouldFetch) return;
+        let cancelled = false;
+        fetchAnalysisResults(selectedTarget).then((results) => {
+            if (cancelled || selectedTargetRef.current !== selectedTarget) return;
+            if (results && (results.status === 'finished' || results.variableCandidates)) {
+                setAnalysisResults(results);
+            }
+        }).catch(() => { /* Ignore */ });
+        return () => { cancelled = true; };
+    }, [selectedTarget, shouldFetch]);
+
+    // Tracks analysis jobs via AstrometricsContext's shared active-jobs feed
+    // instead of running its own polling loop: every pipeline job already
+    // lands there (one poll for the whole app), so this only reaches out to
+    // the backend itself once -- to fetch the final result -- when this
+    // target's job transitions from active to no-longer-active. Also picks
+    // up jobs started out-of-band (e.g. a standalone script), since the
+    // shared feed isn't scoped to jobs this hook itself started.
+    useEffect(() => {
+        if (!selectedTarget || !shouldFetch) return;
+
+        const activeJob = activeJobs.find((j) => j.targetId === selectedTarget && j.jobType === 'analysis');
+
+        if (activeJob) {
+            if (analyzingTargetIdRef.current !== selectedTarget) {
+                setAnalyzingTargetId(selectedTarget);
+            }
+            confirmedActiveJobIdRef.current = activeJob.id;
+            setActiveAnalysisJobId((prev) => (prev === activeJob.id ? prev : activeJob.id));
             return;
         }
 
-        let mounted = true;
+        // Nothing active for this target. Only treat that as "just finished"
+        // if we'd actually seen it active before -- otherwise this is the
+        // window right after starting, before the shared feed has caught up.
+        if (analyzingTargetIdRef.current !== selectedTarget || !confirmedActiveJobIdRef.current) return;
+        confirmedActiveJobIdRef.current = null;
 
-        const checkForJob = () => {
-            if (!mounted || analyzingTargetIdRef.current) return;
-            fetchAnalysisResults(selectedTarget).then((results) => {
-                if (!mounted) return;
-                if (results?.status === 'started') {
-                    setAnalyzingTargetId(selectedTarget);
-                    if (results.jobId) setActiveAnalysisJobId(results.jobId);
-                    monitorAnalysis(selectedTarget);
-                } else if (results && (results.status === 'finished' || results.variableCandidates)) {
-                    setAnalysisResults(results);
-                }
-            }).catch(() => { });
-        };
-
-        checkForJob();
-        const timer = window.setInterval(checkForJob, 4000);
-
-        return () => {
-            mounted = false;
-            window.clearInterval(timer);
-        };
-    }, [selectedTarget, shouldFetch, monitorAnalysis]);
-
-    useEffect(() => {
-        return () => {
-            if (analysisMonitorRef.current) {
-                window.clearInterval(analysisMonitorRef.current);
-                analysisMonitorRef.current = null;
+        let cancelled = false;
+        fetchAnalysisResults(selectedTarget).then((results) => {
+            if (cancelled || selectedTargetRef.current !== selectedTarget) return;
+            if (results && (results.status === 'finished' || results.variableCandidates)) {
+                setAnalysisResults(results);
+                // Store this as the latest analyzed target for other views
+                localStorage.setItem('latestAnalysisTargetId', selectedTarget);
+                onLogRef.current?.(`[${new Date().toLocaleTimeString()}] Analysis complete for ${selectedTarget}.`);
+            } else if (!results || results.status === 'failed' || results.status === 'error') {
+                const msg = results?.error || results?.message || 'Analysis failed';
+                onLogRef.current?.(`[${new Date().toLocaleTimeString()}] ERROR: ${msg}`);
             }
-        };
-    }, []);
+        }).catch(() => { /* Ignore */ }).finally(() => {
+            if (cancelled) return;
+            setAnalyzingTargetId(null);
+            setActiveAnalysisJobId(null);
+        });
+        return () => { cancelled = true; };
+    }, [selectedTarget, shouldFetch, activeJobs]);
 
     // Log Streaming - mirrors the mechanism useStackingJob uses for its own
     // job log panel: poll the DB-backed job log tail for the active job.
@@ -189,7 +170,7 @@ export function useAnalysisJob(
                 setActiveAnalysisJobId(jobId);
                 onJobStartedRef.current?.(jobId);
             }
-            monitorAnalysis(targetToAnalyze);
+            // The activeJobs-driven effect above picks up completion from here.
         } catch (err) {
             setAnalyzingTargetId(null);
             setActiveAnalysisJobId(null);

@@ -183,6 +183,16 @@ const api = {
 			const handler = (event, path) => callback(path);
 			ipcRenderer.on('open-file', handler);
 			return () => ipcRenderer.removeListener('open-file', handler);
+		},
+
+		/**
+		 * Tells the main process every mode has finished its initial data load
+		 * (see ui/common/utils/appBootReadiness.ts), so the splash screen can be
+		 * dismissed. Main window only; other windows never complete the full set
+		 * of modes, so they never call this.
+		 */
+		reportAppFullyLoaded() {
+			ipcRenderer.send('app-fully-loaded');
 		}
 	},
 	window: {

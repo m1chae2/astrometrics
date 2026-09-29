@@ -20,6 +20,7 @@ import { IndiPropertyData } from '../common/types/indiTypes';
  */
 export const IndiStatusPanel: React.FC = () => {
     const [devices, setDevices] = useState<string[]>([]);
+    const [devicesLoading, setDevicesLoading] = useState(true);
     const [selectedDevice, setSelectedDevice] = useState<string>('');
     const [properties, setProperties] = useState<Record<string, IndiPropertyData>>({});
 
@@ -27,7 +28,10 @@ export const IndiStatusPanel: React.FC = () => {
         let mounted = true;
         const loadDevices = async () => {
             const devs = await fetchIndiDevices();
-            if (mounted) setDevices(devs);
+            if (mounted) {
+                setDevices(devs);
+                setDevicesLoading(false);
+            }
         };
         loadDevices();
         const interval = setInterval(loadDevices, 5000);
@@ -66,6 +70,7 @@ export const IndiStatusPanel: React.FC = () => {
                     devices={devices}
                     selectedDevice={selectedDevice}
                     onSelectDevice={setSelectedDevice}
+                    isLoading={devicesLoading}
                 />
             </SectionPanel>
 

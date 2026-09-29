@@ -39,6 +39,13 @@ export interface RadioListManagerProps {
     noWrapper?: boolean;
     title?: string;
     actionsTitle?: string;
+
+    /** Whether `items` is still being fetched, for the empty-state message. */
+    isLoading?: boolean;
+    /** Shown in place of the list while `isLoading` is true and `items` is empty. */
+    loadingMessage?: React.ReactNode;
+    /** Shown in place of the list once loading has finished and `items` is empty. */
+    emptyMessage?: React.ReactNode;
 }
 
 /**
@@ -67,6 +74,9 @@ export const RadioListManager: React.FC<RadioListManagerProps> = ({
     noWrapper = false,
     title = 'List',
     actionsTitle = 'Controls',
+    isLoading,
+    loadingMessage,
+    emptyMessage,
 }) => {
     // REQ: GEN-1.1 - Consistent container structure
 
@@ -94,6 +104,9 @@ export const RadioListManager: React.FC<RadioListManagerProps> = ({
                 pendingId={pendingId}
                 onSelect={onSelect}
                 highlightedIds={highlightedIds}
+                isLoading={isLoading}
+                loadingMessage={loadingMessage}
+                emptyMessage={emptyMessage}
             />
 
             {/* Pagination Controls */}

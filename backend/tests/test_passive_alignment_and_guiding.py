@@ -160,7 +160,7 @@ def test_guiding_service_uses_phd2_samples() -> None:
     )
     phd2_mock.drain_guiding_samples.return_value = [sample]
 
-    service = GuidingService(indi_interface=MagicMock(), phd2_service=phd2_mock)
+    service = GuidingService(observatory_api=MagicMock(), phd2_service=phd2_mock)
     service.poll_external_telemetry()
 
     status = service.get_status()
@@ -178,10 +178,10 @@ def test_guiding_service_does_not_inject_noise_when_idle() -> None:
     phd2_mock = MagicMock()
     phd2_mock.drain_guiding_samples.return_value = []
 
-    indi_mock = MagicMock()
-    indi_mock._external_pulses = []
+    observatory_mock = MagicMock()
+    observatory_mock.drain_external_pulses.return_value = []
 
-    service = GuidingService(indi_interface=indi_mock, phd2_service=phd2_mock)
+    service = GuidingService(observatory_api=observatory_mock, phd2_service=phd2_mock)
     service.poll_external_telemetry()
 
     status = service.get_status()
@@ -354,7 +354,7 @@ def test_guiding_service_persists_live_samples_to_logger_interface() -> None:
 
     logger_mock = MagicMock()
     service = GuidingService(
-        indi_interface=MagicMock(),
+        observatory_api=MagicMock(),
         phd2_service=phd2_mock,
         logger_interface=logger_mock,
     )
@@ -384,7 +384,7 @@ def test_guiding_service_ingest_phd2_log_file(tmp_path: pytest.TempPathFactory) 
     log_file.write_text(log_content, encoding="utf-8")
 
     logger_mock = MagicMock()
-    service = GuidingService(logger_interface=logger_mock)
+    service = GuidingService(observatory_api=MagicMock(), logger_interface=logger_mock)
     count = service.ingest_phd2_log_file(str(log_file), target_name="IC 1396")
 
     assert count == 1
@@ -445,7 +445,10 @@ def test_indi_interface_pulse_coalescing_and_echo_filtering() -> None:
     # 4. Process through GuidingService: should coalesce into ONE sample
     phd2_mock = MagicMock()
     phd2_mock.drain_guiding_samples.return_value = []
-    service = GuidingService(indi_interface=interface, phd2_service=phd2_mock)
+    observatory_mock = MagicMock()
+    observatory_mock.drain_external_pulses.side_effect = interface.drain_external_pulses
+    observatory_mock.get_telescope_status.return_value = {}
+    service = GuidingService(observatory_api=observatory_mock, phd2_service=phd2_mock)
     service.poll_external_telemetry()
 
     status = service.get_status()

@@ -39,6 +39,57 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
+_MOUNT_CONTROLLED_PROPERTY_NAMES = frozenset({
+    "EQUATORIAL_EOD_COORD",
+    "HORIZONTAL_COORD",
+    "TELESCOPE_PARK",
+    "PARK",
+    "TELESCOPE_TRACK_STATE",
+    "TELESCOPE_MOTION_NS",
+    "TELESCOPE_MOTION_WE",
+    "TELESCOPE_ABORT_MOTION",
+    "ABORT",
+    "ON_COORD_SET",
+    "TELESCOPE_SLEW_RATE",
+})
+"""INDI property vector names `wayfindinglib/drivers/indi/mount_controller.py`
+writes to, used by `IndiInterface._should_block_command` to exclude mount
+commands from the legacy Safe Mode gate now that `MOUNT_CONTROL` authority is
+checked centrally instead (see that method's docstring).
+"""
+
+_FOCUSER_CONTROLLED_PROPERTY_NAMES = frozenset({
+    "ABS_FOCUS_POSITION",
+    "REL_FOCUS_POSITION",
+    "FOCUS_MOTION",
+    "Mode",
+    "FOCUS_MODE",
+})
+"""INDI property vector names
+`wayfindinglib/drivers/indi/focuser_controller.py` writes to, excluded
+from the legacy Safe Mode gate now that `AUTOFOCUS` authority is
+checked centrally instead (M3).
+"""
+
+_FILTER_WHEEL_CONTROLLED_PROPERTY_NAMES = frozenset({
+    "FILTER_SLOT",
+})
+"""INDI property vector names
+`wayfindinglib/drivers/indi/filter_wheel_controller.py` writes to,
+excluded from the legacy Safe Mode gate now that `CAPTURE_ORCHESTRATION`
+authority is checked centrally instead (M3).
+"""
+
+_CENTRALLY_AUTHORIZED_PROPERTY_NAMES = (
+    _MOUNT_CONTROLLED_PROPERTY_NAMES
+    | _FOCUSER_CONTROLLED_PROPERTY_NAMES
+    | _FILTER_WHEEL_CONTROLLED_PROPERTY_NAMES
+)
+"""Union of every device type's property names excluded from the legacy Safe
+Mode gate so far. Grows by one union member per milestone (M2 mount, M3
+focuser/filter wheel, ...) until M6 completes and the gate is retired outright.
+"""
+
 
 class TelescopeStatus(BaseModel):
     """Represents the current status and telemetry of the telescope.
@@ -1108,21 +1159,30 @@ class IndiInterface(IndiClient):
 
         REQ: SR-1.5: Safe Mode implementation.
 
+        Commands for device types whose authority is now checked
+        centrally are excluded: mount (M2), focuser and filter wheel
+        (M3). Each is checked in
+        `wayfindinglib/tasks/control_tasks/hardware_operations.py`
+        against the real `DelegationPolicy` before this class is ever
+        called, so this legacy Safe Mode flag would otherwise be a
+        second, conflicting authority (`Wayfinding_Library_Architecture.md`
+        §2.5.1a). M4/M6 extend this exclusion to their own device
+        types as each is centrally authority-checked in turn; this
+        flag is retired outright once none remain (M5-M6 range).
+
         Returns
         -------
         should_block : `bool`
-            `False` if the command is a connection command or Safe
-            Mode is disabled (commands allowed).
+            `False` if the command is a connection command, a
+            centrally-authorized device command, or Safe Mode is
+            disabled (commands allowed).
 
         Raises
         ------
         AstrometryHardwareError
-            If Safe Mode is enabled and the command is not a
-            connection-related command.
+            If Safe Mode is enabled and the command is neither
+            connection-related nor centrally authorized elsewhere.
         """
-        if self.allow_commands:
-            return False
-
         # Always allow connection-related commands
         property_name = ""
         if hasattr(property_item, "getName"):
@@ -1132,13 +1192,18 @@ class IndiInterface(IndiClient):
 
         if property_name in ["CONNECTION", "CONNECT", "DISCONNECT"]:
             return False
+        if property_name in _CENTRALLY_AUTHORIZED_PROPERTY_NAMES:
+            return False
+
+        if self.allow_commands:
+            return False
 
         from wayfindinglib import AstrometryHardwareError
 
         error_message = (
             f"Command to {property_name} blocked by Safe Mode. Please enable hardware control in Settings."
         )
-        print(f"BLOCKED: {error_message}")
+        logger.error(f"BLOCKED: {error_message}")
         raise AstrometryHardwareError(error_message)
 
     def sendNewText(self, property_item: Any) -> None:
@@ -1672,6 +1737,19 @@ class IndiInterface(IndiClient):
             return False
         return self.mount_controller.set_tracking(telescope, enabled)
 
+    def set_slew_rate(self, rate_index):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+        """Set the manual-slew rate.
+
+        Returns
+        -------
+        success : `bool`
+            `True` if the slew-rate command was accepted.
+        """
+        telescope = self.connect_to_telescope()
+        if not telescope or self.status.get("CONNECTION_STATUS") != "Connected":
+            return False
+        return self.mount_controller.set_slew_rate(telescope, rate_index)
+
     def _set_coord_mode(self, telescope_device, mode="TRACK"):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
         """Set the ON_COORD_SET switch (TRACK / SLEW / SYNC).
 
@@ -1745,6 +1823,28 @@ class IndiInterface(IndiClient):
         if not device:
             return False
         return self.camera_controller.pulse_guide(device, direction, duration_ms)
+
+    def drain_external_pulses(self) -> list[dict]:
+        """Return and clear guide pulses issued by an external commander.
+
+        Detects timed guide pulses sent to the mount by something other
+        than this process (e.g. KStars/Ekos or PHD2 driving the mount
+        directly) so a passive observer can still see guiding activity
+        without having issued the pulses itself.
+
+        Returns
+        -------
+        pulses : `list` [`dict`]
+            Each entry has ``"time"``, ``"pulse_n"``, ``"pulse_s"``,
+            ``"pulse_w"``, and ``"pulse_e"`` keys -- this shape is a
+            data contract with
+            `backend/services/observatory/guiding_service.py`, do not
+            rename these keys.
+        """
+        with self._external_pulses_lock:
+            pulses = list(self._external_pulses)
+            self._external_pulses.clear()
+        return pulses
 
     def guide_expose(self, exposure_seconds, gain=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
         """Take an exposure with the guide camera.

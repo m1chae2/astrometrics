@@ -150,7 +150,7 @@ def test_guiding_service_analyze_guiding_spectrum() -> None:
     logger_mock = MagicMock()
     logger_mock.get_guiding_logs.return_value = []
 
-    service = GuidingService(indi_interface=MagicMock(), logger_interface=logger_mock)
+    service = GuidingService(observatory_api=MagicMock(), logger_interface=logger_mock)
     res = service.analyze_guiding_spectrum(session_id="2026-09-25")
     assert res["sampleCount"] == 0
     logger_mock.get_guiding_logs.assert_called_once_with(session_id="2026-09-25", limit=2000)

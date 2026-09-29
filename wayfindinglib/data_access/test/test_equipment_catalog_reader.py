@@ -162,3 +162,50 @@ def test_get_equipment_catalog_active_camera_none_when_no_cameras_configured(app
     catalog = get_equipment_catalog(app_config)
     assert catalog.active_camera_id is None
     assert catalog.active_camera() is None
+
+
+def test_telescope_protocol_fields_default_to_indi(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify a telescope's protocol fields default to 'indi' when unset."""
+    app_config.update_config({
+        "Observatory.Telescope": {"models": "Apertura 75Q"},
+        "Observatory.Telescope.Apertura 75Q": {"focal_length_mm": "450.0"},
+    })
+    telescope = list_telescopes(app_config)[0]
+    assert telescope.mount_protocol == "indi"
+    assert telescope.focuser_protocol == "indi"
+    assert telescope.filter_wheel_protocol == "indi"
+
+
+def test_get_equipment_catalog_raises_on_unregistered_mount_protocol(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify a misconfigured mount protocol fails at catalog-load time.
+
+    Not the first time a `mount_driver` property happens to be accessed
+    mid-session.
+    """
+    app_config.update_config({
+        "Observatory.Telescope": {"models": "Apertura 75Q"},
+        "Observatory.Telescope.Apertura 75Q": {
+            "focal_length_mm": "450.0",
+            "mount_protocol": "ascom",
+        },
+    })
+    with pytest.raises(ValueError, match="ascom"):
+        get_equipment_catalog(app_config)
+
+
+def test_get_equipment_catalog_raises_on_unregistered_camera_protocol(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify a misconfigured camera protocol fails at catalog-load time."""
+    app_config.update_config({
+        "Observatory.Camera": {
+            "models": "ZWO ASI533MM Pro",
+            "default_primary_camera": "ZWO ASI533MM Pro",
+        },
+        "Observatory.Camera.ZWO ASI533MM Pro": {
+            "pixel_size_μm": "3.76",
+            "sensor_width_px": "3008",
+            "sensor_height_px": "3008",
+            "protocol": "alpaca",
+        },
+    })
+    with pytest.raises(ValueError, match="alpaca"):
+        get_equipment_catalog(app_config)

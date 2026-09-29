@@ -10,7 +10,7 @@ used to remove noise from raw telescope images.
 from contextlib import AbstractContextManager
 from typing import Any, Literal
 
-from astrometricslib.drivers.job_logging import JobHandle, capture_job_logs, registered_job
+from astrometricslib.drivers.job_logging import JobHandle, background_job, capture_job_logs, registered_job
 from astrometricslib.drivers.logger_interface import DbLogHandler, LoggerInterface
 from astrometricslib.drivers.siril_interface import ImageProcessing
 from astrometricslib.models.target import FrameRecord, Target
@@ -330,6 +330,7 @@ class ProcessingPipelines:
 
     # -- Pipeline execution, one method per pipeline type -----------------
 
+    @background_job("stacking", grace_period_seconds=5.0)
     def run_stacking(
         self,
         target: Target,
@@ -348,6 +349,11 @@ class ProcessingPipelines:
         Stacking combines many faint, noisy images into one clear image.
         To also plate-solve the result, call `run_astrometry` afterward
         with the same target.
+
+        Called through the MCP server, this runs as a background job (see
+        `astrometricslib.drivers.job_logging.background_job`) rather than
+        blocking the caller until Siril finishes -- called directly, it
+        behaves exactly as before.
 
         Parameters
         ----------
@@ -571,6 +577,7 @@ class ProcessingPipelines:
             photometry_result=photometry_result,
         )
 
+    @background_job("process_target", grace_period_seconds=5.0)
     def process_target(
         self,
         target: Target,
@@ -586,6 +593,11 @@ class ProcessingPipelines:
         way" -- each of the three stages is still available independently
         as `run_astrometry`/`run_photometry`/`run_spectroscopy` for when a
         caller wants to run (or customize) only one of them.
+
+        Called through the MCP server, this runs as a background job (see
+        `astrometricslib.drivers.job_logging.background_job`) rather than
+        blocking the caller until all three stages finish -- called
+        directly, it behaves exactly as before.
 
         Execution order is always astrometry, then photometry, then
         spectroscopy, regardless of `stages`' order -- `stages` only

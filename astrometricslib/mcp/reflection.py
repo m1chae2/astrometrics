@@ -6,6 +6,7 @@ JSON schemas and register public high-level interface methods directly
 as MCP tools.
 """
 
+import asyncio
 import inspect
 import re
 import typing
@@ -156,6 +157,91 @@ def generate_tool_schema(func: Callable[..., Any]) -> dict[str, Any]:
     return {"type": "object", "properties": properties, "required": required_params}
 
 
+def _snapshot_target_quality(target: Any) -> dict[str, Any]:
+    """Collect one target's persisted, per-pipeline quality summaries.
+
+    Meant to be called both right before and right after a background
+    job runs, so the job record can show what actually changed -- not
+    just that the job succeeded. Captures references to the current
+    summary objects rather than copies; safe because each pipeline stage
+    replaces its summary field with a new object on completion rather
+    than mutating the old one's fields in place, so a reference taken
+    before the run is unaffected by the run itself.
+
+    Returns
+    -------
+    quality : `dict`
+        The target's stack/spectral-stack/astrometry/photometry/
+        spectroscopy quality summaries (any not yet computed are `None`).
+    """
+    return {
+        "stack": target.stacking.quality_summary,
+        "spectralStack": target.spectral_stacking.quality_summary,
+        "astrometry": target.quality.astrometry,
+        "photometry": target.quality.photometry,
+        "spectroscopy": target.quality.spectroscopy,
+    }
+
+
+def _infer_background_job_target_id(kwargs: dict[str, Any]) -> str:
+    """Choose a job-tracking target id from a background-job call's arguments.
+
+    Returns
+    -------
+    target_id : `str`
+        The resolved `Target`'s own id for a single-target call, a
+        synthetic `"batch:<camera>"` label for an all-targets call, or
+        `"unknown"` if neither is present.
+    """
+    target_value = kwargs.get("target")
+    if target_value is not None and hasattr(target_value, "id"):
+        return target_value.id
+    if "camera_name" in kwargs:
+        return f"batch:{kwargs['camera_name']}"
+    return "unknown"
+
+
+def _make_quality_snapshot_fn(
+    astrometrics_instance: Any, kwargs: dict[str, Any]
+) -> Callable[[], dict[str, Any]] | None:
+    """Build a snapshot function for a background-job call, if one applies.
+
+    Returns
+    -------
+    snapshot_fn : `Callable` or `None`
+        A no-argument function returning `{target_id: quality_summaries}`
+        for the target(s) this call affects, or `None` if the call's
+        arguments don't identify any (so no snapshot is taken).
+    """
+    target_value = kwargs.get("target")
+    if target_value is not None and hasattr(target_value, "id"):
+        return lambda: {target_value.id: _snapshot_target_quality(target_value)}
+
+    if "camera_name" not in kwargs:
+        return None
+
+    targets_api = getattr(astrometrics_instance, "targets", None)
+    if targets_api is None:
+        return None
+
+    def snapshot_all_batch_targets() -> dict[str, Any]:
+        # `.list()` always re-reads from disk (unlike `.get()`, which
+        # prefers its in-memory cache); a fresh read matters here because
+        # each target in the batch is actually processed in its own
+        # `ProcessPoolExecutor` worker (see `astrometricslib.api.batch`),
+        # so this process's cached copies would not reflect that work.
+        fresh_targets_by_id = {t.id: t for t in targets_api.list()}
+        explicit_ids = kwargs.get("target_ids")
+        target_ids = list(explicit_ids) if explicit_ids else list(fresh_targets_by_id)
+        return {
+            target_id: _snapshot_target_quality(fresh_targets_by_id[target_id])
+            for target_id in target_ids
+            if target_id in fresh_targets_by_id
+        }
+
+    return snapshot_all_batch_targets
+
+
 def register_astrometrics_tools(
     registry: Any,
     astrometrics_instance: Any,
@@ -237,6 +323,29 @@ def register_astrometrics_tools(
                                     resolved = targets_api.get(param_v)
                                     if resolved:
                                         kwargs[param_k] = resolved
+
+                    # A method marked with `@background_job` (see
+                    # `astrometricslib.drivers.job_logging`) runs slowly
+                    # enough that calling it directly here would block this
+                    # server's single connection for its whole duration.
+                    # Run it in a background thread instead, and return
+                    # either its real result (if it finishes quickly) or a
+                    # job id to poll -- see `run_as_background_job`.
+                    job_type = getattr(target_callable, "__background_job_type__", None)
+                    if job_type is not None:
+                        from astrometricslib.drivers.job_logging import run_as_background_job
+
+                        grace_period = getattr(target_callable, "__background_job_grace_period__", 5.0)
+                        target_id = _infer_background_job_target_id(kwargs)
+                        snapshot_fn = _make_quality_snapshot_fn(astrometrics_instance, kwargs)
+                        return await asyncio.to_thread(
+                            run_as_background_job,
+                            job_type,
+                            target_id,
+                            lambda job: target_callable(**kwargs),
+                            grace_period_seconds=grace_period,
+                            snapshot_fn=snapshot_fn,
+                        )
 
                     if inspect.iscoroutinefunction(target_callable):
                         return await target_callable(**kwargs)

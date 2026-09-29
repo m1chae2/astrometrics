@@ -126,6 +126,9 @@ def _build_telescope(config, telescope_name: str, section: dict[str, str]) -> Te
             hour_angle_limits_enabled=_as_bool(section.get("hour_angle_limits_enabled"), default=False),
             max_hour_angle_hours=float(section.get("max_hour_angle_hours", "2.0")),
             flip_hour_angle_deg=float(section.get("flip_hour_angle_deg", "1.0")),
+            mount_protocol=section.get("mount_protocol", "indi"),
+            focuser_protocol=section.get("focuser_protocol", "indi"),
+            filter_wheel_protocol=section.get("filter_wheel_protocol", "indi"),
         )
     except (TypeError, ValueError) as exc:
         logger.warning("Skipping telescope '%s': %s", telescope_name, exc)
@@ -202,6 +205,7 @@ def list_cameras(config) -> list[Camera]:  # ruff: ignore[missing-type-function-
                 pixel_size_um=pixel_size_um,
                 sensor_width_px=sensor_width_px,
                 sensor_height_px=sensor_height_px,
+                protocol=camera_data.get("protocol", "indi"),
             )
         )
     return cameras
@@ -218,6 +222,34 @@ def get_active_camera_id(config) -> str | None:  # ruff: ignore[missing-type-fun
     return config.get_value(CAMERA_SECTION, ACTIVE_CAMERA_KEY)
 
 
+def _validate_protocol(entity_kind: str, entity_name: str, field_name: str, protocol: str) -> None:
+    """Raise a clear error if a configured protocol name has no driver.
+
+    Checked at catalog-load time rather than left to fail the first
+    time a `*_driver` property happens to be accessed mid-session.
+
+    Raises
+    ------
+    ValueError
+        Raised if `protocol` is not a key in the corresponding
+        protocol-driver registry.
+    """
+    from wayfindinglib.drivers.protocols import registry
+
+    registry_by_field = {
+        "mount_protocol": registry.build_mount_driver_registry,
+        "focuser_protocol": registry.build_focuser_driver_registry,
+        "filter_wheel_protocol": registry.build_filter_wheel_driver_registry,
+        "protocol": registry.build_camera_driver_registry,
+    }
+    valid_protocols = set(registry_by_field[field_name]())
+    if protocol not in valid_protocols:
+        raise ValueError(
+            f"{entity_kind} '{entity_name}' has {field_name}='{protocol}', which has no "
+            f"registered driver. Valid choices: {sorted(valid_protocols)}"
+        )
+
+
 def get_equipment_catalog(config) -> EquipmentCatalog:  # ruff: ignore[missing-type-function-argument]
     """Return the full resolved `EquipmentCatalog`.
 
@@ -226,6 +258,10 @@ def get_equipment_catalog(config) -> EquipmentCatalog:  # ruff: ignore[missing-t
     deprecated `EquipmentConfigurationManager.get_active_camera_profile`'s
     "first available" fallback.
 
+    Every configured protocol-selection field is validated against its
+    driver registry here, so a misconfigured protocol name fails at
+    config load, not the first time a `*_driver` property is accessed.
+
     Returns
     -------
     catalog : `EquipmentCatalog`
@@ -233,6 +269,15 @@ def get_equipment_catalog(config) -> EquipmentCatalog:  # ruff: ignore[missing-t
     """
     telescopes = list_telescopes(config)
     cameras = list_cameras(config)
+
+    for telescope in telescopes:
+        _validate_protocol("Telescope", telescope.name, "mount_protocol", telescope.mount_protocol)
+        _validate_protocol("Telescope", telescope.name, "focuser_protocol", telescope.focuser_protocol)
+        _validate_protocol(
+            "Telescope", telescope.name, "filter_wheel_protocol", telescope.filter_wheel_protocol
+        )
+    for camera in cameras:
+        _validate_protocol("Camera", camera.name, "protocol", camera.protocol)
 
     active_telescope_id = get_active_telescope_id(config)
     if active_telescope_id not in {t.id for t in telescopes}:

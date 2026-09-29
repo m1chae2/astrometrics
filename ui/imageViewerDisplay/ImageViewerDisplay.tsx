@@ -11,6 +11,7 @@ import { on as onEvent, emit as emitEvent } from '../common/utils/eventBus';
 import { useRemoteStatusContext } from '../common/context/RemoteStatusContext';
 import { useTargetImage } from './hooks/useTargetImage';
 import { GenericDisplayLayout } from '../common/components/GenericDisplayLayout';
+import { useReportModeReady } from '../common/utils/appBootReadiness';
 import './imageViewerDisplay.css';
 
 /**
@@ -47,6 +48,7 @@ export const ImageViewerDisplay: React.FC = () => {
     filterText,
     setFilterText,
     highlightedIds,
+    isLoading: isTargetListLoading,
   } = useTargetListLogic(reloadKey, pendingTarget, selectedTarget, setPendingTarget, setSelectedTarget, remoteTargets, false);
 
   const { saveTarget, confirmDeleteTarget } = useTargetActions();
@@ -65,6 +67,7 @@ export const ImageViewerDisplay: React.FC = () => {
     activeTarget,
     handleImageLoaded
   );
+  useReportModeReady('Image Viewer', !loading);
 
   const handleDeleteTarget = () => {
     // REQ: TGT-1.4: The display SHALL allow deletion of existing targets from the catalog.
@@ -98,6 +101,9 @@ export const ImageViewerDisplay: React.FC = () => {
       filterText={filterText}
       onFilterTextChange={setFilterText}
       highlightedIds={highlightedIds}
+      isLoading={isTargetListLoading}
+      loadingMessage="Loading targets…"
+      emptyMessage="No targets in the catalog."
     />
   );
 

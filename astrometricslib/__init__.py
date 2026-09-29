@@ -10,6 +10,7 @@ main control panel, giving you access to all the sub-tools like targets,
 stars, and image processing.
 """
 
+from collections.abc import Callable
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _distribution_version
 from typing import TYPE_CHECKING, Any
@@ -38,6 +39,7 @@ from astrometricslib.api.targets import (
     derive_target_sessions,
     frame_is_spectral,
 )
+from astrometricslib.drivers.job_logging import background_job
 from astrometricslib.drivers.provenance_store import ProvenanceStore, export_target_lineage_as_prov_xml
 from astrometricslib.models.moving_object import AsteroidDetectionCandidate
 from astrometricslib.models.moving_object_config import MovingObjectConfig
@@ -199,17 +201,25 @@ class Astrometrics:
         self.processing = ProcessingPipelines(self.config)
         self.visualization = Visualization(self)
 
+    @background_job("batch_processing", grace_period_seconds=8.0)
     def process_all_targets(
         self,
         target_ids: list[str] | None = None,
         *,
         camera_name: str,
         focal_length_mm: float | None = None,
+        on_item_complete: Callable[[str, dict, int, int], None] | None = None,
     ) -> Any:
         """Run the full image processing pipeline for multiple targets.
 
         This runs the image stacking and analysis for many targets at the
         same time, which is much faster than doing them one by one.
+
+        Called through the MCP server, this runs as a background job (see
+        `astrometricslib.drivers.job_logging.background_job`) rather than
+        blocking the caller for the whole batch -- called directly, as
+        here, it behaves exactly as before: it blocks until every target
+        is done and returns the summary.
 
         Parameters
         ----------
@@ -219,6 +229,10 @@ class Astrometrics:
         camera_name : `str`
             The name of the camera used to take the pictures. It will only
             process images taken with this specific camera.
+        on_item_complete : `Callable`, optional
+            Called as `(target_id, result, completed_count, total_count)`
+            after each target finishes, for a caller that wants live
+            progress rather than waiting for the whole batch.
 
         Returns
         -------
@@ -228,7 +242,11 @@ class Astrometrics:
         from astrometricslib.api import batch as batch_processing_operations
 
         return batch_processing_operations.process_all_targets(
-            self, target_ids, camera_name=camera_name, focal_length_mm=focal_length_mm
+            self,
+            target_ids,
+            camera_name=camera_name,
+            focal_length_mm=focal_length_mm,
+            on_item_complete=on_item_complete,
         )
 
 

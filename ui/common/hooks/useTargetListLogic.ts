@@ -225,6 +225,7 @@ export const useTargetListLogic = (
         items: filteredItems,
         targets,
         stars,
+        isLoading: dropdown === 'Stars' ? astronomyListQuery.isLoading : targetListQuery.isLoading,
         filterOptions,
         selectedFilterOption: dropdown,
         setFilterOption: setDropdown,

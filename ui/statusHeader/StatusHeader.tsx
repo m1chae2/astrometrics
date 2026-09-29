@@ -143,6 +143,7 @@ export const StatusHeader: React.FC = () => {
               <button
                 className="header__settings-button"
                 aria-label="Open settings"
+                title="Open settings"
                 onClick={handleOpenSettings}
                 type="button"
               >

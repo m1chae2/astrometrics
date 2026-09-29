@@ -7,6 +7,7 @@ freezing.
 
 import logging
 import traceback
+from collections.abc import Callable
 from typing import Any
 
 from astrometricslib.utilities import parallel_batch
@@ -89,6 +90,7 @@ def process_all_targets(
     *,
     camera_name: str,
     focal_length_mm: float | None = None,
+    on_item_complete: Callable[[str, dict, int, int], None] | None = None,
 ) -> parallel_batch.BatchRunSummary:
     """Process many targets at the same time.
 
@@ -102,6 +104,9 @@ def process_all_targets(
         The specific targets to process. If None, processes all targets.
     camera_name : `str`
         Only process images taken with this specific camera.
+    on_item_complete : `Callable`, optional
+        Called as `(target_id, result, completed_count, total_count)`
+        after each target finishes; see `parallel_batch.run_parallel_batch`.
 
     Returns
     -------
@@ -121,4 +126,5 @@ def process_all_targets(
         worker_arguments=(worker_counts.inner_worker_count, camera_name, focal_length_mm),
         max_workers=worker_counts.outer_worker_count,
         niceness=api.config.get_worker_niceness(),
+        on_item_complete=on_item_complete,
     )

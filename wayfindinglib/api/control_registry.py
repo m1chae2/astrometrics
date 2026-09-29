@@ -78,6 +78,12 @@ class ObservatoryControl:
             config = get_configuration()
         self._config = config
         self.__driver = driver
+        self.__mount_driver = None
+        self.__focuser_driver = None
+        self.__filter_wheel_driver = None
+        self.__camera_driver = None
+        self.__guide_camera_driver = None
+        self.__indi_diagnostics = None
         self._guiding_service = None
         self._sync_service = None
         self._butler = butler or DiskButler(app_config=config)
@@ -111,19 +117,193 @@ class ObservatoryControl:
         self.__driver = driver_interface
 
     @property
-    def _driver(self):  # ruff: ignore[missing-return-type-private-function]
-        """Alias for `.driver`.
+    def mount_driver(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        """Lazily build or return the active `MountDriver`.
 
-        `hardware_operations.connect`/`indi_properties`/
-        `set_indi_property` read this attribute name directly rather
-        than through the public property.
+        Resolved once per active telescope's `mount_protocol` (§2's
+        registry), wrapping the shared session `.driver` already
+        lazily builds -- one INDI client connection serves every
+        device type (`Wayfinding_Library_Architecture.md` §2.5.1a).
 
         Returns
         -------
-        driver : `IndiInterface` or `SimulatorIndiInterface`
-            The active hardware driver.
+        mount_driver : `MountDriver`
+            The active mount hardware-control driver.
         """
-        return self.driver
+        if self.__mount_driver is None:
+            from wayfindinglib.drivers.protocols.registry import build_mount_driver_registry
+
+            telescope = self.active_telescope()
+            protocol = telescope.mount_protocol if telescope else "indi"
+            self.__mount_driver = self._build_protocol_driver(build_mount_driver_registry(), protocol)
+        return self.__mount_driver
+
+    @mount_driver.setter
+    def mount_driver(self, mount_driver) -> None:  # ruff: ignore[missing-type-function-argument]
+        """Set the active `MountDriver` (test injection)."""
+        self.__mount_driver = mount_driver
+
+    @property
+    def focuser_driver(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        """Lazily build or return the active `FocuserDriver`.
+
+        Resolved once per active telescope's `focuser_protocol` (§2's
+        registry), wrapping the same shared session `.driver` already
+        lazily builds.
+
+        Returns
+        -------
+        focuser_driver : `FocuserDriver`
+            The active focuser hardware-control driver.
+        """
+        if self.__focuser_driver is None:
+            from wayfindinglib.drivers.protocols.registry import build_focuser_driver_registry
+
+            telescope = self.active_telescope()
+            protocol = telescope.focuser_protocol if telescope else "indi"
+            self.__focuser_driver = self._build_protocol_driver(build_focuser_driver_registry(), protocol)
+        return self.__focuser_driver
+
+    @focuser_driver.setter
+    def focuser_driver(self, focuser_driver) -> None:  # ruff: ignore[missing-type-function-argument]
+        """Set the active `FocuserDriver` (test injection)."""
+        self.__focuser_driver = focuser_driver
+
+    @property
+    def filter_wheel_driver(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        """Lazily build or return the active `FilterWheelDriver`.
+
+        Resolved once per active telescope's `filter_wheel_protocol`
+        (§2's registry), wrapping the same shared session `.driver`
+        already lazily builds.
+
+        Returns
+        -------
+        filter_wheel_driver : `FilterWheelDriver`
+            The active filter wheel hardware-control driver.
+        """
+        if self.__filter_wheel_driver is None:
+            from wayfindinglib.drivers.protocols.registry import build_filter_wheel_driver_registry
+
+            telescope = self.active_telescope()
+            protocol = telescope.filter_wheel_protocol if telescope else "indi"
+            self.__filter_wheel_driver = self._build_protocol_driver(
+                build_filter_wheel_driver_registry(), protocol
+            )
+        return self.__filter_wheel_driver
+
+    @filter_wheel_driver.setter
+    def filter_wheel_driver(self, filter_wheel_driver) -> None:  # ruff: ignore[missing-type-function-argument]
+        """Set the active `FilterWheelDriver` (test injection)."""
+        self.__filter_wheel_driver = filter_wheel_driver
+
+    @property
+    def camera_driver(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        """Lazily build or return the active main-camera `CameraDriver`.
+
+        Resolved once per active camera's `protocol` (§2's registry),
+        wrapping the same shared session `.driver` already lazily builds.
+
+        Returns
+        -------
+        camera_driver : `CameraDriver`
+            The active main-camera hardware-control driver
+            (``role="main"``).
+        """
+        if self.__camera_driver is None:
+            from wayfindinglib.drivers.protocols.registry import build_camera_driver_registry
+
+            camera = self.active_camera()
+            protocol = camera.protocol if camera else "indi"
+            self.__camera_driver = self._build_protocol_driver(
+                build_camera_driver_registry(), protocol, role="main"
+            )
+        return self.__camera_driver
+
+    @camera_driver.setter
+    def camera_driver(self, camera_driver) -> None:  # ruff: ignore[missing-type-function-argument]
+        """Set the active main-camera `CameraDriver` (test injection)."""
+        self.__camera_driver = camera_driver
+
+    @property
+    def guide_camera_driver(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        """Lazily build or return the active guide-camera `CameraDriver`.
+
+        Always ``"indi"`` today -- the guide camera has no
+        `EquipmentCatalog` entry of its own to hold a protocol
+        selection (a known limitation, noted in §2), so there is
+        nothing to resolve a protocol from yet.
+
+        Returns
+        -------
+        guide_camera_driver : `CameraDriver`
+            The active guide-camera hardware-control driver
+            (``role="guide"``).
+        """
+        if self.__guide_camera_driver is None:
+            from wayfindinglib.drivers.protocols.registry import build_camera_driver_registry
+
+            self.__guide_camera_driver = self._build_protocol_driver(
+                build_camera_driver_registry(), "indi", role="guide"
+            )
+        return self.__guide_camera_driver
+
+    @guide_camera_driver.setter
+    def guide_camera_driver(self, guide_camera_driver) -> None:  # ruff: ignore[missing-type-function-argument]
+        """Set the active guide-camera `CameraDriver` (test injection)."""
+        self.__guide_camera_driver = guide_camera_driver
+
+    @property
+    def indi_diagnostics(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        """Raw INDI device/property inspection, or `None` off-INDI.
+
+        `None` when the active telescope's `mount_protocol` isn't
+        ``"indi"`` -- this escape hatch is inherently INDI-specific,
+        unlike the six `ProtocolDriver` properties above.
+
+        Returns
+        -------
+        indi_diagnostics : `IndiDiagnostics` | `None`
+            Raw INDI inspection for the active session, or `None` if
+            the active mount protocol isn't ``"indi"``.
+        """
+        telescope = self.active_telescope()
+        protocol = telescope.mount_protocol if telescope else "indi"
+        if protocol != "indi":
+            return None
+        if self.__indi_diagnostics is None:
+            from wayfindinglib.drivers.indi.diagnostics import IndiDiagnostics
+
+            self.__indi_diagnostics = IndiDiagnostics(session=self.driver)
+        return self.__indi_diagnostics
+
+    def _build_protocol_driver(  # ruff: ignore[missing-return-type-private-function]
+        self, registry: dict[str, type], protocol: str, **extra_kwargs: Any
+    ):
+        """Construct a protocol driver instance for `protocol` from `registry`.
+
+        Only ``"indi"`` has real constructor wiring today -- it wraps
+        the shared `.driver` session (§3). A future second protocol
+        adds its own branch here rather than a generic `config=`
+        constructor call, since different protocols need different
+        construction arguments (a session vs. e.g. a network address).
+        `extra_kwargs` passes through device-specific constructor
+        arguments (e.g. `CameraDriver`'s `role`).
+
+        Returns
+        -------
+        driver : `ProtocolDriver`
+            The constructed driver instance.
+
+        Raises
+        ------
+        NotImplementedError
+            If `protocol` has no constructor wiring yet.
+        """
+        driver_class = registry[protocol]
+        if protocol == "indi":
+            return driver_class(session=self.driver, **extra_kwargs)
+        raise NotImplementedError(f"No constructor wiring yet for protocol '{protocol}'")
 
     @property
     def guiding_service(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
@@ -184,6 +364,18 @@ class ObservatoryControl:
 
         return hardware_operations.slew_to_coordinates(self, ra, dec)
 
+    def sync_coordinates(self, ra: float, dec: float) -> bool:
+        """Sync the mount's internal coordinates to a plate-solved position.
+
+        Returns
+        -------
+        success : `bool`
+            Whether the sync command was issued successfully.
+        """
+        from wayfindinglib.tasks.control_tasks import hardware_operations
+
+        return hardware_operations.sync_coordinates(self, ra, dec)
+
     def park(self) -> bool:
         """Park the telescope mount.
 
@@ -231,18 +423,6 @@ class ObservatoryControl:
         from wayfindinglib.tasks.control_tasks import hardware_operations
 
         return hardware_operations.set_filter(self, filter_name)
-
-    def get_indi_devices(self) -> list[str]:
-        """List connected INDI device names.
-
-        Returns
-        -------
-        device_names : `list` [`str`]
-            The names of every currently connected INDI device.
-        """
-        from wayfindinglib.tasks.control_tasks import hardware_operations
-
-        return hardware_operations.get_indi_devices(self)
 
     def manual_move(self, direction: str, start: bool = True) -> bool:
         """Drive manual motor movement in a specific direction.
@@ -328,6 +508,18 @@ class ObservatoryControl:
 
         return hardware_operations.pulse_guide(self, direction, duration_ms)
 
+    def capture_image(self, exposure_seconds: float):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        """Take an exposure with the main camera.
+
+        Returns
+        -------
+        result : `Any`
+            The driver's raw exposure result.
+        """
+        from wayfindinglib.tasks.control_tasks import hardware_operations
+
+        return hardware_operations.capture_image(self, exposure_seconds)
+
     def guide_expose(self, exposure_seconds: float, gain: float | None = None):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Take an exposure with the guide camera.
 
@@ -352,6 +544,22 @@ class ObservatoryControl:
 
         return hardware_operations.get_guide_image(self)
 
+    def drain_external_pulses(self) -> list[dict[str, Any]]:
+        """Return and clear guide pulses issued by an external commander.
+
+        Lets a caller passively observe guiding activity commanded by
+        something other than this process (e.g. KStars/Ekos or PHD2
+        driving the mount directly).
+
+        Returns
+        -------
+        pulses : `list` [`dict`]
+            Guide pulses detected since the last drain.
+        """
+        from wayfindinglib.tasks.control_tasks import hardware_operations
+
+        return hardware_operations.drain_external_pulses(self)
+
     def connect(self) -> bool:
         """Command telescope hardware connection.
 
@@ -375,33 +583,6 @@ class ObservatoryControl:
         from wayfindinglib.tasks.control_tasks import hardware_operations
 
         return hardware_operations.disconnect(self)
-
-    def indi_properties(self, device_name: str) -> dict[str, Any]:
-        """List all registered properties for an INDI device.
-
-        Returns
-        -------
-        properties : `dict`
-            Every registered property on the named device, keyed by
-            property name.
-        """
-        from wayfindinglib.tasks.control_tasks import hardware_operations
-
-        return hardware_operations.indi_properties(self, device_name)
-
-    def set_indi_property(
-        self, device_name: str, property_name: str, value: Any, element: str | None = None
-    ) -> bool:
-        """Modify a property element on an INDI device.
-
-        Returns
-        -------
-        success : `bool`
-            Whether the property update was issued successfully.
-        """
-        from wayfindinglib.tasks.control_tasks import hardware_operations
-
-        return hardware_operations.set_indi_property(self, device_name, property_name, value, element)
 
     def sync(self, target_name: str) -> dict[str, Any]:
         """Start a remote sync task for target frames.

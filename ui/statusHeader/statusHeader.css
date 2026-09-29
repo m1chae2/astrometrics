@@ -437,31 +437,6 @@
   opacity: 1;
 }
 
-/* Toast Component */
-.header-toast {
-  position: fixed;
-  top: 12px;
-  right: 12px;
-  min-width: 160px;
-  max-width: 320px;
-  background: rgba(32, 33, 36, 0.98);
-  color: var(--white);
-  padding: 10px 14px;
-  border-radius: 8px;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
-  z-index: 10001;
-  opacity: 0;
-  transform: translateY(-6px) scale(0.995);
-  transition: opacity 220ms ease, transform 220ms ease;
-  pointer-events: none;
-}
-
-.header-toast--visible {
-  opacity: 1;
-  transform: translateY(0) scale(1);
-  pointer-events: auto;
-}
-
 /* Settings Overlay Block */
 .overlay {
   position: fixed;

@@ -26,6 +26,7 @@ interface Window {
       onNotificationAction: (callback: (data: { index: number }) => void) => () => void;
       setProgress: (progress: number, mode: 'normal' | 'error' | 'none' | 'indeterminate' | 'paused') => void;
       onOpenFile: (callback: (path: string) => void) => () => void;
+      reportAppFullyLoaded?: () => void;
       openDisplayWindow?: (options?: string | { mode?: string; displayIndex?: number }) => Promise<{ windowId: number } | null>;
       reportWindowMode?: (mode: string) => void;
       routeDisplayAction?: (intent: any) => Promise<{ handledRemotely: boolean; targetWindowId?: number }>;

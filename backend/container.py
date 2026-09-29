@@ -197,7 +197,13 @@ class Container:
 
         from backend.services.observatory.imaging_service import ImagingService
 
-        self.imaging_service = ImagingService(indi_interface=self.indi_driver, job_service=self.job_service)
+        self.imaging_service = ImagingService(
+            observatory_api=self.wayfinder.control, job_service=self.job_service
+        )
+
+        from backend.services.observatory.indi_diagnostics_service import IndiDiagnosticsService
+
+        self.indi_diagnostics_service = IndiDiagnosticsService(observatory_api=self.wayfinder.control)
 
         self.target_imaging_planner = TargetImagingPlanner()
         self.target_imaging_executor = TargetImagingExecutor(

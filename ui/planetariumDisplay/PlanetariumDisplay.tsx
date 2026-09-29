@@ -39,6 +39,7 @@ import { useSpectralClassBrowserItems, ALL_SPECTRAL_CLASSES_VALUE } from '../ast
 import { useSpectrumList } from '../astronomyManager/hooks/useSpectrumList';
 import { useStarsBySpectralClassList } from '../astronomyManager/hooks/useStarsBySpectralClassList';
 import { spectralClassLetter } from '../astronomyManager/utils/starDisplayFormat';
+import { useReportModeReady } from '../common/utils/appBootReadiness';
 import '../common/styles/segmentedToggle.css';
 import './styles/planetariumDisplay.css';
 
@@ -167,6 +168,10 @@ export const PlanetariumDisplay: React.FC = () => {
 
   const targetBrowser = useTargetBrowserItems();
   const spectralClassBrowser = useSpectralClassBrowserItems();
+  // The sky map's own catalog sources (useSourceMerging) don't expose a
+  // loading flag; the target/star browser sidebar's does and fetches on the
+  // same mount, so it's a reasonable proxy for "this view has real data."
+  useReportModeReady('Planetarium', !targetBrowser.isLoading);
 
   // Auto-select the first target once the list loads, unless one is
   // already scoped (including via a deep link elsewhere in this file).
@@ -473,7 +478,9 @@ export const PlanetariumDisplay: React.FC = () => {
           onFilterTextChange={targetBrowser.setFilterText}
           filterPlaceholder="Search targets..."
           highlightedIds={targetList.highlightedIds}
-          legend={targetBrowser.isLoading ? 'Loading targets…' : undefined}
+          isLoading={targetBrowser.isLoading}
+          loadingMessage="Loading targets…"
+          emptyMessage="No targets found."
         />
       ) : (
         <RadioListManager
@@ -487,11 +494,9 @@ export const PlanetariumDisplay: React.FC = () => {
           onFilterOptionChange={() => {}}
           onFilterTextChange={spectralClassBrowser.setFilterText}
           filterPlaceholder="Search classes..."
-          legend={
-            spectralClassBrowser.isLoading
-              ? 'Scanning the catalog for spectral classes…'
-              : undefined
-          }
+          isLoading={spectralClassBrowser.isLoading}
+          loadingMessage="Scanning the catalog for spectral classes…"
+          emptyMessage="No spectral classes found."
         />
       )}
 
@@ -514,15 +519,14 @@ export const PlanetariumDisplay: React.FC = () => {
         filterText={scopedStarList.filterText}
         onFilterTextChange={scopedStarList.setFilterText}
         legend={
-          scopedStarList.isLoading && scopedStarList.items.length === 0 ? (
-            'Loading stars…'
-          ) : (
-            <>
-              <span><span className="selectable-list__badge selectable-list__badge--spectra">S</span> spectrum</span>
-              <span><span className="selectable-list__badge selectable-list__badge--photometry">P</span> photometry</span>
-            </>
-          )
+          <>
+            <span><span className="selectable-list__badge selectable-list__badge--spectra">S</span> spectrum</span>
+            <span><span className="selectable-list__badge selectable-list__badge--photometry">P</span> photometry</span>
+          </>
         }
+        isLoading={scopedStarList.isLoading}
+        loadingMessage="Loading stars…"
+        emptyMessage="No stars found for this selection."
         page={activeSpectralClass ? undefined : starsInScopedTarget.page}
         onPageChange={activeSpectralClass ? undefined : starsInScopedTarget.setPage}
         hasMore={activeSpectralClass ? false : starsInScopedTarget.hasMore}

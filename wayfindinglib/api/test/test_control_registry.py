@@ -176,18 +176,15 @@ def test_apply_promotion_decision_and_summarize_divergence_evidence(control):  #
     assert summary.sample_count == 0
 
 
-def test_connect_lazily_initializes_the_driver_via_the_private_alias(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify connect() works via the `._driver` alias, not just `.driver`.
+def test_connect_lazily_initializes_every_configured_driver(control, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify connect() lazily initializes the shared driver and succeeds.
 
-    Regression test: `tasks.control_tasks.hardware_operations.connect`
-    (and `indi_properties`/`set_indi_property`) read `observatory._driver`
-    directly rather than through the lazily-initializing `.driver`
-    property -- a plain `self._driver = None` instance attribute (as
-    opposed to a property forwarding to `.driver`) left `connect()`
-    crashing on `NoneType` even though `.driver` itself worked fine.
+    `._driver` (a bare alias for `.driver`) was retired in M5: nothing
+    in production reads it anymore -- `connect()` now loops over the
+    five per-device-type driver properties (§4), each of which lazily
+    builds the shared session via `.driver` on its own.
     """
     monkeypatch.setenv("ASTROMETRICS_TESTING", "1")
-    control = ObservatoryControl(config=object())
 
     assert control.connect() is True
     assert control.driver is not None
@@ -361,3 +358,172 @@ def test_non_hardware_methods_do_not_reference_indi_driver():  # ruff: ignore[mi
             offending.append(method.__name__)
 
     assert offending == []
+
+
+def test_mount_driver_slew_end_to_end_against_simulator(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Exercise slew/park/unpark/tracking/abort through the real driver stack.
+
+    `ObservatoryControl.slew_to_coordinates()` -> `hardware_operations` ->
+    the `MountDriver` ABC -> `IndiMountDriver` -> `SimulatorIndiInterface`,
+    confirming parity with pre-redesign behavior end to end (per the
+    plan's Verification section) rather than only against a
+    duck-typed fake manager.
+    """
+    from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
+
+    control.driver = SimulatorIndiInterface(config=control._config)
+    control.apply_promotion_decision(ObservatoryCapability.MOUNT_CONTROL, DelegationState.AUTHORITATIVE)
+
+    assert control.slew_to_coordinates(10.0, 20.0) is True
+    assert control.set_tracking(True) is True
+    assert control.park() is True
+    assert control.unpark() is True
+    assert control.abort_motion() is True
+
+
+def test_mount_driver_commands_refused_when_not_authoritative(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify mount commands are refused by default (monitoring mode).
+
+    `MOUNT_CONTROL` defaults to `DELEGATED`, not `AUTHORITATIVE` -- this
+    is the concrete mechanism behind "wayfindinglib starts in
+    monitoring mode": hardware commands fail closed until the operator
+    explicitly promotes the capability.
+    """
+    from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
+    from wayfindinglib.exceptions import AstrometryHardwareError
+
+    control.driver = SimulatorIndiInterface(config=control._config)
+
+    with pytest.raises(AstrometryHardwareError, match="MOUNT_CONTROL"):
+        control.slew_to_coordinates(10.0, 20.0)
+
+
+def test_focuser_and_filter_wheel_end_to_end_against_simulator(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Exercise focuser/filter-wheel commands through the real driver stack.
+
+    `ObservatoryControl.focus_move()`/`.set_filter()` -> `hardware_operations`
+    -> the `FocuserDriver`/`FilterWheelDriver` ABCs -> the INDI adapters ->
+    `SimulatorIndiInterface`, confirming parity with pre-redesign behavior
+    (per the plan's Verification section).
+    """
+    from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
+    from wayfindinglib.models.policy.delegation import CapabilityDelegation, DelegationPolicy
+
+    control.driver = SimulatorIndiInterface(config=control._config)
+    # Persisted directly rather than via apply_promotion_decision(): AUTOFOCUS
+    # and CAPTURE_ORCHESTRATION each have their own multi-step validity-rule
+    # promotion path (covered by their own dedicated tests), orthogonal to
+    # what this test verifies -- that the driver plumbing works once a
+    # capability is AUTHORITATIVE.
+    control._butler.put(
+        DelegationPolicy(
+            id="default",
+            capability_delegations=[
+                CapabilityDelegation(
+                    capability=ObservatoryCapability.AUTOFOCUS, state=DelegationState.AUTHORITATIVE
+                ),
+                CapabilityDelegation(
+                    capability=ObservatoryCapability.CAPTURE_ORCHESTRATION,
+                    state=DelegationState.AUTHORITATIVE,
+                ),
+            ],
+        ),
+        "delegation_policy",
+        {"id": "default"},
+    )
+
+    assert control.focus_move(50) is True
+    assert control.get_focuser_position() == 0
+    assert control.set_filter("Luminance") is True
+    assert "Luminance" in control.get_filter_names()
+
+
+def test_focuser_and_filter_wheel_commands_refused_when_not_authoritative(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify focuser/filter-wheel commands fail closed by default."""
+    from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
+    from wayfindinglib.exceptions import AstrometryHardwareError
+
+    control.driver = SimulatorIndiInterface(config=control._config)
+
+    with pytest.raises(AstrometryHardwareError, match="AUTOFOCUS"):
+        control.focus_move(50)
+    with pytest.raises(AstrometryHardwareError, match="CAPTURE_ORCHESTRATION"):
+        control.set_filter("Luminance")
+
+
+def test_get_telescope_status_golden_output_matches_pre_redesign_shape(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify the four-call-assembled status matches the old single-call one.
+
+    Regression-sensitive point (plan Verification, M4): `get_telescope_status`
+    now reassembles its result from four separate driver calls
+    (`mount_driver`, `filter_wheel_driver`, `focuser_driver`, `camera_driver`)
+    instead of one `IndiInterface.get_status()` call. Since nothing here
+    changes the simulator's state between the two reads, both must
+    produce byte-identical output.
+    """
+    from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
+
+    control.driver = SimulatorIndiInterface(config=control._config)
+
+    golden = control.driver.get_status().model_dump(by_alias=True)
+    golden["guidingHistory"] = []  # Populated by a guiding service, not configured here.
+
+    from wayfindinglib.tasks.control_tasks import hardware_operations
+
+    reassembled = hardware_operations.get_telescope_status(control)
+
+    assert reassembled == golden
+
+
+def test_capture_image_and_guide_camera_end_to_end_against_simulator(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Exercise capture_image/guide_expose/sync_coordinates end to end.
+
+    `ObservatoryControl.capture_image()`/`.guide_expose()`/`.sync_coordinates()`
+    -> `hardware_operations` -> the `CameraDriver`/`MountDriver` ABCs ->
+    the INDI adapters -> `SimulatorIndiInterface` (per the plan's
+    Verification section for M2-M4).
+    """
+    from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
+    from wayfindinglib.models.policy.delegation import CapabilityDelegation, DelegationPolicy
+
+    control.driver = SimulatorIndiInterface(config=control._config)
+    control._butler.put(
+        DelegationPolicy(
+            id="default",
+            capability_delegations=[
+                CapabilityDelegation(
+                    capability=ObservatoryCapability.CAPTURE_ORCHESTRATION,
+                    state=DelegationState.AUTHORITATIVE,
+                ),
+                CapabilityDelegation(
+                    capability=ObservatoryCapability.AUTOGUIDING, state=DelegationState.AUTHORITATIVE
+                ),
+                CapabilityDelegation(
+                    capability=ObservatoryCapability.PLATE_SOLVE_ALIGNMENT,
+                    state=DelegationState.AUTHORITATIVE,
+                ),
+            ],
+        ),
+        "delegation_policy",
+        {"id": "default"},
+    )
+
+    assert control.capture_image(1.0) is True
+    assert control.guide_expose(1.0) is True
+    assert control.get_guide_image() is None
+    assert control.sync_coordinates(10.0, 20.0) is True
+
+
+def test_capture_image_and_sync_coordinates_refused_when_not_authoritative(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify capture/sync commands fail closed by default."""
+    from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
+    from wayfindinglib.exceptions import AstrometryHardwareError
+
+    control.driver = SimulatorIndiInterface(config=control._config)
+
+    with pytest.raises(AstrometryHardwareError, match="CAPTURE_ORCHESTRATION"):
+        control.capture_image(1.0)
+    with pytest.raises(AstrometryHardwareError, match="AUTOGUIDING"):
+        control.guide_expose(1.0)
+    with pytest.raises(AstrometryHardwareError, match="PLATE_SOLVE_ALIGNMENT"):
+        control.sync_coordinates(10.0, 20.0)

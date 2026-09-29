@@ -174,6 +174,15 @@ class RPCHandlerRegistry:
         self.register("guiding:capture_frame", _capture_guide_frame)
         self.register("telescope:connect", lambda: container.wayfinder.control.connect())
 
+        # --- Raw INDI diagnostics (IndiStatusPanel) ---
+        # `get_indi_devices`/`indi_properties`/`set_indi_property` were
+        # removed from `ObservatoryControl` outright (M5) -- relocated to
+        # `IndiDiagnosticsService`, registered explicitly here so these three
+        # take priority over the generic dynamic-reflection fallback below.
+        self.register("telescope:indi_devices", ("indi_diagnostics_service", "get_devices"))
+        self.register("telescope:indi_properties", ("indi_diagnostics_service", "get_properties"))
+        self.register("telescope:set_indi_property", ("indi_diagnostics_service", "set_property"))
+
         # --- Alignment (Infrastructure level) ---
         self.register("telescope:alignment_start", _start_alignment)
         self.register("telescope:alignment_stop", ("alignment_service", "cancel_alignment"))
@@ -376,7 +385,6 @@ class RPCHandlerRegistry:
                     "status": ("control", "get_telescope_status"),
                     "slew": ("control", "slew_to_target"),
                     "slew_coordinates": ("control", "slew_to_coordinates"),
-                    "indi_devices": ("control", "get_indi_devices"),
                     "get_focuser_position": ("control", "get_focuser_position"),
                     "focus_move": ("control", "focus_move"),
                     "set_filter": ("control", "set_filter"),

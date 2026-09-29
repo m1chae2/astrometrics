@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { EmptyState } from './EmptyState';
 import '../../common/styles/listCommon.css';
 
 export interface SelectableItem {
@@ -24,6 +25,12 @@ export interface SelectableListProps {
     onSelect: (id: string) => void;
     className?: string;
     highlightedIds?: Set<string>;
+    /** Whether the list's data is still being fetched, for the empty-state message. */
+    isLoading?: boolean;
+    /** Shown in place of the list while `isLoading` is true and `items` is empty. */
+    loadingMessage?: React.ReactNode;
+    /** Shown in place of the list once loading has finished and `items` is empty. */
+    emptyMessage?: React.ReactNode;
 }
 
 // Match .selectable-list__item's CSS min-height (and its --two-line
@@ -61,7 +68,10 @@ export const SelectableList: React.FC<SelectableListProps> = ({
     pendingId,
     onSelect,
     className = '',
-    highlightedIds
+    highlightedIds,
+    isLoading = false,
+    loadingMessage = 'Loading…',
+    emptyMessage = 'No items to display.'
 }) => {
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const [scrollTop, setScrollTop] = useState(0);
@@ -93,6 +103,14 @@ export const SelectableList: React.FC<SelectableListProps> = ({
     const rowsInViewport = Math.ceil(viewportHeight / rowHeightPx);
     const endIndex = Math.min(items.length, firstVisibleIndex + rowsInViewport + OVERSCAN_ROWS);
     const visibleItems = items.slice(startIndex, endIndex);
+
+    if (items.length === 0) {
+        return (
+            <div className={`manager__list ${className}`}>
+                <EmptyState variant={isLoading ? 'loading' : 'empty'} message={isLoading ? loadingMessage : emptyMessage} />
+            </div>
+        );
+    }
 
     return (
         <div

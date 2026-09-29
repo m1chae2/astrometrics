@@ -6,7 +6,7 @@ import time
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from wayfindinglib import IndiInterface
+from wayfindinglib.api.control_registry import ObservatoryControl
 from wayfindinglib.drivers.phd2.phd2_client import PHD2Client
 from wayfindinglib.drivers.phd2.phd2_guiding_service import PHD2GuidingService
 
@@ -29,24 +29,12 @@ class GuidingService:
 
     def __init__(
         self,
-        indi_interface: IndiInterface | None = None,
-        observatory_api: Any = None,
+        observatory_api: ObservatoryControl,
         phd2_service: PHD2GuidingService | None = None,
         logger_interface: Any = None,
     ) -> None:
-        self._observatory_api = observatory_api
+        self._observatory = observatory_api
         self._logger_interface = logger_interface
-        if observatory_api:
-            # Observatory exposes the hardware driver via _driver/driver
-            # properties
-            manager = getattr(observatory_api, "_manager", None)
-            self.indi = (
-                getattr(manager, "_driver", None)
-                or getattr(observatory_api, "_driver", None)
-                or getattr(observatory_api, "driver", None)
-            )
-        else:
-            self.indi = indi_interface
 
         self._phd2_service = phd2_service if phd2_service is not None else PHD2GuidingService(PHD2Client())
         self._is_guiding = False
@@ -93,12 +81,11 @@ class GuidingService:
         # Validate telescope is tracking (with a small retry loop for sync)
         max_retries = 5
         for _i in range(max_retries):
-            tracking_status = self.indi.status.get("TRACKING_STATUS", "Unknown")
+            tracking_status = self._observatory.get_telescope_status().get("trackingStatus", "Unknown")
             if tracking_status == "Tracking":
                 break
             # Force a refresh in the driver if possible
-            if hasattr(self.indi, "connect_to_telescope"):
-                self.indi.connect_to_telescope()
+            self._observatory.connect()
             time.sleep(0.5)
         else:
             logger.error(
@@ -147,6 +134,16 @@ class GuidingService:
         self._is_guiding = False
         logger.info("Stopped guiding loop")
         return True
+
+    def _current_target_name(self) -> str | None:
+        """Look up the target name from the current telescope status.
+
+        Returns
+        -------
+        target_name : `str` | `None`
+            The active target name, or `None` if none is set.
+        """
+        return self._observatory.get_telescope_status().get("targetName")
 
     def poll_external_telemetry(self) -> None:
         """Drain queued real-time external timed guide pulses passively.
@@ -198,9 +195,7 @@ class GuidingService:
 
                     if self._logger_interface:
                         try:
-                            target_name = (
-                                getattr(self.indi, "status", {}).get("TARGET_NAME") if self.indi else None
-                            )
+                            target_name = self._current_target_name()
                             records = [
                                 {
                                     "time": s.time,
@@ -225,11 +220,7 @@ class GuidingService:
 
         # 2. Fall back to INDI timed guide pulse queue
         try:
-            pulses = []
-            if hasattr(self.indi, "_external_pulses"):
-                with self.indi._external_pulses_lock:
-                    pulses = list(self.indi._external_pulses)
-                    self.indi._external_pulses.clear()
+            pulses = self._observatory.drain_external_pulses()
 
             if not pulses:
                 return
@@ -327,7 +318,7 @@ class GuidingService:
 
             if self._logger_interface and coalesced:
                 try:
-                    target_name = getattr(self.indi, "status", {}).get("TARGET_NAME") if self.indi else None
+                    target_name = self._current_target_name()
                     records = [{**s, "target_name": target_name} for s in self._history[-len(coalesced) :]]
                     self._logger_interface.record_guiding_samples(records)
                 except Exception as log_err:
@@ -380,7 +371,7 @@ class GuidingService:
                 # 0. Safety Check: Ensure Telescope is still Tracking
                 # We log it but allow 3 consecutive failures before
                 # breaking loop (to handle transient INDI states)
-                current_tracking = self.indi.status.get("TRACKING_STATUS")
+                current_tracking = self._observatory.get_telescope_status().get("trackingStatus")
                 if current_tracking != "Tracking":
                     if not hasattr(self, "_tracking_fail_count"):
                         self._tracking_fail_count = 0
@@ -401,7 +392,7 @@ class GuidingService:
                     self._tracking_fail_count = 0
 
                 # 1. Start Exposure
-                if not self.indi.guide_expose(self.exposure_time, self.gain):
+                if not self._observatory.guide_expose(self.exposure_time, self.gain):
                     logger.error("Failed to start guide exposure")
                     time.sleep(1)
                     continue
@@ -416,7 +407,7 @@ class GuidingService:
                     break
 
                 # 3. Process Image (Simulated Drift)
-                # In real life: blob = self.indi.get_guide_image() ->
+                # In real life: blob = self._observatory.get_guide_image() ->
                 # processing -> dRA/dDEC
 
                 # Simulate "Random Walk" drift
@@ -442,14 +433,14 @@ class GuidingService:
 
                 if pulse_duration_ra > 50:
                     direction = "W" if correction_ra > 0 else "E"  # Direction logic depends on mount
-                    self.indi.pulse_guide(direction, int(pulse_duration_ra))
+                    self._observatory.pulse_guide(direction, int(pulse_duration_ra))
                     # "Physics" update: drift is reduced by correction
                     # Assume 90% efficiency
                     self._sim_drift_ra += correction_ra * 0.9
 
                 if pulse_duration_dec > 50:
                     direction = "N" if correction_dec > 0 else "S"
-                    self.indi.pulse_guide(direction, int(pulse_duration_dec))
+                    self._observatory.pulse_guide(direction, int(pulse_duration_dec))
                     self._sim_drift_dec += correction_dec * 0.9
 
                 # 5. Update Stats & RMS

@@ -212,9 +212,10 @@ const __dirname = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A
 const getAppPath = (...parts) => path.join(app.getAppPath(), ...parts);
 
 // Minimum time the splash window stays up, just enough to avoid a flash of
-// unstyled content while the main window's renderer does its initial paint.
-// Views now mount on demand (see ui/App.tsx's visitedModes) rather than all
-// preloading their data at boot, so this no longer needs to cover that work.
+// unstyled content or a one-frame flicker of the main window before it's
+// actually shown. The real gate on how long the splash stays up is every
+// mode reporting its data loaded (see dismissSplashAndShowMainWindow and
+// ui/common/utils/appBootReadiness.ts); this is just a floor under that.
 const SPLASH_MIN_DURATION_MS = 500;
 
 /**
@@ -244,10 +245,36 @@ function createSplashWindow() {
 }
 
 /**
+ * Maximum time to wait for the renderer's "every mode is fully loaded"
+ * signal (see ui/common/utils/appBootReadiness.ts) before showing the main
+ * window anyway. Without this, a single mode whose data-load never resolves
+ * (e.g. a hung request) would leave the splash screen up forever.
+ */
+const APP_FULLY_LOADED_TIMEOUT_MS = 30000;
+
+/** Set by createMainWindow(); cleared once dismissSplashAndShowMainWindow() runs. */
+let appFullyLoadedTimeout = null;
+
+/** Guards dismissSplashAndShowMainWindow() against running twice (real signal vs. timeout racing). */
+let splashDismissed = false;
+
+/**
  * Closes the splash window and reveals the main window, waiting out any
  * remaining time on SPLASH_MIN_DURATION_MS since the splash was shown.
+ *
+ * Called once every mode has reported its initial data loaded (normal path,
+ * via the 'app-fully-loaded' IPC message) or once APP_FULLY_LOADED_TIMEOUT_MS
+ * has elapsed without that happening (fallback path, so the app never looks
+ * permanently hung on a stuck load).
  */
 function dismissSplashAndShowMainWindow() {
+  if (splashDismissed) return;
+  splashDismissed = true;
+  if (appFullyLoadedTimeout) {
+    clearTimeout(appFullyLoadedTimeout);
+    appFullyLoadedTimeout = null;
+  }
+
   const elapsed = Date.now() - splashShownAt;
   const remaining = Math.max(SPLASH_MIN_DURATION_MS - elapsed, 0);
   setTimeout(() => {
@@ -394,9 +421,20 @@ async function createMainWindow() {
 
   mainWindow = new BrowserWindow(windowOptions);
   mainWindow.setMenuBarVisibility(false);
-  mainWindow.once('ready-to-show', dismissSplashAndShowMainWindow);
   trackWindowState(mainWindow, app);
   watchWindowChromeState(mainWindow);
+
+  // The splash stays up until the renderer reports every mode has finished
+  // loading (see the 'app-fully-loaded' IPC handler wired below, and
+  // ui/common/utils/appBootReadiness.ts), not just first paint -- with this
+  // timeout as a safety net so a stuck load can't hang the app on the splash
+  // screen forever.
+  splashDismissed = false;
+  if (appFullyLoadedTimeout) clearTimeout(appFullyLoadedTimeout);
+  appFullyLoadedTimeout = setTimeout(() => {
+    log.warn(`Main window did not report fully loaded within ${APP_FULLY_LOADED_TIMEOUT_MS}ms; showing it anyway.`);
+    dismissSplashAndShowMainWindow();
+  }, APP_FULLY_LOADED_TIMEOUT_MS);
 
   if (isDev) {
     const devUrl = process.env.ELECTRON_RENDERER_URL || 'http://127.0.0.1:5173';
@@ -433,6 +471,7 @@ async function createMainWindow() {
       setWindowMode,
       windowModes,
       createFigureWindow,
+      onAppFullyLoaded: dismissSplashAndShowMainWindow,
     },
     platform,
     pythonTerminalManager
@@ -905,8 +944,9 @@ app.on('ready', () => {
   }
 
   // Start backend and transition to UI once it has finished warming up. The
-  // splash stays up until then (it is only dismissed by the main window's
-  // ready-to-show), so nothing opens onto an empty Planetarium.
+  // splash stays up until then, and further still until every mode reports
+  // its own data loaded (see dismissSplashAndShowMainWindow), so nothing
+  // opens onto an empty or half-loaded app.
   backendManager.start(openMainWindowWhenBackendIsWarm);
 
   // System Tray

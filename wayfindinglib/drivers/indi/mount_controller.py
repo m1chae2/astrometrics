@@ -203,6 +203,45 @@ class MountController:
             telescope, "TELESCOPE_TRACK_STATE", expected_name, PyIndi.ISS_ON, timeout=timeout
         )
 
+    def set_slew_rate(self, telescope, rate_index: int, timeout: float = 5.0) -> bool:  # ruff: ignore[missing-type-function-argument]
+        """Set the manual-slew rate by indexed switch element.
+
+        Verified gap fix: the real `IndiInterface` had no `set_slew_rate`
+        implementation at all (only the simulator did), so this call
+        would `AttributeError` against real hardware.
+
+        Parameters
+        ----------
+        telescope
+            INDI device handle for the mount.
+        rate_index : int
+            Index into the `TELESCOPE_SLEW_RATE` switch vector (e.g.
+            0 for the slowest configured rate).
+        timeout : float
+            Maximum number of seconds to wait for the driver to confirm
+            the rate change.
+
+        Returns
+        -------
+        bool
+            True if the slew rate was set and confirmed, False
+            otherwise.
+        """
+        if not telescope:
+            return False
+        rate_switch = telescope.getSwitch("TELESCOPE_SLEW_RATE")
+        if not rate_switch or not (0 <= rate_index < len(rate_switch)):
+            return False
+
+        for i in range(len(rate_switch)):
+            rate_switch[i].s = PyIndi.ISS_ON if i == rate_index else PyIndi.ISS_OFF
+        self.client.sendNewSwitch(rate_switch)
+
+        expected_name = rate_switch[rate_index].getName()
+        return wait_for_switch_state(
+            telescope, "TELESCOPE_SLEW_RATE", expected_name, PyIndi.ISS_ON, timeout=timeout
+        )
+
     def _resolve_altitude_envelope(self) -> tuple[float, float, bool]:
         """Resolve the altitude envelope slews are validated against.
 

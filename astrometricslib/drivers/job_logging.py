@@ -25,12 +25,15 @@ of the four closed their handlers, and only one of them detached from
 both loggers.
 """
 
+import dataclasses
 import logging
 import os
+import threading
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
 from datetime import datetime
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +95,15 @@ class JobHandle:
         if self.job_logger:
             self.job_logger.error(message)
 
-    def mark(self, status: str, progress_current: int = 100) -> None:
+    def mark(
+        self,
+        status: str,
+        progress_current: int = 100,
+        *,
+        progress_total: int | None = None,
+        message: str | None = None,
+        output_metrics: dict | None = None,
+    ) -> None:
         """Record how far along this job is, or that it has finished.
 
         Failures here are deliberately swallowed. Updating the job list is
@@ -105,6 +116,18 @@ class JobHandle:
             The job's new status, such as "completed" or "failed".
         progress_current : `int`, optional
             How far along the job is, out of 100. Defaults to 100.
+        progress_total : `int`, optional
+            What "all the way along" means, when it isn't the usual 100
+            (for example, a batch's frame or target count). Left
+            unchanged when omitted.
+        message : `str`, optional
+            A human-readable status line, such as a batch's final
+            succeeded/failed/skipped counts. Left unchanged when omitted.
+        output_metrics : `dict`, optional
+            Structured results a later caller would want back -- the
+            work's own return value, and/or the target(s)' quality
+            summaries before and after, so a poller has something real to
+            discuss, not just a status word. Left unchanged when omitted.
         """
         if status in _TERMINAL_STATUSES:
             self.reached_terminal_status = True
@@ -116,6 +139,12 @@ class JobHandle:
             if stored_job:
                 stored_job.status = status
                 stored_job.progress_current = progress_current
+                if progress_total is not None:
+                    stored_job.progress_total = progress_total
+                if message is not None:
+                    stored_job.message = message
+                if output_metrics is not None:
+                    stored_job.output_metrics = output_metrics
                 stored_job.updated_at = datetime.now().isoformat()
                 self._logger_interface.upsert_job(stored_job)
         except Exception as update_error:
@@ -331,3 +360,183 @@ def registered_job(
                 handle.mark("completed", 100)
             if completed_message:
                 handle.info(completed_message)
+
+
+def _to_plain(value: Any) -> Any:
+    """Convert a result into plain, JSON-safe data.
+
+    `ProcessingJob.output_metrics` is stored via `json.dumps` (see
+    `LoggerInterface.upsert_job`), which chokes on pydantic models and
+    dataclasses -- both of which pipeline results are made of throughout
+    this library (`BatchRunSummary`, the various `*QualitySummary`
+    models). Recurses through dicts/lists so a pydantic model or
+    dataclass nested arbitrarily deep still comes out as plain data.
+
+    Returns
+    -------
+    plain : `Any`
+        `value`, with any pydantic model or dataclass replaced by its
+        plain dict form.
+    """
+    if hasattr(value, "model_dump"):
+        return _to_plain(value.model_dump(mode="json"))
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return {f.name: _to_plain(getattr(value, f.name)) for f in dataclasses.fields(value)}
+    if isinstance(value, dict):
+        return {k: _to_plain(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_to_plain(v) for v in value]
+    return value
+
+
+def background_job(job_type: str, *, grace_period_seconds: float = 5.0) -> Callable:
+    """Mark a method as safe to run as a background MCP job.
+
+    This is metadata only: it stamps the given job type and grace period
+    onto the function and returns it unchanged. Calling the decorated
+    method directly in Python -- as the backend's own processing flow and
+    the test suite do -- runs synchronously to completion exactly as
+    before. Only `astrometricslib.mcp.reflection`'s dispatch checks for
+    this marker and, when present, routes the call through
+    `run_as_background_job` instead of calling it directly. See that
+    module for why: a slow call blocks the whole MCP connection, not just
+    its own request.
+
+    Parameters
+    ----------
+    job_type : `str`
+        What kind of job this is (see `registered_job`).
+    grace_period_seconds : `float`, optional
+        How long an MCP caller should wait for the work to finish before
+        giving up and returning a job id to poll instead, by default 5.0.
+
+    Returns
+    -------
+    decorator : `Callable`
+        A decorator that stamps the given metadata onto a function.
+    """
+
+    def decorator(func: Callable) -> Callable:
+        func.__background_job_type__ = job_type
+        func.__background_job_grace_period__ = grace_period_seconds
+        return func
+
+    return decorator
+
+
+def run_as_background_job(
+    job_type: str,
+    target_id: str,
+    work_fn: Callable[[JobHandle], Any],
+    *,
+    grace_period_seconds: float = 5.0,
+    snapshot_fn: Callable[[], dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Run `work_fn` under job tracking, in a background thread.
+
+    Waits briefly for the job row to exist, then a while longer for the
+    work itself to finish, so a fast call can still hand back its real
+    result directly -- same shape as calling `work_fn` synchronously,
+    plus a job id for reference. A slow call instead gets a job id (and
+    log file path) to poll with, and critically, the background thread
+    keeps running to completion regardless of what the caller does next:
+    a caller disconnecting can no longer kill the work partway through,
+    which a synchronous call wrapped in a cancellable request could.
+
+    Parameters
+    ----------
+    job_type : `str`
+        What kind of job this is (see `registered_job`).
+    target_id : `str`
+        Which target the job is working on, or a synthetic label for work
+        spanning several (a batch run, for instance).
+    work_fn : `Callable`
+        The work to run, given the job's `JobHandle` so it can log
+        progress or decide its own outcome. Its return value is stashed
+        in the job's `output_metrics["result"]` for later retrieval.
+    grace_period_seconds : `float`, optional
+        How long to wait before giving up and returning a job id instead
+        of the real result, by default 5.0.
+    snapshot_fn : `Callable`, optional
+        Called once right before `work_fn` starts and once right after it
+        finishes; both results are stashed under `output_metrics
+        ["quality"]["pre"/"post"]`. Meant for a target's persisted
+        quality summaries, so a later poll has something concrete to
+        compare, not just a status word. Skipped (with a logged note, not
+        a failure) if it raises.
+
+    Returns
+    -------
+    outcome : `dict`
+        `{"jobId": ..., "result": ...}` if the work finished within
+        `grace_period_seconds`, `{"status": "failed", "jobId": ...,
+        "error": ...}` if it failed that quickly, or `{"status":
+        "running", "jobId": ..., "logFilePath": ...}` if it is still
+        going.
+    """
+    job_created = threading.Event()
+    job_finished = threading.Event()
+    job_info: dict[str, Any] = {}
+    outcome: dict[str, Any] = {}
+
+    def _snapshot(when: str) -> dict[str, Any] | None:
+        if snapshot_fn is None:
+            return None
+        try:
+            return snapshot_fn()
+        except Exception as snapshot_error:
+            logger.debug("Could not take %s-processing quality snapshot: %s", when, snapshot_error)
+            return None
+
+    def _run() -> None:
+        try:
+            with registered_job(enabled=True, job_type=job_type, target_id=target_id) as job:
+                job_info["job_id"] = job.job_id
+                job_info["log_file_path"] = job.log_file_path
+                job_created.set()
+
+                pre_quality = _snapshot("pre")
+                try:
+                    result = work_fn(job)
+                except Exception as work_error:
+                    outcome["error"] = repr(work_error)
+                    raise
+                else:
+                    outcome["result"] = result
+                    metrics: dict[str, Any] = {"result": _to_plain(result)}
+                    if snapshot_fn is not None:
+                        metrics["quality"] = _to_plain({"pre": pre_quality, "post": _snapshot("post")})
+                    job.mark("completed", 100, output_metrics=metrics)
+        except Exception as background_error:
+            # `registered_job` already marked the job failed and re-raises
+            # by contract, for callers that run it synchronously and want
+            # the exception back. Nobody is waiting to catch it here in a
+            # daemon thread -- `outcome["error"]` above already has it, so
+            # letting it propagate further would only spam the process's
+            # default unhandled-thread-exception log for every job failure.
+            logger.debug("Background job '%s' failed: %s", job_type, background_error)
+        finally:
+            job_finished.set()
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+
+    # Just the DB insert -- should be near-instant. A generous cap keeps a
+    # genuinely broken logs DB from hanging the caller forever instead of
+    # falling through to `registered_job`'s own no-op-handle fallback.
+    job_created.wait(timeout=10.0)
+
+    if job_finished.wait(timeout=grace_period_seconds):
+        if "error" in outcome:
+            return {"status": "failed", "jobId": job_info.get("job_id"), "error": outcome["error"]}
+        return {"jobId": job_info.get("job_id"), "result": outcome["result"]}
+
+    return {
+        "status": "running",
+        "jobId": job_info.get("job_id"),
+        "logFilePath": job_info.get("log_file_path"),
+        "message": (
+            f"Still running after {grace_period_seconds:.0f}s; poll with job_get_status/"
+            "job_tail_log using this job id."
+        ),
+    }

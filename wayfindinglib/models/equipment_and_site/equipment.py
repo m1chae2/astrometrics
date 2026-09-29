@@ -57,6 +57,27 @@ class Telescope(BaseModel):
         gt=0.0,
         description="Hour angle past transit at which a meridian flip is triggered, in degrees.",
     )
+    mount_protocol: str = Field(
+        default="indi",
+        description="Hardware-control protocol driving this telescope's mount.",
+    )
+    focuser_protocol: str = Field(
+        default="indi",
+        description=(
+            "Hardware-control protocol driving this telescope's focuser. Lives here rather "
+            "than on a standalone catalog entry because the focuser has no `EquipmentCatalog` "
+            "entry of its own -- it is discovered heuristically off the same connection as "
+            "the mount."
+        ),
+    )
+    filter_wheel_protocol: str = Field(
+        default="indi",
+        description=(
+            "Hardware-control protocol driving this telescope's filter wheel. Lives here "
+            "rather than on a standalone catalog entry for the same reason as "
+            "`focuser_protocol`."
+        ),
+    )
 
     @model_validator(mode="after")
     def _check_altitude_envelope_ordering(self) -> Telescope:
@@ -107,6 +128,10 @@ class Camera(BaseModel):
     min_cooling_temp_c: float = Field(default=-30.0, description="Coldest temperature the sensor supports.")
     max_cooling_ramp_c_per_min: float = Field(
         default=2.0, gt=0.0, description="Maximum safe cooling/warming rate."
+    )
+    protocol: str = Field(
+        default="indi",
+        description="Hardware-control protocol driving this camera.",
     )
 
 

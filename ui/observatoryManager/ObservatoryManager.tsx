@@ -11,6 +11,8 @@ import { GenericDisplayLayout } from '../common/components/GenericDisplayLayout'
 import { SectionPanel } from '../common/components/SectionPanel';
 import { useObservatoryControl } from './hooks/useObservatoryControl';
 import { useRemoteStatusContext } from '../common/context/RemoteStatusContext';
+import { useAstrometrics } from '../common/context/AstrometricsContext';
+import { useReportModeReady } from '../common/utils/appBootReadiness';
 
 import './observatoryManager.css';
 
@@ -41,10 +43,20 @@ export const ObservatoryManager: React.FC = () => {
         setFilterOption,
         filterText,
         setFilterText,
+        isLoading,
     } = useTargetListLogic(reloadKey, pendingTarget, selectedTarget, setPendingTarget, undefined, remoteTargets);
 
     // REQ: OBS-1.5: The display SHALL update position values at a minimum rate of 1Hz.
     const { trackingStatus, telemetry } = useTelescopeStatus();
+    // No fetch-once "loading" concept here (this view is live telemetry, not a
+    // one-shot data load, and AstrometricsContext seeds `telescope` with a
+    // placeholder object rather than null/undefined, so there's no clean
+    // "first real telemetry" signal to key off). `connected` reflects the
+    // actual websocket handshake with the backend, so it's a genuine
+    // "this view now has a real data source" signal rather than firing the
+    // instant the component mounts.
+    const { connected } = useAstrometrics();
+    useReportModeReady('Observatory Manager', connected);
 
     // Custom hook for control logic
     const {
@@ -73,6 +85,9 @@ export const ObservatoryManager: React.FC = () => {
             onFilterOptionChange={setFilterOption}
             filterText={filterText}
             onFilterTextChange={setFilterText}
+            isLoading={isLoading}
+            loadingMessage="Loading targets…"
+            emptyMessage="No targets in the catalog."
             actions={
                 <ListActions>
                     {/* REQ: OBS-3.3: The display SHALL provide an "Add Target" function */}

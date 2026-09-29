@@ -354,17 +354,23 @@ def run_full_pipeline(
 
     standard_frames, spectral_frames = split_standard_and_spectral_frames(target, camera_frames)
     stack_outputs = _stack_camera_frames(target, camera_name, standard_frames, spectral_frames)
-
-    # 2. Astrometry Analysis
-    _run_astrometry_stage(target, astrometrics)
-
-    # 3. Photometry Analysis
     max_concurrent_jobs = astrometrics.config.get_max_concurrent_jobs()
-    _run_photometry_stage(target, astrometrics, camera_frames, max_workers, max_concurrent_jobs)
+
+    # 2. Astrometry Analysis and 3. Photometry Analysis both work from the
+    # standard stack -- skip them (rather than fail the whole target) when
+    # it didn't stack, so a spectral-only success is still saved below.
+    if "standard" in stack_outputs:
+        _run_astrometry_stage(target, astrometrics)
+        _run_photometry_stage(target, astrometrics, camera_frames, max_workers, max_concurrent_jobs)
+    elif standard_frames:
+        print(f"[{target.id}] Standard stacking failed; skipping astrometry and photometry.")
 
     # 4. Spectroscopy Analysis (only when this target actually has a
     # SPEC stack)
-    _run_spectroscopy_stage(target, astrometrics, spectral_frames, max_concurrent_jobs)
+    if "spectral" in stack_outputs:
+        _run_spectroscopy_stage(target, astrometrics, spectral_frames, max_concurrent_jobs)
+    elif spectral_frames:
+        print(f"[{target.id}] Spectral stacking failed; skipping spectroscopy.")
 
     # Save this target's own record (safe under concurrent callers,
     # unlike a full-catalog resync)
@@ -382,17 +388,20 @@ def _stack_camera_frames(
 ) -> dict[str, str]:
     """Stack a target's standard and/or spectral frames.
 
+    The two kinds are stacked independently, and one kind failing does
+    not stop the other from being attempted: a "mixed" target with a
+    full night of spectral frames alongside a couple of incidental
+    standard-imaging frames should not lose the spectral analysis just
+    because those two throwaway frames could not be stacked together.
+
     Returns
     -------
     stack_outputs : `dict`
         Maps the stack type ("standard" or "spectral") to the final
-        saved image file path, for whichever kinds of frames existed.
-
-    Raises
-    ------
-    ValueError
-        If a kind of frame that needed stacking failed to produce a
-        valid output file.
+        saved image file path, for whichever kind(s) stacked
+        successfully. A kind present in the input but absent from the
+        result failed to stack; the reason is printed at the point of
+        failure.
     """
     stack_outputs: dict[str, str] = {}
 
@@ -407,28 +416,24 @@ def _stack_camera_frames(
         print(
             f"[{target.id}] Target contains mixed frames. Stacking standard and spectral frames separately."
         )
-        stacked_output = stack_frames_with_timeout(target, standard_frames)
-        if not stacked_output or not os.path.exists(stacked_output):
-            raise ValueError("Standard stacking failed on mixed target.")
-        stacked_spectral = stack_frames_with_timeout(target, spectral_frames)
-        if not stacked_spectral or not os.path.exists(stacked_spectral):
-            raise ValueError("Spectral stacking failed on mixed target.")
-        print(f"[{target.id}] Stacking succeeded: Standard={stacked_output}, Spectral={stacked_spectral}")
-        stack_outputs["standard"] = stacked_output
-        stack_outputs["spectral"] = stacked_spectral
-    elif standard_frames:
-        stacked_output = stack_frames_with_timeout(target, standard_frames)
-        if not stacked_output or not os.path.exists(stacked_output):
-            raise ValueError("Standard stacking pipeline returned no valid output path.")
-        print(f"[{target.id}] Standard stacking succeeded: {stacked_output}")
-        stack_outputs["standard"] = stacked_output
-    elif spectral_frames:
-        stacked_spectral = stack_frames_with_timeout(target, spectral_frames)
-        if not stacked_spectral or not os.path.exists(stacked_spectral):
-            raise ValueError("Spectral stacking pipeline returned no valid output path.")
-        print(f"[{target.id}] Spectral stacking succeeded: {stacked_spectral}")
-        stack_outputs["spectral"] = stacked_spectral
-    else:
+
+    for kind, frames in (("standard", standard_frames), ("spectral", spectral_frames)):
+        if not frames:
+            continue
+        try:
+            # Caught broadly and deliberately: this kind's failure, whatever
+            # its cause, must not take down the other kind's stack.
+            stacked_path = stack_frames_with_timeout(target, frames)
+        except Exception as stacking_error:
+            print(f"[{target.id}] {kind.capitalize()} stacking raised an error: {stacking_error!r}")
+            continue
+        if not stacked_path or not os.path.exists(stacked_path):
+            print(f"[{target.id}] {kind.capitalize()} stacking pipeline returned no valid output path.")
+            continue
+        print(f"[{target.id}] {kind.capitalize()} stacking succeeded: {stacked_path}")
+        stack_outputs[kind] = stacked_path
+
+    if not standard_frames and not spectral_frames:
         print(
             f"[{target.id}] No valid frames matching camera '{camera_name}' found for stacking. "
             "Skipping stacking step."

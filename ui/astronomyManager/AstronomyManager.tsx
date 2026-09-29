@@ -14,6 +14,7 @@ import { GenericDisplayLayout } from '../common/components/GenericDisplayLayout'
 import { TimelineRangeSelector } from './components/TimelineRangeSelector';
 import { analyzeStarPeriodicity } from '../common/services/astronomyService';
 import { selectLightCurveSeries } from './utils/starDisplayFormat';
+import { useReportModeReady } from '../common/utils/appBootReadiness';
 import './styles/astronomyManager.css';
 
 /**
@@ -55,6 +56,7 @@ export const AstronomyManager: React.FC = () => {
 
   const targetBrowser = useTargetBrowserItems();
   const spectralClassBrowser = useSpectralClassBrowserItems();
+  useReportModeReady('Astronomy Manager', !targetBrowser.isLoading);
 
   // Auto-select the first target once the list loads, unless one is
   // already chosen (including via the ?target= hand-off below).
@@ -223,7 +225,9 @@ export const AstronomyManager: React.FC = () => {
           onFilterOptionChange={() => {}}
           onFilterTextChange={targetBrowser.setFilterText}
           filterPlaceholder="Search targets..."
-          legend={targetBrowser.isLoading ? 'Loading targets…' : undefined}
+          isLoading={targetBrowser.isLoading}
+          loadingMessage="Loading targets…"
+          emptyMessage="No targets found."
         />
       ) : (
         <RadioListManager
@@ -237,11 +241,9 @@ export const AstronomyManager: React.FC = () => {
           onFilterOptionChange={() => {}}
           onFilterTextChange={spectralClassBrowser.setFilterText}
           filterPlaceholder="Search classes..."
-          legend={
-            spectralClassBrowser.isLoading
-              ? 'Scanning the catalog for spectral classes…'
-              : undefined
-          }
+          isLoading={spectralClassBrowser.isLoading}
+          loadingMessage="Scanning the catalog for spectral classes…"
+          emptyMessage="No spectral classes found."
         />
       )}
 
@@ -258,15 +260,14 @@ export const AstronomyManager: React.FC = () => {
         filterText={starList.filterText}
         onFilterTextChange={starList.setFilterText}
         legend={
-          starList.isLoading && starList.items.length === 0 ? (
-            'Loading stars…'
-          ) : (
-            <>
-              <span><span className="selectable-list__badge selectable-list__badge--spectra">S</span> spectrum</span>
-              <span><span className="selectable-list__badge selectable-list__badge--photometry">P</span> photometry</span>
-            </>
-          )
+          <>
+            <span><span className="selectable-list__badge selectable-list__badge--spectra">S</span> spectrum</span>
+            <span><span className="selectable-list__badge selectable-list__badge--photometry">P</span> photometry</span>
+          </>
         }
+        isLoading={starList.isLoading}
+        loadingMessage="Loading stars…"
+        emptyMessage="No stars found for this selection."
         page={isSpectralClassScoped ? undefined : starsByTarget.page}
         onPageChange={isSpectralClassScoped ? undefined : starsByTarget.setPage}
         hasMore={isSpectralClassScoped ? false : starsByTarget.hasMore}

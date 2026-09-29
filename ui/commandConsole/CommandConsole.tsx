@@ -11,6 +11,7 @@ import { WorkspaceTable, WorkspaceVariable } from './WorkspaceTable';
 import { CodeEditor } from './CodeEditor';
 import { TerminalPane, TerminalEntry } from './TerminalPane';
 import { DocViewer } from './DocViewer';
+import { useReportModeReady } from '../common/utils/appBootReadiness';
 import './commandConsole.css';
 
 export const CommandConsole: React.FC = () => {
@@ -37,6 +38,7 @@ export const CommandConsole: React.FC = () => {
   const [docLoading, setDocLoading] = useState<boolean>(false);
 
   // Initial Data Fetch
+  const [isLoadingSidebarData, setIsLoadingSidebarData] = useState<boolean>(true);
   const loadSidebarData = useCallback(async () => {
     try {
       const [recipeList, scriptList, wsList] = await Promise.all([
@@ -49,8 +51,11 @@ export const CommandConsole: React.FC = () => {
       setWorkspaceVariables(wsList || []);
     } catch (err) {
       console.warn('Failed loading Command Console data:', err);
+    } finally {
+      setIsLoadingSidebarData(false);
     }
   }, []);
+  useReportModeReady('Command Console', !isLoadingSidebarData);
 
   useEffect(() => {
     loadSidebarData();

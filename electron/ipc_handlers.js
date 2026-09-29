@@ -413,6 +413,18 @@ export function registerIpcHandlers(
     return win ? win.isFullScreen() : false;
   });
 
+  // Splash Screen — dismissed once every mode reports its initial data
+  // loaded (see ui/common/utils/appBootReadiness.ts). Only the main window
+  // ever actually sends this: auxiliary windows only ever mount one mode, so
+  // they never complete the full set that triggers it.
+  ipcMain.on('app-fully-loaded', (event) => {
+    if (mainWindow && BrowserWindow.fromWebContents(event.sender) === mainWindow) {
+      if (typeof windowCoordinator.onAppFullyLoaded === 'function') {
+        windowCoordinator.onAppFullyLoaded();
+      }
+    }
+  });
+
   // Tray Popover Actions — routed from the TrayPopover React component
   // Emergency Park intentionally keeps the popover open so the user can
   // confirm mount state after triggering the park command.

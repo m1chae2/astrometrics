@@ -44,7 +44,9 @@ def detect_background_split(
     Returns
     -------
     split_summary : `dict` [`str`, `Any`] or `None`
-        Details about the split, or None if the images are all similar.
+        Details about the split, or None if the images are all similar, or
+        if neither side of the candidate split has more than one frame (so
+        neither can show what its own normal spread looks like).
     """
     if len(background_levels) < 2:
         return None
@@ -59,6 +61,23 @@ def detect_background_split(
 
     low_spread = low_group[-1] - low_group[0] if len(low_group) > 1 else 0.0
     high_spread = high_group[-1] - high_group[0] if len(high_group) > 1 else 0.0
+
+    # A side with more than one frame shows what "normal" spread looks like
+    # on its own, which is enough to judge the gap against, however small
+    # the *other* side is (a single washed-out frame among a full night of
+    # good ones is exactly the case this check exists to catch). But when
+    # *neither* side has more than one frame, nothing here establishes what
+    # normal even is: both spreads floor to 0, and dividing by the 1e-9
+    # fallback below turns any gap, however small or well explained (e.g.
+    # by two frames simply having different exposure times), into an
+    # "infinite" ratio. Real case: two ZWO ASI 533MM Pro frames of the same
+    # target at 2 s and 10 s exposure, background ~16 and ~92 ADU -- a
+    # difference fully explained by exposure time, not sky conditions --
+    # produced a gap ratio of 76 billion and had one of the two frames
+    # excluded from the stack.
+    if max(low_spread, high_spread) <= 0.0:
+        return None
+
     typical_spread = max(low_spread, high_spread, 1e-9)
 
     if max_gap < gap_ratio_threshold * typical_spread:

@@ -8,7 +8,8 @@
  * REQ: PLN-2.1, REQ: PLN-2.2
  */
 
-import React, { useState, useRef, useEffect } from 'react';
+import React from 'react';
+import { Popover } from '../../common/components/Popover';
 
 /**
  * Props for PlanetariumToolbar.
@@ -87,45 +88,11 @@ export const PlanetariumToolbar: React.FC<Props> = ({
   currentFOV,
   onOpenTimeModal,
 }) => {
-  const [isLayersOpen, setIsLayersOpen] = useState(false);
-  const layersRef = useRef<HTMLDivElement>(null);
-
-  // Close layers popover on click outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (layersRef.current && !layersRef.current.contains(event.target as Node)) {
-        setIsLayersOpen(false);
-      }
-    };
-    if (isLayersOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [isLayersOpen]);
-
   // A native <select>'s open dropdown is drawn by the OS's own widget toolkit
   // on Linux (GTK), which follows the system theme rather than this page's
   // CSS `color-scheme: dark` — the popup keeps coming back light regardless
-  // of what's declared here. Using our own popover (like the Layers menu
-  // above) keeps the session picker themed consistently everywhere.
-  const [isSessionOpen, setIsSessionOpen] = useState(false);
-  const sessionRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (sessionRef.current && !sessionRef.current.contains(event.target as Node)) {
-        setIsSessionOpen(false);
-      }
-    };
-    if (isSessionOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [isSessionOpen]);
+  // of what's declared here. Using our own Popover (like the Layers menu
+  // below) keeps the session picker themed consistently everywhere.
 
   /**
    * Builds the display label for a historical session option, e.g.
@@ -169,18 +136,21 @@ export const PlanetariumToolbar: React.FC<Props> = ({
   return (
     <div className="planetarium-toolbar">
       {/* Group 1: Passive Sky Layers Popover */}
-      <div className="planetarium-toolbar__popover-container" ref={layersRef}>
-        <button
-          type="button"
-          onClick={() => setIsLayersOpen((prev) => !prev)}
-          className={`planetarium-toolbar__button ${isLayersOpen ? 'planetarium-toolbar__button--active' : ''}`}
-          title="Toggle passive sky background and catalog layers"
-        >
-          <span>Layers</span>
-          <span className="planetarium-toolbar__chevron">{isLayersOpen ? '▲' : '▼'}</span>
-        </button>
-
-        {isLayersOpen && (
+      <Popover
+        className="planetarium-toolbar__popover-container"
+        trigger={({ isOpen, toggle }) => (
+          <button
+            type="button"
+            onClick={toggle}
+            className={`planetarium-toolbar__button ${isOpen ? 'planetarium-toolbar__button--active' : ''}`}
+            title="Toggle passive sky background and catalog layers"
+          >
+            <span>Layers</span>
+            <span className="planetarium-toolbar__chevron">{isOpen ? '▲' : '▼'}</span>
+          </button>
+        )}
+      >
+        {() => (
           <div className="planetarium-toolbar__popover-menu">
             <div className="planetarium-toolbar__popover-header">
               Sky Background
@@ -197,7 +167,7 @@ export const PlanetariumToolbar: React.FC<Props> = ({
             ))}
           </div>
         )}
-      </div>
+      </Popover>
 
       <div className="planetarium-toolbar__divider" />
 
@@ -218,22 +188,25 @@ export const PlanetariumToolbar: React.FC<Props> = ({
       {/* Group 3: Session Selector — alignment is always active, so this is always shown. */}
       <div className="planetarium-toolbar__divider" />
       <div className="planetarium-toolbar__session-container">
-        <div className="planetarium-toolbar__popover-container" ref={sessionRef}>
-          <button
-            type="button"
-            onClick={() => setIsSessionOpen((prev) => !prev)}
-            className={`planetarium-toolbar__button planetarium-toolbar__select ${isSessionOpen ? 'planetarium-toolbar__button--active' : ''}`}
-          >
-            <span>{selectedSessionLabel}</span>
-            <span className="planetarium-toolbar__chevron">{isSessionOpen ? '▲' : '▼'}</span>
-          </button>
-
-          {isSessionOpen && (
+        <Popover
+          className="planetarium-toolbar__popover-container"
+          trigger={({ isOpen, toggle }) => (
+            <button
+              type="button"
+              onClick={toggle}
+              className={`planetarium-toolbar__button planetarium-toolbar__select ${isOpen ? 'planetarium-toolbar__button--active' : ''}`}
+            >
+              <span>{selectedSessionLabel}</span>
+              <span className="planetarium-toolbar__chevron">{isOpen ? '▲' : '▼'}</span>
+            </button>
+          )}
+        >
+          {({ close }) => (
             <div className="planetarium-toolbar__popover-menu planetarium-toolbar__popover-menu--sessions">
               <button
                 type="button"
                 className={`planetarium-toolbar__session-option ${selectedSessionId === null ? 'planetarium-toolbar__session-option--selected' : ''}`}
-                onClick={() => { onSelectSession?.(null); setIsSessionOpen(false); }}
+                onClick={() => { onSelectSession?.(null); close(); }}
               >
                 No Session Selected
               </button>
@@ -241,7 +214,7 @@ export const PlanetariumToolbar: React.FC<Props> = ({
                 <button
                   type="button"
                   className={`planetarium-toolbar__session-option ${selectedSessionId === 'all' ? 'planetarium-toolbar__session-option--selected' : ''}`}
-                  onClick={() => { onSelectSession?.('all'); setIsSessionOpen(false); }}
+                  onClick={() => { onSelectSession?.('all'); close(); }}
                 >
                   All Sessions (Cumulative)
                 </button>
@@ -251,14 +224,14 @@ export const PlanetariumToolbar: React.FC<Props> = ({
                   type="button"
                   key={s.sessionId}
                   className={`planetarium-toolbar__session-option ${selectedSessionId === s.sessionId ? 'planetarium-toolbar__session-option--selected' : ''}`}
-                  onClick={() => { onSelectSession?.(s.sessionId); setIsSessionOpen(false); }}
+                  onClick={() => { onSelectSession?.(s.sessionId); close(); }}
                 >
                   {getSessionLabel(s)}
                 </button>
               ))}
             </div>
           )}
-        </div>
+        </Popover>
       </div>
 
       <div className="planetarium-toolbar__divider" />

@@ -197,6 +197,7 @@ export const AlignmentPointCard: React.FC<Props> = ({
           className="planetarium-info-card__close"
           onClick={onClose}
           aria-label="Close panel"
+          title="Close panel"
         >
           &times;
         </button>

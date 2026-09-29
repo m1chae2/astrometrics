@@ -495,38 +495,6 @@ class TelescopeService:
                 raise FilterNotFoundError(str(e)) from e
             raise HardwareCommandError(str(e)) from e
 
-    def get_indi_devices(self) -> list:
-        """RPC wrapper to get list of active INDI device names.
-
-        Returns
-        -------
-        result : `list`
-            Active INDI device names.
-        """
-        return self.wayfinder.control.get_indi_devices()
-
-    def get_indi_properties(self, device_name: str) -> dict:
-        """RPC wrapper to get all properties for a specified INDI device.
-
-        Returns
-        -------
-        result : `dict`
-            All properties for the specified device.
-        """
-        return self.wayfinder.control.indi_properties(device_name)
-
-    def set_indi_property(
-        self, device_name: str, property_name: str, value: str, element: str | None = None
-    ) -> bool:
-        """RPC wrapper to set a specific element of an INDI property.
-
-        Returns
-        -------
-        result : `bool`
-            `True` if the property was set successfully.
-        """
-        return self.wayfinder.control.set_indi_property(device_name, property_name, value, element)
-
     def get_observer_location(self) -> dict:
         """Return observer location from INDI GPSD or a fallback default.
 

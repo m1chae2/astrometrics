@@ -64,6 +64,7 @@ export const SettingsLayout: React.FC<SettingsLayoutProps> = ({
                         className="settings__close-button"
                         onClick={onClose}
                         aria-label="Close settings"
+                        title="Close settings"
                         type="button"
                     >
                         <svg viewBox="0 0 24 24" width="20" height="20">

@@ -18,7 +18,17 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class PointingCorrection(BaseModel):
-    """One iteration of plate-solve pointing alignment (§2.5.3)."""
+    """One iteration of plate-solve pointing alignment (§2.5.3).
+
+    `model_predicted_error_arcsec`/`unexplained_residual_arcsec` (M7b)
+    are `None` unless a session-scoped `MountPointingModel` was
+    supplied: the systematic error the model predicts at this exact
+    position, and the measured error still left over once that
+    prediction is subtracted out. `converged` is judged against the
+    residual when a model was supplied -- a large `pointing_error_arcsec`
+    the model already fully explains is a known, stable bias, not
+    evidence of a real pointing failure still needing correction.
+    """
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -32,6 +42,8 @@ class PointingCorrection(BaseModel):
     correction_dec_arcsec: float
     iteration: int = Field(..., gt=0)
     converged: bool
+    model_predicted_error_arcsec: float | None = Field(default=None)
+    unexplained_residual_arcsec: float | None = Field(default=None)
 
 
 class GuidingCorrection(BaseModel):

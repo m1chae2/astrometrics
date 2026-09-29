@@ -114,6 +114,69 @@ def test_compute_guiding_correction_succeeds_with_saved_calibration(control, app
     assert correction.pulse_ra_ms > 0
 
 
+def test_compute_guiding_correction_auto_resolves_persisted_mount_model(control, app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify guiding correction feeds forward the saved spectrum analysis.
+
+    Unlike `pointing_model` (session-scoped, never auto-resolved), the
+    active telescope's `GuidingSpectrumAnalysis` is standing state this
+    object already holds, so `compute_guiding_correction` must resolve
+    it automatically without the caller passing it explicitly (M7b).
+    """
+    from wayfindinglib.models.session.telemetry import GuidingSpectrumAnalysis
+
+    _configure_active_rig(app_config)
+    control.set_active_telescope("Rig A")
+    control.set_active_camera("CamA")
+
+    calibration = GuiderCalibration(
+        id="cal-1",
+        camera_id="CamA",
+        telescope_id="Rig A",
+        arcsec_per_pixel=2.0,
+        camera_angle_deg=0.0,
+        ra_rate_arcsec_per_sec=10.0,
+        dec_rate_arcsec_per_sec=10.0,
+    )
+    control.save_guider_calibration(calibration)
+    control.save_guiding_spectrum_analysis(
+        GuidingSpectrumAnalysis(
+            sample_count=100,
+            duration_seconds=3600.0,
+            dominant_period_seconds=480.0,
+            periodic_error_peak_to_peak_arcsec=10.0,
+        )
+    )
+
+    # At phase=0.25, the modeled sinusoid peaks -- a feedforward pulse
+    # is issued even with zero measured drift, well within the deadband.
+    correction = control.compute_guiding_correction("frame-2", 0.0, 0.0, elapsed_guiding_seconds=480.0 * 0.25)
+    assert correction.pulse_ra_ms != 0
+    assert correction.suppressed_by_deadband is False
+
+
+def test_compute_pointing_correction_feeds_forward_a_passed_in_model(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify pointing correction feeds forward a caller-supplied model.
+
+    Unlike guiding's mount model, `pointing_model` is never auto-resolved
+    -- it is session-scoped state the caller must supply explicitly.
+    """
+    from wayfindinglib.models.session.telemetry import MountPointingModel
+
+    model = MountPointingModel(
+        sample_count=10, raw_rms_arcsec=8.0, residual_rms_arcsec=0.0, id_arcsec=8.0, confidence="high"
+    )
+
+    without_model = control.compute_pointing_correction(
+        "frame-3", 180.0, 0.0, 180.0, -8.0 / 3600.0, iteration=1
+    )
+    with_model = control.compute_pointing_correction(
+        "frame-3", 180.0, 0.0, 180.0, -8.0 / 3600.0, iteration=1, pointing_model=model
+    )
+
+    assert without_model.model_predicted_error_arcsec is None
+    assert with_model.unexplained_residual_arcsec == pytest.approx(0.0, abs=1e-6)
+
+
 def test_save_and_active_guiding_spectrum_analysis_round_trip(control, app_config, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify the standing spectrum analysis persists keyed by telescope."""
     from wayfindinglib.models.session.telemetry import GuidingSpectrumAnalysis
@@ -188,6 +251,72 @@ def test_logger_interface_lazily_builds_from_config(control):  # ruff: ignore[mi
     logger_interface = control._logger_interface
     assert isinstance(logger_interface, LoggerInterface)
     assert control._logger_interface is logger_interface
+
+
+def test_run_guider_calibration_persists_the_derived_calibration(control, app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify run_guider_calibration sequences steps and saves the result."""
+    from wayfindinglib.tasks.control_tasks.calibration_routines import GuiderCalibrationSteps
+
+    _configure_active_rig(app_config)
+    control.set_active_telescope("Rig A")
+    control.set_active_camera("CamA")
+
+    centroids = iter([(0.0, 0.0), (10.0, 0.0), (10.0, 0.0), (10.0, 8.0)])
+    steps = GuiderCalibrationSteps(
+        pulse_ra=lambda duration_sec: True,
+        pulse_dec=lambda duration_sec: True,
+        measure_guide_star_centroid=lambda: next(centroids),
+    )
+
+    assert control.active_guider_calibration() is None
+
+    calibration = control.run_guider_calibration(steps, "cal-1", "CamA", "Rig A", arcsec_per_pixel=2.0)
+
+    persisted = control.active_guider_calibration()
+    assert persisted is not None
+    assert persisted.id == calibration.id
+    assert persisted.ra_rate_arcsec_per_sec == pytest.approx(calibration.ra_rate_arcsec_per_sec)
+
+
+def test_run_backlash_calibration_delegates_to_the_task_module(mocker, control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify run_backlash_calibration forwards to calibration_routines."""
+    from wayfindinglib.tasks.control_tasks import calibration_routines
+
+    steps = mocker.Mock()
+    mocker.patch.object(calibration_routines, "run_backlash_calibration", return_value=150.0)
+
+    result = control.run_backlash_calibration(steps)
+
+    assert result == pytest.approx(150.0)
+    calibration_routines.run_backlash_calibration.assert_called_once_with(
+        steps, "north", "south", 1.0, 0.05, 40, 0.5
+    )
+
+
+def test_run_polar_alignment_assist_delegates_to_the_task_module(mocker, control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify run_polar_alignment_assist forwards attempts and latitude."""
+    from wayfindinglib.tasks.control_tasks import calibration_routines
+
+    mocker.patch.object(calibration_routines, "run_polar_alignment_assist", return_value="model")
+    attempts = [{"ra": 1.0, "dec": 2.0}]
+
+    result = control.run_polar_alignment_assist(attempts, latitude_deg=39.7)
+
+    assert result == "model"
+    calibration_routines.run_polar_alignment_assist.assert_called_once_with(attempts, latitude_deg=39.7)
+
+
+def test_run_polar_alignment_assist_defaults_latitude_from_observer_location(mocker, control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify a missing explicit latitude falls back to observer location."""
+    from wayfindinglib.tasks.control_tasks import calibration_routines
+
+    mocker.patch.object(control, "get_observer_location", return_value={"latitude": 39.7})
+    mocker.patch.object(calibration_routines, "run_polar_alignment_assist", return_value="model")
+    attempts = [{"ra": 1.0, "dec": 2.0}]
+
+    control.run_polar_alignment_assist(attempts)
+
+    calibration_routines.run_polar_alignment_assist.assert_called_once_with(attempts, latitude_deg=39.7)
 
 
 def test_assess_safety_hysteresis_persists_across_calls_on_same_astrometrics(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]

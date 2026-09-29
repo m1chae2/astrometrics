@@ -16,6 +16,103 @@ import numpy as np
 from wayfindinglib.models.session.telemetry import MountPointingModel
 
 
+def _pointing_geometry(ra_value: float, dec_deg: float, latitude_deg: float) -> dict[str, float]:
+    """Compute the trig terms `fit_pointing_model`'s rows are built from.
+
+    Shared by `fit_pointing_model` (fitting the six coefficients) and
+    `predict_pointing_error` (evaluating them at a given position), so
+    the two can never drift apart on the geometric convention they use
+    -- including the `h` term below, which is derived from `ra_value`
+    alone rather than true local sidereal time, an existing
+    simplification this function preserves rather than corrects.
+
+    Parameters
+    ----------
+    ra_value : `float`
+        Right Ascension, in hours if `<= 24.0`, else already degrees.
+    dec_deg : `float`
+        Declination in decimal degrees.
+    latitude_deg : `float`
+        Observer latitude in decimal degrees.
+
+    Returns
+    -------
+    geometry : `dict` [`str`, `float`]
+        `sin_h`, `cos_h`, `tan_dec`, `sec_dec`, `sin_dec`, `cos_dec`,
+        `sin_phi`, `cos_phi` -- the trig terms the RA/Dec projection
+        equations below are assembled from.
+    """
+    ra_deg = ra_value * 15.0 if ra_value <= 24.0 else ra_value
+
+    delta = math.radians(dec_deg)
+    clamped_dec = max(min(delta, math.radians(89.5)), math.radians(-89.5))
+    sin_dec = math.sin(clamped_dec)
+    cos_dec = max(math.cos(clamped_dec), 1e-4)
+
+    h = math.radians((ra_deg * 3.0) % 360.0 - 180.0)
+    phi = math.radians(latitude_deg)
+
+    return {
+        "sin_h": math.sin(h),
+        "cos_h": math.cos(h),
+        "tan_dec": sin_dec / cos_dec,
+        "sec_dec": 1.0 / cos_dec,
+        "sin_dec": sin_dec,
+        "cos_dec": cos_dec,
+        "sin_phi": math.sin(phi),
+        "cos_phi": math.cos(phi),
+    }
+
+
+def predict_pointing_error(
+    ra_value: float, dec_deg: float, model: MountPointingModel, latitude_deg: float = 45.0
+) -> tuple[float, float]:
+    """Predict the systematic pointing error `model` implies at a position.
+
+    Evaluates the same RA/Dec projection equations `fit_pointing_model`
+    solves, using `model`'s already-fit IH/ID/ME/MA/CH/TF coefficients
+    instead of solving for them -- the forward direction of the same
+    geometric model, used by `pointing_correction.py`'s feedforward to
+    tell a genuinely new pointing failure apart from one the model
+    already explains.
+
+    Parameters
+    ----------
+    ra_value : `float`
+        Right Ascension, in hours if `<= 24.0`, else already degrees --
+        same convention `fit_pointing_model` accepts.
+    dec_deg : `float`
+        Declination in decimal degrees.
+    model : `MountPointingModel`
+        The already-fit coefficients to evaluate.
+    latitude_deg : `float`, optional
+        Observer latitude in decimal degrees, defaults to 45.0.
+
+    Returns
+    -------
+    delta_ra_arcsec, delta_dec_arcsec : `tuple` [`float`, `float`]
+        The model's predicted RA/Dec pointing offset at this position,
+        in the same ``solved - commanded`` convention `fit_pointing_model`
+        fits against.
+    """
+    g = _pointing_geometry(ra_value, dec_deg, latitude_deg)
+
+    d_ra_cos_dec = (
+        -model.ih_arcsec
+        + model.me_arcsec * g["sin_h"] * g["tan_dec"]
+        - model.ma_arcsec * g["cos_h"] * g["tan_dec"]
+        + model.ch_arcsec * g["sec_dec"]
+        + model.tf_arcsec * g["cos_h"] * g["cos_phi"] * g["tan_dec"]
+    )
+    d_dec = (
+        -model.id_arcsec
+        + model.me_arcsec * g["cos_h"]
+        + model.ma_arcsec * g["sin_h"]
+        + model.tf_arcsec * (g["cos_h"] * g["sin_phi"] * g["sin_dec"] - g["cos_phi"] * g["cos_dec"])
+    )
+    return d_ra_cos_dec / g["cos_dec"], d_dec
+
+
 def fit_pointing_model(
     attempts: list[dict[str, Any]],
     latitude_deg: float = 45.0,
@@ -73,54 +170,39 @@ def fit_pointing_model(
             message=f"Need at least 4 plate-solve points to decompose terms; found {n}.",
         )
 
-    phi = math.radians(latitude_deg)
-
     # Parameters to solve: [IH, ID, ME, MA, CH, TF]
     a_rows = []
     b_rows = []
     raw_sq_errors = []
 
     for p in valid_points:
-        ra_deg = p["ra"] * 15.0 if p["ra"] <= 24.0 else p["ra"]
-        dec_deg = p["dec"]
         d_ra = p["d_ra"]
         d_dec = p["d_dec"]
 
         raw_sq_errors.append(d_ra**2 + d_dec**2)
 
-        delta = math.radians(dec_deg)
-        clamped_dec = max(min(delta, math.radians(89.5)), math.radians(-89.5))
-        sin_dec = math.sin(clamped_dec)
-        cos_dec = max(math.cos(clamped_dec), 1e-4)
-        tan_dec = sin_dec / cos_dec
-        sec_dec = 1.0 / cos_dec
-
-        h = math.radians((ra_deg * 3.0) % 360.0 - 180.0)
-        sin_h = math.sin(h)
-        cos_h = math.cos(h)
-        sin_phi = math.sin(phi)
-        cos_phi = math.cos(phi)
+        g = _pointing_geometry(p["ra"], p["dec"], latitude_deg)
 
         # 1. RA projection equation (IH, ID, ME, MA, CH, TF)
         row_ra = [
             -1.0,
             0.0,
-            sin_h * tan_dec,
-            -cos_h * tan_dec,
-            sec_dec,
-            cos_h * cos_phi * tan_dec,
+            g["sin_h"] * g["tan_dec"],
+            -g["cos_h"] * g["tan_dec"],
+            g["sec_dec"],
+            g["cos_h"] * g["cos_phi"] * g["tan_dec"],
         ]
         a_rows.append(row_ra)
-        b_rows.append(d_ra * cos_dec)
+        b_rows.append(d_ra * g["cos_dec"])
 
         # 2. Dec equation (IH, ID, ME, MA, CH, TF)
         row_dec = [
             0.0,
             -1.0,
-            cos_h,
-            sin_h,
+            g["cos_h"],
+            g["sin_h"],
             0.0,
-            cos_h * sin_phi * sin_dec - cos_phi * cos_dec,
+            g["cos_h"] * g["sin_phi"] * g["sin_dec"] - g["cos_phi"] * g["cos_dec"],
         ]
         a_rows.append(row_dec)
         b_rows.append(d_dec)

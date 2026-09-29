@@ -50,6 +50,10 @@ from wayfindinglib.models.session.correction_result import (
 )
 from wayfindinglib.models.session.safe_state import SafeStateOutcome
 from wayfindinglib.models.session.telemetry import GuidingSpectrumAnalysis, MountPointingModel
+from wayfindinglib.tasks.control_tasks.calibration_routines import (
+    BacklashCalibrationSteps,
+    GuiderCalibrationSteps,
+)
 from wayfindinglib.tasks.control_tasks.capability_promotion import DivergenceEvidenceSummary
 from wayfindinglib.tasks.control_tasks.safe_state import SafeStateSteps
 from wayfindinglib.tasks.control_tasks.safety_monitor import SafetyMonitor, SensorReadings
@@ -803,8 +807,19 @@ class ObservatoryControl:
         solved_ra_deg: float,
         solved_dec_deg: float,
         iteration: int,
+        pointing_model: MountPointingModel | None = None,
     ) -> PointingCorrection:
         """Compute one iteration's pointing error and closing correction.
+
+        Parameters
+        ----------
+        pointing_model : `MountPointingModel` | `None`, optional
+            This session's fitted model (`get_pointing_model`), fed
+            forward as `compute_pointing_correction`'s feedforward
+            input. `None` (default) disables it -- deliberately not
+            resolved automatically here, since it is session-scoped,
+            not standing state this object holds (see
+            `pointing_log_ingestion.py`).
 
         Returns
         -------
@@ -813,6 +828,8 @@ class ObservatoryControl:
         """
         from wayfindinglib.tasks.control_tasks.pointing_correction import compute_pointing_correction
 
+        observer_location = self.get_observer_location()
+        latitude_deg = observer_location["latitude"] if observer_location else 45.0
         return compute_pointing_correction(
             comparison_input_id,
             commanded_ra_deg,
@@ -821,17 +838,37 @@ class ObservatoryControl:
             solved_dec_deg,
             iteration,
             self._correction_config,
+            pointing_model=pointing_model,
+            latitude_deg=latitude_deg,
         )
 
     def compute_guiding_correction(
-        self, comparison_input_id: str, drift_x_px: float, drift_y_px: float
+        self,
+        comparison_input_id: str,
+        drift_x_px: float,
+        drift_y_px: float,
+        elapsed_guiding_seconds: float | None = None,
+        dec_direction_reversal: bool = False,
     ) -> GuidingCorrection:
         """Compute a signed per-axis guiding pulse from a measured pixel drift.
+
+        Parameters
+        ----------
+        elapsed_guiding_seconds : `float` | `None`, optional
+            Seconds since this guiding run began, forwarded to
+            `compute_guiding_correction`'s periodic-error feedforward.
+        dec_direction_reversal : `bool`, optional
+            Whether this call's Dec correction reverses the previous
+            pulse's direction, forwarded to the backlash feedforward.
 
         Returns
         -------
         correction : `GuidingCorrection`
-            The computed signed per-axis guiding pulse.
+            The computed signed per-axis guiding pulse, including any
+            feedforward from `active_guiding_spectrum_analysis` (the
+            active telescope's persisted, cross-night model --
+            resolved automatically, since unlike `pointing_model`
+            above this *is* standing state this object holds).
 
         Raises
         ------
@@ -847,7 +884,14 @@ class ObservatoryControl:
         if calibration is None:
             raise ValueError("No GuiderCalibration exists for the active telescope/camera pairing")
         return compute_guiding_correction(
-            comparison_input_id, drift_x_px, drift_y_px, calibration, self._correction_config
+            comparison_input_id,
+            drift_x_px,
+            drift_y_px,
+            calibration,
+            self._correction_config,
+            mount_model=self.active_guiding_spectrum_analysis(),
+            elapsed_guiding_seconds=elapsed_guiding_seconds,
+            dec_direction_reversal=dec_direction_reversal,
         )
 
     def compute_focus_correction(
@@ -893,6 +937,117 @@ class ObservatoryControl:
     def save_guider_calibration(self, calibration: GuiderCalibration) -> None:
         """Record a measured `GuiderCalibration`."""
         self._butler.put(calibration, "guider_calibration", {"id": calibration.id})
+
+    def run_guider_calibration(
+        self,
+        steps: GuiderCalibrationSteps,
+        calibration_id: str,
+        camera_id: str,
+        telescope_id: str,
+        arcsec_per_pixel: float,
+        ra_pulse_duration_sec: float = 3.0,
+        dec_pulse_duration_sec: float = 3.0,
+    ) -> GuiderCalibration:
+        """Command a known RA/Dec pulse pair and persist the calibration.
+
+        `steps` supplies the real pulse/centroid-measurement operations
+        -- this method does not construct a default wiring itself (the
+        same precedent `execute_safe_state`'s `SafeStateSteps` sets: no
+        production code builds one of those either). See
+        `calibration_routines.run_guider_calibration` for the full
+        sequencing and error contract.
+
+        Returns
+        -------
+        calibration : `GuiderCalibration`
+            The derived and persisted calibration.
+        """
+        from wayfindinglib.tasks.control_tasks.calibration_routines import (
+            run_guider_calibration as _run_guider_calibration,
+        )
+
+        calibration = _run_guider_calibration(
+            steps,
+            calibration_id,
+            camera_id,
+            telescope_id,
+            arcsec_per_pixel,
+            ra_pulse_duration_sec,
+            dec_pulse_duration_sec,
+        )
+        self.save_guider_calibration(calibration)
+        return calibration
+
+    def run_backlash_calibration(
+        self,
+        steps: BacklashCalibrationSteps,
+        settle_direction: str = "north",
+        reversed_direction: str = "south",
+        settle_pulse_sec: float = 1.0,
+        reversal_test_pulse_sec: float = 0.05,
+        max_test_pulses: int = 40,
+        motion_detection_threshold_px: float = 0.5,
+    ) -> float:
+        """Measure Dec backlash by reversing direction and probing gently.
+
+        Does not persist the result itself -- the caller folds it into
+        the active telescope's `GuidingSpectrumAnalysis`
+        (`dec_backlash_estimate_ms`) via `save_guiding_spectrum_analysis`,
+        since this measurement alone doesn't carry the periodic-error
+        half of that model. See
+        `calibration_routines.run_backlash_calibration` for the full
+        probing algorithm.
+
+        Returns
+        -------
+        backlash_estimate_ms : `float`
+            The measured reversal delay, in milliseconds.
+        """
+        from wayfindinglib.tasks.control_tasks.calibration_routines import (
+            run_backlash_calibration as _run_backlash_calibration,
+        )
+
+        return _run_backlash_calibration(
+            steps,
+            settle_direction,
+            reversed_direction,
+            settle_pulse_sec,
+            reversal_test_pulse_sec,
+            max_test_pulses,
+            motion_detection_threshold_px,
+        )
+
+    def run_polar_alignment_assist(
+        self, attempts: list[dict[str, Any]], latitude_deg: float | None = None
+    ) -> MountPointingModel:
+        """Fit ME/MA from this session's plate solves for real-time adjustment.
+
+        Never persisted -- a live, repeatable adjust-and-recheck loop
+        for tonight's own polar alignment, not standing state. See
+        `calibration_routines.run_polar_alignment_assist` for the full
+        workflow this is meant to support.
+
+        Parameters
+        ----------
+        attempts : `list` [`dict` [`str`, `Any`]]
+            This session's plate-solve records so far.
+        latitude_deg : `float` | `None`, optional
+            Observer latitude in decimal degrees; resolved from
+            `get_observer_location` when not given.
+
+        Returns
+        -------
+        model : `MountPointingModel`
+            The freshly-fit model.
+        """
+        from wayfindinglib.tasks.control_tasks.calibration_routines import (
+            run_polar_alignment_assist as _run_polar_alignment_assist,
+        )
+
+        if latitude_deg is None:
+            observer_location = self.get_observer_location()
+            latitude_deg = observer_location["latitude"] if observer_location else 45.0
+        return _run_polar_alignment_assist(attempts, latitude_deg=latitude_deg)
 
     def active_focus_model(self) -> FocusModel | None:
         """Return the `FocusModel` for the active telescope/camera pairing.

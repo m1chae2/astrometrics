@@ -12,7 +12,6 @@ def test_indi_interface_detects_sync_coordinates() -> None:
 
     config_mock = MagicMock()
     config_mock.get_telescope_hostname.return_value = "localhost"
-    config_mock.get_allow_commands.return_value = False
     config_mock.get_indi_host.return_value = "localhost"
     config_mock.get_indi_port.return_value = 7624
 
@@ -66,7 +65,6 @@ def test_indi_interface_ignores_zero_delta_echo_during_sync() -> None:
 
     config_mock = MagicMock()
     config_mock.get_telescope_hostname.return_value = "localhost"
-    config_mock.get_allow_commands.return_value = False
     config_mock.get_indi_host.return_value = "localhost"
     config_mock.get_indi_port.return_value = 7624
 
@@ -194,7 +192,6 @@ def test_indi_interface_extracts_target_from_fits_header() -> None:
 
     config_mock = MagicMock()
     config_mock.get_telescope_hostname.return_value = "localhost"
-    config_mock.get_allow_commands.return_value = False
     config_mock.get_indi_host.return_value = "localhost"
     config_mock.get_indi_port.return_value = 7624
 
@@ -220,7 +217,6 @@ def test_indi_interface_camera_status_exposure_and_download() -> None:
 
     config_mock = MagicMock()
     config_mock.get_telescope_hostname.return_value = "localhost"
-    config_mock.get_allow_commands.return_value = False
     config_mock.get_indi_host.return_value = "localhost"
     config_mock.get_indi_port.return_value = 7624
 
@@ -258,7 +254,6 @@ def test_indi_interface_camera_status_normalizes_elapsed_to_countdown() -> None:
 
     config_mock = MagicMock()
     config_mock.get_telescope_hostname.return_value = "localhost"
-    config_mock.get_allow_commands.return_value = False
     config_mock.get_indi_host.return_value = "localhost"
     config_mock.get_indi_port.return_value = 7624
 
@@ -403,7 +398,6 @@ def test_indi_interface_pulse_coalescing_and_echo_filtering() -> None:
 
     config_mock = MagicMock()
     config_mock.get_telescope_hostname.return_value = "localhost"
-    config_mock.get_allow_commands.return_value = False
     config_mock.get_indi_host.return_value = "localhost"
     config_mock.get_indi_port.return_value = 7624
 
@@ -469,7 +463,6 @@ def test_indi_interface_polar_alignment_and_paa_points() -> None:
 
     config_mock = MagicMock()
     config_mock.get_telescope_hostname.return_value = "stellarmate.local"
-    config_mock.get_allow_commands.return_value = False
     config_mock.get_indi_host.return_value = "stellarmate.local"
     config_mock.get_indi_port.return_value = 7624
 

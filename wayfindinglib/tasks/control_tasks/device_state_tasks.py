@@ -4,10 +4,9 @@ Description: Maps each device's raw presence/connection/alert signals
 onto the five-state `DeviceSummaryState` vocabulary, per
 `Wayfinding_Library_Architecture.md` §2.5.2: `OFFLINE` where not
 present on the server, `STANDBY` where present but not connected,
-`DISABLED` where connected with commands withheld (the existing
-`allow_commands` configuration), `ENABLED` where connected and
-commandable, `FAULT` where the driver reports an alert property state
-or a command failed in a way requiring attention.
+`DISABLED` where connected with commands withheld, `ENABLED` where
+connected and commandable, `FAULT` where the driver reports an alert
+property state or a command failed in a way requiring attention.
 
 Takes already-read raw signals rather than a live driver, so the
 mapping is exercisable with no hardware or Execution package present

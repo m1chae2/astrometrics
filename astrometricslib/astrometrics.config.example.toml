@@ -34,7 +34,6 @@ available = "NONE, L, SPEC"
 hostname = "localhost"
 focal_length_mm = "405"
 focal_ratio = "5.4"
-allow_commands = "true"
 indi_port = "7624"
 remote_pictures_path = "/home/stellarmate/Pictures"
 

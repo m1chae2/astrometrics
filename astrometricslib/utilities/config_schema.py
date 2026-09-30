@@ -44,16 +44,12 @@ class TelescopeConfig(BaseModel):
     remote_pictures_path : `str`
         Remote filesystem path where captured pictures are stored, by
         default ``"/home/stellarmate/Pictures"``.
-    allow_commands : `bool`
-        Whether remote command execution against the telescope host
-        is permitted, by default `False`.
     """
 
     hostname: str = "localhost"
     focal_length_mm: float = 0.0
     focal_ratio: float = 0.0
     remote_pictures_path: str = "/home/stellarmate/Pictures"
-    allow_commands: bool = False
 
 
 class ProcessingConfig(BaseModel):

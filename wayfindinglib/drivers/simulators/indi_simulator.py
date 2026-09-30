@@ -347,8 +347,6 @@ class SimulatorIndiInterface(IndiInterface):
         # setup, we might need to mimic it. For now, we assume we are
         # replacing the connection logic entirely.
         self.config = config
-        get_allow_commands = getattr(config, "get_allow_commands", None)
-        self.allow_commands = get_allow_commands() if callable(get_allow_commands) else False
 
         self.connected = False
         self.telescope_coords = {"ra": "00:00:00", "dec": "00:00:00"}

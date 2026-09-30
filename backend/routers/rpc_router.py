@@ -71,6 +71,26 @@ def _start_alignment(target_ra: str, target_dec: str) -> bool:
     return container.alignment_service.start_alignment(ra_deg, dec_deg)
 
 
+def _serialize_bulk_delegation_outcome(outcome: Any) -> dict[str, dict[str, str]]:
+    """Serialize a `BulkDelegationOutcome` for the JSON-RPC response.
+
+    `ObservatoryCapability`/`DelegationState` are `StrEnum` members --
+    JSON-serializable as-is -- but converted to plain strings
+    explicitly here rather than relying on that, so the wire format
+    doesn't depend on an implementation detail of those enum types.
+
+    Returns
+    -------
+    serialized : `dict`
+        ``{"applied": {capability: state, ...}, "rejected": {capability:
+        reason, ...}}``, both keyed by capability name.
+    """
+    return {
+        "applied": {capability.value: state.value for capability, state in outcome.applied.items()},
+        "rejected": {capability.value: reason for capability, reason in outcome.rejected.items()},
+    }
+
+
 def _get_session_alignment(session_id: str = "") -> dict:
     """Fetch alignment attempts and polar alignment data for a session.
 
@@ -252,6 +272,18 @@ class RPCHandlerRegistry:
         self.register("astronomy:visible", ("stellar_service", "get_visible_targets"))
         self.register("astronomy:get_visible_targets", ("stellar_service", "get_visible_targets"))
         self.register("observatory:connect", lambda: container.wayfinder.control.connect())
+        self.register(
+            "observatory:enter_monitoring_mode",
+            lambda evidence_note="": _serialize_bulk_delegation_outcome(
+                container.wayfinder.control.enter_monitoring_mode(evidence_note=evidence_note)
+            ),
+        )
+        self.register(
+            "observatory:enter_controller_mode",
+            lambda evidence_note="": _serialize_bulk_delegation_outcome(
+                container.wayfinder.control.enter_controller_mode(evidence_note=evidence_note)
+            ),
+        )
         self.register("targets:list", ("target_service", "get_all_targets_list"))
         self.register("targets:get", ("target_service", "get_targets"))
         self.register("observatory:get_telescope_status", ("telescope_service", "get_telescope_status"))

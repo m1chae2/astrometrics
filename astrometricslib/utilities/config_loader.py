@@ -245,7 +245,6 @@ class AppConfiguration:
                 "focal_length_mm": "0.0",
                 "focal_ratio": "0.0",
                 "remote_pictures_path": "/home/stellarmate/Pictures",
-                "allow_commands": "false",
             },
             "Observatory.Camera": {"default_primary_camera": "Unknown", "models": "Unknown"},
             "Observatory.Constraints": {"min_altitude": "0.0", "max_altitude": "90.0"},
@@ -874,20 +873,6 @@ class AppConfiguration:
         """
         return self.app_config.get("Observatory.RemoteTransfer", "driver", fallback="stellarmate")
 
-    def get_allow_commands(self) -> bool:
-        """Return whether commands may be sent to the telescope (Safe Mode).
-
-        Returns
-        -------
-        allow_commands : `bool`
-            `True` if commands may be sent to the telescope.
-        """
-        try:
-            val = self.app_config.get("Observatory.Telescope", "allow_commands")
-            return val.lower() == "true"
-        except configparser.NoSectionError, configparser.NoOptionError, KeyError:
-            return self.app_config.getboolean("Telescope", "allow_commands", fallback=False)
-
     def get_min_altitude(self) -> float:
         """Return the minimum allowed altitude for telescope slews.
 
@@ -998,7 +983,6 @@ class AppConfiguration:
             focal_length_mm=self.get_focal_length_mm(),
             focal_ratio=self.get_focal_ratio(),
             remote_pictures_path=self.get_remote_pictures_path(),
-            allow_commands=self.get_allow_commands(),
         )
 
         # Build processing config

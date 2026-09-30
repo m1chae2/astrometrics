@@ -81,6 +81,16 @@ export interface EquipmentConfigurationResult {
 }
 
 // Strongly typed ActionRegistry to map RPC action names to their payload and response models.
+// Result of a bulk delegation-state change (observatory:enter_monitoring_mode /
+// observatory:enter_controller_mode). Not a pydantic model, so not part of the
+// auto-generated backendTypes.ts -- kept in sync by hand with
+// wayfindinglib/tasks/control_tasks/capability_promotion.py's BulkDelegationOutcome
+// and backend/routers/rpc_router.py's _serialize_bulk_delegation_outcome.
+export interface BulkDelegationOutcome {
+    applied: Record<string, string>;
+    rejected: Record<string, string>;
+}
+
 export interface ActionRegistry {
     // Targets
     "target:list": { payload: Record<string, never>; response: TargetObject[] };
@@ -127,6 +137,14 @@ export interface ActionRegistry {
     "telescope:apply_promotion_decision": {
         payload: { capability: string; new_state: string; evidence_note?: string };
         response: Record<string, any>;
+    };
+    "observatory:enter_monitoring_mode": {
+        payload: { evidence_note?: string };
+        response: BulkDelegationOutcome;
+    };
+    "observatory:enter_controller_mode": {
+        payload: { evidence_note?: string };
+        response: BulkDelegationOutcome;
     };
 
     // System

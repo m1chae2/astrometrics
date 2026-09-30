@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { getSystemConfig, saveSystemConfig } from '../../../common/services/systemService';
+import { enterMonitoringMode, enterControllerMode } from '../../../common/services/observatoryService';
 import { useToast } from '../../../common/hooks/useToast';
 import { reportError } from '../../../common/utils/reportError';
 import { useBackendFetch } from '../../../common/hooks/useBackendFetch';
@@ -15,6 +16,14 @@ export const useSettingsLogic = (open: boolean, closing: boolean, onClose: () =>
 
     // Form State
     const [secondaryWindowEnabled, setSecondaryWindowEnabled] = useState(false);
+
+    // Monitoring/controller mode: an immediate action, not part of the
+    // deferred config-patch/save flow -- the real backing for the retired
+    // "Safe Mode" config checkbox (Wayfinding_Library_Architecture.md M8).
+    // This local flag reflects only the last action taken in this session,
+    // not a persisted status the backend can be queried for yet.
+    const [controllerModeEnabled, setControllerModeEnabled] = useState(false);
+    const [isChangingControlMode, setIsChangingControlMode] = useState(false);
 
     // Config Data: `configData` is the editable working copy shown in every
     // form; `configPatch` mirrors only the fields the user actually changed
@@ -150,6 +159,37 @@ export const useSettingsLogic = (open: boolean, closing: boolean, onClose: () =>
         }
     };
 
+    const handleSetControlMode = async (enterController: boolean) => {
+        if (isChangingControlMode) return;
+        setIsChangingControlMode(true);
+        try {
+            const outcome = enterController
+                ? await enterControllerMode()
+                : await enterMonitoringMode();
+
+            const rejectedCapabilities = Object.keys(outcome.rejected);
+            if (rejectedCapabilities.length > 0) {
+                showToast(
+                    `Controller mode partially applied -- not yet eligible: ${rejectedCapabilities.join(', ')}`,
+                    'error'
+                );
+            } else {
+                showToast(
+                    enterController ? 'Controller mode enabled' : 'Monitoring mode enabled',
+                    'success'
+                );
+            }
+            // Reflects the requested mode even on partial rejection: the
+            // capabilities that did succeed already left DELEGATED, so
+            // "monitoring mode" is no longer strictly true either.
+            setControllerModeEnabled(enterController);
+        } catch (err) {
+            reportError(err instanceof Error ? err : new Error(String(err)), 'settings');
+        } finally {
+            setIsChangingControlMode(false);
+        }
+    };
+
     const handleRevertBackend = () => {
         setConfigPatch({});
         getSystemConfig({ timeoutMs: 10000 })
@@ -184,6 +224,7 @@ export const useSettingsLogic = (open: boolean, closing: boolean, onClose: () =>
     return {
         activeConfigTab, setActiveConfigTab,
         secondaryWindowEnabled, handleToggleSecondaryWindow,
+        controllerModeEnabled, isChangingControlMode, handleSetControlMode,
         configData, loadingConfig,
         handleConfigChange,
         handleSaveBackend,

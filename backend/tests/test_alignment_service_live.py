@@ -96,7 +96,7 @@ def _read_ra_hours_dec_degrees(telescope) -> tuple[float, float]:  # ruff: ignor
 
 @pytest.fixture(scope="module")
 def live_interface():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Yield a real IndiInterface connected to the live server, unblocked.
+    """Yield a real IndiInterface connected to the live server.
 
     Yields
     ------
@@ -104,7 +104,6 @@ def live_interface():  # ruff: ignore[missing-return-type-undocumented-public-fu
         A connected interface with at least one device discovered.
     """
     config = AppConfiguration()
-    config.app_config.set("Observatory.Telescope", "allow_commands", "true")
 
     indi_interface = IndiInterface(config=config)
     indi_interface.connect_to_server()

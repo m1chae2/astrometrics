@@ -54,7 +54,10 @@ from wayfindinglib.tasks.control_tasks.calibration_routines import (
     BacklashCalibrationSteps,
     GuiderCalibrationSteps,
 )
-from wayfindinglib.tasks.control_tasks.capability_promotion import DivergenceEvidenceSummary
+from wayfindinglib.tasks.control_tasks.capability_promotion import (
+    BulkDelegationOutcome,
+    DivergenceEvidenceSummary,
+)
 from wayfindinglib.tasks.control_tasks.safe_state import SafeStateSteps
 from wayfindinglib.tasks.control_tasks.safety_monitor import SafetyMonitor, SensorReadings
 
@@ -1371,6 +1374,57 @@ class ObservatoryControl:
 
         divergence_records = self._butler.get_all("divergence_record")
         return summarize_divergence_evidence(capability, divergence_records)
+
+    def enter_monitoring_mode(self, *, evidence_note: str = "") -> BulkDelegationOutcome:
+        """Move every capability toward `DELEGATED` ("monitoring mode").
+
+        This system's real backing for the "Safe Mode" toggle: watches
+        and computes against every capability, issuing nothing. Always
+        fully succeeds -- `DELEGATED` has no dependency ordering of its
+        own to violate.
+
+        Returns
+        -------
+        outcome : `BulkDelegationOutcome`
+            Every capability's resulting state (always all `applied`,
+            never `rejected`).
+        """
+        from wayfindinglib.tasks.control_tasks.capability_promotion import set_all_capabilities
+
+        return set_all_capabilities(
+            self._butler,
+            DelegationState.DELEGATED,
+            evidence_note=evidence_note,
+            has_guider_calibration=self.active_guider_calibration() is not None,
+            has_focus_model=self.active_focus_model() is not None,
+        )
+
+    def enter_controller_mode(self, *, evidence_note: str = "") -> BulkDelegationOutcome:
+        """Move every capability toward `AUTHORITATIVE` ("controller mode").
+
+        This system's real backing for the "Safe Mode" toggle's
+        opposite state. A capability not yet eligible -- a correction
+        capability not already `SHADOWED`, or capture before the three
+        corrections above it are `AUTHORITATIVE` -- is reported in
+        `BulkDelegationOutcome.rejected` rather than silently skipped or
+        forced; a caller must promote it through the required
+        intermediate states first (`apply_promotion_decision`).
+
+        Returns
+        -------
+        outcome : `BulkDelegationOutcome`
+            Which capabilities reached `AUTHORITATIVE`, and why any
+            that didn't were rejected.
+        """
+        from wayfindinglib.tasks.control_tasks.capability_promotion import set_all_capabilities
+
+        return set_all_capabilities(
+            self._butler,
+            DelegationState.AUTHORITATIVE,
+            evidence_note=evidence_note,
+            has_guider_calibration=self.active_guider_calibration() is not None,
+            has_focus_model=self.active_focus_model() is not None,
+        )
 
     # -- Remote file transfer -----------------------------------------------
 

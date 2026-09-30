@@ -40,57 +40,6 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-_MOUNT_CONTROLLED_PROPERTY_NAMES = frozenset({
-    "EQUATORIAL_EOD_COORD",
-    "HORIZONTAL_COORD",
-    "TELESCOPE_PARK",
-    "PARK",
-    "TELESCOPE_TRACK_STATE",
-    "TELESCOPE_MOTION_NS",
-    "TELESCOPE_MOTION_WE",
-    "TELESCOPE_ABORT_MOTION",
-    "ABORT",
-    "ON_COORD_SET",
-    "TELESCOPE_SLEW_RATE",
-})
-"""INDI property vector names `wayfindinglib/drivers/indi/mount_controller.py`
-writes to, used by `IndiInterface._should_block_command` to exclude mount
-commands from the legacy Safe Mode gate now that `MOUNT_CONTROL` authority is
-checked centrally instead (see that method's docstring).
-"""
-
-_FOCUSER_CONTROLLED_PROPERTY_NAMES = frozenset({
-    "ABS_FOCUS_POSITION",
-    "REL_FOCUS_POSITION",
-    "FOCUS_MOTION",
-    "Mode",
-    "FOCUS_MODE",
-})
-"""INDI property vector names
-`wayfindinglib/drivers/indi/focuser_controller.py` writes to, excluded
-from the legacy Safe Mode gate now that `AUTOFOCUS` authority is
-checked centrally instead (M3).
-"""
-
-_FILTER_WHEEL_CONTROLLED_PROPERTY_NAMES = frozenset({
-    "FILTER_SLOT",
-})
-"""INDI property vector names
-`wayfindinglib/drivers/indi/filter_wheel_controller.py` writes to,
-excluded from the legacy Safe Mode gate now that `CAPTURE_ORCHESTRATION`
-authority is checked centrally instead (M3).
-"""
-
-_CENTRALLY_AUTHORIZED_PROPERTY_NAMES = (
-    _MOUNT_CONTROLLED_PROPERTY_NAMES
-    | _FOCUSER_CONTROLLED_PROPERTY_NAMES
-    | _FILTER_WHEEL_CONTROLLED_PROPERTY_NAMES
-)
-"""Union of every device type's property names excluded from the legacy Safe
-Mode gate so far. Grows by one union member per milestone (M2 mount, M3
-focuser/filter wheel, ...) until M6 completes and the gate is retired outright.
-"""
-
 
 class TelescopeStatus(BaseModel):
     """Represents the current status and telemetry of the telescope.
@@ -263,13 +212,12 @@ class IndiInterface(IndiClient):
         Parameters
         ----------
         config
-            Configuration object providing telescope hostname, allowed
-            commands, and INDI host/port, injected by the caller.
+            Configuration object providing telescope hostname and
+            INDI host/port, injected by the caller.
 
         """
         super().__init__()
         self.config = config
-        self.allow_commands = False  # Default to Safe Mode
         self._sync_config()
         self.device_map = {}
         self._has_initialized_defaults = False
@@ -362,9 +310,8 @@ class IndiInterface(IndiClient):
                 logger.debug(f"Failed to query device name on removeDevice: {e}")
 
     def _sync_config(self):  # ruff: ignore[missing-return-type-private-function]
-        """Sync local state (hostname, allow_commands) from config."""
+        """Sync local state (hostname) from config."""
         self.hostname = self.config.get_telescope_hostname()
-        self.allow_commands = self.config.get_allow_commands()
         self.setServer(self.hostname, 7624)
         if hasattr(self, "connection_manager"):
             self.connection_manager.hostname = self.hostname
@@ -1196,76 +1143,6 @@ class IndiInterface(IndiClient):
         """
         return self.mount_controller.abort(self.connect_to_telescope())
 
-    def _should_block_command(self, property_item: Any) -> bool:
-        """Check if commands should be blocked based on Safe Mode.
-
-        REQ: SR-1.5: Safe Mode implementation.
-
-        Commands for device types whose authority is now checked
-        centrally are excluded: mount (M2), focuser and filter wheel
-        (M3). Each is checked in
-        `wayfindinglib/tasks/control_tasks/hardware_operations.py`
-        against the real `DelegationPolicy` before this class is ever
-        called, so this legacy Safe Mode flag would otherwise be a
-        second, conflicting authority (`Wayfinding_Library_Architecture.md`
-        §2.5.1a). M4/M6 extend this exclusion to their own device
-        types as each is centrally authority-checked in turn; this
-        flag is retired outright once none remain (M5-M6 range).
-
-        Returns
-        -------
-        should_block : `bool`
-            `False` if the command is a connection command, a
-            centrally-authorized device command, or Safe Mode is
-            disabled (commands allowed).
-
-        Raises
-        ------
-        AstrometryHardwareError
-            If Safe Mode is enabled and the command is neither
-            connection-related nor centrally authorized elsewhere.
-        """
-        # Always allow connection-related commands
-        property_name = ""
-        if hasattr(property_item, "getName"):
-            property_name = property_item.getName()
-        elif hasattr(property_item, "name"):
-            property_name = property_item.name
-
-        if property_name in ["CONNECTION", "CONNECT", "DISCONNECT"]:
-            return False
-        if property_name in _CENTRALLY_AUTHORIZED_PROPERTY_NAMES:
-            return False
-
-        if self.allow_commands:
-            return False
-
-        from wayfindinglib import AstrometryHardwareError
-
-        error_message = (
-            f"Command to {property_name} blocked by Safe Mode. Please enable hardware control in Settings."
-        )
-        logger.error(f"BLOCKED: {error_message}")
-        raise AstrometryHardwareError(error_message)
-
-    def sendNewText(self, property_item: Any) -> None:
-        """REQ: SR-1.
-
-        2, SR-1.5.
-        """
-        if self._should_block_command(property_item):
-            return
-        super().sendNewText(property_item)
-
-    def sendNewNumber(self, property_item: Any) -> None:
-        """REQ: SR-1.
-
-        2, SR-1.5.
-        """
-        if self._should_block_command(property_item):
-            return
-        super().sendNewNumber(property_item)
-
     def drain_external_syncs(self) -> list[dict[str, Any]]:
         """Drain and return queued external alignment sync events.
 
@@ -1592,15 +1469,6 @@ class IndiInterface(IndiClient):
         except Exception as text_error:
             logger.debug(f"Error checking external text property: {text_error}")
 
-    def sendNewSwitch(self, property_item: Any) -> None:
-        """REQ: SR-1.
-
-        2, SR-1.5.
-        """
-        if self._should_block_command(property_item):
-            return
-        super().sendNewSwitch(property_item)
-
     def get_device_properties(self, device_name):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
         """Retrieve all properties for a device in a structured format.
 
@@ -1745,8 +1613,8 @@ class IndiInterface(IndiClient):
 
         Does not call connect_to_telescope to avoid recursion.
         Best-effort: this runs automatically on first connection, so
-        a blocked command (e.g. Safe Mode) or any other failure here
-        must not break the connection/status flow that called it.
+        a failure here must not break the connection/status flow that
+        called it.
         """
         try:
             self.mount_controller.set_tracking(telescope_device, False)

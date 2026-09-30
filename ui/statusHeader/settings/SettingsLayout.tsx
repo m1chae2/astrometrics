@@ -19,6 +19,7 @@ interface SettingsLayoutProps extends LogicResult {
 export const SettingsLayout: React.FC<SettingsLayoutProps> = ({
     activeConfigTab, setActiveConfigTab,
     secondaryWindowEnabled, handleToggleSecondaryWindow,
+    controllerModeEnabled, isChangingControlMode, handleSetControlMode,
     configData, loadingConfig,
     handleConfigChange,
     handleSaveBackend,
@@ -113,6 +114,9 @@ export const SettingsLayout: React.FC<SettingsLayoutProps> = ({
                                     configData={configData}
                                     handleConfigChange={handleConfigChange}
                                     loadingConfig={loadingConfig}
+                                    controllerModeEnabled={controllerModeEnabled}
+                                    isChangingControlMode={isChangingControlMode}
+                                    onSetControlMode={handleSetControlMode}
                                 />
                             )}
                             {activeConfigTab === 'Equipment' && (

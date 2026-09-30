@@ -381,6 +381,76 @@ def test_apply_promotion_decision_and_summarize_divergence_evidence(control):  #
     assert summary.sample_count == 0
 
 
+def test_enter_monitoring_mode_always_fully_succeeds(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify monitoring mode moves every capability to DELEGATED."""
+    outcome = control.enter_monitoring_mode(evidence_note="going hands-off")
+
+    assert outcome.rejected == {}
+    assert all(state == DelegationState.DELEGATED for state in outcome.applied.values())
+    assert len(outcome.applied) == len(ObservatoryCapability)
+
+
+def test_enter_controller_mode_reports_partial_success(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify controller mode surfaces a partial BulkDelegationOutcome.
+
+    Plan Verification (M8): from a fresh policy, only OBSERVATORY_SAFETY
+    and MOUNT_CONTROL can legally reach AUTHORITATIVE without first
+    passing through SHADOWED -- the rest must be visibly rejected, not
+    silently skipped or forced.
+    """
+    outcome = control.enter_controller_mode()
+
+    assert outcome.applied == {
+        ObservatoryCapability.OBSERVATORY_SAFETY: DelegationState.AUTHORITATIVE,
+        ObservatoryCapability.MOUNT_CONTROL: DelegationState.AUTHORITATIVE,
+    }
+    assert ObservatoryCapability.AUTOGUIDING in outcome.rejected
+    assert control.delegation_policy().state_for(ObservatoryCapability.AUTOGUIDING) == (
+        DelegationState.DELEGATED
+    )
+
+
+def test_enter_controller_mode_fully_succeeds_once_shadowed_and_calibrated(control, app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify controller mode fully succeeds once every precondition is met."""
+    from wayfindinglib.models.equipment_and_site.focus_model import ApproachDirection, FocusModel
+
+    _configure_active_rig(app_config)
+    control.set_active_telescope("Rig A")
+    control.set_active_camera("CamA")
+
+    calibration = GuiderCalibration(
+        id="cal-1",
+        camera_id="CamA",
+        telescope_id="Rig A",
+        arcsec_per_pixel=2.0,
+        camera_angle_deg=0.0,
+        ra_rate_arcsec_per_sec=10.0,
+        dec_rate_arcsec_per_sec=10.0,
+    )
+    control.save_guider_calibration(calibration)
+    control.save_focus_model(
+        FocusModel(
+            id="focus-1",
+            camera_id="CamA",
+            telescope_id="Rig A",
+            backlash_steps=0,
+            approach_direction=ApproachDirection.INWARD,
+        )
+    )
+
+    for capability in (
+        ObservatoryCapability.PLATE_SOLVE_ALIGNMENT,
+        ObservatoryCapability.AUTOGUIDING,
+        ObservatoryCapability.AUTOFOCUS,
+    ):
+        control.apply_promotion_decision(capability, DelegationState.SHADOWED)
+
+    outcome = control.enter_controller_mode()
+
+    assert outcome.rejected == {}
+    assert all(state == DelegationState.AUTHORITATIVE for state in outcome.applied.values())
+
+
 def test_connect_lazily_initializes_every_configured_driver(control, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify connect() lazily initializes the shared driver and succeeds.
 

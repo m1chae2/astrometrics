@@ -4,6 +4,9 @@ interface ObservatoryFormProps {
     configData: ConfigData;
     handleConfigChange: (section: string, key: string, value: string) => void;
     loadingConfig?: boolean;
+    controllerModeEnabled: boolean;
+    isChangingControlMode: boolean;
+    onSetControlMode: (enterController: boolean) => void;
 }
 
 const TELESCOPE_SECTION = 'Observatory.Telescope';
@@ -14,12 +17,10 @@ export const ObservatoryForm: React.FC<ObservatoryFormProps> = ({
     configData,
     handleConfigChange,
     loadingConfig = false,
+    controllerModeEnabled,
+    isChangingControlMode,
+    onSetControlMode,
 }) => {
-    // allow_commands historically lived under either section name depending
-    // on how old a config file is; write to whichever one is actually present.
-    const telescopeSection = configData['Observatory.Telescope'] ? 'Observatory.Telescope' : 'Telescope';
-    const allowCommands = configData[telescopeSection]?.['allow_commands'] === 'true';
-
     return (
         <div className="settings__form">
             <h3>Observatory</h3>
@@ -102,15 +103,18 @@ export const ObservatoryForm: React.FC<ObservatoryFormProps> = ({
                 <label className="settings__field settings__field--row">
                     <input
                         type="checkbox"
-                        checked={allowCommands}
-                        onChange={(e) => handleConfigChange(telescopeSection, 'allow_commands', e.target.checked ? 'true' : 'false')}
+                        checked={controllerModeEnabled}
+                        onChange={(e) => onSetControlMode(e.target.checked)}
                         className="settings__checkbox"
-                        disabled={loadingConfig}
+                        disabled={loadingConfig || isChangingControlMode}
                     />
                     <span>Allow Telescope Commands (Disable Safe Mode)</span>
                 </label>
                 <div className="settings__help">
-                    Enable this to allow the LLM and UI to move your telescope.
+                    Enable this to let this system command your telescope directly ("controller mode") instead
+                    of only watching and computing alongside your existing control software ("monitoring
+                    mode"). A capability not yet eligible for controller mode is reported, not silently
+                    skipped or forced -- see the notification after toggling.
                 </div>
             </div>
         </div>

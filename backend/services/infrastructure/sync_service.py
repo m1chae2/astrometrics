@@ -7,7 +7,7 @@ from datetime import UTC
 from typing import Any
 
 from backend.services.infrastructure import thread_management
-from wayfindinglib.drivers.stellarmate_interface import StellarMateInterface
+from wayfindinglib.api.control_registry import ObservatoryControl
 
 
 class SyncService:
@@ -18,7 +18,7 @@ class SyncService:
 
     def __init__(
         self,
-        stellarmate: StellarMateInterface | None = None,
+        observatory_api: ObservatoryControl | None = None,
         config_service: Any = None,
         guiding_service: Any = None,
         logger_interface: Any = None,
@@ -27,8 +27,10 @@ class SyncService:
 
         Parameters
         ----------
-        stellarmate : `StellarMateInterface`, optional
-            Injected StellarMateInterface instance.
+        observatory_api : `ObservatoryControl`, optional
+            Provides `remote_transfer_driver`/`list_remote_targets` --
+            no deprecated `StellarMateInterface` fallback (M9's backend
+            cleanup).
         config_service : `Any`, optional
             Injected AppConfiguration instance.
         guiding_service : `Any`, optional
@@ -36,7 +38,7 @@ class SyncService:
         logger_interface : `Any`, optional
             Injected LoggerInterface instance.
         """
-        self._remote = stellarmate
+        self._observatory = observatory_api
         self._config = config_service
         self._guiding_service = guiding_service
         self._logger_interface = logger_interface
@@ -135,12 +137,12 @@ class SyncService:
         -------
         summary : `dict`
             The sync task summary, or an error status if no
-            `StellarMateInterface` is configured.
+            `ObservatoryControl` is configured.
         """
-        if not self._remote:
-            return {"status": "error", "message": "StellarMateInterface not available"}
+        if not self._observatory:
+            return {"status": "error", "message": "ObservatoryControl not available"}
 
-        target_list = self._remote.list_remote_targets()
+        target_list = self._observatory.list_remote_targets()
         target_list = [t for t in target_list if t not in ["Bias", "Dark", "Flat"]]
         return self.sync_all(target_list)
 
@@ -168,7 +170,7 @@ class SyncService:
 
     def _sync_target_frames_task(self, target_name):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
         """Worker task to sync light frames."""
-        if not self._config or not self._remote:
+        if not self._config or not self._observatory:
             return
 
         try:
@@ -183,14 +185,16 @@ class SyncService:
             if not os.path.exists(destination_path):
                 os.makedirs(destination_path)
 
-            self._remote.download_target_folder(remote_folder, destination_path, log_callback=logging.info)
+            self._observatory.remote_transfer_driver.download_target_folder(
+                remote_folder, destination_path, log_callback=logging.info
+            )
 
         except Exception as e:
             logging.error(f"Error syncing target {target_name}: {e}")
 
     def _sync_calibration_task(self, sync_type):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
         """Worker task to sync calibration frames."""
-        if not self._config or not self._remote:
+        if not self._config or not self._observatory:
             return
 
         try:
@@ -206,13 +210,21 @@ class SyncService:
             if not os.path.exists(destination_path):
                 os.makedirs(destination_path)
 
-            self._remote.download_target_folder(remote_folder, destination_path, log_callback=logging.info)
+            self._observatory.remote_transfer_driver.download_target_folder(
+                remote_folder, destination_path, log_callback=logging.info
+            )
 
         except Exception as e:
             logging.error(f"Error syncing {sync_type}: {e}")
 
     def sync_telescope_logs(self) -> dict[str, Any]:
         """Download remote PHD2 guide logs and backfill FITS alignment solves.
+
+        PHD2 guide-log retrieval is StellarMate-specific, not part of
+        the generic `RemoteTransferDriver` ABC (§6) -- guarded with
+        `getattr` rather than assumed, so a non-StellarMate
+        remote-transfer driver degrades to skipping this step instead
+        of raising.
 
         Returns
         -------
@@ -224,15 +236,22 @@ class SyncService:
         fits_solves_recorded = 0
 
         # 1. Download and ingest remote PHD2 guide logs
-        if self._remote and self._config:
+        if self._observatory and self._config:
             try:
-                logs_dir = os.path.join(str(self._config.get_logs_path()), "guiding")
-                downloaded_files = self._remote.download_guide_logs(logs_dir)
-                guide_logs_downloaded = len(downloaded_files)
-                if self._guiding_service:
-                    for fpath in downloaded_files:
-                        cnt = self._guiding_service.ingest_phd2_log_file(fpath)
-                        guiding_samples_ingested += cnt
+                download_guide_logs = getattr(
+                    self._observatory.remote_transfer_driver, "download_guide_logs", None
+                )
+                if download_guide_logs is not None:
+                    logs_dir = os.path.join(str(self._config.get_logs_path()), "guiding")
+                    downloaded_files = download_guide_logs(logs_dir)
+                    guide_logs_downloaded = len(downloaded_files)
+                    if self._guiding_service:
+                        for fpath in downloaded_files:
+                            # ingest_phd2_log_file returns the refit
+                            # spectrum's cumulative sample count (not a
+                            # per-file delta) -- the last file's return
+                            # value is this run's up-to-date total.
+                            guiding_samples_ingested = self._guiding_service.ingest_phd2_log_file(fpath)
             except Exception as exc:
                 logging.error(f"Error syncing remote guide logs: {exc}")
 

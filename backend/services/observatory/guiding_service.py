@@ -488,6 +488,11 @@ class GuidingService:
     def ingest_phd2_log_file(self, file_path: str, target_name: str | None = None) -> int:
         """Parse and persist a native PHD2 guide log text file into SQLite.
 
+        Delegates to `ObservatoryControl.ingest_guiding_log_file`
+        (`guiding_log_ingestion.py`, §6a) rather than parsing and
+        analyzing directly -- this service no longer imports the
+        parser/analytics modules itself.
+
         Parameters
         ----------
         file_path : `str`
@@ -498,42 +503,30 @@ class GuidingService:
         Returns
         -------
         sample_count : `int`
-            Number of samples recorded into SQLite.
+            The refit spectrum's total recorded sample count (cumulative
+            across all history, not just this file), `0` if the file
+            contained no parseable samples.
         """
-        from wayfindinglib.drivers.phd2.guide_log_parser import parse_phd2_guide_log
-
-        samples = parse_phd2_guide_log(file_path, target_name=target_name)
-        if samples and self._logger_interface:
-            self._logger_interface.record_guiding_samples(samples)
-        return len(samples)
+        analysis = self._observatory.ingest_guiding_log_file(file_path, target_name=target_name)
+        return analysis.sample_count if analysis else 0
 
     def analyze_guiding_spectrum(self, session_id: str | None = None) -> dict[str, Any]:
         """Analyze periodic error, worm harmonics, and backlash.
 
+        Delegates to `ObservatoryControl.refit_guiding_spectrum`
+        (`guiding_log_ingestion.py`, §6a) rather than analyzing
+        directly.
+
         Parameters
         ----------
         session_id : `str` | `None`, optional
-            Target session to analyze, or `None` for latest history/DB samples.
+            Target session to analyze, or `None` for all recorded
+            samples.
 
         Returns
         -------
         spectrum : `dict` [`str`, `Any`]
             Dominant periods, peak-to-peak PE, and PSD curve points.
         """
-        from wayfindinglib.analytics.guiding_spectrum import (
-            analyze_guiding_telemetry,
-        )
-
-        samples: list[dict[str, Any]] = []
-        if self._logger_interface:
-            try:
-                samples = self._logger_interface.get_guiding_logs(session_id=session_id, limit=2000)
-            except Exception as exc:
-                logger.error(f"Error fetching guiding logs for spectrum: {exc}")
-
-        # Fall back to live in-memory buffer if DB has none
-        if not samples and self._history:
-            samples = list(self._history)
-
-        analysis = analyze_guiding_telemetry(samples)
+        analysis = self._observatory.refit_guiding_spectrum(session_id=session_id, limit=2000)
         return analysis.model_dump(by_alias=True)

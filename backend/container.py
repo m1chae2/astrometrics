@@ -43,7 +43,6 @@ class Container:
         self.image_service = None
         self.image_processing_service = None
         self.sync_service = None
-        self.stellarmate_interface = None
         self.socket_manager = None
         self.telescope_service = None
         self.notification_service = None
@@ -120,15 +119,6 @@ class Container:
         self.wayfinder.control.driver = self.indi_driver
 
         # 4. Initialize Infrastructure Services
-        from wayfindinglib.drivers.stellarmate_interface import StellarMateInterface
-
-        remote_pictures_path = self.config_service.get_remote_pictures_path() or "/home/stellarmate/Pictures"
-        self.stellarmate_interface = StellarMateInterface(
-            host_alias=self.config_service.get_telescope_hostname() or "stellarmate",
-            remote_pictures_path=remote_pictures_path,
-            frames_path=self.config_service.get_frames_path(),
-        )
-
         from backend.services.infrastructure.socket_manager import SocketManager
 
         self.socket_manager = SocketManager()
@@ -189,7 +179,7 @@ class Container:
         )
 
         self.sync_service = SyncService(
-            stellarmate=self.stellarmate_interface,
+            observatory_api=self.wayfinder.control,
             config_service=self.config_service,
             guiding_service=self.guiding_service,
             logger_interface=self.job_repository,
@@ -223,7 +213,7 @@ class Container:
 
         star_identifier = StarIdentifier(config=self.config_service)
         self.alignment_service = AlignmentService(
-            indi_interface=self.indi_driver,
+            observatory_api=self.wayfinder.control,
             imaging_service=self.imaging_service,
             star_identifier=star_identifier,
             logger_interface=self.job_repository,
@@ -263,7 +253,7 @@ class Container:
         self.wayfinder.control.sync_service = self.sync_service
 
         # Initialize ObservatoryService (peripheral state)
-        self.observatory_service = ObservatoryService(self.indi_driver)
+        self.observatory_service = ObservatoryService(observatory_api=self.wayfinder.control)
 
         # 7. Start Background Maintenance
         self.maintenance_service.system_status_service = self.system_status_service

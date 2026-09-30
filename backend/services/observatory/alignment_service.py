@@ -6,7 +6,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from wayfindinglib import IndiInterface
+from wayfindinglib.api.control_registry import ObservatoryControl
 from wayfindinglib.models.session.telemetry import AlignmentAttempt
 
 logger = logging.getLogger(__name__)
@@ -33,12 +33,12 @@ class AlignmentService:
 
     def __init__(
         self,
-        indi_interface: IndiInterface,
+        observatory_api: ObservatoryControl,
         imaging_service: Any = None,
         star_identifier: Any = None,
         logger_interface: Any = None,
     ) -> None:
-        self.indi = indi_interface
+        self._observatory = observatory_api
         self._imaging_service = imaging_service
         self._star_identifier = star_identifier
         self._logger_interface = logger_interface
@@ -93,7 +93,7 @@ class AlignmentService:
         status : `dict` [`str`, `Any`]
             Polar alignment metrics and coordinates.
         """
-        driver = self.indi
+        driver = self._observatory.driver
         if driver and hasattr(driver, "get_polar_alignment_status"):
             st = driver.get_polar_alignment_status()
             if st.get("status") != "idle":
@@ -278,6 +278,10 @@ class AlignmentService:
     def compute_pointing_model(self, session_id: str | None = None) -> dict[str, Any]:
         """Compute decomposed geometric mount pointing terms.
 
+        Delegates to `ObservatoryControl.get_pointing_model`
+        (`pointing_log_ingestion.py`, §6a) rather than fitting directly
+        -- this service no longer imports the analytics module itself.
+
         Parameters
         ----------
         session_id : `str` | `None`, optional
@@ -289,30 +293,7 @@ class AlignmentService:
         model : `dict` [`str`, `Any`]
             Decomposed model terms (ME, MA, CH, TF) and RMS improvements.
         """
-        from wayfindinglib.analytics.pointing_model import fit_pointing_model
-
-        attempts: list[dict[str, Any]] = []
-        if self._logger_interface:
-            try:
-                if session_id:
-                    attempts = self._logger_interface.get_session_alignment_attempts(session_id)
-                else:
-                    attempts = self._logger_interface.get_alignment_logs(limit=5000)
-            except Exception as exc:
-                logger.error(f"Error fetching attempts for pointing model: {exc}")
-
-        # Fall back to in-memory attempts if DB has none
-        if not attempts and self.alignment_attempts:
-            for a in self.alignment_attempts:
-                attempts.append({
-                    "ra": a.ra,
-                    "dec": a.dec,
-                    "delta_ra_arcsec": a.delta_ra_arcsec,
-                    "delta_dec_arcsec": a.delta_dec_arcsec,
-                    "timestamp": a.timestamp,
-                })
-
-        model = fit_pointing_model(attempts)
+        model = self._observatory.get_pointing_model(session_id)
         return model.model_dump(by_alias=True)
 
     def poll_external_syncs(self, indi_interface: Any = None) -> None:
@@ -322,9 +303,9 @@ class AlignmentService:
         ----------
         indi_interface : `Any`, optional
             INDI driver instance to drain sync records from. If `None`,
-            falls back to `self.indi`.
+            falls back to `self._observatory.driver`.
         """
-        driver = indi_interface or self.indi
+        driver = indi_interface or self._observatory.driver
         if not driver:
             return
 
@@ -491,18 +472,18 @@ class AlignmentService:
                     # Still far off, but we'll sync and retry
                     solving_attempt.status = "warning"
 
-                # Sync telescope to solved coordinates. IndiInterface's mount
+                # Sync telescope to solved coordinates. The mount driver's
                 # commands take RA in hours; solve_result.ra is decimal
                 # degrees (from the WCS solution), so convert at this
                 # boundary rather than upstream, where degrees is correct.
                 solved_ra_hours = solve_result.ra / 15.0
                 logger.info(f"Syncing to solved coordinates: RA={solved_ra_hours}h, DEC={solve_result.dec}")
-                self.indi.sync_coordinates(solved_ra_hours, solve_result.dec)
+                self._observatory.sync_coordinates(solved_ra_hours, solve_result.dec)
 
                 # Re-slew to target
                 target_ra_hours = target_ra / 15.0
                 logger.info(f"Re-slewing to target: RA={target_ra_hours}h, DEC={target_dec}")
-                self.indi.slew(target_ra_hours, target_dec)
+                self._observatory.slew_to_coordinates(target_ra_hours, target_dec)
 
             except Exception as e:
                 logger.error(f"Alignment attempt {attempt_count} failed: {e}")

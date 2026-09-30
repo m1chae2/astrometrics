@@ -51,7 +51,7 @@ def test_get_session_data_all_retrieves_cumulative_attempts() -> None:
     ]
 
     service = AlignmentService(
-        indi_interface=None,
+        observatory_api=None,
         imaging_service=None,
         star_identifier=None,
         logger_interface=mock_logger,
@@ -76,7 +76,7 @@ def test_get_cumulative_tracking_data_delegates_to_all_sessions() -> None:
     mock_logger.get_polar_alignment_logs.return_value = []
 
     service = AlignmentService(
-        indi_interface=None,
+        observatory_api=None,
         imaging_service=None,
         star_identifier=None,
         logger_interface=mock_logger,

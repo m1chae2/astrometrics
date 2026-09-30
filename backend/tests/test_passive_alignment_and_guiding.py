@@ -129,8 +129,10 @@ def test_alignment_service_polls_external_syncs() -> None:
             "delta_dec_arcsec": -8.3,
         }
     ]
+    observatory_mock = MagicMock()
+    observatory_mock.driver = driver_mock
 
-    service = AlignmentService(indi_interface=driver_mock)
+    service = AlignmentService(observatory_api=observatory_mock)
     service.poll_external_syncs()
 
     attempts = service.get_attempts()
@@ -315,9 +317,12 @@ def test_alignment_service_persists_to_logger_interface() -> None:
         }
     ]
 
+    observatory_mock = MagicMock()
+    observatory_mock.driver = driver_mock
+
     logger_mock = MagicMock()
     service = AlignmentService(
-        indi_interface=driver_mock,
+        observatory_api=observatory_mock,
         logger_interface=logger_mock,
     )
     service.poll_external_syncs()
@@ -363,10 +368,18 @@ def test_guiding_service_persists_live_samples_to_logger_interface() -> None:
 
 
 def test_guiding_service_ingest_phd2_log_file(tmp_path: pytest.TempPathFactory) -> None:
-    """Verify GuidingService ingests native PHD2 guide log files."""
+    """Verify GuidingService ingests native PHD2 guide log files.
+
+    Delegates to `ObservatoryControl.ingest_guiding_log_file`
+    (`guiding_log_ingestion.py`, §6a), so a real `ObservatoryControl`
+    with its `_logger_interface` overridden is used here rather than a
+    bare mock -- the parsing/persistence/refit chain must actually run
+    for `logger_mock.record_guiding_samples` to be called.
+    """
     from pathlib import Path
 
     from backend.services.observatory.guiding_service import GuidingService
+    from wayfindinglib.api.control_registry import ObservatoryControl
 
     log_file = Path(str(tmp_path)) / "PHD2_GuideLog_test.txt"
     log_content = (
@@ -379,7 +392,13 @@ def test_guiding_service_ingest_phd2_log_file(tmp_path: pytest.TempPathFactory) 
     log_file.write_text(log_content, encoding="utf-8")
 
     logger_mock = MagicMock()
-    service = GuidingService(observatory_api=MagicMock(), logger_interface=logger_mock)
+    logger_mock.get_guiding_logs.return_value = [{"time": 1.5, "dra": 0.12, "ddec": -0.08, "pulse_dec": 20.0}]
+
+    observatory = ObservatoryControl(config=MagicMock())
+    observatory._logger_interface = logger_mock
+    observatory._butler = MagicMock()  # ingest persists via save_guiding_spectrum_analysis; avoid disk I/O
+
+    service = GuidingService(observatory_api=observatory, logger_interface=logger_mock)
     count = service.ingest_phd2_log_file(str(log_file), target_name="IC 1396")
 
     assert count == 1
@@ -555,7 +574,7 @@ def test_alignment_service_session_queries_and_retrieval() -> None:
         }
     ]
 
-    service = AlignmentService(indi_interface=MagicMock(), logger_interface=logger_mock)
+    service = AlignmentService(observatory_api=MagicMock(), logger_interface=logger_mock)
     sessions = service.list_sessions()
     assert len(sessions) == 1
     assert sessions[0]["sessionId"] == "2026-09-24"
@@ -573,12 +592,12 @@ def test_sync_service_sync_telescope_logs(tmp_path: Path) -> None:
     """Verify SyncService syncs remote PHD2 guide logs and ingests them."""
     from backend.services.infrastructure.sync_service import SyncService
 
-    stellarmate_mock = MagicMock()
     mock_log_file = str(tmp_path / "PHD2_GuideLog_2026-09-24_210000.txt")
     with open(mock_log_file, "w") as f:
         f.write("mock content")
 
-    stellarmate_mock.download_guide_logs.return_value = [mock_log_file]
+    observatory_mock = MagicMock()
+    observatory_mock.remote_transfer_driver.download_guide_logs.return_value = [mock_log_file]
 
     guiding_mock = MagicMock()
     guiding_mock.ingest_phd2_log_file.return_value = 42
@@ -589,7 +608,7 @@ def test_sync_service_sync_telescope_logs(tmp_path: Path) -> None:
     logger_mock = MagicMock()
 
     service = SyncService(
-        stellarmate=stellarmate_mock,
+        observatory_api=observatory_mock,
         config_service=config_mock,
         guiding_service=guiding_mock,
         logger_interface=logger_mock,
@@ -625,7 +644,7 @@ def test_sync_service_extract_fits_header_solves(tmp_path: Path) -> None:
 
     logger_mock = MagicMock()
     service = SyncService(
-        stellarmate=MagicMock(),
+        observatory_api=MagicMock(),
         config_service=MagicMock(),
         guiding_service=MagicMock(),
         logger_interface=logger_mock,

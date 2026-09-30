@@ -127,8 +127,15 @@ def test_analyze_guiding_telemetry_detects_worm_period_and_backlash() -> None:
 
 
 def test_alignment_service_compute_pointing_model() -> None:
-    """Verify AlignmentService.compute_pointing_model queries logger."""
+    """Verify AlignmentService.compute_pointing_model queries logger.
+
+    Delegates to `ObservatoryControl.get_pointing_model`
+    (`pointing_log_ingestion.py`, §6a) rather than fitting directly, so
+    the logger mock is injected on the observatory (its
+    `_logger_interface`), not on `AlignmentService` itself.
+    """
     from backend.services.observatory.alignment_service import AlignmentService
+    from wayfindinglib.api.control_registry import ObservatoryControl
 
     logger_mock = MagicMock()
     logger_mock.get_session_alignment_attempts.return_value = [
@@ -136,7 +143,10 @@ def test_alignment_service_compute_pointing_model() -> None:
         {"ra": 190.0, "dec": 50.0, "delta_ra_arcsec": 6.0, "delta_dec_arcsec": -2.0},
     ]
 
-    service = AlignmentService(indi_interface=MagicMock(), logger_interface=logger_mock)
+    observatory = ObservatoryControl(config=MagicMock())
+    observatory._logger_interface = logger_mock
+
+    service = AlignmentService(observatory_api=observatory)
     res = service.compute_pointing_model(session_id="2026-09-25")
     assert res["sampleCount"] == 2
     assert res["confidence"] == "insufficient_data"
@@ -144,13 +154,24 @@ def test_alignment_service_compute_pointing_model() -> None:
 
 
 def test_guiding_service_analyze_guiding_spectrum() -> None:
-    """Verify GuidingService.analyze_guiding_spectrum delegates to logger."""
+    """Verify GuidingService.analyze_guiding_spectrum delegates to logger.
+
+    Delegates to `ObservatoryControl.refit_guiding_spectrum`
+    (`guiding_log_ingestion.py`, §6a) rather than analyzing directly,
+    so the logger mock is injected on the observatory (its
+    `_logger_interface`), not on `GuidingService` itself.
+    """
     from backend.services.observatory.guiding_service import GuidingService
+    from wayfindinglib.api.control_registry import ObservatoryControl
 
     logger_mock = MagicMock()
     logger_mock.get_guiding_logs.return_value = []
 
-    service = GuidingService(observatory_api=MagicMock(), logger_interface=logger_mock)
+    observatory = ObservatoryControl(config=MagicMock())
+    observatory._logger_interface = logger_mock
+    observatory._butler = MagicMock()  # refit_guiding_spectrum persists; avoid real disk I/O
+
+    service = GuidingService(observatory_api=observatory)
     res = service.analyze_guiding_spectrum(session_id="2026-09-25")
     assert res["sampleCount"] == 0
     logger_mock.get_guiding_logs.assert_called_once_with(session_id="2026-09-25", limit=2000)

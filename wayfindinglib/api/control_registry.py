@@ -1146,6 +1146,28 @@ class ObservatoryControl:
             self, self._logger_interface, destination_dir, target_name
         )
 
+    def refit_guiding_spectrum(
+        self, session_id: str | None = None, limit: int = 2000
+    ) -> GuidingSpectrumAnalysis:
+        """Refit the cumulative guiding spectrum from already-recorded samples.
+
+        Unlike `ingest_guiding_log_file`/`fetch_and_ingest_new_guide_logs`,
+        this reads no new file -- it refits and persists from whatever
+        samples are already on record, for an on-demand "what does the
+        spectrum look like right now" query -- see
+        `guiding_log_ingestion.refit_and_persist_guiding_spectrum`.
+
+        Returns
+        -------
+        analysis : `GuidingSpectrumAnalysis`
+            The refit and persisted spectrum analysis.
+        """
+        from wayfindinglib.tasks.control_tasks import guiding_log_ingestion
+
+        return guiding_log_ingestion.refit_and_persist_guiding_spectrum(
+            self, self._logger_interface, session_id, limit
+        )
+
     def get_pointing_model(self, session_id: str | None = None) -> MountPointingModel:
         """Fit the geometric pointing model from locally recorded plate solves.
 

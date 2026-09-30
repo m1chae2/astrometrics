@@ -14,6 +14,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
+
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines import tasks
 from astrometricslib.pipelines.stacking import stage as stacking_stage
@@ -102,4 +104,73 @@ def test_run_full_pipeline_runs_astrometry_and_photometry_exactly_once(monkeypat
     assert stack_outputs == {"standard": stacked_path}
     assert pipeline_type_calls.count("astrometry") == 1
     assert pipeline_type_calls.count("photometry") == 1
-    assert len(catalog_access.saved) == 1
+    # One checkpoint save after each stage that ran here (stacking,
+    # astrometry, photometry) -- not once at the end -- so a later
+    # stage failing can never discard an earlier stage's results.
+    assert len(catalog_access.saved) == 3
+
+
+def test_a_later_stage_crashing_does_not_discard_an_earlier_stage_save(monkeypatch, tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Regression test for the M 13 incident.
+
+    A photometry crash used to throw away that same run's
+    freshly-recomputed, already-successful stacking and astrometry
+    results, because the target's record was only ever saved once, at
+    the very end of `run_full_pipeline`. A real run hit this when a
+    stale frame path raised `FileNotFoundError` partway through
+    photometry, silently discarding several minutes of completed Siril
+    stacking work. Stacking and astrometry must now be checkpointed to
+    the database before photometry ever runs, so a crash there loses
+    only photometry's own results.
+    """
+    stacked_path = str(tmp_path / "stacked.fits")
+    Path(stacked_path).touch()
+
+    target = Target(
+        id="RegressionTarget",
+        frames=[
+            FrameRecord(path="/fake/frame1.fits", camera="TestCam", filter="Luminance"),
+            FrameRecord(path="/fake/frame2.fits", camera="TestCam", filter="Luminance"),
+        ],
+    )
+
+    def _fake_stack_frames(
+        target,  # ruff: ignore[missing-type-function-argument]
+        log_file=None,  # ruff: ignore[missing-type-function-argument]
+        frames_to_stack=None,  # ruff: ignore[missing-type-function-argument]
+        filter_type=None,  # ruff: ignore[missing-type-function-argument]
+        **kwargs: Any,
+    ) -> str:
+        target.stacking.stacked_image = stacked_path
+        return stacked_path
+
+    monkeypatch.setattr(stacking_stage, "stack_frames", _fake_stack_frames)
+
+    def _fake_run_analysis_pipeline_match(
+        target,  # ruff: ignore[missing-type-function-argument]
+        frames,  # ruff: ignore[missing-type-function-argument]
+        pipeline_type,  # ruff: ignore[missing-type-function-argument]
+        filter_type,  # ruff: ignore[missing-type-function-argument]
+        catalog_access,  # ruff: ignore[missing-type-function-argument]
+        path,  # ruff: ignore[missing-type-function-argument]
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        if pipeline_type == "astrometry":
+            return {"wcs": object()}
+        if pipeline_type == "photometry":
+            raise FileNotFoundError("Image not found at /fake/stale/frame.fits")
+        raise AssertionError(f"Unexpected pipeline_type for this target: {pipeline_type}")
+
+    monkeypatch.setattr(tasks, "_run_analysis_pipeline_match", _fake_run_analysis_pipeline_match)
+
+    catalog_access = _StubCatalogAccess()
+    astrometrics = SimpleNamespace(catalog_access=catalog_access, config=_StubConfig(tmp_path))
+
+    with pytest.raises(FileNotFoundError):
+        tasks.run_full_pipeline(target, astrometrics, camera_name="TestCam")
+
+    # Stacking and astrometry each checkpointed their own success before
+    # photometry ever ran and crashed -- their results are not lost.
+    assert len(catalog_access.saved) == 2
+    saved_target = catalog_access.saved[-1][0]
+    assert saved_target.stacking.stacked_image == stacked_path

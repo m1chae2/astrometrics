@@ -12,11 +12,16 @@ Three layers, smallest first:
   needs to change.
 - `run_full_pipeline` runs every stage for one target, start to finish:
   stacks its raw frames, plate-solves the result, tracks star
-  brightness (photometry), pulls out light spectra (spectroscopy) when
-  there are any, and saves the target's record -- in that order. Its
-  only caller is `api/batch.py`, which runs many targets through this
-  same sequence in parallel worker processes; this module doesn't know
-  or care about that, it just runs one target's full sequence.
+  brightness (photometry), and pulls out light spectra (spectroscopy)
+  when there are any. It saves the target's record after each stage,
+  not just once at the end, so a later stage crashing (a bad frame, a
+  timed-out solve, an OOM kill) does not throw away an earlier stage's
+  results along with it -- the same per-stage save discipline
+  `backend/services/analysis/analysis_orchestrator.py` already uses
+  for UI-triggered single-stage runs. Its only caller is
+  `api/batch.py`, which runs many targets through this same sequence
+  in parallel worker processes; this module doesn't know or care about
+  that, it just runs one target's full sequence.
 
 Every runner `analyze_target` can dispatch to takes the same five
 arguments (``target``, ``frames``, ``filter_type``, ``catalog_access``,
@@ -354,6 +359,7 @@ def run_full_pipeline(
 
     standard_frames, spectral_frames = split_standard_and_spectral_frames(target, camera_frames)
     stack_outputs = _stack_camera_frames(target, camera_name, standard_frames, spectral_frames)
+    _save_target(target, astrometrics)
     max_concurrent_jobs = astrometrics.config.get_max_concurrent_jobs()
 
     # 2. Astrometry Analysis and 3. Photometry Analysis both work from the
@@ -361,7 +367,9 @@ def run_full_pipeline(
     # it didn't stack, so a spectral-only success is still saved below.
     if "standard" in stack_outputs:
         _run_astrometry_stage(target, astrometrics)
+        _save_target(target, astrometrics)
         _run_photometry_stage(target, astrometrics, camera_frames, max_workers, max_concurrent_jobs)
+        _save_target(target, astrometrics)
     elif standard_frames:
         print(f"[{target.id}] Standard stacking failed; skipping astrometry and photometry.")
 
@@ -369,15 +377,33 @@ def run_full_pipeline(
     # SPEC stack)
     if "spectral" in stack_outputs:
         _run_spectroscopy_stage(target, astrometrics, spectral_frames, max_concurrent_jobs)
+        _save_target(target, astrometrics)
     elif spectral_frames:
         print(f"[{target.id}] Spectral stacking failed; skipping spectroscopy.")
 
-    # Save this target's own record (safe under concurrent callers,
-    # unlike a full-catalog resync)
-    astrometrics.catalog_access.put(target, "target_record", {})
     print(f"[{target.id}] Processing completed and metadata saved successfully.")
 
     return stack_outputs
+
+
+def _save_target(target: Target, astrometrics: Any) -> None:
+    """Persist a target's current in-memory state as its own database row.
+
+    Called after each pipeline stage in `run_full_pipeline`, rather than
+    once at the very end, so a later stage raising (a bad frame, a
+    timed-out solve, an OOM kill) does not discard an earlier stage's
+    already-computed results along with it. A save failure is logged
+    rather than raised, so it cannot itself turn a successful stage into
+    a failed target -- matching how
+    `backend/services/analysis/analysis_orchestrator.py` already treats
+    save failures for UI-triggered single-stage runs.
+    """
+    try:
+        # Target-scoped write (safe under concurrent callers), unlike a
+        # full-catalog resync.
+        astrometrics.catalog_access.put(target, "target_record", {})
+    except Exception as save_error:
+        print(f"[{target.id}] Failed to save target after pipeline stage: {save_error}")
 
 
 def _stack_camera_frames(

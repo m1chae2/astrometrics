@@ -78,28 +78,28 @@ class SessionPlanner:
         self._config = config
 
     def create_sequence_plan(self, target_name: str, plan_items: list[dict[str, Any]]) -> dict[str, Any]:
-        """Delegate sequence plan creation to observationlib.
+        """Delegate sequence plan creation to planning_operations.
 
         Returns
         -------
         sequence_plan : `dict`
             The structured sequence plan for the target.
         """
-        from wayfindinglib.observationlib import planning_operations
+        from wayfindinglib.tasks.planning_tasks import planning_operations
 
         return planning_operations.create_sequence_plan(self, target_name, plan_items)
 
     def calculate_panels(
         self, center_ra: str, center_dec: str, rows: int, cols: int, overlap_percent: float
     ) -> list[dict[str, Any]]:
-        """Delegate panel calculation to observationlib.
+        """Delegate panel calculation to its planning-task operations module.
 
         Returns
         -------
         panels : `list` [`dict`]
             RA/DEC coordinate offsets for each mosaic panel.
         """
-        from wayfindinglib.observationlib import planning_operations
+        from wayfindinglib.tasks.planning_tasks import planning_operations
 
         return planning_operations.calculate_panels(
             self._config, center_ra, center_dec, rows, cols, overlap_percent
@@ -113,14 +113,14 @@ class SessionPlanner:
         image_config: dict[str, Any],
         dither_config: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        """Delegate mosaic targets creation to observationlib.
+        """Delegate mosaic targets creation to planning_operations.
 
         Returns
         -------
         target_records : `list` [`dict`]
             The generated target records for the mosaic panels.
         """
-        from wayfindinglib.observationlib import planning_operations
+        from wayfindinglib.tasks.planning_tasks import planning_operations
 
         return planning_operations.create_mosaic_targets(
             self, parent_target_id, grid_config, panels, image_config, dither_config
@@ -137,7 +137,7 @@ class Observation:
         self.location = EarthLocation(lat=39.7392 * u.deg, lon=-104.9903 * u.deg, height=1600 * u.m)
 
     def get_target_status(self, target_id: str) -> dict[str, Any] | None:
-        """Delegate get_target_status to observationlib.
+        """Delegate get_target_status to its planning-task operations module.
 
         Returns
         -------
@@ -145,19 +145,19 @@ class Observation:
             The target's visibility/status fields, or `None` if the
             target could not be resolved.
         """
-        from wayfindinglib.observationlib import visibility_calculations
+        from wayfindinglib.tasks.planning_tasks import visibility_calculations
 
         return visibility_calculations.get_target_status(self, target_id)
 
     def get_visible_targets(self) -> list[dict[str, Any]]:
-        """Delegate get_visible_targets to observationlib.
+        """Delegate get_visible_targets to its planning-task operations module.
 
         Returns
         -------
         targets : `list` [`dict`]
             Status/visibility fields for each currently visible target.
         """
-        from wayfindinglib.observationlib import visibility_calculations
+        from wayfindinglib.tasks.planning_tasks import visibility_calculations
 
         return visibility_calculations.get_visible_targets(self)
 

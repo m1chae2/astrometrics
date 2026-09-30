@@ -1,8 +1,8 @@
 """Sky Engine High-Level Interface.
 
 Composes coordinate transforms, target resolution, catalog queries, and
-visibility calculations into a single astrometrics backed by descriptive skylib
-operations modules.
+visibility calculations into a single astrometrics backed by descriptive
+operations modules under `tasks/planning_tasks/`.
 """
 
 from datetime import datetime
@@ -13,8 +13,8 @@ from astropy.coordinates import EarthLocation
 from astropy.time import Time
 
 from astrometricslib import StellarObject, Target
-from wayfindinglib.skylib.catalog_operations import build_catalog_driver_registry
-from wayfindinglib.skylib.constellation_operations import ConstellationLineLibrary
+from wayfindinglib.tasks.planning_tasks.catalog_operations import build_catalog_driver_registry
+from wayfindinglib.tasks.planning_tasks.constellation_operations import ConstellationLineLibrary
 
 
 class Sky:
@@ -89,56 +89,56 @@ class Sky:
         self._constellation_lines = ConstellationLineLibrary()
 
     def get_local_sidereal_time(self, time_input: datetime | Time) -> float:
-        """Delegate get_local_sidereal_time to skylib coordinate_operations.
+        """Delegate get_local_sidereal_time to coordinate_operations.
 
         Returns
         -------
         lst_hours : `float`
             The local sidereal time, in hours.
         """
-        from wayfindinglib.skylib import coordinate_operations
+        from wayfindinglib.tasks.planning_tasks import coordinate_operations
 
         return coordinate_operations.get_local_sidereal_time(self, time_input)
 
     def radec_to_altaz(
         self, ra_deg: float, dec_deg: float, time_input: datetime | Time
     ) -> tuple[float, float]:
-        """Delegate radec_to_altaz to skylib coordinate_operations.
+        """Delegate radec_to_altaz to coordinate_operations.
 
         Returns
         -------
         altaz : `tuple` [`float`, `float`]
             The (altitude, azimuth) in degrees.
         """
-        from wayfindinglib.skylib import coordinate_operations
+        from wayfindinglib.tasks.planning_tasks import coordinate_operations
 
         return coordinate_operations.radec_to_altaz(self, ra_deg, dec_deg, time_input)
 
     def altaz_to_radec(
         self, alt_deg: float, az_deg: float, time_input: datetime | Time
     ) -> tuple[float, float]:
-        """Delegate altaz_to_radec to skylib coordinate_operations.
+        """Delegate altaz_to_radec to coordinate_operations.
 
         Returns
         -------
         radec : `tuple` [`float`, `float`]
             The (right ascension, declination) in degrees.
         """
-        from wayfindinglib.skylib import coordinate_operations
+        from wayfindinglib.tasks.planning_tasks import coordinate_operations
 
         return coordinate_operations.altaz_to_radec(self, alt_deg, az_deg, time_input)
 
     def get_tracking_rates(
         self, ra_deg: float, dec_deg: float, time_input: datetime | Time
     ) -> dict[str, float]:
-        """Delegate get_tracking_rates to skylib coordinate_operations.
+        """Delegate get_tracking_rates to coordinate_operations.
 
         Returns
         -------
         rates : `dict` [`str`, `float`]
             Tracking rate values keyed by axis name.
         """
-        from wayfindinglib.skylib import coordinate_operations
+        from wayfindinglib.tasks.planning_tasks import coordinate_operations
 
         return coordinate_operations.get_tracking_rates(self, ra_deg, dec_deg, time_input)
 
@@ -150,7 +150,7 @@ class Sky:
         target : `Target` or `StellarObject`
             The resolved target or stellar object.
         """
-        from wayfindinglib.skylib import resolution_operations
+        from wayfindinglib.tasks.planning_tasks import resolution_operations
 
         return resolution_operations.resolve_target_coordinates(self, target_name)
 
@@ -162,14 +162,14 @@ class Sky:
         include_catalog: bool = False,
         include_stars: bool = True,
     ) -> list[Target | StellarObject]:
-        """Delegate get_sources to skylib resolution_operations.
+        """Delegate get_sources to resolution_operations.
 
         Returns
         -------
         sources : `list` [`Target` or `StellarObject`]
             The matching targets and/or stellar objects.
         """
-        from wayfindinglib.skylib import resolution_operations
+        from wayfindinglib.tasks.planning_tasks import resolution_operations
 
         return resolution_operations.get_sources(
             self, ra_deg, dec_deg, radius_deg, include_catalog, include_stars
@@ -182,14 +182,14 @@ class Sky:
         radius_deg: float,
         magnitude_range: tuple[float, float] | None = None,
     ) -> list[dict[str, Any]]:
-        """Delegate get_library_star_summaries to skylib resolution_operations.
+        """Delegate get_library_star_summaries to resolution_operations.
 
         Returns
         -------
         summaries : `list` [`dict`]
             Quick summaries of the user's own stars inside the region.
         """
-        from wayfindinglib.skylib import resolution_operations
+        from wayfindinglib.tasks.planning_tasks import resolution_operations
 
         return resolution_operations.get_library_star_summaries(
             self, ra_deg, dec_deg, radius_deg, magnitude_range
@@ -211,7 +211,7 @@ class Sky:
             Each entry pairs the catalog driver name with a matching
             stellar object.
         """
-        from wayfindinglib.skylib import resolution_operations
+        from wayfindinglib.tasks.planning_tasks import resolution_operations
 
         return resolution_operations.get_online_catalog_sources(
             self, ra_deg, dec_deg, radius_deg, enabled_driver_names, magnitude_limit
@@ -225,12 +225,12 @@ class Sky:
         driver_metadata : `list` [`dict`]
             Metadata describing each registered catalog driver.
         """
-        from wayfindinglib.skylib import catalog_operations
+        from wayfindinglib.tasks.planning_tasks import catalog_operations
 
         return catalog_operations.list_catalog_driver_metadata(self)
 
     def get_constellation_lines(self) -> list[dict[str, Any]]:
-        """Delegate get_constellation_lines to skylib constellation_operations.
+        """Delegate get_constellation_lines to constellation_operations.
 
         REQ: PLN-3.3
 
@@ -239,28 +239,28 @@ class Sky:
         line_segments : `list` [`dict`]
             Constellation stick-figure line segment definitions.
         """
-        from wayfindinglib.skylib import constellation_operations
+        from wayfindinglib.tasks.planning_tasks import constellation_operations
 
         return constellation_operations.get_constellation_line_segments(self)
 
     def get_meridian_status(
         self, ra_deg: float, dec_deg: float, time_input: datetime | Time
     ) -> dict[str, Any]:
-        """Delegate get_meridian_status to skylib visibility_operations.
+        """Delegate get_meridian_status to visibility_operations.
 
         Returns
         -------
         meridian_status : `dict`
             Meridian proximity/flip status fields for the object.
         """
-        from wayfindinglib.skylib import visibility_operations
+        from wayfindinglib.tasks.planning_tasks import visibility_operations
 
         return visibility_operations.get_meridian_status(self, ra_deg, dec_deg, time_input)
 
     def get_object_visibility(
         self, ra_deg: float, dec_deg: float, time_input: datetime | Time
     ) -> dict[str, Any]:
-        """Delegate get_object_visibility to skylib visibility_operations.
+        """Delegate get_object_visibility to visibility_operations.
 
         Returns
         -------
@@ -268,20 +268,20 @@ class Sky:
             Visibility fields (e.g. altitude, rise/set times) for the
             object at the given time.
         """
-        from wayfindinglib.skylib import visibility_operations
+        from wayfindinglib.tasks.planning_tasks import visibility_operations
 
         return visibility_operations.get_object_visibility(self, ra_deg, dec_deg, time_input)
 
     def get_visibility(
         self, objects: list[Target | StellarObject], time_input: datetime | Time | None = None
     ) -> list[dict[str, Any]]:
-        """Delegate get_visibility to skylib visibility_operations.
+        """Delegate get_visibility to visibility_operations.
 
         Returns
         -------
         visibility : `list` [`dict`]
             Visibility fields for each object.
         """
-        from wayfindinglib.skylib import visibility_operations
+        from wayfindinglib.tasks.planning_tasks import visibility_operations
 
         return visibility_operations.get_visibility(self, objects, time_input)

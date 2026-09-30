@@ -301,7 +301,7 @@ class MountController:
         observation_time = Time.now()
         location = EarthLocation(lat=latitude * u.deg, lon=longitude * u.deg, height=elevation * u.m)
 
-        from wayfindinglib.skylib.coordinate_operations import compute_altaz
+        from wayfindinglib.tasks.planning_tasks.coordinate_operations import compute_altaz
 
         # ra is in Hours (INDI convention); compute_altaz's contract
         # is degrees.

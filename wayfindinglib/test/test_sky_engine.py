@@ -13,9 +13,9 @@ from astropy.time import Time
 
 from astrometricslib import StellarObject, Target
 from wayfindinglib.sky import Sky
-from wayfindinglib.skylib.catalog_operations import astrometrics_catalog
-from wayfindinglib.skylib.coordinate_operations import compute_altaz
-from wayfindinglib.skylib.resolution_operations import get_library_star_summaries, get_sources
+from wayfindinglib.tasks.planning_tasks.catalog_operations import astrometrics_catalog
+from wayfindinglib.tasks.planning_tasks.coordinate_operations import compute_altaz
+from wayfindinglib.tasks.planning_tasks.resolution_operations import get_library_star_summaries, get_sources
 
 
 def test_sky_initialization() -> None:
@@ -64,8 +64,8 @@ def test_tracking_rates() -> None:
     assert isinstance(rates["az_rate"], float)
 
 
-@patch("wayfindinglib.skylib.catalog_operations.astrometrics_catalog")
-@patch("wayfindinglib.skylib.catalog_operations.global_catalog")
+@patch("wayfindinglib.tasks.planning_tasks.catalog_operations.astrometrics_catalog")
+@patch("wayfindinglib.tasks.planning_tasks.catalog_operations.global_catalog")
 def test_get_sources(mock_global, mock_local) -> None:  # ruff: ignore[missing-type-function-argument]
     """Verifies regional source query delegation."""
     sky = Sky()
@@ -265,7 +265,7 @@ def test_query_online_catalogs_passes_the_magnitude_limit_to_every_driver():  # 
     from types import SimpleNamespace
     from unittest.mock import MagicMock
 
-    from wayfindinglib.skylib.catalog_operations import query_online_catalogs
+    from wayfindinglib.tasks.planning_tasks.catalog_operations import query_online_catalogs
 
     driver = MagicMock()
     driver.driver_name = "gaia"
@@ -302,7 +302,7 @@ def test_resolve_target_coordinates_asks_the_library_for_the_named_star_only() -
     A star that matches the name but has no position yet (0.0, 0.0) must be
     passed over in favour of a later match that has one, as before.
     """
-    from wayfindinglib.skylib.resolution_operations import resolve_target_coordinates
+    from wayfindinglib.tasks.planning_tasks.resolution_operations import resolve_target_coordinates
 
     unset = StellarObject(id="Vega", name="Vega", ra=0.0, dec=0.0)
     placed = StellarObject(id="* alf Lyr", name="Vega", ra=279.23, dec=38.78)

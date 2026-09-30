@@ -141,7 +141,7 @@ def get_sources(
     List[Union[Target, StellarObject]]
         List of objects found in the region.
     """
-    from wayfindinglib.skylib import catalog_operations
+    from wayfindinglib.tasks.planning_tasks import catalog_operations
 
     # astrometrics_catalog() already restricts local targets/stars to
     # ra_deg/dec_deg/radius_deg via a batched SkyCoord separation check
@@ -240,7 +240,7 @@ def get_online_catalog_sources(
 
     REQ: PLN-3.1, PLN-3.2
     """
-    from wayfindinglib.skylib import catalog_operations
+    from wayfindinglib.tasks.planning_tasks import catalog_operations
 
     return catalog_operations.query_online_catalogs(
         sky,

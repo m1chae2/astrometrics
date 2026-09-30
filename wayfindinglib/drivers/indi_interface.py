@@ -1022,7 +1022,7 @@ class IndiInterface(IndiClient):
         ra = equatorial_coords[0].value  # Hours
         dec = equatorial_coords[1].value  # Degrees
 
-        from wayfindinglib.skylib.coordinate_operations import compute_altaz
+        from wayfindinglib.tasks.planning_tasks.coordinate_operations import compute_altaz
 
         # RA in INDI is typically Hours; compute_altaz's contract is degrees.
         alt_deg, az_deg = compute_altaz(ra * 15.0, dec, location, observation_time)

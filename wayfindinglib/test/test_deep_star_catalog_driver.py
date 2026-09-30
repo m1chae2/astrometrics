@@ -13,7 +13,7 @@ import pytest
 
 from wayfindinglib.drivers.catalog import deep_star_catalog_driver
 from wayfindinglib.drivers.catalog.deep_star_catalog_driver import DeepStarCatalogDriver
-from wayfindinglib.skylib.catalog_operations import build_catalog_driver_registry
+from wayfindinglib.tasks.planning_tasks.catalog_operations import build_catalog_driver_registry
 
 
 class _RecordingSource:

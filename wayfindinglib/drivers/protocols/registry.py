@@ -1,6 +1,6 @@
 """Protocol-driver class registries, keyed by protocol name.
 
-Mirrors `wayfindinglib/skylib/catalog_operations.py`'s
+Mirrors `wayfindinglib/tasks/planning_tasks/catalog_operations.py`'s
 `build_catalog_driver_registry()`, but maps a protocol name to a
 **class**, not a stateless singleton instance -- hardware drivers are
 stateful, connection-owning objects, one per device, constructed once

@@ -21,6 +21,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from datastore.local_database import connect_db
+
 logger = logging.getLogger(__name__)
 
 _CATALOG_DB_FILENAME = "catalog_cache.db"
@@ -99,8 +101,7 @@ def is_region_cached(config: Any, region_key: str) -> bool:
         `True` if this region has already been downloaded and saved.
     """
     cache_db_path = get_catalog_cache_path(config)
-    os.makedirs(cache_db_path.parent, exist_ok=True)
-    connection = sqlite3.connect(cache_db_path)
+    connection = connect_db(str(cache_db_path))
     try:
         _ensure_schema(connection)
         cursor = connection.execute("SELECT 1 FROM cached_regions WHERE region_key = ?", (region_key,))
@@ -124,8 +125,7 @@ def mark_region_cached(config: Any, region_key: str, ra: float, dec: float, radi
         How wide the patch is, in degrees.
     """
     cache_db_path = get_catalog_cache_path(config)
-    os.makedirs(cache_db_path.parent, exist_ok=True)
-    connection = sqlite3.connect(cache_db_path)
+    connection = connect_db(str(cache_db_path))
     try:
         _ensure_schema(connection)
         connection.execute(
@@ -150,8 +150,7 @@ def insert_gaia_sources(config: Any, rows: list[tuple[str, float, float, float, 
         the old row with the new one.
     """
     cache_db_path = get_catalog_cache_path(config)
-    os.makedirs(cache_db_path.parent, exist_ok=True)
-    connection = sqlite3.connect(cache_db_path)
+    connection = connect_db(str(cache_db_path))
     try:
         _ensure_schema(connection)
         connection.executemany(
@@ -186,8 +185,7 @@ def query_gaia_sources_in_bounds(
         this box yet.
     """
     cache_db_path = get_catalog_cache_path(config)
-    os.makedirs(cache_db_path.parent, exist_ok=True)
-    connection = sqlite3.connect(cache_db_path)
+    connection = connect_db(str(cache_db_path))
     try:
         _ensure_schema(connection)
         cursor = connection.execute(

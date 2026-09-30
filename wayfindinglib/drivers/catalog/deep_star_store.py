@@ -36,6 +36,8 @@ from typing import Any
 
 import numpy as np
 
+from datastore.local_database import connect_db
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -339,8 +341,7 @@ def set_deep_catalog_plan(config: Any, healpix_level: int, magnitude_limit: floa
     """
     wanted = {"healpix_level": str(healpix_level), "magnitude_limit": repr(float(magnitude_limit))}
     cache_db_path = get_deep_catalog_path(config)
-    os.makedirs(cache_db_path.parent, exist_ok=True)
-    connection = sqlite3.connect(cache_db_path)
+    connection = connect_db(str(cache_db_path))
     try:
         _ensure_schema(connection)
         saved = dict(connection.execute("SELECT key, value FROM catalog_plan").fetchall())
@@ -374,7 +375,7 @@ def get_downloaded_pixels(config: Any) -> set[int]:
     cache_db_path = get_deep_catalog_path(config)
     if not cache_db_path.exists():
         return set()
-    connection = sqlite3.connect(cache_db_path)
+    connection = connect_db(str(cache_db_path))
     try:
         _ensure_schema(connection)
         return {row[0] for row in connection.execute("SELECT pixel FROM downloaded_pixels")}
@@ -436,7 +437,7 @@ def record_downloaded_pixel(
         )
     )
 
-    connection = sqlite3.connect(cache_db_path)
+    connection = connect_db(str(cache_db_path))
     try:
         _ensure_schema(connection)
         with connection:
@@ -516,7 +517,7 @@ def find_deep_stars(
     cache_db_path = get_deep_catalog_path(config)
     if not cache_db_path.exists():
         return None
-    connection = sqlite3.connect(cache_db_path)
+    connection = connect_db(str(cache_db_path))
     try:
         _ensure_schema(connection)
         limit_milli = math.floor(magnitude_limit * _MILLIMAGNITUDES_PER_MAGNITUDE + 1e-6)

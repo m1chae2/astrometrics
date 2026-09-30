@@ -415,6 +415,7 @@ class ProcessingPipelines:
             job.mark("completed" if stacked_path else "failed", 100)
             return stacked_path
 
+    @background_job("astrometry", grace_period_seconds=5.0)
     def run_astrometry(
         self,
         target: Target,
@@ -430,6 +431,11 @@ class ProcessingPipelines:
         `target.stacking.stacked_image` (falling back to the target's first
         frame) when `path` is omitted, so a bare `run_astrometry(target)` call
         is normally enough.
+
+        Called through the MCP server, this runs as a background job (see
+        `astrometricslib.drivers.job_logging.background_job`) rather than
+        blocking the caller until astrometry finishes -- called directly,
+        it behaves exactly as before.
 
         Parameters
         ----------
@@ -461,6 +467,7 @@ class ProcessingPipelines:
             register_job=register_job,
         )
 
+    @background_job("photometry", grace_period_seconds=5.0)
     def run_photometry(
         self,
         target: Target,
@@ -477,6 +484,11 @@ class ProcessingPipelines:
         See `astrometricslib.pipelines.tasks.analyze_target` for the full
         return documentation. Photometry resolves its own frames from
         `target.frames` when `frames` is omitted.
+
+        Called through the MCP server, this runs as a background job (see
+        `astrometricslib.drivers.job_logging.background_job`) rather than
+        blocking the caller until photometry finishes -- called directly,
+        it behaves exactly as before.
 
         Parameters
         ----------

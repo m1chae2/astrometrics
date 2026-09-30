@@ -13,6 +13,7 @@ from astrometricslib.drivers.calibration_library import (
     CalibrationLibrary,
     is_calibration_gain_compatible,
     is_dark_calibration_metadata_compatible,
+    is_dark_calibration_temperature_compatible,
 )
 
 
@@ -107,6 +108,44 @@ def test_dark_calibration_metadata_compatible_ignores_bias_like_short_exposure_o
     assert not is_dark_calibration_metadata_compatible(
         light_exposure=30.0, light_gain="0", master_exposure=3.2e-05, master_gain="0"
     )
+
+
+# ---- dark master sensor temperature ---------------------------------------
+#
+# Regression coverage for a real incident: Arcturus's 0.5s/gain-0 dark
+# library clusters at ~0C and ~-10C with nothing between, but its light
+# frames drifted from -2.9C to -10.7C across the session. get_dark_frames
+# has no temperature dimension, so it pooled all 90 darks (both clusters)
+# into one mismatched master, and Siril reported 57-64% negative pixels
+# after dark subtraction.
+
+
+def test_dark_calibration_temperature_compatible_within_tolerance():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify a small temperature difference is accepted."""
+    assert is_dark_calibration_temperature_compatible(
+        light_temperature_c=-5.0, master_temperature_c=-6.5, temperature_tolerance_c=3.0
+    )
+
+
+def test_dark_calibration_temperature_incompatible_beyond_tolerance():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify the Arcturus-scale gap is flagged as incompatible.
+
+    Its light frames drifted between two dark clusters roughly 10C
+    apart.
+    """
+    assert not is_dark_calibration_temperature_compatible(
+        light_temperature_c=-5.0, master_temperature_c=0.1, temperature_tolerance_c=3.0
+    )
+
+
+def test_dark_calibration_temperature_compatible_when_either_temperature_is_unknown():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify a missing temperature is not treated as a mismatch.
+
+    A temperature that was never recorded leaves nothing to judge it
+    against.
+    """
+    assert is_dark_calibration_temperature_compatible(light_temperature_c=None, master_temperature_c=0.1)
+    assert is_dark_calibration_temperature_compatible(light_temperature_c=-5.0, master_temperature_c=None)
 
 
 # ---- camera offset and gain in the library key ---------------------------

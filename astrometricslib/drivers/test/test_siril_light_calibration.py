@@ -83,6 +83,53 @@ def test_the_dominant_exposure_of_frames_without_one_is_zero() -> None:
     assert dominant_exposure([SimpleNamespace(exposure=None)]) == "0"
 
 
+def test_representative_light_temperature_averages_dict_frames() -> None:
+    """A batch of model_dump()-style dict frames yields their mean temperature.
+
+    Regression test for the Arcturus dark-calibration incident: the
+    first version of this check read a camelCase key
+    (``sensorTemperatureC``) on dict frames, but `_stack_one_batch`
+    passes plain `model_dump()` dicts, which use the Python field name
+    (``sensor_temperature_c``). That mismatch silently found no
+    temperature on every dict frame, so the mismatch between Arcturus's
+    ~0C dark master and its -2.9C to -10.7C light frames went
+    undetected even after the check existed.
+    """
+    from astrometricslib.drivers.siril_interface import representative_light_temperature_c
+
+    frames = [{"sensor_temperature_c": -2.9}, {"sensor_temperature_c": -10.7}]
+
+    assert representative_light_temperature_c(frames) == pytest.approx(-6.8)
+
+
+def test_representative_light_temperature_averages_frame_objects() -> None:
+    """The same averaging works for real frame objects, not just dicts."""
+    from types import SimpleNamespace
+
+    from astrometricslib.drivers.siril_interface import representative_light_temperature_c
+
+    frames = [SimpleNamespace(sensor_temperature_c=-2.9), SimpleNamespace(sensor_temperature_c=-10.7)]
+
+    assert representative_light_temperature_c(frames) == pytest.approx(-6.8)
+
+
+def test_representative_light_temperature_skips_frames_missing_it() -> None:
+    """A frame that never recorded a temperature doesn't skew the mean."""
+    from astrometricslib.drivers.siril_interface import representative_light_temperature_c
+
+    frames = [{"sensor_temperature_c": -5.0}, {"sensor_temperature_c": None}, {}]
+
+    assert representative_light_temperature_c(frames) == pytest.approx(-5.0)
+
+
+def test_representative_light_temperature_of_frames_without_one_is_none() -> None:
+    """With no readable temperature at all, there is nothing to average."""
+    from astrometricslib.drivers.siril_interface import representative_light_temperature_c
+
+    assert representative_light_temperature_c([]) is None
+    assert representative_light_temperature_c([{}, {"sensor_temperature_c": None}]) is None
+
+
 def test_each_output_file_gets_its_own_work_folder() -> None:
     """Stacks of one target that run together must not share a work folder."""
     from astrometricslib.drivers.siril_interface import work_directory_name

@@ -865,3 +865,59 @@ def is_dark_calibration_metadata_compatible(
     if not is_calibration_gain_compatible(light_gain, master_gain):
         return False
     return abs(float(light_exposure) - float(master_exposure)) <= exposure_tolerance_seconds
+
+
+# How many degrees C a dark master's own capture temperature may differ
+# from the light frames it calibrates before it gets flagged. `get_dark_frames`
+# has no temperature dimension at all -- it pools every dark at a given
+# camera/gain/exposure regardless of when it was captured -- so a library
+# built from sessions at very different sensor temperatures can silently
+# combine them into one mismatched master. This is a first-pass estimate,
+# not yet characterized against this camera's own measured dark-current
+# curve: it is deliberately loose (CMOS dark current can already grow
+# noticeably within a few degrees) so it flags real gaps rather than
+# ordinary cooler-setpoint jitter. Confirmed against a real incident:
+# Arcturus's 0.5s/gain-0 darks cluster at ~0C and ~-10C with nothing in
+# between, while its light frames drifted from -2.9C to -10.7C, and Siril
+# reported 57-64% negative pixels after dark subtraction against the
+# resulting mixed-temperature master.
+DEFAULT_DARK_TEMPERATURE_TOLERANCE_C = 3.0
+
+
+def is_dark_calibration_temperature_compatible(
+    light_temperature_c: float | None,
+    master_temperature_c: float | None,
+    temperature_tolerance_c: float = DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
+) -> bool:
+    """Check if a dark master's capture temperature suits the light frames.
+
+    Dark current (and so the correct pixel-level subtraction) changes
+    with sensor temperature, so a dark captured at a very different
+    temperature than the lights it calibrates can under- or
+    over-subtract -- the latter shows up as Siril's "many negative
+    pixels" warning. `get_dark_frames` does not consider temperature at
+    all, so this is a separate, additive check for callers to apply
+    once they already have a matched master in hand.
+
+    Parameters
+    ----------
+    light_temperature_c : `float` or `None`
+        A representative sensor temperature (e.g. the mean across the
+        group) for the light frames being calibrated. `None` if it was
+        never recorded.
+    master_temperature_c : `float` or `None`
+        The dark master's own capture temperature. `None` if it was
+        never recorded.
+    temperature_tolerance_c : `float`, optional
+        How many degrees C apart they may be before this reports
+        incompatible.
+
+    Returns
+    -------
+    is_compatible : `bool`
+        True if either temperature is unknown (nothing to judge) or
+        they are within tolerance of each other.
+    """
+    if light_temperature_c is None or master_temperature_c is None:
+        return True
+    return abs(light_temperature_c - master_temperature_c) <= temperature_tolerance_c

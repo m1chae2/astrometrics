@@ -546,6 +546,49 @@ def dominant_exposure(frames: list[Any]) -> str:
     return max(counts, key=counts.__getitem__)
 
 
+def representative_light_temperature_c(frames: list[Any]) -> float | None:
+    """Find a light-frame batch's mean sensor temperature, for dark matching.
+
+    `get_dark_frames` has no temperature dimension -- it pools every dark
+    at a given camera/gain/exposure regardless of capture temperature --
+    so this is the only place a batch's actual sensor temperature is
+    available to compare a matched dark master against (see
+    `is_dark_calibration_temperature_compatible`).
+
+    A dict frame here is always a plain ``model_dump()`` (see
+    `_stack_one_batch`), which uses the Python field name
+    (``sensor_temperature_c``), not the camelCase JSON alias
+    (``sensorTemperatureC``) -- confirmed against a real incident where
+    checking the alias silently found no temperature on every dict
+    frame, so Arcturus's dark-temperature mismatch (a dark master at
+    ~0C applied to light frames that drifted from -2.9C to -10.7C,
+    which Siril reported as 57-64% negative pixels after dark
+    subtraction) went undetected even after this check was added.
+
+    Parameters
+    ----------
+    frames : `list`
+        Frame records or dictionaries of them, with a
+        ``sensor_temperature_c``.
+
+    Returns
+    -------
+    mean_temperature_c : `float` or `None`
+        The mean of every frame's recorded temperature, or `None` if
+        none of them have one.
+    """
+    temperatures = [
+        (
+            frame.get("sensor_temperature_c")
+            if isinstance(frame, dict)
+            else getattr(frame, "sensor_temperature_c", None)
+        )
+        for frame in frames
+    ]
+    temperatures = [t for t in temperatures if t is not None]
+    return sum(temperatures) / len(temperatures) if temperatures else None
+
+
 def light_calibration_flags(num_darks: int, num_flats: int, num_biases: int) -> tuple[str, str, str]:
     """Choose which calibration masters Siril applies to the light frames.
 
@@ -969,15 +1012,20 @@ class ImageProcessing:
                 exp = dominant_exposure(matching_frames)
                 filt = f.get("filter") if isinstance(f, dict) else getattr(f, "filter", "None")
 
+                light_temperature_c = representative_light_temperature_c(matching_frames)
+
                 def soft_flag_calibration_mismatch(
-                    master_paths: list[str], master_kind: str, check_exposure: bool
+                    master_paths: list[str],
+                    master_kind: str,
+                    check_exposure: bool,
+                    check_temperature: bool = False,
                 ) -> None:
-                    """Log, without blocking, a relaxed-match gain mismatch.
+                    """Log, without blocking, a relaxed-match mismatch.
 
                     Checks whether a relaxed-matched calibration
-                    master's own gain (and, for darks only,
-                    exposure) looks incompatible with the light
-                    frames it'll be applied to.
+                    master's own gain (and, for darks only, exposure
+                    and sensor temperature) looks incompatible with
+                    the light frames it'll be applied to.
 
                     calibration_library.py's get_dark_frames/
                     get_bias_frames/get_flat_frames are documented
@@ -987,13 +1035,15 @@ class ImageProcessing:
                     surfaces the mismatch as a soft flag, checked
                     against the first matched master file as a
                     low-cost approximation rather than reading every
-                    matched file's header. check_exposure must be
-                    False for bias/flat masters -- their exposure
-                    times are unrelated to the light frames' by
-                    design (bias is near-zero, flats are set by the
-                    flat panel's brightness), so comparing them
-                    against light exposure would flag normal,
-                    correct calibration setups as mismatched.
+                    matched file's header. check_exposure and
+                    check_temperature must be False for bias/flat
+                    masters -- their exposure times are unrelated to
+                    the light frames' by design (bias is near-zero,
+                    flats are set by the flat panel's brightness), so
+                    comparing them against light exposure would flag
+                    normal, correct calibration setups as mismatched;
+                    temperature is likewise only characterized here
+                    for dark current, not bias/flat noise.
                     """
                     if not master_paths:
                         return
@@ -1003,6 +1053,7 @@ class ImageProcessing:
                         is_calibration_gain_compatible,
                         is_calibration_offset_compatible,
                         is_dark_calibration_metadata_compatible,
+                        is_dark_calibration_temperature_compatible,
                     )
 
                     try:
@@ -1011,6 +1062,8 @@ class ImageProcessing:
                         master_iso = str(header.get("ISOSPEED", header.get("GAIN", iso)))
                         master_offset = header.get("OFFSET", header.get("BLKLEVEL", "0"))
                         master_exp = float(header.get("EXPTIME", exp))
+                        master_temp = header.get("CCD-TEMP", header.get("SET-TEMP"))
+                        master_temp = float(master_temp) if master_temp is not None else None
                     except Exception:
                         return
 
@@ -1030,22 +1083,38 @@ class ImageProcessing:
                     # a master taken at another offset shifts every pixel of
                     # the lights it is applied to.
                     offset_compatible = is_calibration_offset_compatible(offset, master_offset)
-                    if not compatible or not offset_compatible:
+
+                    temperature_compatible = True
+                    if check_temperature:
+                        temperature_compatible = is_dark_calibration_temperature_compatible(
+                            light_temperature_c=light_temperature_c,
+                            master_temperature_c=master_temp,
+                        )
+
+                    if not compatible or not offset_compatible or not temperature_compatible:
                         exposure_note = (
                             f" exposure={master_exp}s vs light frames'... exposure={exp}s"
                             if check_exposure
                             else ""
                         )
+                        temperature_note = (
+                            f" temperature={master_temp}C vs light frames' mean temperature="
+                            f"{light_temperature_c:.1f}C"
+                            if check_temperature and not temperature_compatible
+                            else ""
+                        )
                         message = (
                             f"{master_kind} master '{master_paths[0]}' has gain={master_iso} "
                             f"offset={master_offset} vs light frames' gain={iso} offset={offset}."
-                            f"{exposure_note}"
+                            f"{exposure_note}{temperature_note}"
                         )
                         log(f"Calibration metadata mismatch (soft flag, master still applied): {message}")
                         self.last_run_diagnostics.setdefault("calibration_mismatch_flags", []).append(message)
 
                 dark_frame_paths = library.get_dark_frames(camera=cam, iso=iso, offset=offset, exposure=exp)
-                soft_flag_calibration_mismatch(dark_frame_paths, "dark", check_exposure=True)
+                soft_flag_calibration_mismatch(
+                    dark_frame_paths, "dark", check_exposure=True, check_temperature=True
+                )
                 readable_dark_paths = find_readable_paths(dark_frame_paths)
                 for item in dark_frame_paths:
                     if item not in readable_dark_paths:

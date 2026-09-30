@@ -28,6 +28,8 @@ from .indi.filter_wheel_controller import FilterWheelController
 from .indi.focuser_controller import FocuserController
 from .indi.mount_controller import MountController
 from .indi.pyindi_compatibility import PyIndi
+from .indi.switch_controller import SwitchController
+from .indi.weather_controller import WeatherController
 
 # Declares this module's own public surface. Without it, sphinx-automodapi
 # documents every imported name too, which is what produced the
@@ -264,6 +266,8 @@ class IndiInterface(IndiClient):
         self.filter_wheel_controller = FilterWheelController(self)
         self.camera_controller = CameraController(self)
         self.enclosure_controller = EnclosureController(self)
+        self.switch_controller = SwitchController(self)
+        self.weather_controller = WeatherController()
         self.connection_manager = ConnectionManager(config.get_indi_host(), config.get_indi_port())
         self.device_discovery = DeviceDiscovery(self)
 
@@ -666,6 +670,57 @@ class IndiInterface(IndiClient):
             True if the close command was sent and confirmed.
         """
         return self.enclosure_controller.close(self._find_enclosure_device())
+
+    def get_switch_states(self) -> dict[str, bool]:
+        """Return the powerbox's `POWER_CONTROL` outlet states.
+
+        Returns
+        -------
+        states : `dict` [`str`, `bool`]
+            Outlet name to on/off state, or empty if unavailable.
+        """
+        return self.switch_controller.get_switch_states(self._find_powerbox_device())
+
+    def set_switch_state(self, switch_name: str, on: bool) -> bool:
+        """Command one powerbox `POWER_CONTROL` outlet on or off.
+
+        Returns
+        -------
+        success : `bool`
+            Whether the command was sent.
+        """
+        return self.switch_controller.set_switch_state(self._find_powerbox_device(), switch_name, on)
+
+    def get_switch_variable_values(self) -> dict[str, float]:
+        """Return the powerbox's `DEW_PWM`/`POWER_SENSORS` element values.
+
+        Returns
+        -------
+        values : `dict` [`str`, `float`]
+            Element name to value, or empty if unavailable.
+        """
+        return self.switch_controller.get_variable_values(self._find_powerbox_device())
+
+    def set_switch_variable_value(self, name: str, value: float) -> bool:
+        """Command one powerbox `DEW_PWM` element to a new duty cycle.
+
+        Returns
+        -------
+        success : `bool`
+            Whether the command was sent.
+        """
+        return self.switch_controller.set_variable_value(self._find_powerbox_device(), name, value)
+
+    def get_weather_readings(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        """Return the powerbox's `WEATHER_PARAMETERS` as sensor readings.
+
+        Returns
+        -------
+        readings : `SensorReadings`
+            Measurement name to `(value, observed_at)`, or empty if
+            unavailable.
+        """
+        return self.weather_controller.get_readings(self._find_powerbox_device())
 
     def _find_filterwheel_device(self):  # ruff: ignore[missing-return-type-private-function]
         """Heuristic to find filter wheel.

@@ -248,3 +248,5 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "datastore"]
 "wayfindinglib/drivers/indi/test/test_mount_controller.py" = ["invalid-function-name"] # fake telescope device mocks PyIndi's camelCase getNumber
 "wayfindinglib/drivers/test/test_indi_property_dispatch.py" = ["invalid-function-name"] # recording client overrides the same PyIndi camelCase callbacks
 "wayfindinglib/drivers/indi/test/test_enclosure_controller.py" = ["invalid-function-name"] # fake enclosure device/client mocks PyIndi's camelCase interface
+"wayfindinglib/drivers/indi/test/test_switch_controller.py" = ["invalid-function-name"] # fake powerbox device/client mocks PyIndi's camelCase interface
+"wayfindinglib/drivers/indi/test/test_weather_controller.py" = ["invalid-function-name"] # fake powerbox device mocks PyIndi's camelCase getNumber

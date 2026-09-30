@@ -12,12 +12,16 @@ from wayfindinglib.drivers.indi.enclosure_driver import IndiEnclosureDriver
 from wayfindinglib.drivers.indi.filter_wheel_driver import IndiFilterWheelDriver
 from wayfindinglib.drivers.indi.focuser_driver import IndiFocuserDriver
 from wayfindinglib.drivers.indi.mount_driver import IndiMountDriver
+from wayfindinglib.drivers.indi.switch_driver import IndiSwitchDriver
+from wayfindinglib.drivers.indi.weather_driver import IndiWeatherDriver
 from wayfindinglib.drivers.protocols.camera_driver import CameraDriver
 from wayfindinglib.drivers.protocols.enclosure_driver import EnclosureDriver
 from wayfindinglib.drivers.protocols.filter_wheel_driver import FilterWheelDriver
 from wayfindinglib.drivers.protocols.focuser_driver import FocuserDriver
 from wayfindinglib.drivers.protocols.mount_driver import MountDriver
 from wayfindinglib.drivers.protocols.remote_transfer_driver import RemoteTransferDriver
+from wayfindinglib.drivers.protocols.switch_driver import SwitchDriver
+from wayfindinglib.drivers.protocols.weather_driver import WeatherDriver
 from wayfindinglib.drivers.stellarmate_interface import StellarMateInterface
 
 
@@ -78,6 +82,32 @@ def test_indi_filter_wheel_driver_conforms_to_filter_wheel_driver() -> None:
     """
     driver = IndiFilterWheelDriver(session=object())
     assert isinstance(driver, FilterWheelDriver)
+
+
+def test_switch_driver_cannot_be_instantiated_directly() -> None:
+    """Verify `SwitchDriver` cannot be instantiated missing methods."""
+    with pytest.raises(TypeError):
+        SwitchDriver()  # pyrefly: ignore[bad-instantiation]
+
+
+def test_weather_driver_cannot_be_instantiated_directly() -> None:
+    """Verify `WeatherDriver` cannot be instantiated missing methods."""
+    with pytest.raises(TypeError):
+        WeatherDriver()  # pyrefly: ignore[bad-instantiation]
+
+
+def test_indi_switch_driver_conforms_to_switch_driver() -> None:
+    """Verify `IndiSwitchDriver` implements every `SwitchDriver` method."""
+    driver = IndiSwitchDriver(session=object())
+    assert isinstance(driver, SwitchDriver)
+    assert driver.protocol_name == "indi"
+
+
+def test_indi_weather_driver_conforms_to_weather_driver() -> None:
+    """Verify `IndiWeatherDriver` implements every `WeatherDriver` method."""
+    driver = IndiWeatherDriver(session=object())
+    assert isinstance(driver, WeatherDriver)
+    assert driver.protocol_name == "indi"
 
 
 def test_remote_transfer_driver_cannot_be_instantiated_directly() -> None:
@@ -238,3 +268,86 @@ async def test_indi_enclosure_driver_delegates_to_session_enclosure_methods() ->
     assert await driver.get_state() == EnclosureState.OPEN
     assert await driver.open() is True
     assert await driver.close() is True
+
+
+@pytest.mark.anyio
+async def test_indi_switch_driver_delegates_to_session_switch_methods() -> None:
+    """Verify `IndiSwitchDriver` delegates to the session's M12 methods."""
+
+    class _FakeSession:
+        """A stand-in session recording switch command calls."""
+
+        def get_switch_states(self) -> dict[str, bool]:
+            """Report a fixed outlet state map.
+
+            Returns
+            -------
+            states : `dict` [`str`, `bool`]
+                A single fixed outlet's state.
+            """
+            return {"POWER_CONTROL_1": True}
+
+        def set_switch_state(self, switch_name: str, on: bool) -> bool:
+            """Record the requested outlet command and report success.
+
+            Returns
+            -------
+            success : `bool`
+                Always `True`.
+            """
+            self.requested = (switch_name, on)
+            return True
+
+        def get_switch_variable_values(self) -> dict[str, float]:
+            """Report a fixed dew-heater value map.
+
+            Returns
+            -------
+            values : `dict` [`str`, `float`]
+                A single fixed variable's value.
+            """
+            return {"DEW_A": 40.0}
+
+        def set_switch_variable_value(self, name: str, value: float) -> bool:
+            """Record the requested variable command and report success.
+
+            Returns
+            -------
+            success : `bool`
+                Always `True`.
+            """
+            self.requested_variable = (name, value)
+            return True
+
+    session = _FakeSession()
+    driver = IndiSwitchDriver(session=session)
+    assert await driver.get_switch_states() == {"POWER_CONTROL_1": True}
+    assert await driver.set_switch_state("POWER_CONTROL_1", False) is True
+    assert session.requested == ("POWER_CONTROL_1", False)
+    assert await driver.get_variable_values() == {"DEW_A": 40.0}
+    assert await driver.set_variable_value("DEW_A", 75.0) is True
+    assert session.requested_variable == ("DEW_A", 75.0)
+
+
+@pytest.mark.anyio
+async def test_indi_weather_driver_delegates_to_session_weather_method() -> None:
+    """Verify `IndiWeatherDriver` delegates to the session's M12 method."""
+    from datetime import UTC, datetime
+
+    fixed_reading = {"WEATHER_TEMPERATURE": (12.5, datetime.now(UTC))}
+
+    class _FakeSession:
+        """A stand-in session returning a fixed weather reading."""
+
+        def get_weather_readings(self):  # ruff: ignore[missing-return-type-private-function]
+            """Return the fixed reading map.
+
+            Returns
+            -------
+            readings : `SensorReadings`
+                The fixed reading map.
+            """
+            return fixed_reading
+
+    driver = IndiWeatherDriver(session=_FakeSession())
+    assert await driver.get_readings() == fixed_reading

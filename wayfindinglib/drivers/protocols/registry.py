@@ -18,6 +18,8 @@ from wayfindinglib.drivers.protocols.filter_wheel_driver import FilterWheelDrive
 from wayfindinglib.drivers.protocols.focuser_driver import FocuserDriver
 from wayfindinglib.drivers.protocols.mount_driver import MountDriver
 from wayfindinglib.drivers.protocols.remote_transfer_driver import RemoteTransferDriver
+from wayfindinglib.drivers.protocols.switch_driver import SwitchDriver
+from wayfindinglib.drivers.protocols.weather_driver import WeatherDriver
 
 
 def build_mount_driver_registry() -> dict[str, type[MountDriver]]:
@@ -85,6 +87,32 @@ def build_enclosure_driver_registry() -> dict[str, type[EnclosureDriver]]:
     from wayfindinglib.drivers.indi.enclosure_driver import IndiEnclosureDriver
 
     return {"indi": IndiEnclosureDriver}
+
+
+def build_switch_driver_registry() -> dict[str, type[SwitchDriver]]:
+    """Return the protocol-name -> `SwitchDriver` class registry.
+
+    Returns
+    -------
+    registry : `dict` [`str`, `type` [`SwitchDriver`]]
+        Maps a protocol name (e.g. ``"indi"``) to its `SwitchDriver` subclass.
+    """
+    from wayfindinglib.drivers.indi.switch_driver import IndiSwitchDriver
+
+    return {"indi": IndiSwitchDriver}
+
+
+def build_weather_driver_registry() -> dict[str, type[WeatherDriver]]:
+    """Return the protocol-name -> `WeatherDriver` class registry.
+
+    Returns
+    -------
+    registry : `dict` [`str`, `type` [`WeatherDriver`]]
+        Maps a protocol name (e.g. ``"indi"``) to its `WeatherDriver` subclass.
+    """
+    from wayfindinglib.drivers.indi.weather_driver import IndiWeatherDriver
+
+    return {"indi": IndiWeatherDriver}
 
 
 def build_remote_transfer_driver_registry() -> dict[str, type[RemoteTransferDriver]]:

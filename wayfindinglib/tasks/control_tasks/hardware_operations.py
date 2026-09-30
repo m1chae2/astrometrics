@@ -633,3 +633,22 @@ def get_observer_location(manager) -> dict[str, float] | None:  # ruff: ignore[m
         telescope does not report a location.
     """
     return _run_sync(manager.mount_driver.get_observer_location())
+
+
+def refresh_safety_assessment(observatory):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Read the current `WeatherDriver` and assess safety against it.
+
+    Wires §1a's live weather feed into the existing `assess_safety`
+    machinery, which had no live caller anywhere before this (verified
+    in `Wayfinding_Library_Architecture.md` §2.5.4) -- this is that
+    orchestration, not new safety logic. A read, not a command -- no
+    authority check.
+
+    Returns
+    -------
+    assessment : `SafetyAssessment`
+        The current environmental verdict against the freshly-read
+        sensor readings.
+    """
+    readings = _run_sync(observatory.weather_driver.get_readings())
+    return observatory.assess_safety(readings)

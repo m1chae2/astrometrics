@@ -35,7 +35,7 @@ operator configures more than one rig.
 
 import logging
 
-from wayfindinglib.models.equipment_and_site.equipment import Camera, EquipmentCatalog, Telescope
+from wayfindinglib.models.equipment_and_site.equipment import Camera, EquipmentCatalog, GuideScope, Telescope
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +45,8 @@ ACTIVE_TELESCOPE_KEY = "active_telescope"
 CAMERA_SECTION = "Observatory.Camera"
 ACTIVE_CAMERA_KEY = "default_primary_camera"
 _SINGLE_TELESCOPE_FALLBACK_NAME = "Apertura 75Q"
+GUIDE_SCOPE_SECTION = "Observatory.GuideScope"
+ACTIVE_GUIDE_SCOPE_KEY = "active_guide_scope"
 
 _BOOL_TRUE_STRINGS = {"true", "1", "yes", "on"}
 
@@ -222,6 +224,83 @@ def get_active_camera_id(config) -> str | None:  # ruff: ignore[missing-type-fun
     return config.get_value(CAMERA_SECTION, ACTIVE_CAMERA_KEY)
 
 
+def _build_guide_scope(guide_scope_name: str, section: dict[str, str]) -> GuideScope | None:
+    """Construct a `GuideScope` from a resolved config section.
+
+    Unlike telescopes/cameras, an unconfigured guide scope is the
+    common case (guiding through the main OTA) -- there is no
+    single-entry fallback the way `_SINGLE_TELESCOPE_FALLBACK_NAME`
+    provides, so an absent or unparseable section simply yields no
+    guide scope.
+
+    Returns
+    -------
+    guide_scope : `GuideScope` or `None`
+        The constructed guide scope, or `None` if `section` lacks a
+        parseable, positive focal length.
+    """
+    try:
+        focal_length_mm = float(section.get("focal_length_mm", "0.0"))
+        aperture_mm_str = section.get("aperture_mm")
+        aperture_mm = float(aperture_mm_str) if aperture_mm_str else None
+    except TypeError, ValueError:
+        logger.warning("Skipping guide scope '%s': unparseable optics", guide_scope_name)
+        return None
+    if focal_length_mm <= 0.0:
+        logger.debug("Skipping guide scope '%s': no configured focal length", guide_scope_name)
+        return None
+
+    try:
+        return GuideScope(
+            id=guide_scope_name,
+            name=guide_scope_name,
+            focal_length_mm=focal_length_mm,
+            aperture_mm=aperture_mm,
+        )
+    except (TypeError, ValueError) as exc:
+        logger.warning("Skipping guide scope '%s': %s", guide_scope_name, exc)
+        return None
+
+
+def list_guide_scopes(config) -> list[GuideScope]:  # ruff: ignore[missing-type-function-argument]
+    """Return every configured `GuideScope`.
+
+    Reads the comma-separated ``models`` list under
+    ``[Observatory.GuideScope]``, each named guide scope's fields in
+    ``[Observatory.GuideScope.<name>]``. Unlike telescopes, there is no
+    fallback to a single unnamed entry -- an unconfigured operator has
+    no guide scope, which is the correct default (§1a).
+
+    Returns
+    -------
+    guide_scopes : `list` [`GuideScope`]
+        Every configured guide scope.
+    """
+    models_str = config.get_value(GUIDE_SCOPE_SECTION, "models")
+    guide_scope_names = [m.strip() for m in models_str.split(",") if m.strip()] if models_str else []
+
+    guide_scopes = []
+    for name in guide_scope_names:
+        section_key = f"{GUIDE_SCOPE_SECTION}.{name}"
+        section = dict(config.app_config[section_key]) if section_key in config.app_config else {}
+        guide_scope = _build_guide_scope(name, section)
+        if guide_scope is not None:
+            guide_scopes.append(guide_scope)
+    return guide_scopes
+
+
+def get_active_guide_scope_id(config) -> str | None:  # ruff: ignore[missing-type-function-argument]
+    """Return the configured active guide scope id, or `None` if unset.
+
+    Returns
+    -------
+    guide_scope_id : `str` or `None`
+        The configured active guide scope id, or `None` if unset --
+        the common case of guiding through the main OTA.
+    """
+    return config.get_value(GUIDE_SCOPE_SECTION, ACTIVE_GUIDE_SCOPE_KEY)
+
+
 def _validate_protocol(entity_kind: str, entity_name: str, field_name: str, protocol: str) -> None:
     """Raise a clear error if a configured protocol name has no driver.
 
@@ -269,6 +348,7 @@ def get_equipment_catalog(config) -> EquipmentCatalog:  # ruff: ignore[missing-t
     """
     telescopes = list_telescopes(config)
     cameras = list_cameras(config)
+    guide_scopes = list_guide_scopes(config)
 
     for telescope in telescopes:
         _validate_protocol("Telescope", telescope.name, "mount_protocol", telescope.mount_protocol)
@@ -287,10 +367,19 @@ def get_equipment_catalog(config) -> EquipmentCatalog:  # ruff: ignore[missing-t
     if active_camera_id not in {c.id for c in cameras}:
         active_camera_id = cameras[0].id if cameras else None
 
+    active_guide_scope_id = get_active_guide_scope_id(config)
+    if active_guide_scope_id not in {g.id for g in guide_scopes}:
+        # Unlike telescopes/cameras, no "first available" fallback: an
+        # unconfigured guide scope means guiding through the main OTA,
+        # not an oversight to silently correct.
+        active_guide_scope_id = None
+
     return EquipmentCatalog(
         id="default",
         telescopes=telescopes,
         cameras=cameras,
+        guide_scopes=guide_scopes,
         active_telescope_id=active_telescope_id,
         active_camera_id=active_camera_id,
+        active_guide_scope_id=active_guide_scope_id,
     )

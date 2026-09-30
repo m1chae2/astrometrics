@@ -135,6 +135,25 @@ class Camera(BaseModel):
     )
 
 
+class GuideScope(BaseModel):
+    """A separate optical tube used only for guiding, its own focal length.
+
+    Relevant to `compute_guider_calibration`'s `arcsec_per_pixel` input:
+    `EquipmentConfiguration.plate_scale_arcsec_per_px` assumes the
+    *main* telescope's focal length, which is wrong when guiding
+    through a separate scope rather than an off-axis guider sharing
+    the main OTA's aperture. More than one may be configured in an
+    `EquipmentCatalog`; at most one is active.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str
+    name: str
+    focal_length_mm: float = Field(..., gt=0.0, description="Effective focal length in millimetres.")
+    aperture_mm: float | None = Field(default=None, gt=0.0, description="Clear aperture in millimetres.")
+
+
 class CoolingPolicy(BaseModel):
     """Target temperature and ramp behavior for one cooling session."""
 
@@ -160,8 +179,16 @@ class EquipmentCatalog(BaseModel):
     id: str
     telescopes: list[Telescope] = Field(default_factory=list)
     cameras: list[Camera] = Field(default_factory=list)
+    guide_scopes: list[GuideScope] = Field(default_factory=list)
     active_telescope_id: str | None = Field(default=None)
     active_camera_id: str | None = Field(default=None)
+    active_guide_scope_id: str | None = Field(
+        default=None,
+        description=(
+            "Unset when guiding through the main OTA (on-axis or off-axis guider) "
+            "rather than a separate guide scope -- the common case."
+        ),
+    )
 
     @model_validator(mode="after")
     def _check_active_ids_resolve(self) -> EquipmentCatalog:
@@ -175,8 +202,9 @@ class EquipmentCatalog(BaseModel):
         Raises
         ------
         ValueError
-            Raised if `active_telescope_id` or `active_camera_id` names an
-            entry not present in `telescopes`/`cameras`.
+            Raised if `active_telescope_id`, `active_camera_id`, or
+            `active_guide_scope_id` names an entry not present in the
+            corresponding list.
         """
         if self.active_telescope_id is not None:
             if not any(t.id == self.active_telescope_id for t in self.telescopes):
@@ -184,6 +212,11 @@ class EquipmentCatalog(BaseModel):
         if self.active_camera_id is not None:
             if not any(c.id == self.active_camera_id for c in self.cameras):
                 raise ValueError(f"active_camera_id {self.active_camera_id!r} is not in cameras")
+        if self.active_guide_scope_id is not None:
+            if not any(g.id == self.active_guide_scope_id for g in self.guide_scopes):
+                raise ValueError(
+                    f"active_guide_scope_id {self.active_guide_scope_id!r} is not in guide_scopes"
+                )
         return self
 
     def active_telescope(self) -> Telescope | None:
@@ -210,6 +243,18 @@ class EquipmentCatalog(BaseModel):
             return None
         return next((c for c in self.cameras if c.id == self.active_camera_id), None)
 
+    def active_guide_scope(self) -> GuideScope | None:
+        """Return the active `GuideScope`, or `None` if unconfigured.
+
+        Returns
+        -------
+        guide_scope : `GuideScope` or `None`
+            The active guide scope, or `None` if none is configured.
+        """
+        if self.active_guide_scope_id is None:
+            return None
+        return next((g for g in self.guide_scopes if g.id == self.active_guide_scope_id), None)
+
 
 class EquipmentConfiguration(BaseModel):
     """A resolved active telescope/camera pairing with derived geometry.
@@ -231,6 +276,26 @@ class EquipmentConfiguration(BaseModel):
         Derived via: 206.265 x pixel_size_um / focal_length_mm.
         """
         return PLATE_SCALE_CONSTANT * self.camera.pixel_size_um / self.telescope.focal_length_mm
+
+    def guider_plate_scale_arcsec_per_px(self, guide_scope: GuideScope | None = None) -> float:
+        """Plate scale to use for guider-calibration math.
+
+        Uses `guide_scope`'s focal length in place of the main
+        telescope's when guiding through a separate optical tube;
+        falls back to `plate_scale_arcsec_per_px` unchanged when
+        `guide_scope` is `None` (guiding through the main OTA, the
+        common case). Still assumes the main camera's pixel size,
+        since no guide-camera `EquipmentCatalog` entry exists yet
+        (a known, documented limitation this does not fix).
+
+        Returns
+        -------
+        plate_scale : `float`
+            Arcseconds per pixel for guider-calibration math.
+        """
+        if guide_scope is None:
+            return self.plate_scale_arcsec_per_px
+        return PLATE_SCALE_CONSTANT * self.camera.pixel_size_um / guide_scope.focal_length_mm
 
     @property
     def fov_width_deg(self) -> float:

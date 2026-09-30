@@ -11,9 +11,11 @@ import pytest
 
 from wayfindinglib.data_access.equipment_catalog_reader import (
     get_active_camera_id,
+    get_active_guide_scope_id,
     get_active_telescope_id,
     get_equipment_catalog,
     list_cameras,
+    list_guide_scopes,
     list_telescopes,
 )
 
@@ -209,3 +211,53 @@ def test_get_equipment_catalog_raises_on_unregistered_camera_protocol(app_config
     })
     with pytest.raises(ValueError, match="alpaca"):
         get_equipment_catalog(app_config)
+
+
+def test_list_guide_scopes_is_empty_when_unconfigured(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify an unconfigured catalog yields no guide scopes.
+
+    Unlike telescopes, there is no single-entry fallback: guiding
+    through the main OTA (no separate guide scope) is the common case,
+    not an unconfigured oversight.
+    """
+    assert list_guide_scopes(app_config) == []
+    assert get_active_guide_scope_id(app_config) is None
+
+
+def test_list_guide_scopes_resolves_a_configured_guide_scope(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify a named guide scope section resolves with its optics."""
+    app_config.update_config({
+        "Observatory.GuideScope": {"models": "Orion 50mm", "active_guide_scope": "Orion 50mm"},
+        "Observatory.GuideScope.Orion 50mm": {"focal_length_mm": "162.0", "aperture_mm": "50.0"},
+    })
+    guide_scopes = list_guide_scopes(app_config)
+    assert len(guide_scopes) == 1
+    assert guide_scopes[0].id == "Orion 50mm"
+    assert guide_scopes[0].focal_length_mm == pytest.approx(162.0)
+    assert guide_scopes[0].aperture_mm == pytest.approx(50.0)
+    assert get_active_guide_scope_id(app_config) == "Orion 50mm"
+
+
+def test_get_equipment_catalog_resolves_active_guide_scope(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify `get_equipment_catalog` wires the active guide scope through."""
+    app_config.update_config({
+        "Observatory.GuideScope": {"models": "Orion 50mm", "active_guide_scope": "Orion 50mm"},
+        "Observatory.GuideScope.Orion 50mm": {"focal_length_mm": "162.0"},
+    })
+    catalog = get_equipment_catalog(app_config)
+    assert catalog.active_guide_scope() is not None
+    assert catalog.active_guide_scope().id == "Orion 50mm"
+
+
+def test_get_equipment_catalog_ignores_unresolved_active_guide_scope_id(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify a stale/unresolved active guide scope id resolves to `None`.
+
+    Unlike telescopes/cameras, this does not fall back to "the first
+    configured entry" -- an unresolved selection means guiding through
+    the main OTA, not a typo to silently correct.
+    """
+    app_config.update_config({
+        "Observatory.GuideScope": {"active_guide_scope": "Nonexistent Scope"},
+    })
+    catalog = get_equipment_catalog(app_config)
+    assert catalog.active_guide_scope() is None

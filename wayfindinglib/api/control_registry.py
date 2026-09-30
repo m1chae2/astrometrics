@@ -34,7 +34,7 @@ from wayfindinglib.data_access.safety_policy_reader import (
 )
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.models.equipment_and_site.enclosure import Enclosure
-from wayfindinglib.models.equipment_and_site.equipment import Camera, CoolingPolicy, Telescope
+from wayfindinglib.models.equipment_and_site.equipment import Camera, CoolingPolicy, GuideScope, Telescope
 from wayfindinglib.models.equipment_and_site.focus_model import FocusModel
 from wayfindinglib.models.equipment_and_site.guider_calibration import GuiderCalibration
 from wayfindinglib.models.policy.commissioning import CommissioningRun
@@ -92,6 +92,8 @@ class ObservatoryControl:
         self.__camera_driver = None
         self.__guide_camera_driver = None
         self.__enclosure_driver = None
+        self.__switch_driver = None
+        self.__weather_driver = None
         self.__remote_transfer_driver = None
         self.__indi_diagnostics = None
         self._guiding_service = None
@@ -317,6 +319,54 @@ class ObservatoryControl:
     def enclosure_driver(self, enclosure_driver) -> None:  # ruff: ignore[missing-type-function-argument]
         """Set the active `EnclosureDriver` (test injection)."""
         self.__enclosure_driver = enclosure_driver
+
+    @property
+    def switch_driver(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        """Lazily build or return the active `SwitchDriver`.
+
+        No `EquipmentCatalog` entry names a protocol for this device --
+        the powerbox is discovered heuristically, the same limitation
+        `focuser_driver`/`filter_wheel_driver` have, so this always
+        resolves to ``"indi"`` rather than reading a configured field.
+
+        Returns
+        -------
+        switch_driver : `SwitchDriver`
+            The active switch/power-distribution hardware-control driver.
+        """
+        if self.__switch_driver is None:
+            from wayfindinglib.drivers.protocols.registry import build_switch_driver_registry
+
+            self.__switch_driver = self._build_protocol_driver(build_switch_driver_registry(), "indi")
+        return self.__switch_driver
+
+    @switch_driver.setter
+    def switch_driver(self, switch_driver) -> None:  # ruff: ignore[missing-type-function-argument]
+        """Set the active `SwitchDriver` (test injection)."""
+        self.__switch_driver = switch_driver
+
+    @property
+    def weather_driver(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        """Lazily build or return the active `WeatherDriver`.
+
+        Same heuristic-discovery limitation as `switch_driver` above:
+        always resolves to ``"indi"``.
+
+        Returns
+        -------
+        weather_driver : `WeatherDriver`
+            The active weather/environmental-sensing hardware-control driver.
+        """
+        if self.__weather_driver is None:
+            from wayfindinglib.drivers.protocols.registry import build_weather_driver_registry
+
+            self.__weather_driver = self._build_protocol_driver(build_weather_driver_registry(), "indi")
+        return self.__weather_driver
+
+    @weather_driver.setter
+    def weather_driver(self, weather_driver) -> None:  # ruff: ignore[missing-type-function-argument]
+        """Set the active `WeatherDriver` (test injection)."""
+        self.__weather_driver = weather_driver
 
     @property
     def remote_transfer_driver(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
@@ -775,6 +825,38 @@ class ObservatoryControl:
         """
         return get_equipment_catalog(self._config).active_camera()
 
+    def active_guide_scope(self) -> GuideScope | None:
+        """Return the active `GuideScope`, or `None` if unconfigured.
+
+        Returns
+        -------
+        guide_scope : `GuideScope` or `None`
+            The active guide scope, or `None` if none is configured.
+        """
+        return get_equipment_catalog(self._config).active_guide_scope()
+
+    def guider_plate_scale_arcsec_per_px(self) -> float | None:
+        """Plate scale for `run_guider_calibration`'s `arcsec_per_pixel`.
+
+        Uses the active `GuideScope`'s focal length in place of the
+        active telescope's when one is configured
+        (`EquipmentConfiguration.guider_plate_scale_arcsec_per_px`).
+
+        Returns
+        -------
+        plate_scale : `float` or `None`
+            Arcseconds per pixel, or `None` if no telescope and camera
+            are both active.
+        """
+        telescope = self.active_telescope()
+        camera = self.active_camera()
+        if telescope is None or camera is None:
+            return None
+        from wayfindinglib.models.equipment_and_site.equipment import EquipmentConfiguration
+
+        configuration = EquipmentConfiguration(telescope=telescope, camera=camera)
+        return configuration.guider_plate_scale_arcsec_per_px(self.active_guide_scope())
+
     def list_camera_profiles(self) -> list[dict[str, Any]]:
         """Return all camera profiles defined in the config as dicts.
 
@@ -1201,6 +1283,22 @@ class ObservatoryControl:
         """
         rule_set = get_safety_rule_set(self._butler)
         return self._safety_monitor.evaluate(rule_set, readings, now or datetime.now(UTC))
+
+    def refresh_safety_assessment(self) -> SafetyAssessment:
+        """Read the active `weather_driver` and assess safety against it.
+
+        The first live feed `assess_safety` has ever had (§1a) -- prior
+        callers had to construct `SensorReadings` themselves with no
+        driver to read them from.
+
+        Returns
+        -------
+        assessment : `SafetyAssessment`
+            The current environmental verdict against a fresh reading.
+        """
+        from wayfindinglib.tasks.control_tasks import hardware_operations
+
+        return hardware_operations.refresh_safety_assessment(self)
 
     def get_safety_rule_set(self) -> SafetyRuleSet | None:
         """Return the recorded `SafetyRuleSet`, or `None` if unconfigured.

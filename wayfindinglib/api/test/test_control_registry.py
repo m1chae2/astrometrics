@@ -77,6 +77,41 @@ def test_set_active_telescope_and_camera_round_trip(control, app_config):  # ruf
     assert control.active_camera().id == "CamA"
 
 
+def test_guider_plate_scale_falls_back_to_main_telescope_with_no_active_rig(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify guider_plate_scale_arcsec_per_px() is None with no active rig."""
+    assert control.guider_plate_scale_arcsec_per_px() is None
+
+
+def test_guider_plate_scale_uses_main_telescope_with_no_guide_scope_configured(control, app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify the guide-aware plate scale matches the main one, by default."""
+    _configure_active_rig(app_config)
+    control.set_active_telescope("Rig A")
+    control.set_active_camera("CamA")
+
+    assert control.active_guide_scope() is None
+    plate_scale = control.guider_plate_scale_arcsec_per_px()
+    expected = 206.265 * 3.76 / 450.0
+    assert plate_scale == pytest.approx(expected, abs=1e-4)
+
+
+def test_guider_plate_scale_uses_active_guide_scope_focal_length(control, app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify an active guide scope's focal length replaces the telescope's."""
+    _configure_active_rig(app_config)
+    app_config.update_config({
+        "Observatory.GuideScope": {"models": "Orion 50mm", "active_guide_scope": "Orion 50mm"},
+        "Observatory.GuideScope.Orion 50mm": {"focal_length_mm": "162.0"},
+    })
+    control.set_active_telescope("Rig A")
+    control.set_active_camera("CamA")
+
+    assert control.active_guide_scope().id == "Orion 50mm"
+    plate_scale = control.guider_plate_scale_arcsec_per_px()
+    main_plate_scale = 206.265 * 3.76 / 450.0
+    guide_plate_scale = 206.265 * 3.76 / 162.0
+    assert plate_scale == pytest.approx(guide_plate_scale, abs=1e-4)
+    assert plate_scale != pytest.approx(main_plate_scale, abs=1e-4)
+
+
 def test_compute_pointing_correction_delegates_with_astrometrics_config(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify compute_pointing_correction forwards to the task function."""
     correction = control.compute_pointing_correction("frame-1", 180.0, 0.0, 180.0, 0.0, iteration=1)
@@ -342,6 +377,54 @@ def test_assess_safety_hysteresis_persists_across_calls_on_same_astrometrics(con
     settled = _NOW + timedelta(seconds=900)
     cleared = control.assess_safety({"wind_speed_kph": (5.0, settled)}, now=settled)
     assert cleared.verdict == SafetyVerdict.SAFE
+
+
+def test_refresh_safety_assessment_reflects_a_live_weather_reading(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify refresh_safety_assessment's verdict tracks a fed weather reading.
+
+    Proof the M12 wiring is live, not just that `WeatherDriver` and
+    `assess_safety` each exist independently
+    (`Wayfinding_Library_Architecture.md` §2.5.4's verification note):
+    changing what the injected driver reports changes the verdict
+    `refresh_safety_assessment` returns.
+    """
+    rule_set = SafetyRuleSet(
+        id="default",
+        rules=[
+            SafetyRule(
+                id="wind", measurement="wind_speed_kph", comparison="greater_than", unsafe_threshold=40.0
+            )
+        ],
+        settling_period_sec=1,
+    )
+    control._butler.put(rule_set, "safety_rule_set", {"id": "default"})
+
+    class _FakeWeatherDriver:
+        """A stand-in `WeatherDriver` returning a settable fixed reading."""
+
+        def __init__(self) -> None:
+            """Start with a safe wind reading."""
+            self.reading = 5.0
+
+        async def get_readings(self):  # ruff: ignore[missing-return-type-private-function]
+            """Return the current fixed wind reading.
+
+            Returns
+            -------
+            readings : `SensorReadings`
+                A single `wind_speed_kph` reading, timestamped now.
+            """
+            return {"wind_speed_kph": (self.reading, datetime.now(UTC))}
+
+    weather_driver = _FakeWeatherDriver()
+    control.weather_driver = weather_driver
+
+    safe = control.refresh_safety_assessment()
+    assert safe.verdict == SafetyVerdict.SAFE
+
+    weather_driver.reading = 50.0
+    unsafe = control.refresh_safety_assessment()
+    assert unsafe.verdict == SafetyVerdict.UNSAFE
 
 
 def test_execute_safe_state_delegates_to_task_function(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]

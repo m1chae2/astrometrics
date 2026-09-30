@@ -7,6 +7,7 @@ wayfindinglib's Wayfinder high-level interface lives in
 this suite does not require wayfindinglib to be installed.
 """
 
+import asyncio
 import types
 
 import pytest
@@ -213,3 +214,48 @@ async def test_a_background_job_marked_method_returns_its_result_without_blockin
     assert len(result) == 1
     assert '"stackedImage": "Vega_Stacked.fits"' in result[0].text
     assert '"jobId"' in result[0].text
+
+
+async def test_a_sync_method_that_starts_its_own_event_loop_still_works():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """A sync method bridging into `asyncio.run()` must not crash here.
+
+    Regression test for a real incident: wayfindinglib's
+    `ObservatoryControl` reuses this same reflection engine, and its
+    hardware-facing methods stay synchronous by bridging into async
+    INDI drivers via `hardware_operations._run_sync`'s own
+    `asyncio.run(...)`. Calling such a method directly (as a plain
+    Python call, not via a thread) from inside `execute_reflected`
+    crashed with "asyncio.run() cannot be called from a running event
+    loop", because this test itself (like the real MCP server) already
+    runs inside one -- exactly the same conflict
+    `backend/main_backend.py`'s periodic telemetry loop already hit and
+    fixed calling the same hardware layer, by running it via
+    `asyncio.to_thread` instead of a direct call.
+    """
+
+    class FakeObservatoryControl:
+        """A stand-in with one method that starts its own event loop."""
+
+        def get_telescope_status(self) -> dict:
+            """Stand in for a hardware call bridged via `_run_sync`.
+
+            Returns
+            -------
+            result : `dict`
+                A trivial, fixed result, reached only if a nested
+                `asyncio.run()` succeeds from a plain worker thread.
+            """
+
+            async def _coroutine() -> dict:
+                await asyncio.sleep(0)  # stand in for a real async INDI call
+                return {"trackingStatus": "Parked"}
+
+            return asyncio.run(_coroutine())
+
+    isolated_registry = ToolRegistry()
+    register_astrometrics_tools(isolated_registry, FakeObservatoryControl(), {"": "fake"})
+
+    result = await isolated_registry.execute("fake_get_telescope_status", {})
+
+    assert len(result) == 1
+    assert '"trackingStatus": "Parked"' in result[0].text

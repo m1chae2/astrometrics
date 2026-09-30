@@ -43,6 +43,11 @@ CMD="foreground"
 PORT=5173
 OPEN_FILE=""
 APP_MODE=""
+# Electron's own remote-debugging port (fixed, unrelated to Vite's $PORT).
+# stop_frontend force-frees this too, since a previous Electron instance
+# that hasn't fully exited yet holding it is what causes a fresh launch to
+# fail with "bind() failed: Address already in use".
+ELECTRON_DEBUG_PORT=9222
 
 # Parse arguments
 while [ $# -gt 0 ]; do
@@ -119,23 +124,51 @@ if [ -n "$APP_MODE" ]; then
   VITE_URL="${VITE_URL}/?mode=${encoded_mode}"
 fi
 
+# Force-frees whatever is bound to a port, regardless of whether we have a
+# PID file for it. Defaults to $PORT (Vite) when called with no argument,
+# matching every call site that existed before this took a parameter.
 kill_port_pids() {
+  local port="${1:-$PORT}"
   local pids
   pids=""
   if command -v ss >/dev/null 2>&1; then
-    pids=$(ss -ltnp "sport = :${PORT}" 2>/dev/null | grep -o 'pid=[0-9]*' | sed 's/pid=//' | tr '\n' ' ') || true
+    pids=$(ss -ltnp "sport = :${port}" 2>/dev/null | grep -o 'pid=[0-9]*' | sed 's/pid=//' | tr '\n' ' ') || true
   elif command -v lsof >/dev/null 2>&1; then
-    pids=$(lsof -ti :"${PORT}" 2>/dev/null | tr '\n' ' ') || true
+    pids=$(lsof -ti :"${port}" 2>/dev/null | tr '\n' ' ') || true
   elif command -v netstat >/dev/null 2>&1; then
-    pids=$(netstat -ltnp 2>/dev/null | grep ":${PORT} " | grep -o 'pid=[0-9]*' | sed 's/pid=//' | tr '\n' ' ') || true
+    pids=$(netstat -ltnp 2>/dev/null | grep ":${port} " | grep -o 'pid=[0-9]*' | sed 's/pid=//' | tr '\n' ' ') || true
   fi
 
   if [ -n "$pids" ]; then
-    echo "Killing PIDs using ${PORT}: $pids"
+    echo "Killing PIDs using ${port}: $pids"
     for p in $pids; do
       [ -n "$p" ] && kill -9 "$p" 2>/dev/null || true
     done
   fi
+}
+
+# ---------------------------------------------------------------------------
+# wait_for_pid_exit: polls until a PID is no longer running, or
+# max_wait_seconds elapses. Used so stop_frontend only reports a process
+# stopped once it actually has, instead of guessing with a fixed sleep --
+# restarting immediately after only sending a kill signal can otherwise
+# race a fresh launch against a previous instance that hasn't fully torn
+# down yet (e.g. Electron's fixed remote-debugging port failing to bind
+# because the old instance still held it).
+# ---------------------------------------------------------------------------
+wait_for_pid_exit() {
+  local pid="$1"
+  local max_wait_seconds="${2:-5}"
+  local max_ticks=$((max_wait_seconds * 2))
+  local ticks=0
+  while kill -0 "$pid" 2>/dev/null; do
+    if [ "$ticks" -ge "$max_ticks" ]; then
+      return 1
+    fi
+    sleep 0.5
+    ticks=$((ticks + 1))
+  done
+  return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -243,10 +276,10 @@ start_electron_bg() {
         set +e
         if [ "${WATCH:-0}" = "1" ]; then
             echo "Starting Electron (nodemon watch) (logs: $LOG_DIR/electron.log)..."
-            npx nodemon --watch main.js --watch preload.js --delay 1 --exec "ELECTRON_RENDERER_URL=${VITE_URL} SKIP_BACKEND=1 NODE_ENV=development npx electron . --remote-debugging-port=9222 ${extra_args} ${file_arg}" >"$LOG_DIR/electron.log" 2>&1 &
+            npx nodemon --watch main.js --watch preload.js --delay 1 --exec "ELECTRON_RENDERER_URL=${VITE_URL} SKIP_BACKEND=1 NODE_ENV=development npx electron . --remote-debugging-port=${ELECTRON_DEBUG_PORT} ${extra_args} ${file_arg}" >"$LOG_DIR/electron.log" 2>&1 &
         else
             echo "Starting Electron (logs: $LOG_DIR/electron.log)..."
-            ELECTRON_RENDERER_URL="${VITE_URL}" SKIP_BACKEND=1 NODE_ENV=development npx electron . --remote-debugging-port=9222 ${extra_args} ${file_arg} >"$LOG_DIR/electron.log" 2>&1 &
+            ELECTRON_RENDERER_URL="${VITE_URL}" SKIP_BACKEND=1 NODE_ENV=development npx electron . --remote-debugging-port=${ELECTRON_DEBUG_PORT} ${extra_args} ${file_arg} >"$LOG_DIR/electron.log" 2>&1 &
         fi
         local pid=$!
         set -e
@@ -295,9 +328,14 @@ stop_frontend() {
     if [ -n "$epid" ]; then
       echo "Stopping Electron (pid $epid)..."
       kill "$epid" 2>/dev/null || true
-      # Wait a bit then kill -9 if needed
-      sleep 1
-      kill -0 "$epid" 2>/dev/null && kill -9 "$epid" 2>/dev/null || true
+      # A heavy Electron app (GPU process, tray, possibly several windows
+      # each running their own shutdown cleanup) can take longer than a
+      # token sleep to actually exit -- wait for real, then escalate.
+      if ! wait_for_pid_exit "$epid" 5; then
+        echo "Electron did not exit in time; sending SIGKILL..."
+        kill -9 "$epid" 2>/dev/null || true
+        wait_for_pid_exit "$epid" 3 || true
+      fi
       rm -f "$ELECTRON_PID_FILE"
     fi
   fi
@@ -306,11 +344,18 @@ stop_frontend() {
     if [ -n "$vpid" ]; then
       echo "Stopping Vite (pid $vpid)..."
       kill "$vpid" 2>/dev/null || true
+      wait_for_pid_exit "$vpid" 3 || true
       rm -f "$VITE_PID_FILE"
     fi
   fi
-  # Also kill any stale processes on the port just in case
-  kill_port_pids
+  # Force-free both ports regardless of whether the PID waits above
+  # succeeded -- catches orphaned processes never tracked by a PID file,
+  # and anything that still didn't release its port in time. Electron's
+  # debug port matters here too: a fresh launch failing to bind it (because
+  # the previous instance still held it) is what caused the original
+  # "partially started" bug this function is now guarding against.
+  kill_port_pids "$PORT"
+  kill_port_pids "$ELECTRON_DEBUG_PORT"
 }
 
 stop_all() {
@@ -401,8 +446,11 @@ case "$CMD" in
     stop_all
     ;;
   restart)
+    # No extra sleep needed here: stop_all (via stop_frontend's
+    # wait_for_pid_exit calls and force-freed ports, and run_backend.sh's
+    # own wait+SIGKILL+port-cleanup sequence) only returns once everything
+    # is confirmed stopped, not just signaled.
     stop_all
-    sleep 1
     "$0" start "$PORT"
     ;;
   status)

@@ -349,7 +349,21 @@ def register_astrometrics_tools(
 
                     if inspect.iscoroutinefunction(target_callable):
                         return await target_callable(**kwargs)
-                    return target_callable(**kwargs)
+
+                    # A plain synchronous method still needs its own
+                    # thread, not a direct call on this coroutine: some
+                    # (e.g. wayfindinglib's `ObservatoryControl`, which
+                    # bridges into async INDI drivers via
+                    # `hardware_operations._run_sync`'s own
+                    # `asyncio.run(...)`) start a *second* event loop
+                    # internally, which Python refuses whenever the
+                    # calling thread already has one running -- exactly
+                    # this server's own loop. `backend/main_backend.py`'s
+                    # periodic telemetry loop hit this same conflict
+                    # calling the same hardware layer and fixed it the
+                    # same way: run it via `asyncio.to_thread` so it gets
+                    # a plain worker thread with no event loop of its own.
+                    return await asyncio.to_thread(target_callable, **kwargs)
 
                 return execute_reflected
 

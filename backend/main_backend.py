@@ -837,7 +837,15 @@ async def periodic_telemetry_loop():  # ruff: ignore[missing-return-type-undocum
     while True:
         try:
             if container.initialized and container.telescope_service:
-                container.telescope_service.get_status()
+                # get_status() ultimately bridges into async driver calls via
+                # asyncio.run() (hardware_operations._run_sync), which raises
+                # immediately if called from a thread that already has a
+                # running event loop -- exactly this loop's own thread.
+                # Running it via to_thread gives it a plain worker thread
+                # with no event loop of its own, and as a side benefit keeps
+                # a slow hardware query from blocking this event loop (and
+                # therefore every other request) for its duration.
+                await asyncio.to_thread(container.telescope_service.get_status)
         except Exception as e:
             logger.error(f"Error in periodic telemetry loop: {e}")
         await asyncio.sleep(2.0)
@@ -937,8 +945,10 @@ async def websocket_events(websocket: WebSocket):  # ruff: ignore[missing-return
     try:
         if container.initialized and container.telescope_service:
             # Query telescope status once to get fresh data, which
-            # updates astrometrics_service
-            container.telescope_service.get_status()
+            # updates astrometrics_service. Run via to_thread -- see the
+            # comment in periodic_telemetry_loop -- since this also runs
+            # directly on this coroutine's event-loop thread.
+            await asyncio.to_thread(container.telescope_service.get_status)
 
         state = container.astrometrics_service.get_state()
         event = {"type": "UI_EVENT", "action": "system_state_update", "payload": state}

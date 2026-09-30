@@ -348,6 +348,8 @@ Recording an observing night's operational context remains structured as three c
 
 Once a session reaches a terminal state, Execution performs two reconciliations that deliberately do not happen mid-run: calibration frames the session captured are folded into the calibration inventory, and the session's science-side quality-data linkage is attached once those records exist, which is necessarily after the night.
 
+A related but distinct reconciliation runs inside Control rather than Execution, on the same "one consumer, uniform regardless of delegation state" pattern as guiding telemetry above: retrieving a night's guide log and refitting the standing mount-mechanical model, and refitting the session's pointing model from that night's alignment attempts (§2.5.5). Both compute and expose a result; attaching either to this session's own record, the way calibration reconciliation attaches here, is deferred until Execution exists to do it.
+
 #### 2.4.8 Design Invariants
 
 * **Execution Depends Downward Only:** Execution may use Control and Planning; neither may depend on Execution.
@@ -366,6 +368,14 @@ Once a session reaches a terminal state, Execution performs two reconciliations 
 
 * **Inputs:** direct commands — slew, park, unpark, filter, focus, enclosure motion, equipment activation — status queries, environmental readings, and the measurements from which corrections are computed.
 * **Outputs:** hardware state changes, per-device summary state, enclosure state, the current safety assessment, and computed pointing, guiding, and focus corrections.
+
+#### 2.5.1a Hardware Protocol Abstraction
+
+Every command this function issues ultimately reaches one physical device over one wire protocol, but which protocol that is must be a per-device configuration choice, not a fixed assumption baked into Control's own code. INDI is the protocol available today; a second telescope on the same equipment set might reasonably run ASCOM Alpaca instead, and nothing about Control's own logic should have to change for that to be possible.
+
+The architecture resolves this the way ASCOM Alpaca itself does: **one interface per device type, not one interface per protocol.** A `MountDriver`, `CameraDriver`, `FocuserDriver`, `FilterWheelDriver`, and `EnclosureDriver` each define the operations that device type supports — slew and park for a mount, expose and read temperature for a camera — independent of how those operations reach the device underneath. Observatory Control composes one instance of each per active equipment selection, resolved from the equipment catalog's per-device protocol field, so a mount on one protocol and a camera on another coexist within one equipment set without Control itself branching on protocol anywhere. INDI is the first implementation of every interface; a second protocol implements the same five interfaces and requires no change to Control, Planning, or Execution to be usable.
+
+File retrieval (downloading captured frames and guide logs from a telescope host) is a deliberately separate, independently pluggable abstraction, `RemoteTransferDriver` — it has no connection lifecycle or device-state notion the way a hardware-control protocol does, since it is not part of INDI or ASCOM, and conflating the two would force every hardware-control protocol implementation to also solve file transfer whether or not it needs to.
 
 #### 2.5.2 Theoretical Rationale — Device State and Direct Operation
 
@@ -425,6 +435,7 @@ This is also the point at which every remaining backend service that bypassed th
 #### 2.5.6 Design Invariants
 
 * **No Upward Dependency:** Observatory Control never depends on Observation Planning or Observation Execution.
+* **One Interface Per Device Type, Not Per Protocol:** a device's hardware-control interface is defined by what kind of device it is (mount, camera, focuser, filter wheel, enclosure), never by which wire protocol commands it; a device's protocol is a per-device configuration choice, and a second protocol implementing the same interfaces requires no change above the driver layer.
 * **Configured Envelope Respected:** commanded pointing is validated against the active telescope's configured altitude and hour-angle envelope, resolved from the equipment catalog and evaluated at the site profile's position, before being issued.
 * **Uniform Device Vocabulary:** every device exposes summary state in the same five-state vocabulary, whatever its type or underlying driver.
 * **Authority Is Checked, Not Assumed:** a correction computed by this function is issued to hardware only where the delegation policy records that capability as authoritative.
@@ -492,7 +503,7 @@ Table 7 tracks capability status against the roadmap, sequenced to the delegatio
 | Meridian flip sequencing | 4 | Specified by this revision. | Bounded interrupt-flip-reacquire-resume across a meridian crossing (§2.4.5). |
 | Camera thermal management | 4 | Absent. | Controlled cooldown before a session and warm-up after. |
 | Environmental safety assessment | 5 | Specified by this revision. | Continuous four-verdict assessment with staleness treated as unsafe (§2.5.4). |
-| Enclosure control and interlock | 5 | Absent. | Roof or dome as a first-class device, mutually interlocked with mount position. |
+| Enclosure control and interlock | 5 | Specified by this revision. | Roof or dome as a first-class device, mutually interlocked with mount position. |
 | Safe-state sequencing | 5 | Specified by this revision. | The ordered, bounded sequence of Table 6. |
 | Bounded fault recovery | 5 | Specified by this revision. | Recovery attempts governed by policy, escalating to safe state on exhaustion (§2.4.6). |
 | External liveness watchdog | 5 | Specified by this revision. | Out-of-process observation of the controlling system's liveness (§2.5.5). |
@@ -554,6 +565,7 @@ Table 7 tracks capability status against the roadmap, sequenced to the delegatio
 | One Intent Path, Every Phase | The rule that intent computation is identical across delegation states, so shadow evidence describes exactly the code that will later run. |
 | Evidence Is Symmetric | The rule that divergence records capture agreement as well as disagreement, since a promotion gate is a rate. |
 | Uniform Device Vocabulary | The rule that every device publishes lifecycle state in one five-state vocabulary, adopted from Rubin. |
+| One Interface Per Device Type, Not Per Protocol | The rule that a device's hardware-control interface follows what kind of device it is, never which wire protocol commands it, so a second protocol needs no change above the driver layer. |
 | Unknown Is Unsafe | The rule that a missing or stale safety verdict produces closure, reversing the architecture's general tolerance for absent readings. |
 | Asymmetric Enclosure Hysteresis | The rule that closing is immediate and reopening requires a settling period, so a threshold-straddling night cannot cycle the roof. |
 | Interlock Before Motion | The rule that enclosure and mount motion are each validated against the other's position before being commanded. |

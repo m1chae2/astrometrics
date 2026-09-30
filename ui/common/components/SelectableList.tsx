@@ -104,20 +104,23 @@ export const SelectableList: React.FC<SelectableListProps> = ({
     const endIndex = Math.min(items.length, firstVisibleIndex + rowsInViewport + OVERSCAN_ROWS);
     const visibleItems = items.slice(startIndex, endIndex);
 
-    if (items.length === 0) {
-        return (
-            <div className={`manager__list ${className}`}>
-                <EmptyState variant={isLoading ? 'loading' : 'empty'} message={isLoading ? loadingMessage : emptyMessage} />
-            </div>
-        );
-    }
-
     return (
         <div
             className={`manager__list ${className}`}
             ref={scrollContainerRef}
             onScroll={handleScroll}
         >
+            {items.length === 0 ? (
+                // Rendered inside the same ref'd container as the populated-list
+                // branch below (rather than as a separate early return) so the
+                // ResizeObserver effect's ref never goes from attached to
+                // detached and back -- that effect only runs once on mount, so
+                // a list that starts empty and later gets items would otherwise
+                // leave `viewportHeight` stuck at its initial 0 forever, which
+                // caps rendering at OVERSCAN_ROWS items no matter how tall the
+                // container actually is.
+                <EmptyState variant={isLoading ? 'loading' : 'empty'} message={isLoading ? loadingMessage : emptyMessage} />
+            ) : (
             <div className="selectable-list" style={{ position: 'relative', height: totalHeight, display: 'block' }}>
                 {visibleItems.map((item, relativeIndex) => {
                     const idx = startIndex + relativeIndex;
@@ -181,6 +184,7 @@ export const SelectableList: React.FC<SelectableListProps> = ({
                     );
                 })}
             </div>
+            )}
         </div>
     );
 };

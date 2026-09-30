@@ -1,10 +1,16 @@
+@import '../common/styles/theme.css';
+
 .title-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   height: 32px;
   min-height: 32px;
-  background: #0f0f0f;
+  /* Matches .header's background (statusHeader.css) so the title bar reads
+     as part of the same window chrome instead of a separately-colored
+     strip above it -- it previously used a hardcoded near-black that was
+     darker than every other surface in the app. */
+  background: var(--grey-dark);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   /* Makes the whole bar draggable; interactive children opt back out below. */
   -webkit-app-region: drag;

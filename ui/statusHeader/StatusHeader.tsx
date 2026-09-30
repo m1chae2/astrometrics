@@ -121,8 +121,16 @@ export const StatusHeader: React.FC = () => {
     setModeOpen(false);
   };
 
-  const connModifier = connected === null ? 'unknown' : (connected ? 'connected' : 'disconnected');
-  const connTxt = connected === null ? 'Checking…' : (connected ? 'Connected' : 'Disconnected');
+  // The dot reflects the telescope mount's own connection (INDI-reported
+  // connectionStatus), not just whether our websocket to the backend is
+  // alive -- the backend (running on the Pi) can be up with the mount
+  // itself still disconnected/powered off. `connected === null` (websocket
+  // still connecting) stays "unknown" since telescope status can't be
+  // trusted yet; once the websocket is up, a disconnected backend also
+  // means the telescope's real status can't be known, so that case reports
+  // "disconnected" rather than falsely implying the mount specifically.
+  const connModifier = connected === null ? 'unknown' : (connected && telescopeConnection ? 'connected' : 'disconnected');
+  const connTxt = connected === null ? 'Checking…' : (connected && telescopeConnection ? 'Connected' : 'Disconnected');
   const trackVal = trackingStatus || 'Not Tracking';
   const isParked = /park/i.test(String(trackVal));
   const notTrackingRegex = /not track|not-tracking|not tracking/i;

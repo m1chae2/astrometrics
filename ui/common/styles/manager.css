@@ -30,6 +30,21 @@
   flex-direction: column;
 }
 
+/* Overrides the generic .flex-fill (flex: 1 1 auto) that RadioListManager
+   applies to its own SectionPanel: that class's flex-grow would always
+   stretch the list panel to consume every bit of space left over after the
+   actions panel below it, even when the list itself only has a handful of
+   rows -- leaving a large blank area under the last row instead of letting
+   the actions panel sit right below a short list. flex-grow: 0 here means
+   the panel takes its natural (content) height when the list is short, but
+   flex-shrink stays enabled (inherited from .flex-fill, along with
+   min-height: 0) so a long list still gets compressed down to fit -- and
+   still scrolls internally via .manager__list's own overflow -- rather than
+   pushing the actions panel off screen. */
+.manager__list-panel.flex-fill {
+  flex-grow: 0;
+}
+
 .manager__list {
   /* main list panel */
   flex: 1 1 auto;

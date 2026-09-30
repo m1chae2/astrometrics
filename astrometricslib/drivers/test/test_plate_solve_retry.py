@@ -4,6 +4,13 @@ Regression coverage for a real loss: one M 13 session's reference frame
 died on a dropped connection to nova.astrometry.net, so the session got
 no WCS and all 100 of its stars were discarded for having no sky
 position. The very next solve in the same run succeeded.
+
+Also covers two local-solve time-saving guards added after a separate
+M 13 incident: a single underexposed reference frame burned two full
+five-minute local solve attempts (hinted, then blind) before falling
+through to the online path, because nothing checked the detected star
+count first or noticed the hinted attempt had already searched
+exhaustively.
 """
 
 import http.client
@@ -13,7 +20,9 @@ from astropy.io import fits
 
 from astrometricslib.drivers import plate_solve_interface
 from astrometricslib.drivers.plate_solve_interface import (
+    MINIMUM_SOURCES_FOR_LOCAL_SOLVE,
     ONLINE_SOLVE_ATTEMPT_LIMIT,
+    PlateSolver,
     _call_with_transient_retry,
     _is_transient_network_error,
 )
@@ -113,3 +122,94 @@ def test_successful_first_attempt_does_not_retry():  # ruff: ignore[missing-retu
 
     assert _call_with_transient_retry(solve_call, description="Online image solve") is header
     assert len(attempts) == 1
+
+
+def test_solve_skips_the_local_solver_when_too_few_sources_are_detected(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """A frame with too few detected stars never reaches the local solver.
+
+    Regression test for the M 13 incident: a single underexposed
+    reference frame had too few sources to ever solve, but the code
+    tried the local solver anyway, burning two full five-minute
+    timeouts before falling through to the (much faster) online path.
+    """
+    solver = PlateSolver(api_key="fake-key")
+    local_solve_calls = []
+    monkeypatch.setattr(solver, "_solve_locally", lambda *a, **k: local_solve_calls.append(1))
+    header = fits.Header()
+    header["CRVAL1"] = 250.4  # a non-empty header is truthy; an empty one is not
+    monkeypatch.setattr(solver, "_solve_online_sources", lambda *a, **k: header)
+
+    too_few_sources = [{"x_centroid": i, "y_centroid": i} for i in range(MINIMUM_SOURCES_FOR_LOCAL_SOLVE - 1)]
+    result = solver.solve(
+        image_path="/fake/image.fits", sources=too_few_sources, image_width=100, image_height=100
+    )
+
+    assert local_solve_calls == []
+    assert result is header
+
+
+def test_solve_still_tries_the_local_solver_with_enough_sources(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """A normal, well-populated frame is unaffected by the new guard."""
+    solver = PlateSolver(api_key="fake-key")
+    header = fits.Header()
+    header["CRVAL1"] = 250.4  # a non-empty header is truthy; an empty one is not
+    local_solve_calls = []
+    monkeypatch.setattr(solver, "_solve_locally", lambda *a, **k: local_solve_calls.append(1) or header)
+
+    enough_sources = [{"x_centroid": i, "y_centroid": i} for i in range(MINIMUM_SOURCES_FOR_LOCAL_SOLVE)]
+    result = solver.solve(
+        image_path="/fake/image.fits", sources=enough_sources, image_width=100, image_height=100
+    )
+
+    assert local_solve_calls == [1]
+    assert result is header
+
+
+def test_hinted_solve_exhausting_its_timeout_skips_the_blind_retry(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """A hinted solve that searched its full budget does not retry blind.
+
+    Regression test for the M 13 incident: the hinted attempt used
+    nearly all 300s without succeeding, so the blind retry (an even
+    harder, unconstrained search) was always going to fail too --
+    trying it anyway doubled the wasted time.
+    """
+    solver = PlateSolver()
+    monotonic_values = iter([0.0, 295.0])
+    monkeypatch.setattr(plate_solve_interface.time, "monotonic", lambda: next(monotonic_values))
+    run_solve_field_calls = []
+    monkeypatch.setattr(
+        solver,
+        "_run_solve_field",
+        lambda command, working_directory, timeout: run_solve_field_calls.append(command) or None,
+    )
+
+    result = solver._solve_locally(
+        "/fake/image.fits", scale_units="arcsecperpix", scale_lower=1.0, scale_upper=2.0, solve_timeout=300
+    )
+
+    assert result is None
+    assert len(run_solve_field_calls) == 1
+
+
+def test_hinted_solve_failing_quickly_still_retries_blind(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """A hinted solve that fails fast still gets the blind retry.
+
+    Likely a hint mismatch, not an exhaustive search -- this is the
+    real rescue case the blind retry exists for.
+    """
+    solver = PlateSolver()
+    monotonic_values = iter([0.0, 5.0])
+    monkeypatch.setattr(plate_solve_interface.time, "monotonic", lambda: next(monotonic_values))
+    run_solve_field_calls = []
+    monkeypatch.setattr(
+        solver,
+        "_run_solve_field",
+        lambda command, working_directory, timeout: run_solve_field_calls.append(command) or None,
+    )
+
+    result = solver._solve_locally(
+        "/fake/image.fits", scale_units="arcsecperpix", scale_lower=1.0, scale_upper=2.0, solve_timeout=300
+    )
+
+    assert result is None
+    assert len(run_solve_field_calls) == 2

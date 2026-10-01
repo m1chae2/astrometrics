@@ -9,6 +9,9 @@ that constructing the high-level interface and calling its non-hardware methods
 never imports the INDI driver layer.
 """
 
+import os
+import time
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -22,6 +25,32 @@ from wayfindinglib.models.policy.safety import SafetyRule, SafetyRuleSet, Safety
 from wayfindinglib.tasks.control_tasks.safe_state import SafeStateSteps
 
 _NOW = datetime(2026, 8, 5, 4, 0, 0, tzinfo=UTC)
+
+
+@pytest.fixture
+def utc_host_timezone() -> Iterator[None]:
+    """Pin the process's local time zone to UTC for the test, then restore it.
+
+    PHD2/Ekos guide logs carry no time zone, so
+    `wayfindinglib.drivers.phd2.guide_log_parser._parse_timestamp` reads
+    them as local time on whatever machine is doing the parsing -- correct
+    for a real observatory, but it means a test built around the guide
+    log's and the analyze log's (which *does* carry an explicit zone)
+    timestamps agreeing with each other would otherwise only pass on a
+    machine whose local zone happens to match the fixture data's author,
+    not in CI or for a contributor elsewhere.
+    """
+    original_tz = os.environ.get("TZ")
+    os.environ["TZ"] = "UTC"
+    time.tzset()
+    try:
+        yield
+    finally:
+        if original_tz is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = original_tz
+        time.tzset()
 
 
 @pytest.fixture
@@ -133,13 +162,18 @@ def test_guider_plate_scale_uses_the_active_guide_camera_pixel_size(control, app
 
 
 _EKOS_GUIDE_LOG = (
-    "KStars version 3.8.3. PHD2 log version 2.5. Log enabled at 2026-09-23 20:43:05\n\n"
-    "Guiding Begins at 2026-09-23 20:50:00\n"
+    # Guide logs carry no time zone (see utc_host_timezone's docstring), so
+    # these clock times are written as the true-UTC equivalent of the
+    # analyze log's "2026-09-23 20:31:48.442 MDT" -- i.e. already shifted
+    # +6h and a day later -- so they land inside its overlap window once
+    # the test pins the host's local zone to UTC.
+    "KStars version 3.8.3. PHD2 log version 2.5. Log enabled at 2026-09-24 02:43:05\n\n"
+    "Guiding Begins at 2026-09-24 02:50:00\n"
     "Pixel scale = 6.39 arc-sec/px, Binning = 1, Focal length = 121.05 mm\n"
     "Frame,Time,mount,dx,dy,RARawDistance,DECRawDistance,RAGuideDistance,DECGuideDistance,"
     "RADuration,RADirection,DECDuration,DECDirection,XStep,YStep,StarMass,SNR,ErrorCode\n"
     '1,2.0,"Mount",0.1,0.1,0.100,0.200,0.1,0.1,10,E,10,N,,,250000,40.0,0\n'
-    "Guiding Ends at 2026-09-23 20:55:00\n"
+    "Guiding Ends at 2026-09-24 02:55:00\n"
 )
 _EKOS_ANALYZE_LOG = (
     "#KStars version 3.8.3. Analyze log version 1.0.\n\n"
@@ -148,7 +182,12 @@ _EKOS_ANALYZE_LOG = (
 )
 
 
-def test_ingest_ekos_session_logs_stores_samples_and_a_retrievable_session(control, app_config, tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_ingest_ekos_session_logs_stores_samples_and_a_retrievable_session(  # ruff: ignore[missing-return-type-undocumented-public-function]
+    control,  # ruff: ignore[missing-type-function-argument]
+    app_config,  # ruff: ignore[missing-type-function-argument]
+    tmp_path,  # ruff: ignore[missing-type-function-argument]
+    utc_host_timezone,  # ruff: ignore[missing-type-function-argument]
+):
     """Verify the whole chain with a real Butler and a real log database."""
     (tmp_path / "science_library").mkdir()
     app_config.update_config({"Image Library": {"path": str(tmp_path / "science_library")}})
@@ -173,7 +212,12 @@ def test_ingest_ekos_session_logs_stores_samples_and_a_retrievable_session(contr
     assert control.list_guiding_runs("1999-01-01") == []
 
 
-def test_ingest_ekos_session_logs_twice_does_not_duplicate_anything(control, app_config, tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_ingest_ekos_session_logs_twice_does_not_duplicate_anything(  # ruff: ignore[missing-return-type-undocumented-public-function]
+    control,  # ruff: ignore[missing-type-function-argument]
+    app_config,  # ruff: ignore[missing-type-function-argument]
+    tmp_path,  # ruff: ignore[missing-type-function-argument]
+    utc_host_timezone,  # ruff: ignore[missing-type-function-argument]
+):
     """Verify a repeat run leaves one sample and one session record."""
     (tmp_path / "science_library").mkdir()
     app_config.update_config({"Image Library": {"path": str(tmp_path / "science_library")}})

@@ -408,9 +408,6 @@ status_check() {
   else
     echo "Backend is NOT running."
   fi
-  if [ -x "$ASSISTANT_LAUNCHER" ]; then
-    "$ASSISTANT_LAUNCHER" status
-  fi
   return 0
 }
 
@@ -461,7 +458,12 @@ case "$CMD" in
     echo "Starting in foreground..."
     kill_port_pids
 
-    trap 'stop_all' EXIT INT TERM
+    # stop_what_this_run_started, not stop_all: launch_backend_bg leaves an
+    # already-running backend alone (see "Leaves an already-running backend
+    # alone" above), so exiting this foreground session must not tear down a
+    # backend some other concurrent session on this repo is relying on --
+    # only the backend (and frontend) this invocation actually started.
+    trap 'stop_what_this_run_started' EXIT INT TERM
 
     if ! launch_backend_bg; then
         echo "Backend failed to launch."

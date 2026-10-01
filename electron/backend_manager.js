@@ -165,9 +165,11 @@ export class BackendManager {
    * Terminates the backend process.
    *
    * If the backend was spawned by this manager, terminates its process tree.
-   * In addition, cleans up any external backend or Vite processes recorded in
-   * `.run_pids/` so closing the desktop application leaves no orphaned child
-   * or background services lingering.
+   * Also sweeps up any `.run_pids/` entries orphaned by a previous run of
+   * this same workflow -- but only when `SKIP_BACKEND` is unset. With
+   * `SKIP_BACKEND` set (dev mode, pointed at a backend `run_astrometrics.sh`
+   * started separately), this manager spawned nothing, so it leaves
+   * `.run_pids/` alone (see `_cleanupOrphanedRunPids`'s own doc for why).
    */
   stop() {
     if (this.backendProcess && !this.backendProcess.killed) {
@@ -175,12 +177,27 @@ export class BackendManager {
       this.platform.terminateProcessTree(this.backendProcess);
     }
 
-    this._cleanupOrphanedRunPids();
+    if (!process.env.SKIP_BACKEND) {
+      this._cleanupOrphanedRunPids();
+    }
   }
 
   /**
    * Reads PID files created by developer run scripts and terminates any running
    * backend or Vite dev processes before removing the PID files.
+   *
+   * Only meaningful for a packaged/non-dev launch that spawned its own
+   * backend directly (this manager's `start()` did the spawning, not
+   * `SKIP_BACKEND`): it's a safety net for a stray process left behind by a
+   * *previous* run of this same single-instance workflow. It must never run
+   * under `SKIP_BACKEND` (dev mode via `run_astrometrics.sh`), because then
+   * `.run_pids/backend.pid` and `.run_pids/vite.pid` name a backend and Vite
+   * server that `run_astrometrics.sh` -- not this Electron instance --
+   * launched and owns, and that script's own `stop_backend_if_launched_here`
+   * already handles tearing them down safely. Multiple concurrent dev
+   * sessions on the same checkout share that one pidfile; killing on sight
+   * here would mean closing any one session's window silently kills every
+   * other session's backend and Vite server too.
    *
    * @private
    */

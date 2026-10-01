@@ -94,10 +94,35 @@ done
 set -- "${NEW_ARGS[@]:-}"
 
 launch_backend() {
+  # Set to 1 when an already-healthy backend is left running untouched, so
+  # start_backend() can skip the redundant (and confusingly-worded, since it
+  # unconditionally says "started successfully") health-wait below.
+  BACKEND_ALREADY_RUNNING=0
 
   if [ -f "$PID_FILE" ]; then
-    if kill -0 "$(cat "$PID_FILE")" >/dev/null 2>&1; then
-      echo "Backend already running (pid $(cat "$PID_FILE")). Stopping it first..."
+    existing_pid="$(cat "$PID_FILE")"
+    if kill -0 "$existing_pid" >/dev/null 2>&1; then
+      # Idempotent by design: this backend is shared state (it owns the one
+      # real telescope/camera/PHD2 connection), so a second caller's `start`
+      # must not silently kill and replace an instance another caller is
+      # relying on -- that was happening whenever multiple concurrent
+      # sessions on this repo each ran `start` to make sure the backend was
+      # up, and it looked like random unexplained backend crashes. A caller
+      # that genuinely wants a fresh process (e.g. after editing backend
+      # code) should ask for that explicitly via `restart`, which still
+      # tears the old one down unconditionally.
+      #
+      # --max-time caps how long curl waits for a response: a process that's
+      # alive but wedged (hung, deadlocked) can still hold its listening
+      # socket open without ever answering, and an un-timed-out curl would
+      # hang here indefinitely instead of detecting "unhealthy" and healing
+      # it below.
+      if curl -s --max-time 2 "http://$BIND_HOST:5000/" >/dev/null; then
+        echo "Backend already running and healthy (pid $existing_pid). Leaving it alone -- use 'restart' to replace it."
+        BACKEND_ALREADY_RUNNING=1
+        return 0
+      fi
+      echo "Backend already running (pid $existing_pid) but not answering health checks. Stopping it first..."
       stop_backend
     else
       echo "Stale pidfile found, removing."; rm -f "$PID_FILE"
@@ -148,7 +173,10 @@ wait_for_backend_healthy() {
   # Health Check Loop
   echo "Waiting for backend to become healthy..."
   for i in {1..120}; do
-      if curl -s "http://$BIND_HOST:5000/" >/dev/null; then
+      # --max-time: an unresponsive-but-connectable backend would otherwise
+      # hang this curl call indefinitely, which would also block the "did
+      # the process die" check a few lines below from ever running again.
+      if curl -s --max-time 2 "http://$BIND_HOST:5000/" >/dev/null; then
           echo -e "\033[0;32mBackend started successfully (pid $backend_pid).\033[0m"
           echo "Logs: $LOG_FILE"
           echo "Listening on http://$BIND_HOST:5000"
@@ -177,6 +205,9 @@ wait_for_backend_healthy() {
 
 start_backend() {
   launch_backend
+  if [ "$BACKEND_ALREADY_RUNNING" = "1" ]; then
+    return 0
+  fi
   wait_for_backend_healthy
 }
 

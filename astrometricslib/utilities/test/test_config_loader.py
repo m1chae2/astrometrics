@@ -7,6 +7,8 @@ stars at once.
 
 from pathlib import Path
 
+import pytest
+
 from astrometricslib.utilities.config_loader import AppConfiguration
 
 
@@ -133,3 +135,40 @@ def test_resending_an_already_stringified_field_would_corrupt_it(tmp_path: Path)
     corrupted = config.get_camera_config("Nikon D5300")["clip_ceiling_adu"]
     assert isinstance(corrupted, str)
     assert not isinstance(corrupted, dict)
+
+
+def test_graxpert_is_off_unless_a_command_is_configured(tmp_path: Path) -> None:
+    """A blank or missing setting turns the gradient-removal step off."""
+    config = _make_isolated_config(tmp_path)
+
+    assert config.get_graxpert_executable() is None
+
+
+def test_a_configured_graxpert_command_is_returned_as_written(tmp_path: Path) -> None:
+    """The command may be a path or a command with arguments."""
+    config = _make_isolated_config(tmp_path)
+    config.update_config({"Processing.GraXpert": {"graxpert_executable": "/opt/GraXpert-linux/GraXpert"}})
+
+    assert config.get_graxpert_executable() == "/opt/GraXpert-linux/GraXpert"
+
+
+def test_cosmic_clarity_is_off_unless_a_program_is_configured(tmp_path: Path) -> None:
+    """A blank or missing setting turns the denoise step off."""
+    config = _make_isolated_config(tmp_path)
+
+    assert config.get_cosmic_clarity_denoise_executable() is None
+
+
+def test_the_denoise_strength_is_read_and_kept_between_zero_and_one(tmp_path: Path) -> None:
+    """A fresh install uses full strength; out-of-range values are clipped."""
+    config = _make_isolated_config(tmp_path)
+    assert config.get_cosmic_clarity_denoise_strength() == pytest.approx(1.0)
+
+    config.update_config({"Processing.CosmicClarity": {"denoise_strength": "0.4"}})
+    assert config.get_cosmic_clarity_denoise_strength() == pytest.approx(0.4)
+
+    config.update_config({"Processing.CosmicClarity": {"denoise_strength": "3"}})
+    assert config.get_cosmic_clarity_denoise_strength() == pytest.approx(1.0)
+
+    config.update_config({"Processing.CosmicClarity": {"denoise_strength": "not a number"}})
+    assert config.get_cosmic_clarity_denoise_strength() == pytest.approx(1.0)

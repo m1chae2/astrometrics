@@ -204,6 +204,27 @@ index_path = "/usr/share/astrometry"
 autoindex = "true"
 cpulimit = "300"
 
+["Processing.GraXpert"]
+# Optional. The command that starts GraXpert (https://graxpert.com), the
+# program that removes the sky's brightness gradient. When set, each finished
+# stack's preview picture is flattened with GraXpert before Siril stretches it.
+# Leave blank to skip that step. The stack file is never changed either way.
+# Example: /opt/GraXpert-linux/GraXpert
+graxpert_executable = ""
+
+["Processing.CosmicClarity"]
+# Optional. The path of Cosmic Clarity's denoise program (SetiAstro, free,
+# https://www.setiastro.com/cosmic-clarity), for example
+# /opt/CosmicClaritySuite_Linux/SetiAstroCosmicClarity_denoise.
+# When set, each finished stack's preview picture is denoised with it before
+# Siril stretches it. Leave blank to skip that step. The program reads and
+# writes the "input" and "output" folders next to itself, so keep those
+# folders free of other files. The stack file is never changed either way.
+denoise_executable = ""
+# How strongly to remove noise, from 0 (none) to 1 (full). 1.0 is the default
+# of Siril's own Cosmic Clarity script. Not tuned on this project's stacks.
+denoise_strength = "1.0"
+
 ["Processing.Siril"]
 # Match this to whichever --siril-source you passed to
 # build/linux/install_ubuntu_deps.sh (the script prints the right value

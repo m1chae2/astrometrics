@@ -83,7 +83,7 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
             <button
               className={`btn btn--tiny ${stretch ? 'btn--active' : ''}`}
               onClick={toggleStretch}
-              title={stretch ? "Switch to Linear view" : "Switch to Auto-Stretched view"}
+              title={stretch ? "Switch to Linear view" : "Switch to Auto-Stretched view (a stack shows its Siril-stretched JPEG when one exists)"}
             >
               {stretch ? "Stretch" : "Linear"}
             </button>

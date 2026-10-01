@@ -269,6 +269,11 @@ class AppConfiguration:
                 "background_homogeneity_check_enabled": "true",
                 "auto_open_gui": "false",
             },
+            # Blank: no gradient removal. Stack previews are then stretched
+            # without it. See get_graxpert_executable.
+            "Processing.GraXpert": {"graxpert_executable": ""},
+            # Blank: no denoising. See get_cosmic_clarity_denoise_executable.
+            "Processing.CosmicClarity": {"denoise_executable": "", "denoise_strength": "1.0"},
             # 500; see get_maximum_identified_stars for why this isn't 0
             # (unlimited) despite that having been this setting's first
             # default.
@@ -319,6 +324,53 @@ class AppConfiguration:
         if val is not None:
             return val
         return self.app_config.get("Image Library", "siril_executable", fallback=None)
+
+    def get_graxpert_executable(self) -> str | None:
+        """Retrieve the command that starts GraXpert, if one is set.
+
+        GraXpert removes the sky gradient from a stack before its preview
+        picture is stretched. A blank setting turns that step off.
+
+        Returns
+        -------
+        executable : `str` or `None`
+            The command (a path, or a command with arguments), or `None` if
+            the setting is blank or missing.
+        """
+        return self.get_value("Processing.GraXpert", "graxpert_executable", fallback="") or None
+
+    def get_cosmic_clarity_denoise_executable(self) -> str | None:
+        """Retrieve the path of Cosmic Clarity's denoise program, if set.
+
+        Cosmic Clarity (SetiAstro) removes noise with an AI model. It runs on
+        a copy of a stack, after the sky gradient is removed, before that
+        stack's preview picture is stretched. A blank setting turns the step
+        off.
+
+        Returns
+        -------
+        executable : `str` or `None`
+            The path of ``SetiAstroCosmicClarity_denoise``, or `None` if the
+            setting is blank or missing. The program works in the ``input``
+            and ``output`` folders next to it.
+        """
+        return self.get_value("Processing.CosmicClarity", "denoise_executable", fallback="") or None
+
+    def get_cosmic_clarity_denoise_strength(self) -> float:
+        """Return how strongly Cosmic Clarity removes noise, from 0 to 1.
+
+        Returns
+        -------
+        strength : `float`
+            The configured strength, kept between 0 and 1. A missing or
+            unreadable setting gives 1.0, the default of Siril's own
+            Cosmic Clarity script.
+        """
+        raw = self.get_value("Processing.CosmicClarity", "denoise_strength", fallback="1.0")
+        try:
+            return min(1.0, max(0.0, float(raw)))
+        except TypeError, ValueError:
+            return 1.0
 
     def get_stack_rejection_sigma_mode(self) -> str:
         """Return the configured stack-time pixel rejection sigma mode.

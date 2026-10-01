@@ -206,6 +206,29 @@ def isolate_config_singleton():  # ruff: ignore[missing-return-type-undocumented
     config_loader._instance = original_instance
 
 
+@pytest.fixture(autouse=True)
+def no_siril_stack_preview(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stop tests from starting Siril or GraXpert to draw a preview picture.
+
+    Stacking writes a picture of each finished stack by running GraXpert and
+    Siril. Tests that stack with a fake driver must not launch the real
+    programs. Tests of the preview code replace these stand-ins with their
+    own.
+    """
+    monkeypatch.setattr(
+        "astrometricslib.pipelines.stacking.stack_preview.run_preview_script",
+        lambda directory, commands, siril_executable: False,
+    )
+    monkeypatch.setattr(
+        "astrometricslib.pipelines.stacking.stack_preview.flatten_background",
+        lambda graxpert_executable, input_path, output_stem: False,
+    )
+    monkeypatch.setattr(
+        "astrometricslib.pipelines.stacking.stack_preview.denoise_with_cosmic_clarity",
+        lambda executable, input_path, output_path, strength: False,
+    )
+
+
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_environment():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Create the safe testing folder and delete it when tests are finished."""

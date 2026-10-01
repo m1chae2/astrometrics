@@ -243,6 +243,7 @@ def stack_frames(
 
     from astrometricslib.drivers.siril_interface import ImageProcessing
     from astrometricslib.pipelines.stacking.siril_stacking import run_siril_stack
+    from astrometricslib.pipelines.stacking.stack_preview import write_stack_preview
 
     siril_driver = ImageProcessing()
     # `run_siril_stack` adds two safeguards for spectroscopy: frames of
@@ -309,6 +310,9 @@ def stack_frames(
                 )
             },
         )
+        # A picture for people to look at. It never changes the stack and a
+        # failure to make it is logged, not raised.
+        write_stack_preview(stacked_path)
 
     return stacked_path
 

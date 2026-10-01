@@ -10,6 +10,7 @@ This folder holds small, generic helpers used across the library that do not bel
 - `coordinate_parsing.py` — parses astronomical coordinate strings (right ascension, declination) into decimal degrees.
 - `camera_names.py` — compares camera names that may be written differently in different places (a header, a config section, a UI field) to decide whether they refer to the same camera.
 - `observatory_setups.py` — the optics an observatory owns, and which camera is paired with which optic.
+- `observing_night.py` — names the observing night a moment belongs to: the local date on which the night began, found by subtracting 12 hours from the moment. A night that crosses midnight keeps one name, so records written before and after midnight group together. The log database's SQL queries use the same rule.
 - `iso_text.py` — helpers for parsing and formatting the ISO and gain text stored on a frame.
 - `concurrency.py`, `parallel_batch.py` — generic worker-count reconciliation and a parallel batch-processing engine, used by any pipeline stage that fans work out across multiple processes.
 - `rejection_thresholds.py`, `stack_filter_floor.py` — generic algorithms for adjusting a pixel-rejection threshold by frame count, and for keeping a sharpness filter from discarding too many frames.

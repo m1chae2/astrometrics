@@ -39,6 +39,8 @@ from astrometricslib.api.targets import (
     derive_target_sessions,
     frame_is_spectral,
 )
+from astrometricslib.drivers.calibration_library import DEFAULT_DARK_TEMPERATURE_TOLERANCE_C
+from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib.drivers.job_logging import background_job
 from astrometricslib.drivers.provenance_store import ProvenanceStore, export_target_lineage_as_prov_xml
 from astrometricslib.models.moving_object import AsteroidDetectionCandidate
@@ -91,10 +93,15 @@ from astrometricslib.models.target import (
     RenderedImage,
     Target,
 )
+from astrometricslib.pipelines.stacking.exposure_saturation import (
+    SATURATED_BLOB_MINIMUM_PIXELS,
+    SATURATED_FRAME_FRACTION,
+)
 from astrometricslib.utilities.concurrency import resolve_worker_counts
 from astrometricslib.utilities.config_loader import AppConfiguration, get_configuration
 from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
 from astrometricslib.utilities.enums import FilterType
+from astrometricslib.utilities.observing_night import observing_night_id
 from astrometricslib.utilities.parallel_batch import BatchRunSummary, run_parallel_batch
 from astrometricslib.utilities.pipeline_models import ProcessingJob
 
@@ -251,6 +258,9 @@ class Astrometrics:
 
 
 __all__ = [
+    "DEFAULT_DARK_TEMPERATURE_TOLERANCE_C",
+    "SATURATED_BLOB_MINIMUM_PIXELS",
+    "SATURATED_FRAME_FRACTION",
     "AbstractCatalogAccess",
     "Activity",
     "ActivityDescription",
@@ -321,8 +331,10 @@ __all__ = [
     "export_target_lineage_as_prov_xml",
     "frame_is_spectral",
     "get_configuration",
+    "observing_night_id",
     "parse_coordinate_string",
     "registered_job",
+    "resolve_camera_profile",
     "resolve_worker_counts",
     "run_parallel_batch",
     "run_siril_stack",

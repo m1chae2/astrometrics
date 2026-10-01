@@ -34,6 +34,9 @@ import astrometricslib
 # should be a deliberate edit to this list, not a side effect of moving
 # code around internally.
 EXPECTED_PUBLIC_NAMES = frozenset({
+    "DEFAULT_DARK_TEMPERATURE_TOLERANCE_C",
+    "SATURATED_BLOB_MINIMUM_PIXELS",
+    "SATURATED_FRAME_FRACTION",
     "AbstractCatalogAccess",
     "Activity",
     "ActivityDescription",
@@ -104,8 +107,10 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "export_target_lineage_as_prov_xml",
     "frame_is_spectral",
     "get_configuration",
+    "observing_night_id",
     "parse_coordinate_string",
     "registered_job",
+    "resolve_camera_profile",
     "resolve_worker_counts",
     "run_parallel_batch",
     "run_siril_stack",

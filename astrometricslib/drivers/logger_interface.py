@@ -11,9 +11,11 @@ emitted log records into that same database.
 import json
 import logging
 import sqlite3
+from collections.abc import Iterable
 from datetime import datetime
 from typing import Any
 
+from astrometricslib.utilities.observing_night import observing_night_id
 from astrometricslib.utilities.pipeline_models import ProcessingJob
 
 logger = logging.getLogger(__name__)
@@ -167,9 +169,19 @@ class LoggerInterface:
                     snr REAL,
                     rms_ra REAL,
                     rms_dec REAL,
-                    star_mass REAL
+                    star_mass REAL,
+                    source TEXT NOT NULL DEFAULT 'unverified'
                 )
             """)
+            # A database created before `source` existed lacks the column.
+            # Rows written then keep the honest default 'unverified',
+            # because nothing recorded whether they were measured.
+            cursor.execute("PRAGMA table_info(guiding_logs)")
+            guiding_columns = [row[1] for row in cursor.fetchall()]
+            if "source" not in guiding_columns:
+                cursor.execute(
+                    "ALTER TABLE guiding_logs ADD COLUMN source TEXT NOT NULL DEFAULT 'unverified'"
+                )
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_guiding_logs_time ON guiding_logs(timestamp)")
             # Polar alignment assistant logs
             cursor.execute("""
@@ -760,6 +772,7 @@ class LoggerInterface:
                 conn.close()
                 return
 
+            attempt_timestamp = attempt.get("timestamp", attempt.get("time", datetime.now().timestamp()))
             cursor.execute(
                 """
                 INSERT INTO alignment_logs (
@@ -769,9 +782,9 @@ class LoggerInterface:
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    attempt.get("session_id"),
+                    attempt.get("session_id") or observing_night_id(attempt_timestamp),
                     attempt.get("target_name"),
-                    attempt.get("timestamp", attempt.get("time", datetime.now().timestamp())),
+                    attempt_timestamp,
                     attempt.get("status", "unknown"),
                     d_ra,
                     d_dec,
@@ -820,6 +833,42 @@ class LoggerInterface:
             logger.error(f"Error cleaning up spurious alignment logs: {e}")
             return 0
 
+    @staticmethod
+    def _guiding_sample_rows(samples: list[dict[str, Any]]) -> list[tuple[Any, ...]]:
+        """Turn guiding sample dictionaries into database rows.
+
+        Returns
+        -------
+        rows : `list` [`tuple`]
+            One tuple per sample, in the column order of
+            `_INSERT_GUIDING_SAMPLE_SQL`.
+        """
+        rows = []
+        for s in samples:
+            sample_timestamp = s.get("timestamp", s.get("time", datetime.now().timestamp()))
+            rows.append((
+                s.get("session_id") or observing_night_id(sample_timestamp),
+                s.get("target_name"),
+                sample_timestamp,
+                s.get("dra", 0.0),
+                s.get("ddec", 0.0),
+                s.get("pulse_ra", s.get("pulseRa", 0.0)),
+                s.get("pulse_dec", s.get("pulseDec", 0.0)),
+                s.get("snr"),
+                s.get("rms_ra", s.get("rmsRa")),
+                s.get("rms_dec", s.get("rmsDec")),
+                s.get("star_mass", s.get("starMass")),
+                s.get("source", "unverified"),
+            ))
+        return rows
+
+    _INSERT_GUIDING_SAMPLE_SQL = """
+        INSERT INTO guiding_logs (
+            session_id, target_name, timestamp, dra, ddec,
+            pulse_ra, pulse_dec, snr, rms_ra, rms_dec, star_mass, source
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """
+
     def record_guiding_samples(self, samples: list[dict[str, Any]]) -> None:
         """Record autoguiding drift, pulse, and SNR telemetry in SQLite.
 
@@ -828,41 +877,78 @@ class LoggerInterface:
         samples : `list` [`dict` [`str`, `Any`]]
             List of guiding sample dictionaries containing time/timestamp,
             dra, ddec, pulseRa/pulse_ra, pulseDec/pulse_dec, snr, rmsRa/rms_ra,
-            rmsDec/rms_dec, star_mass, target_name, session_id.
+            rmsDec/rms_dec, star_mass, target_name, session_id, source.
+            A sample with no ``session_id`` is filed under the observing
+            night its timestamp falls in (see
+            `astrometricslib.utilities.observing_night`). A sample with no
+            ``source`` is stored as ``"unverified"``; callers should say
+            where each sample came from, so that estimates are never
+            mistaken for measurements.
         """
         if not samples:
             return
         try:
             conn = self._connect()
-            cursor = conn.cursor()
-            rows = []
-            for s in samples:
-                rows.append((
-                    s.get("session_id"),
-                    s.get("target_name"),
-                    s.get("timestamp", s.get("time", datetime.now().timestamp())),
-                    s.get("dra", 0.0),
-                    s.get("ddec", 0.0),
-                    s.get("pulse_ra", s.get("pulseRa", 0.0)),
-                    s.get("pulse_dec", s.get("pulseDec", 0.0)),
-                    s.get("snr"),
-                    s.get("rms_ra", s.get("rmsRa")),
-                    s.get("rms_dec", s.get("rmsDec")),
-                    s.get("star_mass", s.get("starMass")),
-                ))
-            cursor.executemany(
-                """
-                INSERT INTO guiding_logs (
-                    session_id, target_name, timestamp, dra, ddec,
-                    pulse_ra, pulse_dec, snr, rms_ra, rms_dec, star_mass
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                rows,
-            )
+            conn.executemany(self._INSERT_GUIDING_SAMPLE_SQL, self._guiding_sample_rows(samples))
             conn.commit()
             conn.close()
         except Exception as e:
             logger.error(f"Error recording guiding samples: {e}")
+
+    def replace_guiding_samples(self, samples: list[dict[str, Any]]) -> int:
+        """Record guiding samples, replacing any earlier copy of the same log.
+
+        Reading the same log file twice must not double its samples. This
+        deletes every stored sample with the same ``source`` whose time
+        falls inside the batch's time span, then inserts the batch, all in
+        one transaction. Samples from other sources are untouched, so a
+        measurement is never replaced by an estimate covering the same time.
+
+        Parameters
+        ----------
+        samples : `list` [`dict` [`str`, `Any`]]
+            Samples, as for `record_guiding_samples`. Every sample must
+            carry the same ``source``.
+
+        Returns
+        -------
+        replaced_count : `int`
+            How many earlier samples were removed.
+
+        Raises
+        ------
+        ValueError
+            Raised if the samples do not all have one ``source``.
+        sqlite3.Error
+            Raised if the database cannot be written. Unlike the other
+            ``record_*`` methods, this one does not swallow the error:
+            ingestion reports how many samples it stored, and that count
+            must not claim samples that never reached the database.
+        """
+        if not samples:
+            return 0
+        sources = {sample.get("source", "unverified") for sample in samples}
+        if len(sources) != 1:
+            raise ValueError(f"replace_guiding_samples needs a single source, got {sorted(sources)}")
+        (source,) = sources
+        timestamps = [sample.get("timestamp", sample.get("time")) for sample in samples]
+        if any(timestamp is None for timestamp in timestamps):
+            raise ValueError("replace_guiding_samples needs a timestamp on every sample")
+        try:
+            connection = self._connect()
+            cursor = connection.cursor()
+            cursor.execute(
+                "DELETE FROM guiding_logs WHERE source = ? AND timestamp BETWEEN ? AND ?",
+                (source, min(timestamps), max(timestamps)),
+            )
+            replaced_count = cursor.rowcount
+            cursor.executemany(self._INSERT_GUIDING_SAMPLE_SQL, self._guiding_sample_rows(samples))
+            connection.commit()
+            connection.close()
+        except sqlite3.Error:
+            logger.exception("Error replacing guiding samples")
+            raise
+        return replaced_count
 
     def get_alignment_logs(self, target_name: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
         """Retrieve recent plate-solve alignment logs from SQLite.
@@ -906,6 +992,7 @@ class LoggerInterface:
         session_id: str | None = None,
         start_time: float | None = None,
         limit: int = 1000,
+        sources: Iterable[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Retrieve historical guiding telemetry logs from SQLite.
 
@@ -914,11 +1001,17 @@ class LoggerInterface:
         target_name : `str` | `None`, optional
             Filter by target name if provided.
         session_id : `str` | `None`, optional
-            Filter by session identifier or date if provided.
+            Filter by session identifier or observing-night date if
+            provided. A night's date is the local date on which it began
+            (see `astrometricslib.utilities.observing_night`), so a night
+            that crosses midnight is one session.
         start_time : `float` | `None`, optional
             Earliest epoch timestamp to query.
         limit : `int`, optional
             Maximum rows to return, default 1000.
+        sources : `Iterable` [`str`] | `None`, optional
+            Keep only samples whose ``source`` is one of these. `None`
+            keeps every sample, including estimates.
 
         Returns
         -------
@@ -936,12 +1029,17 @@ class LoggerInterface:
                 params.append(target_name)
             if session_id:
                 query += (
-                    " AND (session_id = ? OR strftime('%Y-%m-%d', timestamp, 'unixepoch', 'localtime') = ?)"
+                    " AND (session_id = ? OR "
+                    "strftime('%Y-%m-%d', timestamp - 43200, 'unixepoch', 'localtime') = ?)"
                 )
                 params.extend([session_id, session_id])
             if start_time is not None:
                 query += " AND timestamp >= ?"
                 params.append(start_time)
+            if sources is not None:
+                allowed_sources = list(sources)
+                query += f" AND source IN ({','.join('?' * len(allowed_sources))})"
+                params.extend(allowed_sources)
             query += " ORDER BY timestamp ASC LIMIT ?"
             params.append(limit)
 

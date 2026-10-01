@@ -30,9 +30,13 @@ M9's backend-cleanup scope, paired with this milestone but not part of it.
 
 from typing import Any
 
+from astrometricslib import observing_night_id
 from wayfindinglib.analytics.guiding_spectrum import analyze_guiding_telemetry
 from wayfindinglib.drivers.phd2.guide_log_parser import parse_phd2_guide_log
-from wayfindinglib.models.session.telemetry import GuidingSpectrumAnalysis
+from wayfindinglib.models.session.telemetry import MEASURED_GUIDING_SAMPLE_SOURCES, GuidingSpectrumAnalysis
+
+_REFIT_SAMPLE_LIMIT = 50000
+"""Most samples one refit reads. A long night holds about 10,000."""
 
 
 def refit_and_persist_guiding_spectrum(
@@ -48,6 +52,11 @@ def refit_and_persist_guiding_spectrum(
     existing behavior) -- the only change this pipeline makes is writing
     the result back to standing `ObservatoryControl` storage instead of
     only returning it to whichever caller asked.
+
+    Only samples measured from a real guide star are read. Samples that
+    were reconstructed from mount pulses, or whose origin was never
+    recorded, are left out: fitting periodic error to a model's own
+    output would just return that model.
 
     Parameters
     ----------
@@ -66,7 +75,11 @@ def refit_and_persist_guiding_spectrum(
     analysis : `GuidingSpectrumAnalysis`
         The refit and persisted spectrum analysis.
     """
-    samples = logger_interface.get_guiding_logs(session_id=session_id, limit=limit)
+    samples = logger_interface.get_guiding_logs(
+        session_id=session_id,
+        limit=limit,
+        sources=[source.value for source in MEASURED_GUIDING_SAMPLE_SOURCES],
+    )
     analysis = analyze_guiding_telemetry(samples)
     observatory.save_guiding_spectrum_analysis(analysis)
     return analysis
@@ -101,8 +114,13 @@ def ingest_guide_log_file(
     samples = parse_phd2_guide_log(file_path, target_name=target_name)
     if not samples:
         return None
-    logger_interface.record_guiding_samples(samples)
-    return refit_and_persist_guiding_spectrum(observatory, logger_interface)
+    logger_interface.replace_guiding_samples(samples)
+    return refit_and_persist_guiding_spectrum(
+        observatory,
+        logger_interface,
+        session_id=observing_night_id(samples[-1]["timestamp"]),
+        limit=_REFIT_SAMPLE_LIMIT,
+    )
 
 
 def fetch_and_ingest_new_guide_logs(
@@ -146,12 +164,19 @@ def fetch_and_ingest_new_guide_logs(
         return None
 
     total_new_samples = 0
+    latest_sample_time = None
     for file_path in downloaded_files:
         samples = parse_phd2_guide_log(file_path, target_name=target_name)
         if samples:
-            logger_interface.record_guiding_samples(samples)
+            logger_interface.replace_guiding_samples(samples)
             total_new_samples += len(samples)
+            latest_sample_time = max(latest_sample_time or 0.0, samples[-1]["timestamp"])
 
     if total_new_samples == 0:
         return None
-    return refit_and_persist_guiding_spectrum(observatory, logger_interface)
+    return refit_and_persist_guiding_spectrum(
+        observatory,
+        logger_interface,
+        session_id=observing_night_id(latest_sample_time),
+        limit=_REFIT_SAMPLE_LIMIT,
+    )

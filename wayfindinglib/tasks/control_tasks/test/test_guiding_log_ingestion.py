@@ -13,26 +13,44 @@ from wayfindinglib.tasks.control_tasks import guiding_log_ingestion
 
 
 class _FakeLoggerInterface:
-    """Records `record_guiding_samples` calls and serves a fixed history."""
+    """Records `replace_guiding_samples` calls and serves a fixed history."""
 
     def __init__(self, guiding_logs: list[dict[str, Any]] | None = None) -> None:
         """Initialize with a fixed cumulative-history response."""
         self.recorded_batches: list[list[dict[str, Any]]] = []
         self._guiding_logs = guiding_logs if guiding_logs is not None else []
 
-    def record_guiding_samples(self, samples: list[dict[str, Any]]) -> None:
-        """Record a batch of samples for later assertion."""
-        self.recorded_batches.append(samples)
+    def replace_guiding_samples(self, samples: list[dict[str, Any]]) -> int:
+        """Record a batch of samples for later assertion.
 
-    def get_guiding_logs(self, session_id: str | None = None, limit: int = 2000) -> list[dict[str, Any]]:
+        Returns
+        -------
+        replaced_count : `int`
+            Always 0; this fake never holds earlier samples.
+        """
+        self.recorded_batches.append(samples)
+        return 0
+
+    def get_guiding_logs(
+        self,
+        session_id: str | None = None,
+        limit: int = 2000,
+        sources: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
         """Return the fixed cumulative guiding-log history.
+
+        Filters by `sources` the way the real `LoggerInterface` does, so
+        a test sees what the real refit would see.
 
         Returns
         -------
         logs : `list` [`dict`]
-            The fixed history passed at construction.
+            The fixed history passed at construction, restricted to
+            `sources` when given.
         """
-        return self._guiding_logs
+        if sources is None:
+            return self._guiding_logs
+        return [log for log in self._guiding_logs if log.get("source") in sources]
 
 
 class _FakeObservatory:
@@ -49,12 +67,14 @@ class _FakeObservatory:
 
 
 _SAMPLE_LOG_LINES = [
+    "KStars version 3.8.3. PHD2 log version 2.5. Log enabled at 2026-09-24 22:00:00",
+    "",
     "Guiding Begins at 2026-09-24 22:00:00",
-    "Frame,Time,mount,dx,dy,RARawDistance,DecRawDistance,RADistance,DECDistance,"
-    "RADuration,RADirection,DECDuration,DECDirection,XStep,YStep,StarMass,SNR,"
-    "ErrorCode",
-    "1,1.0,Mount,0.5,0.3,0.4,0.2,0.4,0.2,120,W,80,N,0.1,0.1,5000,10.0,0",
-    "2,2.0,Mount,0.6,0.2,0.5,0.1,0.5,0.1,130,E,90,S,0.1,0.1,5100,11.0,0",
+    "Pixel scale = 6.39 arc-sec/px, Binning = 1, Focal length = 121.05 mm",
+    "Frame,Time,mount,dx,dy,RARawDistance,DECRawDistance,RAGuideDistance,DECGuideDistance,"
+    "RADuration,RADirection,DECDuration,DECDirection,XStep,YStep,StarMass,SNR,ErrorCode",
+    '1,1.0,"Mount",0.5,0.3,0.4,0.2,0.4,0.2,120,W,80,N,,,5000,10.0,0',
+    '2,2.0,"Mount",0.6,0.2,0.5,0.1,0.5,0.1,130,E,90,S,,,5100,11.0,0',
     "Guiding Ends at 2026-09-24 22:05:00",
 ]
 
@@ -94,8 +114,8 @@ def test_ingest_guide_log_file_persists_samples_and_refits_spectrum(tmp_path):  
     # shaped like the samples ingest_guide_log_file would have recorded.
     logger_interface = _FakeLoggerInterface(
         guiding_logs=[
-            {"time": 1.0, "dra": 0.4, "ddec": 0.2, "pulse_dec": 80},
-            {"time": 2.0, "dra": 0.5, "ddec": 0.1, "pulse_dec": 90},
+            {"time": 1.0, "dra": 0.4, "ddec": 0.2, "pulse_dec": 80, "source": "phd2_guide_log"},
+            {"time": 2.0, "dra": 0.5, "ddec": 0.1, "pulse_dec": 90, "source": "phd2_guide_log"},
         ]
     )
     observatory = _FakeObservatory()
@@ -193,3 +213,27 @@ def test_refit_and_persist_guiding_spectrum_persists_through_observatory():  # r
 
     assert isinstance(result, GuidingSpectrumAnalysis)
     assert observatory.saved is result
+
+
+def test_refit_ignores_samples_that_were_not_measured_from_a_real_star():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify estimated and unverified samples never reach the fit.
+
+    A sample reconstructed from mount pulses has a drift value that is a
+    model's output, so a periodic-error fit on it would only recover the
+    model. Only real measurements may be fitted.
+    """
+    measured = [
+        {"time": float(second), "dra": 0.3, "ddec": 0.1, "pulse_dec": 50, "source": "ekos_analyze_log"}
+        for second in range(3)
+    ]
+    estimated = [
+        {"time": 100.0 + second, "dra": 9.0, "ddec": 9.0, "pulse_dec": 50, "source": "indi_pulse_estimate"}
+        for second in range(5)
+    ]
+    unverified = [{"time": 200.0, "dra": 9.0, "ddec": 9.0, "pulse_dec": 50, "source": "unverified"}]
+    logger_interface = _FakeLoggerInterface(guiding_logs=measured + estimated + unverified)
+    observatory = _FakeObservatory()
+
+    analysis = guiding_log_ingestion.refit_and_persist_guiding_spectrum(observatory, logger_interface)
+
+    assert analysis.sample_count == len(measured)

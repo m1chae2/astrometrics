@@ -1,38 +1,141 @@
 """Frequency analysis of autoguiding drift, periodic error, and backlash.
 
-Uses Fast Fourier Transform (FFT) and Periodogram power spectral density
-to extract:
-- Peak-to-peak Periodic Error (PE_p-p)
+Finds the repeating parts of the guide error and the mount's backlash:
+- Peak-to-peak size of the repeating error (PE_p-p)
 - Worm gear fundamental harmonic periods (e.g. ~480s, ~600s, ~430s)
 - Declination backlash reversal response delay
+
+Guide samples come in separate stretches: each guiding run is continuous, and
+the runs of one night, or of several nights, are separated by pauses of
+minutes to months. A spectrum must never join two stretches into one series,
+because the join looks like a step the mount never made and puts a made-up
+time scale on the result. So the samples are first split wherever they pause
+for 60 seconds or more. Each stretch is analysed on its own with its true
+timestamps (a Lomb-Scargle periodogram, which handles samples that are not
+evenly spaced), and the stretches are then combined. A stretch counts toward
+a period only if it is long enough to hold two full cycles of it, so a short
+run cannot make up a long period.
+
+The error measured here is the offset left after the guider's earlier
+corrections, so the peaks show the repeating error the guider did not remove.
+It is not a measurement of the mount's unguided periodic error.
 """
 
 import math
 from typing import Any
 
 import numpy as np
+from scipy.signal import find_peaks, lombscargle
 
 from wayfindinglib.models.session.telemetry import (
     GuidingSpectrumAnalysis,
     GuidingSpectrumPeak,
 )
 
+SEGMENT_BREAK_SECONDS = 60.0
+"""A pause of at least this long between samples ends a continuous stretch.
+
+The guide cycle is 2 to 6 seconds, so a pause of a minute is a stop in guiding,
+not a slow cycle.
+"""
+
+MINIMUM_SAMPLES = 16
+"""Fewest samples in a stretch for its spectrum to be worked out."""
+
+MINIMUM_STRETCH_SECONDS = 10.0
+"""Shortest stretch whose spectrum is worked out."""
+
+MINIMUM_CYCLES = 2
+"""A stretch counts toward a period only if it holds at least this many cycles.
+
+With fewer, the fit cannot tell the period from a trend.
+"""
+
+_MAXIMUM_FREQUENCY_HZ = 0.5
+"""Highest frequency looked at (a period of 2 seconds)."""
+
+_FREQUENCY_POINTS = 1000
+"""Points on the logarithmic frequency grid.
+
+Periods are 0.66 percent apart, so a 480 second period is placed within
+about 3 seconds.
+"""
+
+_MAXIMUM_PEAKS = 5
+"""Most spectral peaks reported."""
+
+SLOW_DRIFT = "Slow Drift (not a gear period)"
+"""The label for a peak slower than any gear in the mount's drive train."""
+
+_LONGEST_MECHANICAL_PERIOD_SECONDS = 650.0
+"""The longest period attributed to the mount's gears.
+
+The worm gear turns once in 8 to 10 minutes on mounts of this class, so a
+repeating error slower than 650 seconds is wander from polar alignment,
+flexure, or the sky, not a gear.
+"""
+
+
+def _split_into_stretches(
+    times: np.ndarray, dra: np.ndarray, pulse_dec: np.ndarray
+) -> list[tuple[np.ndarray, np.ndarray, np.ndarray]]:
+    """Split sorted samples at every pause of `SEGMENT_BREAK_SECONDS` or more.
+
+    Returns
+    -------
+    stretches : `list` [`tuple`]
+        The times, RA errors and Dec pulses (three arrays) of each continuous
+        stretch.
+    """
+    breaks = np.flatnonzero(np.diff(times) >= SEGMENT_BREAK_SECONDS) + 1
+    starts = np.concatenate([[0], breaks])
+    ends = np.concatenate([breaks, [times.size]])
+    return [(times[a:b], dra[a:b], pulse_dec[a:b]) for a, b in zip(starts, ends, strict=True)]
+
+
+def _backlash_accumulations(pulse_dec: np.ndarray) -> list[float]:
+    """Add up the Dec pulse length between reversals in one stretch.
+
+    Returns
+    -------
+    accumulations : `list` [`float`]
+        The total pulse length before each reversal, in milliseconds.
+    """
+    accumulations: list[float] = []
+    current = 0.0
+    last_sign = 0
+    for pulse in pulse_dec:
+        sign = 1 if pulse > 0 else (-1 if pulse < 0 else 0)
+        if sign == 0:
+            continue
+        if last_sign != 0 and sign != last_sign:
+            if current > 0:
+                accumulations.append(current)
+            current = abs(float(pulse))
+        else:
+            current += abs(float(pulse))
+        last_sign = sign
+    return accumulations
+
 
 def analyze_guiding_telemetry(
     samples: list[dict[str, Any]],
 ) -> GuidingSpectrumAnalysis:
-    """Perform FFT harmonic analysis and backlash estimation on guide samples.
+    """Perform harmonic analysis and backlash estimation on guide samples.
 
     Parameters
     ----------
     samples : `list` [`dict` [`str`, `Any`]]
-        Chronological guiding telemetry samples containing `timestamp`,
-        `dra`, `ddec`, `pulse_ra`, and `pulse_dec`.
+        Guiding telemetry samples containing `timestamp`, `dra`, `ddec`,
+        `pulse_ra`, and `pulse_dec`. They may come from several runs and
+        several nights, in any order.
 
     Returns
     -------
     analysis : `GuidingSpectrumAnalysis`
-        Computed periodic error metrics, dominant frequencies, and PSD.
+        Computed repeating-error metrics, dominant periods and PSD.
+        `duration_seconds` is the time spent guiding in the stretches used,
+        not the span from the first sample to the last.
     """
     valid_samples: list[dict[str, Any]] = []
     for s in samples:
@@ -44,146 +147,131 @@ def analyze_guiding_telemetry(
                 valid_samples.append({
                     "time": float(t),
                     "dra": float(dra),
-                    "ddec": float(ddec),
                     "pulse_dec": float(s.get("pulse_dec", s.get("pulseDec", 0.0))),
                 })
 
     n = len(valid_samples)
-    if n < 16:
+    if n < MINIMUM_SAMPLES:
         return GuidingSpectrumAnalysis(
             sample_count=n,
             duration_seconds=0.0,
             periodic_error_peak_to_peak_arcsec=0.0,
-            message=f"Need at least 16 guiding samples for frequency analysis; found {n}.",
+            message=f"Need at least {MINIMUM_SAMPLES} guiding samples for frequency analysis; found {n}.",
         )
 
-    # Sort chronologically
     valid_samples.sort(key=lambda x: x["time"])
     times = np.array([s["time"] for s in valid_samples])
-    dra = np.array([s["dra"] for s in valid_samples])
-    ddec = np.array([s["ddec"] for s in valid_samples])
-    pulse_dec = np.array([s["pulse_dec"] for s in valid_samples])
+    dra_values = np.array([s["dra"] for s in valid_samples])
+    pulses = np.array([s["pulse_dec"] for s in valid_samples])
 
-    duration = float(times[-1] - times[0])
-    if duration <= 10.0:
+    stretches = [
+        stretch
+        for stretch in _split_into_stretches(times, dra_values, pulses)
+        if stretch[0].size >= MINIMUM_SAMPLES and stretch[0][-1] - stretch[0][0] > MINIMUM_STRETCH_SECONDS
+    ]
+    if not stretches:
         return GuidingSpectrumAnalysis(
             sample_count=n,
-            duration_seconds=duration,
+            duration_seconds=0.0,
             periodic_error_peak_to_peak_arcsec=0.0,
-            message="Guiding sample duration too short for periodic error analysis.",
+            message=(
+                f"No continuous stretch of guiding has {MINIMUM_SAMPLES} samples and lasts more than "
+                f"{MINIMUM_STRETCH_SECONDS:g} seconds, so no frequency analysis is possible."
+            ),
         )
 
-    # Resample onto uniform time grid for FFT
-    dt = max(duration / (n - 1), 0.5)
-    uniform_times = np.linspace(times[0], times[-1], n)
-    uniform_dra = np.interp(uniform_times, times, dra)
+    durations = np.array([stretch[0][-1] - stretch[0][0] for stretch in stretches])
+    counts = np.array([stretch[0].size for stretch in stretches])
+    guided_seconds = float(durations.sum())
+    cadence = float(np.median(np.concatenate([np.diff(stretch[0]) for stretch in stretches])))
+    f_max = min(_MAXIMUM_FREQUENCY_HZ, 0.5 / max(cadence, 1e-3))
+    f_min = MINIMUM_CYCLES / float(durations.max())
+    if f_min >= f_max:
+        f_min = f_max / 10.0
+    frequencies = np.geomspace(f_min, f_max, _FREQUENCY_POINTS)
+    angular = 2.0 * np.pi * frequencies
 
-    # Detrend linear drift
-    poly = np.polyfit(uniform_times - uniform_times[0], uniform_dra, 1)
-    detrended_dra = uniform_dra - np.polyval(poly, uniform_times - uniform_times[0])
-
-    # Peak-to-peak periodic error estimate (95th percentile spread)
-    p97_5 = float(np.percentile(detrended_dra, 97.5))
-    p2_5 = float(np.percentile(detrended_dra, 2.5))
-    pe_p_to_p = max(0.0, p97_5 - p2_5)
-
-    # FFT Power Spectral Density
-    window = np.hanning(n)
-    fft_vals = np.fft.rfft(detrended_dra * window)
-    freqs = np.fft.rfftfreq(n, d=dt)
-
-    power = np.abs(fft_vals) ** 2
-    # Ignore DC component (0 Hz) and ultra-long frequencies > duration / 2
-    valid_mask = (freqs > 1.0 / duration) & (freqs < 0.5)
-    f_sub = freqs[valid_mask]
-    p_sub = power[valid_mask]
+    squared_amplitude = np.zeros_like(frequencies)
+    weight = np.zeros_like(frequencies)
+    peak_to_peak_values = []
+    for (stretch_times, stretch_dra, _), duration, count in zip(stretches, durations, counts, strict=True):
+        relative_time = stretch_times - stretch_times[0]
+        trend = np.polyval(np.polyfit(relative_time, stretch_dra, 1), relative_time)
+        residual = stretch_dra - trend
+        peak_to_peak_values.append(float(np.percentile(residual, 97.5) - np.percentile(residual, 2.5)))
+        power = lombscargle(relative_time, residual - residual.mean(), angular, normalize=False)
+        amplitude_squared = 4.0 * power / count
+        long_enough = frequencies * duration >= MINIMUM_CYCLES
+        squared_amplitude[long_enough] += count * amplitude_squared[long_enough]
+        weight[long_enough] += count
+    covered = weight > 0
+    combined = np.zeros_like(frequencies)
+    combined[covered] = squared_amplitude[covered] / weight[covered]
+    pe_p_to_p = max(0.0, float(np.average(peak_to_peak_values, weights=durations)))
 
     peaks: list[GuidingSpectrumPeak] = []
     dominant_period: float | None = None
-
-    if len(f_sub) > 0 and np.max(p_sub) > 0:
-        # Sort spectral peaks by power
-        peak_indices = np.argsort(p_sub)[::-1][:5]
-        max_p = float(np.max(p_sub))
-
-        for idx in peak_indices:
-            peak_f = float(f_sub[idx])
-            peak_p = float(p_sub[idx])
-            if peak_f > 0:
-                period_sec = round(1.0 / peak_f, 1)
-                # Calibrate amplitude to arcsec
-                amp = round(float(np.sqrt(peak_p) * 2.0 / n), 2)
-                norm_p = round(peak_p / max_p, 3)
-
-                # Classify probable harmonic sources
-                source = "Worm Harmonic"
-                if 420.0 <= period_sec <= 650.0:
-                    source = "Worm Fundamental Period"
-                elif 200.0 <= period_sec <= 300.0:
-                    source = "2nd Worm Harmonic"
-                elif 100.0 <= period_sec <= 160.0:
-                    source = "Gear Transfer / Pulley"
-                elif period_sec < 60.0:
-                    source = "Seeing / Atmospheric Scintillation"
-
-                peaks.append(
-                    GuidingSpectrumPeak(
-                        period_seconds=period_sec,
-                        amplitude_arcsec=amp,
-                        power=norm_p,
-                        probable_source=source,
-                    )
-                )
-
-        if peaks:
-            dominant_period = peaks[0].period_seconds
-
-    # Resampled PSD curve for UI plotting (top 30 points)
-    psd_curve: list[dict[str, float]] = []
-    if len(f_sub) > 0:
-        step = max(1, len(f_sub) // 40)
-        norm_factor = float(np.max(p_sub)) if np.max(p_sub) > 0 else 1.0
-        for i in range(0, len(f_sub), step):
-            f_val = float(f_sub[i])
-            if f_val > 0:
-                psd_curve.append({
-                    "periodSeconds": round(1.0 / f_val, 1),
-                    "power": round(float(p_sub[i]) / norm_factor, 3),
-                })
-
-    # Estimate DEC Backlash Reversal Delay
-    # Measure cumulative pulse duration between reversal commands
-    dec_backlash_ms: float | None = None
-    reversal_pulse_accum: list[float] = []
-    current_accum = 0.0
-    last_pulse_sign = 0
-
-    for i in range(len(pulse_dec)):
-        p = pulse_dec[i]
-        sign = 1 if p > 0 else (-1 if p < 0 else 0)
-        if sign != 0:
-            if last_pulse_sign != 0 and sign != last_pulse_sign:
-                # Sign reversal detected: record accumulation until flip
-                if current_accum > 0:
-                    reversal_pulse_accum.append(current_accum)
-                current_accum = abs(p)
+    if combined.max() > 0:
+        maximum = float(combined.max())
+        located, _ = find_peaks(combined)
+        ranked = sorted(located, key=lambda index: combined[index], reverse=True)[:_MAXIMUM_PEAKS]
+        for index in ranked:
+            period = round(1.0 / float(frequencies[index]), 1)
+            if 420.0 <= period <= 650.0:
+                source = "Worm Fundamental Period"
+            elif 200.0 <= period <= 300.0:
+                source = "2nd Worm Harmonic"
+            elif 100.0 <= period <= 160.0:
+                source = "Gear Transfer / Pulley"
+            elif period < 60.0:
+                source = "Seeing / Atmospheric Scintillation"
+            elif period > _LONGEST_MECHANICAL_PERIOD_SECONDS:
+                source = SLOW_DRIFT
             else:
-                current_accum += abs(p)
-            last_pulse_sign = sign
+                source = "Worm Harmonic"
+            peaks.append(
+                GuidingSpectrumPeak(
+                    period_seconds=period,
+                    amplitude_arcsec=round(float(np.sqrt(combined[index])), 2),
+                    power=round(float(combined[index]) / maximum, 3),
+                    probable_source=source,
+                )
+            )
+        # A slow drift is real wander in the error, but it is not a period of
+        # the mount's gears, so it is never the dominant period that the
+        # correction code phase-locks to.
+        dominant_period = next(
+            (peak.period_seconds for peak in peaks if peak.probable_source != SLOW_DRIFT), None
+        )
 
-    if reversal_pulse_accum:
-        dec_backlash_ms = round(float(np.median(reversal_pulse_accum)), 1)
+    psd_curve: list[dict[str, float]] = []
+    if combined.max() > 0:
+        step = max(1, int(covered.sum()) // 40)
+        covered_indices = np.flatnonzero(covered)[::step]
+        psd_curve = [
+            {
+                "periodSeconds": round(1.0 / float(frequencies[index]), 1),
+                "power": round(float(combined[index]) / float(combined.max()), 3),
+            }
+            for index in covered_indices
+        ]
+
+    accumulations = [
+        accumulation for stretch in stretches for accumulation in _backlash_accumulations(stretch[2])
+    ]
+    dec_backlash_ms = round(float(np.median(accumulations)), 1) if accumulations else None
 
     return GuidingSpectrumAnalysis(
         sample_count=n,
-        duration_seconds=round(duration, 1),
+        duration_seconds=round(guided_seconds, 1),
         periodic_error_peak_to_peak_arcsec=round(pe_p_to_p, 2),
         dominant_period_seconds=dominant_period,
         dec_backlash_estimate_ms=dec_backlash_ms,
         peaks=peaks,
         psd_curve=psd_curve,
         message=(
-            f"Analyzed {n} samples across {round(duration / 60.0, 1)}m: "
+            f"Analyzed {n} samples in {len(stretches)} continuous stretch(es), "
+            f"{round(guided_seconds / 60.0, 1)}m of guiding: "
             f'PE={round(pe_p_to_p, 2)}", Backlash={dec_backlash_ms or "N/A"}ms.'
         ),
     )

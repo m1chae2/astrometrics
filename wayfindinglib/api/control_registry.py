@@ -22,7 +22,9 @@ to Observation Execution (M5) and the capability's current
 `DelegationState`.
 """
 
+import logging
 import os
+import statistics
 from datetime import UTC, datetime
 from typing import Any
 
@@ -37,10 +39,12 @@ from wayfindinglib.models.equipment_and_site.enclosure import Enclosure
 from wayfindinglib.models.equipment_and_site.equipment import Camera, CoolingPolicy, GuideScope, Telescope
 from wayfindinglib.models.equipment_and_site.focus_model import FocusModel
 from wayfindinglib.models.equipment_and_site.guider_calibration import GuiderCalibration
+from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
 from wayfindinglib.models.policy.commissioning import CommissioningRun
 from wayfindinglib.models.policy.delegation import DelegationPolicy, DelegationState, ObservatoryCapability
 from wayfindinglib.models.policy.device_state import DeviceRole, DeviceState
 from wayfindinglib.models.policy.safety import SafetyAssessment, SafetyRuleSet
+from wayfindinglib.models.session.capture_quality import CaptureSessionAnalysis
 from wayfindinglib.models.session.correction_config import CorrectionConfig
 from wayfindinglib.models.session.correction_result import (
     FocusCorrection,
@@ -48,7 +52,13 @@ from wayfindinglib.models.session.correction_result import (
     GuidingCorrection,
     PointingCorrection,
 )
+from wayfindinglib.models.session.ekos_session import EkosSessionContext
+from wayfindinglib.models.session.guide_exposure_ladder import GuideExposureLadder
+from wayfindinglib.models.session.guiding_run import GuidingRunSummary
+from wayfindinglib.models.session.recurring_issue import RecurringIssue
 from wayfindinglib.models.session.safe_state import SafeStateOutcome
+from wayfindinglib.models.session.session_quality import GuidingSessionAnalysis
+from wayfindinglib.models.session.sky_quality import SkyAnalysis
 from wayfindinglib.models.session.telemetry import GuidingSpectrumAnalysis, MountPointingModel
 from wayfindinglib.tasks.control_tasks.calibration_routines import (
     BacklashCalibrationSteps,
@@ -67,6 +77,8 @@ from wayfindinglib.tasks.control_tasks.safety_monitor import SafetyMonitor, Sens
 __all__ = [
     "ObservatoryControl",
 ]
+
+logger = logging.getLogger(__name__)
 
 
 class ObservatoryControl:
@@ -835,11 +847,23 @@ class ObservatoryControl:
         """
         return get_equipment_catalog(self._config).active_guide_scope()
 
+    def active_guide_camera(self) -> Camera | None:
+        """Return the active guide `Camera`, or `None` if unconfigured.
+
+        Returns
+        -------
+        guide_camera : `Camera` or `None`
+            The camera that sees the guide star, or `None` when the
+            main camera also does the guiding.
+        """
+        return get_equipment_catalog(self._config).active_guide_camera()
+
     def guider_plate_scale_arcsec_per_px(self) -> float | None:
         """Plate scale for `run_guider_calibration`'s `arcsec_per_pixel`.
 
         Uses the active `GuideScope`'s focal length in place of the
-        active telescope's when one is configured
+        active telescope's, and the active guide camera's pixel size in
+        place of the main camera's, when those are configured
         (`EquipmentConfiguration.guider_plate_scale_arcsec_per_px`).
 
         Returns
@@ -855,7 +879,9 @@ class ObservatoryControl:
         from wayfindinglib.models.equipment_and_site.equipment import EquipmentConfiguration
 
         configuration = EquipmentConfiguration(telescope=telescope, camera=camera)
-        return configuration.guider_plate_scale_arcsec_per_px(self.active_guide_scope())
+        return configuration.guider_plate_scale_arcsec_per_px(
+            self.active_guide_scope(), self.active_guide_camera()
+        )
 
     def list_camera_profiles(self) -> list[dict[str, Any]]:
         """Return all camera profiles defined in the config as dicts.
@@ -1248,6 +1274,746 @@ class ObservatoryControl:
 
         return guiding_log_ingestion.refit_and_persist_guiding_spectrum(
             self, self._logger_interface, session_id, limit
+        )
+
+    # -- Ekos session log ingestion ------------------------------------------
+
+    def save_ekos_session_context(self, context: EkosSessionContext) -> None:
+        """Record one Ekos session's context, replacing an earlier read of it.
+
+        Keyed by the analyze file's own name, so reading the same file
+        again updates its record instead of adding a second one.
+        """
+        self._butler.put(context, "ekos_session_context", {"id": context.id})
+
+    def save_guiding_run(self, run: GuidingRunSummary) -> None:
+        """Record one guiding run, replacing an earlier read of the same run.
+
+        Keyed by the guide log's file name and the run's position in it.
+        """
+        self._butler.put(run, "guiding_run", {"id": run.id})
+
+    def list_guiding_runs(self, session_id: str | None = None) -> list[GuidingRunSummary]:
+        """Return recorded guiding runs, oldest first.
+
+        Parameters
+        ----------
+        session_id : `str` or `None`, optional
+            Keep only the runs of this observing night.
+
+        Returns
+        -------
+        runs : `list` [`GuidingRunSummary`]
+            The matching runs.
+        """
+        runs = self._butler.get_all("guiding_run")
+        return sorted(
+            (run for run in runs if session_id is None or run.session_id == session_id),
+            key=lambda run: run.started_at,
+        )
+
+    def get_ekos_session_context(self, session_file_id: str) -> EkosSessionContext | None:
+        """Return one recorded Ekos session context.
+
+        Parameters
+        ----------
+        session_file_id : `str`
+            The analyze file's timestamp name, for example
+            ``"2026-09-23T20-31-48"``.
+
+        Returns
+        -------
+        context : `EkosSessionContext` or `None`
+            The recorded context, or `None` if none has that id.
+        """
+        return self._butler.get("ekos_session_context", {"id": session_file_id})
+
+    def list_ekos_session_summaries(self) -> list[dict[str, Any]]:
+        """Summarise every recorded Ekos session, without their full detail.
+
+        Returns
+        -------
+        summaries : `list` [`dict`]
+            One entry per session, oldest first: its id, observing night,
+            start and end times, equipment fingerprint, and how many
+            exposures, aborted exposures, autofocus runs and mount position
+            samples it holds.
+        """
+        contexts = sorted(self._butler.get_all("ekos_session_context"), key=lambda c: c.started_at)
+        return [
+            {
+                "id": context.id,
+                "sessionId": context.session_id,
+                "startedAt": context.started_at,
+                "endedAt": context.ended_at,
+                "equipmentFingerprint": context.equipment.equipment_fingerprint
+                if context.equipment
+                else None,
+                "captures": len(context.captures),
+                "abortedCaptures": len(context.aborted_captures),
+                "autofocusRuns": len(context.autofocus_runs),
+                "mountPositions": len(context.mount_positions),
+            }
+            for context in contexts
+        ]
+
+    def ingest_ekos_session_logs(
+        self, destination_dir: str | None = None, download: bool = True
+    ) -> dict[str, Any]:
+        """Read Ekos's guide and session logs and store what they record.
+
+        Downloads the guide logs and analyze logs from the telescope
+        computer (skipping files already current), then stores the guiding
+        samples and one session record per analyze file. Safe to repeat: a
+        second run leaves the same data as the first. Each session is tied
+        to the equipment it used, worked out from its own data.
+
+        Parameters
+        ----------
+        destination_dir : `str` or `None`, optional
+            Local folder for the downloaded logs. Defaults to ``ekos_logs``
+            inside this library's own data folder.
+        download : `bool`, optional
+            If `False`, read whatever is already in `destination_dir` and
+            do not contact the telescope computer.
+
+        Returns
+        -------
+        summary : `dict`
+            What was read and stored -- see `EkosLogIngestionSummary`.
+        """
+        from wayfindinglib.drivers import local_database
+        from wayfindinglib.tasks.control_tasks import ekos_log_ingestion
+
+        if destination_dir is None:
+            destination_dir = str(local_database._wayfinding_library_path(self._config) / "ekos_logs")
+
+        frame_lookup = None
+        try:
+            from astrometricslib import Astrometrics
+
+            frame_lookup = ekos_log_ingestion.build_frame_lookup(Astrometrics())
+        except Exception as error:
+            logger.warning("Could not read the frame library to name imaging equipment: %s", error)
+
+        if download:
+            summary = ekos_log_ingestion.fetch_and_ingest_ekos_session_logs(
+                self, self._logger_interface, destination_dir, frame_lookup
+            )
+        else:
+            summary = ekos_log_ingestion.ingest_ekos_session_logs_from_directory(
+                self, self._logger_interface, destination_dir, frame_lookup
+            )
+        return summary.as_dict()
+
+    # -- Performance envelope -----------------------------------------------
+
+    def get_performance_envelope(
+        self, blur_tolerance_fraction: float | None = None, before_night: str | None = None
+    ) -> PerformanceEnvelope | None:
+        """Work out the performance limits for the equipment in use now.
+
+        Every limit is derived on the spot from the active equipment, the
+        camera's stored profile, the star width this equipment's own frames
+        show, and how this equipment behaved in earlier sessions. Nothing
+        is stored, so changing the active equipment changes every limit,
+        and the new equipment starts with no history of its own. A limit
+        without enough data says so instead of giving a guess.
+
+        Parameters
+        ----------
+        blur_tolerance_fraction : `float` or `None`, optional
+            The most guiding error and trailing may widen a star image, as
+            a fraction of its width. Defaults to 0.10.
+        before_night : `str` or `None`, optional
+            Use only this equipment's nights earlier than this one (an
+            observing-night date such as ``"2026-09-24"``) for the history
+            behind the baseline limits. Left out, the history is every
+            recorded night, which is the right one for judging a new night.
+
+        Returns
+        -------
+        envelope : `PerformanceEnvelope` or `None`
+            The limits, or `None` if no telescope and camera are active.
+        """
+        return self._derive_performance_envelope(
+            blur_tolerance_fraction,
+            before_night,
+            self._butler.get_all("ekos_session_context"),
+            self._butler.get_all("guiding_run"),
+            {},
+        )
+
+    def _capture_library(
+        self, telescope_name: str, camera_name: str, library_cache: dict[tuple[str, str, str], Any]
+    ) -> tuple[list[Any], list[Any]]:
+        """Read the equipment's light frames and stack verdicts once.
+
+        Parameters
+        ----------
+        telescope_name : `str`
+            Name of the imaging telescope.
+        camera_name : `str`
+            Name of the imaging camera.
+        library_cache : `dict`
+            Holds earlier reads, so many nights share one read.
+
+        Returns
+        -------
+        frames : `list` [`CaptureFrame`]
+            The equipment's light frames, oldest first. Empty if the frame
+            library could not be read.
+        verdicts : `list` [`StackSaturationVerdict`]
+            The science library's saturation verdicts for stacked exposures.
+        """
+        from wayfindinglib.tasks.control_tasks import capture_analysis_tasks
+
+        key = ("library", telescope_name, camera_name)
+        if key not in library_cache:
+            try:
+                from astrometricslib import Astrometrics
+
+                astrometrics = Astrometrics()
+                library_cache[key] = (
+                    capture_analysis_tasks.collect_capture_frames(
+                        astrometrics, telescope_name, camera_name, self._config
+                    ),
+                    capture_analysis_tasks.collect_stack_saturation_verdicts(astrometrics),
+                )
+            except Exception as error:
+                logger.warning("Could not read this equipment's frames from the frame library: %s", error)
+                library_cache[key] = ([], [])
+        return library_cache[key]
+
+    def _derive_performance_envelope(
+        self,
+        blur_tolerance_fraction: float | None,
+        before_night: str | None,
+        contexts: list[EkosSessionContext],
+        runs: list[GuidingRunSummary],
+        library_cache: dict[tuple[str, str, str], Any],
+    ) -> PerformanceEnvelope | None:
+        """Derive the envelope from data that is already loaded.
+
+        `library_cache` holds what was read from the science library's frame
+        records between calls, so analysing many nights reads them once, not
+        once per night.
+
+        Returns
+        -------
+        envelope : `PerformanceEnvelope` or `None`
+            The limits, or `None` if no telescope and camera are active.
+        """
+        from wayfindinglib.analytics.performance_envelope import (
+            DEFAULT_BLUR_TOLERANCE_FRACTION,
+            MINIMUM_GUIDE_CYCLES_PER_EXPOSURE,
+            derive_performance_envelope,
+        )
+        from wayfindinglib.models.equipment_and_site.equipment import EquipmentConfiguration
+        from wayfindinglib.models.equipment_and_site.equipment_fingerprint import build_equipment_fingerprint
+        from wayfindinglib.tasks.control_tasks import capture_analysis_tasks, performance_envelope_tasks
+
+        catalog = get_equipment_catalog(self._config)
+        telescope, camera = catalog.active_telescope(), catalog.active_camera()
+        if telescope is None or camera is None:
+            return None
+        guide_scope, guide_camera = catalog.active_guide_scope(), catalog.active_guide_camera()
+        equipment = EquipmentConfiguration(telescope=telescope, camera=camera)
+        guide_scale = equipment.guider_plate_scale_arcsec_per_px(guide_scope, guide_camera)
+        guide_focal_length = guide_scope.focal_length_mm if guide_scope else telescope.focal_length_mm
+        fingerprint = build_equipment_fingerprint(
+            telescope.name, camera.name, guide_focal_length, guide_scale
+        )
+
+        # The guide cycle is a property of the equipment, not of one night,
+        # so it is read from every recorded night. The baseline limits use
+        # only the nights before `before_night`.
+        every_night = performance_envelope_tasks.collect_baseline_values(
+            self._logger_interface, contexts, fingerprint, runs
+        )
+        baseline_values = (
+            every_night
+            if before_night is None
+            else performance_envelope_tasks.collect_baseline_values(
+                self._logger_interface, contexts, fingerprint, runs, before_night
+            )
+        )
+
+        # Only frames long enough for guiding error to show in them say how
+        # sharp this equipment's images are. "Long enough" is a few cycles
+        # of the equipment's own guider, known only once it has guided.
+        measured_image_quality = None
+        cadences = every_night["guide_cadence_seconds"]
+        guide_cadence = statistics.median(cadences) if cadences else None
+        capture_frames, _ = self._capture_library(telescope.name, camera.name, library_cache)
+        if guide_cadence is not None:
+            measured_image_quality = performance_envelope_tasks.image_quality_from_frames(
+                capture_frames, MINIMUM_GUIDE_CYCLES_PER_EXPOSURE * guide_cadence
+            )
+        baseline_values = {
+            **baseline_values,
+            **capture_analysis_tasks.collect_capture_baseline_values(
+                capture_frames,
+                contexts,
+                None if guide_cadence is None else MINIMUM_GUIDE_CYCLES_PER_EXPOSURE * guide_cadence,
+                before_night,
+            ),
+        }
+
+        try:
+            sensor_limits = performance_envelope_tasks.sensor_limits_for_camera(camera.name, self._config)
+        except ValueError as error:
+            logger.warning("No usable camera profiles, so no saturation limits: %s", error)
+            sensor_limits = None
+
+        def derive(values):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+            return derive_performance_envelope(
+                equipment,
+                guide_scope,
+                guide_camera,
+                fingerprint,
+                sensor_limits=sensor_limits,
+                measured_image_quality=measured_image_quality,
+                baseline_values=values,
+                guide_cadence_seconds=guide_cadence,
+                blur_tolerance_fraction=(
+                    DEFAULT_BLUR_TOLERANCE_FRACTION
+                    if blur_tolerance_fraction is None
+                    else blur_tolerance_fraction
+                ),
+            )
+
+        # The excursion limit depends on the measured star width, and each
+        # earlier night's share of excursions depends on that limit, so the
+        # envelope is derived twice: once to learn the limit, once with the
+        # nights' shares included.
+        envelope = derive(baseline_values)
+        excursion_limit = envelope.value("guide_excursion_limit")
+        if excursion_limit is not None:
+            baseline_values["guide_excursion_fraction"] = (
+                performance_envelope_tasks.collect_excursion_fraction_baseline(
+                    self._logger_interface, contexts, fingerprint, excursion_limit, before_night
+                )
+            )
+            envelope = derive(baseline_values)
+        return envelope
+
+    # -- Session-quality analysis -------------------------------------------
+
+    def _exposure_lengths_in_use(
+        self, envelope: PerformanceEnvelope | None, library_cache: dict[tuple[str, str, str], Any]
+    ) -> list[float]:
+        """List the exposure lengths the active equipment is used with.
+
+        Returns
+        -------
+        lengths : `list` [`float`]
+            The lengths, shortest first. Empty if no equipment is active, the
+            equipment has not guided yet, or no length has enough frames.
+        """
+        from wayfindinglib.tasks.control_tasks import capture_analysis_tasks
+
+        minimum = envelope.value("minimum_star_measurement_exposure") if envelope else None
+        catalog = get_equipment_catalog(self._config)
+        telescope, camera = catalog.active_telescope(), catalog.active_camera()
+        if minimum is None or telescope is None or camera is None:
+            return []
+        frames, _ = self._capture_library(telescope.name, camera.name, library_cache)
+        return capture_analysis_tasks.exposure_lengths_in_use(frames, minimum)
+
+    def _analyze_guiding_night(
+        self,
+        session_id: str,
+        contexts: list[EkosSessionContext],
+        runs: list[GuidingRunSummary],
+        library_cache: dict[tuple[str, str, str], Any],
+    ) -> GuidingSessionAnalysis | None:
+        """Analyse one night's guiding from data that is already loaded.
+
+        The night is judged against limits whose history contains only the
+        equipment's earlier nights, never the night itself or later ones.
+
+        Returns
+        -------
+        analysis : `GuidingSessionAnalysis` or `None`
+            The analysis, or `None` if the night has no runs, samples or
+            session records at all.
+        """
+        from wayfindinglib.session_analysis.guiding.pipeline import (
+            GuidingAnalysisRequest,
+            analyze_guiding_session_request,
+        )
+        from wayfindinglib.tasks.control_tasks import session_analysis_tasks as tasks
+
+        night_contexts = [context for context in contexts if context.session_id == session_id]
+        night_runs = [run for run in runs if run.session_id == session_id]
+        samples = tasks.measured_night_samples(self._logger_interface, session_id)
+        if not (night_contexts or night_runs or samples):
+            return None
+        envelope = self._derive_performance_envelope(None, session_id, contexts, runs, library_cache)
+        exposure_lengths = self._exposure_lengths_in_use(envelope, library_cache)
+        fingerprints = [c.equipment.equipment_fingerprint for c in night_contexts if c.equipment is not None]
+        match = tasks.equipment_match_level(
+            envelope.equipment_fingerprint if envelope else None, fingerprints, night_runs
+        )
+        request = GuidingAnalysisRequest(
+            session_id=session_id,
+            equipment_fingerprint=envelope.equipment_fingerprint if envelope else "unknown",
+            envelope=envelope,
+            limits_equipment_match=match,
+            samples=samples,
+            runs=night_runs,
+            guide_scale_matches_configuration=tasks.guide_scale_agreement(night_contexts),
+            logged_guide_scale=tasks.logged_guide_scale(night_runs),
+            configured_guide_scale=self.guider_plate_scale_arcsec_per_px(),
+            exposure_lengths_seconds=exposure_lengths,
+        )
+        return analyze_guiding_session_request(request)
+
+    def analyze_guiding_session(self, session_id: str) -> GuidingSessionAnalysis | None:
+        """Analyse one observing night's guiding in three stages.
+
+        Pre-processing asks whether the guiding data is good: lost frames,
+        a weak guide star, jumps to the wrong star, impossible calibrations.
+        Processing measures the guiding error, what it does to star width,
+        and the declination drift the guider had to correct. Post-processing
+        turns those into recommendations, each with the evidence and the
+        equipment-derived limit behind it. Nothing is stored: the result is
+        computed from the stored samples and the equipment's current limits.
+
+        Parameters
+        ----------
+        session_id : `str`
+            The observing night, named for the local date on which it began,
+            for example ``"2026-09-24"``.
+
+        Returns
+        -------
+        analysis : `GuidingSessionAnalysis` or `None`
+            The analysis, or `None` if nothing is recorded for that night.
+        """
+        return self._analyze_guiding_night(
+            session_id,
+            self._butler.get_all("ekos_session_context"),
+            self._butler.get_all("guiding_run"),
+            {},
+        )
+
+    def summarize_guiding_sessions(self) -> list[dict[str, Any]]:
+        """Summarise the guiding analysis of every recorded night.
+
+        Returns
+        -------
+        summaries : `list` [`dict`]
+            One row per night, oldest first: whether it was flagged and why,
+            how many samples it has, the share of lost frames, the guide
+            signal, the guiding error, and the kinds of its recommendations.
+        """
+        contexts = self._butler.get_all("ekos_session_context")
+        runs = self._butler.get_all("guiding_run")
+        library_cache: dict[tuple[str, str, str], Any] = {}
+        rows = []
+        for night in sorted({run.session_id for run in runs}):
+            analysis = self._analyze_guiding_night(night, contexts, runs, library_cache)
+            if analysis is None:
+                continue
+            rows.append({
+                "sessionId": night,
+                "flagged": analysis.flagged,
+                "flagReasons": analysis.flag_reasons,
+                "limitsEquipmentMatch": analysis.input_quality.limits_equipment_match,
+                "samples": analysis.input_quality.samples_analyzed,
+                "lostFraction": analysis.input_quality.lost_fraction,
+                "medianSnr": analysis.input_quality.median_snr,
+                "rmsPerAxisArcsec": analysis.performance.rms_per_axis_arcsec,
+                "recommendations": [r.kind.value for r in analysis.recommendations],
+            })
+        return rows
+
+    def _analyze_capture_night(
+        self,
+        session_id: str,
+        contexts: list[EkosSessionContext],
+        runs: list[GuidingRunSummary],
+        library_cache: dict[tuple[str, str, str], Any],
+    ) -> CaptureSessionAnalysis | None:
+        """Analyse one night's captured frames from already-loaded data.
+
+        The night is judged against limits whose history contains only the
+        equipment's earlier nights, never the night itself or later ones.
+
+        Returns
+        -------
+        analysis : `CaptureSessionAnalysis` or `None`
+            The analysis, or `None` if no equipment is active, or the night has
+            neither frames from this equipment nor an Ekos record.
+        """
+        from wayfindinglib.session_analysis.capture.pipeline import (
+            CaptureAnalysisRequest,
+            analyze_capture_session_request,
+        )
+        from wayfindinglib.tasks.control_tasks import capture_analysis_tasks
+
+        catalog = get_equipment_catalog(self._config)
+        telescope, camera = catalog.active_telescope(), catalog.active_camera()
+        if telescope is None or camera is None:
+            return None
+        frames, verdicts = self._capture_library(telescope.name, camera.name, library_cache)
+        night_frames = capture_analysis_tasks.frames_by_night(frames).get(session_id, [])
+        captures, aborted, has_record = capture_analysis_tasks.night_captures(contexts, session_id)
+        if not (night_frames or has_record):
+            return None
+        envelope = self._derive_performance_envelope(None, session_id, contexts, runs, library_cache)
+        request = CaptureAnalysisRequest(
+            session_id=session_id,
+            equipment_fingerprint=envelope.equipment_fingerprint if envelope else "unknown",
+            envelope=envelope,
+            limits_equipment_match="exact" if night_frames and envelope else "none",
+            frames=night_frames,
+            captures=captures,
+            aborted_captures=aborted,
+            has_ekos_record=has_record,
+            stack_saturation=verdicts,
+            sensor_pixel_count=camera.sensor_width_px * camera.sensor_height_px,
+        )
+        return analyze_capture_session_request(request)
+
+    def analyze_capture_session(self, session_id: str) -> CaptureSessionAnalysis | None:
+        """Analyse one observing night's captured frames in three stages.
+
+        Pre-processing asks whether the capture data is good: whether every
+        exposure Ekos finished reached the frame library, whether frames carry
+        the measurements later steps need, and whether exposures were
+        cancelled often. Processing measures which exposures clipped a star,
+        how sharp and round the stars were, and how much of the night was
+        spent exposing. Post-processing turns those into recommendations, each
+        with the evidence and the equipment-derived limit behind it. The
+        science library's own saturation verdicts are used wherever it has
+        stacked the target. Nothing is stored: the result is computed from the
+        recorded frames and the equipment's current limits.
+
+        Parameters
+        ----------
+        session_id : `str`
+            The observing night, named for the local date on which it began,
+            for example ``"2026-09-24"``.
+
+        Returns
+        -------
+        analysis : `CaptureSessionAnalysis` or `None`
+            The analysis, or `None` if nothing is recorded for that night.
+        """
+        return self._analyze_capture_night(
+            session_id,
+            self._butler.get_all("ekos_session_context"),
+            self._butler.get_all("guiding_run"),
+            {},
+        )
+
+    def summarize_capture_sessions(self) -> list[dict[str, Any]]:
+        """Summarise the capture analysis of every recorded night.
+
+        Returns
+        -------
+        summaries : `list` [`dict`]
+            One row per night, oldest first: whether it was flagged and why,
+            how many light frames it has, how many Ekos exposures have no
+            frame, the median star width, and the kinds of its
+            recommendations.
+        """
+        from wayfindinglib.tasks.control_tasks import capture_analysis_tasks
+
+        contexts = self._butler.get_all("ekos_session_context")
+        runs = self._butler.get_all("guiding_run")
+        library_cache: dict[tuple[str, str, str], Any] = {}
+        catalog = get_equipment_catalog(self._config)
+        telescope, camera = catalog.active_telescope(), catalog.active_camera()
+        if telescope is None or camera is None:
+            return []
+        frames, _ = self._capture_library(telescope.name, camera.name, library_cache)
+        nights = set(capture_analysis_tasks.frames_by_night(frames)) | {
+            context.session_id for context in contexts if context.captures
+        }
+        rows = []
+        for night in sorted(nights):
+            analysis = self._analyze_capture_night(night, contexts, runs, library_cache)
+            if analysis is None:
+                continue
+            rows.append({
+                "sessionId": night,
+                "flagged": analysis.flagged,
+                "flagReasons": analysis.flag_reasons,
+                "lightFrames": analysis.input_quality.light_frames,
+                "capturesWithoutFrame": analysis.input_quality.captures_without_frame,
+                "medianStarWidthArcsec": analysis.performance.star_quality.median_star_width_arcsec,
+                "dutyCycle": analysis.performance.efficiency.duty_cycle,
+                "recommendations": [r.kind.value for r in analysis.recommendations],
+            })
+        return rows
+
+    def analyze_sky_coverage(self) -> SkyAnalysis | None:
+        """Compare how the equipment performs in different parts of the sky.
+
+        Across every recorded night, asks whether stars were wider or less
+        round, or the guiding error larger, at low altitude, in one azimuth
+        direction, or on one side of the pier. Each measurement is compared
+        with the typical value of the same night, which removes the night's
+        seeing, and a part of the sky is judged only when several nights
+        reached it. The result also maps which parts of the sky no night
+        reached, so they are not mistaken for parts that performed well.
+        Nothing is stored.
+
+        Returns
+        -------
+        analysis : `SkyAnalysis` or `None`
+            The analysis, or `None` if no telescope and camera are active.
+        """
+        from wayfindinglib.session_analysis.sky.pipeline import SkyAnalysisRequest, analyze_sky_request
+        from wayfindinglib.tasks.control_tasks import sky_analysis_tasks
+
+        catalog = get_equipment_catalog(self._config)
+        telescope, camera = catalog.active_telescope(), catalog.active_camera()
+        if telescope is None or camera is None:
+            return None
+        contexts = self._butler.get_all("ekos_session_context")
+        runs = self._butler.get_all("guiding_run")
+        library_cache: dict[tuple[str, str, str], Any] = {}
+        envelope = self._derive_performance_envelope(None, None, contexts, runs, library_cache)
+        frames, _ = self._capture_library(telescope.name, camera.name, library_cache)
+        frame_samples, frames_without_position = sky_analysis_tasks.sky_samples_from_frames(
+            frames, envelope.value("minimum_star_measurement_exposure") if envelope else None
+        )
+        guiding_analyses = [
+            analysis
+            for night in sorted({run.session_id for run in runs})
+            if (analysis := self._analyze_guiding_night(night, contexts, runs, library_cache)) is not None
+        ]
+        run_samples, runs_without_position, nights_excluded = sky_analysis_tasks.sky_samples_from_guiding(
+            guiding_analyses
+        )
+        samples = [*frame_samples, *run_samples]
+        nights = sorted({sample.night for sample in samples})
+        request = SkyAnalysisRequest(
+            session_id=f"{nights[0]}..{nights[-1]}" if nights else "none",
+            equipment_fingerprint=envelope.equipment_fingerprint if envelope else "unknown",
+            envelope=envelope,
+            limits_equipment_match="exact",
+            samples=samples,
+            samples_without_position=frames_without_position + runs_without_position,
+            guiding_nights_excluded=nights_excluded,
+            minimum_altitude_degrees=telescope.min_altitude_deg,
+            maximum_altitude_degrees=telescope.max_altitude_deg,
+            blur_tolerance_fraction=envelope.blur_tolerance_fraction if envelope else 0.10,
+        )
+        return analyze_sky_request(request)
+
+    def summarize_recurring_issues(self) -> list[RecurringIssue]:
+        """List the findings that repeat across nights.
+
+        Runs the guiding and capture analyses on every night and reports each
+        finding of advice or warning level that appears on at least two. A
+        single bad night can be weather. The same finding on many nights points
+        at the equipment or the routine. Nothing is stored.
+
+        Returns
+        -------
+        issues : `list` [`RecurringIssue`]
+            Each recurring finding with the nights it appeared on, most
+            frequent first.
+        """
+        from wayfindinglib.session_analysis.recurring_issues import find_recurring_issues
+        from wayfindinglib.tasks.control_tasks import capture_analysis_tasks
+
+        contexts = self._butler.get_all("ekos_session_context")
+        runs = self._butler.get_all("guiding_run")
+        library_cache: dict[tuple[str, str, str], Any] = {}
+        catalog = get_equipment_catalog(self._config)
+        telescope, camera = catalog.active_telescope(), catalog.active_camera()
+        capture_nights: set[str] = {context.session_id for context in contexts if context.captures}
+        if telescope is not None and camera is not None:
+            frames, _ = self._capture_library(telescope.name, camera.name, library_cache)
+            capture_nights |= set(capture_analysis_tasks.frames_by_night(frames))
+        per_night: list[tuple[str, str, list[Any]]] = []
+        for night in sorted({run.session_id for run in runs}):
+            guiding = self._analyze_guiding_night(night, contexts, runs, library_cache)
+            if guiding is not None:
+                per_night.append(("guiding", night, guiding.recommendations))
+        for night in sorted(capture_nights):
+            capture = self._analyze_capture_night(night, contexts, runs, library_cache)
+            if capture is not None:
+                per_night.append(("capture", night, capture.recommendations))
+        return find_recurring_issues(per_night)
+
+    def run_guide_exposure_test(
+        self,
+        exposure_seconds: tuple[float, ...] = (0.5, 1.0, 2.0, 4.0),
+        frames_per_exposure: int = 8,
+        gain: float | None = None,
+    ) -> GuideExposureLadder:
+        """Find the shortest guide exposure this guide camera needs.
+
+        Takes a short series of guide frames at each exposure length while
+        the mount tracks without guiding. For each length it measures how
+        bright the guide star is, whether it saturates, and how much its
+        measured position jumps from frame to frame, in arcseconds. Seeing
+        moves the star at every length, so a short exposure is judged by the
+        noise it adds beyond the best length tried, against the guiding error
+        this equipment can absorb. The answer is the shortest length that
+        works, or a statement that none did and what to check.
+
+        This commands the guide camera (exposures only). It does not move the
+        mount and does not guide. Point the guide scope at a bright star
+        first. The frame capture has not yet been run against the real guide
+        camera.
+
+        Parameters
+        ----------
+        exposure_seconds : `tuple` [`float`, ...], optional
+            The exposure lengths to try.
+        frames_per_exposure : `int`, optional
+            Frames to take at each length. At least 5 are needed to work out
+            the position noise.
+        gain : `float` or `None`, optional
+            Guide camera gain to set for the test, or `None` to leave it alone.
+
+        Returns
+        -------
+        test : `GuideExposureLadder`
+            One result per length and the recommended exposure.
+
+        Raises
+        ------
+        RuntimeError
+            If the telescope host is not reachable, no guide camera or limits
+            are configured, or the camera does not deliver a frame.
+        """
+        from wayfindinglib.analytics.guide_exposure_ladder import analyze_guide_exposure_ladder
+        from wayfindinglib.tasks.control_tasks import guide_exposure_ladder_tasks, performance_envelope_tasks
+
+        if not self.check_remote_connection():
+            raise RuntimeError("The telescope host is not reachable, so the guide camera cannot be used.")
+        catalog = get_equipment_catalog(self._config)
+        guide_camera = catalog.active_guide_camera()
+        plate_scale = self.guider_plate_scale_arcsec_per_px()
+        if guide_camera is None or plate_scale is None:
+            raise RuntimeError("No guide camera and guide optics are configured.")
+        envelope = self.get_performance_envelope()
+        ceiling = performance_envelope_tasks.sensor_limits_for_camera(
+            guide_camera.name, self._config
+        ).clip_ceiling_adu
+        frames = guide_exposure_ladder_tasks.capture_guide_ladder(
+            lambda seconds, camera_gain: self.guide_expose(seconds, camera_gain),
+            self.get_guide_image,
+            exposure_seconds,
+            frames_per_exposure,
+            gain,
+        )
+        return analyze_guide_exposure_ladder(
+            frames,
+            plate_scale,
+            ceiling,
+            envelope.value("guiding_rms_limit") if envelope else None,
+            envelope.blur_tolerance_fraction if envelope else 0.10,
         )
 
     def get_pointing_model(self, session_id: str | None = None) -> MountPointingModel:

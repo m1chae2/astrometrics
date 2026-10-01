@@ -112,6 +112,166 @@ def test_guider_plate_scale_uses_active_guide_scope_focal_length(control, app_co
     assert plate_scale != pytest.approx(main_plate_scale, abs=1e-4)
 
 
+def test_guider_plate_scale_uses_the_active_guide_camera_pixel_size(control, app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify a guide camera's pixel size is used, not the main one's."""
+    _configure_active_rig(app_config)
+    app_config.update_config({
+        "Observatory.GuideScope": {"models": "Orion 50mm", "active_guide_scope": "Orion 50mm"},
+        "Observatory.GuideScope.Orion 50mm": {"focal_length_mm": "162.0"},
+        "Observatory.Camera": {"models": "CamA, GuideCam", "default_guide_camera": "GuideCam"},
+        "Observatory.Camera.GuideCam": {
+            "pixel_size_μm": "3.75",
+            "sensor_width_px": "1280",
+            "sensor_height_px": "960",
+        },
+    })
+    control.set_active_telescope("Rig A")
+    control.set_active_camera("CamA")
+
+    assert control.active_guide_camera().id == "GuideCam"
+    assert control.guider_plate_scale_arcsec_per_px() == pytest.approx(206.265 * 3.75 / 162.0, abs=1e-4)
+
+
+_EKOS_GUIDE_LOG = (
+    "KStars version 3.8.3. PHD2 log version 2.5. Log enabled at 2026-09-23 20:43:05\n\n"
+    "Guiding Begins at 2026-09-23 20:50:00\n"
+    "Pixel scale = 6.39 arc-sec/px, Binning = 1, Focal length = 121.05 mm\n"
+    "Frame,Time,mount,dx,dy,RARawDistance,DECRawDistance,RAGuideDistance,DECGuideDistance,"
+    "RADuration,RADirection,DECDuration,DECDirection,XStep,YStep,StarMass,SNR,ErrorCode\n"
+    '1,2.0,"Mount",0.1,0.1,0.100,0.200,0.1,0.1,10,E,10,N,,,250000,40.0,0\n'
+    "Guiding Ends at 2026-09-23 20:55:00\n"
+)
+_EKOS_ANALYZE_LOG = (
+    "#KStars version 3.8.3. Analyze log version 1.0.\n\n"
+    "AnalyzeStartTime,2026-09-23 20:31:48.442,MDT\n"
+    "CaptureComplete,1500.0,30.000,Luminance,1.262,/home/stellarmate/M_27_001.fits,238,460,0.452\n"
+)
+
+
+def test_ingest_ekos_session_logs_stores_samples_and_a_retrievable_session(control, app_config, tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify the whole chain with a real Butler and a real log database."""
+    (tmp_path / "science_library").mkdir()
+    app_config.update_config({"Image Library": {"path": str(tmp_path / "science_library")}})
+    logs_directory = tmp_path / "ekos_logs"
+    logs_directory.mkdir()
+    (logs_directory / "guide_log-2026-09-23T20-43-05.txt").write_text(_EKOS_GUIDE_LOG, encoding="utf-8")
+    (logs_directory / "ekos-2026-09-23T20-31-48.analyze").write_text(_EKOS_ANALYZE_LOG, encoding="utf-8")
+
+    summary = control.ingest_ekos_session_logs(destination_dir=str(logs_directory), download=False)
+
+    assert summary["guide_samples_stored"] == 1
+    assert summary["session_contexts_stored"] == 1
+    assert summary["nights"] == ["2026-09-23"]
+    (listed,) = control.list_ekos_session_summaries()
+    assert listed["id"] == "2026-09-23T20-31-48"
+    assert listed["captures"] == 1
+    assert "guide_focal_mm=121" in listed["equipmentFingerprint"]
+    context = control.get_ekos_session_context("2026-09-23T20-31-48")
+    assert context.equipment.guide_pixel_scale_arcsec_per_px == pytest.approx(6.39)
+    (run,) = control.list_guiding_runs()
+    assert run.session_id == "2026-09-23"
+    assert control.list_guiding_runs("1999-01-01") == []
+
+
+def test_ingest_ekos_session_logs_twice_does_not_duplicate_anything(control, app_config, tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify a repeat run leaves one sample and one session record."""
+    (tmp_path / "science_library").mkdir()
+    app_config.update_config({"Image Library": {"path": str(tmp_path / "science_library")}})
+    logs_directory = tmp_path / "ekos_logs"
+    logs_directory.mkdir()
+    (logs_directory / "guide_log-2026-09-23T20-43-05.txt").write_text(_EKOS_GUIDE_LOG, encoding="utf-8")
+    (logs_directory / "ekos-2026-09-23T20-31-48.analyze").write_text(_EKOS_ANALYZE_LOG, encoding="utf-8")
+
+    control.ingest_ekos_session_logs(destination_dir=str(logs_directory), download=False)
+    control.ingest_ekos_session_logs(destination_dir=str(logs_directory), download=False)
+
+    assert len(control.list_ekos_session_summaries()) == 1
+    assert len(control._logger_interface.get_guiding_logs()) == 1
+
+
+def test_get_ekos_session_context_is_none_for_an_unknown_session(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify asking for a session that was never recorded gives None."""
+    assert control.get_ekos_session_context("1999-01-01T00-00-00") is None
+
+
+def _configure_two_rigs(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    """Configure two complete equipment setups, a short and a long one."""
+    app_config.update_config({
+        "Observatory.Telescope": {"models": "Short, Long", "active_telescope": "Short"},
+        "Observatory.Telescope.Short": {"focal_length_mm": "400.0", "focal_ratio": "5.0"},
+        "Observatory.Telescope.Long": {"focal_length_mm": "1000.0", "focal_ratio": "8.0"},
+        "Observatory.GuideScope": {"models": "Guide 120, Guide 240", "active_guide_scope": "Guide 120"},
+        "Observatory.GuideScope.Guide 120": {"focal_length_mm": "120.0", "aperture_mm": "30"},
+        "Observatory.GuideScope.Guide 240": {"focal_length_mm": "240.0", "aperture_mm": "50"},
+        "Observatory.Camera": {
+            "models": "Main A, Main B, Guider",
+            "default_primary_camera": "Main A",
+            "default_guide_camera": "Guider",
+        },
+        "Observatory.Camera.Main A": {
+            "pixel_size_μm": "3.76",
+            "sensor_width_px": "3008",
+            "sensor_height_px": "3008",
+        },
+        "Observatory.Camera.Main B": {
+            "pixel_size_μm": "5.94",
+            "sensor_width_px": "6248",
+            "sensor_height_px": "4176",
+        },
+        "Observatory.Camera.Guider": {
+            "pixel_size_μm": "3.75",
+            "sensor_width_px": "1280",
+            "sensor_height_px": "960",
+        },
+    })
+
+
+def test_the_performance_envelope_is_none_without_active_equipment(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify no telescope and camera means no envelope, not a made-up one."""
+    assert control.get_performance_envelope() is None
+
+
+def test_changing_the_active_equipment_changes_every_limit_with_no_other_step(control, app_config, tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify the limits follow the equipment automatically.
+
+    The requirement this tests: nothing about the limits is stored, so
+    swapping the telescope, camera or guide scope is all it takes for
+    every dependent limit to change.
+    """
+    (tmp_path / "science_library").mkdir()
+    app_config.update_config({"Image Library": {"path": str(tmp_path / "science_library")}})
+    _configure_two_rigs(app_config)
+
+    before = control.get_performance_envelope()
+    app_config.update_config({
+        "Observatory.Telescope": {"active_telescope": "Long"},
+        "Observatory.Camera": {"default_primary_camera": "Main B"},
+        "Observatory.GuideScope": {"active_guide_scope": "Guide 240"},
+    })
+    after = control.get_performance_envelope()
+
+    assert before.value("imaging_plate_scale") == pytest.approx(206.265 * 3.76 / 400.0)
+    assert after.value("imaging_plate_scale") == pytest.approx(206.265 * 5.94 / 1000.0)
+    assert before.value("guide_plate_scale") == pytest.approx(206.265 * 3.75 / 120.0)
+    assert after.value("guide_plate_scale") == pytest.approx(206.265 * 3.75 / 240.0)
+    assert before.equipment_fingerprint != after.equipment_fingerprint
+    assert "telescope=short" in before.equipment_fingerprint
+    assert "telescope=long" in after.equipment_fingerprint
+
+
+def test_the_envelope_is_honest_about_data_a_new_setup_does_not_have_yet(control, app_config, tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify a setup with no frames or sessions gets no measured limits."""
+    (tmp_path / "science_library").mkdir()
+    app_config.update_config({"Image Library": {"path": str(tmp_path / "science_library")}})
+    _configure_two_rigs(app_config)
+
+    envelope = control.get_performance_envelope()
+
+    for name in ("guiding_rms_limit", "trailing_limit", "guide_snr_low_limit", "guiding_rms_high_limit"):
+        assert envelope.value(name) is None
+        assert envelope.thresholds[name].status.value == "insufficient_data"
+
+
 def test_compute_pointing_correction_delegates_with_astrometrics_config(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify compute_pointing_correction forwards to the task function."""
     correction = control.compute_pointing_correction("frame-1", 180.0, 0.0, 180.0, 0.0, iteration=1)

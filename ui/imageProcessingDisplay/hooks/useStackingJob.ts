@@ -29,6 +29,8 @@ export type LightFrameRow = [string, string, number];
 
 export interface StackingJobResult {
     lightFrames: LightFrameRow[];
+    /** Whether the light-frame summary for the selected target is still being fetched. */
+    isLoadingFrames: boolean;
     logLines: string[];
     isProcessing: boolean;
     startProcessing: (imageFiles?: string[], logFile?: string) => Promise<void>;
@@ -99,6 +101,24 @@ export function useStackingJob(
         return () => { mounted = false; };
     }, [selectedTarget]);
 
+    // Identifies which fetch of the light-frame summary is currently wanted:
+    // null means "nothing to fetch" (no target selected, or `shouldFetch` --
+    // typically whether the target is confirmed local -- is false); a string
+    // means a fetch for that target+reload-generation is wanted. Comparing
+    // this against `settledFramesKey` below gives `isLoadingFrames` purely
+    // from this render's own values, with no dependency on a *separate*
+    // piece of state that this hook's own effect would otherwise have to
+    // "catch up" to a render late. That matters because `shouldFetch` itself
+    // often flips from false to true only once a prerequisite (e.g. the
+    // shared target list) finishes loading elsewhere -- if `isLoadingFrames`
+    // were instead toggled by this hook's effect, callers gating "fully
+    // loaded" on it (see ImageProcessingDisplay.tsx's app boot readiness
+    // check) could read a stale "not loading" value for one render after
+    // `shouldFetch` flips true but before this hook's effect has run again.
+    const pendingFramesKey = selectedTarget && shouldFetch ? `${selectedTarget}:${framesReloadKey}` : null;
+    const [settledFramesKey, setSettledFramesKey] = useState<string | null>(null);
+    const isLoadingFrames = pendingFramesKey !== null && settledFramesKey !== pendingFramesKey;
+
     // Fetch and parse light frames
     useEffect(() => {
         let mounted = true;
@@ -120,6 +140,8 @@ export function useStackingJob(
                 if (mounted) setLightFrames(rows);
             } catch (err) {
                 if (mounted) reportError(err, 'useStackingJob');
+            } finally {
+                if (mounted) setSettledFramesKey(`${selectedTarget}:${framesReloadKey}`);
             }
         };
         loadFrames();
@@ -209,6 +231,7 @@ export function useStackingJob(
 
     return {
         lightFrames,
+        isLoadingFrames,
         logLines,
         isProcessing,
         startProcessing,

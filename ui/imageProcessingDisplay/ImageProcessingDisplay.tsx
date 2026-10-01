@@ -64,7 +64,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
     items, isLoading: isTargetListLoading, filterOptions, selectedFilterOption, setFilterOption,
     filterText, setFilterText,
     isLocalTarget,
-    lightFrames, isProcessing, startProcessing, cancelProcessingJob,
+    lightFrames, isLoadingFrames, isProcessing, startProcessing, cancelProcessingJob,
     refreshFrames, isAnalyzing, analysisResults, startAnalysis,
     logLines, clearLogs,
     files,
@@ -72,7 +72,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
   } = useImageProcessingContext();
 
   const {
-    allFiles, filteredFiles, exposureCounts, fileFilterText, setFileFilterText,
+    allFiles, isLoadingFiles, filteredFiles, exposureCounts, fileFilterText, setFileFilterText,
     selectedFile, setSelectedFile, filesToDelete, handleRequestDeleteFiles, confirmDeleteFiles,
     showFileDeleteConfirm, setShowFileDeleteConfirm,
     checkedFiles, setCheckedFiles, toggleFile, toggleAllFiles,
@@ -89,7 +89,26 @@ const ImageProcessingDisplayInner: React.FC = () => {
     loading, error, stretch, toggleStretch,
     setSelectedLightRow, selectedLightRow
   } = useViewerState(selectedTarget, lightFrames, selectedFile);
-  useReportModeReady('Image Processing', !loading);
+
+  // "Ready" for the app-boot splash screen means the viewer has actually
+  // settled on its initial image, not merely that `loading` happens to be
+  // false on the render where this runs -- `loading` starts false and only
+  // flips true a couple of effects downstream of the target/frames data
+  // arriving (see useViewerState.ts), so checking it alone reports ready
+  // before that chain even begins. Gating on `isTargetListLoading` and
+  // `isLoadingFrames` (both seeded true-while-something-is-selected, see
+  // useStackingJob.ts) closes that gap: this can't go true until the target
+  // list and the selected target's frame summary have both genuinely
+  // resolved, by which point `loading`'s own true/false transition (if any)
+  // is a same-frame formality rather than a multi-second race.
+  const hasFrameToAutoLoad = lightFrames.length > 0 && !selectedFile;
+  const isViewerSettled = !loading && (
+    !selectedTarget || !hasFrameToAutoLoad || imageUrl !== null || error !== null
+  );
+  useReportModeReady(
+    'Image Processing',
+    !isTargetListLoading && !isLoadingFrames && !isLoadingFiles && isViewerSettled
+  );
 
   // The raw frames ticked for stacking must not stay ticked once stacking
   // ends. A leftover selection would be sent to the next Analyze run in

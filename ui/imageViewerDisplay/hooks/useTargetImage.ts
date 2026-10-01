@@ -26,7 +26,15 @@ export function useTargetImage(
 ): UseTargetImageResult {
     const [imageUrl, setImageUrl] = useState<string | null>(null);
     const [imageBlob, setImageBlob] = useState<Blob | null>(null);
-    const [loading, setLoading] = useState<boolean>(false);
+    // Seeded from whether a target is already selected at mount (e.g.
+    // restored from localStorage) rather than always starting false. The app
+    // boot readiness check (see ImageViewerDisplay.tsx, ui/common/utils/
+    // appBootReadiness.ts) gates the splash screen on `!loading`; if this
+    // started false unconditionally, that check would read "ready" on the
+    // very first render, before the fetch effect below even runs, and the
+    // splash would dismiss before the real image fetch (which can take
+    // several seconds) has started.
+    const [loading, setLoading] = useState<boolean>(() => Boolean(targetId));
     const [error, setError] = useState<string | null>(null);
     const [refreshCount, setRefreshCount] = useState<number>(0);
 

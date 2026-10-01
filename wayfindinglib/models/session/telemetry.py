@@ -12,9 +12,37 @@ are unaffected by the transition.
 """
 
 import math
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
+
+
+class GuidingSampleSource(StrEnum):
+    """Where a stored guiding sample came from.
+
+    The difference matters because only some sources are measurements of
+    the real star. `INDI_PULSE_ESTIMATE` samples are reconstructed from
+    the guide pulses the mount received: their drift values are a model
+    of what those pulses imply, not something a camera saw, so they must
+    never be treated as measurements.
+    """
+
+    PHD2_GUIDE_LOG = "phd2_guide_log"
+    PHD2_LIVE = "phd2_live"
+    EKOS_GUIDE_LOG = "ekos_guide_log"
+    EKOS_ANALYZE_LOG = "ekos_analyze_log"
+    INDI_PULSE_ESTIMATE = "indi_pulse_estimate"
+    UNVERIFIED = "unverified"
+
+
+MEASURED_GUIDING_SAMPLE_SOURCES: tuple[GuidingSampleSource, ...] = (
+    GuidingSampleSource.PHD2_GUIDE_LOG,
+    GuidingSampleSource.PHD2_LIVE,
+    GuidingSampleSource.EKOS_GUIDE_LOG,
+    GuidingSampleSource.EKOS_ANALYZE_LOG,
+)
+"""The sources whose drift values were measured from a real guide star."""
 
 
 class GuidingSample(BaseModel):
@@ -52,6 +80,7 @@ class AlignmentAttempt(BaseModel):
     pointing_error_arcsec: float | None = Field(default=None, alias="pointingErrorArcsec")
     timestamp: float | None = Field(default=None, alias="timestamp")
     target_name: str | None = Field(default=None, alias="targetName")
+    session_id: str | None = Field(default=None, alias="sessionId")
 
     @property
     def pointing_error(self) -> float | None:

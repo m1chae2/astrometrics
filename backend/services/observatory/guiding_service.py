@@ -9,6 +9,7 @@ from typing import Any
 from wayfindinglib.api.control_registry import ObservatoryControl
 from wayfindinglib.drivers.phd2.phd2_client import PHD2Client
 from wayfindinglib.drivers.phd2.phd2_guiding_service import PHD2GuidingService
+from wayfindinglib.models.session.telemetry import GuidingSampleSource
 
 logger = logging.getLogger(__name__)
 
@@ -207,6 +208,7 @@ class GuidingService:
                                     "rms_ra": s.rms_ra,
                                     "rms_dec": s.rms_dec,
                                     "target_name": target_name,
+                                    "source": GuidingSampleSource.PHD2_LIVE.value,
                                 }
                                 for s in phd2_samples
                             ]
@@ -319,7 +321,14 @@ class GuidingService:
             if self._logger_interface and coalesced:
                 try:
                     target_name = self._current_target_name()
-                    records = [{**s, "target_name": target_name} for s in self._history[-len(coalesced) :]]
+                    records = [
+                        {
+                            **s,
+                            "target_name": target_name,
+                            "source": GuidingSampleSource.INDI_PULSE_ESTIMATE.value,
+                        }
+                        for s in self._history[-len(coalesced) :]
+                    ]
                     self._logger_interface.record_guiding_samples(records)
                 except Exception as log_err:
                     logger.debug(f"Failed to record INDI guiding samples: {log_err}")

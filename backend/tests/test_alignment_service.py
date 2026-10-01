@@ -87,6 +87,7 @@ def test_get_attempts_returns_alias_keyed_dicts():  # ruff: ignore[missing-retur
             "pointingErrorArcsec": None,
             "timestamp": None,
             "targetName": None,
+            "sessionId": None,
         }
     ]
 

@@ -261,3 +261,49 @@ def test_get_equipment_catalog_ignores_unresolved_active_guide_scope_id(app_conf
     })
     catalog = get_equipment_catalog(app_config)
     assert catalog.active_guide_scope() is None
+
+
+def _configure_two_cameras(app_config, **camera_section_overrides: str):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    """Configure a main camera and a guide camera in an isolated config."""
+    camera_section = {
+        "models": "Main, Guide",
+        "default_primary_camera": "Main",
+        **camera_section_overrides,
+    }
+    app_config.update_config({
+        "Observatory.Camera": camera_section,
+        "Observatory.Camera.Main": {
+            "pixel_size_μm": "3.76",
+            "sensor_width_px": "3008",
+            "sensor_height_px": "3008",
+        },
+        "Observatory.Camera.Guide": {
+            "pixel_size_μm": "3.75",
+            "sensor_width_px": "1280",
+            "sensor_height_px": "960",
+        },
+    })
+
+
+def test_guide_camera_is_unset_when_nothing_is_configured(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify no guide-camera key means the main camera guides."""
+    _configure_two_cameras(app_config)
+    assert get_equipment_catalog(app_config).active_guide_camera() is None
+
+
+def test_explicit_default_guide_camera_key_selects_the_guide_camera(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify `default_guide_camera` resolves to a configured camera."""
+    _configure_two_cameras(app_config, default_guide_camera="Guide")
+    assert get_equipment_catalog(app_config).active_guide_camera().id == "Guide"
+
+
+def test_legacy_secondary_camera_key_is_the_guide_camera_fallback(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify a config that only has `default_secondary_camera` still works."""
+    _configure_two_cameras(app_config, default_secondary_camera="Guide")
+    assert get_equipment_catalog(app_config).active_guide_camera().id == "Guide"
+
+
+def test_an_unknown_guide_camera_name_resolves_to_none_not_an_error(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify a stale guide-camera name never breaks catalog loading."""
+    _configure_two_cameras(app_config, default_guide_camera="Removed Camera")
+    assert get_equipment_catalog(app_config).active_guide_camera() is None

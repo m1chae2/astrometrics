@@ -44,6 +44,8 @@ _LEGACY_TELESCOPE_SECTION = "Telescope"
 ACTIVE_TELESCOPE_KEY = "active_telescope"
 CAMERA_SECTION = "Observatory.Camera"
 ACTIVE_CAMERA_KEY = "default_primary_camera"
+ACTIVE_GUIDE_CAMERA_KEY = "default_guide_camera"
+_SECONDARY_CAMERA_KEY = "default_secondary_camera"
 _SINGLE_TELESCOPE_FALLBACK_NAME = "Apertura 75Q"
 GUIDE_SCOPE_SECTION = "Observatory.GuideScope"
 ACTIVE_GUIDE_SCOPE_KEY = "active_guide_scope"
@@ -301,6 +303,26 @@ def get_active_guide_scope_id(config) -> str | None:  # ruff: ignore[missing-typ
     return config.get_value(GUIDE_SCOPE_SECTION, ACTIVE_GUIDE_SCOPE_KEY)
 
 
+def get_active_guide_camera_id(config) -> str | None:  # ruff: ignore[missing-type-function-argument]
+    """Return the configured guide camera identifier, or `None` if unset.
+
+    Reads ``default_guide_camera`` under ``[Observatory.Camera]``. A
+    config written before that key existed names its second camera
+    with ``default_secondary_camera``; that camera is the guide camera
+    in every setup this library has been used with, so it is used when
+    the explicit key is absent.
+
+    Returns
+    -------
+    guide_camera_id : `str` or `None`
+        The configured guide camera id, or `None` when the main camera
+        also does the guiding.
+    """
+    return config.get_value(CAMERA_SECTION, ACTIVE_GUIDE_CAMERA_KEY) or config.get_value(
+        CAMERA_SECTION, _SECONDARY_CAMERA_KEY
+    )
+
+
 def _validate_protocol(entity_kind: str, entity_name: str, field_name: str, protocol: str) -> None:
     """Raise a clear error if a configured protocol name has no driver.
 
@@ -374,6 +396,12 @@ def get_equipment_catalog(config) -> EquipmentCatalog:  # ruff: ignore[missing-t
         # not an oversight to silently correct.
         active_guide_scope_id = None
 
+    active_guide_camera_id = get_active_guide_camera_id(config)
+    if active_guide_camera_id not in {c.id for c in cameras}:
+        # No "first available" fallback, for the same reason as the guide
+        # scope: an unset guide camera means the main camera guides.
+        active_guide_camera_id = None
+
     return EquipmentCatalog(
         id="default",
         telescopes=telescopes,
@@ -382,4 +410,5 @@ def get_equipment_catalog(config) -> EquipmentCatalog:  # ruff: ignore[missing-t
         active_telescope_id=active_telescope_id,
         active_camera_id=active_camera_id,
         active_guide_scope_id=active_guide_scope_id,
+        active_guide_camera_id=active_guide_camera_id,
     )

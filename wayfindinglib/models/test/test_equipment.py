@@ -162,3 +162,52 @@ def test_guider_plate_scale_uses_guide_scope_focal_length_when_active():  # ruff
     plate_scale = config.guider_plate_scale_arcsec_per_px(guide_scope)
     assert plate_scale == pytest.approx(4.78740, abs=1e-4)
     assert plate_scale != pytest.approx(config.plate_scale_arcsec_per_px)
+
+
+def test_equipment_catalog_active_guide_camera_none_when_unset():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify active_guide_camera() returns None -- the main camera guides."""
+    catalog = EquipmentCatalog(id="cat1", telescopes=[], cameras=[])
+    assert catalog.active_guide_camera() is None
+
+
+def test_equipment_catalog_rejects_unresolvable_active_guide_camera_id():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify an active_guide_camera_id absent from cameras is rejected."""
+    with pytest.raises(ValidationError):
+        EquipmentCatalog(id="cat1", telescopes=[], cameras=[_make_camera()], active_guide_camera_id="nope")
+
+
+def test_equipment_catalog_resolves_active_guide_camera():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify active_guide_camera() resolves the matching configured camera."""
+    guide_camera = _make_camera(id="guide", name="ZWO ASI120MC-S", pixel_size_um=3.75)
+    catalog = EquipmentCatalog(
+        id="cat1",
+        telescopes=[],
+        cameras=[_make_camera(), guide_camera],
+        active_guide_camera_id="guide",
+    )
+    assert catalog.active_guide_camera() is guide_camera
+
+
+def test_guider_plate_scale_uses_guide_camera_pixel_size_and_guide_scope_focal_length():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify the guide plate scale uses the guide camera's own pixel size.
+
+    The user's real guide train: a 121.05 mm guide scope and an
+    ASI120MC-S with 3.75 um pixels, about 6.39 arcsec/px. Using the
+    main camera's 3.76 um pixels (the old behaviour) would give 6.41,
+    and using the main telescope's focal length too would give 1.9.
+    """
+    main = EquipmentConfiguration(telescope=_make_telescope(focal_length_mm=405.0), camera=_make_camera())
+    guide_scope = GuideScope(id="g", name="Apertura 32mm", focal_length_mm=121.05, aperture_mm=32.0)
+    guide_camera = _make_camera(id="guide", name="ZWO ASI120MC-S", pixel_size_um=3.75)
+
+    scale = main.guider_plate_scale_arcsec_per_px(guide_scope, guide_camera)
+
+    assert scale == pytest.approx(206.265 * 3.75 / 121.05)
+    assert scale != pytest.approx(main.guider_plate_scale_arcsec_per_px(guide_scope))
+
+
+def test_guider_plate_scale_uses_guide_camera_with_the_main_telescope():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify a guide camera alone changes only the pixel size."""
+    main = EquipmentConfiguration(telescope=_make_telescope(focal_length_mm=450.0), camera=_make_camera())
+    guide_camera = _make_camera(id="guide", name="Guide", pixel_size_um=3.75)
+    assert main.guider_plate_scale_arcsec_per_px(None, guide_camera) == pytest.approx(206.265 * 3.75 / 450.0)

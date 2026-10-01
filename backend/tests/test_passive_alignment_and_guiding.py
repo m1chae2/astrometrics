@@ -365,6 +365,7 @@ def test_guiding_service_persists_live_samples_to_logger_interface() -> None:
     assert len(samples) == 1
     assert samples[0]["dra"] == pytest.approx(0.35)
     assert samples[0]["ddec"] == pytest.approx(-0.25)
+    assert samples[0]["source"] == "phd2_live"
 
 
 def test_guiding_service_ingest_phd2_log_file(tmp_path: pytest.TempPathFactory) -> None:
@@ -374,7 +375,7 @@ def test_guiding_service_ingest_phd2_log_file(tmp_path: pytest.TempPathFactory) 
     (`guiding_log_ingestion.py`, §6a), so a real `ObservatoryControl`
     with its `_logger_interface` overridden is used here rather than a
     bare mock -- the parsing/persistence/refit chain must actually run
-    for `logger_mock.record_guiding_samples` to be called.
+    for `logger_mock.replace_guiding_samples` to be called.
     """
     from pathlib import Path
 
@@ -383,10 +384,13 @@ def test_guiding_service_ingest_phd2_log_file(tmp_path: pytest.TempPathFactory) 
 
     log_file = Path(str(tmp_path)) / "PHD2_GuideLog_test.txt"
     log_content = (
+        "PHD2 version 2.6.11, Log version 2.5. Log enabled at 2026-09-24 22:00:00\n"
+        "\n"
         "Guiding Begins at 2026-09-24 22:00:00\n"
-        "Frame, Time, mount, RADistanceGuide, DECDistanceGuide, "
-        "RADuration, RADirection, DECDuration, DECDirection\n"
-        "1, 1.5, Mount, 0.12, -0.08, 45, East, 20, North\n"
+        "Pixel scale = 2.00 arc-sec/px, Binning = 1, Focal length = 390.00 mm\n"
+        "Frame,Time,mount,dx,dy,RARawDistance,DECRawDistance,RAGuideDistance,DECGuideDistance,"
+        "RADuration,RADirection,DECDuration,DECDirection,XStep,YStep,StarMass,SNR,ErrorCode\n"
+        '1,1.5,"Mount",0.12,-0.08,0.06,-0.04,0.06,-0.04,45,E,20,N,,,5000,10.0,0\n'
         "Guiding Ends at 2026-09-24 22:05:00\n"
     )
     log_file.write_text(log_content, encoding="utf-8")
@@ -402,12 +406,13 @@ def test_guiding_service_ingest_phd2_log_file(tmp_path: pytest.TempPathFactory) 
     count = service.ingest_phd2_log_file(str(log_file), target_name="IC 1396")
 
     assert count == 1
-    assert logger_mock.record_guiding_samples.called
-    persisted = logger_mock.record_guiding_samples.call_args[0][0]
+    assert logger_mock.replace_guiding_samples.called
+    persisted = logger_mock.replace_guiding_samples.call_args[0][0]
     assert len(persisted) == 1
     assert persisted[0]["target_name"] == "IC 1396"
-    assert persisted[0]["dra"] == pytest.approx(0.12)
+    assert persisted[0]["dra"] == pytest.approx(0.06 * 2.0)
     assert persisted[0]["pulse_ra"] == pytest.approx(45.0)
+    assert persisted[0]["source"] == "phd2_guide_log"
 
 
 def test_indi_interface_pulse_coalescing_and_echo_filtering() -> None:
@@ -559,6 +564,7 @@ def test_alignment_service_session_queries_and_retrieval() -> None:
             "pointing_error_arcsec": 6.05,
             "timestamp": 1700005000.0,
             "target_name": "M31",
+            "session_id": "2026-09-24",
         }
     ]
     logger_mock.get_polar_alignment_logs.return_value = [
@@ -584,6 +590,7 @@ def test_alignment_service_session_queries_and_retrieval() -> None:
     assert len(data["alignmentAttempts"]) == 1
     assert data["alignmentAttempts"][0]["targetName"] == "M31"
     assert data["alignmentAttempts"][0]["ra"] == pytest.approx(180.5)
+    assert data["alignmentAttempts"][0]["sessionId"] == "2026-09-24"
     assert data["polarAlignment"] is not None
     assert data["polarAlignment"]["totalErrorArcsec"] == pytest.approx(42.5)
 
@@ -662,3 +669,29 @@ def test_sync_service_extract_fits_header_solves(tmp_path: Path) -> None:
     assert call_args["delta_dec_arcsec"] == pytest.approx(7.2, abs=0.1)
     # Delta RA: (180.005 - 180.0) * 3600 * cos(45 deg) = 12.72 arcsec
     assert call_args["delta_ra_arcsec"] == pytest.approx(12.73, abs=0.1)
+
+
+def test_guiding_service_labels_pulse_derived_samples_as_estimates_when_persisting() -> None:
+    """Verify INDI-pulse samples are stored as estimates, not measurements.
+
+    Their drift values are reconstructed from the pulse length plus
+    random jitter, so storing them unlabeled would let later analysis
+    mistake a model's output for a real guide-star measurement.
+    """
+    from backend.services.observatory.guiding_service import GuidingService
+
+    phd2_mock = MagicMock()
+    phd2_mock.drain_guiding_samples.return_value = []
+    observatory_mock = MagicMock()
+    observatory_mock.drain_external_pulses.return_value = [{"time": 1700000000.0, "pulse_w": 250.0}]
+    observatory_mock.get_telescope_status.return_value = {}
+    logger_mock = MagicMock()
+
+    service = GuidingService(
+        observatory_api=observatory_mock, phd2_service=phd2_mock, logger_interface=logger_mock
+    )
+    service.poll_external_telemetry()
+
+    persisted = logger_mock.record_guiding_samples.call_args[0][0]
+    assert len(persisted) == 1
+    assert persisted[0]["source"] == "indi_pulse_estimate"

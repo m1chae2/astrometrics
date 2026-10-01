@@ -174,4 +174,10 @@ def test_guiding_service_analyze_guiding_spectrum() -> None:
     service = GuidingService(observatory_api=observatory)
     res = service.analyze_guiding_spectrum(session_id="2026-09-25")
     assert res["sampleCount"] == 0
-    logger_mock.get_guiding_logs.assert_called_once_with(session_id="2026-09-25", limit=2000)
+    # Only samples measured from a real guide star are refit; estimates
+    # reconstructed from mount pulses are never read.
+    logger_mock.get_guiding_logs.assert_called_once_with(
+        session_id="2026-09-25",
+        limit=2000,
+        sources=["phd2_guide_log", "phd2_live", "ekos_guide_log", "ekos_analyze_log"],
+    )

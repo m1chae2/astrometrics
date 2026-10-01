@@ -221,6 +221,7 @@ class AlignmentService:
                     "pointingErrorArcsec": row.get("pointing_error_arcsec"),
                     "timestamp": row.get("timestamp"),
                     "targetName": row.get("target_name"),
+                    "sessionId": row.get("session_id"),
                 })
 
             # Also fetch synthesized target tracking telemetry for this session

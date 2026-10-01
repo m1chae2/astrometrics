@@ -510,6 +510,7 @@ export interface AlignmentAttempt {
   pointingErrorArcsec?: number | null;
   timestamp?: number | null;
   targetName?: string | null;
+  sessionId?: string | null;
 }
 
 /**

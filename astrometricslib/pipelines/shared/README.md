@@ -6,7 +6,7 @@ This folder holds code that more than one pipeline (astrometry, photometry, spec
 
 - `analysis_context.py` — the shared container a pipeline run passes between its own stages: the loaded image, detected sources, and results found so far.
 - `frame_grouping.py`, `frame_optics.py` — sort a target's frames by camera, optic, and role (light/dark/flat/bias), and work out which physical telescope or lens took a given frame.
-- `frame_scanning.py` — finds image files on disk and reads them into frame records.
+- `frame_scanning.py` — finds image files on disk and reads them into frame records. It skips the output of processing: a file whose name contains `_stacked`, `starless`, `starmask` or `processed`, or whose header has a positive `STACKCNT` (Siril writes it only on a stack, and keeps `IMAGETYP = Light Frame` on it). The sorter files such a stack under `others`, not under the lights.
 - `session_identification.py`, `target_sessions.py` — group a target's frames into observing sessions (one continuous night or run with the same setup), and figure out which stars an image sequence contains.
 - `camera_passes.py` — plans which cameras a batch run should process, and which targets go to each camera pass.
 - `catalog_star_identity.py` — decides whether two different catalog names refer to the same star.

@@ -314,6 +314,47 @@ def refresh_acquisition_conditions(frame: FrameRecord) -> bool:
     return True
 
 
+# Words in a file name that mark the output of processing, not a raw frame.
+# "_stacked", "starless" and "starmask" come from this library's own stacking
+# and star removal. "processed" marks a stack that was finished by hand (for
+# example in Siril) and saved next to the raw frames. Two such files in the
+# real library (13,740 s and 1,320 s long) were recorded as light frames and
+# added hours to their targets' total exposure.
+STACKED_OUTPUT_NAME_MARKERS = ("_stacked", "starless", "starmask", "processed")
+
+
+def is_stacked_output(file_name: str, header: Any = None) -> bool:
+    """Tell whether a FITS file is the output of processing, not a raw frame.
+
+    Siril keeps ``IMAGETYP = Light Frame`` on a stack, so the type in the
+    header cannot tell a stack from a raw light. A stack does carry
+    ``STACKCNT``, the number of frames combined, which a raw frame never has.
+
+    Parameters
+    ----------
+    file_name : `str`
+        The file's name (not its folder).
+    header : `Any`, optional
+        The file's FITS header, if it has been read. Without it, only the
+        name is checked.
+
+    Returns
+    -------
+    is_output : `bool`
+        `True` if the name carries one of `STACKED_OUTPUT_NAME_MARKERS`, or the
+        header has a positive ``STACKCNT``.
+    """
+    lowered = file_name.lower()
+    if any(marker in lowered for marker in STACKED_OUTPUT_NAME_MARKERS):
+        return True
+    if header is None:
+        return False
+    try:
+        return int(header.get("STACKCNT", 0) or 0) > 0
+    except TypeError, ValueError:
+        return False
+
+
 def scan_target_directory(target: Target, frames_root_path: str, refresh_headers: bool = False) -> None:
     """Look through folders to find new images for a specific target.
 
@@ -363,11 +404,13 @@ def scan_target_directory(target: Target, frames_root_path: str, refresh_headers
     for root, _, files in os.walk(found_directory):
         for file in files:
             if file.lower().endswith((".fits", ".fit")):
-                if "_stacked" in file.lower() or "starless" in file.lower() or "starmask" in file.lower():
+                if is_stacked_output(file):
                     continue
                 file_path = os.path.join(root, file)
                 # Check if already tracked
                 if not any(frame.path == file_path for frame in target.frames):
+                    if is_stacked_output(file, _read_header_or_none(file_path)):
+                        continue
                     frame_record = create_frame_record_from_fits(file_path)
                     target.frames.append(frame_record)
 
@@ -376,6 +419,22 @@ def scan_target_directory(target: Target, frames_root_path: str, refresh_headers
             refresh_acquisition_conditions(frame)
 
     target.recalculate_total_exposure()
+
+
+def _read_header_or_none(file_path: str) -> Any:
+    """Read a FITS header, or give `None` if the file cannot be read.
+
+    Returns
+    -------
+    header : `Any`
+        The header, or `None` for an unreadable file, which the caller then
+        treats as it would any file whose header says nothing.
+    """
+    try:
+        return read_header(file_path)
+    except Exception as error:
+        logger.warning(f"Could not read the header of {file_path}: {error}")
+        return None
 
 
 def classify_and_sort_fits_files(scan_list: list[str], target_id: str, config, telescope_name: str) -> int:  # ruff: ignore[missing-type-function-argument]
@@ -425,7 +484,9 @@ def classify_and_sort_fits_files(scan_list: list[str], target_id: str, config, t
             frame_type = header.get("FRAME", header.get("IMAGETYP", "Light")).replace(" ", "").lower()
             camera = _record_camera_name(header.get("INSTRUME", header.get("CAMERA", "Unknown")), config)
 
-            if "light" in frame_type:
+            if is_stacked_output(file, header):
+                dest_path = os.path.join(frames_path, "others")
+            elif "light" in frame_type:
                 if target_id:
                     dest_path = os.path.join(frames_path, "lights", target_id, telescope_name, camera)
                 else:

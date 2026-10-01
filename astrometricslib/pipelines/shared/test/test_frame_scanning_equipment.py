@@ -13,10 +13,13 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
+from astrometricslib.models.target import Target
 from astrometricslib.pipelines.shared.frame_scanning import (
     PLACEHOLDER_RECORD_ISO,
     classify_and_sort_fits_files,
     create_frame_record_from_fits,
+    is_stacked_output,
+    scan_target_directory,
 )
 from astrometricslib.utilities.config_loader import AppConfiguration, _TomlSectionedConfig
 from astrometricslib.utilities.warn_once import warn_once
@@ -205,3 +208,60 @@ def test_a_gain_is_recorded_exactly_as_the_header_writes_it(tmp_path: Path) -> N
     """Check that session ids built from the gain text do not change."""
     path = write_frame(tmp_path / "a.fits", INSTRUME="ZWO CCD ASI533MM Pro", GAIN=0.0, FOCALLEN=405.0)
     assert create_frame_record_from_fits(path, config=make_config()).iso == "0.0"
+
+
+def test_a_stacked_output_is_recognised_by_name_or_stack_count(tmp_path: Path) -> None:
+    """Check both signals, and that a raw light is not mistaken for one."""
+    raw = write_frame(tmp_path / "M31_Light_001.fits", FRAME="Light")
+    by_count = write_frame(tmp_path / "result.fits", FRAME="Light", STACKCNT=44)
+
+    assert is_stacked_output("NGC_2403_Processed.fits")
+    assert is_stacked_output("M_13_stacked.fit")
+    assert is_stacked_output("M31_starless.fits")
+    assert is_stacked_output("result.fits", fits.getheader(by_count))
+    assert not is_stacked_output("result.fits")
+    assert not is_stacked_output("M31_Light_001.fits", fits.getheader(raw))
+
+
+def test_an_unreadable_stack_count_is_not_a_stack() -> None:
+    """Check a bad value is treated as a raw frame."""
+    assert not is_stacked_output("a.fits", {"STACKCNT": "many"})
+    assert not is_stacked_output("a.fits", {"STACKCNT": 0})
+
+
+def test_scanning_a_target_folder_skips_a_stack_among_the_lights(tmp_path: Path) -> None:
+    """Check the real-library case: a hand-made stack beside the raw frames.
+
+    One stack here has an innocent file name and is found by STACKCNT alone.
+    """
+    folder = tmp_path / "lights" / "M31"
+    folder.mkdir(parents=True)
+    write_frame(folder / "M31_Light_001.fits", INSTRUME="ZWO CCD ASI533MM Pro", FRAME="Light", EXPTIME=30.0)
+    write_frame(folder / "M31_Light_002.fits", INSTRUME="ZWO CCD ASI533MM Pro", FRAME="Light", EXPTIME=30.0)
+    write_frame(
+        folder / "M31_final.fits", INSTRUME="ZWO CCD ASI533MM Pro", FRAME="Light", EXPTIME=60.0, STACKCNT=2
+    )
+    write_frame(folder / "M31_Processed.fits", INSTRUME="ZWO CCD ASI533MM Pro", FRAME="Light", EXPTIME=60.0)
+    target = Target(id="M31")
+
+    scan_target_directory(target, str(tmp_path))
+
+    assert sorted(Path(frame.path).name for frame in target.frames) == [
+        "M31_Light_001.fits",
+        "M31_Light_002.fits",
+    ]
+    assert target.exposure_sec == pytest.approx(60.0)
+
+
+def test_sorting_a_stack_files_it_under_others_not_the_lights(tmp_path: Path) -> None:
+    """Check a stack that says it is a light is not filed with the lights."""
+    incoming = tmp_path / "incoming"
+    incoming.mkdir()
+    write_frame(incoming / "final.fits", INSTRUME="ZWO CCD ASI533MM Pro", FRAME="Light", STACKCNT=70)
+    config = make_config(frames_root=tmp_path / "library")
+
+    moved = classify_and_sort_fits_files([str(incoming)], "M31", config, "Apertura 75Q")
+
+    assert moved == 1
+    assert (tmp_path / "library" / "frames" / "others" / "final.fits").exists()
+    assert not (tmp_path / "library" / "frames" / "lights").exists()

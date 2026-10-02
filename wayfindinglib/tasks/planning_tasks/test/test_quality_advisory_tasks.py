@@ -24,15 +24,37 @@ class _FakeCandidate:
         self.cascade_stage = _Stage()
 
 
+class _FakeStacking:
+    def __init__(self, quality_summary=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+        self.quality_summary = quality_summary
+
+
+class _FakeQuality:
+    def __init__(self, astrometry=None, photometry=None, spectroscopy=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+        self.astrometry = astrometry
+        self.photometry = photometry
+        self.spectroscopy = spectroscopy
+
+
+class _FakeAsteroidDetection:
+    def __init__(self, quality_summary=None, candidates=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+        self.quality_summary = quality_summary
+        self.candidates = candidates or []
+
+
 class _FakeTarget:
     def __init__(self, **overrides):  # ruff: ignore[missing-type-kwargs, missing-return-type-special-method]
-        self.stack_quality_summary = overrides.get("stack_quality_summary")
-        self.spectral_stack_quality_summary = overrides.get("spectral_stack_quality_summary")
-        self.astrometry_quality_summary = overrides.get("astrometry_quality_summary")
-        self.photometry_quality_summary = overrides.get("photometry_quality_summary")
-        self.spectroscopy_quality_summary = overrides.get("spectroscopy_quality_summary")
-        self.asteroid_detection_quality_summary = overrides.get("asteroid_detection_quality_summary")
-        self.asteroid_candidates = overrides.get("asteroid_candidates", [])
+        self.stacking = _FakeStacking(overrides.get("stack_quality_summary"))
+        self.spectral_stacking = _FakeStacking(overrides.get("spectral_stack_quality_summary"))
+        self.quality = _FakeQuality(
+            astrometry=overrides.get("astrometry_quality_summary"),
+            photometry=overrides.get("photometry_quality_summary"),
+            spectroscopy=overrides.get("spectroscopy_quality_summary"),
+        )
+        self.asteroid_detection = _FakeAsteroidDetection(
+            quality_summary=overrides.get("asteroid_detection_quality_summary"),
+            candidates=overrides.get("asteroid_candidates", []),
+        )
 
 
 class _FakeTargetRegistry:

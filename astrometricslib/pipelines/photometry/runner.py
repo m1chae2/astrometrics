@@ -10,10 +10,12 @@ cross-session mechanics live in `batch.py` -- this file is the thin
 import logging
 from typing import Any
 
+from astrometricslib.models.stellar_source import StellarObject, VariableCandidate
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.photometry.batch import (
     _match_and_merge_across_sessions,
     _run_variability_analysis_for_session,
+    search_periods_and_save,
 )
 from astrometricslib.pipelines.pipeline_base import (
     AnalysisPipeline,
@@ -39,6 +41,29 @@ MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG = 0.25
 # This prevents false alarms when dealing with a small number of frames
 # (under 20), where a single rejected frame could cause a high percentage.
 MINIMUM_ENSEMBLE_REJECTION_COUNT_TO_FLAG = 5
+
+
+def _format_variable_candidates(stars: list[StellarObject]) -> list[VariableCandidate]:
+    """Build the `VariableCandidate` payload rows for a list of stars.
+
+    Shared between the raw (pre-merge) per-session candidates and the
+    cross-session long-term candidates -- both are formatted identically.
+
+    Returns
+    -------
+    candidates : `list` [`VariableCandidate`]
+        One entry per star, in the same order given.
+    """
+    return [
+        VariableCandidate(
+            id=star.id,
+            meanFlux=star.photometry.mean_flux,
+            coefficientOfVariation=star.photometry.coefficient_of_variation,
+            ra=float(star.right_ascension) if star.right_ascension else 0.0,
+            dec=float(star.declination) if star.declination else 0.0,
+        )
+        for star in stars
+    ]
 
 
 def _empty_photometry_result(no_work_reason: str) -> Result:
@@ -124,6 +149,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             sessions carried in `payload`, so `run` does not have to
             redo this work.
         """
+        from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
         from astrometricslib.pipelines.shared.target_sessions import derive_target_sessions
 
         target = request.target
@@ -134,6 +160,14 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         target_frames = request.frames if request.frames is not None else target.frames
         for frame in target_frames:
             if not frame.path:
+                continue
+            # A dispersed (grating) frame has no normal point-source PSF,
+            # so aperture photometry on it measures something other than
+            # a star's brightness -- mixing one into an ensemble with
+            # ordinary imaging frames corrupts that frame's (and its
+            # ensemble members') normalization. Frames captured through
+            # this filter belong to the spectroscopy pipeline instead.
+            if frame_is_spectral(frame):
                 continue
             if not filter_type:
                 image_paths.append(frame.path)
@@ -190,8 +224,6 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             own session. Everything `validate_output` and
             `to_result_dict` need is in `payload`.
         """
-        from astrometricslib.models.stellar_source import VariableCandidate
-
         target = request.target
         catalog_access = request.catalog_access
         options = request.options
@@ -220,7 +252,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         use_astrometry_seed = bool(options.get("use_astrometry_seed", True))
         star_identifier = None
         if use_astrometry_seed:
-            from astrometricslib.pipelines.astrometry.star_identifier import StarIdentifier
+            from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 
             star_identifier = StarIdentifier()
 
@@ -261,16 +293,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         # later mutating the underlying StellarObjects (merging
         # light curves, recomputing a long-term CV) cannot retroactively
         # change an already-built VariableCandidate.
-        candidates_formatted = [
-            VariableCandidate(
-                id=star.id,
-                meanFlux=star.photometry.mean_flux,
-                coefficientOfVariation=star.photometry.coefficient_of_variation,
-                ra=float(star.right_ascension) if star.right_ascension else 0.0,
-                dec=float(star.declination) if star.declination else 0.0,
-            )
-            for star in all_candidates
-        ]
+        candidates_formatted = _format_variable_candidates(all_candidates)
 
         sessions_missing_wcs: list[str] = []
         cross_session_match_count = 0
@@ -283,7 +306,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                 )
             )
             if cross_session_match_count > 0:
-                from astrometricslib.pipelines.photometry.variability_analyzer import (
+                from astrometricslib.pipelines.photometry.processing.variability_analyzer import (
                     identify_long_term_variable_candidates,
                 )
 
@@ -291,16 +314,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         else:
             all_stellar_objects = per_session_results[0][0].stellar_objects
 
-        long_term_candidates_formatted = [
-            VariableCandidate(
-                id=star.id,
-                meanFlux=star.photometry.mean_flux,
-                coefficientOfVariation=star.photometry.coefficient_of_variation,
-                ra=float(star.right_ascension) if star.right_ascension else 0.0,
-                dec=float(star.declination) if star.declination else 0.0,
-            )
-            for star in long_term_candidates
-        ]
+        long_term_candidates_formatted = _format_variable_candidates(long_term_candidates)
 
         all_stellar_objects, star_id_breakdown = record_pipeline_stars(
             all_stellar_objects,
@@ -309,6 +323,14 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             merge_function=merge_photometry_stellar_object,
             pipeline_name="photometry",
         )
+
+        # The light curves are saved now. Search the target's own star and
+        # its brightest stars for repeating patterns, in a step of its own so
+        # that a failure here can never cost a photometry result.
+        try:
+            search_periods_and_save(all_stellar_objects, target, catalog_access)
+        except Exception as search_error:
+            logger.warning("[%s] Period search step failed: %s", target.id, search_error)
 
         frames_processed = sum(len(session.frame_paths) for session in photometry_sessions) - len(
             all_rejected_files
@@ -354,7 +376,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             PhotometryPipelineQualityMetrics,
             PhotometryQualitySummary,
         )
-        from astrometricslib.pipelines.photometry.variability_analyzer import (
+        from astrometricslib.pipelines.photometry.processing.variability_analyzer import (
             median_light_curve_scatter_mag,
         )
         from astrometricslib.pipelines.shared.target_sessions import build_target_session_breakdown
@@ -443,6 +465,20 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         if no_work_reason:
             summary.flagged = True
             summary.flag_reasons.append(no_work_reason)
+
+        from astrometricslib.pipelines.shared.applied_camera_profile import (
+            camera_name_for_paths,
+            most_common_camera_name,
+            record_camera_profile,
+        )
+
+        # The camera of the frames that were actually measured; the target's
+        # frames are the fallback when the run measured none.
+        record_camera_profile(
+            summary,
+            camera_name_for_paths(target.frames, payload.get("image_paths") or [])
+            or most_common_camera_name(target.frames),
+        )
         return summary
 
     def to_result_dict(self, request: PipelineRequest, result: Result, summary: Any) -> dict[str, Any]:
@@ -506,7 +542,7 @@ def run_photometry_analysis(
         The completed dict carrying every brightness-tracking metric,
         even when there was no usable data -- in that case every metric
         is zero/empty and the reason surfaces as a flag in
-        `target.photometry_quality_summary.flag_reasons` rather than as
+        `target.quality.photometry.flag_reasons` rather than as
         a differently-structured return value.
     """
     request = PipelineRequest(

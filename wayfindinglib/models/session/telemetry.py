@@ -12,9 +12,37 @@ are unaffected by the transition.
 """
 
 import math
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
+
+
+class GuidingSampleSource(StrEnum):
+    """Where a stored guiding sample came from.
+
+    The difference matters because only some sources are measurements of
+    the real star. `INDI_PULSE_ESTIMATE` samples are reconstructed from
+    the guide pulses the mount received: their drift values are a model
+    of what those pulses imply, not something a camera saw, so they must
+    never be treated as measurements.
+    """
+
+    PHD2_GUIDE_LOG = "phd2_guide_log"
+    PHD2_LIVE = "phd2_live"
+    EKOS_GUIDE_LOG = "ekos_guide_log"
+    EKOS_ANALYZE_LOG = "ekos_analyze_log"
+    INDI_PULSE_ESTIMATE = "indi_pulse_estimate"
+    UNVERIFIED = "unverified"
+
+
+MEASURED_GUIDING_SAMPLE_SOURCES: tuple[GuidingSampleSource, ...] = (
+    GuidingSampleSource.PHD2_GUIDE_LOG,
+    GuidingSampleSource.PHD2_LIVE,
+    GuidingSampleSource.EKOS_GUIDE_LOG,
+    GuidingSampleSource.EKOS_ANALYZE_LOG,
+)
+"""The sources whose drift values were measured from a real guide star."""
 
 
 class GuidingSample(BaseModel):
@@ -47,13 +75,51 @@ class AlignmentAttempt(BaseModel):
     status: str = Field(..., pattern="^(solving|failed|warning|aligned|idle)$")
     delta_ra_arcsec: float | None = Field(default=None, alias="deltaRaArcsec")
     delta_dec_arcsec: float | None = Field(default=None, alias="deltaDecArcsec")
+    ra: float | None = Field(default=None, alias="ra")
+    dec: float | None = Field(default=None, alias="dec")
+    pointing_error_arcsec: float | None = Field(default=None, alias="pointingErrorArcsec")
+    timestamp: float | None = Field(default=None, alias="timestamp")
+    target_name: str | None = Field(default=None, alias="targetName")
+    session_id: str | None = Field(default=None, alias="sessionId")
 
     @property
     def pointing_error(self) -> float | None:
         """Calculate the total coordinate pointing offset magnitude."""
+        if self.pointing_error_arcsec is not None:
+            return self.pointing_error_arcsec
         if self.delta_ra_arcsec is not None and self.delta_dec_arcsec is not None:
             return math.sqrt(self.delta_ra_arcsec**2 + self.delta_dec_arcsec**2)
         return None
+
+
+class PolarAlignmentStatus(BaseModel):
+    """Status and measurement metrics from Polar Alignment Assistant (PAA)."""
+
+    model_config = ConfigDict(populate_by_name=True)
+    status: str = Field(default="idle", pattern="^(idle|in_progress|aligned|warning)$")
+    total_error_arcsec: float | None = Field(default=None, alias="totalErrorArcsec")
+    alt_error_arcsec: float | None = Field(default=None, alias="altErrorArcsec")
+    az_error_arcsec: float | None = Field(default=None, alias="azErrorArcsec")
+    pole_ra: float | None = Field(default=None, alias="poleRa")
+    pole_dec: float | None = Field(default=None, alias="poleDec")
+    paa_points: list[dict[str, Any]] = Field(default_factory=list, alias="paaPoints")
+    timestamp: float | None = Field(default=None, alias="timestamp")
+
+
+class AlignmentSessionSummary(BaseModel):
+    """Summary of a past observing session's alignment and polar telemetry."""
+
+    model_config = ConfigDict(populate_by_name=True)
+    session_id: str = Field(..., alias="sessionId")
+    session_date: str = Field(..., alias="sessionDate")
+    sync_count: int = Field(default=0, alias="syncCount")
+    target_count: int | None = Field(default=None, alias="targetCount")
+    start_time: float | None = Field(default=None, alias="startTime")
+    end_time: float | None = Field(default=None, alias="endTime")
+    avg_error_arcsec: float | None = Field(default=None, alias="avgErrorArcsec")
+    polar_error_arcsec: float | None = Field(default=None, alias="polarErrorArcsec")
+    polar_alt_error_arcsec: float | None = Field(default=None, alias="polarAltErrorArcsec")
+    polar_az_error_arcsec: float | None = Field(default=None, alias="polarAzErrorArcsec")
 
 
 class IndiStatus(BaseModel):
@@ -83,3 +149,60 @@ class GuidingStatus(BaseModel):
     history: list[dict[str, Any]] = Field(default_factory=list, alias="history")
     exposure: float = Field(default=1.0, alias="exposure")
     gain: float = Field(default=0.0, alias="gain")
+
+
+class MountPointingModel(BaseModel):
+    """Decomposed geometric mount pointing model terms from plate solves."""
+
+    model_config = ConfigDict(populate_by_name=True)
+    sample_count: int = Field(..., alias="sampleCount")
+    raw_rms_arcsec: float = Field(..., alias="rawRmsArcsec")
+    residual_rms_arcsec: float = Field(..., alias="residualRmsArcsec")
+    improvement_percent: float = Field(default=0.0, alias="improvementPercent")
+    ih_arcsec: float = Field(default=0.0, alias="ihArcsec")
+    id_arcsec: float = Field(default=0.0, alias="idArcsec")
+    me_arcsec: float = Field(default=0.0, alias="meArcsec")
+    ma_arcsec: float = Field(default=0.0, alias="maArcsec")
+    ch_arcsec: float = Field(default=0.0, alias="chArcsec")
+    tf_arcsec: float = Field(default=0.0, alias="tfArcsec")
+    total_polar_error_arcsec: float = Field(default=0.0, alias="totalPolarErrorArcsec")
+    confidence: str = Field(default="high", alias="confidence")
+    message: str = Field(default="", alias="message")
+
+
+class GuidingSpectrumPeak(BaseModel):
+    """A dominant harmonic frequency identified in guiding telemetry."""
+
+    model_config = ConfigDict(populate_by_name=True)
+    period_seconds: float = Field(..., alias="periodSeconds")
+    amplitude_arcsec: float = Field(..., alias="amplitudeArcsec")
+    power: float = Field(..., alias="power")
+    probable_source: str = Field(default="Unknown", alias="probableSource")
+
+
+class GuidingSpectrumAnalysis(BaseModel):
+    """Periodic error, worm harmonic spectrum, and backlash diagnostics.
+
+    `id`/`telescope_id`/`schema_version` support this model's other use
+    (M7a): as standing, cross-night mount-mechanical Foundation state
+    persisted via `DiskButler`, refit cumulatively each time
+    `guiding_log_ingestion.py` processes a new guide log, the same
+    status as `GuiderCalibration`/`FocusModel`
+    (`Wayfinding_Library_Architecture.md` §2.5.1a's §6a extension). All
+    three default so existing ad hoc, non-persisted analysis results
+    (e.g. `GuidingService.analyze_guiding_spectrum`'s live RPC response)
+    are unaffected.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+    id: str = Field(default="", alias="id")
+    telescope_id: str = Field(default="", alias="telescopeId")
+    schema_version: int = Field(default=1, alias="schemaVersion")
+    sample_count: int = Field(..., alias="sampleCount")
+    duration_seconds: float = Field(..., alias="durationSeconds")
+    periodic_error_peak_to_peak_arcsec: float = Field(default=0.0, alias="periodicErrorPeakToPeakArcsec")
+    dominant_period_seconds: float | None = Field(default=None, alias="dominantPeriodSeconds")
+    dec_backlash_estimate_ms: float | None = Field(default=None, alias="decBacklashEstimateMs")
+    peaks: list[GuidingSpectrumPeak] = Field(default_factory=list, alias="peaks")
+    psd_curve: list[dict[str, float]] = Field(default_factory=list, alias="psdCurve")
+    message: str = Field(default="", alias="message")

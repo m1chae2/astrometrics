@@ -23,12 +23,18 @@ import matplotlib
 
 matplotlib.use("Agg")
 
+# 3. Configure Astropy to use bundled earth orientation tables, not downloads
+from astropy.utils import iers
+
+iers.conf.auto_download = False
+iers.conf.auto_max_age = None
+
 # 3. Setup a global temporary directory for tests
 _test_tmp_dir = tempfile.TemporaryDirectory()
 TEST_TEMP_DIR = Path(_test_tmp_dir.name)
 
 # 4. Create isolated library, frames, wayfinding, and logs directories
-test_library_path = TEST_TEMP_DIR / "libraryIndex"
+test_library_path = TEST_TEMP_DIR / "library"
 test_frames_path = test_library_path / "frames"
 test_wayfinding_path = TEST_TEMP_DIR / "wayfinding_library"
 test_logs_path = TEST_TEMP_DIR / "logs"
@@ -42,14 +48,39 @@ test_logs_path.mkdir(parents=True, exist_ok=True)
 test_targets_path.mkdir(parents=True, exist_ok=True)
 test_calibration_path.mkdir(parents=True, exist_ok=True)
 
-test_config_path = TEST_TEMP_DIR / "astrometrics.config"
-test_config_path.write_text(f"""[Image Library]
-path = {test_library_path}
-frames_path = {test_frames_path}
 
-[Wayfinding Library]
-path = {test_wayfinding_path}
-""")
+def _shipped_camera_sections_toml() -> str:
+    """Read the real camera sections out of the shipped config template.
+
+    Keeps the test fixture's camera catalog (aliases, record names,
+    quantum efficiency curves) identical to the shipped one without
+    duplicating it by hand.
+
+    Returns
+    -------
+    sections_text : `str`
+        Every ``[Observatory.Camera.<name>]`` section's TOML text,
+        concatenated.
+    """
+    import tomlkit
+
+    template_path = Path(__file__).parent / "astrometricslib" / "astrometrics.config.example.toml"
+    document = tomlkit.parse(template_path.read_text(encoding="utf-8"))
+    blocks = []
+    for section_name, table in document.items():
+        if section_name.startswith("Observatory.Camera.") and "clip_ceiling_adu" in table:
+            blocks.append(f'["{section_name}"]\n{tomlkit.dumps(table)}')
+    return "\n".join(blocks)
+
+
+test_config_path = TEST_TEMP_DIR / "astrometrics.config.toml"
+test_config_path.write_text(
+    f'["Image Library"]\n'
+    f'path = "{test_library_path}"\n'
+    f'frames_path = "{test_frames_path}"\n\n'
+    f'["Wayfinding Library"]\n'
+    f'path = "{test_wayfinding_path}"\n\n' + _shipped_camera_sections_toml()
+)
 os.environ["ASTROMETRICS_CONFIG"] = str(test_config_path)
 os.environ["ASTROMETRICS_CONFIG_PATH"] = str(test_config_path)
 

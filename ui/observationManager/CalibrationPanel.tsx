@@ -4,48 +4,32 @@
  * Fetches data via the unified JSON-RPC layer using callBackend.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { SectionPanel } from '../common/components/SectionPanel';
 import { useTerminalContext } from '../statusHeader/context/TerminalContext';
 import { IngestFramesModal } from '../common/components/IngestFramesModal';
-import { callBackend } from '../common/services/backendApi';
-import { CalibrationStats, CalibrationEntry } from '../common/types/backendTypes';
+import { CalibrationEntry } from '../common/types/backendTypes';
 import { useIngestionManager } from '../common/hooks/useIngestionManager';
+import { useCalibrationStats } from '../common/hooks/useCalibrationStats';
 import './observationManager.css';
+
+/** How often to re-poll calibration stats in the background, in milliseconds. */
+const CALIBRATION_POLL_INTERVAL_MS = 10000;
 
 export const CalibrationPanel: React.FC = () => {
     const { sendCommand } = useTerminalContext();
-    const [stats, setStats] = useState<CalibrationStats>({ darks: [], biases: [], flats: [] });
     const [selectedCamera, setSelectedCamera] = useState<string>("ZWO ASI 533MM Pro");
     const [isIngestModalOpen, setIsIngestModalOpen] = useState(false);
+    const [reloadKey, setReloadKey] = useState(0);
 
     // Initialize ingestion state manager (lifted state)
     const ingestionState = useIngestionManager("Calibration");
 
-    /**
-     * Fetches calibration library statistics (darks, biases, flats) from the backend
-     * via the unified JSON-RPC callBackend interface.
-     */
-    const fetchStats = async () => {
-        try {
-            const data = await callBackend("calibration:get_stats", {});
-            setStats(data || { darks: [], biases: [], flats: [] });
-        } catch (error) {
-            console.error("Failed to fetch calibration stats:", error);
-        }
-    };
-
-    useEffect(() => {
-        fetchStats();
-        // Poll every 10 seconds? Or just manual?
-        // Let's poll gently or rely on sync updates.
-        const interval = setInterval(fetchStats, 10000);
-        return () => clearInterval(interval);
-    }, []);
+    const { stats } = useCalibrationStats(reloadKey, { pollIntervalMs: CALIBRATION_POLL_INTERVAL_MS });
 
     const handleIngestComplete = () => {
         setIsIngestModalOpen(false);
-        fetchStats();
+        setReloadKey(key => key + 1);
     };
 
     // Filter Stats

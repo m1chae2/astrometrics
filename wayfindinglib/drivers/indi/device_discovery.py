@@ -6,6 +6,10 @@ among connected devices requires inspecting each device's properties/name for
 type-specific signals. This module centralizes those heuristics.
 """
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class DeviceDiscovery:
     """Finds and caches role-specific devices on an INDI client.
@@ -25,10 +29,20 @@ class DeviceDiscovery:
         client = self.client
         if not client.isServerConnected():
             return
+        if not hasattr(client, "deviceMap") or client.deviceMap is None:
+            client.deviceMap = {}
+        # Clean up any invalid or empty-string keys
+        empty_keys = [k for k in client.deviceMap if not k or not str(k).strip()]
+        for k in empty_keys:
+            client.deviceMap.pop(k, None)
+
         for device in client.getDevices():
-            name = device.getDeviceName()
-            if name not in client.deviceMap:
-                client.deviceMap[name] = client.getDevice(name)
+            try:
+                name = device.getDeviceName()
+                if name and name.strip() and name not in client.deviceMap:
+                    client.deviceMap[name] = client.getDevice(name)
+            except Exception as e:
+                logger.debug(f"Failed to query device name during refresh: {e}")
 
     def find_device_with_property(self, property_name: str):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Search connected devices for one with the specified property.
@@ -209,6 +223,30 @@ class DeviceDiscovery:
             if "guide" in candidate_device.getDeviceName().lower():
                 return candidate_device
         return candidates[0]
+
+    def find_enclosure(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        """Heuristic to find the roll-off-roof/dome device.
+
+        1. Look for the standard INDI Dome Interface's `DOME_SHUTTER`
+        switch. 2. Prefer device with 'dome', 'roof', or 'shutter' in
+        name.
+
+        Returns
+        -------
+        device
+            The enclosure device, or `None` if none is found.
+        """
+        device = self.find_device_with_property("DOME_SHUTTER")
+        if device:
+            return device
+        client = self.client
+        if not client.isServerConnected() or not client.deviceMap:
+            return None
+        for device_name, device in client.deviceMap.items():
+            lowered_name = device_name.lower()
+            if "dome" in lowered_name or "roof" in lowered_name or "shutter" in lowered_name:
+                return device
+        return None
 
     def find_main_camera(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Heuristic to find the main imaging camera.

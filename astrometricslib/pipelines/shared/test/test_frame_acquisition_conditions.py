@@ -120,15 +120,15 @@ def test_refresh_preserves_measured_values(tmp_path):  # ruff: ignore[missing-ty
     from astrometricslib.pipelines.shared.frame_scanning import refresh_acquisition_conditions
 
     record = create_frame_record_from_fits(_write_frame(tmp_path / "a.fits", PIERSIDE="WEST"))
-    record.background_level = 4456.0
-    record.registration_fwhm_x_px = 2.48
-    record.registration_dx_px = 6.32
+    record.measurements.background_level = 4456.0
+    record.measurements.registration_fwhm_x_px = 2.48
+    record.measurements.registration_dx_px = 6.32
 
     refresh_acquisition_conditions(record)
 
-    assert record.background_level == pytest.approx(4456.0)
-    assert record.registration_fwhm_x_px == pytest.approx(2.48)
-    assert record.registration_dx_px == pytest.approx(6.32)
+    assert record.measurements.background_level == pytest.approx(4456.0)
+    assert record.measurements.registration_fwhm_x_px == pytest.approx(2.48)
+    assert record.measurements.registration_dx_px == pytest.approx(6.32)
 
 
 def test_refresh_of_a_missing_file_reports_failure(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]

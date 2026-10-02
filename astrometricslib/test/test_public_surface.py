@@ -2,11 +2,10 @@
 
 `astrometricslib/__init__.py` is the only door into this library that
 anything outside it is supposed to use. The UI backend imports from
-`astrometricslib` directly at 35 call sites and never reaches into a
-submodule, and the Sphinx documentation only ever documents this
-top-level namespace -- so the 46 names listed in `__all__` are, in a
-very real sense, the entire contract this library makes with the rest
-of the repository.
+`astrometricslib` directly and never reaches into a submodule, and the
+Sphinx documentation only ever documents this top-level namespace --
+so the names listed in `__all__` are, in a very real sense, the entire
+contract this library makes with the rest of the repository.
 
 That contract is easy to break by accident during a refactor. Moving a
 class to a new home, renaming it, or forgetting to re-export it after
@@ -35,9 +34,17 @@ import astrometricslib
 # should be a deliberate edit to this list, not a side effect of moving
 # code around internally.
 EXPECTED_PUBLIC_NAMES = frozenset({
+    "DEFAULT_DARK_TEMPERATURE_TOLERANCE_C",
+    "SATURATED_BLOB_MINIMUM_PIXELS",
+    "SATURATED_FRAME_FRACTION",
     "AbstractCatalogAccess",
+    "Activity",
+    "ActivityDescription",
+    "Agent",
+    "AgentType",
     "AnalysisResult",
     "AppConfiguration",
+    "AppliedCameraProfile",
     "AsteroidDetectionCandidate",
     "Astrometrics",
     "AstrometryPipeline",
@@ -46,24 +53,35 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "BatchRunSummary",
     "CalibrationCatalog",
     "CatalogAccess",
+    "Collection",
+    "ConfigFile",
+    "ConfigFileDescription",
+    "DatasetDescription",
+    "DatasetEntity",
     "DbLogHandler",
+    "Entity",
+    "EntityDescription",
+    "ExposureGroupSummary",
     "FileItem",
     "FilterType",
     "FitsHeaderEntry",
     "FrameRecord",
+    "GenerationDescription",
     "GroupedFrameStat",
     "ImageProcessing",
     "JobHandle",
     "LoggerInterface",
     "MovingObjectConfig",
     "MovingObjectRecovery",
+    "Parameter",
+    "ParameterDescription",
     "PhotometryResult",
     "PlotData",
     "ProcessingJob",
     "ProcessingPipelines",
+    "ProvenanceStore",
     "QualityDiagnostics",
     "RenderedImage",
-    "SpectralObservation",
     "SpectroscopyResult",
     "StarIdentifier",
     "StellarCatalog",
@@ -72,16 +90,30 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "TargetCatalog",
     "TargetFilesResponse",
     "TargetSessionContribution",
+    "UsageDescription",
+    "Used",
+    "ValueDescription",
+    "ValueEntity",
     "VariableCandidate",
     "Visualization",
+    "WasAssociatedWith",
+    "WasAttributedTo",
+    "WasConfiguredBy",
+    "WasGeneratedBy",
     "capture_job_logs",
     "classify_and_sort_fits_files",
+    "derive_field_centers",
     "derive_target_sessions",
+    "export_target_lineage_as_prov_xml",
+    "frame_is_spectral",
     "get_configuration",
+    "observing_night_id",
     "parse_coordinate_string",
     "registered_job",
+    "resolve_camera_profile",
     "resolve_worker_counts",
     "run_parallel_batch",
+    "run_siril_stack",
 })
 
 

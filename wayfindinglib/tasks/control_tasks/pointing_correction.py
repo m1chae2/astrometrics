@@ -8,14 +8,28 @@ test) that returns the angular separation and the per-axis correction
 that closes it. Issues nothing: syncing the mount and re-slewing are
 a separate, delegation-gated orchestration step layered on top of this
 computation, not part of it (§2.5.9, "Corrections Are Pure").
+
+The optional `pointing_model` parameter (§2.5.1a's §6a extension, M7b)
+tells a genuinely new pointing failure apart from one already explained
+by tonight's fitted polar-alignment/index-error model: it predicts the
+systematic error `pointing_model` implies at this exact commanded
+position (`pointing_model.predict_pointing_error`, the forward
+direction of the same geometric fit `run_polar_alignment_assist`
+produces) and reports what's left over once that's subtracted out.
+`pointing_model` is deliberately never fed forward across sessions --
+see `pointing_log_ingestion.py`'s module docstring for why.
 """
 
+import math
+
+from wayfindinglib.analytics.pointing_model import predict_pointing_error
 from wayfindinglib.astronomy.coordinate_transforms import (
     angular_separation_arcsec,
     signed_offset_components_arcsec,
 )
 from wayfindinglib.models.session.correction_config import CorrectionConfig
 from wayfindinglib.models.session.correction_result import PointingCorrection
+from wayfindinglib.models.session.telemetry import MountPointingModel
 
 
 def compute_pointing_correction(
@@ -26,6 +40,8 @@ def compute_pointing_correction(
     solved_dec_deg: float,
     iteration: int,
     config: CorrectionConfig,
+    pointing_model: MountPointingModel | None = None,
+    latitude_deg: float = 45.0,
 ) -> PointingCorrection:
     """Compute one iteration's pointing error and closing correction.
 
@@ -42,6 +58,16 @@ def compute_pointing_correction(
         Which alignment iteration this is (1-indexed).
     config : `CorrectionConfig`
         Supplies `alignment_convergence_tolerance_arcsec`.
+    pointing_model : `MountPointingModel` | `None`, optional
+        Tonight's session-scoped fitted model
+        (`ObservatoryControl.get_pointing_model`). `None` (default)
+        disables the feedforward, reproducing the pre-M7b behavior
+        exactly: `converged` is judged against the raw measured error.
+        Skipped even when supplied if its `confidence` is
+        ``"insufficient_data"`` -- an unfit model predicts nothing.
+    latitude_deg : `float`, optional
+        Observer latitude in decimal degrees, used only when
+        `pointing_model` is supplied, default 45.0.
 
     Returns
     -------
@@ -56,7 +82,26 @@ def compute_pointing_correction(
     correction_ra_arcsec, correction_dec_arcsec = signed_offset_components_arcsec(
         solved_ra_deg, solved_dec_deg, commanded_ra_deg, commanded_dec_deg
     )
-    converged = pointing_error_arcsec <= config.alignment_convergence_tolerance_arcsec
+
+    model_predicted_error_arcsec = None
+    unexplained_residual_arcsec = None
+    convergence_error_arcsec = pointing_error_arcsec
+
+    if pointing_model is not None and pointing_model.confidence != "insufficient_data":
+        measured_delta_ra_arcsec, measured_delta_dec_arcsec = signed_offset_components_arcsec(
+            commanded_ra_deg, commanded_dec_deg, solved_ra_deg, solved_dec_deg
+        )
+        predicted_delta_ra_arcsec, predicted_delta_dec_arcsec = predict_pointing_error(
+            commanded_ra_deg, commanded_dec_deg, pointing_model, latitude_deg
+        )
+        model_predicted_error_arcsec = math.hypot(predicted_delta_ra_arcsec, predicted_delta_dec_arcsec)
+        unexplained_residual_arcsec = math.hypot(
+            measured_delta_ra_arcsec - predicted_delta_ra_arcsec,
+            measured_delta_dec_arcsec - predicted_delta_dec_arcsec,
+        )
+        convergence_error_arcsec = unexplained_residual_arcsec
+
+    converged = convergence_error_arcsec <= config.alignment_convergence_tolerance_arcsec
 
     return PointingCorrection(
         comparison_input_id=comparison_input_id,
@@ -69,4 +114,6 @@ def compute_pointing_correction(
         correction_dec_arcsec=correction_dec_arcsec,
         iteration=iteration,
         converged=converged,
+        model_predicted_error_arcsec=model_predicted_error_arcsec,
+        unexplained_residual_arcsec=unexplained_residual_arcsec,
     )

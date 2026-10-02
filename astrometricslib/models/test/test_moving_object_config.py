@@ -24,7 +24,7 @@ def test_load_moving_object_config_falls_back_to_defaults_when_section_missing(t
     import configparser
 
     config_path = tmp_path / "empty.config"
-    config_path.write_text("[Library]\npath = libraryIndex\n")
+    config_path.write_text("[Library]\npath = library\n")
 
     app_config = AppConfiguration()
     app_config.app_config = configparser.ConfigParser()

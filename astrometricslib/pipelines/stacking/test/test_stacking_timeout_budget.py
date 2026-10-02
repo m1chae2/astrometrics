@@ -8,6 +8,7 @@ be penalized for their wait time.
 import os
 import threading
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -162,6 +163,7 @@ def test_a_genuinely_hung_stack_is_still_abandoned(monkeypatch):  # ruff: ignore
 
     class _Target:
         id = "HungTarget"
+        stacking = SimpleNamespace(quality_summary=None)
 
     try:
         result = tasks.stack_frames_with_timeout(_Target(), [], timeout_seconds=1)

@@ -29,6 +29,8 @@ export type LightFrameRow = [string, string, number];
 
 export interface StackingJobResult {
     lightFrames: LightFrameRow[];
+    /** Whether the light-frame summary for the selected target is still being fetched. */
+    isLoadingFrames: boolean;
     logLines: string[];
     isProcessing: boolean;
     startProcessing: (imageFiles?: string[], logFile?: string) => Promise<void>;
@@ -50,7 +52,7 @@ export function useStackingJob(
     shouldFetch: boolean = true
 ): StackingJobResult {
     const { framesReloadKey, invalidate } = useTargetContext();
-    const { processing } = useAstrometrics();
+    const { activeJobs } = useAstrometrics();
     const [lightFrames, setLightFrames] = useState<LightFrameRow[]>([]);
     const [logLines, setLogLines] = useState<string[]>([]);
     const [isProcessing, setIsProcessing] = useState<boolean>(false);
@@ -99,6 +101,24 @@ export function useStackingJob(
         return () => { mounted = false; };
     }, [selectedTarget]);
 
+    // Identifies which fetch of the light-frame summary is currently wanted:
+    // null means "nothing to fetch" (no target selected, or `shouldFetch` --
+    // typically whether the target is confirmed local -- is false); a string
+    // means a fetch for that target+reload-generation is wanted. Comparing
+    // this against `settledFramesKey` below gives `isLoadingFrames` purely
+    // from this render's own values, with no dependency on a *separate*
+    // piece of state that this hook's own effect would otherwise have to
+    // "catch up" to a render late. That matters because `shouldFetch` itself
+    // often flips from false to true only once a prerequisite (e.g. the
+    // shared target list) finishes loading elsewhere -- if `isLoadingFrames`
+    // were instead toggled by this hook's effect, callers gating "fully
+    // loaded" on it (see ImageProcessingDisplay.tsx's app boot readiness
+    // check) could read a stale "not loading" value for one render after
+    // `shouldFetch` flips true but before this hook's effect has run again.
+    const pendingFramesKey = selectedTarget && shouldFetch ? `${selectedTarget}:${framesReloadKey}` : null;
+    const [settledFramesKey, setSettledFramesKey] = useState<string | null>(null);
+    const isLoadingFrames = pendingFramesKey !== null && settledFramesKey !== pendingFramesKey;
+
     // Fetch and parse light frames
     useEffect(() => {
         let mounted = true;
@@ -120,58 +140,44 @@ export function useStackingJob(
                 if (mounted) setLightFrames(rows);
             } catch (err) {
                 if (mounted) reportError(err, 'useStackingJob');
+            } finally {
+                if (mounted) setSettledFramesKey(`${selectedTarget}:${framesReloadKey}`);
             }
         };
         loadFrames();
         return () => { mounted = false; };
     }, [selectedTarget, shouldFetch, framesReloadKey]);
 
-    // Global Process Monitoring
+    // Global Process Monitoring: derived from AstrometricsContext's shared
+    // active-jobs feed (one poll for the whole app) instead of this hook
+    // running its own competing poll against the same backend data. Still
+    // catches jobs started out-of-band (e.g. a standalone script), since the
+    // context's feed isn't scoped to jobs this hook itself started.
     useEffect(() => {
-        let mounted = true;
-        let timer: any = null;
+        if (!selectedTarget) return;
 
-        const checkStatus = async () => {
-            if (!mounted || !selectedTarget) return;
-            try {
-                const jobs = await fetchJobs(selectedTarget);
-                if (!mounted) return;
-                setJobHistory(jobs);
-                // Scoped to stacking jobs only: useAnalysisJob owns its own
-                // isAnalyzing/activeAnalysisJobId state and log stream, so an
-                // in-flight analysis job must not also flip stacking's
-                // isProcessing (which would start a second, redundant poller
-                // against the same job's log).
-                const activeJob = jobs.find((j: any) => j.status === 'started' && j.jobType === 'stacking');
-                const currentlyProcessing = !!activeJob;
+        // Scoped to stacking jobs only: useAnalysisJob owns its own
+        // isAnalyzing/activeAnalysisJobId state and log stream, so an
+        // in-flight analysis job must not also flip stacking's isProcessing
+        // (which would start a second, redundant poller against the same
+        // job's log).
+        const activeJob = activeJobs.find((j) => j.targetId === selectedTarget && j.jobType === 'stacking');
+        const currentlyProcessing = !!activeJob;
 
-                // Detect transition from processing to finished to trigger a refresh
-                if (prevIsProcessing.current && !currentlyProcessing) {
-                    invalidate('frames');
-                }
+        // Detect transition from processing to finished to trigger a refresh
+        // of frames and job history (a one-off fetch, not a recurring poll).
+        if (prevIsProcessing.current && !currentlyProcessing) {
+            invalidate('frames');
+            fetchJobs(selectedTarget).then(setJobHistory).catch(() => { /* Ignore */ });
+        }
 
-                setIsProcessing(currentlyProcessing);
-                prevIsProcessing.current = currentlyProcessing;
+        setIsProcessing(currentlyProcessing);
+        prevIsProcessing.current = currentlyProcessing;
 
-                if (activeJob) {
-                    setActiveJobId(activeJob.id);
-                }
-            } catch { /* Ignore */ }
-        };
-
-        checkStatus();
-        // Always poll, not just while a stacking job is active: jobHistory
-        // must also pick up analysis (or other) jobs created out-of-band,
-        // e.g. from a standalone script rather than this hook's own
-        // startProcessing(). Poll less aggressively than the 2s stacking
-        // cadence above since this covers the idle case too.
-        timer = setInterval(checkStatus, isProcessing ? 2000 : 4000);
-
-        return () => {
-            mounted = false;
-            if (timer) clearInterval(timer);
-        };
-    }, [selectedTarget, invalidate, isProcessing]);
+        if (activeJob) {
+            setActiveJobId(activeJob.id);
+        }
+    }, [selectedTarget, invalidate, activeJobs]);
 
 
     // Log Streaming
@@ -225,6 +231,7 @@ export function useStackingJob(
 
     return {
         lightFrames,
+        isLoadingFrames,
         logLines,
         isProcessing,
         startProcessing,

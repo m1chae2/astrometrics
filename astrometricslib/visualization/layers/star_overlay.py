@@ -6,6 +6,28 @@ Includes catalog labels with limit filtering.
 from matplotlib.patches import Circle
 
 
+def resolve_star_radius(obj: object, default_radius: float) -> float:
+    """Pick the circle radius for a star, in pixels.
+
+    Parameters
+    ----------
+    obj : `object`
+        A stellar object or a dict shaped like one.
+    default_radius : `float`
+        Radius to use when the star has no measured size.
+
+    Returns
+    -------
+    radius : `float`
+        The star's `radius_px` if it is a positive number, else
+        `default_radius`.
+    """
+    radius_px = obj.get("radius_px") if isinstance(obj, dict) else getattr(obj, "radius_px", None)
+    if isinstance(radius_px, int | float) and radius_px > 0:
+        return float(radius_px)
+    return default_radius
+
+
 class StarOverlay:
     """Draws star selection circles and text labels onto a 2D FITS image axis.
 
@@ -87,9 +109,17 @@ class StarOverlay:
             color = self.config.active_color if is_active else self.config.inactive_color
             lw = 3 if is_active else 2
 
+            # Prefer the size source detection measured for this star.
+            radius_px = getattr(obj, "radius_px", None) if is_obj else obj.get("radius_px")
+            radius = (
+                radius_px
+                if isinstance(radius_px, int | float) and radius_px > 0
+                else self.config.fixed_radius
+            )
+
             circle = Circle(
                 (x, y),
-                self.config.fixed_radius,
+                radius,
                 edgecolor=color,
                 facecolor="none",
                 lw=lw,
@@ -104,7 +134,7 @@ class StarOverlay:
                 if spectral_type:
                     label += f" ({spectral_type})"
                 self.ax.text(
-                    x + self.config.fixed_radius + 5,
+                    x + radius + 5,
                     y,
                     label,
                     color=color,

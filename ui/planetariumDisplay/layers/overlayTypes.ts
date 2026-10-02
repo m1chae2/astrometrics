@@ -4,7 +4,7 @@
  */
 
 import { PlanetariumSource, PlanetariumTarget, ConstellationLineSegment } from '../../common/types/planetariumTypes';
-import { LoadedFitsEntry } from '../components/FitsLoaderItem';
+import { AlignmentAttempt, PolarAlignmentStatus } from '../../common/types/backendTypes';
 
 /**
  * Interface representing the read-only projection, coordinates, and view configuration
@@ -21,13 +21,10 @@ export interface ProjectionContext {
   observerLat: number;
   observerLon: number;
   selectedTargetId: string;
-  /** Pre-loaded and pixel-stretched FITS image data keyed by target ID. */
-  loadedFits: Record<string, LoadedFitsEntry>;
   sources: PlanetariumSource[];
   targets: PlanetariumTarget[];
   showStars: boolean;
   showFOV: boolean;
-  showFITS: boolean;
   showEnvironment: boolean;
   showGrid: boolean;
   showCatalog: boolean;
@@ -44,10 +41,24 @@ export interface ProjectionContext {
   telescopeRa?: number | null;
   telescopeDec?: number | null;
   showTelescope?: boolean;
+  /** Show alignment pointing vectors and polar alignment overlay. */
+  showAlignment?: boolean;
+  /** Plate-solve alignment attempts to project onto the celestial sphere. */
+  alignmentAttempts?: AlignmentAttempt[];
+  /** Polar Alignment Assistant (PAA) status and coordinates. */
+  polarAlignment?: PolarAlignmentStatus | null;
+  /** Selected historical session identifier being reviewed. */
+  selectedSessionId?: string | null;
   /** Sensor FOV width in degrees from active equipment configuration. */
   sensorFovWidthDeg?: number;
   /** Sensor FOV height in degrees from active equipment configuration. */
   sensorFovHeightDeg?: number;
+  /** Sensor plate scale in arcseconds per pixel from active equipment configuration. */
+  plateScaleArcsecPerPx?: number;
+  /** Show mount tracking mechanical risk heatmap. */
+  showTrackingRisk?: boolean;
+  /** Cumulative tracking and alignment attempts across all recorded observing sessions. */
+  cumulativeTrackingAttempts?: AlignmentAttempt[];
 }
 
 /**

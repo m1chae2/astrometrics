@@ -2,8 +2,9 @@
  * @module PlanetariumContextMenu
  * @fileoverview Right-click context menu for celestial objects on the sky map.
  *
- * Displays coordinates and object name, with optional actions to open the
- * object in Astronomy Manager or slew the telescope to its position.
+ * Displays coordinates and object name, with optional actions to switch to
+ * Astronomy Manager with the object selected, or slew the telescope to its
+ * position.
  *
  */
 
@@ -11,6 +12,7 @@ import React, { useEffect, useRef } from 'react';
 import { PlanetariumSource } from '../../common/types/planetariumTypes';
 import { slewTelescope } from '../../common/services/telescopeService';
 import { emitToast } from '../../common/utils/emitToast';
+import { navigateToElement } from '../../common/utils/displayCoordinator';
 
 /**
  * Props for PlanetariumContextMenu.
@@ -58,14 +60,38 @@ export const PlanetariumContextMenu: React.FC<Props> = ({ source, x, y, telescop
   }, [onClose]);
 
   /**
-   * Opens a duplicate browser tab pre-navigated to the Astronomy Manager view
-   * with the current source pre-selected via URL query parameter.
+   * Switches the app to the Astronomy Manager view with the current source
+   * pre-selected, in place -- matching how every other mode switch in this
+   * app (e.g. the sidebar) works, rather than opening a second window.
    *
    * @returns {void}
    */
-  const handleOpenDuplicateWindow = () => {
-    const url = `${window.location.origin}${window.location.pathname}?mode=Astronomy Manager&star=${encodeURIComponent(source.id)}`;
-    window.open(url, '_blank');
+  const handleOpenInAstronomyManager = () => {
+    try {
+      window.localStorage.setItem('planetariumSelectedStar', source.id);
+    } catch {
+      // Ignore localStorage access failures (e.g. in private browsing)
+    }
+
+    navigateToElement({
+      targetDisplay: 'Astronomy Manager',
+      targetElement: 'spectrumViewer',
+      action: 'astronomySelectStar',
+      payload: source.id,
+      toast: {
+        message: `Opening ${source.name || source.id} in Astronomy Manager`,
+        type: 'info',
+        title: 'Planetarium',
+      },
+    }).then((result) => {
+      if (!result.handledRemotely) {
+        try {
+          window.localStorage.setItem('appMode', 'Astronomy Manager');
+        } catch {
+          // Ignore
+        }
+      }
+    });
     onClose();
   };
 
@@ -113,9 +139,9 @@ export const PlanetariumContextMenu: React.FC<Props> = ({ source, x, y, telescop
       {hasAnyData && (
         <button
           className="planetarium-context-menu__action"
-          onClick={handleOpenDuplicateWindow}
+          onClick={handleOpenInAstronomyManager}
         >
-          Open in Astronomy Manager ↗
+          Open in Astronomy Manager
         </button>
       )}
 

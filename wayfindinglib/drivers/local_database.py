@@ -28,16 +28,16 @@ _TABLE_NAME = "observation_sessions"
 
 
 def _wayfinding_library_path(app_config) -> Path:  # ruff: ignore[missing-type-function-argument]
-    """Return wayfindinglib's own libraryIndex directory path.
+    """Return wayfindinglib's own `library` directory path.
 
-    Physically separate from astrometricslib's own libraryIndex --
+    Physically separate from astrometricslib's own `library` --
     wayfindinglib records its own data (e.g. ObservationSession) in
     its own database file, not astrometricslib's.
 
     Returns
     -------
     wayfinding_library_path : `Path`
-        Absolute path to wayfindinglib's libraryIndex directory,
+        Absolute path to wayfindinglib's `library` directory,
         created if it did not already exist.
     """
     try:
@@ -46,7 +46,7 @@ def _wayfinding_library_path(app_config) -> Path:  # ruff: ignore[missing-type-f
         if not path.is_absolute():
             path = (app_config.get_project_root() / path).absolute()
     except configparser.NoSectionError, configparser.NoOptionError, KeyError:
-        path = app_config.get_project_root() / "wayfindinglib" / "libraryIndex"
+        path = app_config.get_project_root() / "wayfindinglib" / "library"
     path.mkdir(parents=True, exist_ok=True)
     return path.absolute()
 

@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useTargetListQuery } from '../queries/useTargetListQuery';
 import { useAstronomyListQuery } from '../queries/useAstronomyListQuery';
-import { useToast } from './useToast';
+import { reportError } from '../utils/reportError';
 import { SelectableItem } from '../components/SelectableList';
 
 interface Target {
     id?: string;
     name?: string;
+    stacking?: { processedImage?: string; stackedImage?: string };
     [key: string]: unknown;
 }
 
@@ -45,7 +46,6 @@ export const useTargetListLogic = (
 ) => {
     const [dropdown, setDropdown] = useState<string>('Target Objects');
     const [filterText, setFilterText] = useState<string>('');
-    const toast = useToast();
 
     // Shared queries: multiple views consume the same cached target/star
     // lists instead of each independently fetching them on mount.
@@ -70,18 +70,8 @@ export const useTargetListLogic = (
 
     useEffect(() => {
         if (!targetListQuery.error) return;
-        console.error(targetListQuery.error);
-        try {
-            toast.show(
-                targetListQuery.error instanceof Error
-                    ? targetListQuery.error.message
-                    : String(targetListQuery.error),
-                'error'
-            );
-        } catch {
-            // Ignore toast errors
-        }
-    }, [targetListQuery.error, toast]);
+        reportError(targetListQuery.error, 'target-list');
+    }, [targetListQuery.error]);
 
     useEffect(() => {
         if (astronomyListQuery.error) {
@@ -111,7 +101,7 @@ export const useTargetListLogic = (
         (t: Target) => {
             const processedPath = typeof t === 'string'
                 ? ''
-                : (t.processed_image || t.processedImage || '');
+                : (t.stacking?.processedImage || t.stacking?.stackedImage || '');
             const isProcessed = typeof processedPath === 'string' && processedPath.trim() !== '';
 
             if (dropdown === 'No Image') {
@@ -153,7 +143,7 @@ export const useTargetListLogic = (
             if (!filterProcessedOnly) return true;
             const processedPath = typeof t === 'string'
                 ? ''
-                : (t.processed_image || t.processedImage || '');
+                : (t.stacking?.processedImage || t.stacking?.stackedImage || '');
             return typeof processedPath === 'string' && processedPath.trim() !== '';
         },
         [filterProcessedOnly]
@@ -215,8 +205,10 @@ export const useTargetListLogic = (
                     ? undefined
                     : (typeof target === 'string'
                         ? false
-                        : typeof (target.processed_image || target.processedImage) === 'string' &&
-                          (target.processed_image || target.processedImage).trim() !== '')
+                        : (() => {
+                              const image = target.stacking?.processedImage || target.stacking?.stackedImage;
+                              return typeof image === 'string' && image.trim() !== '';
+                          })())
             };
         });
     }, [filteredTargets, dropdown]);
@@ -233,6 +225,7 @@ export const useTargetListLogic = (
         items: filteredItems,
         targets,
         stars,
+        isLoading: dropdown === 'Stars' ? astronomyListQuery.isLoading : targetListQuery.isLoading,
         filterOptions,
         selectedFilterOption: dropdown,
         setFilterOption: setDropdown,

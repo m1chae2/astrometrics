@@ -142,7 +142,7 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
         from astrometricslib.pipelines.astrometry.pipeline import (
             AstrometryPipeline,
         )
-        from astrometricslib.pipelines.astrometry.star_identifier import (
+        from astrometricslib.pipelines.astrometry.processing.star_identifier import (
             get_gaia_query_statistics,
             reset_gaia_query_statistics,
         )
@@ -160,7 +160,7 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
 
         pipeline = AstrometryPipeline()
         context = pipeline.process(
-            path, attempt_plate_solving=True, target_ra=target.ra, target_dec=target.dec, **request.options
+            path, attempt_plate_solving=True, target_ra=target.ra, target_dec=target.dec
         )
 
         context.stellar_objects, star_id_breakdown = _drop_unresolved_stars(
@@ -186,6 +186,11 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
             merge_function=merge_astrometry_stellar_object,
             already_dropped=True,
         )
+
+        # The stars solved and saved from the stacked image are the ones
+        # this target "has"; photometry later finds more, but only from
+        # per-frame detection, so they do not describe the stack.
+        target.number_of_stars = len(context.stellar_objects)
 
         return Result(
             context=context,
@@ -229,6 +234,19 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
         if not summary.astrometry_metrics.plate_solve_succeeded:
             summary.flagged = True
             summary.flag_reasons.append("plate solve failed")
+
+        from astrometricslib.pipelines.shared.applied_camera_profile import (
+            camera_name_from_header,
+            most_common_camera_name,
+            record_camera_profile,
+        )
+
+        # The image's own header names its camera; the target's frames are the
+        # fallback for an image whose header does not.
+        camera_name = camera_name_from_header(result.context.image.header) or most_common_camera_name(
+            request.frames or request.target.frames
+        )
+        record_camera_profile(summary, camera_name)
         return summary
 
     def to_result_dict(
@@ -288,6 +306,10 @@ def run_astrometry_analysis(
         Has ``"context"`` (the `AnalysisContext` the pipeline built),
         ``"stellar_objects"``, ``"wcs"``, and ``"image_stats"``.
     """
+    from astrometricslib.pipelines.shared.provenance_recording import note_stacked_image_upstream
+
+    note_stacked_image_upstream(kwargs, target.id, target.stacking.stacked_image, "input_image")
+
     request = PipelineRequest(
         target=target,
         catalog_access=catalog_access,

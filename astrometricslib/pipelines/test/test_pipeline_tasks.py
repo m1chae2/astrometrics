@@ -296,7 +296,7 @@ def test_target_analyze_target(tmp_path: Any) -> None:
     Confirms the pipeline correctly identifies stars in the frame.
     """
     config = AppConfiguration()
-    original_path = config.get_value("Image Library", "path", fallback="./libraryIndex")
+    original_path = config.get_value("Image Library", "path", fallback="./library")
     config.update_config({"Image Library": {"path": str(tmp_path)}})
 
     try:
@@ -415,7 +415,7 @@ def test_target_analyze_frame_spectroscopy(tmp_path, mocker):  # ruff: ignore[mi
     original_instance = config_loader._instance
     config_loader._instance = config
 
-    original_path = config.get_value("Image Library", "path", fallback="./libraryIndex")
+    original_path = config.get_value("Image Library", "path", fallback="./library")
     config.update_config({"Image Library": {"path": str(tmp_path)}})
 
     try:
@@ -482,7 +482,7 @@ def test_analyze_frame_spectroscopy_does_not_disturb_other_stars_indexed_columns
     original_instance = config_loader._instance
     config_loader._instance = config
 
-    original_path = config.get_value("Image Library", "path", fallback="./libraryIndex")
+    original_path = config.get_value("Image Library", "path", fallback="./library")
     config.update_config({"Image Library": {"path": str(tmp_path)}})
 
     try:
@@ -590,16 +590,16 @@ def test_target_analyze_target_asteroid_detection(tmp_path, mocker):  # ruff: ig
     _write_asteroid_detection_stack_fits(stack_path)
 
     target = Target(id="AsteroidDetectionTestTarget", frames=frames)
-    target.stacked_image = str(stack_path)
+    target.stacking.stacked_image = str(stack_path)
 
     result = tasks.analyze_target(target, pipeline_type="asteroid_detection")
 
     assert_result_keys(result, "asteroid_detection")
     assert result["status"] == "completed"
-    assert len(target.asteroid_candidates) == 1
-    assert target.asteroid_candidates[0].cascade_stage == CascadeStage.RATE_LINEARITY_CONFIRMED
+    assert len(target.asteroid_detection.candidates) == 1
+    assert target.asteroid_detection.candidates[0].cascade_stage == CascadeStage.RATE_LINEARITY_CONFIRMED
 
-    summary = target.asteroid_detection_quality_summary
+    summary = target.asteroid_detection.quality_summary
     assert summary is not None
     assert summary.upstream_quality_summary_reference == "astrometry"
     assert summary.asteroid_detection_metrics.frames_with_wcs_estimate == 4
@@ -617,7 +617,7 @@ def test_target_analyze_target_asteroid_detection_drops_rejected_candidates(tmp_
     chains into its own single-detection candidate alongside the
     genuine moving-object track. `analyze_target` should still report
     it in the run's metrics (the full discrimination-cascade audit
-    trail), but must not record it onto `target.asteroid_candidates`
+    trail), but must not record it onto `target.asteroid_detection.candidates`
     -- otherwise a dense field's rejected noise chains bloat the
     target's recorded record without limit.
     """
@@ -636,7 +636,7 @@ def test_target_analyze_target_asteroid_detection_drops_rejected_candidates(tmp_
     _write_asteroid_detection_stack_fits(stack_path)
 
     target = Target(id="AsteroidDetectionMixedTestTarget", frames=frames)
-    target.stacked_image = str(stack_path)
+    target.stacking.stacked_image = str(stack_path)
 
     result = tasks.analyze_target(target, pipeline_type="asteroid_detection")
 
@@ -644,16 +644,16 @@ def test_target_analyze_target_asteroid_detection_drops_rejected_candidates(tmp_
     assert result["status"] == "completed"
     # Only the confirmed track is recorded -- the single-frame cosmic
     # ray is dropped, not carried onto the target.
-    assert len(target.asteroid_candidates) == 1
-    assert target.asteroid_candidates[0].cascade_stage == CascadeStage.RATE_LINEARITY_CONFIRMED
+    assert len(target.asteroid_detection.candidates) == 1
+    assert target.asteroid_detection.candidates[0].cascade_stage == CascadeStage.RATE_LINEARITY_CONFIRMED
 
     # But the pipeline's own metrics still account for both candidates
     # it evaluated, proving the drop happens at recording time, not
     # inside the discrimination cascade itself.
-    summary = target.asteroid_detection_quality_summary
+    summary = target.asteroid_detection.quality_summary
     assert summary.asteroid_detection_metrics.candidates_detected == 2
     assert summary.asteroid_detection_metrics.candidates_rate_linearity_confirmed == 1
-    assert result["candidates"] == target.asteroid_candidates
+    assert result["candidates"] == target.asteroid_detection.candidates
 
 
 def _grid_star_positions(count, spacing=30.0, margin=30.0, per_row=6):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
@@ -702,7 +702,7 @@ def test_target_analyze_target_photometry_runs_each_session_independently(tmp_pa
     bug), only one session's reference frame would ever be identified
     against, so the total would be 12 or 18, never the sum of both.
     """
-    monkeypatch.setenv("ASTROMETRICS_CONFIG_PATH", str(tmp_path / "astrometrics.config"))
+    monkeypatch.setenv("ASTROMETRICS_CONFIG_PATH", str(tmp_path / "astrometrics.config.toml"))
     config = AppConfiguration()
     config.update_config({"Image Library": {"path": str(tmp_path)}})
     catalog_access = CatalogAccess(config=config)
@@ -734,7 +734,7 @@ def test_target_analyze_target_photometry_runs_each_session_independently(tmp_pa
                 )
             )
 
-    from astrometricslib.pipelines.astrometry import session_identification
+    from astrometricslib.pipelines.shared import session_identification
 
     # Sky offsets are 190 degrees apart, far beyond the 5 arcsec
     # cross-session match tolerance, so no session A/B star can ever
@@ -781,7 +781,7 @@ def test_target_analyze_target_photometry_runs_each_session_independently(tmp_pa
     assert result["starsProcessed"] == expected_independent_total
     assert result["starsFound"] == expected_independent_total
 
-    summary = target.photometry_quality_summary
+    summary = target.quality.photometry
     assert summary is not None
     assert len(summary.target_session_ids) == 2
 
@@ -813,7 +813,7 @@ def test_target_analyze_target_photometry_with_astrometry_seed_uses_identified_s
     star carries its real astrometry-derived id) without depending on
     solve-field or a network SIMBAD query.
     """
-    monkeypatch.setenv("ASTROMETRICS_CONFIG_PATH", str(tmp_path / "astrometrics.config"))
+    monkeypatch.setenv("ASTROMETRICS_CONFIG_PATH", str(tmp_path / "astrometrics.config.toml"))
     config = AppConfiguration()
     config.update_config({"Image Library": {"path": str(tmp_path)}})
     catalog_access = CatalogAccess(config=config)
@@ -837,7 +837,7 @@ def test_target_analyze_target_photometry_with_astrometry_seed_uses_identified_s
     # catalog-matched, not position-only, by _drop_unresolved_stars.
     seed_star.is_catalog_identified = True
 
-    from astrometricslib.pipelines.astrometry import session_identification
+    from astrometricslib.pipelines.shared import session_identification
 
     fake_wcs = object()
 
@@ -875,7 +875,7 @@ def test_target_analyze_target_photometry_with_astrometry_seed_uses_identified_s
     assert len(matching) == 1
     assert matching[0].name == "Vega"
 
-    summary = target.photometry_quality_summary
+    summary = target.quality.photometry
     assert summary is not None
     assert summary.photometry_metrics.astrometry_identified_star_count == 1
     assert summary.photometry_metrics.sessions_with_reused_header_wcs == summary.target_session_ids
@@ -895,7 +895,7 @@ def test_target_analyze_target_photometry_without_astrometry_seed_persists_nothi
     meaningfully merged back into the physical star it came from on a
     later run.
     """
-    monkeypatch.setenv("ASTROMETRICS_CONFIG_PATH", str(tmp_path / "astrometrics.config"))
+    monkeypatch.setenv("ASTROMETRICS_CONFIG_PATH", str(tmp_path / "astrometrics.config.toml"))
     config = AppConfiguration()
     config.update_config({"Image Library": {"path": str(tmp_path)}})
     catalog_access = CatalogAccess(config=config)
@@ -919,7 +919,7 @@ def test_target_analyze_target_photometry_without_astrometry_seed_persists_nothi
     assert result["status"] == "completed"
     assert result["starsProcessed"] == 0
     assert result["starsFound"] == 0
-    summary = target.photometry_quality_summary
+    summary = target.quality.photometry
     assert summary.photometry_metrics.astrometry_identified_star_count == 0
     assert summary.photometry_metrics.sessions_with_reused_header_wcs == []
 

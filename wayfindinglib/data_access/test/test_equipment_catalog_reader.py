@@ -11,9 +11,11 @@ import pytest
 
 from wayfindinglib.data_access.equipment_catalog_reader import (
     get_active_camera_id,
+    get_active_guide_scope_id,
     get_active_telescope_id,
     get_equipment_catalog,
     list_cameras,
+    list_guide_scopes,
     list_telescopes,
 )
 
@@ -38,7 +40,7 @@ def app_config(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-arg
     """
     from astrometricslib import AppConfiguration
 
-    config_path = tmp_path / "astrometrics.config"
+    config_path = tmp_path / "astrometrics.config.toml"
     monkeypatch.setattr(AppConfiguration, "_find_config_file", lambda self: config_path)
     return AppConfiguration()
 
@@ -162,3 +164,146 @@ def test_get_equipment_catalog_active_camera_none_when_no_cameras_configured(app
     catalog = get_equipment_catalog(app_config)
     assert catalog.active_camera_id is None
     assert catalog.active_camera() is None
+
+
+def test_telescope_protocol_fields_default_to_indi(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify a telescope's protocol fields default to 'indi' when unset."""
+    app_config.update_config({
+        "Observatory.Telescope": {"models": "Apertura 75Q"},
+        "Observatory.Telescope.Apertura 75Q": {"focal_length_mm": "450.0"},
+    })
+    telescope = list_telescopes(app_config)[0]
+    assert telescope.mount_protocol == "indi"
+    assert telescope.focuser_protocol == "indi"
+    assert telescope.filter_wheel_protocol == "indi"
+
+
+def test_get_equipment_catalog_raises_on_unregistered_mount_protocol(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify a misconfigured mount protocol fails at catalog-load time.
+
+    Not the first time a `mount_driver` property happens to be accessed
+    mid-session.
+    """
+    app_config.update_config({
+        "Observatory.Telescope": {"models": "Apertura 75Q"},
+        "Observatory.Telescope.Apertura 75Q": {
+            "focal_length_mm": "450.0",
+            "mount_protocol": "ascom",
+        },
+    })
+    with pytest.raises(ValueError, match="ascom"):
+        get_equipment_catalog(app_config)
+
+
+def test_get_equipment_catalog_raises_on_unregistered_camera_protocol(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify a misconfigured camera protocol fails at catalog-load time."""
+    app_config.update_config({
+        "Observatory.Camera": {
+            "models": "ZWO ASI533MM Pro",
+            "default_primary_camera": "ZWO ASI533MM Pro",
+        },
+        "Observatory.Camera.ZWO ASI533MM Pro": {
+            "pixel_size_μm": "3.76",
+            "sensor_width_px": "3008",
+            "sensor_height_px": "3008",
+            "protocol": "alpaca",
+        },
+    })
+    with pytest.raises(ValueError, match="alpaca"):
+        get_equipment_catalog(app_config)
+
+
+def test_list_guide_scopes_is_empty_when_unconfigured(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify an unconfigured catalog yields no guide scopes.
+
+    Unlike telescopes, there is no single-entry fallback: guiding
+    through the main OTA (no separate guide scope) is the common case,
+    not an unconfigured oversight.
+    """
+    assert list_guide_scopes(app_config) == []
+    assert get_active_guide_scope_id(app_config) is None
+
+
+def test_list_guide_scopes_resolves_a_configured_guide_scope(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify a named guide scope section resolves with its optics."""
+    app_config.update_config({
+        "Observatory.GuideScope": {"models": "Orion 50mm", "active_guide_scope": "Orion 50mm"},
+        "Observatory.GuideScope.Orion 50mm": {"focal_length_mm": "162.0", "aperture_mm": "50.0"},
+    })
+    guide_scopes = list_guide_scopes(app_config)
+    assert len(guide_scopes) == 1
+    assert guide_scopes[0].id == "Orion 50mm"
+    assert guide_scopes[0].focal_length_mm == pytest.approx(162.0)
+    assert guide_scopes[0].aperture_mm == pytest.approx(50.0)
+    assert get_active_guide_scope_id(app_config) == "Orion 50mm"
+
+
+def test_get_equipment_catalog_resolves_active_guide_scope(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify `get_equipment_catalog` wires the active guide scope through."""
+    app_config.update_config({
+        "Observatory.GuideScope": {"models": "Orion 50mm", "active_guide_scope": "Orion 50mm"},
+        "Observatory.GuideScope.Orion 50mm": {"focal_length_mm": "162.0"},
+    })
+    catalog = get_equipment_catalog(app_config)
+    assert catalog.active_guide_scope() is not None
+    assert catalog.active_guide_scope().id == "Orion 50mm"
+
+
+def test_get_equipment_catalog_ignores_unresolved_active_guide_scope_id(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify a stale/unresolved active guide scope id resolves to `None`.
+
+    Unlike telescopes/cameras, this does not fall back to "the first
+    configured entry" -- an unresolved selection means guiding through
+    the main OTA, not a typo to silently correct.
+    """
+    app_config.update_config({
+        "Observatory.GuideScope": {"active_guide_scope": "Nonexistent Scope"},
+    })
+    catalog = get_equipment_catalog(app_config)
+    assert catalog.active_guide_scope() is None
+
+
+def _configure_two_cameras(app_config, **camera_section_overrides: str):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    """Configure a main camera and a guide camera in an isolated config."""
+    camera_section = {
+        "models": "Main, Guide",
+        "default_primary_camera": "Main",
+        **camera_section_overrides,
+    }
+    app_config.update_config({
+        "Observatory.Camera": camera_section,
+        "Observatory.Camera.Main": {
+            "pixel_size_μm": "3.76",
+            "sensor_width_px": "3008",
+            "sensor_height_px": "3008",
+        },
+        "Observatory.Camera.Guide": {
+            "pixel_size_μm": "3.75",
+            "sensor_width_px": "1280",
+            "sensor_height_px": "960",
+        },
+    })
+
+
+def test_guide_camera_is_unset_when_nothing_is_configured(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify no guide-camera key means the main camera guides."""
+    _configure_two_cameras(app_config)
+    assert get_equipment_catalog(app_config).active_guide_camera() is None
+
+
+def test_explicit_default_guide_camera_key_selects_the_guide_camera(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify `default_guide_camera` resolves to a configured camera."""
+    _configure_two_cameras(app_config, default_guide_camera="Guide")
+    assert get_equipment_catalog(app_config).active_guide_camera().id == "Guide"
+
+
+def test_legacy_secondary_camera_key_is_the_guide_camera_fallback(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify a config that only has `default_secondary_camera` still works."""
+    _configure_two_cameras(app_config, default_secondary_camera="Guide")
+    assert get_equipment_catalog(app_config).active_guide_camera().id == "Guide"
+
+
+def test_an_unknown_guide_camera_name_resolves_to_none_not_an_error(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify a stale guide-camera name never breaks catalog loading."""
+    _configure_two_cameras(app_config, default_guide_camera="Removed Camera")
+    assert get_equipment_catalog(app_config).active_guide_camera() is None

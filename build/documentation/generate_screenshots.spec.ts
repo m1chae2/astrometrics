@@ -146,7 +146,7 @@ test.describe('Documentation Screenshots Generator (Live Backend)', () => {
   test('Capture screenshot for Astronomy Manager', async ({ page }) => {
     await preparePage(page, 'Astronomy Manager', 'star=Alcor');
 
-    // Wait for AstronomyDisplay to mount and list to load
+    // Wait for AstronomyManager to mount and list to load
     await page.waitForSelector('.astronomy-display', { state: 'visible', timeout: 15000 });
     await page.waitForSelector('.astronomy-display .selectable-list__item', { state: 'visible', timeout: 15000 });
 

@@ -43,10 +43,19 @@ def test_measure_rejected_fraction_returns_none_when_rejmap_missing(tmp_path):  
     assert measure_rejected_fraction(str(stacked_path)) is None
 
 
-def test_measure_saturated_pixel_fraction_counts_known_saturated_pixels(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verifies a known fraction of saturated pixels is measured exactly."""
-    data = np.full((10, 10), 100.0, dtype=np.float32)
-    data[:3, :] = 65535.0  # 30 of 100 pixels saturated
-    path = tmp_path / "partially_saturated.fits"
+def test_measure_saturated_pixel_fraction_finds_plateau_in_normalised_stack(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verifies 100 pixels piled at 0.8 in a 0-1 stack count as saturated."""
+    data = np.random.default_rng(1).uniform(0.03, 0.07, (100, 100)).astype(np.float32)
+    data[:1, :100] = 0.8  # 100 of 10000 pixels on the plateau
+    path = tmp_path / "saturated_stack.fits"
     fits.PrimaryHDU(data).writeto(path)
-    assert measure_saturated_pixel_fraction(str(path)) == pytest.approx(0.3)
+    assert measure_saturated_pixel_fraction(str(path)) == pytest.approx(0.01)
+
+
+def test_measure_saturated_pixel_fraction_ignores_unsaturated_stack(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verifies a stack whose brightest pixel is a lone peak reports zero."""
+    data = np.random.default_rng(1).uniform(0.03, 0.07, (100, 100)).astype(np.float32)
+    data[50, 50] = 1.0
+    path = tmp_path / "unsaturated_stack.fits"
+    fits.PrimaryHDU(data).writeto(path)
+    assert measure_saturated_pixel_fraction(str(path)) == pytest.approx(0.0)

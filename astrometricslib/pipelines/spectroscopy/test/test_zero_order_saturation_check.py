@@ -75,3 +75,28 @@ def test_zero_order_saturation_fraction_reflects_saturated_aperture():  # ruff: 
     result = pipeline._process_single_star(image, (float(star_x), float(star_y)), auto_detect_angle=False)
 
     assert result["zero_order_saturated_pixel_fraction"] == pytest.approx(1.0)
+
+
+def test_zero_order_saturation_fraction_uses_plateau_on_normalised_stack():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify a 0-1 stack with a plateau at its star reports saturation."""
+    data = np.full((1000, 1000), 0.02)
+    star_x, star_y, radius = 500, 500, 5
+    data[star_y - radius : star_y + radius + 1, star_x - radius : star_x + radius + 1] = 0.8
+    image = MockAstrometricsImage(data=data)
+    pipeline = _build_pipeline(extraction_radius=radius)
+
+    result = pipeline._process_single_star(image, (float(star_x), float(star_y)), auto_detect_angle=False)
+
+    assert result["zero_order_saturated_pixel_fraction"] == pytest.approx(1.0)
+
+
+def test_zero_order_saturation_fraction_zero_for_unsaturated_normalised_stack():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify a lone 1.0 peak in a 0-1 stack is not called saturated."""
+    data = np.random.default_rng(3).uniform(0.01, 0.03, (1000, 1000))
+    data[500, 500] = 1.0
+    image = MockAstrometricsImage(data=data)
+    pipeline = _build_pipeline(extraction_radius=5)
+
+    result = pipeline._process_single_star(image, (500.0, 500.0), auto_detect_angle=False)
+
+    assert result["zero_order_saturated_pixel_fraction"] == pytest.approx(0.0, abs=0.01)

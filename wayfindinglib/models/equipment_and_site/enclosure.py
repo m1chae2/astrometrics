@@ -56,3 +56,7 @@ class Enclosure(BaseModel):
     park_altitude_deg: float = Field(..., ge=-90.0, le=90.0)
     clearance_tolerance_deg: float = Field(default=2.0, gt=0.0)
     motion_timeout_sec: int = Field(default=180, gt=0)
+    protocol: str = Field(
+        default="indi",
+        description="Hardware-control protocol driving this enclosure.",
+    )

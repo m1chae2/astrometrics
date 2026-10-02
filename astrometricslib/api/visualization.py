@@ -276,6 +276,32 @@ class Visualization:
 
         return plot_target_spectroscopy(target, self._astrometrics.stars, limit=limit, figsize=figsize)
 
+    def plot_focus_vs_temperature(self, target: Target, figsize: tuple[int, int] = (14, 9)) -> Figure:
+        """Render a target's focuser position, temperature and focus quality.
+
+        Shows the focuser temperature and position through the night, the
+        position against the temperature, and (when frames have one) the
+        star-image width against the temperature with its slope in pixels
+        per degree, so a focus drift as the telescope cools is easy to see.
+
+        Parameters
+        ----------
+        target : `Target`
+            The target to render. Its light frames must carry a focuser
+            temperature.
+        figsize : `tuple` [`int`, `int`], optional
+            Matplotlib figure size, in inches. Defaults to ``(14, 9)``.
+
+        Returns
+        -------
+        fig : `matplotlib.figure.Figure`
+            Matplotlib figure instance. A target with no focuser
+            temperature raises `ValueError`.
+        """
+        from astrometricslib.visualization.focus_plots import plot_focus_vs_temperature
+
+        return plot_focus_vs_temperature(target, figsize=figsize)
+
     def plot_asteroid_detection(self, target: Target, figsize: tuple[int, int] = (10, 10)) -> Figure:
         """Render a target's stacked image with detected asteroid tracks.
 

@@ -37,6 +37,7 @@ export const TargetListPanel: React.FC<Props> = ({
         filterText,
         setFilterText,
         highlightedIds,
+        isLoading,
     } = useTargetListLogic(reloadKey, pendingTarget, selectedTarget, setPendingTarget);
 
     React.useEffect(() => {
@@ -64,6 +65,9 @@ export const TargetListPanel: React.FC<Props> = ({
                 filterText={filterText}
                 onFilterTextChange={setFilterText}
                 highlightedIds={highlightedIds}
+                isLoading={isLoading}
+                loadingMessage="Loading targets…"
+                emptyMessage="No targets in the catalog."
                 className="target-list-manager"
                 actions={
                     <ListActions>

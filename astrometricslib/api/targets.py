@@ -10,6 +10,7 @@ work.
 import builtins
 
 from astrometricslib.models.target import Target
+from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
 from astrometricslib.pipelines.shared.frame_scanning import classify_and_sort_fits_files
 from astrometricslib.pipelines.shared.target_sessions import derive_target_sessions
 from astrometricslib.utilities.config_loader import AppConfiguration
@@ -18,6 +19,7 @@ __all__ = [
     "TargetCatalog",
     "classify_and_sort_fits_files",
     "derive_target_sessions",
+    "frame_is_spectral",
 ]
 
 
@@ -240,9 +242,9 @@ class TargetCatalog:
         """
         if target is not None:
             belongs_to_target = any(f.path == path for f in target.frames) or path in (
-                target.processed_image,
-                target.stacked_image,
-                target.stacked_spectral_target,
+                target.stacking.processed_image,
+                target.stacking.stacked_image,
+                target.spectral_stacking.stacked_image,
             )
             if not belongs_to_target:
                 raise ValueError(f"Path {path} does not belong to target {target.id}")

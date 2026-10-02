@@ -13,6 +13,9 @@ Astrometrics Library (`astrometricslib`)
 .. automodapi:: astrometricslib
    :no-inheritance-diagram:
    :skip: AbstractCatalogAccess
+   :skip: ActivityDescription
+   :skip: Agent
+   :skip: AgentType
    :skip: AnalysisResult
    :skip: AppConfiguration
    :skip: AsteroidDetectionCandidate
@@ -21,27 +24,43 @@ Astrometrics Library (`astrometricslib`)
    :skip: AstrometryQualitySummary
    :skip: BatchRunSummary
    :skip: CatalogAccess
+   :skip: Collection
+   :skip: ConfigFile
+   :skip: ConfigFileDescription
+   :skip: DatasetDescription
+   :skip: DatasetEntity
    :skip: DbLogHandler
+   :skip: EntityDescription
    :skip: FileItem
    :skip: FilterType
    :skip: FitsHeaderEntry
    :skip: FrameRecord
+   :skip: GenerationDescription
    :skip: GroupedFrameStat
    :skip: ImageProcessing
    :skip: LoggerInterface
    :skip: MovingObjectConfig
+   :skip: Parameter
+   :skip: ParameterDescription
    :skip: PhotometryResult
    :skip: PlotData
    :skip: ProcessingJob
    :skip: RenderedImage
-   :skip: SpectralObservation
    :skip: SpectroscopyResult
    :skip: StarIdentifier
    :skip: StellarObject
    :skip: Target
    :skip: TargetFilesResponse
    :skip: TargetSessionContribution
+   :skip: UsageDescription
+   :skip: Used
+   :skip: ValueDescription
+   :skip: ValueEntity
    :skip: VariableCandidate
+   :skip: WasAssociatedWith
+   :skip: WasAttributedTo
+   :skip: WasConfiguredBy
+   :skip: WasGeneratedBy
    :skip: classify_and_sort_fits_files
    :skip: derive_target_sessions
    :skip: get_configuration

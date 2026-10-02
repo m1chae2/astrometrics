@@ -59,10 +59,10 @@ export const fetchIngestStatus = async (jobId: string): Promise<IngestStatusResp
  */
 export const scanRemoteTargets = async (): Promise<RemoteScanResponse> => {
     try {
-        const result = await callBackend('ingestion:scan', {});
+        const result = await callBackend('ingestion:scan', {}, { silent: true });
         return result || { folders: [] };
     } catch {
-        throw new Error('Failed to scan remote targets');
+        return { folders: [] };
     }
 };
 

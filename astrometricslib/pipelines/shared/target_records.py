@@ -371,7 +371,7 @@ def add_data(api, target_id: str, image_file: Any, camera: str | None = None) ->
                 resolved = api._resolve_relative_image_path(path)
                 if resolved:
                     path = resolved
-            target.processed_image = path
+            target.stacking.processed_image = path
 
     target.recalculate_total_exposure()
     save_targets(api)

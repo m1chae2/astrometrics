@@ -9,7 +9,7 @@ import './common/styles/index.css';
 import App from './App';
 import { ToastProvider } from './common/components/ToastProvider';
 
-import { ErrorBoundary } from './components/ErrorBoundary';
+import { ErrorBoundary } from './common/components/ErrorBoundary';
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>

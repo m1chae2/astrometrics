@@ -80,7 +80,7 @@ def _build_moving_target(tmp_path, include_radec=True):  # ruff: ignore[missing-
     _write_stack_fits(stack_path)
 
     target = Target(id="TestAsteroidTarget", frames=frames)
-    target.stacked_image = str(stack_path)
+    target.stacking.stacked_image = str(stack_path)
     return target
 
 
@@ -104,7 +104,7 @@ def test_process_raises_when_target_has_no_stacked_image():  # ruff: ignore[miss
     target = Target(id="NoStackTarget", frames=[])
     pipeline = AsteroidDetectionPipeline(MovingObjectConfig())
     with pytest.raises(ValueError, match="stacked_image"):
-        pipeline.process(target.id, target.stacked_image, _light_frames(target))
+        pipeline.process(target.id, target.stacking.stacked_image, _light_frames(target))
 
 
 def test_process_confirms_a_moving_source_with_no_ephemeris_match(tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
@@ -114,7 +114,7 @@ def test_process_confirms_a_moving_source_with_no_ephemeris_match(tmp_path, mock
     target = _build_moving_target(tmp_path)
     pipeline = AsteroidDetectionPipeline(MovingObjectConfig())
 
-    candidates = pipeline.process(target.id, target.stacked_image, _light_frames(target))
+    candidates = pipeline.process(target.id, target.stacking.stacked_image, _light_frames(target))
 
     assert len(candidates) == 1
     assert candidates[0].cascade_stage == CascadeStage.RATE_LINEARITY_CONFIRMED
@@ -147,7 +147,7 @@ def test_process_matches_a_moving_source_against_a_known_body(tmp_path, mocker):
     target = _build_moving_target(tmp_path)
     pipeline = AsteroidDetectionPipeline(MovingObjectConfig())
 
-    candidates = pipeline.process(target.id, target.stacked_image, _light_frames(target))
+    candidates = pipeline.process(target.id, target.stacking.stacked_image, _light_frames(target))
 
     assert len(candidates) == 1
     assert candidates[0].cascade_stage == CascadeStage.EPHEMERIS_MATCHED
@@ -163,7 +163,7 @@ def test_process_excludes_frames_missing_pointing_metadata(tmp_path, mocker):  #
     target = _build_moving_target(tmp_path, include_radec=False)
     pipeline = AsteroidDetectionPipeline(MovingObjectConfig())
 
-    candidates = pipeline.process(target.id, target.stacked_image, _light_frames(target))
+    candidates = pipeline.process(target.id, target.stacking.stacked_image, _light_frames(target))
 
     assert candidates == []
     assert pipeline.last_run_metrics["frames_with_wcs_estimate"] == 0

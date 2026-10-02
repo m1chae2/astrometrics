@@ -39,6 +39,8 @@ export interface ImageDetailsManagerProps {
   hasNoFiles?: boolean;
   /** Callback to start analysis. */
   onAnalyze?: () => void;
+  /** Callback to follow the spectrum of each star across the raw frames (stage two of spectral analysis). */
+  onAnalyzeTemporalVariation?: () => void;
   /** Whether analysis is currently in progress. */
   isAnalyzing?: boolean;
   /** Whether multiple filter types are selected. */
@@ -77,6 +79,7 @@ export const ImageDetailsManager: React.FC<ImageDetailsManagerProps> = ({
   selectedCameras,
   hasNoFiles,
   onAnalyze,
+  onAnalyzeTemporalVariation,
   isAnalyzing,
   hasMultipleFilters,
   selectedFilters,
@@ -116,6 +119,22 @@ export const ImageDetailsManager: React.FC<ImageDetailsManagerProps> = ({
                 title="Analyze Target"
               >
                 Analyze Target
+              </button>
+            )}
+
+            {onAnalyzeTemporalVariation && !isAnalyzing && (
+              <button
+                className="btn"
+                onClick={() => {
+                  if (!isAnalyzing && !isProcessing) {
+                    onAnalyzeTemporalVariation();
+                  }
+                }}
+                disabled={isProcessing}
+                type="button"
+                title="Follow how each star's spectrum changes across the raw frames. Analyze the master stack first."
+              >
+                Analyze Temporal Variation
               </button>
             )}
 

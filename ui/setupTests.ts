@@ -61,35 +61,26 @@ function reserveFreePort(): Promise<number> {
         probe.on('error', reject);
         probe.listen(0, '127.0.0.1', () => {
             const { port } = probe.address() as net.AddressInfo;
-            probe.close(() => resolve(port));
+            probe.close(() => {
+                // Avoid TIME_WAIT on Linux by offsetting by 1 from the just-closed socket
+                resolve(port + 1);
+            });
         });
     });
 }
 
-beforeAll(async () => {
-    // 1. Create sandbox directory
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'astrometrics-test-ui-'));
+/**
+ * Spawns the test backend on a freshly reserved port and waits for it to
+ * answer an RPC probe.
+ *
+ * @param {string} configPath - Path to the sandbox config file to pass via ASTROMETRICS_CONFIG_PATH.
+ * @return {Promise<{ port: number, addressInUse: boolean }>} The port it was attempted on, and whether
+ *   it failed specifically because that port was already bound by another process (as opposed to any
+ *   other startup failure) -- the only case worth retrying with a fresh port.
+ */
+async function trySpawnBackend(configPath: string): Promise<{ port: number; addressInUse: boolean }> {
+    const port = await reserveFreePort();
 
-    const libDir = path.join(tempDir, 'libraryIndex');
-    const framesDir = path.join(libDir, 'frames');
-    fs.mkdirSync(libDir, { recursive: true });
-    fs.mkdirSync(framesDir, { recursive: true });
-
-    // Write sandbox config file
-    const configPath = path.join(tempDir, 'astrometrics.config');
-    fs.writeFileSync(configPath, `[Image Library]
-path = ${libDir}
-frames_path = ${framesDir}
-`);
-
-    // Configure test environment variables
-    const backendPort = await reserveFreePort();
-    testBackendOrigin = `http://127.0.0.1:${backendPort}`;
-    process.env.BACKEND_URL = testBackendOrigin;
-    process.env.ASTROMETRICS_CONFIG_PATH = configPath;
-    process.env.ASTROMETRICS_TESTING = '1';
-
-    // 2. Spawn the backend process
     const repoRoot = path.resolve(__dirname, '..');
     const venvPythonPath = path.join(repoRoot, '.venv', 'bin', 'python3');
     const pythonPath = fs.existsSync(venvPythonPath) ? venvPythonPath : (process.env.PYTHON_BIN || 'python3');
@@ -98,7 +89,9 @@ frames_path = ${framesDir}
         cwd: repoRoot,
         env: {
             ...process.env,
-            ASTROMETRICS_PORT: String(backendPort),
+            ASTROMETRICS_CONFIG_PATH: configPath,
+            ASTROMETRICS_TESTING: '1',
+            ASTROMETRICS_PORT: String(port),
         },
         stdio: 'pipe'
     });
@@ -124,7 +117,7 @@ frames_path = ${framesDir}
     while (Date.now() - start < readinessTimeoutMs) {
         if (exitInfo) break;
         try {
-            const res = await nativeFetch(`http://127.0.0.1:${backendPort}/api/rpc`, {
+            const res = await nativeFetch(`http://127.0.0.1:${port}/api/rpc`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -144,13 +137,59 @@ frames_path = ${framesDir}
     }
 
     if (!ready) {
-        const elapsedSeconds = ((Date.now() - start) / 1000).toFixed(1);
-        const reason = exitInfo ?? `no successful probe within ${elapsedSeconds}s`;
-        throw new Error(
-            `Test backend server failed to start on port ${backendPort}: ${reason}.\n` +
-            `Backend stderr:\n${backendStderr.slice(-4000) || '(none captured)'}`
-        );
+        // reserveFreePort's own free-at-the-time port can still lose a race
+        // to another concurrently starting test file's backend between the
+        // probe and the real bind -- rare, but worth a clean retry on a new
+        // port rather than failing the whole suite over it.
+        const addressInUse = backendStderr.includes('address already in use');
+        if (!addressInUse) {
+            const elapsedSeconds = ((Date.now() - start) / 1000).toFixed(1);
+            const reason = exitInfo ?? `no successful probe within ${elapsedSeconds}s`;
+            throw new Error(
+                `Test backend server failed to start on port ${port}: ${reason}.\n` +
+                `Backend stderr:\n${backendStderr.slice(-4000) || '(none captured)'}`
+            );
+        }
+        return { port, addressInUse: true };
     }
+
+    return { port, addressInUse: false };
+}
+
+beforeAll(async () => {
+    // 1. Create sandbox directory
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'astrometrics-test-ui-'));
+
+    const libDir = path.join(tempDir, 'library');
+    const framesDir = path.join(libDir, 'frames');
+    fs.mkdirSync(libDir, { recursive: true });
+    fs.mkdirSync(framesDir, { recursive: true });
+
+    // Write sandbox config file
+    const configPath = path.join(tempDir, 'astrometrics.config.toml');
+    fs.writeFileSync(configPath, `["Image Library"]
+path = "${libDir}"
+frames_path = "${framesDir}"
+`);
+
+    // 2. Spawn the backend process, retrying on a lost port-reservation race
+    const maxAttempts = 3;
+    let backendPort = -1;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        const { port, addressInUse } = await trySpawnBackend(configPath);
+        backendPort = port;
+        if (!addressInUse) break;
+        if (attempt === maxAttempts) {
+            throw new Error(
+                `Test backend could not bind a free port after ${maxAttempts} attempts ` +
+                `(last tried port ${port}: address already in use).`
+            );
+        }
+        backendProcess?.kill('SIGTERM');
+    }
+
+    testBackendOrigin = `http://127.0.0.1:${backendPort}`;
+    process.env.BACKEND_URL = testBackendOrigin;
 }, 120000);
 
 afterAll(() => {

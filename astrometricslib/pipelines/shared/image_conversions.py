@@ -5,7 +5,6 @@ into standard pictures (PNGs) that can be shown on a webpage or app.
 """
 
 import base64
-import glob
 import logging
 import os
 from io import BytesIO
@@ -15,12 +14,54 @@ from PIL import Image
 
 from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.pipelines.shared.image_scaling import ImageScaler
+from astrometricslib.pipelines.shared.stack_preview_path import PREVIEW_JPEG_QUALITY, preview_path_for
 from astrometricslib.utilities.exceptions import AstroLibError
 
 logger = logging.getLogger(__name__)
 
 # Shared in-memory cache for rendered PNG frames
 _png_cache: dict[tuple[str, int, float | None, float | None, str, bool], tuple[bytes, float, float]] = {}
+
+
+def _siril_preview_picture(path: str, max_dimensions: int) -> str | None:
+    """Read the Siril-stretched JPEG that stacking saved beside a stack.
+
+    The picture is used only if it is at least as new as the stack, so an old
+    picture is never shown for a newer stack. A picture larger than
+    `max_dimensions` is shrunk to fit, as the PNG route does.
+
+    Parameters
+    ----------
+    path : `str`
+        Path of the stacked FITS file.
+    max_dimensions : `int`
+        The longest side the picture may have, in pixels.
+
+    Returns
+    -------
+    image_data : `str` or `None`
+        The picture as a ``data:image/jpeg;base64,...`` string, or `None` if
+        there is no current preview or it cannot be read.
+    """
+    preview_path = preview_path_for(path)
+    try:
+        if os.path.getmtime(preview_path) < os.path.getmtime(path):
+            return None
+        with open(preview_path, "rb") as preview_file:
+            jpeg_bytes = preview_file.read()
+        with Image.open(BytesIO(jpeg_bytes)) as picture:
+            width_px, height_px = picture.size
+            largest_side = max(width_px, height_px)
+            if largest_side > max_dimensions:
+                scale = float(max_dimensions) / largest_side
+                shrunk = picture.resize((round(width_px * scale), round(height_px * scale)), Image.LANCZOS)
+                buffer = BytesIO()
+                shrunk.save(buffer, format="JPEG", quality=PREVIEW_JPEG_QUALITY)
+                jpeg_bytes = buffer.getvalue()
+    except (OSError, ValueError) as error:
+        logger.warning("Could not use the preview picture for '%s': %s", path, error)
+        return None
+    return f"data:image/jpeg;base64,{base64.b64encode(jpeg_bytes).decode('utf-8')}"
 
 
 class ImageConverter:
@@ -87,11 +128,17 @@ class ImageConverter:
     ) -> dict[str, Any] | None:
         """Convert a FITS image to text so it can be sent over the internet.
 
+        A stretched view of a stack uses the JPEG that stacking saved beside
+        it (see `stack_preview_path`), when that picture is current. Every
+        other request, including any unstretched view, is drawn from the FITS
+        data as a PNG.
+
         Returns
         -------
         result : `dict`
-            A dictionary with the image text (`image_data`), minimum
-            brightness (`min`), maximum brightness (`max`), and file headers.
+            A dictionary with the image text (`image_data`, a PNG or JPEG data
+            URL), minimum brightness (`min`), maximum brightness (`max`), and
+            file headers. For the JPEG, `min` and `max` are 0 and 255.
 
         Raises
         ------
@@ -99,20 +146,26 @@ class ImageConverter:
             If there is any problem changing the image.
         """
         try:
-            png_bytes, vmin, vmax = cls.convert_fits_to_png_with_stats(
-                path, max_dimensions=max_dimensions, stretch=stretch
-            )
-            base64_string = base64.b64encode(png_bytes).decode("utf-8")
+            # A stretched view of a stack is Siril's own picture, if stacking
+            # saved one. Its brightness range is the 8-bit scale of the JPEG.
+            preview = _siril_preview_picture(path, max_dimensions) if stretch else None
+            if preview is not None:
+                image_data, vmin, vmax = preview, 0.0, 255.0
+            else:
+                png_bytes, vmin, vmax = cls.convert_fits_to_png_with_stats(
+                    path, max_dimensions=max_dimensions, stretch=stretch
+                )
+                image_data = f"data:image/png;base64,{base64.b64encode(png_bytes).decode('utf-8')}"
 
             # Extract FITS headers to bundle them in the output
             headers = []
             try:
-                headers = get_fits_header(None, path)
+                headers = get_fits_header(path)
             except Exception as e:
                 logger.warning(f"Could not extract headers during PNG conversion: {e}")
 
             return {
-                "image_data": f"data:image/png;base64,{base64_string}",
+                "image_data": image_data,
                 "min": float(vmin),
                 "max": float(vmax),
                 "headers": headers,
@@ -344,14 +397,38 @@ def get_last_captured_image(config: Any, stretch: bool = True) -> dict[str, Any]
         images could be found.
     """
     frames_path = config.get_frames_path()
-    pattern = os.path.join(frames_path, "**", "*.fit*")
-    files = glob.glob(pattern, recursive=True)
-
-    if not files:
+    if not frames_path or not os.path.isdir(frames_path):
         return None
 
-    files.sort(key=os.path.getmtime, reverse=True)
-    latest_path = files[0]
+    latest_path: str | None = None
+    latest_mtime: float = -1.0
+
+    try:
+        stack = [frames_path]
+        while stack:
+            current_dir = stack.pop()
+            try:
+                with os.scandir(current_dir) as entries:
+                    for entry in entries:
+                        try:
+                            if entry.is_dir(follow_symlinks=False):
+                                stack.append(entry.path)
+                            elif entry.is_file(follow_symlinks=False):
+                                name_lower = entry.name.lower()
+                                if name_lower.endswith((".fits", ".fit", ".fts")):
+                                    mtime = entry.stat().st_mtime
+                                    if mtime > latest_mtime:
+                                        latest_mtime = mtime
+                                        latest_path = entry.path
+                        except OSError:
+                            continue
+            except OSError:
+                continue
+    except Exception as scan_error:
+        logger.warning("Error scanning frames directory for last image: %s", scan_error)
+
+    if not latest_path:
+        return None
 
     try:
         png_bytes, vmin, vmax = convert_fits_to_png_with_stats(

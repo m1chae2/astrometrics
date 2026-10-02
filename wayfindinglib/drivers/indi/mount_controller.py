@@ -203,6 +203,45 @@ class MountController:
             telescope, "TELESCOPE_TRACK_STATE", expected_name, PyIndi.ISS_ON, timeout=timeout
         )
 
+    def set_slew_rate(self, telescope, rate_index: int, timeout: float = 5.0) -> bool:  # ruff: ignore[missing-type-function-argument]
+        """Set the manual-slew rate by indexed switch element.
+
+        Verified gap fix: the real `IndiInterface` had no `set_slew_rate`
+        implementation at all (only the simulator did), so this call
+        would `AttributeError` against real hardware.
+
+        Parameters
+        ----------
+        telescope
+            INDI device handle for the mount.
+        rate_index : int
+            Index into the `TELESCOPE_SLEW_RATE` switch vector (e.g.
+            0 for the slowest configured rate).
+        timeout : float
+            Maximum number of seconds to wait for the driver to confirm
+            the rate change.
+
+        Returns
+        -------
+        bool
+            True if the slew rate was set and confirmed, False
+            otherwise.
+        """
+        if not telescope:
+            return False
+        rate_switch = telescope.getSwitch("TELESCOPE_SLEW_RATE")
+        if not rate_switch or not (0 <= rate_index < len(rate_switch)):
+            return False
+
+        for i in range(len(rate_switch)):
+            rate_switch[i].s = PyIndi.ISS_ON if i == rate_index else PyIndi.ISS_OFF
+        self.client.sendNewSwitch(rate_switch)
+
+        expected_name = rate_switch[rate_index].getName()
+        return wait_for_switch_state(
+            telescope, "TELESCOPE_SLEW_RATE", expected_name, PyIndi.ISS_ON, timeout=timeout
+        )
+
     def _resolve_altitude_envelope(self) -> tuple[float, float, bool]:
         """Resolve the altitude envelope slews are validated against.
 
@@ -262,7 +301,7 @@ class MountController:
         observation_time = Time.now()
         location = EarthLocation(lat=latitude * u.deg, lon=longitude * u.deg, height=elevation * u.m)
 
-        from wayfindinglib.skylib.coordinate_operations import compute_altaz
+        from wayfindinglib.tasks.planning_tasks.coordinate_operations import compute_altaz
 
         # ra is in Hours (INDI convention); compute_altaz's contract
         # is degrees.
@@ -397,12 +436,12 @@ class MountController:
 
         if direction == "STOP":
             north_south_motion = telescope.getSwitch("TELESCOPE_MOTION_NS")
-            if north_south_motion:
+            if north_south_motion and any(s.s == PyIndi.ISS_ON for s in north_south_motion):
                 for i in range(len(north_south_motion)):
                     north_south_motion[i].s = PyIndi.ISS_OFF
                 self.client.sendNewSwitch(north_south_motion)
             west_east_motion = telescope.getSwitch("TELESCOPE_MOTION_WE")
-            if west_east_motion:
+            if west_east_motion and any(s.s == PyIndi.ISS_ON for s in west_east_motion):
                 for i in range(len(west_east_motion)):
                     west_east_motion[i].s = PyIndi.ISS_OFF
                 self.client.sendNewSwitch(west_east_motion)
@@ -412,30 +451,42 @@ class MountController:
         if any(direction_char in direction for direction_char in ("N", "S")):
             north_south_motion = telescope.getSwitch("TELESCOPE_MOTION_NS")
             if north_south_motion:
+                needs_update = False
                 for i in range(len(north_south_motion)):
                     name = north_south_motion[i].getName()
-                    if "N" in direction and name == "MOTION_NORTH":
-                        north_south_motion[i].s = PyIndi.ISS_ON if start else PyIndi.ISS_OFF
-                    elif "S" in direction and name == "MOTION_SOUTH":
-                        north_south_motion[i].s = PyIndi.ISS_ON if start else PyIndi.ISS_OFF
-                    else:
-                        north_south_motion[i].s = PyIndi.ISS_OFF
-                self.client.sendNewSwitch(north_south_motion)
-                success = True
+                    desired_state = PyIndi.ISS_OFF
+                    if "N" in direction and name == "MOTION_NORTH" and start:
+                        desired_state = PyIndi.ISS_ON
+                    elif "S" in direction and name == "MOTION_SOUTH" and start:
+                        desired_state = PyIndi.ISS_ON
+
+                    if north_south_motion[i].s != desired_state:
+                        north_south_motion[i].s = desired_state
+                        needs_update = True
+
+                if needs_update:
+                    self.client.sendNewSwitch(north_south_motion)
+                    success = True
 
         if any(direction_char in direction for direction_char in ("E", "W")):
             west_east_motion = telescope.getSwitch("TELESCOPE_MOTION_WE")
             if west_east_motion:
+                needs_update = False
                 for i in range(len(west_east_motion)):
                     name = west_east_motion[i].getName()
-                    if "E" in direction and name == "MOTION_EAST":
-                        west_east_motion[i].s = PyIndi.ISS_ON if start else PyIndi.ISS_OFF
-                    elif "W" in direction and name == "MOTION_WEST":
-                        west_east_motion[i].s = PyIndi.ISS_ON if start else PyIndi.ISS_OFF
-                    else:
-                        west_east_motion[i].s = PyIndi.ISS_OFF
-                self.client.sendNewSwitch(west_east_motion)
-                success = True
+                    desired_state = PyIndi.ISS_OFF
+                    if "E" in direction and name == "MOTION_EAST" and start:
+                        desired_state = PyIndi.ISS_ON
+                    elif "W" in direction and name == "MOTION_WEST" and start:
+                        desired_state = PyIndi.ISS_ON
+
+                    if west_east_motion[i].s != desired_state:
+                        west_east_motion[i].s = desired_state
+                        needs_update = True
+
+                if needs_update:
+                    self.client.sendNewSwitch(west_east_motion)
+                    success = True
 
         return success
 

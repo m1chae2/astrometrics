@@ -5,10 +5,15 @@ allowing the computer to process multiple targets simultaneously without
 freezing.
 """
 
+import logging
+import traceback
+from collections.abc import Callable
 from typing import Any
 
 from astrometricslib.utilities import parallel_batch
 from astrometricslib.utilities.concurrency import resolve_worker_counts
+
+logger = logging.getLogger(__name__)
 
 
 def _process_single_target_worker(
@@ -63,7 +68,18 @@ def _process_single_target_worker(
         )
         result["status"] = "success"
     except Exception as processing_error:
-        result["error"] = str(processing_error)
+        # `str(processing_error)` alone can be an empty string -- some
+        # exceptions (a bare `raise SomeError()`, or a Rust panic pyo3
+        # converts into a catchable `PanicException`) carry no message,
+        # only a type. An empty "error" is falsy, so the batch summary's
+        # `result.get("error") or "Unknown failure"` fallback silently
+        # discarded it, leaving a real target failure completely
+        # undiagnosable. `repr` always includes the exception's type name,
+        # and the full traceback is logged (captured per-target by
+        # `parallel_batch._run_worker_with_captured_output`) so the actual
+        # cause is visible instead of a bare "Unknown failure".
+        logger.exception("Target '%s' failed during processing", target_id)
+        result["error"] = f"{processing_error!r}\n{traceback.format_exc()}"
 
     return result
 
@@ -74,6 +90,7 @@ def process_all_targets(
     *,
     camera_name: str,
     focal_length_mm: float | None = None,
+    on_item_complete: Callable[[str, dict, int, int], None] | None = None,
 ) -> parallel_batch.BatchRunSummary:
     """Process many targets at the same time.
 
@@ -87,6 +104,9 @@ def process_all_targets(
         The specific targets to process. If None, processes all targets.
     camera_name : `str`
         Only process images taken with this specific camera.
+    on_item_complete : `Callable`, optional
+        Called as `(target_id, result, completed_count, total_count)`
+        after each target finishes; see `parallel_batch.run_parallel_batch`.
 
     Returns
     -------
@@ -106,4 +126,5 @@ def process_all_targets(
         worker_arguments=(worker_counts.inner_worker_count, camera_name, focal_length_mm),
         max_workers=worker_counts.outer_worker_count,
         niceness=api.config.get_worker_niceness(),
+        on_item_complete=on_item_complete,
     )

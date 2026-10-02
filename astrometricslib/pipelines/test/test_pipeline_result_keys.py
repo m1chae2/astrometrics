@@ -93,7 +93,7 @@ def test_photometry_with_no_frames_for_the_filter_returns_completed_with_zero_co
     assert result["starsFound"] == 0
     assert result["totalImages"] == 0
 
-    summary = target.photometry_quality_summary
+    summary = target.quality.photometry
     assert summary is not None
     assert summary.flagged
     assert any("No frames found for filter" in reason for reason in summary.flag_reasons)

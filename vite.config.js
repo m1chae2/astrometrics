@@ -1,10 +1,17 @@
 /**
  * @fileoverview Vite configuration for building and serving the React application.
+ *
+ * Supports multi-page build: the main app (index.html) and the system tray
+ * popover (tray_popover.html) are built as separate Rollup entry points while
+ * sharing the same vendor chunk split.
+ *
+ * CSP injection is handled by the inline `injectCspPlugin`, which replaces the
+ * <%- csp %> EJS placeholder in every HTML file during both dev and build,
+ * without requiring vite-plugin-html's per-page configuration overhead.
  */
 
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import { createHtmlPlugin } from 'vite-plugin-html';
 import path from 'path';
 
 // https://vitejs.dev/config/
@@ -16,17 +23,23 @@ export default defineConfig(({ mode }) => {
     ? "<!-- Production CSP --> <meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'self'; script-src 'self'; worker-src 'self' blob:; child-src 'self' blob:; connect-src 'self' https: http://127.0.0.1:* ws://127.0.0.1:*; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self';\">"
     : "<!-- Dev CSP --> <meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'self'; connect-src 'self' http: ws: data:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; worker-src 'self' blob:; child-src 'self' blob:; img-src 'self' data: blob: http:; style-src 'self' 'unsafe-inline';\">";
 
+  /**
+   * Inline Vite plugin that replaces the <%- csp %> EJS placeholder in any
+   * HTML file with the resolved CSP meta tag. Applied to all HTML files so
+   * both index.html and tray_popover.html receive injection without requiring
+   * vite-plugin-html's per-page configuration.
+   */
+  const injectCspPlugin = {
+    name: 'inject-csp',
+    transformIndexHtml(html) {
+      return html.replace(/<%- csp %>/g, cspContent);
+    },
+  };
+
   return {
     plugins: [
       react(),
-      createHtmlPlugin({
-        minify: isProd,
-        inject: {
-          data: {
-            csp: cspContent
-          }
-        }
-      })
+      injectCspPlugin,
     ],
     resolve: {
       alias: [
@@ -54,6 +67,10 @@ export default defineConfig(({ mode }) => {
       outDir: '../dist',
       emptyOutDir: true,
       rollupOptions: {
+        input: {
+          main: path.resolve(__dirname, 'ui/index.html'),
+          tray_popover: path.resolve(__dirname, 'ui/tray_popover.html'),
+        },
         output: {
           manualChunks: {
             'vendor': ['react', 'react-dom'],

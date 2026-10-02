@@ -14,6 +14,7 @@ from wayfindinglib.models.policy.delegation import DelegationState, ObservatoryC
 from wayfindinglib.models.session.divergence import DivergenceRecord
 from wayfindinglib.tasks.control_tasks.capability_promotion import (
     apply_promotion_decision,
+    set_all_capabilities,
     summarize_divergence_evidence,
 )
 
@@ -29,7 +30,7 @@ def isolated_butler(tmp_path, monkeypatch):  # ruff: ignore[missing-type-functio
     """
     from astrometricslib import AppConfiguration
 
-    config_path = tmp_path / "astrometrics.config"
+    config_path = tmp_path / "astrometrics.config.toml"
     monkeypatch.setattr(AppConfiguration, "_find_config_file", lambda self: config_path)
     config = AppConfiguration()
     config.update_config({"Wayfinding Library": {"path": str(tmp_path / "wayfinding_library")}})
@@ -119,3 +120,66 @@ def test_apply_promotion_decision_rejects_safety_shadowed_without_persisting(iso
 
     reloaded = isolated_butler.get("delegation_policy", {"id": "default"})
     assert reloaded is None
+
+
+def test_set_all_capabilities_to_delegated_always_succeeds_from_default(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify monitoring mode succeeds for every capability, no evidence."""
+    outcome = set_all_capabilities(isolated_butler, DelegationState.DELEGATED)
+
+    assert outcome.rejected == {}
+    assert len(outcome.applied) == len(ObservatoryCapability)
+    assert all(state == DelegationState.DELEGATED for state in outcome.applied.values())
+
+
+def test_set_all_capabilities_to_authoritative_rejects_corrections_not_shadowed(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify controller mode from a fresh policy only promotes safety/mount.
+
+    The three correction capabilities cannot skip SHADOWED, and capture
+    depends on all three of them already being AUTHORITATIVE -- neither
+    condition holds from an all-DELEGATED starting policy, so only
+    OBSERVATORY_SAFETY and MOUNT_CONTROL succeed.
+    """
+    outcome = set_all_capabilities(isolated_butler, DelegationState.AUTHORITATIVE)
+
+    assert outcome.applied == {
+        ObservatoryCapability.OBSERVATORY_SAFETY: DelegationState.AUTHORITATIVE,
+        ObservatoryCapability.MOUNT_CONTROL: DelegationState.AUTHORITATIVE,
+    }
+    assert set(outcome.rejected) == {
+        ObservatoryCapability.PLATE_SOLVE_ALIGNMENT,
+        ObservatoryCapability.AUTOGUIDING,
+        ObservatoryCapability.AUTOFOCUS,
+        ObservatoryCapability.CAPTURE_ORCHESTRATION,
+    }
+
+
+def test_set_all_capabilities_to_authoritative_succeeds_once_corrections_are_shadowed(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify controller mode fully succeeds once every precondition is met."""
+    for capability in (
+        ObservatoryCapability.PLATE_SOLVE_ALIGNMENT,
+        ObservatoryCapability.AUTOGUIDING,
+        ObservatoryCapability.AUTOFOCUS,
+    ):
+        apply_promotion_decision(
+            isolated_butler,
+            capability,
+            DelegationState.SHADOWED,
+            has_guider_calibration=True,
+            has_focus_model=True,
+        )
+
+    outcome = set_all_capabilities(
+        isolated_butler, DelegationState.AUTHORITATIVE, has_guider_calibration=True, has_focus_model=True
+    )
+
+    assert outcome.rejected == {}
+    assert all(state == DelegationState.AUTHORITATIVE for state in outcome.applied.values())
+    assert len(outcome.applied) == len(ObservatoryCapability)
+
+
+def test_set_all_capabilities_never_writes_a_rejected_capability(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify a rejected capability's prior recorded state is unchanged."""
+    set_all_capabilities(isolated_butler, DelegationState.AUTHORITATIVE)
+
+    reloaded = isolated_butler.get("delegation_policy", {"id": "default"})
+    assert reloaded.state_for(ObservatoryCapability.AUTOGUIDING) == DelegationState.DELEGATED

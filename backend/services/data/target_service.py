@@ -58,8 +58,8 @@ class TargetService:
         return [
             {
                 "id": target.id,
-                "processed_image": target.processed_image,
-                "stacked_image": target.stacked_image,
+                "processed_image": target.stacking.processed_image,
+                "stacked_image": target.stacking.stacked_image,
             }
             for target in targets
         ]
@@ -177,7 +177,7 @@ class TargetService:
             return {"status": "error", "message": "Invalid target data input."}
 
         if os.path.splitext(path)[1].lower() in self.PROCESSED_IMAGE_EXTENSIONS:
-            target.processed_image = path
+            target.stacking.processed_image = path
             self.astrometrics.targets.save()
             return {"status": "success"}
 
@@ -271,8 +271,8 @@ class TargetService:
 
         return {
             "files": files,
-            "stackedImage": target.stacked_image or None,
-            "stackedSpectralTarget": target.stacked_spectral_target or None,
+            "stackedImage": target.stacking.stacked_image or None,
+            "stackedSpectralTarget": target.spectral_stacking.stacked_image or None,
             "totalExposure": target.exposure_sec,
         }
 

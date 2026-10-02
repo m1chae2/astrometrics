@@ -253,7 +253,7 @@ export interface VisibleTarget {
  */
 export async function fetchVisibleTargets(): Promise<VisibleTarget[]> {
     try {
-        const data = await callBackend("astronomy:visible", {});
+        const data = await callBackend("astronomy:visible", {}, { timeoutMs: 30000 });
         return (data || []) as VisibleTarget[];
     } catch (err) {
         console.error('Failed to fetch visible targets', err);

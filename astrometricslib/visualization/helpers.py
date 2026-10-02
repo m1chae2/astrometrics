@@ -9,11 +9,20 @@ from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.patches import Circle
 
 from astrometricslib.drivers.image import AstrometricsImage
 
 from .interaction_handler import InteractionHandler
-from .layers import ImageOverlay, PhotometryOverlay, SpectrumOverlay, StarOverlay
+from .layers import (
+    DispersionOverlay,
+    ImageOverlay,
+    PhotometryOverlay,
+    SpectrumOverlay,
+    StarOverlay,
+    resolve_star_radius,
+)
+from .spectroscopy_field_access import get_spectroscopy_field
 from .star_field_visualization import _AnalysisView
 from .visualization_config import VisualizationConfig
 
@@ -28,9 +37,10 @@ def _extract_spectrum_data(star: Any) -> dict[str, Any]:
     Returns
     -------
     spectrum_data : `dict`
-        With `"wavelengths_angstrom"`, `"intensities"`, and
-        `"quantum_efficiency_corrected_intensities"` if any were
-        found, or empty if this star has no spectrum yet.
+        With `"wavelengths_angstrom"`, `"intensities"`,
+        `"quantum_efficiency_corrected_intensities"` and
+        `"response_corrected_intensities"` if any were found, or empty if
+        this star has no spectrum yet.
     """
     spectroscopy = getattr(star, "spectroscopy", None)
     if spectroscopy is not None and spectroscopy.wavelengths_angstrom:
@@ -38,6 +48,7 @@ def _extract_spectrum_data(star: Any) -> dict[str, Any]:
             "wavelengths_angstrom": spectroscopy.wavelengths_angstrom,
             "intensities": spectroscopy.intensities,
             "quantum_efficiency_corrected_intensities": spectroscopy.quantum_efficiency_corrected_intensities,
+            "response_corrected_intensities": spectroscopy.response_corrected_intensities,
         }
     if isinstance(star, dict):
         return star.get("spectroscopy") or star
@@ -93,7 +104,7 @@ def plot_fits_star_field(  # ruff: ignore[missing-return-type-undocumented-publi
         stellar_objects = []
 
     if image_data is None and target is not None:
-        fits_path = getattr(target, "stacked_image", None) or fits_path
+        fits_path = target.stacking.stacked_image or fits_path
 
     if image_data is None and fits_path:
         from astropy.io import fits
@@ -113,8 +124,6 @@ def plot_fits_star_field(  # ruff: ignore[missing-return-type-undocumented-publi
     layer_stars.render(stellar_objects, active_index=active_index, limit=limit)
 
     if draw_dispersion_rectangles:
-        from .layers import DispersionOverlay
-
         layer_dispersion = DispersionOverlay(ax, config)
         layer_dispersion.render(stellar_objects, active_index=active_index, limit=limit)
 
@@ -374,6 +383,7 @@ def plot_stellar_spectroscopy(
         wavelengths,
         intensities,
         quantum_efficiency_corrected_intensities=qe_intensities,
+        response_corrected_intensities=spectrum_data.get("response_corrected_intensities"),
     )
     return fig
 
@@ -477,18 +487,20 @@ def _load_target_stars(target: Any, stars: Any, limit: int) -> tuple[list, list,
     ValueError
         If stacked image or catalog stars are missing.
     """
-    if not getattr(target, "stacked_image", None):
+    if not getattr(getattr(target, "stacking", None), "stacked_image", None):
         raise ValueError(f"Target {getattr(target, 'id', 'unknown')!r} has no stacked_image.")
 
-    all_objects = stars.list_objects()
     target_id = getattr(target, "id", "")
+    # Only this target's stars are read from the database, not the whole
+    # catalog of every target ever imaged.
+    all_objects = stars.list_objects_for_target(target_id)
 
     astrometry_stars = sorted(
         (
             obj
             for obj in all_objects
             if target_id in getattr(obj, "target_ids", [])
-            and getattr(obj.spectroscopy, "dispersion_angle", None) is None
+            and getattr(obj, "stellar_spectral_type", "") != "Cluster"
             and not getattr(obj, "id", "").startswith("Star_")
         ),
         key=_magnitude_sort_key,
@@ -522,23 +534,29 @@ def _find_star_index(astrometry_stars: list, x: float, y: float, config: Visuali
         Click y coordinate, in the same data space as each star's
         `star_data` centroid.
     config : `VisualizationConfig`
-        Supplies the hit-test radius (`fixed_radius`), matching the
-        radius `StarOverlay` actually draws the marker at.
+        Supplies the fallback hit-test radius (`fixed_radius`) for stars
+        with no `radius_px`, matching what `StarOverlay` draws.
 
     Returns
     -------
     int | None
         Index of the nearest star within range, or `None`.
     """
+    best_idx = None
+    best_dist = float("inf")
     for i, obj in enumerate(astrometry_stars):
         star_data = getattr(obj, "star_data", {})
         star_x = star_data.get("xcentroid", star_data.get("x_centroid"))
         star_y = star_data.get("ycentroid", star_data.get("y_centroid"))
         if star_x is None or star_y is None:
             continue
-        if (x - star_x) ** 2 + (y - star_y) ** 2 <= config.fixed_radius**2:
-            return i
-    return None
+        radius = resolve_star_radius(obj, config.fixed_radius)
+        hit_radius = max(radius * 2.5, 30.0)
+        dist = ((x - star_x) ** 2 + (y - star_y) ** 2) ** 0.5
+        if dist <= hit_radius and dist < best_dist:
+            best_dist = dist
+            best_idx = i
+    return best_idx
 
 
 def _highlight_active_star(star_patches: list, index: int, config: VisualizationConfig) -> None:
@@ -639,6 +657,11 @@ def plot_astrometry(
     """
     astrometry_stars, _, _ = _load_target_stars(target, stars, limit)
 
+    # Close any figures left open by a previous call (e.g. from a
+    # long-running scripting console) before creating this one, so repeated
+    # calls don't accumulate Figures in pyplot's global state.
+    plt.close("all")
+
     config = VisualizationConfig()
     plt.style.use("dark_background")
 
@@ -647,7 +670,7 @@ def plot_astrometry(
     star_layer = StarOverlay(ax_astrometry, config)
 
     image_layer.render(
-        AstrometricsImage(target.stacked_image).data,
+        AstrometricsImage(target.stacking.stacked_image).data,
         config.default_percentile,
         title=f"{target.id} - Astrometry Solved Star Field",
     )
@@ -683,8 +706,13 @@ def plot_asteroid_detection(target: Any, figsize: tuple[int, int] = (10, 10)) ->
     """
     from .layers import TrackOverlay
 
-    if not getattr(target, "stacked_image", None):
+    if not getattr(getattr(target, "stacking", None), "stacked_image", None):
         raise ValueError(f"Target {getattr(target, 'id', 'unknown')!r} has no stacked_image.")
+
+    # Close any figures left open by a previous call before creating this
+    # one, so repeated calls don't accumulate Figures in pyplot's global
+    # state.
+    plt.close("all")
 
     config = VisualizationConfig()
     plt.style.use("dark_background")
@@ -692,14 +720,14 @@ def plot_asteroid_detection(target: Any, figsize: tuple[int, int] = (10, 10)) ->
     fig, ax = plt.subplots(figsize=figsize)
     image_layer = ImageOverlay(ax, config)
 
-    stacked_image = AstrometricsImage(target.stacked_image)
+    stacked_image = AstrometricsImage(target.stacking.stacked_image)
     image_layer.render(
         stacked_image.data,
         config.default_percentile,
         title=f"{target.id} - Asteroid Detection Candidates",
     )
     if stacked_image.wcs is not None:
-        candidates = getattr(target, "asteroid_candidates", None) or []
+        candidates = getattr(getattr(target, "asteroid_detection", None), "candidates", None) or []
         TrackOverlay(ax, config).render(candidates, stacked_image.wcs)
 
     return fig
@@ -731,6 +759,11 @@ def plot_target_photometry(
     """
     astrometry_stars, _, _ = _load_target_stars(target, stars, limit)
 
+    # Close any figures left open by a previous call before creating this
+    # one, so repeated calls don't accumulate Figures in pyplot's global
+    # state.
+    plt.close("all")
+
     config = VisualizationConfig()
     plt.style.use("dark_background")
 
@@ -745,7 +778,7 @@ def plot_target_photometry(
     photometry_layer = PhotometryOverlay(ax_photometry, fig, config)
 
     image_layer.render(
-        AstrometricsImage(target.stacked_image).data,
+        AstrometricsImage(target.stacking.stacked_image).data,
         config.default_percentile,
         title=f"{target.id} - Astrometry Solved Star Field",
     )
@@ -799,53 +832,159 @@ def plot_target_spectroscopy(
     -------
     fig : `plt.Figure`
         Matplotlib figure instance.
+
+    Raises
+    ------
+    ValueError
+        If the target has no stacked spectral image, or no extracted
+        spectrum has an extraction box.
     """
-    astrometry_stars, _, spectral_by_id = _load_target_stars(target, stars, limit)
+    if not getattr(getattr(target, "spectral_stacking", None), "stacked_image", None):
+        raise ValueError(f"Target {getattr(target, 'id', 'unknown')!r} has no stacked_spectral_target.")
+
+    _, spectral_stars, _ = _load_target_stars(target, stars, limit)
+    # The extraction boxes live in the spectral stack's pixel grid, so only
+    # stars that actually have a box can be drawn on it.
+    spectral_stars = sorted(
+        (s for s in spectral_stars if get_spectroscopy_field(s, "rectangle") is not None),
+        key=_magnitude_sort_key,
+    )[:limit]
+    if not spectral_stars:
+        raise ValueError(f"No extracted spectra with extraction boxes for target {target.id!r}.")
+
+    # Close any figures left open by a previous call before creating this
+    # one, so repeated calls don't accumulate Figures in pyplot's global
+    # state.
+    plt.close("all")
 
     config = VisualizationConfig()
     plt.style.use("dark_background")
 
     fig = plt.figure(figsize=figsize)
-    gs = fig.add_gridspec(1, 2, width_ratios=[1.4, 1.0], wspace=0.28)
+    gs = fig.add_gridspec(2, 2, width_ratios=[1.4, 1.0], hspace=0.4, wspace=0.28)
 
-    ax_astrometry = fig.add_subplot(gs[0, 0])
+    ax_image = fig.add_subplot(gs[:, 0])
     ax_spectrum = fig.add_subplot(gs[0, 1])
+    ax_spectrum_corrected = fig.add_subplot(gs[1, 1])
 
-    image_layer = ImageOverlay(ax_astrometry, config)
-    star_layer = StarOverlay(ax_astrometry, config)
-    spectrum_layer = SpectrumOverlay(ax_spectrum, fig, config)
+    image_layer = ImageOverlay(ax_image, config)
+    dispersion_layer = DispersionOverlay(ax_image, config)
+    spectrum_layer = SpectrumOverlay(ax_spectrum, fig, config, corrected_axis=ax_spectrum_corrected)
 
     image_layer.render(
-        AstrometricsImage(target.stacked_image).data,
+        AstrometricsImage(target.spectral_stacking.stacked_image).data,
         config.default_percentile,
-        title=f"{target.id} - Astrometry Solved Star Field",
+        title=f"{target.id} - Stacked Spectral Image (extraction boxes)",
     )
-    star_patches = star_layer.render(astrometry_stars, active_index=0)
+    box_patches = dispersion_layer.render(spectral_stars, active_index=0)
+    # Circle radius is the size source detection measured for each star
+    # (`radius_px`); the box sizes were already set by the extraction pipeline.
+    star_circles = []
+    star_positions = []
+    for star in spectral_stars:
+        center_x, center_y = (
+            get_spectroscopy_field(star, "star_position_px") or get_spectroscopy_field(star, "rectangle")[:2]
+        )
+        star_positions.append((center_x, center_y))
+        radius = resolve_star_radius(star, config.fixed_radius)
+        circle = Circle((center_x, center_y), radius, edgecolor=config.inactive_color, facecolor="none", lw=2)
+        ax_image.add_patch(circle)
+        star_circles.append(circle)
+        ax_image.text(
+            center_x + radius + 5,
+            center_y,
+            getattr(star, "name", ""),
+            color=config.rectangle_color,
+            fontsize=7,
+            verticalalignment="center",
+        )
 
     def render_spectrum_panel(index: int) -> None:
-        """Render spectrum panel for star at given index."""
-        star = astrometry_stars[index]
-        spectral_star = spectral_by_id.get(f"{getattr(star, 'id', '')}::spectroscopy")
-        if spectral_star is not None:
-            data = _extract_spectrum_data(spectral_star)
-            spectrum_layer.render_spectrum(
-                index,
-                getattr(spectral_star, "name", ""),
-                getattr(spectral_star, "stellar_spectral_type", ""),
-                data.get("wavelengths_angstrom"),
-                data.get("intensities"),
-                quantum_efficiency_corrected_intensities=data.get("quantum_efficiency_corrected_intensities"),
-            )
-        else:
-            ax_spectrum.clear()
-            ax_spectrum.text(
-                0.5, 0.5, "No spectrum available", ha="center", va="center", color="red", fontsize=12
-            )
-            ax_spectrum.set_title("Spectrum Not Available")
+        """Render the extracted spectrum for the star at the given index."""
+        star = spectral_stars[index]
+        data = _extract_spectrum_data(star)
+        spectrum_layer.render_spectrum(
+            index,
+            getattr(star, "name", ""),
+            getattr(star, "stellar_spectral_type", ""),
+            data.get("wavelengths_angstrom"),
+            data.get("intensities"),
+            quantum_efficiency_corrected_intensities=data.get("quantum_efficiency_corrected_intensities"),
+            response_corrected_intensities=data.get("response_corrected_intensities"),
+        )
 
-    _wire_star_click_selection(
-        fig, ax_astrometry, astrometry_stars, star_patches, config, render_spectrum_panel
-    )
+    def highlight_active_box(index: int) -> None:
+        """Mark only the box and circle at `index` as active."""
+        for i, (box, circle) in enumerate(zip(box_patches, star_circles, strict=True)):
+            is_active = i == index
+            if box is not None:
+                box.set_edgecolor(config.active_color if is_active else config.rectangle_color)
+                box.set_linewidth(3 if is_active else 2)
+            if circle is not None:
+                circle.set_edgecolor(config.active_color if is_active else config.inactive_color)
+                circle.set_linewidth(3 if is_active else 2)
+
+    interaction = InteractionHandler(fig, ax_image, None, config)
+
+    def find_star_or_box(x: float, y: float) -> int | None:
+        """Find the star marker or extraction box under a click.
+
+        Checks both star circle proximity / centroid distance and
+        extraction box containment.
+
+        Parameters
+        ----------
+        x : `float`
+            Click x-coordinate in data space.
+        y : `float`
+            Click y-coordinate in data space.
+
+        Returns
+        -------
+        index : `int` or `None`
+            Index of the matched star, or `None`.
+        """
+        display_point = ax_image.transData.transform((x, y))
+
+        # 1. Direct star circle containment hit-test
+        for i, circle in enumerate(star_circles):
+            if circle is not None and circle.contains_point(display_point):
+                return i
+
+        # 2. Nearest star centroid hit-test with generous tolerance
+        best_idx = None
+        best_dist = float("inf")
+        for i, (star, (cx, cy)) in enumerate(zip(spectral_stars, star_positions, strict=True)):
+            radius = resolve_star_radius(star, config.fixed_radius)
+            hit_radius = max(radius * 2.5, 35.0)
+            dist = ((x - cx) ** 2 + (y - cy) ** 2) ** 0.5
+            if dist <= hit_radius and dist < best_dist:
+                best_dist = dist
+                best_idx = i
+
+        if best_idx is not None:
+            return best_idx
+
+        # 3. Extraction box hit-test
+        for i, box in enumerate(box_patches):
+            if box is not None and box.contains_point(display_point):
+                return i
+
+        return None
+
+    def on_select(index: int) -> None:
+        """Highlight the clicked box and show its star's spectrum."""
+        highlight_active_box(index)
+        render_spectrum_panel(index)
+        fig.canvas.draw_idle()
+
+    interaction.on_find_star = find_star_or_box
+    interaction.on_star_select = on_select
+    interaction.connect_events()
+    # matplotlib only weak-references bound-method callbacks; keep the
+    # handler alive for the figure's lifetime.
+    fig._star_click_interaction = interaction
+    highlight_active_box(0)
     render_spectrum_panel(0)
     return fig
 
@@ -898,6 +1037,11 @@ def plot_target_dashboard(
                 active_index = idx
                 break
 
+    # Close any figures left open by a previous call before creating this
+    # one, so repeated calls don't accumulate Figures in pyplot's global
+    # state.
+    plt.close("all")
+
     config = VisualizationConfig()
     plt.style.use("dark_background")
 
@@ -928,7 +1072,7 @@ def plot_target_dashboard(
     photometry_layer = PhotometryOverlay(ax_photometry, fig, config) if ax_photometry is not None else None
     spectrum_layer = SpectrumOverlay(ax_spectrum, fig, config) if ax_spectrum is not None else None
 
-    stacked_image = AstrometricsImage(target.stacked_image)
+    stacked_image = AstrometricsImage(target.stacking.stacked_image)
     image_layer.render(
         stacked_image.data,
         config.default_percentile,
@@ -936,7 +1080,7 @@ def plot_target_dashboard(
     )
     star_patches = star_layer.render(astrometry_stars, active_index=active_index)
 
-    asteroid_candidates = getattr(target, "asteroid_candidates", None)
+    asteroid_candidates = getattr(getattr(target, "asteroid_detection", None), "candidates", None)
     if isinstance(asteroid_candidates, list) and asteroid_candidates and stacked_image.wcs is not None:
         from .layers import TrackOverlay
 
@@ -965,7 +1109,7 @@ def plot_target_dashboard(
             )
 
         if spectrum_layer is not None:
-            spectral_star = spectral_by_id.get(f"{getattr(star, 'id', '')}::spectroscopy")
+            spectral_star = spectral_by_id.get(getattr(star, "id", ""))
             if spectral_star is not None:
                 data = _extract_spectrum_data(spectral_star)
                 spectrum_layer.render_spectrum(
@@ -977,6 +1121,7 @@ def plot_target_dashboard(
                     quantum_efficiency_corrected_intensities=data.get(
                         "quantum_efficiency_corrected_intensities"
                     ),
+                    response_corrected_intensities=data.get("response_corrected_intensities"),
                 )
             else:
                 ax_spectrum.clear()

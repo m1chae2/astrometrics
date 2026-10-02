@@ -10,6 +10,9 @@ set -euo pipefail
 #
 # Usage:
 #   ./run_backend.sh start             - start backend in background (writes PID to .run_pids/backend.pid)
+#   ./run_backend.sh launch            - like start, but return immediately instead of waiting for the
+#                                        backend to answer (used by run_astrometrics.sh so the app's
+#                                        splash screen can cover the backend's startup)
 #   ./run_backend.sh foreground        - run backend in foreground (logs to stdout)
 #   ./run_backend.sh stop              - stop backgrounded backend
 #   ./run_backend.sh status            - show status
@@ -90,15 +93,50 @@ done
 # Replace positional parameters with filtered args
 set -- "${NEW_ARGS[@]:-}"
 
-start_backend() {
+launch_backend() {
+  # Set to 1 when an already-healthy backend is left running untouched, so
+  # start_backend() can skip the redundant (and confusingly-worded, since it
+  # unconditionally says "started successfully") health-wait below.
+  BACKEND_ALREADY_RUNNING=0
 
   if [ -f "$PID_FILE" ]; then
-    if kill -0 "$(cat "$PID_FILE")" >/dev/null 2>&1; then
-      echo "Backend already running (pid $(cat "$PID_FILE")). Stopping it first..."
+    existing_pid="$(cat "$PID_FILE")"
+    if kill -0 "$existing_pid" >/dev/null 2>&1; then
+      # Idempotent by design: this backend is shared state (it owns the one
+      # real telescope/camera/PHD2 connection), so a second caller's `start`
+      # must not silently kill and replace an instance another caller is
+      # relying on -- that was happening whenever multiple concurrent
+      # sessions on this repo each ran `start` to make sure the backend was
+      # up, and it looked like random unexplained backend crashes. A caller
+      # that genuinely wants a fresh process (e.g. after editing backend
+      # code) should ask for that explicitly via `restart`, which still
+      # tears the old one down unconditionally.
+      #
+      # --max-time caps how long curl waits for a response: a process that's
+      # alive but wedged (hung, deadlocked) can still hold its listening
+      # socket open without ever answering, and an un-timed-out curl would
+      # hang here indefinitely instead of detecting "unhealthy" and healing
+      # it below.
+      if curl -s --max-time 2 "http://$BIND_HOST:5000/" >/dev/null; then
+        echo "Backend already running and healthy (pid $existing_pid). Leaving it alone -- use 'restart' to replace it."
+        BACKEND_ALREADY_RUNNING=1
+        return 0
+      fi
+      echo "Backend already running (pid $existing_pid) but not answering health checks. Stopping it first..."
       stop_backend
     else
       echo "Stale pidfile found, removing."; rm -f "$PID_FILE"
     fi
+  fi
+
+  # Keep the previous run's backend log before the purge below wipes it, so a
+  # crash can still be diagnosed after the next restart. Only the newest 10
+  # are kept.
+  if [ -s "$LOG_FILE" ]; then
+    ARCHIVE_DIR="$ROOT_DIR/.run_logs_archive"
+    mkdir -p "$ARCHIVE_DIR"
+    cp "$LOG_FILE" "$ARCHIVE_DIR/backend_$(date +%Y%m%d_%H%M%S).log" || true
+    { ls -1t "$ARCHIVE_DIR"/backend_*.log 2>/dev/null | tail -n +11 | xargs -r rm -f; } || true
   fi
 
   # Purge old logs to ensure process panel starts clean
@@ -110,6 +148,14 @@ start_backend() {
   # Pass the bind host via environment variable that the Python entrypoint reads
   # Force PYTHONPATH to include ROOT_DIR so we use local source instead of installed packages
   export PYTHONPATH="$ROOT_DIR:${PYTHONPATH:-}"
+  # Make a hard abort or segfault write a Python traceback into the log,
+  # instead of the process disappearing with no explanation.
+  export PYTHONFAULTHANDLER=1
+  # Limit how many separate malloc heaps the worker threads get. With the
+  # default (8 per core) freed memory is scattered across many heaps and is
+  # rarely handed back to the operating system, so the backend's memory grows
+  # to several times what it really needs after a few jobs.
+  export MALLOC_ARENA_MAX=2
   # -u: unbuffered stdout/stderr. Without it, Python fully block-buffers
   # output once it's not a TTY (redirected to $LOG_FILE), so print()
   # diagnostics -- including the INDI driver's "No indiserver running on
@@ -118,11 +164,19 @@ start_backend() {
   ASTROMETRICS_BIND_HOST="$BIND_HOST" nohup "$PYTHON" -u -m "$BACKEND_MODULE" >"$LOG_FILE" 2>&1 &
   backend_pid=$!
   echo "$backend_pid" > "$PID_FILE"
+}
+
+wait_for_backend_healthy() {
+  local backend_pid
+  backend_pid=$(cat "$PID_FILE")
 
   # Health Check Loop
   echo "Waiting for backend to become healthy..."
   for i in {1..120}; do
-      if curl -s "http://$BIND_HOST:5000/" >/dev/null; then
+      # --max-time: an unresponsive-but-connectable backend would otherwise
+      # hang this curl call indefinitely, which would also block the "did
+      # the process die" check a few lines below from ever running again.
+      if curl -s --max-time 2 "http://$BIND_HOST:5000/" >/dev/null; then
           echo -e "\033[0;32mBackend started successfully (pid $backend_pid).\033[0m"
           echo "Logs: $LOG_FILE"
           echo "Listening on http://$BIND_HOST:5000"
@@ -149,6 +203,14 @@ start_backend() {
   return 1
 }
 
+start_backend() {
+  launch_backend
+  if [ "$BACKEND_ALREADY_RUNNING" = "1" ]; then
+    return 0
+  fi
+  wait_for_backend_healthy
+}
+
 install_into_env() {
   # Install the project into the selected Python environment.
   # Prefer a wheel from dist/ if available, otherwise fall back to an editable install.
@@ -171,23 +233,40 @@ start_foreground() {
 }
 
 stop_backend() {
-  if [ ! -f "$PID_FILE" ]; then
-    echo "No pidfile found at $PID_FILE; backend not running?"; return 0
-  fi
-  pid=$(cat "$PID_FILE")
-  if kill -0 "$pid" >/dev/null 2>&1; then
-    echo "Stopping backend pid $pid..."
-    kill "$pid"
-    sleep 1
+  if [ -f "$PID_FILE" ]; then
+    pid=$(cat "$PID_FILE")
     if kill -0 "$pid" >/dev/null 2>&1; then
-      echo "Backend did not exit; sending SIGKILL..."
-      kill -9 "$pid" || true
+      echo "Stopping backend pid $pid..."
+      kill "$pid"
+      # Grace period before escalating to SIGKILL. A single fixed 1s sleep
+      # used to be here, but that's shorter than shutdown_event() can
+      # legitimately take on its own: IndiWorkerClient.stop() (see
+      # backend/services/infrastructure/indi_worker.py) joins the INDI
+      # worker process for up to 3s, and if that worker is wedged, kills it
+      # and joins again for up to 2s more -- on top of uvicorn's own
+      # shutdown handshake. Polling for up to 10s instead gives that room
+      # while still returning as soon as the process actually exits, so the
+      # common (fast) case isn't slowed down.
+      for _ in $(seq 1 20); do
+        kill -0 "$pid" >/dev/null 2>&1 || break
+        sleep 0.5
+      done
+      if kill -0 "$pid" >/dev/null 2>&1; then
+        echo "Backend did not exit; sending SIGKILL..."
+        kill -9 "$pid" || true
+      fi
+    else
+      echo "Process $pid not running; removing stale pidfile."
     fi
     rm -f "$PID_FILE"
-    echo "Stopped."
-  else
-    echo "Process $pid not running; removing stale pidfile."; rm -f "$PID_FILE"
   fi
+
+  # Clean up any orphaned backend instances by module name or port 5000
+  pkill -f "python.*backend.main_backend" 2>/dev/null || true
+  if command -v fuser >/dev/null 2>&1; then
+    fuser -k 5000/tcp 2>/dev/null || true
+  fi
+  echo "Stopped."
 }
 
 status_backend() {
@@ -209,6 +288,9 @@ case ${1:-start} in
   start)
     start_backend
     ;;
+  launch)
+    launch_backend
+    ;;
   install)
     install_into_env
     ;;
@@ -222,6 +304,7 @@ Usage: ./scripts/run_backend.sh [OPTIONS] <command>
 
 Commands:
   start               Start backend in background (writes PID to .run_pids/backend.pid)
+  launch              Start backend in background and return immediately, without waiting for it to answer
   foreground          Run backend in foreground (logs to stdout)
   stop                Stop backgrounded backend (uses PID file)
   restart             Stop and then start the backend
@@ -250,7 +333,7 @@ EOF
     start_backend
     ;;
   *)
-    echo "Usage: $0 {start|stop|restart|status|foreground|install}"
+    echo "Usage: $0 {start|launch|stop|restart|status|foreground|install}"
     exit 2
     ;;
 esac

@@ -87,13 +87,19 @@ def test_script_reindex_all_targets(tmp_path):  # ruff: ignore[missing-type-func
     Asserts the frame survives reindexing, so this exercises real
     prune-vs-keep logic rather than only proving the script boots.
     """
-    library_path = tmp_path / "libraryIndex"
+    library_path = tmp_path / "library"
     frames_dir = library_path / "frames" / "lights" / "ReindexScriptTestTarget"
     frames_dir.mkdir(parents=True)
 
     frames_path = library_path / "frames"
-    config_path = tmp_path / "astrometrics.config"
-    config_path.write_text(f"[Image Library]\npath = {library_path}\nframes_path = {frames_path}\n")
+    config_path = tmp_path / "astrometrics.config.toml"
+    config_path.write_text(
+        f'["Image Library"]\npath = "{library_path}"\nframes_path = "{frames_path}"\n\n'
+        '["Observatory.Camera.Generic unlisted camera"]\n'
+        'is_generic_fallback = "true"\n'
+        'clip_ceiling_adu = { value = 65535.0, kind = "assumed", source = "Test fixture." }\n'
+        'saturation_threshold_adu = { value = 65000.0, kind = "assumed", source = "Test fixture." }\n'
+    )
 
     import numpy as np
     from astropy.io import fits

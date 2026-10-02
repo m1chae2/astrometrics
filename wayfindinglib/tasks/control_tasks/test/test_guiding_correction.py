@@ -6,11 +6,28 @@ suppression, max-pulse clamping, and camera-rotation handling at 0 deg,
 `Wayfinding_Library_Architecture.md` §2.5.11 calls out.
 """
 
+import math
+
 import pytest
 
 from wayfindinglib.models.equipment_and_site.guider_calibration import GuiderCalibration
 from wayfindinglib.models.session.correction_config import CorrectionConfig
+from wayfindinglib.models.session.telemetry import GuidingSpectrumAnalysis
 from wayfindinglib.tasks.control_tasks.guiding_correction import compute_guiding_correction
+
+
+def _mount_model(
+    dominant_period_seconds: float | None = 480.0,
+    periodic_error_peak_to_peak_arcsec: float = 10.0,
+    dec_backlash_estimate_ms: float | None = None,
+) -> GuidingSpectrumAnalysis:
+    return GuidingSpectrumAnalysis(
+        sample_count=100,
+        duration_seconds=3600.0,
+        dominant_period_seconds=dominant_period_seconds,
+        periodic_error_peak_to_peak_arcsec=periodic_error_peak_to_peak_arcsec,
+        dec_backlash_estimate_ms=dec_backlash_estimate_ms,
+    )
 
 
 def _calibration(camera_angle_deg: float = 0.0) -> GuiderCalibration:
@@ -79,3 +96,157 @@ def test_calibration_required_no_default():  # ruff: ignore[missing-return-type-
     """Verify calling without a calibration raises rather than defaulting."""
     with pytest.raises(TypeError):
         compute_guiding_correction("f-7", 5.0, 0.0, config=_config())
+
+
+def test_no_mount_model_disables_all_feedforward():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify omitting mount_model reproduces pre-M7b reactive-only output."""
+    without_model = compute_guiding_correction("f-8", 0.0, 0.0, _calibration(), _config())
+    with_none_elapsed = compute_guiding_correction(
+        "f-8", 0.0, 0.0, _calibration(), _config(), mount_model=None, elapsed_guiding_seconds=100.0
+    )
+    assert without_model.pulse_ra_ms == with_none_elapsed.pulse_ra_ms == 0
+    assert without_model.suppressed_by_deadband is with_none_elapsed.suppressed_by_deadband is True
+
+
+def test_periodic_error_feedforward_issues_a_pulse_even_within_deadband():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify PEC anticipates the error instead of waiting for the deadband.
+
+    At phase=0.25 (a quarter into the worm cycle), the modeled sinusoid
+    peaks, so a pulse must be issued canceling it even though the
+    measured instantaneous drift is zero (well within the deadband).
+    """
+    mount_model = _mount_model(dominant_period_seconds=480.0, periodic_error_peak_to_peak_arcsec=10.0)
+    elapsed_seconds = 480.0 * 0.25
+
+    correction = compute_guiding_correction(
+        "f-9",
+        0.0,
+        0.0,
+        _calibration(),
+        _config(),
+        mount_model=mount_model,
+        elapsed_guiding_seconds=elapsed_seconds,
+    )
+
+    assert correction.pulse_ra_ms != 0
+    assert correction.suppressed_by_deadband is False
+
+
+def test_periodic_error_feedforward_requires_elapsed_time():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify a mount_model without elapsed_guiding_seconds adds none."""
+    mount_model = _mount_model()
+
+    correction = compute_guiding_correction(
+        "f-10", 0.0, 0.0, _calibration(), _config(), mount_model=mount_model
+    )
+
+    assert correction.pulse_ra_ms == 0
+    assert correction.suppressed_by_deadband is True
+
+
+def test_periodic_error_feedforward_is_near_zero_at_zero_crossing():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify the modeled sinusoid's zero crossing adds ~no pulse."""
+    mount_model = _mount_model(dominant_period_seconds=480.0, periodic_error_peak_to_peak_arcsec=10.0)
+
+    correction = compute_guiding_correction(
+        "f-11",
+        0.0,
+        0.0,
+        _calibration(),
+        _config(),
+        mount_model=mount_model,
+        elapsed_guiding_seconds=0.0,
+    )
+
+    assert correction.pulse_ra_ms == 0
+    assert correction.suppressed_by_deadband is True
+
+
+def test_backlash_feedforward_adds_lead_in_pulse_on_reversal():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify a flagged Dec reversal adds the learned backlash lead-in."""
+    mount_model = _mount_model(dominant_period_seconds=None, dec_backlash_estimate_ms=150.0)
+
+    with_reversal = compute_guiding_correction(
+        "f-12",
+        0.0,
+        5.0,
+        _calibration(),
+        _config(),
+        mount_model=mount_model,
+        dec_direction_reversal=True,
+    )
+    without_reversal = compute_guiding_correction(
+        "f-12",
+        0.0,
+        5.0,
+        _calibration(),
+        _config(),
+        mount_model=mount_model,
+        dec_direction_reversal=False,
+    )
+
+    assert abs(with_reversal.pulse_dec_ms) > abs(without_reversal.pulse_dec_ms)
+
+
+def test_backlash_feedforward_direction_matches_the_reactive_pulse():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify the lead-in pulse's sign matches the reactive correction's."""
+    mount_model = _mount_model(dominant_period_seconds=None, dec_backlash_estimate_ms=150.0)
+
+    positive_drift = compute_guiding_correction(
+        "f-13", 0.0, 5.0, _calibration(), _config(), mount_model=mount_model, dec_direction_reversal=True
+    )
+    negative_drift = compute_guiding_correction(
+        "f-14", 0.0, -5.0, _calibration(), _config(), mount_model=mount_model, dec_direction_reversal=True
+    )
+
+    assert positive_drift.pulse_dec_ms > 0
+    assert negative_drift.pulse_dec_ms < 0
+
+
+def test_combined_feedforward_and_reactive_pulse_is_clamped_to_max_pulse():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify a large reactive plus feedforward sum is still clamped."""
+    mount_model = _mount_model(dominant_period_seconds=None, dec_backlash_estimate_ms=900.0)
+    config = _config(guiding_max_pulse_ms=200)
+
+    correction = compute_guiding_correction(
+        "f-15",
+        0.0,
+        50.0,
+        _calibration(),
+        config,
+        mount_model=mount_model,
+        dec_direction_reversal=True,
+    )
+
+    assert abs(correction.pulse_dec_ms) == 200
+    assert correction.clamped_by_max_move is True
+
+
+def test_periodic_error_feedforward_direction_flips_across_the_period():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify the feedforward pulse's sign flips a half-period apart."""
+    mount_model = _mount_model(dominant_period_seconds=480.0, periodic_error_peak_to_peak_arcsec=10.0)
+
+    quarter_phase = compute_guiding_correction(
+        "f-16",
+        0.0,
+        0.0,
+        _calibration(),
+        _config(),
+        mount_model=mount_model,
+        elapsed_guiding_seconds=480.0 * 0.25,
+    )
+    three_quarter_phase = compute_guiding_correction(
+        "f-17",
+        0.0,
+        0.0,
+        _calibration(),
+        _config(),
+        mount_model=mount_model,
+        elapsed_guiding_seconds=480.0 * 0.75,
+    )
+
+    assert quarter_phase.pulse_ra_ms != 0
+    assert three_quarter_phase.pulse_ra_ms != 0
+    assert math.copysign(1.0, quarter_phase.pulse_ra_ms) != math.copysign(
+        1.0, three_quarter_phase.pulse_ra_ms
+    )

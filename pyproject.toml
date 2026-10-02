@@ -61,10 +61,13 @@ dependencies = [
     "setuptools",
     "tk",
     "tksheet",
+    "tomlkit", # format-preserving TOML read/write for astrometrics.config.toml
     "uvicorn",
     "websockets",
     "psutil",
     "pandas",
+    "prov", # W3C PROV-XML export/validation for ProvenanceStore.export_target_lineage_as_prov_xml
+    "lxml", # validates exported PROV-XML against the vendored W3C schema in tests
 ]
 
 [project.optional-dependencies]
@@ -201,12 +204,15 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "datastore"]
 # untrusted input into a shell command), which is the safe subprocess pattern.
 "astrometricslib/drivers/siril_interface.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"]
 "astrometricslib/scripts/spectral_registration_quality_analysis.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
+"astrometricslib/pipelines/stacking/post_processing/stack_preview.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
+"astrometricslib/drivers/siril_stacking_engine.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "astrometricslib/drivers/plate_solve_interface.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "backend/mcp/mcp_diagnostics.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"]
+"backend/mcp/tool_registry.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"]
 "backend/mcp/tools/developer_tools.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "hardcoded-temp-file"] # S108: "/tmp" is an allowlist prefix for the sandbox boundary check, not a path being written to
 "backend/mcp/tools/diagnostics.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
-"backend/services/infrastructure/remote_service.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "backend/services/infrastructure/system_status_service.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"]
+"backend/services/infrastructure/handoff_service.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "wayfindinglib/drivers/stellarmate_interface.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "astrometricslib/drivers/test/test_target_records.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "astrometricslib/test/test_scripts.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
@@ -223,7 +229,7 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "datastore"]
 "datastore/butler.py" = ["hardcoded-sql-expression"]
 "astrometricslib/drivers/local_database.py" = ["hardcoded-sql-expression"]
 "astrometricslib/drivers/logger_interface.py" = ["hardcoded-sql-expression"]
-"astrometricslib/pipelines/astrometry/star_identifier.py" = ["hardcoded-sql-expression"]
+"astrometricslib/pipelines/astrometry/processing/star_identifier.py" = ["hardcoded-sql-expression"]
 "wayfindinglib/drivers/local_database.py" = ["hardcoded-sql-expression"]
 "wayfindinglib/drivers/catalog/gaia_catalog_driver.py" = ["hardcoded-sql-expression"]
 "wayfindinglib/drivers/catalog/local_bright_star_catalog_driver.py" = ["hardcoded-sql-expression"]
@@ -243,3 +249,6 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "datastore"]
 "wayfindinglib/drivers/simulators/indi_simulator.py" = ["invalid-function-name"] # mocks the same PyIndi camelCase interface
 "wayfindinglib/drivers/indi/test/test_mount_controller.py" = ["invalid-function-name"] # fake telescope device mocks PyIndi's camelCase getNumber
 "wayfindinglib/drivers/test/test_indi_property_dispatch.py" = ["invalid-function-name"] # recording client overrides the same PyIndi camelCase callbacks
+"wayfindinglib/drivers/indi/test/test_enclosure_controller.py" = ["invalid-function-name"] # fake enclosure device/client mocks PyIndi's camelCase interface
+"wayfindinglib/drivers/indi/test/test_switch_controller.py" = ["invalid-function-name"] # fake powerbox device/client mocks PyIndi's camelCase interface
+"wayfindinglib/drivers/indi/test/test_weather_controller.py" = ["invalid-function-name"] # fake powerbox device mocks PyIndi's camelCase getNumber

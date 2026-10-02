@@ -47,6 +47,29 @@ export const JobHistoryList: React.FC<JobHistoryListProps> = ({
                                     {job.status}
                                 </span>
                                 <button
+                                    className="job-history-item__inspect"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        window.dispatchEvent(
+                                            new CustomEvent('astrometrics:modeChange', {
+                                                detail: 'Command Console'
+                                            })
+                                        );
+                                    }}
+                                    title="Inspect in Command Console"
+                                    style={{
+                                        background: 'transparent',
+                                        border: '1px solid var(--term-border, #2e2e2e)',
+                                        color: 'var(--term-cyan, #33c7de)',
+                                        borderRadius: '3px',
+                                        fontSize: '11px',
+                                        padding: '1px 5px',
+                                        cursor: 'pointer',
+                                    }}
+                                >
+                                    Console
+                                </button>
+                                <button
                                     className="job-history-item__dismiss"
                                     onClick={(e) => {
                                         e.stopPropagation();

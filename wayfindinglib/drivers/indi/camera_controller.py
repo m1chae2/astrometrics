@@ -87,8 +87,8 @@ class CameraController:
             return True
         return False
 
-    def get_guide_image(self, guide_camera_device):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-        """Retrieve the last image blob from the guide camera.
+    def get_guide_image(self, guide_camera_device) -> bytes | None:  # ruff: ignore[missing-type-function-argument]
+        """Retrieve the last image frame from the guide camera, as raw bytes.
 
         Parameters
         ----------
@@ -97,11 +97,20 @@ class CameraController:
 
         Returns
         -------
-        The CCD1 or CCD2 BLOB property, or None if the device is missing.
+        data : `bytes` or `None`
+            The CCD1 or CCD2 frame's raw data (usually a FITS file in
+            memory), or `None` if the device or frame is missing. Returned
+            as plain `bytes` -- not the INDI BLOB property object itself --
+            so the caller never has to know this came from INDI, and so the
+            value can cross a process boundary (e.g. to the caller running
+            in a different process than this driver).
         """
         if not guide_camera_device:
             return None
         # BaseDevice has no getBlobs() (plural) -- BLOB properties are
         # looked up by name like every other property type
         # (getSwitch/getNumber/getText).
-        return guide_camera_device.getBLOB("CCD1") or guide_camera_device.getBLOB("CCD2")
+        blob_vector = guide_camera_device.getBLOB("CCD1") or guide_camera_device.getBLOB("CCD2")
+        if not blob_vector:
+            return None
+        return bytes(blob_vector[0].getblobdata())

@@ -13,6 +13,7 @@ from wayfindinglib.models.equipment_and_site.equipment import (
     Camera,
     EquipmentCatalog,
     EquipmentConfiguration,
+    GuideScope,
     Telescope,
 )
 
@@ -109,3 +110,104 @@ def test_equipment_configuration_fov_matches_known_value():  # ruff: ignore[miss
     expected_fov_deg = config.plate_scale_arcsec_per_px * 3008 / 3600.0
     assert config.fov_width_deg == pytest.approx(expected_fov_deg)
     assert config.fov_height_deg == pytest.approx(expected_fov_deg)
+
+
+def test_equipment_catalog_active_guide_scope_none_when_unset():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify active_guide_scope() returns None -- guiding via the main OTA."""
+    catalog = EquipmentCatalog(id="cat1", telescopes=[], cameras=[])
+    assert catalog.active_guide_scope() is None
+
+
+def test_equipment_catalog_rejects_unresolvable_active_guide_scope_id():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify an active_guide_scope_id absent from guide_scopes is rejected."""
+    with pytest.raises(ValidationError):
+        EquipmentCatalog(
+            id="cat1",
+            telescopes=[],
+            cameras=[],
+            guide_scopes=[GuideScope(id="g1", name="Orion 50mm", focal_length_mm=162.0)],
+            active_guide_scope_id="does-not-exist",
+        )
+
+
+def test_equipment_catalog_resolves_active_guide_scope():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify active_guide_scope() resolves the matching configured entry."""
+    guide_scope = GuideScope(id="g1", name="Orion 50mm", focal_length_mm=162.0, aperture_mm=50.0)
+    catalog = EquipmentCatalog(
+        id="cat1", telescopes=[], cameras=[], guide_scopes=[guide_scope], active_guide_scope_id="g1"
+    )
+    assert catalog.active_guide_scope() is guide_scope
+
+
+def test_guider_plate_scale_falls_back_to_main_telescope_with_no_guide_scope():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify guider_plate_scale_arcsec_per_px(None) matches the main scale.
+
+    The common case: guiding through the main OTA (on-axis or
+    off-axis), not a separate guide scope.
+    """
+    config = EquipmentConfiguration(telescope=_make_telescope(), camera=_make_camera())
+    assert config.guider_plate_scale_arcsec_per_px(None) == pytest.approx(config.plate_scale_arcsec_per_px)
+
+
+def test_guider_plate_scale_uses_guide_scope_focal_length_when_active():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify an active guide scope's focal length replaces the telescope's.
+
+    206.265 x 3.76 / 162 ~= 4.78740 arcsec/px -- a materially different
+    (coarser) plate scale than the main telescope's ~1.72 arcsec/px,
+    since a 162mm guide scope has far less focal length than the
+    450mm main OTA.
+    """
+    config = EquipmentConfiguration(telescope=_make_telescope(), camera=_make_camera())
+    guide_scope = GuideScope(id="g1", name="Orion 50mm", focal_length_mm=162.0)
+    plate_scale = config.guider_plate_scale_arcsec_per_px(guide_scope)
+    assert plate_scale == pytest.approx(4.78740, abs=1e-4)
+    assert plate_scale != pytest.approx(config.plate_scale_arcsec_per_px)
+
+
+def test_equipment_catalog_active_guide_camera_none_when_unset():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify active_guide_camera() returns None -- the main camera guides."""
+    catalog = EquipmentCatalog(id="cat1", telescopes=[], cameras=[])
+    assert catalog.active_guide_camera() is None
+
+
+def test_equipment_catalog_rejects_unresolvable_active_guide_camera_id():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify an active_guide_camera_id absent from cameras is rejected."""
+    with pytest.raises(ValidationError):
+        EquipmentCatalog(id="cat1", telescopes=[], cameras=[_make_camera()], active_guide_camera_id="nope")
+
+
+def test_equipment_catalog_resolves_active_guide_camera():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify active_guide_camera() resolves the matching configured camera."""
+    guide_camera = _make_camera(id="guide", name="ZWO ASI120MC-S", pixel_size_um=3.75)
+    catalog = EquipmentCatalog(
+        id="cat1",
+        telescopes=[],
+        cameras=[_make_camera(), guide_camera],
+        active_guide_camera_id="guide",
+    )
+    assert catalog.active_guide_camera() is guide_camera
+
+
+def test_guider_plate_scale_uses_guide_camera_pixel_size_and_guide_scope_focal_length():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify the guide plate scale uses the guide camera's own pixel size.
+
+    The user's real guide train: a 121.05 mm guide scope and an
+    ASI120MC-S with 3.75 um pixels, about 6.39 arcsec/px. Using the
+    main camera's 3.76 um pixels (the old behaviour) would give 6.41,
+    and using the main telescope's focal length too would give 1.9.
+    """
+    main = EquipmentConfiguration(telescope=_make_telescope(focal_length_mm=405.0), camera=_make_camera())
+    guide_scope = GuideScope(id="g", name="Apertura 32mm", focal_length_mm=121.05, aperture_mm=32.0)
+    guide_camera = _make_camera(id="guide", name="ZWO ASI120MC-S", pixel_size_um=3.75)
+
+    scale = main.guider_plate_scale_arcsec_per_px(guide_scope, guide_camera)
+
+    assert scale == pytest.approx(206.265 * 3.75 / 121.05)
+    assert scale != pytest.approx(main.guider_plate_scale_arcsec_per_px(guide_scope))
+
+
+def test_guider_plate_scale_uses_guide_camera_with_the_main_telescope():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify a guide camera alone changes only the pixel size."""
+    main = EquipmentConfiguration(telescope=_make_telescope(focal_length_mm=450.0), camera=_make_camera())
+    guide_camera = _make_camera(id="guide", name="Guide", pixel_size_um=3.75)
+    assert main.guider_plate_scale_arcsec_per_px(None, guide_camera) == pytest.approx(206.265 * 3.75 / 450.0)

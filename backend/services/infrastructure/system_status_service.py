@@ -9,7 +9,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from wayfindinglib.models.session.telemetry import IndiStatus
+from wayfindinglib.models.session.telemetry import IndiStatus, PolarAlignmentStatus
 
 
 class TelescopePulse(BaseModel):
@@ -28,6 +28,10 @@ class TelescopePulse(BaseModel):
     guiding_history: list[dict[str, Any]] = Field(default_factory=list, alias="guidingHistory")
     alignment_attempts: list[Any] = Field(default_factory=list, alias="alignmentAttempts")
     alignment_active: bool = Field(default=False, alias="alignmentActive")
+    polar_alignment: PolarAlignmentStatus | None = Field(default=None, alias="polarAlignment")
+    camera_temperature: str | None = Field(default=None, alias="cameraTemperature")
+    camera_status: str | None = Field(default=None, alias="cameraStatus")
+    target_name: str | None = Field(default=None, alias="targetName")
 
 
 class ProcessingJobPulse(BaseModel):
@@ -139,6 +143,10 @@ class SystemStatusService:
                     alignmentActive=full_data.get(
                         "alignmentActive", full_data.get("alignment_active", False)
                     ),
+                    polarAlignment=full_data.get("polarAlignment", full_data.get("polar_alignment")),
+                    cameraTemperature=full_data.get("cameraTemperature", full_data.get("camera_temperature")),
+                    cameraStatus=full_data.get("cameraStatus", full_data.get("camera_status")),
+                    targetName=full_data.get("targetName", full_data.get("target_name")),
                 )
             except Exception as e:
                 # Log error but don't fail the pulse

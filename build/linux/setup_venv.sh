@@ -88,13 +88,14 @@ done
 
 log "Repository root: $ROOT_DIR"
 
-# Seed the local configuration from the tracked template. astrometrics.config
-# holds machine-specific paths and an API key, so it is gitignored; without
-# this a fresh clone (and CI) would start with no configuration at all.
-CONFIG_FILE="$ROOT_DIR/astrometricslib/astrometrics.config"
-CONFIG_TEMPLATE="$ROOT_DIR/astrometricslib/astrometrics.config.example"
+# Seed the local configuration from the tracked template.
+# astrometrics.config.toml holds machine-specific paths and an API key, so
+# it is gitignored; without this a fresh clone (and CI) would start with no
+# configuration at all.
+CONFIG_FILE="$ROOT_DIR/astrometricslib/astrometrics.config.toml"
+CONFIG_TEMPLATE="$ROOT_DIR/astrometricslib/astrometrics.config.example.toml"
 if [ ! -f "$CONFIG_FILE" ] && [ -f "$CONFIG_TEMPLATE" ]; then
-  log "No astrometrics.config found; seeding one from astrometrics.config.example"
+  log "No astrometrics.config.toml found; seeding one from astrometrics.config.example.toml"
   cp "$CONFIG_TEMPLATE" "$CONFIG_FILE"
   log "Edit $CONFIG_FILE to set frames_path and, if using the online solver, api_key"
 fi
@@ -150,13 +151,13 @@ log "Installing project from $ROOT_DIR (editable)..."
 log "Installing pyindi-client (real INDI hardware control)..."
 "$VENV_PYTHON" -m pip install pyindi-client || log "WARNING: pyindi-client install failed; INDI hardware control will use the no-op stub (see wayfindinglib/drivers/indi/pyindi_compatibility.py)."
 
-if [ -f "$ROOT_DIR/astrometricslib/pipelines/spectroscopy/_extractor_c.c" ]; then
+if [ -f "$ROOT_DIR/astrometricslib/pipelines/spectroscopy/pre_processing/_extractor_c.c" ]; then
   log "Compiling CPython C extension (_extractor_c.c)..."
   PYTHON_INC="$("$VENV_PYTHON" -c "import sysconfig; print(sysconfig.get_path('include'))")"
   NUMPY_INC="$("$VENV_PYTHON" -c "import numpy; print(numpy.get_include())")"
   gcc -O3 -shared -fPIC -I"$PYTHON_INC" -I"$NUMPY_INC" \
-      "$ROOT_DIR/astrometricslib/pipelines/spectroscopy/_extractor_c.c" \
-      -o "$ROOT_DIR/astrometricslib/pipelines/spectroscopy/_extractor_c.so" || {
+      "$ROOT_DIR/astrometricslib/pipelines/spectroscopy/pre_processing/_extractor_c.c" \
+      -o "$ROOT_DIR/astrometricslib/pipelines/spectroscopy/pre_processing/_extractor_c.so" || {
         log "WARNING: C extension compilation failed; pure-Python fallback will be used."
       }
 fi

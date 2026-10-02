@@ -13,8 +13,15 @@ from astrometricslib.models.target import Target
 from astrometricslib.pipelines.shared.frame_grouping import add_frame
 
 
-def analyze_frame_spectroscopy(target: Target, path: str, limit: int = 10) -> tuple[Any, list[Any]]:
+def analyze_frame_spectroscopy(target: Target, path: str, limit: int | None = None) -> tuple[Any, list[Any]]:
     """Run spectroscopy analysis on a single frame in this target's context.
+
+    Parameters
+    ----------
+    limit : `int`, optional
+        A cap on how many detected stars to extract. `None` (the
+        default) processes every candidate that clears the point-source
+        detector's own 5-sigma threshold; see `SpectroscopyPipeline.process`.
 
     Returns
     -------
@@ -27,7 +34,6 @@ def analyze_frame_spectroscopy(target: Target, path: str, limit: int = 10) -> tu
 
     from astrometricslib.drivers.catalog_access import CatalogAccess
     from astrometricslib.pipelines.astrometry.pipeline import AstrometryPipeline
-    from astrometricslib.pipelines.shared.star_recording import merge_spectra_history
     from astrometricslib.pipelines.spectroscopy.pipeline import (
         SpectroscopyPipeline,
     )
@@ -59,7 +65,6 @@ def analyze_frame_spectroscopy(target: Target, path: str, limit: int = 10) -> tu
             if target_id not in existing.target_ids:
                 existing.target_ids.append(target_id)
         existing.spectroscopy = updated.spectroscopy
-        existing.spectra_history = merge_spectra_history(existing.spectra_history, updated.spectra_history)
         return existing
 
     CatalogAccess(config).merge_and_record("stellar_catalog", stellar_objects, _merge_frame_star)

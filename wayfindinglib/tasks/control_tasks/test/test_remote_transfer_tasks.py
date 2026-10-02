@@ -2,12 +2,22 @@
 
 Description: Verifies check_for_new_remote_images's local/remote diffing
 and download_remote_frames's science-astrometrics indexing call, using a fake
-StellarMateInterface driver rather than a real SSH-reachable host.
+`RemoteTransferDriver` (matching `StellarMateInterface`'s shape) rather than
+a real SSH-reachable host.
 """
 
-from unittest.mock import ANY, patch
+import os
+from pathlib import Path
+from unittest.mock import ANY, Mock, patch
 
 from wayfindinglib.tasks.control_tasks import remote_transfer_tasks as remote_operations
+
+
+class _FakeObservatory:
+    """A stand-in `ObservatoryControl` exposing a `remote_transfer_driver`."""
+
+    def __init__(self, remote_transfer_driver):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+        self.remote_transfer_driver = remote_transfer_driver
 
 
 class _FakeFrame:
@@ -42,16 +52,11 @@ def _patched_config(**overrides):  # ruff: ignore[missing-type-kwargs, missing-r
 def test_check_for_new_remote_images_reports_only_new_filenames():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verify only remote files absent from the local baseline are reported."""
     target = _FakeTarget("M 81", frame_paths=["/local/frame1.fits"])
+    driver = Mock()
+    driver.list_remote_files.return_value = ["frame1.fits", "frame2.fits"]
+    observatory = _FakeObservatory(driver)
 
-    with (
-        patch(
-            "astrometricslib.get_configuration",
-            return_value=_patched_config(),
-        ),
-        patch("wayfindinglib.drivers.stellarmate_interface.StellarMateInterface") as mock_driver,
-    ):
-        mock_driver.return_value.list_remote_files.return_value = ["frame1.fits", "frame2.fits"]
-        result = remote_operations.check_for_new_remote_images(target)
+    result = remote_operations.check_for_new_remote_images(observatory, target)
 
     assert result == {
         "remote_files_available": True,
@@ -63,16 +68,11 @@ def test_check_for_new_remote_images_reports_only_new_filenames():  # ruff: igno
 def test_check_for_new_remote_images_no_remote_files():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verify an empty remote listing reports unavailable, not a raise."""
     target = _FakeTarget("M 81", frame_paths=[])
+    driver = Mock()
+    driver.list_remote_files.return_value = []
+    observatory = _FakeObservatory(driver)
 
-    with (
-        patch(
-            "astrometricslib.get_configuration",
-            return_value=_patched_config(),
-        ),
-        patch("wayfindinglib.drivers.stellarmate_interface.StellarMateInterface") as mock_driver,
-    ):
-        mock_driver.return_value.list_remote_files.return_value = []
-        result = remote_operations.check_for_new_remote_images(target)
+    result = remote_operations.check_for_new_remote_images(observatory, target)
 
     assert result == {"remote_files_available": False, "remote_files_count": 0, "remote_files": []}
 
@@ -87,17 +87,18 @@ def test_download_remote_frames_indexes_through_science_astrometrics_on_success(
     reaching into astrometricslib.drivers internals directly.
     """
     target = _FakeTarget("M 81", frame_paths=[])
+    driver = Mock()
+    driver.download_target_folder.return_value = True
+    observatory = _FakeObservatory(driver)
 
     with (
         patch(
             "astrometricslib.get_configuration",
             return_value=_patched_config(),
         ),
-        patch("wayfindinglib.drivers.stellarmate_interface.StellarMateInterface") as mock_driver,
         patch("astrometricslib.Astrometrics") as mock_astrometrics,
     ):
-        mock_driver.return_value.download_target_folder.return_value = True
-        success = remote_operations.download_remote_frames(target)
+        success = remote_operations.download_remote_frames(observatory, target)
 
     assert success is True
     mock_astrometrics.return_value.processing.scan_target_directory.assert_called_once()
@@ -107,17 +108,18 @@ def test_download_remote_frames_indexes_through_science_astrometrics_on_success(
 def test_download_remote_frames_returns_false_without_indexing_on_failure():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verify a failed download does not attempt to index frames."""
     target = _FakeTarget("M 81", frame_paths=[])
+    driver = Mock()
+    driver.download_target_folder.return_value = False
+    observatory = _FakeObservatory(driver)
 
     with (
         patch(
             "astrometricslib.get_configuration",
             return_value=_patched_config(),
         ),
-        patch("wayfindinglib.drivers.stellarmate_interface.StellarMateInterface") as mock_driver,
         patch("astrometricslib.Astrometrics") as mock_astrometrics,
     ):
-        mock_driver.return_value.download_target_folder.return_value = False
-        success = remote_operations.download_remote_frames(target)
+        success = remote_operations.download_remote_frames(observatory, target)
 
     assert success is False
     mock_astrometrics.return_value.processing.scan_target_directory.assert_not_called()
@@ -157,6 +159,11 @@ class _FakeAstrometrics:
 def test_download_remote_targets_downloads_and_reindexes_on_success():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verify a remote download classifies frames and reindexes the target."""
     fake_astrometrics = _FakeAstrometrics()
+    driver = Mock()
+    driver.resolve_remote_folder_name.return_value = "M 81"
+    driver.list_remote_files_with_sizes.return_value = []
+    driver.download_target_folder.return_value = True
+    observatory = _FakeObservatory(driver)
 
     with (
         patch(
@@ -164,11 +171,9 @@ def test_download_remote_targets_downloads_and_reindexes_on_success():  # ruff: 
             return_value=_patched_config(),
         ),
         patch("astrometricslib.Astrometrics", return_value=fake_astrometrics),
-        patch("wayfindinglib.drivers.stellarmate_interface.StellarMateInterface") as mock_driver,
         patch("astrometricslib.classify_and_sort_fits_files") as mock_classify,
     ):
-        mock_driver.return_value.download_target_folder.return_value = True
-        success = remote_operations.download_remote_targets("M 81")
+        success = remote_operations.download_remote_targets(observatory, "M 81")
 
     assert success is True
     assert fake_astrometrics.created == ["M 81"]
@@ -179,6 +184,8 @@ def test_download_remote_targets_downloads_and_reindexes_on_success():  # ruff: 
 def test_download_remote_targets_local_path_skips_download():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verify a local_path ingests without touching the remote driver."""
     fake_astrometrics = _FakeAstrometrics(existing=[_FakeTargetRecord("M 81")])
+    driver = Mock()
+    observatory = _FakeObservatory(driver)
 
     with (
         patch(
@@ -186,13 +193,14 @@ def test_download_remote_targets_local_path_skips_download():  # ruff: ignore[mi
             return_value=_patched_config(),
         ),
         patch("astrometricslib.Astrometrics", return_value=fake_astrometrics),
-        patch("wayfindinglib.drivers.stellarmate_interface.StellarMateInterface") as mock_driver,
         patch("astrometricslib.classify_and_sort_fits_files") as mock_classify,
     ):
-        success = remote_operations.download_remote_targets("M 81", local_path="/local/lights/M81")
+        success = remote_operations.download_remote_targets(
+            observatory, "M 81", local_path="/local/lights/M81"
+        )
 
     assert success is True
-    mock_driver.assert_not_called()
+    driver.download_target_folder.assert_not_called()
     mock_classify.assert_called_once_with(["/local/lights/M81"], "M 81", ANY, "Apertura 75Q")
     assert fake_astrometrics.saved is True
 
@@ -231,6 +239,11 @@ def test_download_remote_targets_stages_into_the_resolved_remote_folder(tmp_path
     a parallel directory.
     """
     fake_astrometrics = _FakeAstrometrics()
+    driver = Mock()
+    driver.resolve_remote_folder_name.return_value = "M_42"
+    driver.list_remote_files_with_sizes.return_value = [("Light/Luminance/a.fits", 10)]
+    driver.download_target_folder.return_value = True
+    observatory = _FakeObservatory(driver)
 
     with (
         patch(
@@ -238,17 +251,13 @@ def test_download_remote_targets_stages_into_the_resolved_remote_folder(tmp_path
             return_value=_patched_config(frames_path=str(tmp_path)),
         ),
         patch("astrometricslib.Astrometrics", return_value=fake_astrometrics),
-        patch("wayfindinglib.drivers.stellarmate_interface.StellarMateInterface") as mock_driver,
         patch("astrometricslib.classify_and_sort_fits_files") as mock_classify,
     ):
-        mock_driver.return_value.resolve_remote_folder_name.return_value = "M_42"
-        mock_driver.return_value.list_remote_files_with_sizes.return_value = [("Light/Luminance/a.fits", 10)]
-        mock_driver.return_value.download_target_folder.return_value = True
-        success = remote_operations.download_remote_targets("M 42")
+        success = remote_operations.download_remote_targets(observatory, "M 42")
 
     assert success is True
     # The driver is asked for the resolved folder, not the raw target id.
-    assert mock_driver.return_value.download_target_folder.call_args.kwargs["remote_target_name"] == "M_42"
+    assert driver.download_target_folder.call_args.kwargs["remote_target_name"] == "M_42"
     # Classification scans the same directory the download landed in.
     assert mock_classify.call_args.args[0] == [str(tmp_path / "lights" / "M_42")]
 
@@ -259,6 +268,14 @@ def test_download_remote_targets_transfers_only_files_not_held_locally(tmp_path)
     classified_dir = tmp_path / "lights" / "M 42" / "Apertura 75Q" / "ZWO ASI 533MM Pro"
     classified_dir.mkdir(parents=True)
     (classified_dir / "held.fits").write_text("already downloaded")
+    driver = Mock()
+    driver.resolve_remote_folder_name.return_value = "M_42"
+    driver.list_remote_files_with_sizes.return_value = [
+        ("Light/Luminance/held.fits", len("already downloaded")),
+        ("Light/Luminance/fresh.fits", 999),
+    ]
+    driver.download_target_folder.return_value = True
+    observatory = _FakeObservatory(driver)
 
     with (
         patch(
@@ -266,21 +283,46 @@ def test_download_remote_targets_transfers_only_files_not_held_locally(tmp_path)
             return_value=_patched_config(frames_path=str(tmp_path)),
         ),
         patch("astrometricslib.Astrometrics", return_value=fake_astrometrics),
-        patch("wayfindinglib.drivers.stellarmate_interface.StellarMateInterface") as mock_driver,
         patch("astrometricslib.classify_and_sort_fits_files"),
     ):
-        mock_driver.return_value.resolve_remote_folder_name.return_value = "M_42"
-        mock_driver.return_value.list_remote_files_with_sizes.return_value = [
-            ("Light/Luminance/held.fits", len("already downloaded")),
-            ("Light/Luminance/fresh.fits", 999),
-        ]
-        mock_driver.return_value.download_target_folder.return_value = True
-        success = remote_operations.download_remote_targets("M 42")
+        success = remote_operations.download_remote_targets(observatory, "M 42")
 
     assert success is True
-    assert mock_driver.return_value.download_target_folder.call_args.kwargs["selected_files"] == [
-        "Light/Luminance/fresh.fits"
+    assert driver.download_target_folder.call_args.kwargs["selected_files"] == ["Light/Luminance/fresh.fits"]
+
+
+def test_download_remote_targets_incremental_filters_explicit_selected_files(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify explicit selected_files list is also filtered.
+
+    Already-held frames must be excluded even if selected_files is passed.
+    """
+    fake_astrometrics = _FakeAstrometrics()
+    darks_dir = tmp_path / "darks" / "ZWO ASI 533MM Pro" / "100" / "60.0"
+    darks_dir.mkdir(parents=True)
+    (darks_dir / "Dark_001.fits").write_text("existing dark content")
+    driver = Mock()
+    driver.resolve_remote_folder_name.return_value = "Dark"
+    driver.list_remote_files_with_sizes.return_value = [
+        ("Dark_001.fits", len("existing dark content")),
+        ("Dark_002.fits", 1234),
     ]
+    driver.download_target_folder.return_value = True
+    observatory = _FakeObservatory(driver)
+
+    with (
+        patch(
+            "astrometricslib.get_configuration",
+            return_value=_patched_config(frames_path=str(tmp_path)),
+        ),
+        patch("astrometricslib.Astrometrics", return_value=fake_astrometrics),
+        patch("astrometricslib.classify_and_sort_fits_files"),
+    ):
+        success = remote_operations.download_remote_targets(
+            observatory, "Dark", selected_files=["Dark_001.fits", "Dark_002.fits"]
+        )
+
+    assert success is True
+    assert driver.download_target_folder.call_args.kwargs["selected_files"] == ["Dark_002.fits"]
 
 
 def test_download_remote_targets_skips_transfer_when_nothing_is_new(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
@@ -289,6 +331,12 @@ def test_download_remote_targets_skips_transfer_when_nothing_is_new(tmp_path):  
     staging_dir = tmp_path / "lights" / "M_42"
     staging_dir.mkdir(parents=True)
     (staging_dir / "held.fits").write_text("already downloaded")
+    driver = Mock()
+    driver.resolve_remote_folder_name.return_value = "M_42"
+    driver.list_remote_files_with_sizes.return_value = [
+        ("Light/Luminance/held.fits", len("already downloaded"))
+    ]
+    observatory = _FakeObservatory(driver)
 
     with (
         patch(
@@ -296,17 +344,12 @@ def test_download_remote_targets_skips_transfer_when_nothing_is_new(tmp_path):  
             return_value=_patched_config(frames_path=str(tmp_path)),
         ),
         patch("astrometricslib.Astrometrics", return_value=fake_astrometrics),
-        patch("wayfindinglib.drivers.stellarmate_interface.StellarMateInterface") as mock_driver,
         patch("astrometricslib.classify_and_sort_fits_files") as mock_classify,
     ):
-        mock_driver.return_value.resolve_remote_folder_name.return_value = "M_42"
-        mock_driver.return_value.list_remote_files_with_sizes.return_value = [
-            ("Light/Luminance/held.fits", len("already downloaded"))
-        ]
-        success = remote_operations.download_remote_targets("M 42")
+        success = remote_operations.download_remote_targets(observatory, "M 42")
 
     assert success is True
-    mock_driver.return_value.download_target_folder.assert_not_called()
+    driver.download_target_folder.assert_not_called()
     # Still classifies, so staging left by an earlier run gets healed.
     mock_classify.assert_called_once()
     assert fake_astrometrics.saved is True
@@ -315,6 +358,10 @@ def test_download_remote_targets_skips_transfer_when_nothing_is_new(tmp_path):  
 def test_download_remote_targets_incremental_false_forces_full_transfer(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify incremental=False bypasses the local-library diff."""
     fake_astrometrics = _FakeAstrometrics()
+    driver = Mock()
+    driver.resolve_remote_folder_name.return_value = "M_42"
+    driver.download_target_folder.return_value = True
+    observatory = _FakeObservatory(driver)
 
     with (
         patch(
@@ -322,16 +369,13 @@ def test_download_remote_targets_incremental_false_forces_full_transfer(tmp_path
             return_value=_patched_config(frames_path=str(tmp_path)),
         ),
         patch("astrometricslib.Astrometrics", return_value=fake_astrometrics),
-        patch("wayfindinglib.drivers.stellarmate_interface.StellarMateInterface") as mock_driver,
         patch("astrometricslib.classify_and_sort_fits_files"),
     ):
-        mock_driver.return_value.resolve_remote_folder_name.return_value = "M_42"
-        mock_driver.return_value.download_target_folder.return_value = True
-        success = remote_operations.download_remote_targets("M 42", incremental=False)
+        success = remote_operations.download_remote_targets(observatory, "M 42", incremental=False)
 
     assert success is True
-    mock_driver.return_value.list_remote_files_with_sizes.assert_not_called()
-    assert mock_driver.return_value.download_target_folder.call_args.kwargs["selected_files"] is None
+    driver.list_remote_files_with_sizes.assert_not_called()
+    assert driver.download_target_folder.call_args.kwargs["selected_files"] is None
 
 
 def test_download_remote_targets_transfers_same_name_file_of_different_size(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
@@ -345,6 +389,12 @@ def test_download_remote_targets_transfers_same_name_file_of_different_size(tmp_
     classified_dir = tmp_path / "lights" / "M 27" / "Nikkor 300mm"
     classified_dir.mkdir(parents=True)
     (classified_dir / "M_27_Light_001.fits").write_bytes(b"x" * 100)
+    driver = Mock()
+    driver.resolve_remote_folder_name.return_value = "M 27"
+    # Same basename, different size -> a different frame.
+    driver.list_remote_files_with_sizes.return_value = [("Light/Luminance/M_27_Light_001.fits", 250)]
+    driver.download_target_folder.return_value = True
+    observatory = _FakeObservatory(driver)
 
     with (
         patch(
@@ -352,19 +402,12 @@ def test_download_remote_targets_transfers_same_name_file_of_different_size(tmp_
             return_value=_patched_config(frames_path=str(tmp_path)),
         ),
         patch("astrometricslib.Astrometrics", return_value=fake_astrometrics),
-        patch("wayfindinglib.drivers.stellarmate_interface.StellarMateInterface") as mock_driver,
         patch("astrometricslib.classify_and_sort_fits_files"),
     ):
-        mock_driver.return_value.resolve_remote_folder_name.return_value = "M 27"
-        # Same basename, different size -> a different frame.
-        mock_driver.return_value.list_remote_files_with_sizes.return_value = [
-            ("Light/Luminance/M_27_Light_001.fits", 250)
-        ]
-        mock_driver.return_value.download_target_folder.return_value = True
-        success = remote_operations.download_remote_targets("M 27")
+        success = remote_operations.download_remote_targets(observatory, "M 27")
 
     assert success is True
-    assert mock_driver.return_value.download_target_folder.call_args.kwargs["selected_files"] == [
+    assert driver.download_target_folder.call_args.kwargs["selected_files"] == [
         "Light/Luminance/M_27_Light_001.fits"
     ]
 
@@ -474,3 +517,61 @@ def test_sync_all_remote_folders_without_job_registration_records_nothing(tmp_pa
 
     assert result["job_id"] is None
     assert len(_our_log_handlers("wayfindinglib")) == handlers_before
+
+
+def test_sync_calibration_folder_summarises_what_was_added(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify the sync reports counts and the folders new frames landed in.
+
+    The remote listing has three files and the library already holds
+    one, so two are requested; the stubbed sorting step then drops them
+    into a per-exposure folder, which the summary must report.
+    """
+    import astrometricslib
+
+    frames_path = tmp_path / "library"
+    held_folder = frames_path / "darks" / "Cam" / "0.0" / "60.0"
+    held_folder.mkdir(parents=True)
+    (held_folder / "Dark_001.fits").write_bytes(b"x" * 10)
+
+    class _Configuration:
+        def get_frames_path(self) -> Path:
+            return frames_path
+
+    class _Catalog:
+        def refresh(self, kind: str) -> None:
+            pass
+
+        def save(self) -> None:
+            pass
+
+    class _Astrometrics:
+        def __init__(self, config: object) -> None:
+            self.processing = type("Processing", (), {"calibration": _Catalog()})()
+
+    class _Api:
+        def download_remote_frames(self, target: object, **kwargs: object) -> bool:
+            return True
+
+    def fake_classify(scan_list: list[str], target_id: str, config: object, telescope_name: str) -> int:
+        for name in ("Dark_002.fits", "Dark_003.fits"):
+            (held_folder / name).write_bytes(b"y" * 10)
+        return 2
+
+    monkeypatch.setattr(astrometricslib, "get_configuration", lambda: _Configuration())
+    monkeypatch.setattr(astrometricslib, "Astrometrics", _Astrometrics)
+    monkeypatch.setattr(astrometricslib, "classify_and_sort_fits_files", fake_classify)
+    monkeypatch.setattr(
+        remote_operations,
+        "list_remote_files_with_sizes",
+        lambda api, folder: [("Dark_001.fits", 10), ("Dark_002.fits", 10), ("Dark_003.fits", 10)],
+    )
+
+    summary = remote_operations.sync_calibration_folder(_Api(), "Dark")
+
+    assert summary == {
+        "success": True,
+        "remote_count": 3,
+        "already_held_count": 1,
+        "transferred_count": 2,
+        "added_by_folder": {os.path.join("darks", "Cam", "0.0", "60.0"): 2},
+    }

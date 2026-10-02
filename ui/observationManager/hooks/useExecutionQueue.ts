@@ -10,6 +10,7 @@ import {
     modifyQueueItem
 } from '../../common/services/sequencerService';
 import { useExecutionQueueQuery, EXECUTION_QUEUE_QUERY_KEY } from '../../common/queries/useExecutionQueueQuery';
+import { useToast } from '../../common/hooks/useToast';
 
 export interface SequenceObject {
     id: string;
@@ -28,7 +29,7 @@ export interface SequenceObject {
  */
 export const useExecutionQueue = () => {
     const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
+    const toast = useToast();
     const queryClient = useQueryClient();
     const executionQueueQuery = useExecutionQueueQuery();
     const queue = useMemo(
@@ -36,13 +37,17 @@ export const useExecutionQueue = () => {
         [executionQueueQuery.data]
     );
 
+    // A queue/sequencer failure is more consequential than a routine toast
+    // and the user may not be watching the screen when it happens, so it's
+    // shown as a sticky toast (timeoutMs=0) that stays until dismissed
+    // rather than a transient one.
     const refreshQueue = useCallback(async () => {
         try {
             await executionQueueQuery.refetch();
         } catch (err: any) {
-            setError(err.message);
+            toast.show(err.message, 'error', 0);
         }
-    }, [executionQueueQuery]);
+    }, [executionQueueQuery, toast]);
 
     const add = useCallback(async (targetName: string, items: any[]) => {
         setLoading(true);
@@ -51,29 +56,29 @@ export const useExecutionQueue = () => {
             await addToQueue(sequence);
             await refreshQueue();
         } catch (err: any) {
-            setError(err.message);
+            toast.show(err.message, 'error', 0);
         } finally {
             setLoading(false);
         }
-    }, [refreshQueue]);
+    }, [refreshQueue, toast]);
 
     const remove = useCallback(async (id: string) => {
         try {
             await removeFromQueue(id);
             await refreshQueue();
         } catch (err: any) {
-            setError(err.message);
+            toast.show(err.message, 'error', 0);
         }
-    }, [refreshQueue]);
+    }, [refreshQueue, toast]);
 
     const beginImaging = useCallback(async () => {
         try {
             await beginImagingSession();
             // Toast success could be added here if needed
         } catch (err: any) {
-            setError(err.message);
+            toast.show(err.message, 'error', 0);
         }
-    }, []);
+    }, [toast]);
 
     const reorder = useCallback(async (newQueue: SequenceObject[]) => {
         const originalQueue = queue;
@@ -83,10 +88,10 @@ export const useExecutionQueue = () => {
             const ids = newQueue.map(item => item.id);
             await reorderQueue(ids);
         } catch (err: any) {
-            setError(err.message);
+            toast.show(err.message, 'error', 0);
             queryClient.setQueryData(EXECUTION_QUEUE_QUERY_KEY, originalQueue);
         }
-    }, [queue, queryClient]);
+    }, [queue, queryClient, toast]);
 
     const updateQueueItem = useCallback(async (id: string, targetName: string, items: any[]) => {
         setLoading(true);
@@ -96,19 +101,15 @@ export const useExecutionQueue = () => {
             await modifyQueueItem(id, sequence);
             await refreshQueue();
         } catch (err: any) {
-            setError(err.message);
+            toast.show(err.message, 'error', 0);
         } finally {
             setLoading(false);
         }
-    }, [refreshQueue]);
-
-    const clearError = useCallback(() => setError(null), []);
+    }, [refreshQueue, toast]);
 
     return {
         queue,
         loading,
-        error,
-        clearError,
         addToQueue: add,
         removeFromQueue: remove,
         updateQueueItem,

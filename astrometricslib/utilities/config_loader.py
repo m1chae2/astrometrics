@@ -5,9 +5,153 @@ import logging
 import os
 from pathlib import Path
 
+import tomlkit
+
+from .camera_names import normalize_camera_name
 from .enums import FilterType
+from .observatory_setups import ObservatorySetups, load_observatory_setups
 
 _instance = None
+
+_UNSET = object()
+
+
+class _TomlSectionedConfig:
+    """A configparser-compatible view over a flat-sectioned TOML document.
+
+    Every section is stored as a single top-level TOML table keyed by its
+    full historical dotted name (e.g. ``"Observatory.Camera.Nikon D5300"``)
+    rather than as real nested TOML tables, so every accessor on
+    `AppConfiguration` written against `configparser`'s flat-section model
+    keeps working unchanged -- this class only swaps what parses/writes the
+    file on disk. Plain values are stored and returned as strings, matching
+    `configparser`'s own everything-is-a-string behavior, so existing
+    `float()`/`int()`/`.lower()` conversions elsewhere keep working. Inline
+    tables (used by camera profile fields such as `clip_ceiling_adu`) are
+    the one exception: they come back as `tomlkit`'s own dict-like objects
+    with real, native types, since those are read by a purpose-built loader
+    (`camera_profile_store.py`), not by these generic string-based getters.
+    """
+
+    def __init__(self) -> None:
+        """Start with an empty TOML document."""
+        self._document: tomlkit.TOMLDocument = tomlkit.document()
+
+    def read(self, path: str, encoding: str = "utf-8") -> list[str]:
+        """Parse a TOML file into this config, `configparser.read`-style.
+
+        Returns
+        -------
+        read_paths : `list` [`str`]
+            `[path]` if the file was read successfully, `[]` otherwise.
+        """
+        try:
+            text = Path(path).read_text(encoding=encoding)
+        except OSError:
+            return []
+        self._document = tomlkit.parse(text)
+        return [path]
+
+    def write(self, fileobj) -> None:  # ruff: ignore[missing-type-function-argument]
+        """Serialize this config to `fileobj`, keeping comments/formatting."""
+        fileobj.write(tomlkit.dumps(self._document))
+
+    def read_string(self, text: str) -> None:
+        """Parse TOML text into this config, `configparser`-style."""
+        self._document = tomlkit.parse(text)
+
+    def sections(self) -> list[str]:
+        """Return every section's full flat name.
+
+        Returns
+        -------
+        section_names : `list` [`str`]
+            Every top-level section name, in document order.
+        """
+        return list(self._document.keys())
+
+    def has_section(self, section: str) -> bool:
+        """Return whether `section` exists.
+
+        Returns
+        -------
+        exists : `bool`
+            `True` if `section` is present.
+        """
+        return section in self._document
+
+    def add_section(self, section: str) -> None:
+        """Add an empty section named `section`."""
+        self._document[section] = tomlkit.table()
+
+    def set(self, section: str, key: str, value: object) -> None:
+        """Set `key` within `section` to `str(value)`."""
+        self._document[section][key] = str(value)
+
+    def get(self, section: str, key: str, fallback: object = _UNSET) -> object:
+        """Return `section`'s `key`, `configparser.get`-style.
+
+        Returns
+        -------
+        value : `Any`
+            The stored value, stringified, or `fallback` if `section`/`key`
+            does not exist and `fallback` was given.
+
+        Raises
+        ------
+        KeyError
+            If `section`/`key` does not exist and no `fallback` was given.
+        """
+        try:
+            return str(self._document[section][key])
+        except KeyError:
+            if fallback is _UNSET:
+                raise
+            return fallback
+
+    def getboolean(self, section: str, key: str, fallback: object = _UNSET) -> object:
+        """Return `section`'s `key` as a bool, `configparser.getboolean`-style.
+
+        Returns
+        -------
+        value : `bool` or `Any`
+            The stored value interpreted as a bool, or `fallback` if
+            `section`/`key` does not exist and `fallback` was given.
+
+        Raises
+        ------
+        KeyError
+            If `section`/`key` does not exist and no `fallback` was given.
+        """
+        try:
+            raw = self._document[section][key]
+        except KeyError:
+            if fallback is _UNSET:
+                raise
+            return fallback
+        if isinstance(raw, bool):
+            return raw
+        return str(raw).strip().lower() in ("true", "1", "yes", "on")
+
+    def __contains__(self, section: str) -> bool:
+        """Return whether `section` exists.
+
+        Returns
+        -------
+        exists : `bool`
+            `True` if `section` is present.
+        """
+        return section in self._document
+
+    def __getitem__(self, section: str) -> object:
+        """Return `section`'s table.
+
+        Returns
+        -------
+        table : `Any`
+            The section's underlying TOML table.
+        """
+        return self._document[section]
 
 
 def get_configuration() -> AppConfiguration:
@@ -35,7 +179,7 @@ class AppConfiguration:
     def __init__(self):  # ruff: ignore[missing-return-type-special-method]
         # Get the directory of the current script
         self.base_dir = Path(__file__).parent.absolute()
-        self.app_config = configparser.ConfigParser()
+        self.app_config = _TomlSectionedConfig()
         self.config_file_path: Path | None = None
         self.load_configuration()
 
@@ -62,10 +206,10 @@ class AppConfiguration:
 
         candidates = [
             self.base_dir.parent
-            / "astrometrics.config",  # astrometricslib/astrometrics.config (primary user location)
+            / "astrometrics.config.toml",  # astrometricslib/astrometrics.config.toml (primary user location)
             self.base_dir.parent.parent
             / "backend"
-            / "astrometrics.config",  # Backend root folder (Repo/backend/astrometrics.config)
+            / "astrometrics.config.toml",  # Backend root folder (Repo/backend/astrometrics.config.toml)
         ]
 
         for p in candidates:
@@ -93,7 +237,7 @@ class AppConfiguration:
         """Populate the config with sensible defaults if it's empty."""
         defaults = {
             "Image Library": {
-                "path": "./libraryIndex",
+                "path": "./library",
             },
             "Observatory.Telescope": {
                 "hostname": "localhost",
@@ -101,12 +245,11 @@ class AppConfiguration:
                 "focal_length_mm": "0.0",
                 "focal_ratio": "0.0",
                 "remote_pictures_path": "/home/stellarmate/Pictures",
-                "allow_commands": "false",
             },
             "Observatory.Camera": {"default_primary_camera": "Unknown", "models": "Unknown"},
             "Observatory.Constraints": {"min_altitude": "0.0", "max_altitude": "90.0"},
             "Processing.Siril": {
-                # The -cli entry point, matching astrometrics.config.example.
+                # The -cli entry point, matching the config template.
                 # Plain "siril" is the GUI build: it needs a display
                 # connection and so fails in headless pipe mode, which is how
                 # every stack runs. This default is what a configuration
@@ -118,7 +261,7 @@ class AppConfiguration:
                 "rejection_sigma_high": "3.0",
                 "filter_wfwhm_percentile": "",
                 "filter_round_percentile": "",
-                # Blank, matching astrometrics.config.example: -weight= needs
+                # Blank, matching the config template: -weight= needs
                 # a newer Siril than the default apt install provides, and a
                 # default that breaks the default install is not a default.
                 "stack_weight": "",
@@ -126,6 +269,11 @@ class AppConfiguration:
                 "background_homogeneity_check_enabled": "true",
                 "auto_open_gui": "false",
             },
+            # Blank: no gradient removal. Stack previews are then stretched
+            # without it. See get_graxpert_executable.
+            "Processing.GraXpert": {"graxpert_executable": ""},
+            # Blank: no denoising. See get_cosmic_clarity_denoise_executable.
+            "Processing.CosmicClarity": {"denoise_executable": "", "denoise_strength": "0.9"},
             # 500; see get_maximum_identified_stars for why this isn't 0
             # (unlimited) despite that having been this setting's first
             # default.
@@ -176,6 +324,55 @@ class AppConfiguration:
         if val is not None:
             return val
         return self.app_config.get("Image Library", "siril_executable", fallback=None)
+
+    def get_graxpert_executable(self) -> str | None:
+        """Retrieve the command that starts GraXpert, if one is set.
+
+        GraXpert removes the sky gradient from a stack before its preview
+        picture is stretched. A blank setting turns that step off.
+
+        Returns
+        -------
+        executable : `str` or `None`
+            The command (a path, or a command with arguments), or `None` if
+            the setting is blank or missing.
+        """
+        return self.get_value("Processing.GraXpert", "graxpert_executable", fallback="") or None
+
+    def get_cosmic_clarity_denoise_executable(self) -> str | None:
+        """Retrieve the path of Cosmic Clarity's denoise program, if set.
+
+        Cosmic Clarity (SetiAstro) removes noise with an AI model. It runs on
+        the stretched copy of a stack, after the sky gradient is removed and
+        the stretch is applied, and before that copy is saved as the preview
+        picture. A blank setting turns the step off.
+
+        Returns
+        -------
+        executable : `str` or `None`
+            The path of ``SetiAstroCosmicClarity_denoise``, or `None` if the
+            setting is blank or missing. The program works in the ``input``
+            and ``output`` folders next to it.
+        """
+        return self.get_value("Processing.CosmicClarity", "denoise_executable", fallback="") or None
+
+    def get_cosmic_clarity_denoise_strength(self) -> float:
+        """Return how strongly Cosmic Clarity removes noise, from 0 to 1.
+
+        Returns
+        -------
+        strength : `float`
+            The configured strength, kept between 0 and 1. A missing or
+            unreadable setting gives 0.9. On the M 101, M 57, NGC 4438 and
+            M 81 stacks, 0.9 cut the sky grain by 14-39% compared with 0.75
+            and left star peaks unchanged. On the M 13 stack, 0.5 left
+            visible grain. The denoise runs after the stretch.
+        """
+        raw = self.get_value("Processing.CosmicClarity", "denoise_strength", fallback="0.9")
+        try:
+            return min(1.0, max(0.0, float(raw)))
+        except TypeError, ValueError:
+            return 0.9
 
     def get_stack_rejection_sigma_mode(self) -> str:
         """Return the configured stack-time pixel rejection sigma mode.
@@ -376,10 +573,10 @@ class AppConfiguration:
         # Camera names in settings and image files often differ slightly
         # in spacing/capitalization (e.g. "ZWO ASI533MM Pro" in a config
         # file typed by hand vs. "ZWO ASI 533MM Pro" as the camera's own
-        # FITS header spells it). Matching loosely here, the same way
-        # `astrometricslib.pipelines.stacking.stage._camera_names_match`
-        # already has to for stack lookups, keeps a real per-camera
-        # section (dispersion geometry, grating spacing, etc.) from being
+        # FITS header spells it). Matching loosely here, with the same
+        # `normalize_camera_name` the rest of the library uses, keeps a
+        # real per-camera section (dispersion geometry, grating spacing,
+        # etc.) from being
         # silently skipped over a formatting difference -- which
         # otherwise falls through to the generic `[Observatory.Camera]`
         # section's bare model list and produces nonsensical spectroscopy
@@ -389,7 +586,7 @@ class AppConfiguration:
             if not section.startswith(camera_prefix):
                 continue
             section_camera_name = section[len(camera_prefix) :]
-            if "".join(section_camera_name.split()).casefold() == "".join(camera_name.split()).casefold():
+            if normalize_camera_name(section_camera_name) == normalize_camera_name(camera_name):
                 return dict(self.app_config[section])
 
         if "Observatory.Camera" in self.app_config:
@@ -504,6 +701,45 @@ class AppConfiguration:
         camera_name = (camera_name or "").strip()
         return camera_name or None
 
+    def get_observatory_setups(self) -> ObservatorySetups:
+        """Return the optics and the camera-and-optic pairings in the config.
+
+        The pairings say which cameras are really used with which optics.
+        They are read from the ``[Observatory.Optics]``,
+        ``[Observatory.Optic.<name>]``, ``[Observatory.Setups]`` and
+        ``[Observatory.Setup.<name>]`` sections (see
+        `astrometricslib.utilities.observatory_setups`).
+
+        Returns
+        -------
+        observatory_setups : `ObservatorySetups`
+            The optics and setups. Both are empty when the config has none.
+        """
+        return load_observatory_setups(self)
+
+    def get_camera_default_iso(self, camera_name: str | None) -> str | None:
+        """Return the ISO or gain to assume for a camera whose header has none.
+
+        Read from the ``default_iso`` key of the camera's section. It is used
+        only when an image's header records neither ``ISOSPEED`` nor ``GAIN``.
+
+        Parameters
+        ----------
+        camera_name : `str` or `None`
+            The camera, written in any spelling that matches its section.
+
+        Returns
+        -------
+        default_iso : `str` or `None`
+            The configured value, or `None` when the camera's section does
+            not give one.
+        """
+        if not camera_name:
+            return None
+        value = self.get_camera_config(camera_name).get("default_iso")
+        value = (value or "").strip()
+        return value or None
+
     def get_focal_ratio(self) -> float:
         """Return the telescope focal ratio from the configuration.
 
@@ -550,7 +786,7 @@ class AppConfiguration:
         return self.base_dir.parent.parent.absolute()
 
     def get_library_path(self) -> Path:
-        """Return the absolute path to the image library libraryIndex path.
+        """Return the absolute path to the image library's `library` path.
 
         Returns
         -------
@@ -562,7 +798,7 @@ class AppConfiguration:
             path = Path(path_str)
             if not path.is_absolute():
                 # If path starts with ./, resolve relative to project root.
-                # If libraryIndex was moved to astrometricslib/libraryIndex,
+                # If `library` was moved to astrometricslib/library,
                 # check there.
                 check_path = self.get_project_root() / "astrometricslib" / path
                 if check_path.exists():
@@ -570,29 +806,53 @@ class AppConfiguration:
                 return (self.get_project_root() / path).absolute()
             return path.absolute()
         except configparser.NoSectionError, configparser.NoOptionError, KeyError:
-            check_path = self.get_project_root() / "astrometricslib" / "libraryIndex"
+            check_path = self.get_project_root() / "astrometricslib" / "library"
             if check_path.exists():
                 return check_path.absolute()
-            return (self.get_project_root() / "libraryIndex").absolute()
+            return (self.get_project_root() / "library").absolute()
 
     def get_frames_path(self) -> Path:
         """Return the absolute path to the frames directory.
 
-        Always a `"frames"` subfolder of the library path -- not
-        independently configurable, so the sandboxing check in
-        `mcp/tool_registry.py` only ever has one library root to reason
-        about.
+        Reads the ``"frames_path"`` entry from the ``[Image Library]`` section.
+        If omitted or empty, defaults to a `"frames"` subfolder of the library
+        path. Handles mount path resolution between ``/run/media`` and
+        ``/media`` if one is configured but the other is currently mounted.
 
         Returns
         -------
         frames_path : `Path`
-            Absolute path to the frames directory, nested under the
-            library path.
+            Absolute path to the resolved frames directory.
         """
+        try:
+            path_str = self.app_config.get("Image Library", "frames_path")
+            if path_str:
+                path = Path(path_str)
+                if not path.is_absolute():
+                    check_path = self.get_project_root() / "astrometricslib" / path
+                    if check_path.exists():
+                        path = check_path.absolute()
+                    else:
+                        path = (self.get_project_root() / path).absolute()
+                else:
+                    path = path.absolute()
+                if not path.exists():
+                    p_str = str(path)
+                    if p_str.startswith("/run/media/"):
+                        alt = Path(p_str.replace("/run/media/", "/media/", 1))
+                        if alt.exists():
+                            path = alt
+                    elif p_str.startswith("/media/"):
+                        alt = Path(p_str.replace("/media/", "/run/media/", 1))
+                        if alt.exists():
+                            path = alt
+                return path
+        except configparser.NoSectionError, configparser.NoOptionError, KeyError:
+            pass
         return self.get_library_path() / "frames"
 
     def get_library_file_path(self, filename: str) -> Path:
-        """Return the absolute path to a file within libraryIndex.
+        """Return the absolute path to a file within `library`.
 
         Returns
         -------
@@ -649,19 +909,23 @@ class AppConfiguration:
             "Observatory.Telescope", "remote_pictures_path", fallback="/home/stellarmate/Pictures"
         )
 
-    def get_allow_commands(self) -> bool:
-        """Return whether commands may be sent to the telescope (Safe Mode).
+    def get_remote_transfer_driver_name(self) -> str:
+        """Return the configured remote file-transfer protocol name.
+
+        Selects which `RemoteTransferDriver` implementation
+        `ObservatoryControl.remote_transfer_driver` builds
+        (`wayfindinglib/drivers/protocols/remote_transfer_driver.py`) --
+        a separate, pluggable choice from the hardware-control protocol,
+        since pulling files off a telescope host is not part of INDI or
+        ASCOM.
 
         Returns
         -------
-        allow_commands : `bool`
-            `True` if commands may be sent to the telescope.
+        driver_name : `str`
+            The configured remote-transfer driver name, defaulting to
+            ``"stellarmate"``.
         """
-        try:
-            val = self.app_config.get("Observatory.Telescope", "allow_commands")
-            return val.lower() == "true"
-        except configparser.NoSectionError, configparser.NoOptionError:
-            return self.app_config.getboolean("Telescope", "allow_commands", fallback=False)
+        return self.app_config.get("Observatory.RemoteTransfer", "driver", fallback="stellarmate")
 
     def get_min_altitude(self) -> float:
         """Return the minimum allowed altitude for telescope slews.
@@ -773,7 +1037,6 @@ class AppConfiguration:
             focal_length_mm=self.get_focal_length_mm(),
             focal_ratio=self.get_focal_ratio(),
             remote_pictures_path=self.get_remote_pictures_path(),
-            allow_commands=self.get_allow_commands(),
         )
 
         # Build processing config

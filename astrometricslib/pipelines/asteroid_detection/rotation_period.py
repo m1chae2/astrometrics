@@ -63,7 +63,7 @@ def find_rotation_period(candidate: AsteroidDetectionCandidate) -> PeriodogramRe
         `VariabilityAnalyzer.run_lomb_scargle_periodogram` for the
         minimum needed).
     """
-    from astrometricslib.pipelines.photometry.variability_analyzer import VariabilityAnalyzer
+    from astrometricslib.pipelines.photometry.processing.variability_analyzer import VariabilityAnalyzer
 
     light_curve = build_light_curve_from_track(candidate)
     star = StellarObject(id=candidate.id, photometry=light_curve)

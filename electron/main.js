@@ -2,9 +2,10 @@
  * @fileoverview Electron main process for the Astrometrics application.
  * Orchestrates application lifecycle, window management, and backend services.
  */
-import { app, BrowserWindow, Tray, Menu, nativeImage, session } from 'electron';
+import { app, BrowserWindow, Tray, Menu, nativeImage, session, nativeTheme, screen, dialog, powerMonitor, shell } from 'electron';
 import squirrelStartup from 'electron-squirrel-startup';
 import path from 'path';
+import fs from 'fs';
 import process from 'process';
 import os from 'os';
 import log from 'electron-log';
@@ -13,26 +14,196 @@ import isDev from 'electron-is-dev';
 // Modularized logic
 import { registerIpcHandlers } from './ipc_handlers.js';
 import { BackendManager } from './backend_manager.js';
+import { createTrayPopoverWindow } from './tray_window.js';
+import { getPlatform } from './platforms/index.js';
+import { PythonTerminalManager } from './python_terminal_manager.js';
+import { loadWindowState, trackWindowState } from './window_state.js';
+
+const platform = getPlatform();
+const pythonTerminalManager = new PythonTerminalManager({ platform });
 
 // Handle squirrel startup for Windows
 if (squirrelStartup) {
   app.quit();
 }
 
+// Early platform command-line arguments (e.g. Wayland window decorations)
+platform.initCommandLine(app);
+
+// Enforce resource constraints: cap V8 JavaScript heap size to 2GB to prevent memory bloat
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=2048');
+
+// Application identity and taskbar grouping
+platform.configureIdentity(app);
+
+/**
+ * Extracts a candidate file path from application launch arguments.
+ * Filters out Electron/Node binaries, switches, and current-directory tokens.
+ *
+ * @param {string[]} args Command-line arguments array.
+ * @returns {string|null} Resolved file path if found, otherwise null.
+ */
+function extractFilePath(args) {
+  if (!Array.isArray(args)) return null;
+  for (const arg of args) {
+    if (!arg || arg.startsWith('-') || arg === '.') continue;
+    if (arg.endsWith('electron') || arg.endsWith('electron.js') || arg.endsWith('main.js')) continue;
+    return path.resolve(arg);
+  }
+  return null;
+}
+
+/**
+ * Extracts a requested workspace mode from --mode=<Name> command-line arguments.
+ *
+ * @param {string[]} args Command-line arguments array.
+ * @returns {string|null} The target mode name or null.
+ */
+function extractModeArg(args) {
+  if (!Array.isArray(args)) return null;
+  for (const arg of args) {
+    if (arg && arg.startsWith('--mode=')) {
+      return arg.slice(7).replace(/^['"]|['"]$/g, '');
+    }
+  }
+  return null;
+}
+
+/**
+ * Extracts a custom URL protocol string (astrometrics://...) from command line arguments.
+ *
+ * @param {string[]} args Command-line arguments array.
+ * @returns {string|null} The URL string if found, otherwise null.
+ */
+function extractUrlArg(args) {
+  if (!Array.isArray(args)) return null;
+  for (const arg of args) {
+    if (arg && typeof arg === 'string' && arg.startsWith('astrometrics://')) {
+      return arg;
+    }
+  }
+  return null;
+}
+
+/**
+ * Parses an astrometrics:// protocol URL and dispatches the action to the frontend.
+ * Examples:
+ *   astrometrics://mode/Planetarium
+ *   astrometrics://target/M31?mode=Planetarium
+ *
+ * @param {string} rawUrl
+ * @param {Electron.BrowserWindow} win
+ */
+function handleProtocolUrl(rawUrl, win) {
+  if (!rawUrl || !win || win.isDestroyed() || !win.webContents) return;
+  try {
+    const parsed = new URL(rawUrl);
+    // Path routing: astrometrics://mode/<modeName> or astrometrics://target/<targetName>
+    const host = parsed.hostname || parsed.host;
+    const pathname = parsed.pathname.replace(/^\/+/, '');
+    const searchParams = parsed.searchParams;
+
+    if (host === 'mode' || pathname.startsWith('mode/')) {
+      const mode = host === 'mode' ? decodeURIComponent(pathname) : decodeURIComponent(pathname.replace(/^mode\//, ''));
+      if (mode) {
+        win.webContents.send('navigate-mode', mode);
+      }
+    } else if (host === 'target' || pathname.startsWith('target/')) {
+      const targetName = host === 'target' ? decodeURIComponent(pathname) : decodeURIComponent(pathname.replace(/^target\//, ''));
+      const mode = searchParams.get('mode');
+      if (mode) {
+        win.webContents.send('navigate-mode', mode);
+      }
+      if (targetName) {
+        win.webContents.send('remote-action', { action: 'targetSelected', payload: targetName });
+      }
+    }
+  } catch (err) {
+    log.warn('Failed to parse protocol URL:', rawUrl, err);
+  }
+}
+
+let queuedFileToOpen = extractFilePath(process.argv);
+let queuedModeToOpen = extractModeArg(process.argv);
+let queuedUrlToOpen = extractUrlArg(process.argv);
+
+// Register Custom URL Protocol (astrometrics://)
+if (process.defaultApp) {
+  if (process.argv.length >= 2) {
+    app.setAsDefaultProtocolClient('astrometrics', process.execPath, [path.resolve(process.argv[1])]);
+  }
+} else {
+  app.setAsDefaultProtocolClient('astrometrics');
+}
+
+// Configure OS user tasks / Jump Lists / Dock
+platform.setupUserTasks(app);
+
 // Single Instance Lock
 if (!app.requestSingleInstanceLock()) {
   app.quit();
+} else {
+  app.on('second-instance', (_event, commandLine) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+
+      const urlArg = extractUrlArg(commandLine);
+      if (urlArg) {
+        handleProtocolUrl(urlArg, mainWindow);
+      }
+
+      const filePath = extractFilePath(commandLine);
+      if (filePath && mainWindow.webContents) {
+        mainWindow.webContents.send('open-file', filePath);
+        app.addRecentDocument(filePath);
+      }
+
+      const modeArg = extractModeArg(commandLine);
+      if (modeArg && mainWindow.webContents) {
+        mainWindow.webContents.send('navigate-mode', modeArg);
+      }
+    }
+  });
 }
 
-// Configure Logging
-log.transports.file.level = 'info';
-log.transports.file.resolvePathFn = () => path.join(app.getPath('userData'), 'logs', 'main.log');
+// OS Deep Linking listener (macOS and Linux portal/desktop events)
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+    handleProtocolUrl(url, mainWindow);
+  } else {
+    queuedUrlToOpen = url;
+  }
+});
+
+// OS File Association listener (macOS and portal events)
+app.on('open-file', (event, filePath) => {
+  event.preventDefault();
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+    mainWindow.webContents.send('open-file', filePath);
+    app.addRecentDocument(filePath);
+  } else {
+    queuedFileToOpen = filePath;
+  }
+});
+
+// Configure Logging via platform adapter
+platform.configureLogging(app, log);
 
 // Define global references
 let mainWindow = null;
 let secondaryWindow = null;
+const auxiliaryWindows = new Map();
+const windowModes = new Map();
 let splashWindow = null;
+let trayPopoverWindow = null;
 let splashShownAt = 0;
+let isOpeningMainWindow = false;
+// Whether the main window should maximize on first show: true unless a saved
+// window-state file says the user last left it un-maximized at a specific size.
+let shouldMaximizeMainWindow = true;
 let tray = null;
 const backendManager = new BackendManager(app);
 
@@ -41,9 +212,10 @@ const __dirname = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A
 const getAppPath = (...parts) => path.join(app.getAppPath(), ...parts);
 
 // Minimum time the splash window stays up, just enough to avoid a flash of
-// unstyled content while the main window's renderer does its initial paint.
-// Views now mount on demand (see ui/App.tsx's visitedModes) rather than all
-// preloading their data at boot, so this no longer needs to cover that work.
+// unstyled content or a one-frame flicker of the main window before it's
+// actually shown. The real gate on how long the splash stays up is every
+// mode reporting its data loaded (see dismissSplashAndShowMainWindow and
+// ui/common/utils/appBootReadiness.ts); this is just a floor under that.
 const SPLASH_MIN_DURATION_MS = 500;
 
 /**
@@ -73,10 +245,36 @@ function createSplashWindow() {
 }
 
 /**
+ * Maximum time to wait for the renderer's "every mode is fully loaded"
+ * signal (see ui/common/utils/appBootReadiness.ts) before showing the main
+ * window anyway. Without this, a single mode whose data-load never resolves
+ * (e.g. a hung request) would leave the splash screen up forever.
+ */
+const APP_FULLY_LOADED_TIMEOUT_MS = 30000;
+
+/** Set by createMainWindow(); cleared once dismissSplashAndShowMainWindow() runs. */
+let appFullyLoadedTimeout = null;
+
+/** Guards dismissSplashAndShowMainWindow() against running twice (real signal vs. timeout racing). */
+let splashDismissed = false;
+
+/**
  * Closes the splash window and reveals the main window, waiting out any
  * remaining time on SPLASH_MIN_DURATION_MS since the splash was shown.
+ *
+ * Called once every mode has reported its initial data loaded (normal path,
+ * via the 'app-fully-loaded' IPC message) or once APP_FULLY_LOADED_TIMEOUT_MS
+ * has elapsed without that happening (fallback path, so the app never looks
+ * permanently hung on a stuck load).
  */
 function dismissSplashAndShowMainWindow() {
+  if (splashDismissed) return;
+  splashDismissed = true;
+  if (appFullyLoadedTimeout) {
+    clearTimeout(appFullyLoadedTimeout);
+    appFullyLoadedTimeout = null;
+  }
+
   const elapsed = Date.now() - splashShownAt;
   const remaining = Math.max(SPLASH_MIN_DURATION_MS - elapsed, 0);
   setTimeout(() => {
@@ -85,10 +283,46 @@ function dismissSplashAndShowMainWindow() {
     if (mainWindow && !mainWindow.isDestroyed()) {
       // maximize() before the window is shown; calling it while show:false is
       // still pending, some Linux window managers map (show) the window early.
-      mainWindow.maximize();
+      if (shouldMaximizeMainWindow) mainWindow.maximize();
       mainWindow.show();
     }
   }, remaining);
+}
+
+/**
+ * Opens the main window once the backend has finished loading its star catalog.
+ *
+ * The backend's "ready" signal can arrive more than once (it is matched against
+ * streamed output), so this guards against starting a second wait or window
+ * while one is already underway.
+ */
+async function openMainWindowWhenBackendIsWarm() {
+  if (mainWindow || isOpeningMainWindow) return;
+  isOpeningMainWindow = true;
+  let isWarm = await backendManager.waitUntilWarm();
+  // A backend that is missing or dead cannot be fixed by opening the window
+  // anyway, so say so and offer a retry instead of showing an empty app.
+  while (!isWarm && ['unreachable', 'exited'].includes(backendManager.warmUpFailureReason)) {
+    if (splashWindow && !splashWindow.isDestroyed()) splashWindow.hide();
+    const { response } = await dialog.showMessageBox({
+      type: 'error',
+      title: 'Astrometrics backend not running',
+      message: 'The Astrometrics backend is not running.',
+      detail:
+        'Nothing answered on http://127.0.0.1:5000. Start it with ' +
+        'build/linux/run_backend.sh start (check .run_logs/backend.log if it stops), then retry.',
+      buttons: ['Retry', 'Quit'],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (response !== 0) {
+      app.quit();
+      return;
+    }
+    if (splashWindow && !splashWindow.isDestroyed()) splashWindow.show();
+    isWarm = await backendManager.waitUntilWarm();
+  }
+  createMainWindow();
 }
 
 /**
@@ -98,20 +332,62 @@ function dismissSplashAndShowMainWindow() {
  * enabling `contextIsolation`. Exposes only the whitelisted IPC API defined
  * in `preload.js` to the React renderer context.
  */
-const getWindowOptions = () => ({
-  show: true,
-  width: 1280,
-  height: 800,
-  minWidth: 1024,
-  minHeight: 700,
-  icon: getAppPath('assets', 'orbit.png'),
-  resizable: true,
-  webPreferences: {
-    nodeIntegration: false,
-    contextIsolation: true,
-    preload: path.join(__dirname, 'preload.js')
-  }
-});
+const getWindowOptions = () => {
+  const platformWindowOptions = platform.getWindowOptions();
+  // Passed through as a renderer command-line flag (rather than an IPC round
+  // trip) so the custom title bar's presence is known synchronously at first
+  // paint, with no flash of the wrong chrome.
+  const isFrameless = platformWindowOptions.frame === false;
+
+  return {
+    show: true,
+    width: 1280,
+    height: 800,
+    minWidth: 1024,
+    minHeight: 700,
+    frame: true,
+    backgroundColor: '#181818',
+    icon: getAppPath('assets', 'orbit-smooth-256.png'),
+    resizable: true,
+    ...platformWindowOptions,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js'),
+      additionalArguments: [`--astrometrics-frameless=${isFrameless}`]
+    }
+  };
+};
+
+/**
+ * Wires a BrowserWindow's maximize, focus, and fullscreen transitions to
+ * notify its own renderer, so a custom title bar stays in sync with real
+ * window state it doesn't otherwise observe directly: the maximize/restore
+ * button icon (including transitions triggered outside that button, e.g. a
+ * window-manager double-click or edge-snap), dimming to match OS-native title
+ * bars when the window loses focus, and hiding itself in fullscreen the way
+ * native chrome would.
+ *
+ * @param {Electron.BrowserWindow} win
+ */
+function watchWindowChromeState(win) {
+  const send = (channel, value) => {
+    if (!win.isDestroyed() && win.webContents) {
+      win.webContents.send(channel, value);
+    }
+  };
+
+  const notifyMaximized = () => send('window-maximized-changed', win.isMaximized());
+  win.on('maximize', notifyMaximized);
+  win.on('unmaximize', notifyMaximized);
+
+  win.on('focus', () => send('window-focus-changed', true));
+  win.on('blur', () => send('window-focus-changed', false));
+
+  const notifyFullscreen = () => send('window-fullscreen-changed', win.isFullScreen());
+  win.on('enter-full-screen', notifyFullscreen);
+  win.on('leave-full-screen', notifyFullscreen);
+}
 
 /**
  * Creates the main application window.
@@ -120,9 +396,45 @@ const getWindowOptions = () => ({
  * the renderer process to the Python backend process (`backendManager`).
  */
 async function createMainWindow() {
-  mainWindow = new BrowserWindow({ ...getWindowOptions(), show: false });
+  const savedState = loadWindowState(app);
+  const windowOptions = { ...getWindowOptions(), show: false };
+  if (savedState) {
+    windowOptions.width = savedState.width;
+    windowOptions.height = savedState.height;
+    // Only reuse the saved position if it still lands on a currently connected
+    // display; a monitor removed/reconfigured since the last run (or an
+    // absolute position Wayland never actually honored) could otherwise place
+    // the window off-screen with no way for the user to reach it.
+    const savedPositionIsOnScreen =
+      typeof savedState.x === 'number' &&
+      typeof savedState.y === 'number' &&
+      screen.getAllDisplays().some((display) => {
+        const { x, y, width, height } = display.workArea;
+        return savedState.x >= x && savedState.y >= y && savedState.x < x + width && savedState.y < y + height;
+      });
+    if (savedPositionIsOnScreen) {
+      windowOptions.x = savedState.x;
+      windowOptions.y = savedState.y;
+    }
+  }
+  shouldMaximizeMainWindow = !savedState || savedState.isMaximized;
+
+  mainWindow = new BrowserWindow(windowOptions);
   mainWindow.setMenuBarVisibility(false);
-  mainWindow.once('ready-to-show', dismissSplashAndShowMainWindow);
+  trackWindowState(mainWindow, app);
+  watchWindowChromeState(mainWindow);
+
+  // The splash stays up until the renderer reports every mode has finished
+  // loading (see the 'app-fully-loaded' IPC handler wired below, and
+  // ui/common/utils/appBootReadiness.ts), not just first paint -- with this
+  // timeout as a safety net so a stuck load can't hang the app on the splash
+  // screen forever.
+  splashDismissed = false;
+  if (appFullyLoadedTimeout) clearTimeout(appFullyLoadedTimeout);
+  appFullyLoadedTimeout = setTimeout(() => {
+    log.warn(`Main window did not report fully loaded within ${APP_FULLY_LOADED_TIMEOUT_MS}ms; showing it anyway.`);
+    dismissSplashAndShowMainWindow();
+  }, APP_FULLY_LOADED_TIMEOUT_MS);
 
   if (isDev) {
     const devUrl = process.env.ELECTRON_RENDERER_URL || 'http://127.0.0.1:5173';
@@ -131,40 +443,385 @@ async function createMainWindow() {
     mainWindow.loadFile(getAppPath('dist', 'index.html'));
   }
 
-  registerIpcHandlers(mainWindow, createSecondaryWindow, backendManager);
+  // Deliver any pending file association or workspace mode once the frontend is ready
+  mainWindow.webContents.once('did-finish-load', () => {
+    if (queuedFileToOpen) {
+      mainWindow.webContents.send('open-file', queuedFileToOpen);
+      queuedFileToOpen = null;
+    }
+    if (queuedModeToOpen) {
+      mainWindow.webContents.send('navigate-mode', queuedModeToOpen);
+      queuedModeToOpen = null;
+    }
+    if (queuedUrlToOpen) {
+      handleProtocolUrl(queuedUrlToOpen, mainWindow);
+      queuedUrlToOpen = null;
+    }
+  });
+
+    registerIpcHandlers(
+    mainWindow,
+    createSecondaryWindow,
+    backendManager,
+    updateTrayMenu,
+    () => trayPopoverWindow,
+    {
+      createDisplayWindow,
+      closeSecondaryWindow,
+      setWindowMode,
+      windowModes,
+      createFigureWindow,
+      onAppFullyLoaded: dismissSplashAndShowMainWindow,
+    },
+    platform,
+    pythonTerminalManager
+  );
+
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+
+    // Check if any auxiliary user windows remain
+    const hasRemainingUserWindows = auxiliaryWindows.size > 0;
+    if (!hasRemainingUserWindows) {
+      log.info('Last application window closed. Cleaning up tray and terminating app...');
+      if (trayPopoverWindow && !trayPopoverWindow.isDestroyed()) {
+        trayPopoverWindow.destroy();
+        trayPopoverWindow = null;
+      }
+      if (tray && !tray.isDestroyed()) {
+        tray.destroy();
+        tray = null;
+      }
+      if (platform.shouldQuitOnWindowAllClosed()) {
+        app.quit();
+      }
+    }
+  });
 }
 
 /**
- * Creates the secondary window for dual-screen setups.
+ * Creates an auxiliary display window for multi-screen and multi-window workflows.
+ *
+ * Automatically detects available secondary monitors and positions the new
+ * window on the secondary display when present.
+ *
+ * @param {Object} [options]
+ * @param {string} [options.mode] Target display mode to open with (e.g. 'Image Processing').
+ * @param {number} [options.displayIndex] Optional specific monitor index.
+ * @returns {BrowserWindow} The created window.
+ */
+function createDisplayWindow(options = {}) {
+  const { mode = '', displayIndex } = options;
+  const windowOptions = { ...getWindowOptions() };
+
+  // If multiple displays exist, target a secondary monitor
+  const allDisplays = screen.getAllDisplays();
+  if (allDisplays.length > 1) {
+    const primaryDisplay = screen.getPrimaryDisplay();
+    let targetDisplay = null;
+    if (typeof displayIndex === 'number' && allDisplays[displayIndex]) {
+      targetDisplay = allDisplays[displayIndex];
+    } else {
+      targetDisplay = allDisplays.find((d) => d.id !== primaryDisplay.id) || allDisplays[1];
+    }
+
+    if (targetDisplay) {
+      windowOptions.x = targetDisplay.bounds.x + 50;
+      windowOptions.y = targetDisplay.bounds.y + 50;
+      windowOptions.width = Math.min(windowOptions.width, targetDisplay.bounds.width - 100);
+      windowOptions.height = Math.min(windowOptions.height, targetDisplay.bounds.height - 100);
+    }
+  }
+
+  const win = new BrowserWindow(windowOptions);
+  win.setMenuBarVisibility(false);
+  watchWindowChromeState(win);
+  const winId = win.id;
+  auxiliaryWindows.set(winId, win);
+
+  if (mode) {
+    windowModes.set(win.webContents.id, mode);
+  }
+
+  const queryParams = new URLSearchParams();
+  if (mode) queryParams.set('mode', mode);
+  queryParams.set('windowId', String(winId));
+  const queryString = queryParams.toString() ? `?${queryParams.toString()}` : '';
+
+  if (isDev) {
+    const baseUrl = process.env.ELECTRON_RENDERER_URL || 'http://127.0.0.1:5173';
+    win.loadURL(`${baseUrl}${queryString}`);
+  } else {
+    win.loadFile(getAppPath('dist', 'index.html'), { search: queryString });
+  }
+
+  win.on('closed', () => {
+    auxiliaryWindows.delete(winId);
+    windowModes.delete(win.webContents.id);
+    if (secondaryWindow === win) {
+      secondaryWindow = null;
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('secondary-window-closed');
+      }
+    }
+
+    // If main window was already closed and this was the last auxiliary window
+    if ((!mainWindow || mainWindow.isDestroyed()) && auxiliaryWindows.size === 0) {
+      log.info('Last auxiliary window closed. Cleaning up tray and terminating app...');
+      if (trayPopoverWindow && !trayPopoverWindow.isDestroyed()) {
+        trayPopoverWindow.destroy();
+        trayPopoverWindow = null;
+      }
+      if (tray && !tray.isDestroyed()) {
+        tray.destroy();
+        tray = null;
+      }
+      if (platform.shouldQuitOnWindowAllClosed()) {
+        app.quit();
+      }
+    }
+  });
+
+  return win;
+}
+
+/**
+ * Creates an independent pop-up figure window for Matplotlib plots.
+ * Supports both interactive WebAgg URLs and fallback static PNG images.
+ *
+ * @param {string|{plotPath?: string, interactiveUrl?: string}} target
+ *   Filesystem path, interactive URL, or descriptor object.
+ * @returns {BrowserWindow}
+ */
+function createFigureWindow(target) {
+  const figureWin = new BrowserWindow({
+    width: 760,
+    height: 600,
+    title: 'Astrometrics Figure',
+    backgroundColor: '#0a0d14',
+    icon: getAppPath('assets', 'orbit.png'),
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+    },
+  });
+
+  figureWin.setMenuBarVisibility(false);
+
+  let plotPath = '';
+  let interactiveUrl = '';
+
+  if (typeof target === 'string') {
+    if (target.startsWith('http://') || target.startsWith('https://')) {
+      interactiveUrl = target;
+    } else if (target.startsWith('/figure/')) {
+      const port = process.env.ASTROMETRICS_PORT || '5000';
+      interactiveUrl = `http://127.0.0.1:${port}${target}`;
+    } else {
+      plotPath = target;
+    }
+  } else if (target && typeof target === 'object') {
+    plotPath = target.plotPath || '';
+    if (target.interactiveUrl) {
+      if (target.interactiveUrl.startsWith('http://') || target.interactiveUrl.startsWith('https://')) {
+        interactiveUrl = target.interactiveUrl;
+      } else {
+        const port = process.env.ASTROMETRICS_PORT || '5000';
+        interactiveUrl = `http://127.0.0.1:${port}${target.interactiveUrl}`;
+      }
+    }
+  }
+
+  if (interactiveUrl) {
+    figureWin.loadURL(interactiveUrl);
+  } else {
+    let imageSrc = '';
+    try {
+      if (plotPath && fs.existsSync(plotPath)) {
+        const imgBuffer = fs.readFileSync(plotPath);
+        imageSrc = `data:image/png;base64,${imgBuffer.toString('base64')}`;
+      } else if (plotPath) {
+        log.warn(`Figure path does not exist: ${plotPath}`);
+      }
+    } catch (err) {
+      log.error(`Failed to read figure image at ${plotPath}:`, err);
+    }
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Astrometrics Figure</title>
+          <style>
+            body {
+              margin: 0;
+              padding: 16px;
+              background-color: #0a0d14;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              height: calc(100vh - 32px);
+              overflow: auto;
+              box-sizing: border-box;
+            }
+            img {
+              max-width: 100%;
+              max-height: 100%;
+              object-fit: contain;
+              box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+              border-radius: 4px;
+            }
+          </style>
+        </head>
+        <body>
+          ${imageSrc ? `<img src="${imageSrc}" alt="Figure" />` : '<div style="color: #e95420; font-family: monospace;">Figure image not found</div>'}
+        </body>
+      </html>
+    `;
+    figureWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
+  }
+
+  const windowId = `figure-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  auxiliaryWindows.set(windowId, figureWin);
+
+  figureWin.on('closed', () => {
+    auxiliaryWindows.delete(windowId);
+  });
+
+  return figureWin;
+}
+
+/**
+ * Creates or focuses the secondary window for dual-screen setups.
  *
  * Functions identically to the main window but doesn't handle the backend
  * lifecycle. Useful for separating the Planetarium from the Processing views.
+ *
+ * @param {string} [mode] Optional initial mode for the secondary window.
+ * @returns {BrowserWindow}
  */
-function createSecondaryWindow() {
+function createSecondaryWindow(mode) {
   if (secondaryWindow && !secondaryWindow.isDestroyed()) {
     secondaryWindow.focus();
-    return;
+    return secondaryWindow;
   }
-  secondaryWindow = new BrowserWindow(getWindowOptions());
-  secondaryWindow.setMenuBarVisibility(false);
+  secondaryWindow = createDisplayWindow({ mode });
+  return secondaryWindow;
+}
 
-  if (isDev) {
-    secondaryWindow.loadURL(process.env.ELECTRON_RENDERER_URL || 'http://127.0.0.1:5173');
-  } else {
-    secondaryWindow.loadFile(getAppPath('dist', 'index.html'));
-  }
-
-  secondaryWindow.on('closed', () => {
+/**
+ * Closes the secondary window if currently open.
+ */
+function closeSecondaryWindow() {
+  if (secondaryWindow && !secondaryWindow.isDestroyed()) {
+    secondaryWindow.close();
     secondaryWindow = null;
+  }
+}
+
+/**
+ * Updates the tracked active mode for a window's webContents.
+ *
+ * @param {number} webContentsId The sender webContents ID.
+ * @param {string} mode The active workspace display mode.
+ */
+function setWindowMode(webContentsId, mode) {
+  if (mode) {
+    windowModes.set(webContentsId, mode);
+  } else {
+    windowModes.delete(webContentsId);
+  }
+}
+
+/**
+ * Builds or refreshes the context menu for the system tray icon with live status.
+ *
+ * @param {Object} [status] Optional live observatory and workspace telemetry.
+ * @param {string} [status.mountStatus] e.g. "Tracking", "Parked", "Slewing"
+ * @param {string} [status.activeTarget] e.g. "M31 Andromeda Galaxy"
+ * @param {string} [status.activeMode] Current active workspace
+ */
+function updateTrayMenu(status = {}) {
+  if (!tray) return;
+
+  const navigateTo = (mode) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('secondary-window-closed');
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+      mainWindow.webContents.send('navigate-mode', mode);
     }
-  });
+  };
+
+  const isTracking = status.mountStatus && /tracking/i.test(status.mountStatus);
+  const isSlewing = status.mountStatus && /slew/i.test(status.mountStatus);
+  const mountState = status.mountStatus || 'Ready';
+  const mountDot = isTracking ? '● ' : isSlewing ? '● ' : '○ ';
+  const targetName = status.activeTarget || 'None Selected';
+
+  const tooltipLines = ['Astrometrics', `Observatory: ${mountState}`, `Target: ${targetName}`];
+  tray.setToolTip(tooltipLines.join(' • '));
+
+  const menuTemplate = [
+    { label: 'Astrometrics', enabled: false },
+    { type: 'separator' },
+    { label: `${mountDot}Observatory: ${mountState}`, enabled: false },
+    { label: `  Target: ${targetName}`, enabled: false },
+    { type: 'separator' },
+    {
+      label: 'Switch Workspace',
+      submenu: [
+        { label: 'Image Viewer', click: () => navigateTo('Image Viewer') },
+        { label: 'Astronomy Manager', click: () => navigateTo('Astronomy Manager') },
+        { label: 'Planetarium', click: () => navigateTo('Planetarium') },
+        { label: 'Image Processing', click: () => navigateTo('Image Processing') },
+        { label: 'Observatory Manager', click: () => navigateTo('Observatory Manager') },
+        { label: 'Observation Manager', click: () => navigateTo('Observation Manager') },
+        { label: 'Command Console', click: () => navigateTo('Command Console') }
+      ]
+    },
+    {
+      label: 'Open Window',
+      click: () => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          if (mainWindow.isMinimized()) mainWindow.restore();
+          mainWindow.show();
+          mainWindow.focus();
+        }
+      }
+    },
+    { type: 'separator' },
+    {
+      label: 'Emergency Park Telescope',
+      click: () => {
+        if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+          mainWindow.webContents.send('emergency-park-mount');
+        }
+      }
+    },
+    { type: 'separator' },
+    { label: 'Quit Astrometrics', click: () => app.quit() }
+  ];
+
+  try {
+    // Store the built menu for use by the right-click handler bound in the tray
+    // setup block. Do NOT call tray.setContextMenu() here — on Linux that call
+    // intercepts all tray-icon clicks (including left-click) and prevents the
+    // popover window's 'click' event from ever firing.
+    tray._builtContextMenu = Menu.buildFromTemplate(menuTemplate);
+  } catch (err) {
+    log.warn('Failed to build tray context menu:', err);
+  }
 }
 
 // App Initialization
 
 app.on('ready', () => {
+  // Astrometrics always renders dark (night-vision friendly for observatory use),
+  // independent of the desktop's own light/dark setting, so OS theme changes are
+  // not forwarded to renderers.
+  nativeTheme.themeSource = 'dark';
+
   createSplashWindow();
 
   // ---------------------------------------------------------------------------
@@ -201,31 +858,145 @@ app.on('ready', () => {
     });
   });
 
-  // Start backend and transition to UI when ready
-  backendManager.start(() => {
-    if (!mainWindow) createMainWindow();
+  // Intercept window.open and top-level navigation on all webContents
+  // Ensures external links (http/https) open in the user's OS browser and
+  // internal links cannot cause accidental top-level app navigations or reloads.
+  app.on('web-contents-created', (_event, contents) => {
+    contents.setWindowOpenHandler(({ url }) => {
+      if (url.startsWith('http:') || url.startsWith('https:')) {
+        shell.openExternal(url).catch((err) => log.warn('Failed opening external URL:', err));
+        return { action: 'deny' };
+      }
+      return { action: 'allow' };
+    });
+
+    contents.on('will-navigate', (event, navigationUrl) => {
+      // Allow Vite HMR / dev server and initial file:// root
+      const parsedUrl = new URL(navigationUrl);
+      if (parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:') {
+        if (!isDev || (parsedUrl.hostname !== '127.0.0.1' && parsedUrl.hostname !== 'localhost')) {
+          event.preventDefault();
+          shell.openExternal(navigationUrl).catch((err) => log.warn('Failed opening external URL:', err));
+        }
+      } else if (parsedUrl.protocol === 'file:' && !navigationUrl.endsWith('index.html')) {
+        // Prevent navigating the main webContents to local markdown/docs files directly
+        event.preventDefault();
+      }
+    });
   });
+
+  // Setup platform application menu with standard desktop accelerators (Ctrl+O, Ctrl+Q, F11)
+  platform.setupApplicationMenu(app, {
+    onOpenFile: async () => {
+      const targetWindow = BrowserWindow.getFocusedWindow() || mainWindow;
+      if (!targetWindow || targetWindow.isDestroyed()) return;
+      try {
+        const result = await dialog.showOpenDialog(targetWindow, {
+          title: 'Open FITS Image',
+          filters: [
+            { name: 'FITS Images', extensions: ['fits', 'fit', 'fts'] },
+            { name: 'All Files', extensions: ['*'] }
+          ],
+          properties: ['openFile']
+        });
+        if (!result.canceled && result.filePaths && result.filePaths.length > 0) {
+          const filePath = result.filePaths[0];
+          targetWindow.webContents.send('open-file', filePath);
+          app.addRecentDocument(filePath);
+        }
+      } catch (err) {
+        log.warn('Open file accelerator failed:', err);
+      }
+    },
+    isDev,
+    menuModule: Menu
+  });
+
+  // System Resource Guardian: Automatically pause background compute pipelines
+  // (Siril stacking, plate solvers) when switching to battery power or locking screen,
+  // preserving battery life and telescope tracking stability without requiring user action.
+  try {
+    powerMonitor.on('on-battery', () => {
+      log.info('System switched to battery power: auto-pausing heavy background compute pipelines.');
+      platform.pauseBackgroundPipelines();
+      pythonTerminalManager.pause();
+    });
+
+    powerMonitor.on('on-ac', () => {
+      log.info('System connected to AC power: auto-resuming background compute pipelines.');
+      platform.resumeBackgroundPipelines();
+      pythonTerminalManager.resume();
+    });
+
+    powerMonitor.on('lock-screen', () => {
+      log.info('Screen locked: auto-pausing heavy background compute pipelines.');
+      platform.pauseBackgroundPipelines();
+      pythonTerminalManager.pause();
+    });
+
+    powerMonitor.on('unlock-screen', () => {
+      log.info('Screen unlocked: auto-resuming background compute pipelines.');
+      platform.resumeBackgroundPipelines();
+      pythonTerminalManager.resume();
+    });
+  } catch (err) {
+    log.debug('Power monitor initialization skipped:', err);
+  }
+
+  // Start backend and transition to UI once it has finished warming up. The
+  // splash stays up until then, and further still until every mode reports
+  // its own data loaded (see dismissSplashAndShowMainWindow), so nothing
+  // opens onto an empty or half-loaded app.
+  backendManager.start(openMainWindowWhenBackendIsWarm);
 
   // System Tray
   try {
-    const trayIcon = nativeImage.createFromPath(getAppPath('assets', 'orbit.png')).resize({ width: 16, height: 16 });
+    const trayIconPath = getAppPath('assets', 'tray-icon-22.png');
+    const trayIcon = nativeImage.createFromPath(trayIconPath);
     tray = new Tray(trayIcon);
-    tray.setContextMenu(Menu.buildFromTemplate([
-      { label: 'Open Astrometrics', click: () => mainWindow && mainWindow.show() },
-      { type: 'separator' },
-      { label: 'Quit', click: () => app.quit() }
-    ]));
+    tray.setToolTip('Astrometrics');
+    updateTrayMenu();
+
+    // Tray Popover — frameless popover window toggled by left-clicking the tray icon
+    trayPopoverWindow = createTrayPopoverWindow(
+      tray,
+      getAppPath,
+      isDev,
+      path.join(__dirname, 'preload.js'),
+      platform
+    );
+
+    // Right-click shows the native fallback context menu.
+    // This is kept separate from setContextMenu() which would block left-click
+    // on Linux by intercepting all tray clicks before 'click' can fire.
+    tray.on('right-click', () => {
+      if (tray._builtContextMenu) {
+        tray.popUpContextMenu(tray._builtContextMenu);
+      }
+    });
   } catch (err) {
     log.warn('Tray creation failed:', err);
   }
 });
 
 app.on('window-all-closed', () => {
+  pythonTerminalManager.stopAll();
   backendManager.stop();
-  if (process.platform !== 'darwin') app.quit();
+  if (platform.shouldQuitOnWindowAllClosed()) app.quit();
 });
 
-app.on('before-quit', () => backendManager.stop());
+app.on('before-quit', () => {
+  pythonTerminalManager.stopAll();
+  if (trayPopoverWindow && !trayPopoverWindow.isDestroyed()) {
+    trayPopoverWindow.destroy();
+    trayPopoverWindow = null;
+  }
+  if (tray && !tray.isDestroyed()) {
+    tray.destroy();
+    tray = null;
+  }
+  backendManager.stop();
+});
 
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) createMainWindow();

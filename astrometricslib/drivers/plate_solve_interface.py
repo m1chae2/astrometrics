@@ -38,6 +38,27 @@ _TRANSIENT_NETWORK_ERROR_TYPES: tuple[type[BaseException], ...] = (
     socket.gaierror,
 )
 
+# Fewest detected stars worth handing to the local solver at all. A quad
+# match needs at least 4 non-collinear stars in principle, but in practice
+# a real solve wants several candidate quads to find one the index files
+# actually recognize -- a frame with fewer than this essentially never
+# solves locally (confirmed on a real underexposed M 13 reference frame,
+# where both a hinted and a blind local solve each burned their full
+# 300s timeout with too few detected sources to ever succeed). Below
+# this, skip straight to the online path instead of spending minutes on
+# an attempt that was never going to work.
+MINIMUM_SOURCES_FOR_LOCAL_SOLVE = 10
+
+# If the hinted local solve already consumed this fraction of its time
+# budget without succeeding, it searched exhaustively and failed --
+# meaning the blind retry (an even harder, unconstrained search) is
+# very unlikely to succeed within the same budget either. Skipping it
+# in that case saves a second full timeout on a near-certain repeat
+# failure; a hinted attempt that instead fails quickly (a real
+# hint-mismatch, not an exhaustive search) still gets the blind retry,
+# since that is the case it exists to rescue.
+HINTED_SOLVE_NEAR_TIMEOUT_FRACTION = 0.9
+
 # The maximum number of times to retry if the internet connection fails.
 # Stop at 3 so the process doesn't get stuck forever if the site is down.
 ONLINE_SOLVE_ATTEMPT_LIMIT = 3
@@ -211,8 +232,20 @@ class PlateSolver:
         # it unless a caller explicitly asks for that output.
         kwargs.setdefault("verbose", False)
 
-        # 1. Local Solve
-        if image_path:
+        # 1. Local Solve -- skipped when a pre-detected source list is too
+        # thin to plausibly solve, since a local attempt would just burn
+        # its full timeout (twice, hinted then blind) on a near-certain
+        # failure. Sources are only skipped when the count is known
+        # (`sources` provided) and clearly too low; when the caller has
+        # not pre-detected sources at all, local solving still runs.
+        source_count_too_low = sources is not None and len(sources) < MINIMUM_SOURCES_FOR_LOCAL_SOLVE
+        if source_count_too_low:
+            logger.info(
+                f"Only {len(sources)} source(s) detected (fewer than "
+                f"{MINIMUM_SOURCES_FOR_LOCAL_SOLVE}); skipping the local solver and going "
+                "straight to the online path."
+            )
+        elif image_path:
             header = self._solve_locally(image_path, **kwargs)
             if header:
                 return header
@@ -250,9 +283,10 @@ class PlateSolver:
             solver_config = {}
 
         index_path = solver_config.get("index_path", "/usr/share/astrometry")
-        autoindex = True
-        if hasattr(solver_config, "getboolean"):
-            autoindex = solver_config.getboolean("autoindex", fallback=True)
+        autoindex_raw = solver_config.get("autoindex", True)
+        autoindex = (
+            autoindex_raw if isinstance(autoindex_raw, bool) else str(autoindex_raw).strip().lower() == "true"
+        )
         cpulimit = solver_config.get("cpulimit", "300")
 
         config_lines = [f"add_path {index_path}"]
@@ -315,17 +349,34 @@ class PlateSolver:
                 hinted_command.append(working_path)
                 timeout = kwargs.get("solve_timeout", 300)
 
+                hinted_started_at = time.monotonic()
                 header = self._run_solve_field(hinted_command, tmp_dir, timeout)
+                hinted_elapsed = time.monotonic() - hinted_started_at
                 if header is not None:
                     return header
 
-                # Try again without any hints if the first attempt fails.
-                # If the user's telescope settings are slightly wrong (like
-                # forgetting to account for a focal reducer), the strict hints
-                # will actually prevent the solver from finding the right
-                # answer.
-                # A blind retry fixes this by searching everywhere.
-                if applied_hints:
+                # Try again without any hints if the first attempt fails
+                # quickly. If the user's telescope settings are slightly
+                # wrong (like forgetting to account for a focal reducer),
+                # the strict hints will actually prevent the solver from
+                # finding the right answer, and a blind retry (searching
+                # everywhere) fixes that.
+                #
+                # But if the hinted attempt instead consumed nearly its
+                # whole time budget without succeeding, it already
+                # searched exhaustively within those hints and found
+                # nothing -- an even harder, unconstrained blind search is
+                # very unlikely to succeed in the same budget, so skip it
+                # rather than spend a second full timeout on a near-certain
+                # repeat failure.
+                hinted_exhausted_its_budget = hinted_elapsed >= timeout * HINTED_SOLVE_NEAR_TIMEOUT_FRACTION
+                if applied_hints and hinted_exhausted_its_budget:
+                    logger.info(
+                        f"Hinted local solve failed after using {hinted_elapsed:.0f}s of its "
+                        f"{timeout}s budget; skipping the blind retry rather than spending "
+                        "another full timeout on a near-certain repeat failure."
+                    )
+                elif applied_hints:
                     logger.info("Hinted local solve failed; retrying blind (no scale or position hints).")
                     blind_command = [*cmd, working_path]
                     header = self._run_solve_field(blind_command, tmp_dir, timeout)
@@ -366,7 +417,7 @@ class PlateSolver:
         solved_path = os.path.join(working_directory, "input_image.new")
         if not os.path.exists(solved_path):
             return None
-        with fits.open(solved_path) as hdul:
+        with fits.open(solved_path, memmap=False) as hdul:
             return hdul[0].header.copy()
 
     def _solve_online_sources(

@@ -36,7 +36,11 @@ def _write_stack_fits(path) -> None:  # ruff: ignore[missing-type-function-argum
 
 def test_plot_asteroid_detection_raises_on_missing_stacked_image():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verify a target with no stacked_image is rejected."""
-    target = SimpleNamespace(id="M 13", stacked_image=None, asteroid_candidates=[])
+    target = SimpleNamespace(
+        id="M 13",
+        stacking=SimpleNamespace(stacked_image=None),
+        asteroid_detection=SimpleNamespace(candidates=[]),
+    )
 
     with pytest.raises(ValueError, match="has no stacked_image"):
         plot_asteroid_detection(target)
@@ -70,7 +74,11 @@ def test_plot_asteroid_detection_draws_a_track_for_each_candidate(tmp_path):  # 
         ],
         cascade_stage=CascadeStage.RATE_LINEARITY_CONFIRMED,
     )
-    target = SimpleNamespace(id="M 13", stacked_image=str(stack_path), asteroid_candidates=[candidate])
+    target = SimpleNamespace(
+        id="M 13",
+        stacking=SimpleNamespace(stacked_image=str(stack_path)),
+        asteroid_detection=SimpleNamespace(candidates=[candidate]),
+    )
 
     fig = plot_asteroid_detection(target)
 
@@ -83,7 +91,11 @@ def test_plot_asteroid_detection_with_no_candidates_still_renders_the_image(tmp_
     """Verify a target with no candidates still returns a usable figure."""
     stack_path = tmp_path / "stack.fits"
     _write_stack_fits(stack_path)
-    target = SimpleNamespace(id="M 13", stacked_image=str(stack_path), asteroid_candidates=[])
+    target = SimpleNamespace(
+        id="M 13",
+        stacking=SimpleNamespace(stacked_image=str(stack_path)),
+        asteroid_detection=SimpleNamespace(candidates=[]),
+    )
 
     fig = plot_asteroid_detection(target)
 

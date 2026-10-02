@@ -8,6 +8,7 @@ import os
 import uuid
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from astrometricslib import LoggerInterface, ProcessingJob
 
@@ -23,7 +24,13 @@ class JobService:
     def __init__(self, job_repository: LoggerInterface):  # ruff: ignore[missing-return-type-special-method]
         self.repository = job_repository
 
-    def create_job(self, target_id: str, job_type: str, log_file: str | None = None) -> ProcessingJob:
+    def create_job(
+        self,
+        target_id: str,
+        job_type: str,
+        log_file: str | None = None,
+        input_metrics: dict[str, Any] | None = None,
+    ) -> ProcessingJob:
         """Create a new job and record it to the database.
 
         Returns
@@ -41,6 +48,8 @@ class JobService:
             log_file_path=log_file,
             created_at=datetime.now().isoformat(),
             updated_at=datetime.now().isoformat(),
+            input_metrics=input_metrics or {},
+            output_metrics={},
         )
         self.repository.upsert_job(job)
         return job
@@ -51,6 +60,8 @@ class JobService:
         status: str | None = None,
         progress: float | None = None,
         status_message: str | None = None,
+        input_metrics: dict[str, Any] | None = None,
+        output_metrics: dict[str, Any] | None = None,
     ):
         """Update job state in the database."""
         job = self.repository.get_job(job_id)
@@ -67,6 +78,12 @@ class JobService:
 
         if status_message:
             job.message = status_message
+
+        if input_metrics is not None:
+            job.input_metrics = input_metrics
+
+        if output_metrics is not None:
+            job.output_metrics = output_metrics
 
         job.updated_at = datetime.now().isoformat()
         self.repository.upsert_job(job)

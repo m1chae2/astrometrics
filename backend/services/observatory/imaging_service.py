@@ -16,7 +16,7 @@ Future Implementation Scope:
 import logging
 
 from backend.services.processing.job_service import JobService
-from wayfindinglib import IndiInterface
+from wayfindinglib.api.control_registry import ObservatoryControl
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +24,8 @@ logger = logging.getLogger(__name__)
 class ImagingService:
     """Coordinate camera capture sequences and background capture jobs."""
 
-    def __init__(self, indi_interface: IndiInterface, job_service: JobService):  # ruff: ignore[missing-return-type-special-method]
-        self.indi = indi_interface
+    def __init__(self, observatory_api: ObservatoryControl, job_service: JobService):  # ruff: ignore[missing-return-type-special-method]
+        self._observatory = observatory_api
         self.job_service = job_service
         self._background_tasks: set = set()
 
@@ -112,11 +112,15 @@ class ImagingService:
             # sequence is defined as one filter, and re-driving the wheel
             # between frames would add settling time for no benefit.
             if filter_name:
+                from wayfindinglib import AstrometryHardwareError
+
                 self.job_service.update_job(job_id, status_message=f"Selecting filter {filter_name}...")
-                if not self.indi.set_filterwheel_position(filter_name):
+                try:
+                    self._observatory.set_filter(filter_name)
+                except (ValueError, AstrometryHardwareError) as filter_error:
                     # Capturing in whatever filter happened to be in place
                     # would silently mislabel the frames, so fail instead.
-                    logger.error(f"Job {job_id}: Could not select filter {filter_name}")
+                    logger.error(f"Job {job_id}: Could not select filter {filter_name}: {filter_error}")
                     self.job_service.update_job(
                         job_id, status="failed", status_message=f"Could not select filter {filter_name}"
                     )
@@ -130,7 +134,7 @@ class ImagingService:
 
                 logger.info(f"Job {job_id}: Capturing frame {i + 1}/{count}")
 
-                success = self.indi.capture_image(exposure_seconds)
+                success = self._observatory.capture_image(exposure_seconds)
                 if not success:
                     logger.error(f"Job {job_id}: Failed to start capture for frame {i + 1}")
                     self.job_service.update_job(
@@ -185,7 +189,7 @@ class ImagingService:
             frame.
         """
         logger.info(f"Capturing single light frame for alignment: {exposure}s, ISO={iso}")
-        success = self.indi.capture_image(exposure)
+        success = self._observatory.capture_image(exposure)
         if not success:
             raise RuntimeError("Underlying INDI camera failed to capture frame")
 

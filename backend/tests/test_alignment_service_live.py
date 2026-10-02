@@ -29,7 +29,10 @@ import pytest
 
 from astrometricslib import AppConfiguration
 from backend.services.observatory.alignment_service import AlignmentService
+from wayfindinglib.api.control_registry import ObservatoryControl
+from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.drivers.indi_interface import IndiInterface
+from wayfindinglib.models.policy.delegation import DelegationState, ObservatoryCapability
 
 INDI_HOST = "localhost"
 INDI_PORT = 7624
@@ -96,7 +99,7 @@ def _read_ra_hours_dec_degrees(telescope) -> tuple[float, float]:  # ruff: ignor
 
 @pytest.fixture(scope="module")
 def live_interface():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Yield a real IndiInterface connected to the live server, unblocked.
+    """Yield a real IndiInterface connected to the live server.
 
     Yields
     ------
@@ -104,7 +107,6 @@ def live_interface():  # ruff: ignore[missing-return-type-undocumented-public-fu
         A connected interface with at least one device discovered.
     """
     config = AppConfiguration()
-    config.app_config.set("Observatory.Telescope", "allow_commands", "true")
 
     indi_interface = IndiInterface(config=config)
     indi_interface.connect_to_server()
@@ -122,6 +124,42 @@ def live_interface():  # ruff: ignore[missing-return-type-undocumented-public-fu
         time.sleep(0.3)
 
 
+@pytest.fixture(scope="module")
+def observatory(live_interface, tmp_path_factory):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Build an authority-granted ObservatoryControl over `live_interface`.
+
+    MOUNT_CONTROL/PLATE_SOLVE_ALIGNMENT are promoted to AUTHORITATIVE
+    (via SHADOWED first, per the correction-capability shadow-precedence
+    rule) so `sync_coordinates`/`slew_to_coordinates` actually dispatch
+    to the driver rather than raising -- an isolated, temp-directory
+    `DiskButler` backs the delegation policy so this never touches a
+    real config/database file.
+
+    Returns
+    -------
+    observatory : `ObservatoryControl`
+        A control instance wrapping the live driver, with both
+        capabilities this test needs already AUTHORITATIVE.
+    """
+    isolated_dir = tmp_path_factory.mktemp("alignment_service_live")
+    config = AppConfiguration()
+    config._find_config_file = lambda: isolated_dir / "astrometrics.config.toml"
+    config.update_config({"Wayfinding Library": {"path": str(isolated_dir / "wayfinding_library")}})
+
+    observatory_control = ObservatoryControl(config=config, butler=DiskButler(app_config=config))
+    observatory_control.driver = live_interface
+    observatory_control.apply_promotion_decision(
+        ObservatoryCapability.MOUNT_CONTROL, DelegationState.AUTHORITATIVE
+    )
+    observatory_control.apply_promotion_decision(
+        ObservatoryCapability.PLATE_SOLVE_ALIGNMENT, DelegationState.SHADOWED
+    )
+    observatory_control.apply_promotion_decision(
+        ObservatoryCapability.PLATE_SOLVE_ALIGNMENT, DelegationState.AUTHORITATIVE
+    )
+    return observatory_control
+
+
 @pytest.fixture()
 def telescope(live_interface):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Yield the telescope device.
@@ -136,7 +174,7 @@ def telescope(live_interface):  # ruff: ignore[missing-type-function-argument, m
     yield device
 
 
-def test_alignment_loop_syncs_real_mount_with_correct_units(live_interface, telescope):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_alignment_loop_syncs_real_mount_with_correct_units(live_interface, observatory, telescope):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify a not-yet-aligned attempt issues correct real INDI commands.
 
     Regression test for two bugs: AlignmentService used to call
@@ -158,7 +196,7 @@ def test_alignment_loop_syncs_real_mount_with_correct_units(live_interface, tele
     solved_ra_deg, solved_dec_deg = 165.0, 21.0
 
     service = AlignmentService(
-        indi_interface=live_interface,
+        observatory_api=observatory,
         imaging_service=_StubImagingService(),
         star_identifier=_StubStarIdentifier(solved_ra_deg, solved_dec_deg),
     )

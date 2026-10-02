@@ -12,6 +12,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from astrometricslib.models.stacking_quality import StackingInputQuality, StackingOutputQuality
+
 
 class ExcludedFrame(BaseModel):
     """A record of a single picture that was skipped, and the reason why."""
@@ -20,6 +22,39 @@ class ExcludedFrame(BaseModel):
 
     path: str = Field(alias="path")
     reason: str = Field(alias="reason")
+
+
+class ExposureGroupSummary(BaseModel):
+    """What happened to the frames of one exposure length in a stack.
+
+    Frames taken with different exposure lengths are stacked one length at a
+    time (each with the dark frames of its own length) and the results are
+    combined. This records, for each length, how it went. A group left out of
+    the combined image says why in `left_out_reason`.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    exposure_seconds: float = Field(alias="exposureSeconds")
+    frames_submitted: int = Field(alias="framesSubmitted")
+    frames_stacked: int = Field(alias="framesStacked")
+    # False when no dark frames of this exposure length exist: the group was
+    # stacked without a dark, and its frames are not mixed with darked ones.
+    dark_applied: bool = Field(alias="darkApplied")
+    # Whether a star is clipped at the camera's ceiling at this exposure
+    # length (see `pipelines/stacking/post_processing/exposure_saturation.py`).
+    saturated: bool = Field(default=False, alias="saturated")
+    # Whether this group's raw frames are clipped at zero (the sky sits below
+    # the camera's read noise), so their faint pixels read too high.
+    clipped_at_zero: bool = Field(default=False, alias="clippedAtZero")
+    # Where this group's own stack is kept (the ``groups`` folder next to the
+    # combined stack), or `None` when the group could not be stacked.
+    stack_path: str | None = Field(default=None, alias="stackPath")
+    # How far this group's stack was moved to line up with the reference
+    # group, as [rows, columns] in pixels; `None` for the reference group.
+    alignment_shift_pixels: list[float] | None = Field(default=None, alias="alignmentShiftPixels")
+    # Why the group is not in the combined image, or `None` if it is.
+    left_out_reason: str | None = Field(default=None, alias="leftOutReason")
 
 
 class TargetSessionContribution(BaseModel):
@@ -50,6 +85,41 @@ class StarIdentificationMetrics(BaseModel):
     unresolved_star_count: int = Field(default=0, alias="unresolvedStarCount")
 
 
+class AppliedCameraProfile(BaseModel):
+    """Which camera profile a pipeline run used, and the numbers from it.
+
+    A camera profile holds facts about one camera model (see
+    `astrometricslib.models.camera_profile`). Recording it on each summary
+    lets a reader see which assumptions a result rests on, in particular
+    whether the camera was recognised at all.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    # The camera name as the frames spell it, or `None` when the run could not
+    # tell which camera took its frames.
+    camera_name: str | None = Field(default=None, alias="cameraName")
+    # The profile that was used. For a camera with no profile of its own this
+    # is the generic stand-in.
+    profile_name: str = Field(alias="profileName")
+    # `True` when the camera has no profile and the generic stand-in was used.
+    # Every number below is then an assumption about a made-up camera.
+    is_generic_fallback: bool = Field(alias="isGenericFallback")
+    # The pixel value at which this camera's frames clip, and where that
+    # number came from: "datasheet", "measured" or "assumed".
+    clip_ceiling_adu: float = Field(alias="clipCeilingAdu")
+    clip_ceiling_source: str = Field(alias="clipCeilingSource")
+    # A pixel at or above this value counts as saturated in a raw frame.
+    saturation_threshold_adu: float = Field(alias="saturationThresholdAdu")
+    saturation_threshold_source: str = Field(alias="saturationThresholdSource")
+    # `False` when the threshold is above the ceiling, so a saturated raw frame
+    # could never be counted as saturated.
+    saturation_threshold_can_be_reached: bool = Field(alias="saturationThresholdCanBeReached")
+    # Whether the profile has a sensitivity curve, so spectra can be corrected
+    # for the sensor's sensitivity.
+    has_quantum_efficiency_curve: bool = Field(alias="hasQuantumEfficiencyCurve")
+
+
 class PipelineQualitySummaryBase(BaseModel):
     """Basic information recorded by every processing pipeline.
 
@@ -76,10 +146,26 @@ class PipelineQualitySummaryBase(BaseModel):
     # defaults -- kept so a confusing result can later be traced back to
     # exactly what was configured.
     resolved_parameters: dict[str, Any] = Field(default_factory=dict, alias="resolvedParameters")
+    # The camera profile this run used. `None` in summaries saved before
+    # camera profiles existed, or when the run has no frames to name a camera.
+    camera_profile: AppliedCameraProfile | None = Field(default=None, alias="cameraProfile")
     quality_processing_applied: bool = Field(default=True, alias="qualityProcessingApplied")
     flagged: bool = Field(default=False, alias="flagged")
     flag_reasons: list[str] = Field(default_factory=list, alias="flagReasons")
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), alias="createdAt")
+    # The id of the IVOA provenance Activity (see
+    # astrometricslib.models.provenance) this run was recorded as --
+    # always the same id as the run's job_id. `None` when no job was
+    # open for this run (register_job=False), matching the job log's
+    # own behavior of recording nothing in that case.
+    provenance_activity_id: str | None = Field(default=None, alias="provenanceActivityId")
+    # The id of the upstream provenance Entity this run actually
+    # consumed (for example the specific stacked image astrometry
+    # solved), superseding upstream_quality_summary_reference's plain
+    # category name with a real, resolvable reference. `None` when this
+    # run has no upstream entity (for example stacking itself, or a run
+    # with no provenance recorded).
+    upstream_entity_id: str | None = Field(default=None, alias="upstreamEntityId")
 
 
 # ---------------------------------------------------------------------------
@@ -87,7 +173,7 @@ class PipelineQualitySummaryBase(BaseModel):
 # ---------------------------------------------------------------------------
 
 # Bumped whenever StackingPipelineQualityMetrics's shape changes meaningfully.
-STACKING_PIPELINE_VERSION = "1.1.0"
+STACKING_PIPELINE_VERSION = "1.3.0"
 
 
 class StackingPipelineQualityMetrics(BaseModel):
@@ -112,8 +198,38 @@ class StackingPipelineQualityMetrics(BaseModel):
 
     calibration_mismatch_flags: list[str] = Field(default_factory=list, alias="calibrationMismatchFlags")
 
+    # The flat frames the stack was calibrated with. The master flat's noise
+    # is copied into every light frame, so a set with few or faint frames
+    # leaves a fixed noise pattern in the stack. `flat_noise_fraction` is the
+    # master flat's relative noise (0.005 is 0.5%). When it is above the
+    # limit, the master flat is smoothed by `flat_smoothing_sigma_px` pixels
+    # (a Gaussian width). `flat_calibration_issues` states each problem found
+    # in one sentence. All are empty or `None` when the stack used no flats.
+    flat_frame_count: int | None = Field(default=None, alias="flatFrameCount")
+    flat_noise_fraction: float | None = Field(default=None, alias="flatNoiseFraction")
+    flat_smoothing_sigma_px: float | None = Field(default=None, alias="flatSmoothingSigmaPx")
+    flat_calibration_issues: list[str] = Field(default_factory=list, alias="flatCalibrationIssues")
+
     saturated_pixel_fraction: float | None = Field(default=None, alias="saturatedPixelFraction")
     saturation_flagged: bool = Field(default=False, alias="saturationFlagged")
+
+    # One entry per exposure length in the stack (a single entry when every
+    # frame has the same length).
+    exposure_groups: list[ExposureGroupSummary] = Field(default_factory=list, alias="exposureGroups")
+    # The exposure length, in seconds, that would keep the brightest star
+    # below the camera's ceiling; `None` when it cannot be worked out (for
+    # example a star clipped too heavily to estimate).
+    recommended_exposure_seconds: float | None = Field(default=None, alias="recommendedExposureSeconds")
+
+    # The share of the stack's pixels that are exactly zero. A stack that is
+    # mostly zero has been over-subtracted (its calibration removed more than
+    # the sky), and is blank.
+    zero_pixel_fraction: float | None = Field(default=None, alias="zeroPixelFraction")
+    zero_fraction_flagged: bool = Field(default=False, alias="zeroFractionFlagged")
+    # Siril warns when calibration leaves a large share of a frame below zero;
+    # this is the worst percentage it reported, or `None` if it did not warn.
+    negative_pixel_max_percent: int | None = Field(default=None, alias="negativePixelMaxPercent")
+    negative_pixels_flagged: bool = Field(default=False, alias="negativePixelsFlagged")
 
     # Standard-imaging-only.
     stacked_fwhm_px: float | None = Field(default=None, alias="stackedFwhmPx")
@@ -130,6 +246,11 @@ class StackingPipelineQualityMetrics(BaseModel):
     stacking_duration_seconds: float | None = Field(default=None, alias="stackingDurationSeconds")
     timed_out: bool = Field(default=False, alias="timedOut")
     debayer_applied: bool | None = Field(default=None, alias="debayerApplied")
+    # The program that did the pixel work (calibration, registration and
+    # combination) and its version, so a stack can be traced to the tool that
+    # made it. `None` on a summary saved before they were recorded.
+    stacking_engine: str | None = Field(default=None, alias="stackingEngine")
+    stacking_engine_version: str | None = Field(default=None, alias="stackingEngineVersion")
     # To align images, one picture is chosen as the "reference" that
     # all others are matched against. Which picture was chosen is recorded.
     registration_reference_frame: str | None = Field(default=None, alias="registrationReferenceFrame")
@@ -148,6 +269,11 @@ class StackQualitySummary(PipelineQualitySummaryBase):
     pipeline_name: str = Field(default="stacking", alias="pipelineName")
     pipeline_version: str = Field(default=STACKING_PIPELINE_VERSION, alias="pipelineVersion")
     stacking_metrics: StackingPipelineQualityMetrics = Field(alias="stackingMetrics")
+    # The same judgement split in two: was the input sound, and did the
+    # stack come out well. Both are `None` on a summary saved before they
+    # existed.
+    input_quality: StackingInputQuality | None = Field(default=None, alias="inputQuality")
+    output_quality: StackingOutputQuality | None = Field(default=None, alias="outputQuality")
 
 
 # ---------------------------------------------------------------------------
@@ -156,7 +282,7 @@ class StackQualitySummary(PipelineQualitySummaryBase):
 
 # Bumped whenever AstrometryPipelineQualityMetrics's shape changes
 # meaningfully.
-ASTROMETRY_PIPELINE_VERSION = "1.2.0"
+ASTROMETRY_PIPELINE_VERSION = "1.3.0"
 
 
 class AstrometryPipelineQualityMetrics(StarIdentificationMetrics):
@@ -210,7 +336,7 @@ class AstrometryQualitySummary(PipelineQualitySummaryBase):
 
 # Bumped whenever PhotometryPipelineQualityMetrics's shape changes
 # meaningfully.
-PHOTOMETRY_PIPELINE_VERSION = "1.1.0"
+PHOTOMETRY_PIPELINE_VERSION = "1.2.0"
 
 
 class FrameEnsembleComposition(BaseModel):
@@ -279,7 +405,7 @@ class PhotometryQualitySummary(PipelineQualitySummaryBase):
 
 # Bumped whenever SpectroscopyPipelineQualityMetrics's shape changes
 # meaningfully.
-SPECTROSCOPY_PIPELINE_VERSION = "1.2.0"
+SPECTROSCOPY_PIPELINE_VERSION = "1.3.0"
 
 
 class SpectralClassificationConcern(BaseModel):
@@ -349,7 +475,7 @@ class SpectroscopyQualitySummary(PipelineQualitySummaryBase):
 
 # Bumped whenever AsteroidDetectionPipelineQualityMetrics's shape
 # changes meaningfully.
-ASTEROID_DETECTION_PIPELINE_VERSION = "1.0.0"
+ASTEROID_DETECTION_PIPELINE_VERSION = "1.1.0"
 
 
 class AsteroidDetectionPipelineQualityMetrics(BaseModel):

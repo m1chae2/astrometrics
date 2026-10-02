@@ -78,6 +78,22 @@ class SocketManager:
         if self._loop and self._loop.is_running():
             asyncio.run_coroutine_threadsafe(self.broadcast(event), self._loop)
 
+    def broadcast_ui_event_sync(self, action: str, payload: dict | None = None) -> None:
+        """Broadcast a UI event synchronously from any background thread.
+
+        Parameters
+        ----------
+        action : `str`
+            The action identifier for the UI event (e.g. 'handoff').
+        payload : `dict`, optional
+            Data payload to serialize into the event.
+        """
+        if payload is None:
+            payload = {}
+        event = {"type": "UI_EVENT", "action": action, "payload": payload}
+        if self._loop and self._loop.is_running():
+            asyncio.run_coroutine_threadsafe(self.broadcast(event), self._loop)
+
 
 class SocketLoggingHandler(logging.Handler):
     """Custom logging handler that broadcasts logs via SocketManager."""

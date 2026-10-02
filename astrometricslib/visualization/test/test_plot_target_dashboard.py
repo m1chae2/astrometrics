@@ -4,7 +4,7 @@ Description: Verifies standalone stellar plotting, target plotting,
 error checking, and layout generation.
 """
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -19,6 +19,7 @@ from astrometricslib.visualization.helpers import (
     plot_stellar_photometry,
     plot_stellar_spectroscopy,
     plot_target_dashboard,
+    plot_target_spectroscopy,
 )
 
 
@@ -92,7 +93,7 @@ def test_plot_target_dashboard_raises_on_missing_stacked_image():  # ruff: ignor
     """
     mock_target = MagicMock()
     mock_target.id = "M 13"
-    mock_target.stacked_image = None
+    mock_target.stacking.stacked_image = None
     mock_astrometrics = MagicMock()
 
     with pytest.raises(ValueError, match="has no stacked_image"):
@@ -106,7 +107,7 @@ def test_plot_target_dashboard_raises_on_no_catalog_stars():  # ruff: ignore[mis
     """
     mock_target = MagicMock()
     mock_target.id = "M 13"
-    mock_target.stacked_image = "/fake/path/stacked.fits"
+    mock_target.stacking.stacked_image = "/fake/path/stacked.fits"
 
     mock_star_synthetic = MagicMock()
     mock_star_synthetic.id = "Star_1"
@@ -114,7 +115,7 @@ def test_plot_target_dashboard_raises_on_no_catalog_stars():  # ruff: ignore[mis
     mock_star_synthetic.spectroscopy.dispersion_angle = None
 
     mock_astrometrics = MagicMock()
-    mock_astrometrics.stars.list_objects.return_value = [mock_star_synthetic]
+    mock_astrometrics.stars.list_objects_for_target.return_value = [mock_star_synthetic]
 
     with pytest.raises(ValueError, match="No catalog-identified stars found"):
         plot_target_dashboard(mock_target, mock_astrometrics.stars)
@@ -127,7 +128,7 @@ def test_plot_target_dashboard_dynamic_layout_cases(monkeypatch):  # ruff: ignor
     """
     mock_target = MagicMock()
     mock_target.id = "M 13"
-    mock_target.stacked_image = "/fake/path/stacked.fits"
+    mock_target.stacking.stacked_image = "/fake/path/stacked.fits"
 
     # Mock AstrometricsImage so no disk read occurs
     mock_img_instance = MagicMock()
@@ -137,11 +138,16 @@ def test_plot_target_dashboard_dynamic_layout_cases(monkeypatch):  # ruff: ignor
         lambda p: mock_img_instance,
     )
 
-    # 1. Star with both photometry and spectroscopy
+    # 1. One star row holding both photometry and spectroscopy
     star_catalog = MagicMock()
     star_catalog.id = "Gaia DR3 12345"
     star_catalog.target_ids = ["M 13"]
-    star_catalog.spectroscopy.dispersion_angle = None
+    star_catalog.stellar_spectral_type = "G2V"
+    star_catalog.spectroscopy = SpectroscopyResult(
+        wavelengths_angstrom=[4000.0, 5000.0],
+        intensities=[10.0, 20.0],
+        dispersion_angle=45.0,
+    )
     star_catalog.magnitude = 10.5
     star_catalog.name = "Gaia 12345"
     star_catalog.star_data = {"xcentroid": 100.0, "ycentroid": 100.0}
@@ -152,19 +158,8 @@ def test_plot_target_dashboard_dynamic_layout_cases(monkeypatch):  # ruff: ignor
     mock_light_curve.fluxes_normalized = [1.0, 1.1]
     star_catalog.photometry = mock_light_curve
 
-    star_spectral = MagicMock()
-    star_spectral.id = "Gaia DR3 12345::spectroscopy"
-    star_spectral.target_ids = ["M 13"]
-    star_spectral.name = "Gaia 12345 Spec"
-    star_spectral.stellar_spectral_type = "G2V"
-    star_spectral.spectroscopy = SpectroscopyResult(
-        wavelengths_angstrom=[4000.0, 5000.0],
-        intensities=[10.0, 20.0],
-        dispersion_angle=45.0,
-    )
-
     mock_astrometrics = MagicMock()
-    mock_astrometrics.stars.list_objects.return_value = [star_catalog, star_spectral]
+    mock_astrometrics.stars.list_objects_for_target.return_value = [star_catalog]
 
     # Both photometry + spectroscopy -> 3 axes
     fig_both = plot_target_dashboard(mock_target, mock_astrometrics.stars)
@@ -180,7 +175,7 @@ def test_plot_target_dashboard_dynamic_layout_cases(monkeypatch):  # ruff: ignor
     star_catalog_no_spec.star_data = {"xcentroid": 50.0, "ycentroid": 50.0}
     star_catalog_no_spec.photometry = mock_light_curve
 
-    mock_astrometrics.stars.list_objects.return_value = [star_catalog_no_spec]
+    mock_astrometrics.stars.list_objects_for_target.return_value = [star_catalog_no_spec]
     fig_photo_only = plot_target_dashboard(mock_target, mock_astrometrics.stars)
     assert len(fig_photo_only.axes) == 2
     plt.close(fig_photo_only)
@@ -194,7 +189,7 @@ def test_plot_target_dashboard_dynamic_layout_cases(monkeypatch):  # ruff: ignor
     star_catalog_bare.star_data = {"xcentroid": 20.0, "ycentroid": 20.0}
     star_catalog_bare.photometry = None
 
-    mock_astrometrics.stars.list_objects.return_value = [star_catalog_bare]
+    mock_astrometrics.stars.list_objects_for_target.return_value = [star_catalog_bare]
     fig_bare = plot_target_dashboard(mock_target, mock_astrometrics.stars)
     assert len(fig_bare.axes) == 1
     plt.close(fig_bare)
@@ -243,8 +238,53 @@ def test_plot_stellar_analysis_raises_on_empty_star():  # ruff: ignore[missing-r
         plot_stellar_analysis(mock_star)
 
 
+def test_plot_target_spectroscopy_renders_raw_and_calibrated_panels_side_by_side():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify plot_target_spectroscopy draws three panels, not a toggle.
+
+    The image panel, plus a raw-counts panel and a separate calibrated
+    (response-corrected) panel, both visible at once.
+    """
+    mock_target = MagicMock()
+    mock_target.id = "Navi"
+    mock_target.spectral_stacking.stacked_image = "/fake/path/spectral_stack.fits"
+
+    mock_img_instance = MagicMock()
+    mock_img_instance.data = [[1, 2], [3, 4]]
+
+    star = MagicMock()
+    star.id = "* gam Cas"
+    star.name = "* gam Cas"
+    star.target_ids = ["Navi"]
+    star.stellar_spectral_type = "B0.5IVpe"
+    star.magnitude = 2.5
+    star.spectroscopy = SpectroscopyResult(
+        wavelengths_angstrom=[4000.0, 5000.0, 6000.0],
+        intensities=[10.0, 25.0, 15.0],
+        quantum_efficiency_corrected_intensities=[12.0, 28.0, 17.0],
+        response_corrected_intensities=[11.0, 27.0, 16.0],
+        rectangle=[100.0, 100.0, 20.0, 60.0],
+        dispersion_angle=0.0,
+        star_position_px=[100.0, 100.0],
+    )
+
+    stars = MagicMock()
+    stars.list_objects_for_target.return_value = [star]
+
+    with patch("astrometricslib.visualization.helpers.AstrometricsImage", return_value=mock_img_instance):
+        fig = plot_target_spectroscopy(mock_target, stars)
+
+    # Image + raw spectrum + calibrated spectrum.
+    assert len(fig.axes) == 3
+    raw_axis, calibrated_axis = fig.axes[1], fig.axes[2]
+    assert "Raw" in raw_axis.get_title()
+    assert raw_axis.get_ylabel() == "Raw Counts"
+    assert "Calibrated" in calibrated_axis.get_title()
+    assert calibrated_axis.get_ylabel() == "Normalized Flux"
+    plt.close(fig)
+
+
 def test_plot_target_dashboard_draws_asteroid_candidates_on_the_star_field(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify a target's asteroid_candidates are drawn on the astrometry panel.
+    """Verify a target's asteroid candidates are drawn on the astrometry panel.
 
     Uses a real stacked-image FITS file (with a real WCS) rather than
     the monkeypatched `AstrometricsImage` the layout-cases test uses,
@@ -285,8 +325,8 @@ def test_plot_target_dashboard_draws_asteroid_candidates_on_the_star_field(tmp_p
 
     mock_target = MagicMock()
     mock_target.id = "M 13"
-    mock_target.stacked_image = str(stack_path)
-    mock_target.asteroid_candidates = [candidate]
+    mock_target.stacking.stacked_image = str(stack_path)
+    mock_target.asteroid_detection.candidates = [candidate]
 
     star_catalog_bare = MagicMock()
     star_catalog_bare.id = "Gaia DR3 88888"
@@ -297,7 +337,7 @@ def test_plot_target_dashboard_draws_asteroid_candidates_on_the_star_field(tmp_p
     star_catalog_bare.photometry = None
 
     mock_astrometrics = MagicMock()
-    mock_astrometrics.stars.list_objects.return_value = [star_catalog_bare]
+    mock_astrometrics.stars.list_objects_for_target.return_value = [star_catalog_bare]
 
     fig = plot_target_dashboard(mock_target, mock_astrometrics.stars)
 

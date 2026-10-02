@@ -16,38 +16,61 @@ export interface AstronomyListOptions {
     offset?: number;
 }
 
+/** Builds the `target_id`/`search`/`filter_type` scoping params shared by the list and count RPCs. */
+function buildAstronomyScopeParams(optionsOrTargetId?: string | AstronomyListOptions): Record<string, unknown> {
+    const params: Record<string, unknown> = {};
+    if (typeof optionsOrTargetId === 'string') {
+        if (optionsOrTargetId.trim() !== '') {
+            params.target_id = optionsOrTargetId.trim();
+        }
+    } else if (optionsOrTargetId && typeof optionsOrTargetId === 'object') {
+        if (optionsOrTargetId.targetId && optionsOrTargetId.targetId.trim() !== '') {
+            params.target_id = optionsOrTargetId.targetId.trim();
+        }
+        if (optionsOrTargetId.search && optionsOrTargetId.search.trim() !== '') {
+            params.search = optionsOrTargetId.search.trim();
+        }
+        if (optionsOrTargetId.filterType && optionsOrTargetId.filterType.trim() !== '') {
+            params.filter_type = optionsOrTargetId.filterType.trim();
+        }
+    }
+    return params;
+}
+
 async function getAstronomyList(optionsOrTargetId?: string | AstronomyListOptions): Promise<Spectrum[]> {
     try {
-        const params: Record<string, unknown> = {};
-        if (typeof optionsOrTargetId === 'string') {
-            if (optionsOrTargetId.trim() !== '') {
-                params.target_id = optionsOrTargetId.trim();
-            }
+        const params = buildAstronomyScopeParams(optionsOrTargetId);
+        if (typeof optionsOrTargetId === 'string' || !optionsOrTargetId || typeof optionsOrTargetId !== 'object') {
             params.limit = 100;
             params.offset = 0;
-        } else if (optionsOrTargetId && typeof optionsOrTargetId === 'object') {
-            if (optionsOrTargetId.targetId && optionsOrTargetId.targetId.trim() !== '') {
-                params.target_id = optionsOrTargetId.targetId.trim();
-            }
-            if (optionsOrTargetId.search && optionsOrTargetId.search.trim() !== '') {
-                params.search = optionsOrTargetId.search.trim();
-            }
-            if (optionsOrTargetId.filterType && optionsOrTargetId.filterType.trim() !== '') {
-                params.filter_type = optionsOrTargetId.filterType.trim();
-            }
+        } else {
             params.limit = optionsOrTargetId.limit !== undefined ? optionsOrTargetId.limit : 100;
             if (optionsOrTargetId.offset !== undefined) {
                 params.offset = optionsOrTargetId.offset;
             }
-        } else {
-            params.limit = 100;
-            params.offset = 0;
         }
         const data = await callBackend("astronomy:list", params);
         return Array.isArray(data) ? (data as Spectrum[]) : [];
     } catch (err: unknown) {
         reportError(err instanceof Error ? err : new Error(String(err)), 'backend');
         return [];
+    }
+}
+
+/**
+ * Fetches how many stars match a scope (target, search, and/or filter), unpaginated.
+ * Used to compute how many pages a paginated star listing has.
+ * @param optionsOrTargetId Optional target identifier or options object.
+ * @return The total matching count, or 0 on failure.
+ */
+export async function fetchAstronomyCount(optionsOrTargetId?: string | AstronomyListOptions): Promise<number> {
+    try {
+        const params = buildAstronomyScopeParams(optionsOrTargetId);
+        const data = await callBackend("astronomy:count", params);
+        return typeof data === 'number' ? data : 0;
+    } catch (err: unknown) {
+        reportError(err instanceof Error ? err : new Error(String(err)), 'backend');
+        return 0;
     }
 }
 
@@ -60,6 +83,76 @@ export const fetchAstronomyList = (optionsOrTargetId?: string | AstronomyListOpt
     return getAstronomyList(optionsOrTargetId);
 };
 
+/** Whether a target has any star with spectra and/or photometry data, and how many stars it has. */
+export interface TargetDataAvailability {
+    hasSpectra: boolean;
+    hasPhotometry: boolean;
+    starCount: number;
+}
+
+/**
+ * Fetches, per target, whether any of its stars have spectra or photometry data.
+ * @return A map from target ID to its data availability, or an empty map on failure.
+ */
+export async function fetchTargetDataAvailability(): Promise<Record<string, TargetDataAvailability>> {
+    try {
+        const data = await callBackend('astronomy:target_data_availability', {});
+        return (data as Record<string, TargetDataAvailability>) ?? {};
+    } catch (err: unknown) {
+        reportError(err instanceof Error ? err : new Error(String(err)), 'backend');
+        return {};
+    }
+}
+
+/** A catalog spectral class present in the library, with how many stars have it. */
+export interface SpectralClassSummary {
+    spectralClass: string;
+    label: string;
+    count: number;
+}
+
+/**
+ * Fetches the catalog spectral classes present in the library, with counts.
+ * @return The spectral classes, sorted alphabetically, or an empty list on failure.
+ */
+export async function fetchSpectralClassSummary(): Promise<SpectralClassSummary[]> {
+    try {
+        const data = await callBackend('astronomy:spectral_class_summary', {});
+        return Array.isArray(data) ? (data as SpectralClassSummary[]) : [];
+    } catch (err: unknown) {
+        reportError(err instanceof Error ? err : new Error(String(err)), 'backend');
+        return [];
+    }
+}
+
+/** One star in a catalog spectral class listing, ranked by self-determined match quality. */
+export interface SpectralClassStar {
+    id: string;
+    name: string;
+    ra: number | null;
+    dec: number | null;
+    magnitude: number | null;
+    spectralType: string;
+    hasSpectra: boolean;
+    hasPhotometry: boolean;
+    selfDeterminedSpectralTypeRms: number | null;
+}
+
+/**
+ * Fetches the stars in one catalog spectral class, best self-determined match first.
+ * @param spectralClass The spectral class letter (or a full catalog string such as "G2V").
+ * @return The matching stars, best match first, or an empty list on failure.
+ */
+export async function fetchStarsBySpectralClass(spectralClass: string): Promise<SpectralClassStar[]> {
+    try {
+        const data = await callBackend('astronomy:stars_by_spectral_class', { spectral_class: spectralClass });
+        return Array.isArray(data) ? (data as SpectralClassStar[]) : [];
+    } catch (err: unknown) {
+        reportError(err instanceof Error ? err : new Error(String(err)), 'backend');
+        return [];
+    }
+}
+
 /**
  * Fetches detailed astronomy data for a named object (with fuzzy matching).
  * @param name The name or ID of the object.
@@ -71,11 +164,60 @@ export async function fetchAstronomyData(
     signal?: AbortSignal
 ): Promise<any> {
     try {
-        const data = await callBackend("astronomy:get", { object_id: name.trim() });
+        const data = await callBackend("astronomy:get", { object_id: name.trim() }, { signal });
         return data || null;
     } catch (err: unknown) {
+        if ((err as any)?.name === 'AbortError') {
+            return null;
+        }
         const errorMessage = err instanceof Error ? err.message : String(err);
         reportError(err instanceof Error ? err : new Error(errorMessage), 'backend');
         throw err;
     }
+}
+
+/**
+ * Runs the period and transit search on a star's light curve and saves the result.
+ * @param objectId The id of the star to analyze.
+ * @return The star with any new analysis attached, or null if it does not exist.
+ */
+export async function analyzeStarPeriodicity(objectId: string): Promise<Spectrum | null> {
+    try {
+        const data = await callBackend("astronomy:analyze_periodicity", { object_id: objectId.trim() });
+        return (data as Spectrum | null) || null;
+    } catch (err: unknown) {
+        reportError(err instanceof Error ? err : new Error(String(err)), 'backend');
+        throw err;
+    }
+}
+
+export interface AstrometryOverlayStar {
+    id: string;
+    name: string;
+    x: number;
+    y: number;
+    spectralType?: string;
+    isCatalogIdentified: boolean;
+    referenceWidth?: number | null;
+    referenceHeight?: number | null;
+    /** Measured star radius in reference-image pixels, if available. */
+    radiusPx?: number | null;
+}
+
+/**
+ * Fetches identified stars and their pixel coordinates for astrometry overlay.
+ * @param targetId The target identifier to fetch stars for.
+ * @param limit Maximum number of stars to return (defaults to 35).
+ * @returns List of star overlay items with centroid coordinates and labels.
+ */
+export async function fetchAstrometryOverlayStars(
+    targetId: string,
+    limit = 35
+): Promise<AstrometryOverlayStar[]> {
+    if (!targetId || targetId.trim() === '') return [];
+    const data = await callBackend("astronomy:get_overlay_stars", {
+        target_id: targetId.trim(),
+        limit
+    });
+    return Array.isArray(data) ? (data as AstrometryOverlayStar[]) : [];
 }

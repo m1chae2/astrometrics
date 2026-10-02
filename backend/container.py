@@ -11,6 +11,7 @@ from backend.services.analysis.analysis_orchestrator import AnalysisOrchestrator
 from backend.services.data.image_service import ImageService
 from backend.services.data.stellar_service import StellarService
 from backend.services.data.target_service import TargetService
+from backend.services.infrastructure.handoff_service import HandoffService
 from backend.services.infrastructure.maintenance_service import MaintenanceService
 from backend.services.infrastructure.notification_service import NotificationService
 from backend.services.infrastructure.sync_service import SyncService
@@ -33,6 +34,7 @@ class Container:
         # Core Infrastructure
         self.config_service = None
         self.indi_driver = None
+        self.indi_worker_client = None
         self.calibration_library = None
 
         # Domain Services
@@ -42,10 +44,10 @@ class Container:
         self.image_service = None
         self.image_processing_service = None
         self.sync_service = None
-        self.remote_service = None
         self.socket_manager = None
         self.telescope_service = None
         self.notification_service = None
+        self.handoff_service = None
         self.scripting_service = None
         self.ingestion_service = None
         self.system_status_service = None
@@ -111,20 +113,30 @@ class Container:
 
             self.indi_driver = SimulatorIndiInterface(config=self.config_service)
         else:
-            from wayfindinglib import IndiInterface
+            # The real IndiInterface runs in its own OS process, not here:
+            # pyindi-client does not release the GIL during its blocking
+            # calls, so running it in this process would freeze the whole
+            # backend (every concurrent request, the event loop, everything)
+            # for however long that call takes -- see
+            # backend/services/infrastructure/indi_worker.py for the full
+            # story and measurements. IndiWorkerProxy forwards every call to
+            # that process and stands in for a real IndiInterface wherever
+            # one is expected.
+            from backend.services.infrastructure.indi_worker import IndiWorkerClient, IndiWorkerProxy
 
-            self.indi_driver = IndiInterface(config=self.config_service)
+            self.indi_worker_client = IndiWorkerClient()
+            self.indi_driver = IndiWorkerProxy(self.indi_worker_client)
 
         self.wayfinder.control.driver = self.indi_driver
 
         # 4. Initialize Infrastructure Services
-        from backend.services.infrastructure.remote_service import RemoteService
-
-        self.remote_service = RemoteService(config_service=self.config_service)
-
         from backend.services.infrastructure.socket_manager import SocketManager
 
         self.socket_manager = SocketManager()
+        # stellar_object_service is constructed earlier in this method, before
+        # socket_manager exists, so it's wired in here instead of passed to
+        # the constructor.
+        self.stellar_object_service.set_socket_manager(self.socket_manager)
 
         from backend.services.infrastructure.astrometrics_service import AstrometricsService
 
@@ -132,10 +144,14 @@ class Container:
 
         notification_path = os.path.join(os.path.dirname(__file__), "notifications.json")
         self.notification_service = NotificationService(storage_path=notification_path)
+        self.handoff_service = HandoffService(socket_manager=self.socket_manager)
 
         from backend.services.observatory.guiding_service import GuidingService
 
-        self.guiding_service = GuidingService(observatory_api=self.wayfinder.control)
+        self.guiding_service = GuidingService(
+            observatory_api=self.wayfinder.control,
+            logger_interface=self.job_repository,
+        )
         self.wayfinder.control.guiding_service = self.guiding_service
 
         # 5. Initialize Domain Services with proper DI
@@ -173,11 +189,22 @@ class Container:
             astrometrics=self.astrometrics,
         )
 
-        self.sync_service = SyncService(remote_service=self.remote_service)
+        self.sync_service = SyncService(
+            observatory_api=self.wayfinder.control,
+            config_service=self.config_service,
+            guiding_service=self.guiding_service,
+            logger_interface=self.job_repository,
+        )
 
         from backend.services.observatory.imaging_service import ImagingService
 
-        self.imaging_service = ImagingService(indi_interface=self.indi_driver, job_service=self.job_service)
+        self.imaging_service = ImagingService(
+            observatory_api=self.wayfinder.control, job_service=self.job_service
+        )
+
+        from backend.services.observatory.indi_diagnostics_service import IndiDiagnosticsService
+
+        self.indi_diagnostics_service = IndiDiagnosticsService(observatory_api=self.wayfinder.control)
 
         self.target_imaging_planner = TargetImagingPlanner()
         self.target_imaging_executor = TargetImagingExecutor(
@@ -197,9 +224,10 @@ class Container:
 
         star_identifier = StarIdentifier(config=self.config_service)
         self.alignment_service = AlignmentService(
-            indi_interface=self.indi_driver,
+            observatory_api=self.wayfinder.control,
             imaging_service=self.imaging_service,
             star_identifier=star_identifier,
+            logger_interface=self.job_repository,
         )
         self.telescope_service._alignment_service = self.alignment_service
 
@@ -236,7 +264,7 @@ class Container:
         self.wayfinder.control.sync_service = self.sync_service
 
         # Initialize ObservatoryService (peripheral state)
-        self.observatory_service = ObservatoryService(self.indi_driver)
+        self.observatory_service = ObservatoryService(observatory_api=self.wayfinder.control)
 
         # 7. Start Background Maintenance
         self.maintenance_service.system_status_service = self.system_status_service

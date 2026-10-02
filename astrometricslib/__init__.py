@@ -10,6 +10,7 @@ main control panel, giving you access to all the sub-tools like targets,
 stars, and image processing.
 """
 
+from collections.abc import Callable
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _distribution_version
 from typing import TYPE_CHECKING, Any
@@ -31,13 +32,48 @@ from astrometricslib.api.processing import (
     LoggerInterface,
     capture_job_logs,
     registered_job,
+    run_siril_stack,
 )
-from astrometricslib.api.targets import classify_and_sort_fits_files, derive_target_sessions
+from astrometricslib.api.targets import (
+    classify_and_sort_fits_files,
+    derive_target_sessions,
+    frame_is_spectral,
+)
+from astrometricslib.drivers.calibration_library import DEFAULT_DARK_TEMPERATURE_TOLERANCE_C
+from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
+from astrometricslib.drivers.job_logging import background_job
+from astrometricslib.drivers.provenance_store import ProvenanceStore, export_target_lineage_as_prov_xml
 from astrometricslib.models.moving_object import AsteroidDetectionCandidate
 from astrometricslib.models.moving_object_config import MovingObjectConfig
+from astrometricslib.models.provenance import (
+    Activity,
+    ActivityDescription,
+    Agent,
+    AgentType,
+    Collection,
+    ConfigFile,
+    ConfigFileDescription,
+    DatasetDescription,
+    DatasetEntity,
+    Entity,
+    EntityDescription,
+    GenerationDescription,
+    Parameter,
+    ParameterDescription,
+    UsageDescription,
+    Used,
+    ValueDescription,
+    ValueEntity,
+    WasAssociatedWith,
+    WasAttributedTo,
+    WasConfiguredBy,
+    WasGeneratedBy,
+)
 from astrometricslib.models.quality_summary import (
+    AppliedCameraProfile,
     AstrometryPipelineQualityMetrics,
     AstrometryQualitySummary,
+    ExposureGroupSummary,
     TargetSessionContribution,
 )
 from astrometricslib.models.stellar_source import (
@@ -46,7 +82,6 @@ from astrometricslib.models.stellar_source import (
     GroupedFrameStat,
     PhotometryResult,
     PlotData,
-    SpectralObservation,
     SpectroscopyResult,
     StellarObject,
     TargetFilesResponse,
@@ -58,10 +93,15 @@ from astrometricslib.models.target import (
     RenderedImage,
     Target,
 )
+from astrometricslib.pipelines.stacking.post_processing.exposure_saturation import (
+    SATURATED_BLOB_MINIMUM_PIXELS,
+    SATURATED_FRAME_FRACTION,
+)
 from astrometricslib.utilities.concurrency import resolve_worker_counts
 from astrometricslib.utilities.config_loader import AppConfiguration, get_configuration
 from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
 from astrometricslib.utilities.enums import FilterType
+from astrometricslib.utilities.observing_night import observing_night_id
 from astrometricslib.utilities.parallel_batch import BatchRunSummary, run_parallel_batch
 from astrometricslib.utilities.pipeline_models import ProcessingJob
 
@@ -72,11 +112,15 @@ if TYPE_CHECKING:
     from astrometricslib.api.targets import TargetCatalog
     from astrometricslib.api.visualization import Visualization
     from astrometricslib.pipelines.astrometry.pipeline import AstrometryPipeline
-    from astrometricslib.pipelines.astrometry.star_identifier import StarIdentifier
+    from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
+    from astrometricslib.pipelines.astrometry.utilities.catalog_seeding import (
+        derive_field_centers,
+    )
 
 _DEFERRED_EXPORTS = {
     "AstrometryPipeline": "astrometricslib.pipelines.astrometry.pipeline",
-    "StarIdentifier": "astrometricslib.pipelines.astrometry.star_identifier",
+    "StarIdentifier": "astrometricslib.pipelines.astrometry.processing.star_identifier",
+    "derive_field_centers": "astrometricslib.pipelines.astrometry.utilities.catalog_seeding",
     "CalibrationCatalog": "astrometricslib.api.processing",
     "ProcessingPipelines": "astrometricslib.api.processing",
     "QualityDiagnostics": "astrometricslib.api.processing",
@@ -123,12 +167,12 @@ class Astrometrics:
     star tracking, and data visualization) together in one place.
     """
 
-    def __init__(  # ruff: ignore[missing-return-type-special-method]
+    def __init__(
         self,
         config: AppConfiguration | None = None,
         app_config: AppConfiguration | None = None,
         catalog_access: AbstractCatalogAccess | None = None,
-    ):
+    ) -> None:
         """Set up the main Astrometrics tools.
 
         Parameters
@@ -153,27 +197,36 @@ class Astrometrics:
         self.config = config or app_config or get_configuration()
         self.catalog_access = catalog_access or CatalogAccess(self.config)
 
-        # Load the known stars from storage here; a target's own data is
-        # loaded separately, since TargetCatalog owns that (see its docstring).
-        self.stellar_objects: list[StellarObject] = self.catalog_access.get("stellar_catalog", {}) or []
-
+        # There is deliberately no in-memory copy of the star catalog here.
+        # The database is the one copy, reached through `self.stars`, which
+        # answers each question with a query for just the stars it needs.
+        # A target's own data is loaded separately, since TargetCatalog owns
+        # that (see its docstring).
         self.targets = TargetCatalog(self.config, self.catalog_access)
         self.stars = StellarCatalog(self.config, catalog_access=self.catalog_access)
         self.moving_objects = MovingObjectRecovery()
         self.processing = ProcessingPipelines(self.config)
         self.visualization = Visualization(self)
 
+    @background_job("batch_processing", grace_period_seconds=8.0)
     def process_all_targets(
         self,
         target_ids: list[str] | None = None,
         *,
         camera_name: str,
         focal_length_mm: float | None = None,
+        on_item_complete: Callable[[str, dict, int, int], None] | None = None,
     ) -> Any:
         """Run the full image processing pipeline for multiple targets.
 
         This runs the image stacking and analysis for many targets at the
         same time, which is much faster than doing them one by one.
+
+        Called through the MCP server, this runs as a background job (see
+        `astrometricslib.drivers.job_logging.background_job`) rather than
+        blocking the caller for the whole batch -- called directly, as
+        here, it behaves exactly as before: it blocks until every target
+        is done and returns the summary.
 
         Parameters
         ----------
@@ -183,6 +236,10 @@ class Astrometrics:
         camera_name : `str`
             The name of the camera used to take the pictures. It will only
             process images taken with this specific camera.
+        on_item_complete : `Callable`, optional
+            Called as `(target_id, result, completed_count, total_count)`
+            after each target finishes, for a caller that wants live
+            progress rather than waiting for the whole batch.
 
         Returns
         -------
@@ -192,14 +249,26 @@ class Astrometrics:
         from astrometricslib.api import batch as batch_processing_operations
 
         return batch_processing_operations.process_all_targets(
-            self, target_ids, camera_name=camera_name, focal_length_mm=focal_length_mm
+            self,
+            target_ids,
+            camera_name=camera_name,
+            focal_length_mm=focal_length_mm,
+            on_item_complete=on_item_complete,
         )
 
 
 __all__ = [
+    "DEFAULT_DARK_TEMPERATURE_TOLERANCE_C",
+    "SATURATED_BLOB_MINIMUM_PIXELS",
+    "SATURATED_FRAME_FRACTION",
     "AbstractCatalogAccess",
+    "Activity",
+    "ActivityDescription",
+    "Agent",
+    "AgentType",
     "AnalysisResult",
     "AppConfiguration",
+    "AppliedCameraProfile",
     "AsteroidDetectionCandidate",
     "Astrometrics",
     "AstrometryPipeline",
@@ -208,24 +277,35 @@ __all__ = [
     "BatchRunSummary",
     "CalibrationCatalog",
     "CatalogAccess",
+    "Collection",
+    "ConfigFile",
+    "ConfigFileDescription",
+    "DatasetDescription",
+    "DatasetEntity",
     "DbLogHandler",
+    "Entity",
+    "EntityDescription",
+    "ExposureGroupSummary",
     "FileItem",
     "FilterType",
     "FitsHeaderEntry",
     "FrameRecord",
+    "GenerationDescription",
     "GroupedFrameStat",
     "ImageProcessing",
     "JobHandle",
     "LoggerInterface",
     "MovingObjectConfig",
     "MovingObjectRecovery",
+    "Parameter",
+    "ParameterDescription",
     "PhotometryResult",
     "PlotData",
     "ProcessingJob",
     "ProcessingPipelines",
+    "ProvenanceStore",
     "QualityDiagnostics",
     "RenderedImage",
-    "SpectralObservation",
     "SpectroscopyResult",
     "StarIdentifier",
     "StellarCatalog",
@@ -234,14 +314,28 @@ __all__ = [
     "TargetCatalog",
     "TargetFilesResponse",
     "TargetSessionContribution",
+    "UsageDescription",
+    "Used",
+    "ValueDescription",
+    "ValueEntity",
     "VariableCandidate",
     "Visualization",
+    "WasAssociatedWith",
+    "WasAttributedTo",
+    "WasConfiguredBy",
+    "WasGeneratedBy",
     "capture_job_logs",
     "classify_and_sort_fits_files",
+    "derive_field_centers",
     "derive_target_sessions",
+    "export_target_lineage_as_prov_xml",
+    "frame_is_spectral",
     "get_configuration",
+    "observing_night_id",
     "parse_coordinate_string",
     "registered_job",
+    "resolve_camera_profile",
     "resolve_worker_counts",
     "run_parallel_batch",
+    "run_siril_stack",
 ]

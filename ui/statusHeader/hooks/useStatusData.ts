@@ -9,6 +9,8 @@ export interface StatusTelemetry {
     humidity: string;
     ra: string;
     dec: string;
+    cameraTemperature?: string;
+    cameraStatus?: string;
 }
 
 export const useStatusData = () => {
@@ -32,6 +34,19 @@ export const useStatusData = () => {
         }
     });
 
+    // Keeps the header's mode label in sync with mode switches that don't go
+    // through chooseMode() below -- e.g. a remote "navigate" socket action, or
+    // a cross-view hand-off like Planetarium's "Open in Astronomy Manager" --
+    // both of which dispatch this event directly rather than calling chooseMode.
+    useEffect(() => {
+        const handleModeChange = (event: Event) => {
+            const nextMode = (event as CustomEvent<string>).detail;
+            if (nextMode) setSelectedMode(nextMode);
+        };
+        window.addEventListener('astrometrics:modeChange', handleModeChange);
+        return () => window.removeEventListener('astrometrics:modeChange', handleModeChange);
+    }, []);
+
     // Refs for transition detection
     const prevTelescopeConnection = useRef<boolean | null>(null);
     const prevTelescopeTracking = useRef<string | null>(null);
@@ -43,12 +58,14 @@ export const useStatusData = () => {
             if (!v || v === '-') return v;
 
             // Handle coordinate strings: [+-]XX° YY' ZZ.ZZ"
-            const coordRegex = /^([+-]?\d+°\s*\d+['′]\s*)(\d+(?:\.\d+)?)(["″])$/;
+            const coordRegex = /^([+-]?\d+°\s*)(\d+)['′]\s*(\d+(?:\.\d+)?)(["″])$/;
             const coordMatch = v.match(coordRegex);
             if (coordMatch) {
-                const [_, prefix, seconds, suffix] = coordMatch;
-                const rounded = Math.round(parseFloat(seconds));
-                return `${prefix}${rounded}${suffix}`;
+                const [_, degPrefix, minutes, seconds, suffix] = coordMatch;
+                const roundedSec = Math.round(parseFloat(seconds));
+                const padSec = String(roundedSec).padStart(2, '0');
+                const padMin = String(parseInt(minutes, 10)).padStart(2, '0');
+                return `${degPrefix}${padMin}' ${padSec}${suffix}`;
             }
 
             // Handle plain numeric strings (for temp/humidity)
@@ -66,7 +83,9 @@ export const useStatusData = () => {
             altitude: stripDecimals(normalize(telescope.altitude)),
             azimuth: stripDecimals(normalize(telescope.azimuth)),
             temperature: stripDecimals(normalize(telescope.temperature).replace(/\s*°C$/, '')),
-            humidity: stripDecimals(normalize(telescope.humidity).replace(/\s*%$/, ''))
+            humidity: stripDecimals(normalize(telescope.humidity).replace(/\s*%$/, '')),
+            cameraTemperature: telescope.cameraTemperature ?? undefined,
+            cameraStatus: telescope.cameraStatus ?? undefined,
         });
 
         // Status Logic

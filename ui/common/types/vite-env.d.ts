@@ -18,15 +18,55 @@ interface Window {
       onLoadTargetManager: (callback: (event: any, ...args: any[]) => void) => () => void;
       toggleSecondaryWindow: (enable: boolean) => void;
       onSecondaryWindowClosed: (callback: (event: any, ...args: any[]) => void) => () => void;
-      showNotification: (title: string, body: string) => void;
+      showNotification: (title: string, body: string, options?: { urgency?: 'normal' | 'critical'; tag?: string; silent?: boolean; timeoutType?: 'default' | 'never'; actions?: string[] }) => void;
+      updateTrayStatus: (status: { mountStatus?: string; activeTarget?: string; activeMode?: string }) => void;
+      setPowerSaveBlocker: (enable: boolean) => void;
+      onNavigateMode: (callback: (mode: string) => void) => () => void;
+      onSystemThemeChanged: (callback: (isDark: boolean) => void) => () => void;
+      onNotificationAction: (callback: (data: { index: number }) => void) => () => void;
       setProgress: (progress: number, mode: 'normal' | 'error' | 'none' | 'indeterminate' | 'paused') => void;
       onOpenFile: (callback: (path: string) => void) => () => void;
+      reportAppFullyLoaded?: () => void;
+      openDisplayWindow?: (options?: string | { mode?: string; displayIndex?: number }) => Promise<{ windowId: number } | null>;
+      reportWindowMode?: (mode: string) => void;
+      routeDisplayAction?: (intent: any) => Promise<{ handledRemotely: boolean; targetWindowId?: number }>;
+      onRemoteAction?: (callback: (data: { action: string; payload: any; intent?: any }) => void) => () => void;
+    };
+    window: {
+      hasCustomTitleBar: boolean;
+      minimize: () => void;
+      toggleMaximize: () => void;
+      close: () => void;
+      isMaximized: () => Promise<boolean>;
+      onMaximizedChange: (callback: (isMaximized: boolean) => void) => () => void;
+      isFocused: () => Promise<boolean>;
+      onFocusChange: (callback: (isFocused: boolean) => void) => () => void;
+      isFullscreen: () => Promise<boolean>;
+      onFullscreenChange: (callback: (isFullscreen: boolean) => void) => () => void;
     };
     backend: {
       ping: (targetUrl?: string) => Promise<{ ok: boolean; status: number; statusText: string }>;
     };
     dialog: {
       openFile: (options?: any) => Promise<string[] | null>;
+      saveFile?: (options?: any) => Promise<string | null>;
+      openFigureWindow?: (target: string | { plotPath?: string; interactiveUrl?: string }) => Promise<{ windowId: number } | null>;
+    };
+    terminal?: {
+      executeScript: (code: string, options?: any) => Promise<any>;
+      getWorkspace: () => Promise<any[]>;
+      getCompletions: (text: string) => Promise<string[]>;
+      onOutput: (callback: (chunk: { stdout?: string; stderr?: string }) => void) => () => void;
+      onFigure: (callback: (plotPath: string) => void) => () => void;
+      onWorkspaceUpdated: (callback: (workspace: any[]) => void) => () => void;
+    };
+    tray: {
+      /**
+       * Dispatch a quick action from the tray popover to the Electron main process.
+       * @param action - 'park' | 'navigate' | 'open-app' | 'quit'
+       * @param payload - Optional action-specific payload, e.g. { mode: 'Planetarium' }
+       */
+      sendAction: (action: string, payload?: Record<string, string>) => void;
     };
   };
   electronAPI?: any; // Deprecated/Legacy check

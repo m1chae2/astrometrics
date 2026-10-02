@@ -6,6 +6,7 @@
         "-m",
         "astrometricslib.mcp"
       ],
+      "cwd": "/path/to/astrometrics",
       "env": {
         "PYTHONPATH": "/path/to/astrometrics"
       }
@@ -16,6 +17,7 @@
         "-m",
         "wayfindinglib.mcp"
       ],
+      "cwd": "/path/to/astrometrics",
       "env": {
         "PYTHONPATH": "/path/to/astrometrics"
       }
@@ -26,9 +28,11 @@
         "-m",
         "backend.mcp"
       ],
+      "cwd": "/path/to/astrometrics",
       "env": {
-        "ASTROMETRICS_API_BASE": "http://localhost:5000",
-        "PYTHONPATH": "/path/to/astrometrics"
+        "ASTROMETRICS_API_BASE": "http://127.0.0.1:5000",
+        "PYTHONPATH": "/path/to/astrometrics",
+        "MPLCONFIGDIR": "/tmp/matplotlib"
       }
     },
     "astrometrics-ui": {
@@ -36,6 +40,7 @@
       "args": [
         "/path/to/astrometrics/ui/mcp/dist/index.js"
       ],
+      "cwd": "/path/to/astrometrics",
       "env": {}
     }
   }

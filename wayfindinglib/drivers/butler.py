@@ -43,8 +43,11 @@ from wayfindinglib.models.policy.commissioning import CommissioningRun
 from wayfindinglib.models.policy.delegation import DelegationPolicy
 from wayfindinglib.models.policy.safety import SafetyRuleSet
 from wayfindinglib.models.session.divergence import DivergenceRecord
+from wayfindinglib.models.session.ekos_session import EkosSessionContext
 from wayfindinglib.models.session.guide_star_loss import GuideStarLossEvent
+from wayfindinglib.models.session.guiding_run import GuidingRunSummary
 from wayfindinglib.models.session.observation_session import ObservationSession
+from wayfindinglib.models.session.telemetry import GuidingSpectrumAnalysis
 
 _GENERIC_DATASET_TYPES: dict[str, tuple[str, type]] = {
     "observation_package": ("observation_packages", ObservationPackage),
@@ -58,6 +61,9 @@ _GENERIC_DATASET_TYPES: dict[str, tuple[str, type]] = {
     "divergence_record": ("divergence_records", DivergenceRecord),
     "commissioning_run": ("commissioning_runs", CommissioningRun),
     "guide_star_loss_event": ("guide_star_loss_events", GuideStarLossEvent),
+    "guiding_spectrum_analysis": ("guiding_spectrum_analyses", GuidingSpectrumAnalysis),
+    "ekos_session_context": ("ekos_session_contexts", EkosSessionContext),
+    "guiding_run": ("guiding_runs", GuidingRunSummary),
 }
 """Maps a dataset_type string to its (table_name, model_class).
 

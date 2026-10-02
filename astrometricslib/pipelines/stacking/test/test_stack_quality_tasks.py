@@ -4,7 +4,7 @@ Description: Verifies is_stacked_fwhm_degraded's ratio comparison and
 is_rejected_fraction_significant's threshold comparison.
 """
 
-from astrometricslib.pipelines.stacking.stack_quality import (
+from astrometricslib.pipelines.stacking.post_processing.stack_quality import (
     is_rejected_fraction_significant,
     is_stacked_fwhm_degraded,
 )

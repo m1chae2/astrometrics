@@ -16,6 +16,7 @@ from pydantic import BaseModel
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 from astrometricslib import FilterType
+from astrometricslib.models.astrometry_quality import CatalogMatchQuality
 from astrometricslib.models.moving_object import (
     AsteroidDetectionCandidate,
     CascadeStage,
@@ -24,11 +25,13 @@ from astrometricslib.models.moving_object import (
     MovingObjectTrack,
 )
 from astrometricslib.models.quality_summary import (
+    AppliedCameraProfile,
     AsteroidDetectionPipelineQualityMetrics,
     AsteroidDetectionQualitySummary,
     AstrometryPipelineQualityMetrics,
     AstrometryQualitySummary,
     ExcludedFrame,
+    ExposureGroupSummary,
     FrameEnsembleComposition,
     PhotometryPipelineQualityMetrics,
     PhotometryQualitySummary,
@@ -39,6 +42,12 @@ from astrometricslib.models.quality_summary import (
     StackQualitySummary,
     TargetSessionContribution,
 )
+from astrometricslib.models.spectroscopy_quality import (
+    CatalogComparison,
+    InputQualityAssessment,
+    OutputQualityAssessment,
+)
+from astrometricslib.models.stacking_quality import StackingInputQuality, StackingOutputQuality
 from astrometricslib.models.stellar_source import (
     AnalysisResult,
     FileItem,
@@ -46,7 +55,6 @@ from astrometricslib.models.stellar_source import (
     PeriodogramResult,
     PhotometryResult,
     PlotData,
-    SpectralObservation,
     SpectroscopyResult,
     StellarObject,
     StellarSessionMatch,
@@ -55,12 +63,16 @@ from astrometricslib.models.stellar_source import (
     VariableCandidate,
 )
 from astrometricslib.models.target import (
+    AsteroidDetectionResult,
     FitsHeaderEntry,
+    FrameMeasurements,
     FrameRecord,
     ImageType,
     RenderedImage,
     StackConfigurationResult,
     Target,
+    TargetQualitySummaries,
+    TargetStackingResult,
 )
 from astrometricslib.utilities.pipeline_models import ProcessingJob, ProcessStatus
 from backend.services.infrastructure.system_status_service import (
@@ -75,10 +87,15 @@ from wayfindinglib.drivers.indi_interface import TelescopeStatus
 from wayfindinglib.models.session.observation_session import WeatherSample
 from wayfindinglib.models.session.telemetry import (
     AlignmentAttempt,
+    AlignmentSessionSummary,
     GuidingSample,
+    GuidingSpectrumAnalysis,
+    GuidingSpectrumPeak,
     GuidingStats,
     GuidingStatus,
     IndiStatus,
+    MountPointingModel,
+    PolarAlignmentStatus,
 )
 from wayfindinglib.observation import (
     CalibrationEntry,
@@ -249,9 +266,13 @@ def main() -> None:
     interfaces = [
         generate_enum(FilterType, "FilterType"),
         generate_enum(ImageType, "ImageType"),
+        generate_interface(FrameMeasurements, "FrameMeasurements"),
         generate_interface(FrameRecord, "FrameRecord"),
         generate_interface(TelescopeStatus, "TelescopeStatus"),
         generate_interface(StackConfigurationResult, "StackConfigurationResult"),
+        generate_interface(TargetStackingResult, "TargetStackingResult"),
+        generate_interface(AsteroidDetectionResult, "AsteroidDetectionResult"),
+        generate_interface(TargetQualitySummaries, "TargetQualitySummaries"),
         generate_interface(Target, "TargetObject"),
         generate_interface(FileItem, "FileItem"),
         generate_interface(TargetFilesResponse, "TargetFilesResponse"),
@@ -259,8 +280,11 @@ def main() -> None:
         generate_interface(PlotData, "PlotData"),
         generate_interface(StellarObject, "Spectrum"),
         generate_interface(StellarSessionMatch, "StellarSessionMatch"),
-        generate_interface(SpectralObservation, "SpectralObservation"),
+        generate_interface(CatalogMatchQuality, "CatalogMatchQuality"),
         generate_interface(SpectroscopyResult, "SpectroscopyResult"),
+        generate_interface(CatalogComparison, "CatalogComparison"),
+        generate_interface(InputQualityAssessment, "InputQualityAssessment"),
+        generate_interface(OutputQualityAssessment, "OutputQualityAssessment"),
         generate_interface(PeriodogramResult, "PeriodogramResult"),
         generate_interface(TransitCandidate, "TransitCandidate"),
         generate_interface(PhotometryResult, "PhotometryResult"),
@@ -269,6 +293,11 @@ def main() -> None:
         generate_interface(SystemPulse, "SystemPulse"),
         generate_interface(GuidingSample, "GuidingSample"),
         generate_interface(AlignmentAttempt, "AlignmentAttempt"),
+        generate_interface(PolarAlignmentStatus, "PolarAlignmentStatus"),
+        generate_interface(AlignmentSessionSummary, "AlignmentSessionSummary"),
+        generate_interface(MountPointingModel, "MountPointingModel"),
+        generate_interface(GuidingSpectrumPeak, "GuidingSpectrumPeak"),
+        generate_interface(GuidingSpectrumAnalysis, "GuidingSpectrumAnalysis"),
         generate_interface(ProcessStatus, "ProcessStatus"),
         generate_interface(ProcessingJob, "ProcessingJob"),
         generate_interface(AnalysisResult, "AnalysisResult"),
@@ -288,6 +317,10 @@ def main() -> None:
         generate_interface(MosaicPanel, "MosaicPanel"),
         generate_interface(ExcludedFrame, "ExcludedFrame"),
         generate_interface(TargetSessionContribution, "TargetSessionContribution"),
+        generate_interface(ExposureGroupSummary, "ExposureGroupSummary"),
+        generate_interface(AppliedCameraProfile, "AppliedCameraProfile"),
+        generate_interface(StackingInputQuality, "StackingInputQuality"),
+        generate_interface(StackingOutputQuality, "StackingOutputQuality"),
         generate_interface(StackingPipelineQualityMetrics, "StackingPipelineQualityMetrics"),
         generate_interface(StackQualitySummary, "StackQualitySummary"),
         generate_interface(AstrometryPipelineQualityMetrics, "AstrometryPipelineQualityMetrics"),

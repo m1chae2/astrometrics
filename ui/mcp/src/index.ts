@@ -12,9 +12,17 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { runFrontendTests, diagnoseCode, auditAccessibility, buildCheck } from "./tools.js";
 import * as path from "path";
+import * as fs from "fs";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Find project repo root
-const repoRoot = path.resolve(process.cwd());
+let repoRoot = path.resolve(process.cwd());
+if (!fs.existsSync(path.join(repoRoot, "package.json"))) {
+  repoRoot = path.resolve(__dirname, "../../..");
+}
 
 const server = new Server(
   {

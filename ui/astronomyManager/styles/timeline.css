@@ -1,0 +1,100 @@
+.timeline-selector {
+  --timeline-thumb-size: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.timeline-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.8rem;
+}
+
+.timeline-summary__range {
+  font-weight: 500;
+  color: var(--text-primary, #fff);
+}
+
+.timeline-summary__count {
+  font-size: 0.75rem;
+  color: var(--text-muted, #888);
+}
+
+/* Two range inputs stacked on one track, one handle for each end. */
+.timeline-range {
+  position: relative;
+  height: 20px;
+}
+
+.timeline-range__track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 8px;
+  height: 4px;
+  border-radius: 2px;
+  background-color: var(--border-color, #444);
+}
+
+.timeline-range__fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 2px;
+  background-color: var(--highlight-color, #4db8ff);
+}
+
+.timeline-range input[type="range"] {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 20px;
+  margin: 0;
+  background: transparent;
+  appearance: none;
+  -webkit-appearance: none;
+  /* Only the handles take the mouse, so the two sliders don't block each other. */
+  pointer-events: none;
+}
+
+.timeline-range input[type="range"]::-webkit-slider-runnable-track {
+  height: 20px;
+  background: transparent;
+}
+
+.timeline-range input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  pointer-events: auto;
+  width: var(--timeline-thumb-size);
+  height: var(--timeline-thumb-size);
+  margin-top: 3px;
+  border-radius: 50%;
+  border: 2px solid var(--grey-dark, #1e1e1e);
+  background-color: var(--highlight-color, #4db8ff);
+  cursor: pointer;
+}
+
+.timeline-range input[type="range"]::-moz-range-track {
+  background: transparent;
+}
+
+.timeline-range input[type="range"]::-moz-range-thumb {
+  pointer-events: auto;
+  width: var(--timeline-thumb-size);
+  height: var(--timeline-thumb-size);
+  border-radius: 50%;
+  border: 2px solid var(--grey-dark, #1e1e1e);
+  background-color: var(--highlight-color, #4db8ff);
+  cursor: pointer;
+}
+
+.timeline-range input[type="range"]:focus-visible::-webkit-slider-thumb {
+  outline: 2px solid var(--highlight-color, #4db8ff);
+  outline-offset: 2px;
+}

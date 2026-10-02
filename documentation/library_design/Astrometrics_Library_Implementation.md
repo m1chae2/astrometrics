@@ -28,6 +28,9 @@ Table columns are the five pipelines plus a column for code shared across all of
 > [!NOTE]
 > **Shared Vocabulary:** Modules like `models/`, `enums.py`, `exceptions.py`, and `config_schema.py` contain pure data structures. They perform no I/O, contain no behavior, and import nothing from any layer. They may be safely imported by any module in the system.
 
+> [!NOTE]
+> **Composing columns, not adding one:** `process_target` (Layer 1, `api/processing.py`) is not a sixth pipeline alongside this table's five columns. It runs the Astrometry, Photometry, and Spectroscopy columns' own Layer-1 entry points in that fixed order for one target, threading photometry's result into the spectroscopy call. Each of those three entry points remains independently callable for a caller that wants only one stage, or one with custom options.
+
 ## Core Processing Pipelines
 
 ### Stacking
@@ -69,6 +72,7 @@ Table columns are the five pipelines plus a column for code shared across all of
 - **Image format conversion for display:** `image_conversions.py`
 - **Image scaling math shared by `image_conversions.py` and the visualization overlay:** `image_scaling.py`
 - **Star recording shared by all three stellar pipelines:** `star_recording.py`
+- **Rules for when two catalog names are one star (position tolerance, same-catalog check, HD/BD/Gaia name preference), shared by `star_recording.py` and `scripts/merge_duplicate_catalog_stars.py`:** `catalog_star_identity.py`
 - **Observing-session grouping:** `target_sessions.py`
 - **Per-image analysis state:** `analysis_context.py`
 - **Saturation checks and image/hardware quality telemetry:** `quality/saturation.py` and `quality/quality_metrics.py`

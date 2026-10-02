@@ -105,6 +105,7 @@ def measure_frame_input_quality(
         A dictionary showing how many images were "measured", "skipped",
         or "failed" (because they couldn't be read).
     """
+    from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
     from astrometricslib.pipelines.shared.quality.quality_metrics import (
         measure_frame_input_quality as measure_one_frame,
     )
@@ -114,18 +115,21 @@ def measure_frame_input_quality(
     for frame in target.frames:
         if camera_name and camera_name.lower() not in (frame.camera or "").lower():
             continue
-        if not remeasure and frame.background_level is not None:
+        if not remeasure and frame.measurements.background_level is not None:
             counts["skipped"] += 1
             continue
 
-        metrics = measure_one_frame(frame.path, include_fwhm=include_fwhm)
+        saturation_threshold_adu = resolve_camera_profile(frame.camera).saturation_threshold_adu.value
+        metrics = measure_one_frame(
+            frame.path, include_fwhm=include_fwhm, saturation_threshold_adu=saturation_threshold_adu
+        )
         if metrics["background_level"] is None:
             counts["failed"] += 1
             continue
 
-        frame.background_level = metrics["background_level"]
+        frame.measurements.background_level = metrics["background_level"]
         if metrics["saturated_pixel_fraction"] is not None:
-            frame.saturated_pixel_fraction = metrics["saturated_pixel_fraction"]
+            frame.measurements.saturated_pixel_fraction = metrics["saturated_pixel_fraction"]
         if metrics["fwhm_px"] is not None:
             # Deliberately NOT written into registration_fwhm_x/y_px.
             # Siril's registration PSF fit and this photutils measurement
@@ -140,7 +144,7 @@ def measure_frame_input_quality(
             # per-axis (fwhm_x != fwhm_y on 228 of 238 measured frames),
             # carrying elongation information a single circularized
             # median cannot represent.
-            frame.measured_fwhm_px = metrics["fwhm_px"]
+            frame.measurements.measured_fwhm_px = metrics["fwhm_px"]
         counts["measured"] += 1
 
     return counts

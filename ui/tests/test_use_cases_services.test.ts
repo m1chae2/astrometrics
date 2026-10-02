@@ -3,12 +3,13 @@
  * inside the frontend client services layer, fully integrated with the running backend.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import { getTargets, createTarget, deleteTarget, addTargetData, fetchFrameStatsGrouped } from '../common/services/targetService';
 import { fetchTelescopeStatus, slewTelescope } from '../common/services/telescopeService';
 import { fetchAstronomyList, fetchAstronomyData } from '../common/services/astronomyService';
 import { startIngestion, scanRemoteTargets } from '../common/services/imaging/ingestionService';
 import { previewMosaic } from '../common/services/mosaicService';
+import { callBackend } from '../common/services/backendApi';
 
 describe('Frontend Services Use Cases Suite', () => {
     /**
@@ -24,6 +25,17 @@ describe('Frontend Services Use Cases Suite', () => {
      * - The backend must be seeded with test fixtures if necessary.
      */
     // No mock fetch stubbing here! This tests the full astrometrics + backend + UI services integration stack.
+
+    beforeAll(async () => {
+        // Mount hardware commands require MOUNT_CONTROL to be AUTHORITATIVE
+        // (not the default DELEGATED), so promote it once for the suite --
+        // see wayfindinglib/tasks/control_tasks/hardware_operations.py.
+        await callBackend('telescope:apply_promotion_decision', {
+            capability: 'MOUNT_CONTROL',
+            new_state: 'AUTHORITATIVE',
+            evidence_note: 'Test suite setup: promoted for integration testing.',
+        });
+    });
 
     it('test_use_case_1_1_local_image_registration', async () => {
         /**

@@ -9,6 +9,7 @@ wheels, and weather/environmental telemetry.
 #   sudo apt-add-repository ppa:mutlaqja/ppa
 #   sudo apt-get -y install python3-indi-client
 
+import logging
 import threading
 import time
 from typing import Any
@@ -22,10 +23,13 @@ from .indi import coordinate_utils
 from .indi.camera_controller import CameraController
 from .indi.connection_manager import ConnectionManager
 from .indi.device_discovery import DeviceDiscovery
+from .indi.enclosure_controller import EnclosureController
 from .indi.filter_wheel_controller import FilterWheelController
 from .indi.focuser_controller import FocuserController
 from .indi.mount_controller import MountController
 from .indi.pyindi_compatibility import PyIndi
+from .indi.switch_controller import SwitchController
+from .indi.weather_controller import WeatherController
 
 # Declares this module's own public surface. Without it, sphinx-automodapi
 # documents every imported name too, which is what produced the
@@ -35,6 +39,8 @@ __all__ = [
     "IndiInterface",
     "TelescopeStatus",
 ]
+
+logger = logging.getLogger(__name__)
 
 
 class TelescopeStatus(BaseModel):
@@ -56,6 +62,9 @@ class TelescopeStatus(BaseModel):
     focuser_position: int = Field(0, alias="focuserPosition")
     filter: str = Field("L", alias="filter")
     guiding_history: list = Field([], alias="guidingHistory")
+    camera_temperature: str = Field("-", alias="cameraTemperature")
+    camera_status: str = Field("Idle", alias="cameraStatus")
+    target_name: str | None = Field(default=None, alias="targetName")
 
 
 # Maps an INDI property type constant to the name of the per-type
@@ -205,27 +214,60 @@ class IndiInterface(IndiClient):
         Parameters
         ----------
         config
-            Configuration object providing telescope hostname, allowed
-            commands, and INDI host/port, injected by the caller.
+            Configuration object providing telescope hostname and
+            INDI host/port, injected by the caller.
 
         """
         super().__init__()
         self.config = config
-        self.allow_commands = False  # Default to Safe Mode
         self._sync_config()
         self.device_map = {}
         self._has_initialized_defaults = False
 
         # Thread-safe external pulse event queue
-
         self._external_pulses_lock = threading.Lock()
         self._external_pulses = []
+        self._last_pulse_ns: float = 0.0
+        self._last_pulse_we: float = 0.0
+
+        # Thread-safe external alignment sync event queue
+        self._external_syncs_lock = threading.Lock()
+        self._external_syncs: list[dict[str, Any]] = []
+        self._sync_mode_active: bool = False
+        self._sync_mode_start_time: float | None = None
+        self._pre_sync_ra: float | None = None
+        self._pre_sync_dec: float | None = None
+        self._last_mount_ra: float | None = None
+        self._last_mount_dec: float | None = None
+        # Polar alignment tracking state
+        self._polar_alignment_lock = threading.Lock()
+        self._polar_alignment_status: dict[str, Any] = {
+            "status": "idle",
+            "total_error_arcsec": None,
+            "alt_error_arcsec": None,
+            "az_error_arcsec": None,
+            "pole_ra": None,
+            "pole_dec": None,
+            "paa_points": [],
+            "timestamp": None,
+        }
+        self._pending_polar_alignment_record: dict[str, Any] | None = None
+
+        # Camera exposure tracking state for countdown clock
+        self._exposure_in_progress: bool = False
+        self._active_exposure_duration: float | None = None
+        self._exposure_start_time: float | None = None
+        self._last_exposure_val: float | None = None
+        self._exposure_counts_up: bool | None = None
 
         # Modular Controllers
         self.mount_controller = MountController(self)
         self.focuser_controller = FocuserController(self)
         self.filter_wheel_controller = FilterWheelController(self)
         self.camera_controller = CameraController(self)
+        self.enclosure_controller = EnclosureController(self)
+        self.switch_controller = SwitchController(self)
+        self.weather_controller = WeatherController()
         self.connection_manager = ConnectionManager(config.get_indi_host(), config.get_indi_port())
         self.device_discovery = DeviceDiscovery(self)
 
@@ -233,10 +275,47 @@ class IndiInterface(IndiClient):
         # self._ensure_connection() is removed to prevent blocking startup.
         # Connection will be established lazily on first use.
 
+    def newDevice(self, device: Any) -> None:
+        """Handle a newly announced INDI device.
+
+        Dynamically updates the device map if the device has a valid name.
+
+        Parameters
+        ----------
+        device : `Any`
+            The new INDI device object from the server.
+        """
+        if not hasattr(self, "deviceMap") or self.deviceMap is None:
+            self.deviceMap = {}
+        if device is not None:
+            try:
+                name = device.getDeviceName()
+                if name and name.strip():
+                    self.deviceMap[name] = device
+            except Exception as e:
+                logger.debug(f"Failed to query device name on newDevice: {e}")
+
+    def removeDevice(self, device: Any) -> None:
+        """Handle a removed INDI device.
+
+        Evicts the removed device from the internal device map.
+
+        Parameters
+        ----------
+        device : `Any`
+            The removed INDI device object.
+        """
+        if hasattr(self, "deviceMap") and self.deviceMap and device is not None:
+            try:
+                name = device.getDeviceName()
+                if name in self.deviceMap:
+                    self.deviceMap.pop(name, None)
+            except Exception as e:
+                logger.debug(f"Failed to query device name on removeDevice: {e}")
+
     def _sync_config(self):  # ruff: ignore[missing-return-type-private-function]
-        """Sync local state (hostname, allow_commands) from config."""
+        """Sync local state (hostname) from config."""
         self.hostname = self.config.get_telescope_hostname()
-        self.allow_commands = self.config.get_allow_commands()
         self.setServer(self.hostname, 7624)
         if hasattr(self, "connection_manager"):
             self.connection_manager.hostname = self.hostname
@@ -303,7 +382,12 @@ class IndiInterface(IndiClient):
         self.deviceMap = {}
         device_list = self.getDevices()
         for device in device_list:
-            self.deviceMap[device.getDeviceName()] = self.getDevice(device.getDeviceName())
+            try:
+                name = device.getDeviceName()
+                if name and name.strip():
+                    self.deviceMap[name] = self.getDevice(name)
+            except Exception as e:
+                logger.debug(f"Failed to resolve device name in connect_to_server: {e}")
 
         return self
 
@@ -330,8 +414,20 @@ class IndiInterface(IndiClient):
                 self._reconnect(now)
 
         # Re-check device map population logic
-        if self.isServerConnected() and (not hasattr(self, "deviceMap") or not self.deviceMap):
-            self.connect_to_server()
+        has_valid_devices = (
+            hasattr(self, "deviceMap")
+            and bool(self.deviceMap)
+            and any(bool(k and str(k).strip()) for k in self.deviceMap)
+        )
+        if self.isServerConnected() and not has_valid_devices:
+            self.device_discovery.refresh_device_map()
+            has_valid_devices = (
+                hasattr(self, "deviceMap")
+                and bool(self.deviceMap)
+                and any(bool(k and str(k).strip()) for k in self.deviceMap)
+            )
+            if not has_valid_devices and cooldown_elapsed:
+                self._reconnect(now)
 
     def _reconnect(self, now: float) -> None:
         """Tear down (if needed) and re-establish the connection.
@@ -367,7 +463,7 @@ class IndiInterface(IndiClient):
         print(f"INDI Server disconnected (code {code})")
         self._reset_status()
 
-    def _reset_status(self):  # ruff: ignore[missing-return-type-private-function]
+    def _reset_status(self) -> None:
         """Reset the status dictionary to default/disconnected state."""
         self.status = {
             "CONNECTION_STATUS": "Disconnected",
@@ -379,6 +475,9 @@ class IndiInterface(IndiClient):
             "TEMPERATURE": "-",
             "HUMIDITY": "-",
             "FILTER": "Unknown",
+            "CAMERA_TEMPERATURE": "-",
+            "CAMERA_STATUS": "Idle",
+            "TARGET_NAME": None,
         }
 
     def connect_to_telescope(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
@@ -445,10 +544,45 @@ class IndiInterface(IndiClient):
 
                 if parking_status and parking_status[0].getState() == PyIndi.ISS_ON:
                     tracking_status = "Parked"
-                elif telescope_track_state and telescope_track_state[0].getState() == PyIndi.ISS_ON:
+                elif telescope_track_state and any(
+                    (s.getName() in ("TRACK_ON", "ON") or "ON" in s.getName().upper())
+                    and s.getState() == PyIndi.ISS_ON
+                    for s in telescope_track_state
+                ):
                     tracking_status = "Tracking"
                 else:
-                    tracking_status = "Idle"
+                    # Check SkyWatcher / Star Adventurer GTi RASTATUS
+                    # light property
+                    ra_status = device_telescope.getLight("RASTATUS")
+                    is_ra_running = False
+                    if ra_status:
+                        for light in ra_status:
+                            light_name = light.getName()
+                            if light_name == "RARunning" and light.getState() in (
+                                PyIndi.IPS_BUSY,
+                                PyIndi.IPS_OK,
+                            ):
+                                is_ra_running = True
+                                break
+
+                    # Also check TELESCOPE_MOTION_RATE or TELESCOPE_TRACK_RATE
+                    # if present
+                    track_rate = device_telescope.getSwitch("TELESCOPE_TRACK_RATE")
+                    rate_active = False
+                    if (
+                        track_rate
+                        and telescope_track_state
+                        and not any(
+                            (s.getName() in ("TRACK_OFF", "OFF", "IDLE")) and s.getState() == PyIndi.ISS_ON
+                            for s in telescope_track_state
+                        )
+                    ):
+                        rate_active = any(s.getState() == PyIndi.ISS_ON for s in track_rate)
+
+                    if is_ra_running or rate_active:
+                        tracking_status = "Tracking"
+                    else:
+                        tracking_status = "Idle"
             else:
                 connection_status = (
                     "Disconnecting..."
@@ -456,9 +590,9 @@ class IndiInterface(IndiClient):
                     else "Connecting..."
                 )
 
-            # Enforce default tracking off on first connection
+            # Mark defaults initialized without forcibly altering
+            # hardware tracking state
             if connection_status == "Connected" and not self._has_initialized_defaults:
-                self._enforce_default_tracking_off(device_telescope)
                 self._has_initialized_defaults = True
 
         # Save statuses to status dictionary
@@ -496,6 +630,97 @@ class IndiInterface(IndiClient):
             The focuser device, or `None` if none is found.
         """
         return self.device_discovery.find_focuser()
+
+    def _find_enclosure_device(self):  # ruff: ignore[missing-return-type-private-function]
+        """Heuristic to find the roll-off-roof/dome device.
+
+        Returns
+        -------
+        device : `PyIndi.BaseDevice` or `None`
+            The enclosure device, or `None` if none is found.
+        """
+        return self.device_discovery.find_enclosure()
+
+    def get_enclosure_state(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        """Return the enclosure's current motion state.
+
+        Returns
+        -------
+        state : `EnclosureState`
+            The current enclosure state (`UNKNOWN` if unavailable).
+        """
+        return self.enclosure_controller.get_state(self._find_enclosure_device())
+
+    def open_enclosure(self) -> bool:
+        """Command the enclosure shutter open.
+
+        Returns
+        -------
+        success : `bool`
+            True if the open command was sent and confirmed.
+        """
+        return self.enclosure_controller.open(self._find_enclosure_device())
+
+    def close_enclosure(self) -> bool:
+        """Command the enclosure shutter closed.
+
+        Returns
+        -------
+        success : `bool`
+            True if the close command was sent and confirmed.
+        """
+        return self.enclosure_controller.close(self._find_enclosure_device())
+
+    def get_switch_states(self) -> dict[str, bool]:
+        """Return the powerbox's `POWER_CONTROL` outlet states.
+
+        Returns
+        -------
+        states : `dict` [`str`, `bool`]
+            Outlet name to on/off state, or empty if unavailable.
+        """
+        return self.switch_controller.get_switch_states(self._find_powerbox_device())
+
+    def set_switch_state(self, switch_name: str, on: bool) -> bool:
+        """Command one powerbox `POWER_CONTROL` outlet on or off.
+
+        Returns
+        -------
+        success : `bool`
+            Whether the command was sent.
+        """
+        return self.switch_controller.set_switch_state(self._find_powerbox_device(), switch_name, on)
+
+    def get_switch_variable_values(self) -> dict[str, float]:
+        """Return the powerbox's `DEW_PWM`/`POWER_SENSORS` element values.
+
+        Returns
+        -------
+        values : `dict` [`str`, `float`]
+            Element name to value, or empty if unavailable.
+        """
+        return self.switch_controller.get_variable_values(self._find_powerbox_device())
+
+    def set_switch_variable_value(self, name: str, value: float) -> bool:
+        """Command one powerbox `DEW_PWM` element to a new duty cycle.
+
+        Returns
+        -------
+        success : `bool`
+            Whether the command was sent.
+        """
+        return self.switch_controller.set_variable_value(self._find_powerbox_device(), name, value)
+
+    def get_weather_readings(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        """Return the powerbox's `WEATHER_PARAMETERS` as sensor readings.
+
+        Returns
+        -------
+        readings : `SensorReadings`
+            Measurement name to `(value, observed_at)`, or empty if
+            unavailable.
+        """
+        return self.weather_controller.get_readings(self._find_powerbox_device())
 
     def _find_filterwheel_device(self):  # ruff: ignore[missing-return-type-private-function]
         """Heuristic to find filter wheel.
@@ -609,6 +834,187 @@ class IndiInterface(IndiClient):
         if current is not None:
             self.status["FILTER"] = current
 
+    def _refresh_camera_status(self) -> None:
+        """Poll the main camera for temperature, exposure, and target."""
+        if self.status.get("CONNECTION_STATUS") != "Connected":
+            return
+
+        camera = self._find_main_camera_device()
+        if not camera:
+            return
+
+        # Read camera sensor temperature
+        ccd_temp = camera.getNumber("CCD_TEMPERATURE")
+        if ccd_temp and len(ccd_temp) > 0:
+            self.status["CAMERA_TEMPERATURE"] = f"{ccd_temp[0].value:.1f}°C"
+
+        # Read camera exposure countdown or status
+        ccd_exposure = camera.getNumber("CCD_EXPOSURE")
+        if ccd_exposure and len(ccd_exposure) > 0:
+            val = ccd_exposure[0].value
+            state = getattr(ccd_exposure, "s", None)
+            is_busy = (state == PyIndi.IPS_BUSY) if PyIndi else False
+            fits_exptime = self._extract_exptime_from_camera(camera)
+            self._handle_exposure_update(val, is_busy, fits_exptime)
+        else:
+            self.status["CAMERA_STATUS"] = "Idle"
+
+        # Inspect camera FITS header for target name if available
+        self._extract_target_from_camera(camera)
+
+    def _extract_exptime_from_camera(self, camera: Any) -> float | None:
+        """Extract commanded exposure duration from camera FITS_HEADER.
+
+        Parameters
+        ----------
+        camera : `Any`
+            INDI camera device handle.
+
+        Returns
+        -------
+        exptime : `float` | `None`
+            Target exposure seconds if found in header.
+        """
+        try:
+            fits_header = camera.getText("FITS_HEADER")
+            if not fits_header:
+                return None
+            import re
+
+            for i in range(len(fits_header)):
+                elem = fits_header[i]
+                raw_text = elem.getText() if hasattr(elem, "getText") else getattr(elem, "text", "") or ""
+                match = re.search(r"EXPTIME\s*=\s*([\d\.]+)", raw_text, re.IGNORECASE)
+                if match:
+                    return float(match.group(1))
+        except Exception as exptime_err:
+            logger.debug(f"Failed to read EXPTIME from FITS_HEADER: {exptime_err}")
+        return None
+
+    def _handle_exposure_update(self, val: float, is_busy: bool, fits_exptime: float | None = None) -> None:
+        """Process camera exposure progress and maintain a countdown clock.
+
+        Normalizes camera drivers that report elapsed seconds vs drivers that
+        report remaining seconds into a monotonically decreasing countdown.
+
+        Parameters
+        ----------
+        val : `float`
+            Current exposure value reported by the camera driver.
+        is_busy : `bool`
+            Whether the camera exposure property state is IPS_BUSY.
+        fits_exptime : `float` | `None`, optional
+            Target exposure duration extracted from FITS_HEADER.
+        """
+        import time
+
+        if not is_busy:
+            self._exposure_in_progress = False
+            self._active_exposure_duration = None
+            self._exposure_start_time = None
+            self._last_exposure_val = None
+            self._exposure_counts_up = None
+            self.status["CAMERA_STATUS"] = "Idle"
+            return
+
+        now = time.time()
+        if not self._exposure_in_progress:
+            self._exposure_in_progress = True
+            self._exposure_start_time = now
+            self._last_exposure_val = val
+            self._exposure_counts_up = None
+
+        if fits_exptime is not None and fits_exptime > 0:
+            self._active_exposure_duration = fits_exptime
+        elif self._active_exposure_duration is None and val > 0:
+            self._active_exposure_duration = val
+
+        # Detect direction of counter if changing
+        if self._last_exposure_val is not None and abs(val - self._last_exposure_val) > 0.02:
+            if val > self._last_exposure_val:
+                self._exposure_counts_up = True
+            elif val < self._last_exposure_val:
+                self._exposure_counts_up = False
+        self._last_exposure_val = val
+
+        # Calculate remaining countdown seconds
+        if self._exposure_counts_up is True:
+            # val is elapsed time, so remaining is duration - val
+            total = self._active_exposure_duration or val
+            remaining = max(0.0, total - val)
+        elif self._exposure_counts_up is False:
+            # val is already remaining time
+            remaining = val
+        else:
+            # Initial sample before direction is established:
+            # If we know total duration and val is a small fraction (< 50%),
+            # val is elapsed time (e.g. 0.4s into a 30s exposure).
+            if (
+                self._active_exposure_duration
+                and self._active_exposure_duration > 1.0
+                and val < self._active_exposure_duration * 0.5
+            ):
+                self._exposure_counts_up = True
+                remaining = max(0.0, self._active_exposure_duration - val)
+            else:
+                remaining = val
+
+        if remaining > 0:
+            self.status["CAMERA_STATUS"] = f"Exposing ({remaining:.1f}s)"
+        else:
+            self.status["CAMERA_STATUS"] = "Downloading"
+
+    def _extract_target_from_camera(self, camera: Any) -> None:
+        """Check camera device properties for celestial target metadata.
+
+        Parameters
+        ----------
+        camera : `Any`
+            INDI camera device handle.
+        """
+        try:
+            fits_header = camera.getText("FITS_HEADER")
+            if fits_header:
+                self._extract_target_from_text_property(fits_header)
+        except Exception as header_error:
+            logger.debug(f"Failed to read camera FITS_HEADER: {header_error}")
+
+    def _extract_target_from_text_property(self, text_vector: Any) -> None:
+        """Extract celestial target name from FITS_HEADER or target text.
+
+        Parameters
+        ----------
+        text_vector : `Any`
+            INDI text property containing target keywords or headers.
+        """
+        try:
+            import re
+
+            for i in range(len(text_vector)):
+                elem = text_vector[i]
+                name = elem.getName() if hasattr(elem, "getName") else getattr(elem, "name", "")
+                raw_text = elem.getText() if hasattr(elem, "getText") else getattr(elem, "text", "") or ""
+                text = raw_text.strip()
+                if not text:
+                    continue
+
+                # Direct OBJECT element match
+                if name.upper() in ("OBJECT", "FITS_OBJECT", "TARGET", "TARGET_NAME", "OBJECT_NAME"):
+                    clean_name = text.strip("'\" \t\r\n")
+                    if clean_name and clean_name.upper() not in ("UNKNOWN", "-", "NONE"):
+                        self.status["TARGET_NAME"] = clean_name
+                        return
+
+                # FITS header card text match: OBJECT  = 'M31' / Target name
+                card_match = re.search(r"OBJECT\s*=\s*['\"]?([^'\"/]+)", text, re.IGNORECASE)
+                if card_match:
+                    clean_name = card_match.group(1).strip()
+                    if clean_name and clean_name.upper() not in ("UNKNOWN", "-", "NONE"):
+                        self.status["TARGET_NAME"] = clean_name
+                        return
+        except Exception as extract_error:
+            logger.debug(f"Failed to extract target from text property: {extract_error}")
+
     def get_coordinates(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Get the coordinates the telescope is pointing at."""
         # Connect to telescope device
@@ -671,7 +1077,7 @@ class IndiInterface(IndiClient):
         ra = equatorial_coords[0].value  # Hours
         dec = equatorial_coords[1].value  # Degrees
 
-        from wayfindinglib.skylib.coordinate_operations import compute_altaz
+        from wayfindinglib.tasks.planning_tasks.coordinate_operations import compute_altaz
 
         # RA in INDI is typically Hours; compute_altaz's contract is degrees.
         alt_deg, az_deg = compute_altaz(ra * 15.0, dec, location, observation_time)
@@ -717,6 +1123,7 @@ class IndiInterface(IndiClient):
         self.get_coordinates()
         self.get_environmentals()
         self._refresh_filter_status()
+        self._refresh_camera_status()
 
         # Check for disconnection signal from get_coordinates (which
         # calls connect_to_telescope -> _ensure_connection). If
@@ -737,6 +1144,9 @@ class IndiInterface(IndiClient):
             focuser_position=self.get_focuser_position(),
             filter=self.status.get("FILTER", "L"),
             guiding_history=[],  # Handled by GuidingService
+            camera_temperature=self.status.get("CAMERA_TEMPERATURE", "-"),
+            camera_status=self.status.get("CAMERA_STATUS", "Idle"),
+            target_name=self.status.get("TARGET_NAME"),
         )
 
     def set_filterwheel_position(self, filter_name):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
@@ -788,67 +1198,98 @@ class IndiInterface(IndiClient):
         """
         return self.mount_controller.abort(self.connect_to_telescope())
 
-    def _should_block_command(self, property_item: Any) -> bool:
-        """Check if commands should be blocked based on Safe Mode.
-
-        REQ: SR-1.5: Safe Mode implementation.
+    def drain_external_syncs(self) -> list[dict[str, Any]]:
+        """Drain and return queued external alignment sync events.
 
         Returns
         -------
-        should_block : `bool`
-            `False` if the command is a connection command or Safe
-            Mode is disabled (commands allowed).
-
-        Raises
-        ------
-        AstrometryHardwareError
-            If Safe Mode is enabled and the command is not a
-            connection-related command.
+        sync_records : `list` [`dict` [`str`, `Any`]]
+            List of detected plate-solve sync events containing
+            pointing error offsets and target coordinates.
         """
-        if self.allow_commands:
-            return False
+        with self._external_syncs_lock:
+            sync_records = list(self._external_syncs)
+            self._external_syncs.clear()
+        return sync_records
 
-        # Always allow connection-related commands
-        property_name = ""
-        if hasattr(property_item, "getName"):
-            property_name = property_item.getName()
-        elif hasattr(property_item, "name"):
-            property_name = property_item.name
+    def drain_polar_alignment(self) -> dict[str, Any] | None:
+        """Drain and return newly detected polar alignment record, if any.
 
-        if property_name in ["CONNECTION", "CONNECT", "DISCONNECT"]:
-            return False
-
-        from wayfindinglib import AstrometryHardwareError
-
-        error_message = (
-            f"Command to {property_name} blocked by Safe Mode. Please enable hardware control in Settings."
-        )
-        print(f"BLOCKED: {error_message}")
-        raise AstrometryHardwareError(error_message)
-
-    def sendNewText(self, property_item: Any) -> None:
-        """REQ: SR-1.
-
-        2, SR-1.5.
+        Returns
+        -------
+        record : `dict` [`str`, `Any`] | `None`
+            Latest polar alignment telemetry record for persistence, or
+            `None` if no new measurement occurred.
         """
-        if self._should_block_command(property_item):
-            return
-        super().sendNewText(property_item)
+        with self._polar_alignment_lock:
+            record = self._pending_polar_alignment_record
+            self._pending_polar_alignment_record = None
+        return record
 
-    def sendNewNumber(self, property_item: Any) -> None:
-        """REQ: SR-1.
+    def get_polar_alignment_status(self) -> dict[str, Any]:
+        """Return the current polar alignment status and metrics.
 
-        2, SR-1.5.
+        Returns
+        -------
+        status : `dict` [`str`, `Any`]
+            Dictionary containing polar error, alt/az offsets, and pole coords.
         """
-        if self._should_block_command(property_item):
-            return
-        super().sendNewNumber(property_item)
+        with self._polar_alignment_lock:
+            data = dict(self._polar_alignment_status)
+        return {
+            "status": data.get("status", "idle"),
+            "totalErrorArcsec": data.get("total_error_arcsec"),
+            "altErrorArcsec": data.get("alt_error_arcsec"),
+            "azErrorArcsec": data.get("az_error_arcsec"),
+            "poleRa": data.get("pole_ra"),
+            "poleDec": data.get("pole_dec"),
+            "paaPoints": data.get("paa_points", []),
+            "timestamp": data.get("timestamp"),
+        }
+
+    def newSwitch(self, switch_vector: Any) -> None:
+        """Handle a switch property update from the INDI server.
+
+        Passively observes mount coordinate sync mode changes commanded by
+        external programs such as KStars or Ekos.
+
+        Parameters
+        ----------
+        switch_vector : `Any`
+            Updated INDI switch property from the server.
+        """
+        try:
+            property_name = switch_vector.getName()
+            if property_name == "ON_COORD_SET":
+                import time
+
+                for switch_item in switch_vector:
+                    name = switch_item.getName()
+                    state = switch_item.getState()
+                    if name == "SYNC":
+                        is_sync = state == PyIndi.ISS_ON
+                        self._sync_mode_active = is_sync
+                        if is_sync:
+                            self._sync_mode_start_time = time.time()
+                            self._pre_sync_ra = self._last_mount_ra
+                            self._pre_sync_dec = self._last_mount_dec
+                    elif name in ("TRACK", "SLEW") and state == PyIndi.ISS_ON:
+                        self._sync_mode_active = False
+                        self._pre_sync_ra = None
+                        self._pre_sync_dec = None
+        except Exception as switch_error:
+            logger.debug(f"Error checking external switch property: {switch_error}")
 
     def newNumber(self, number_vector: Any) -> None:
         """Handle a number property update from the INDI server.
 
-        Passively intercepts timed guide pulse commands sent by
-        external guiders like KStars/Ekos/PHD2.
+        Passively intercepts timed guide pulse commands and mount coordinate
+        syncs sent by external clients like KStars/Ekos/PHD2.
+
+        Parameters
+        ----------
+        number_vector : `Any`
+            Updated INDI number property from the server.
         """
         try:
             property_name = number_vector.getName()
@@ -870,9 +1311,29 @@ class IndiInterface(IndiClient):
                     elif element_name == "TIMED_GUIDE_E":
                         pulse_east = pulse_value
 
-                # Timed guide commands send positive duration, which
-                # counts down to 0. We only record the initial
-                # commanding values (> 0) to avoid countdown duplicates
+                # Filter driver countdown decrements: only record new
+                # commanding pulses; ignore decrements until 0.
+                if property_name == "TELESCOPE_TIMED_GUIDE_NS":
+                    current_ns = (
+                        pulse_north if pulse_north > 0 else (-pulse_south if pulse_south > 0 else 0.0)
+                    )
+                    last_ns = getattr(self, "_last_pulse_ns", 0.0)
+                    is_new_pulse = abs(current_ns) > 0 and (
+                        abs(current_ns) > abs(last_ns) or abs(last_ns) < 1e-3
+                    )
+                    self._last_pulse_ns = current_ns
+                    if not is_new_pulse:
+                        return
+                elif property_name == "TELESCOPE_TIMED_GUIDE_WE":
+                    current_we = pulse_west if pulse_west > 0 else (-pulse_east if pulse_east > 0 else 0.0)
+                    last_we = getattr(self, "_last_pulse_we", 0.0)
+                    is_new_pulse = abs(current_we) > 0 and (
+                        abs(current_we) > abs(last_we) or abs(last_we) < 1e-3
+                    )
+                    self._last_pulse_we = current_we
+                    if not is_new_pulse:
+                        return
+
                 if pulse_north > 0 or pulse_south > 0 or pulse_west > 0 or pulse_east > 0:
                     import time
 
@@ -887,17 +1348,181 @@ class IndiInterface(IndiClient):
                             "pulse_w": pulse_west,
                             "pulse_e": pulse_east,
                         })
+
+            elif property_name in ("EQUATORIAL_EOD_COORD", "EQUATORIAL_COORD"):
+                import math
+                import time
+
+                ra_val = None
+                dec_val = None
+                for coord_element in number_vector:
+                    coord_name = coord_element.getName()
+                    if coord_name == "RA":
+                        ra_val = coord_element.getValue()
+                    elif coord_name == "DEC":
+                        dec_val = coord_element.getValue()
+
+                if ra_val is not None and dec_val is not None:
+                    # Expire stale sync mode if no plate-solve sync arrived
+                    # within 15 seconds
+                    if (
+                        self._sync_mode_active
+                        and self._sync_mode_start_time is not None
+                        and time.time() - self._sync_mode_start_time > 15.0
+                    ):
+                        self._sync_mode_active = False
+                        self._pre_sync_ra = None
+                        self._pre_sync_dec = None
+
+                    if self._sync_mode_active:
+                        base_ra = self._pre_sync_ra if self._pre_sync_ra is not None else self._last_mount_ra
+                        base_dec = (
+                            self._pre_sync_dec if self._pre_sync_dec is not None else self._last_mount_dec
+                        )
+
+                        if base_ra is not None and base_dec is not None:
+                            d_ra_hours = (ra_val - base_ra + 12.0) % 24.0 - 12.0
+                            dec_rad = math.radians(dec_val)
+                            delta_ra_arcsec = d_ra_hours * 15.0 * 3600.0 * math.cos(dec_rad)
+                            delta_dec_arcsec = (dec_val - base_dec) * 3600.0
+
+                            pointing_error = math.hypot(delta_ra_arcsec, delta_dec_arcsec)
+
+                            # Ignore mount tracking loop heartbeat echoes and
+                            # minor jitter (error < 2.0 arcsec or stationary
+                            # Dec with negligible RA). Legitimate plate solves
+                            # correct slewing errors (> 3-5 arcsec). Keep
+                            # _sync_mode_active = True so we wait for actual
+                            # plate-solved coordinates rather than consuming a
+                            # sub-tick tracking update.
+                            is_tracking_jitter = abs(delta_dec_arcsec) < 1e-4 and abs(delta_ra_arcsec) < 2.0
+                            if pointing_error < 2.0 or is_tracking_jitter:
+                                return
+
+                            if pointing_error < 36000.0:
+                                status = "aligned" if pointing_error <= 120.0 else "warning"
+                                ra_deg = (ra_val * 15.0) % 360.0 if ra_val is not None else None
+                                with self._external_syncs_lock:
+                                    self._external_syncs.append({
+                                        "time": time.time(),
+                                        "status": status,
+                                        "delta_ra_arcsec": round(delta_ra_arcsec, 2),
+                                        "delta_dec_arcsec": round(delta_dec_arcsec, 2),
+                                        "pointing_error_arcsec": round(pointing_error, 2),
+                                        "ra": ra_deg,
+                                        "dec": dec_val,
+                                    })
+                                if abs(dec_val) > 65.0 and ra_deg is not None:
+                                    with self._polar_alignment_lock:
+                                        pts = self._polar_alignment_status.get("paa_points", [])
+                                        if not any(
+                                            abs(p.get("ra", 0) - ra_deg) < 0.01
+                                            and abs(p.get("dec", 0) - dec_val) < 0.01
+                                            for p in pts
+                                        ):
+                                            pts.append({"ra": ra_deg, "dec": dec_val, "time": time.time()})
+                                            self._polar_alignment_status["paa_points"] = pts[-5:]
+                            self._sync_mode_active = False
+                            self._pre_sync_ra = None
+                            self._pre_sync_dec = None
+
+                    self._last_mount_ra = ra_val
+                    self._last_mount_dec = dec_val
+
+            elif property_name in ("ALIGNPOINT", "POLAR_ALIGNMENT_POINT"):
+                import time
+
+                ra_val = None
+                dec_val = None
+                for elem in number_vector:
+                    ename = elem.getName()
+                    if ename in ("ALIGNPOINT_CELESTIAL_RA", "RA", "CELESTIAL_RA"):
+                        ra_val = elem.getValue()
+                    elif ename in ("ALIGNPOINT_CELESTIAL_DE", "DEC", "DE", "CELESTIAL_DEC"):
+                        dec_val = elem.getValue()
+
+                if ra_val is not None and dec_val is not None:
+                    # In INDI, RA is reported in hours (0..24); convert
+                    # to decimal degrees (0..360).
+                    ra_deg = (ra_val * 15.0) % 360.0
+                    with self._polar_alignment_lock:
+                        pts = self._polar_alignment_status.get("paa_points", [])
+                        if not any(
+                            abs(p.get("ra", 0) - ra_deg) < 0.01 and abs(p.get("dec", 0) - dec_val) < 0.01
+                            for p in pts
+                        ):
+                            pts.append({
+                                "ra": round(ra_deg, 4),
+                                "dec": round(dec_val, 4),
+                                "time": time.time(),
+                            })
+                            self._polar_alignment_status["paa_points"] = pts[-5:]
+
+            elif property_name == "SYNCPOLARALIGN":
+                import math
+                import time
+
+                alt_err = None
+                az_err = None
+                for elem in number_vector:
+                    ename = elem.getName()
+                    if ename in ("SYNCPOLARALIGN_ALT", "ALT", "ALTITUDE"):
+                        alt_err = elem.getValue()
+                    elif ename in ("SYNCPOLARALIGN_AZ", "AZ", "AZIMUTH"):
+                        az_err = elem.getValue()
+
+                if alt_err is not None or az_err is not None:
+                    alt_val = alt_err or 0.0
+                    az_val = az_err or 0.0
+                    total_err = math.hypot(alt_val, az_val)
+                    status = "aligned" if total_err <= 60.0 else "warning"
+                    current_dec = self._last_mount_dec if self._last_mount_dec is not None else 90.0
+                    pole_dec = (
+                        90.0 - (total_err / 3600.0) if current_dec >= 0 else -90.0 + (total_err / 3600.0)
+                    )
+                    pole_record = {
+                        "status": status,
+                        "total_error_arcsec": round(total_err, 2),
+                        "alt_error_arcsec": round(alt_val, 2),
+                        "az_error_arcsec": round(az_val, 2),
+                        "pole_ra": self._last_mount_ra,
+                        "pole_dec": round(pole_dec, 5),
+                        "paa_points": list(self._polar_alignment_status.get("paa_points", [])),
+                        "timestamp": time.time(),
+                    }
+                    with self._polar_alignment_lock:
+                        self._polar_alignment_status = dict(pole_record)
+                        self._pending_polar_alignment_record = dict(pole_record)
+
+            elif property_name == "CCD_EXPOSURE":
+                if len(number_vector) > 0:
+                    val = number_vector[0].getValue()
+                    state = getattr(number_vector, "s", None)
+                    is_busy = (state == PyIndi.IPS_BUSY) if PyIndi else False
+                    camera = self._find_main_camera_device()
+                    fits_exptime = self._extract_exptime_from_camera(camera) if camera else None
+                    self._handle_exposure_update(val, is_busy, fits_exptime)
+
         except Exception as pulse_error:
-            print(f"Error recording external guide pulse: {pulse_error}")
+            logger.debug(f"Error handling property update in newNumber: {pulse_error}")
 
-    def sendNewSwitch(self, property_item: Any) -> None:
-        """REQ: SR-1.
+    def newText(self, text_vector: Any) -> None:
+        """Handle a text property update from the INDI server.
 
-        2, SR-1.5.
+        Passively intercepts FITS header keywords (such as OBJECT) and
+        target info sent by external capture software (e.g. KStars/Ekos).
+
+        Parameters
+        ----------
+        text_vector : `Any`
+            Updated INDI text property from the server.
         """
-        if self._should_block_command(property_item):
-            return
-        super().sendNewSwitch(property_item)
+        try:
+            property_name = text_vector.getName()
+            if property_name in ("FITS_HEADER", "OBJECT_INFO", "TARGET_NAME", "OBJECT_NAME"):
+                self._extract_target_from_text_property(text_vector)
+        except Exception as text_error:
+            logger.debug(f"Error checking external text property: {text_error}")
 
     def get_device_properties(self, device_name):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
         """Retrieve all properties for a device in a structured format.
@@ -1043,8 +1668,8 @@ class IndiInterface(IndiClient):
 
         Does not call connect_to_telescope to avoid recursion.
         Best-effort: this runs automatically on first connection, so
-        a blocked command (e.g. Safe Mode) or any other failure here
-        must not break the connection/status flow that called it.
+        a failure here must not break the connection/status flow that
+        called it.
         """
         try:
             self.mount_controller.set_tracking(telescope_device, False)
@@ -1076,6 +1701,19 @@ class IndiInterface(IndiClient):
         if not telescope or self.status.get("CONNECTION_STATUS") != "Connected":
             return False
         return self.mount_controller.set_tracking(telescope, enabled)
+
+    def set_slew_rate(self, rate_index):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+        """Set the manual-slew rate.
+
+        Returns
+        -------
+        success : `bool`
+            `True` if the slew-rate command was accepted.
+        """
+        telescope = self.connect_to_telescope()
+        if not telescope or self.status.get("CONNECTION_STATUS") != "Connected":
+            return False
+        return self.mount_controller.set_slew_rate(telescope, rate_index)
 
     def _set_coord_mode(self, telescope_device, mode="TRACK"):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
         """Set the ON_COORD_SET switch (TRACK / SLEW / SYNC).
@@ -1151,6 +1789,28 @@ class IndiInterface(IndiClient):
             return False
         return self.camera_controller.pulse_guide(device, direction, duration_ms)
 
+    def drain_external_pulses(self) -> list[dict]:
+        """Return and clear guide pulses issued by an external commander.
+
+        Detects timed guide pulses sent to the mount by something other
+        than this process (e.g. KStars/Ekos or PHD2 driving the mount
+        directly) so a passive observer can still see guiding activity
+        without having issued the pulses itself.
+
+        Returns
+        -------
+        pulses : `list` [`dict`]
+            Each entry has ``"time"``, ``"pulse_n"``, ``"pulse_s"``,
+            ``"pulse_w"``, and ``"pulse_e"`` keys -- this shape is a
+            data contract with
+            `backend/services/observatory/guiding_service.py`, do not
+            rename these keys.
+        """
+        with self._external_pulses_lock:
+            pulses = list(self._external_pulses)
+            self._external_pulses.clear()
+        return pulses
+
     def guide_expose(self, exposure_seconds, gain=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
         """Take an exposure with the guide camera.
 
@@ -1169,14 +1829,15 @@ class IndiInterface(IndiClient):
         device = self._find_guide_camera_device()
         return self.camera_controller.expose(device, exposure_seconds, gain=gain)
 
-    def get_guide_image(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
-        """Retrieve the last image blob from the guide camera.
+    def get_guide_image(self) -> bytes | None:
+        """Retrieve the last image frame from the guide camera, as raw bytes.
 
         Returns
         -------
-        image
-            The last guide camera image blob, as returned by the
-            camera controller.
+        data : `bytes` or `None`
+            The last guide camera frame's raw data (usually a FITS file in
+            memory), as returned by the camera controller, or `None` if
+            there is no guide camera or no frame yet.
         """
         device = self._find_guide_camera_device()
         return self.camera_controller.get_guide_image(device)

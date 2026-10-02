@@ -5,9 +5,14 @@ middleware, initializes the dependency injection container, and
 defines API/WebSocket routes.
 """
 
+import html
 import logging
 import os
+import socket
+import threading
+import time
 import warnings
+from typing import Any
 
 import uvicorn
 
@@ -15,7 +20,7 @@ import uvicorn
 # REQ: SYS-1.4: Maintain clean logs
 from astropy.utils.exceptions import AstropyDeprecationWarning, AstropyWarning
 from astropy.wcs import FITSFixedWarning
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 
 from backend.routers import rpc_router
@@ -24,7 +29,8 @@ warnings.filterwarnings("ignore", category=FITSFixedWarning)
 warnings.filterwarnings("ignore", category=AstropyDeprecationWarning)
 warnings.filterwarnings("ignore", category=AstropyWarning, message=".*extra padding.*")
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
+from pydantic import BaseModel, Field
 
 from astrometricslib import get_configuration
 from backend.container import container
@@ -48,6 +54,31 @@ logging.getLogger("uvicorn.access").setLevel(logging.ERROR)
 logging.getLogger("uvicorn.error").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
+
+
+def _use_bundled_earth_orientation_data() -> None:
+    """Stop astropy downloading Earth-orientation (IERS) data while running.
+
+    Turning a star's position into altitude and azimuth needs a small table
+    of how the Earth's rotation drifts (UT1 minus UTC). By default astropy
+    tries to download the latest copy the first time it is needed, which
+    stalled the first star click for 6 to 14 seconds, and quietly needed the
+    internet. The copy that ships with astropy is used instead.
+
+    Measured (astropy 8.0.1, Bozeman, a star at RA 315.7 deg, Dec 68.7 deg):
+    the first conversion took 5.8 to 13.8 s with the download and 0.5 s
+    without. Altitude and azimuth differed by at most 0.5 arcseconds across
+    dates from two years ago to ten years ahead, far below what a sky map or
+    a telescope slew can resolve, and nothing raised an error for any date.
+    """
+    from astropy.utils import iers
+
+    iers.conf.auto_download = False
+    # Without this, astropy refuses to use a table more than 30 days old.
+    iers.conf.auto_max_age = None
+
+
+_use_bundled_earth_orientation_data()
 
 # Initialize Container Resources
 container.init_resources()
@@ -101,13 +132,21 @@ origins = [
     "http://127.0.0.1:5175",
     "http://localhost:8000",  # Development Server
     "http://127.0.0.1:8000",
+    "http://localhost:5000",  # Backend Server
+    "http://127.0.0.1:5000",
     "http://localhost:3000",
     "app://.",  # Electron
 ]
 
+lan_origin_regex = (
+    r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?$|"
+    r"^capacitor://localhost$"
+)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
+    allow_origin_regex=lan_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -169,6 +208,24 @@ if _frames_path.is_dir() and _frames_path != _library_path:
     app.mount("/static/frames", StaticFiles(directory=str(_frames_path)), name="static_frames")
 app.mount("/static", StaticFiles(directory=str(_library_path)), name="static")
 
+# Mount Matplotlib WebAgg static assets and toolbar images for
+# interactive figures
+try:
+    import matplotlib
+    import matplotlib.backends.backend_webagg_core as webagg_core
+
+    webagg_core.FigureManagerWebAgg._toolbar2_class = webagg_core.NavigationToolbar2WebAgg
+
+    _mpl_static_path = webagg_core.FigureManagerWebAgg.get_static_file_path()
+    _mpl_img_path = os.path.join(matplotlib.get_data_path(), "images")
+    if os.path.isdir(_mpl_static_path):
+        app.mount("/mpl_static", StaticFiles(directory=_mpl_static_path), name="mpl_static")
+    if os.path.isdir(_mpl_img_path):
+        app.mount("/_images", StaticFiles(directory=_mpl_img_path), name="mpl_images")
+        app.mount("/figure/_images", StaticFiles(directory=_mpl_img_path), name="mpl_figure_images")
+except Exception as e:
+    logger.warning("Failed to mount Matplotlib WebAgg static assets: %s", e)
+
 
 async def authorize_websocket(websocket: WebSocket) -> bool:
     """Enforce the origin allowlist and session token on a handshake.
@@ -218,6 +275,231 @@ async def session_token():  # ruff: ignore[missing-return-type-undocumented-publ
     return {"token": session_auth.SESSION_TOKEN}
 
 
+def _detect_lan_ip() -> str:
+    """Detect the active LAN IPv4 address for remote mobile companion clients.
+
+    Returns
+    -------
+    lan_ip : `str`
+        The local IPv4 address, or '127.0.0.1' if none can be resolved.
+    """
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("1.1.1.1", 80))
+        return str(s.getsockname()[0])
+    except Exception:
+        return "127.0.0.1"
+    finally:
+        s.close()
+
+
+@app.get("/api/pairing-info")
+async def pairing_info(request: Request) -> dict[str, Any]:
+    """Provide connection and authorization metadata for companion clients.
+
+    Facilitates zero-configuration pairing with mobile companion apps
+    or remote browser clients over the local network.
+
+    Parameters
+    ----------
+    request : `~fastapi.Request`
+        The incoming HTTP request.
+
+    Returns
+    -------
+    info : `dict`
+        Server metadata, host/port, endpoints, and the active session token.
+    """
+    host_header = request.headers.get("host", "")
+    host = host_header.split(":")[0] if host_header else _detect_lan_ip()
+    port = request.url.port or 5000
+
+    return {
+        "app": "Astrometrics",
+        "version": "0.2.0",
+        "host": host,
+        "port": port,
+        "lan_ip": _detect_lan_ip(),
+        "session_token": session_auth.SESSION_TOKEN,
+        "endpoints": {
+            "rpc": f"http://{host}:{port}/api/action",
+            "ws_events": f"ws://{host}:{port}/ws/events?token={session_auth.SESSION_TOKEN}",
+            "ws_terminal": f"ws://{host}:{port}/ws/terminal?token={session_auth.SESSION_TOKEN}",
+        },
+    }
+
+
+class HandoffStateUpdate(BaseModel):
+    """Payload for updating the active workspace handoff state."""
+
+    active_mode: str | None = Field(None, description="Active UI mode")
+    selected_target: str | None = Field(None, description="Selected target designation")
+    coordinates: dict[str, Any] | None = Field(None, description="RA/Dec coordinates and FOV")
+    telemetry: dict[str, Any] | None = Field(None, description="Mount or capture telemetry")
+    origin_device: str = Field("desktop", description="Device identifier")
+
+
+@app.get("/api/handoff/state")
+async def get_handoff_state() -> dict[str, Any]:
+    """Retrieve the workspace handoff state used for cross-device continuity.
+
+    Returns
+    -------
+    state : `dict`
+        Active workspace mode, selected target, coordinates, and telemetry.
+    """
+    if container.handoff_service:
+        return container.handoff_service.get_state()
+    return {}
+
+
+@app.post("/api/handoff/state")
+async def update_handoff_state(payload: HandoffStateUpdate) -> dict[str, Any]:
+    """Update the workspace handoff state and broadcast it to clients.
+
+    Parameters
+    ----------
+    payload : `HandoffStateUpdate`
+        State fields to update.
+
+    Returns
+    -------
+    state : `dict`
+        Updated active workspace state.
+    """
+    if container.handoff_service:
+        return container.handoff_service.update_state(
+            active_mode=payload.active_mode,
+            selected_target=payload.selected_target,
+            coordinates=payload.coordinates,
+            telemetry=payload.telemetry,
+            origin_device=payload.origin_device,
+        )
+    return {}
+
+
+@app.post("/api/handoff/beam")
+async def beam_to_device(target: str | None = None, mode: str | None = None) -> dict[str, Any]:
+    """Beam the current target or view to a paired phone via GSConnect.
+
+    Parameters
+    ----------
+    target : `str`, optional
+        Target designation to open on the mobile device.
+    mode : `str`, optional
+        Workspace view mode to display on the mobile device.
+
+    Returns
+    -------
+    result : `dict`
+        Status of the beam dispatch attempt.
+    """
+    if container.handoff_service:
+        return container.handoff_service.beam_to_device(target=target, mode=mode)
+    return {
+        "success": False,
+        "message": "HandoffService is unavailable",
+        "deep_link": f"astrometrics://handoff?mode={mode or 'Planetarium'}",
+    }
+
+
+@app.get("/api/handoff/devices")
+async def list_companion_devices() -> list[dict[str, Any]]:
+    """Enumerate paired companion devices via GSConnect or KDE Connect.
+
+    Returns
+    -------
+    devices : `list` of `dict`
+        List of paired devices with identifiers and reachable states.
+    """
+    if container.handoff_service:
+        return container.handoff_service.list_paired_devices()
+    return []
+
+
+class DeviceAlertRequest(BaseModel):
+    """Request schema for dispatching an alert to companion hardware."""
+
+    title: str = Field(..., description="Short alert title or category")
+    message: str = Field(..., description="Descriptive alert text")
+    priority: str = Field("normal", description="Severity level")
+    ring_device: bool = Field(False, description="Trigger audible ring alarm")
+    device_id: str | None = Field(None, description="Optional target device ID")
+
+
+@app.post("/api/handoff/alert")
+async def dispatch_device_alert(payload: DeviceAlertRequest) -> dict[str, Any]:
+    """Dispatch an alert to companion devices and WebSocket subscribers.
+
+    Parameters
+    ----------
+    payload : `DeviceAlertRequest`
+        Alert details, severity, and optional ring flag.
+
+    Returns
+    -------
+    result : `dict`
+        Status and delivered communication channels.
+    """
+    if container.handoff_service:
+        return container.handoff_service.send_device_alert(
+            title=payload.title,
+            message=payload.message,
+            priority=payload.priority,
+            ring_device=payload.ring_device,
+            device_id=payload.device_id,
+        )
+    return {"success": False, "message": "HandoffService is unavailable"}
+
+
+class ShareFileRequest(BaseModel):
+    """Request schema for sharing a file to a companion device."""
+
+    file_path: str = Field(..., description="Absolute path of file to share")
+    device_id: str | None = Field(None, description="Optional target device ID")
+
+
+@app.post("/api/handoff/share-file")
+async def share_file_to_device(payload: ShareFileRequest) -> dict[str, Any]:
+    """Share an image or data file to a companion device via GSConnect.
+
+    Parameters
+    ----------
+    payload : `ShareFileRequest`
+        Path of file and optional target device ID.
+
+    Returns
+    -------
+    result : `dict`
+        Status of the file beam attempt.
+    """
+    if container.handoff_service:
+        return container.handoff_service.share_file_to_device(
+            file_path=payload.file_path,
+            device_id=payload.device_id,
+        )
+    return {"success": False, "message": "HandoffService is unavailable"}
+
+
+@app.get("/api/ready")
+async def readiness():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Report whether startup warm-up has finished.
+
+    Distinct from the liveness route below: the backend accepts requests
+    as soon as it is listening, but the first Planetarium load stays slow
+    until the star catalog has been loaded into memory.
+
+    Returns
+    -------
+    response : `~fastapi.responses.JSONResponse`
+        Status 200 with ``{"ready": true}`` once warm-up has finished,
+        otherwise status 503 with ``{"ready": false}``.
+    """
+    if sky_catalog_warmup_finished.is_set():
+        return JSONResponse(status_code=200, content={"ready": True})
+    return JSONResponse(status_code=503, content={"ready": False})
+
+
 @app.get("/")
 async def root():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Return a simple liveness message for the backend root route.
@@ -262,6 +544,284 @@ async def websocket_endpoint(websocket: WebSocket):  # ruff: ignore[missing-retu
         logger.info("Terminal disconnected")
 
 
+@app.get("/figure/mpl.js")
+async def get_figure_js() -> Response:
+    """Serve complete Matplotlib WebAgg JavaScript bundle with toolbar items.
+
+    Returns
+    -------
+    response : `~fastapi.responses.Response`
+        JavaScript bundle defining figure and navigation toolbar components.
+    """
+    import matplotlib.backends.backend_webagg_core as webagg_core
+
+    return Response(
+        content=webagg_core.FigureManagerWebAgg.get_javascript(),
+        media_type="application/javascript",
+    )
+
+
+@app.get("/figure/{figure_id}/download.{fmt}")
+async def download_figure(figure_id: int, fmt: str) -> Response:
+    """Export and download the figure image in the requested graphics format.
+
+    Parameters
+    ----------
+    figure_id : `int`
+        The figure identifier.
+    fmt : `str`
+        The output graphics format extension (e.g. 'png', 'svg', 'pdf').
+
+    Returns
+    -------
+    response : `~fastapi.responses.Response`
+        Rendered figure bytes with the appropriate MIME content-type.
+
+    Raises
+    ------
+    HTTPException
+        If the figure manager is not found or export fails.
+    """
+    mgr = None
+    if container.scripting_service:
+        mgr = container.scripting_service.get_figure_manager(figure_id)
+
+    if not mgr:
+        raise HTTPException(status_code=404, detail="Figure not found")
+
+    import io
+    import mimetypes
+
+    buff = io.BytesIO()
+    try:
+        mgr.canvas.figure.savefig(buff, format=fmt)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Failed to export figure: {exc}") from exc
+
+    media_type, _ = mimetypes.guess_type(f"figure.{fmt}")
+    return Response(
+        content=buff.getvalue(),
+        media_type=media_type or "application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="figure_{figure_id}.{fmt}"'},
+    )
+
+
+@app.get("/figure/{figure_id}", response_class=HTMLResponse)
+async def get_figure_page(figure_id: int) -> HTMLResponse:
+    """Serve the interactive Matplotlib WebAgg HTML page for a figure.
+
+    Parameters
+    ----------
+    figure_id : `int`
+        The figure identifier.
+
+    Returns
+    -------
+    html : `~fastapi.responses.HTMLResponse`
+        Interactive HTML page with toolbar and HTML5 canvas.
+    """
+    token = session_auth.SESSION_TOKEN
+    # FastAPI's `figure_id: int` annotation already rejects a request whose
+    # path segment cannot be parsed as an integer, so this value cannot
+    # actually hold script content. It is still escaped before being written
+    # into the page, so a static scan of this function does not have to
+    # trust that route-level validation elsewhere: the value is safe at the
+    # point it is used no matter how it got here.
+    safe_figure_id = html.escape(str(figure_id))
+    html_content = f"""<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <base href="/">
+    <meta charset="utf-8">
+    <title>Astrometrics Plot #{safe_figure_id}</title>
+    <link rel="stylesheet" href="/mpl_static/css/boilerplate.css" type="text/css">
+    <link rel="stylesheet" href="/mpl_static/css/fbm.css" type="text/css">
+    <link rel="stylesheet" href="/mpl_static/css/mpl.css" type="text/css">
+    <script src="/figure/mpl.js"></script>
+    <style>
+      body {{
+        margin: 0;
+        padding: 12px;
+        background-color: #0a0d14;
+        color: #e0e0e0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: flex-start;
+        min-height: 100vh;
+        box-sizing: border-box;
+      }}
+      .mpl-toolbar {{
+        background: #141923;
+        border: 1px solid #2a3649;
+        border-radius: 6px;
+        padding: 4px 8px;
+        margin-bottom: 8px;
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 6px;
+      }}
+      .mpl-button-group {{
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+      }}
+      .mpl-widget {{
+        background-color: #1e2638;
+        border: 1px solid #3b4c68;
+        border-radius: 4px;
+        padding: 4px 8px;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: #e0e0e0;
+      }}
+      .mpl-widget:hover {{
+        background-color: #2b374e;
+      }}
+      .mpl-widget.active {{
+        background-color: #0284c7;
+        border-color: #38bdf8;
+      }}
+      .mpl-widget img {{
+        filter: invert(90%);
+        width: 16px;
+        height: 16px;
+      }}
+      select.mpl-widget {{
+        background-color: #1e2638;
+        color: #e0e0e0;
+        border: 1px solid #3b4c68;
+        border-radius: 4px;
+        padding: 3px 6px;
+        font-size: 12px;
+      }}
+      .ui-dialog-titlebar {{
+        display: none !important;
+      }}
+      .mpl-message {{
+        color: #94a3b8;
+        font-size: 12px;
+        margin-left: 10px;
+        font-family: monospace;
+      }}
+      #figure {{
+        background: #ffffff;
+        border-radius: 6px;
+        overflow: hidden;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+      }}
+    </style>
+    <script>
+      function on_download(figure, format) {{
+        window.open('/figure/' + figure.id + '/download.' + format, '_blank');
+      }}
+
+      document.addEventListener("DOMContentLoaded", function () {{
+        var wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        var wsUrl = wsProtocol + '//' + window.location.host + '/ws/figure/{safe_figure_id}?token={token}';
+        var websocket_type = mpl.get_websocket_type();
+        var websocket = new websocket_type(wsUrl);
+
+        var fig = new mpl.figure(
+          {safe_figure_id},
+          websocket,
+          on_download,
+          document.getElementById("figure")
+        );
+      }});
+    </script>
+  </head>
+  <body>
+    <div id="mpl-warnings" class="mpl-warnings" style="color: #f87171; margin-bottom: 8px;"></div>
+    <div id="figure"></div>
+  </body>
+</html>"""
+    return HTMLResponse(content=html_content)
+
+
+class _FastApiWebSocketAdapter:
+    """Adapter matching FigureManagerWebAgg's expected WebSocket interface."""
+
+    def __init__(self, websocket: WebSocket, loop: asyncio.AbstractEventLoop) -> None:
+        self.websocket = websocket
+        self.loop = loop
+
+    def send_json(self, content: dict[str, Any]) -> None:
+        """Serialize and send JSON payload to the WebSocket client."""
+        asyncio.run_coroutine_threadsafe(
+            self.websocket.send_text(json.dumps(content)),
+            self.loop,
+        )
+
+    def send_binary(self, blob: bytes) -> None:
+        """Send raw binary bytes to the WebSocket client."""
+        asyncio.run_coroutine_threadsafe(
+            self.websocket.send_bytes(blob),
+            self.loop,
+        )
+
+
+@app.websocket("/ws/figure/{figure_id}")
+async def figure_websocket_endpoint(websocket: WebSocket, figure_id: int):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Handle interactive Matplotlib WebAgg WebSocket communication.
+
+    Parameters
+    ----------
+    websocket : `~fastapi.WebSocket`
+        The WebSocket connection.
+    figure_id : `int`
+        Figure number.
+    """
+    if not await authorize_websocket(websocket):
+        return
+
+    await websocket.accept()
+
+    mgr = None
+    if container.scripting_service:
+        mgr = container.scripting_service.get_figure_manager(figure_id)
+
+    if not mgr:
+        logger.warning("No active figure manager found for figure %d", figure_id)
+        await websocket.close(code=4404)
+        return
+
+    if mgr.toolbar is None:
+        import matplotlib.backends.backend_webagg_core as webagg_core
+
+        mgr.toolbar = webagg_core.NavigationToolbar2WebAgg(mgr.canvas)
+        mgr.canvas.toolbar = mgr.toolbar
+
+    loop = asyncio.get_running_loop()
+    adapter = _FastApiWebSocketAdapter(websocket, loop)
+    mgr.add_web_socket(adapter)
+
+    try:
+        while True:
+            raw_msg = await websocket.receive_text()
+            try:
+                msg = json.loads(raw_msg)
+                msg_type = msg.get("type")
+                if msg_type == "supports_binary":
+                    # Client capability advertisement, safely handled
+                    pass
+                else:
+                    mgr.handle_json(msg)
+            except Exception as exc:
+                logger.debug("Error processing figure WS message: %s", exc)
+    except WebSocketDisconnect:
+        logger.info("Figure %d client disconnected", figure_id)
+    finally:
+        try:
+            mgr.remove_web_socket(adapter)
+        except Exception as exc:
+            logger.debug("Failed removing web socket adapter: %s", exc)
+
+
 import asyncio
 import json
 
@@ -277,27 +837,94 @@ async def periodic_telemetry_loop():  # ruff: ignore[missing-return-type-undocum
     while True:
         try:
             if container.initialized and container.telescope_service:
-                container.telescope_service.get_status()
+                # get_status() ultimately bridges into async driver calls via
+                # asyncio.run() (hardware_operations._run_sync), which raises
+                # immediately if called from a thread that already has a
+                # running event loop -- exactly this loop's own thread.
+                # Running it via to_thread gives it a plain worker thread
+                # with no event loop of its own, and as a side benefit keeps
+                # a slow hardware query from blocking this event loop (and
+                # therefore every other request) for its duration.
+                await asyncio.to_thread(container.telescope_service.get_status)
         except Exception as e:
             logger.error(f"Error in periodic telemetry loop: {e}")
         await asyncio.sleep(2.0)
+
+
+# Set once the startup catalog warm-up below has finished, whether or not it
+# succeeded. The desktop shell polls `/api/ready` and holds its splash screen
+# until this is set, so the UI never opens onto a Planetarium that would sit
+# empty while the catalog loads. It is set on failure too: a broken warm-up
+# only means a slow first load, and must never keep the app from opening.
+sky_catalog_warmup_finished = threading.Event()
+
+
+def _warm_earth_orientation_data() -> None:
+    """Load astropy's Earth-orientation table now, while the splash is up.
+
+    The first altitude/azimuth conversion in a process reads that table
+    (about half a second), so do one here instead of on the first star click.
+    """
+    import astropy.units as u
+    from astropy.coordinates import AltAz, EarthLocation, SkyCoord
+    from astropy.time import Time
+
+    started_at = time.monotonic()
+    SkyCoord(0.0 * u.deg, 0.0 * u.deg).transform_to(
+        AltAz(obstime=Time.now(), location=EarthLocation(lat=0.0 * u.deg, lon=0.0 * u.deg))
+    )
+    logger.info("Earth-orientation data loaded in %.1fs", time.monotonic() - started_at)
+
+
+def _warm_sky_catalog() -> None:
+    """Load the Planetarium's star catalog into memory ahead of first use.
+
+    The first `planetarium:get_sources` request otherwise pays a one-time
+    cost of tens of seconds (deserializing every stored star) while the
+    user waits on an empty sky. A tiny query constructs the sky engine and
+    loads that catalog now, in a worker thread, so it doesn't delay startup
+    or block other requests.
+    """
+    started_at = time.monotonic()
+    try:
+        container.wayfinder.planning.get_sources(0.0, 0.0, 0.01)
+        logger.info("Sky catalog warmed in %.1fs", time.monotonic() - started_at)
+    except Exception as warm_error:
+        logger.warning("Sky catalog warm-up failed; first Planetarium load will be slow: %s", warm_error)
+    try:
+        _warm_earth_orientation_data()
+    except Exception as warm_error:
+        logger.warning("Earth-orientation warm-up failed; the first star click will be slow: %s", warm_error)
+    try:
+        stellar_started_at = time.monotonic()
+        container.stellar_service.warm_catalog_summary_cache()
+        logger.info("Stellar catalog summary warmed in %.1fs", time.monotonic() - stellar_started_at)
+    except Exception as warm_error:
+        logger.warning(
+            "Stellar summary warm-up failed; first Astronomy Manager load will be slow: %s", warm_error
+        )
+    finally:
+        sky_catalog_warmup_finished.set()
 
 
 @app.on_event("startup")
 # ruff: ignore[unused-async] -- required async signature for FastAPI's
 # on_event("startup") decorator, which awaits this handler.
 async def startup_event():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Launch the background telemetry loop on FastAPI startup."""
+    """Launch the telemetry loop and sky catalog warm-up on startup."""
     app.state.telemetry_task = asyncio.create_task(periodic_telemetry_loop())
+    app.state.sky_warmup_task = asyncio.create_task(asyncio.to_thread(_warm_sky_catalog))
 
 
 @app.on_event("shutdown")
 # ruff: ignore[unused-async] -- required async signature for FastAPI's
 # on_event("shutdown") decorator, which awaits this handler.
 async def shutdown_event():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Stop the background DB-log listener thread on FastAPI shutdown."""
+    """Stop background threads/processes on FastAPI shutdown."""
     app.state.telemetry_task.cancel()
     db_log_listener.stop()
+    if container.indi_worker_client is not None:
+        container.indi_worker_client.stop()
 
 
 @app.websocket("/ws/events")
@@ -320,8 +947,10 @@ async def websocket_events(websocket: WebSocket):  # ruff: ignore[missing-return
     try:
         if container.initialized and container.telescope_service:
             # Query telescope status once to get fresh data, which
-            # updates astrometrics_service
-            container.telescope_service.get_status()
+            # updates astrometrics_service. Run via to_thread -- see the
+            # comment in periodic_telemetry_loop -- since this also runs
+            # directly on this coroutine's event-loop thread.
+            await asyncio.to_thread(container.telescope_service.get_status)
 
         state = container.astrometrics_service.get_state()
         event = {"type": "UI_EVENT", "action": "system_state_update", "payload": state}

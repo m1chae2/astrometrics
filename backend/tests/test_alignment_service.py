@@ -3,11 +3,12 @@
 Description: Verifies get_attempts()'s alias-keyed dict shape, the
 solving/aligned/warning/failed status transitions _alignment_loop
 produces, and -- the reason this file exists -- that the loop calls
-real IndiInterface methods with the correct RA units (hours, not the
-decimal degrees used everywhere else in this pipeline) at the mount
-command boundary. A bare MagicMock() indi double would silently accept
-a call to a nonexistent method, so mount interaction tests use an
-autospec'd mock that raises AttributeError like the real class would.
+real `ObservatoryControl` methods with the correct RA units (hours,
+not the decimal degrees used everywhere else in this pipeline) at the
+mount command boundary. A bare MagicMock() observatory double would
+silently accept a call to a nonexistent method, so mount interaction
+tests use an autospec'd mock that raises AttributeError like the real
+class would.
 """
 
 from types import SimpleNamespace
@@ -16,7 +17,7 @@ from unittest.mock import MagicMock, create_autospec
 import pytest
 
 from backend.services.observatory.alignment_service import AlignmentService
-from wayfindinglib.drivers.indi_interface import IndiInterface
+from wayfindinglib.api.control_registry import ObservatoryControl
 from wayfindinglib.models.session.telemetry import AlignmentAttempt
 
 
@@ -51,7 +52,7 @@ class _FailingStarIdentifier:
         return None, None
 
 
-def _make_service(indi=None, imaging_service=None, star_identifier=None) -> AlignmentService:  # ruff: ignore[missing-type-function-argument]
+def _make_service(observatory=None, imaging_service=None, star_identifier=None) -> AlignmentService:  # ruff: ignore[missing-type-function-argument]
     """Build an AlignmentService with settle_time zeroed for fast tests.
 
     Returns
@@ -60,7 +61,9 @@ def _make_service(indi=None, imaging_service=None, star_identifier=None) -> Alig
         A service instance ready for direct ``_alignment_loop`` calls.
     """
     service = AlignmentService(
-        indi_interface=indi if indi is not None else create_autospec(IndiInterface, instance=True),
+        observatory_api=(
+            observatory if observatory is not None else create_autospec(ObservatoryControl, instance=True)
+        ),
         imaging_service=imaging_service,
         star_identifier=star_identifier,
     )
@@ -74,7 +77,19 @@ def test_get_attempts_returns_alias_keyed_dicts():  # ruff: ignore[missing-retur
     service.alignment_attempts = [
         AlignmentAttempt(status="aligned", deltaRaArcsec=1.5, deltaDecArcsec=-2.5),
     ]
-    assert service.get_attempts() == [{"status": "aligned", "deltaRaArcsec": 1.5, "deltaDecArcsec": -2.5}]
+    assert service.get_attempts() == [
+        {
+            "status": "aligned",
+            "deltaRaArcsec": 1.5,
+            "deltaDecArcsec": -2.5,
+            "ra": None,
+            "dec": None,
+            "pointingErrorArcsec": None,
+            "timestamp": None,
+            "targetName": None,
+            "sessionId": None,
+        }
+    ]
 
 
 def test_clear_attempts_empties_the_list():  # ruff: ignore[missing-return-type-undocumented-public-function]
@@ -157,9 +172,9 @@ def test_alignment_loop_within_threshold_reports_aligned_and_stops():  # ruff: i
     solved_ra = target_ra + (1.0 / 3600.0)
     solved_dec = target_dec + (1.0 / 3600.0)
 
-    indi = create_autospec(IndiInterface, instance=True)
+    observatory = create_autospec(ObservatoryControl, instance=True)
     service = _make_service(
-        indi=indi,
+        observatory=observatory,
         imaging_service=_StubImagingService(),
         star_identifier=_StubStarIdentifier(solved_ra, solved_dec),
     )
@@ -170,8 +185,8 @@ def test_alignment_loop_within_threshold_reports_aligned_and_stops():  # ruff: i
     assert attempts[0]["status"] == "aligned"
     assert service.is_active() is False
     # Aligned on the first attempt means no sync/re-slew was ever issued.
-    indi.sync_coordinates.assert_not_called()
-    indi.slew.assert_not_called()
+    observatory.sync_coordinates.assert_not_called()
+    observatory.slew_to_coordinates.assert_not_called()
 
 
 def test_alignment_loop_computes_arcsec_delta_without_hours_factor():  # ruff: ignore[missing-return-type-undocumented-public-function]
@@ -198,24 +213,25 @@ def test_alignment_loop_computes_arcsec_delta_without_hours_factor():  # ruff: i
 
 
 def test_alignment_loop_out_of_range_syncs_and_reslews_in_hours():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify sync/re-slew use IndiInterface's real methods with RA in hours.
+    """Verify sync/re-slew use ObservatoryControl's real methods, RA in hours.
 
     This is the regression test for the bug this module's docstring
     describes: the loop used to call a nonexistent slew_telescope()
-    method and pass RA in decimal degrees where IndiInterface expects
-    hours. An autospec'd mock (not a bare MagicMock) is required here
-    -- a bare MagicMock would silently accept slew_telescope() too.
+    method and pass RA in decimal degrees where the mount driver
+    expects hours. An autospec'd mock (not a bare MagicMock) is
+    required here -- a bare MagicMock would silently accept
+    slew_telescope() too.
     """
     target_ra, target_dec = 150.0, 30.0
     solved_ra = target_ra + 1.0  # 1 degree off -- far outside the default threshold
     solved_dec = target_dec + 1.0
 
-    indi = create_autospec(IndiInterface, instance=True)
-    indi.sync_coordinates.return_value = True
-    indi.slew.return_value = True
+    observatory = create_autospec(ObservatoryControl, instance=True)
+    observatory.sync_coordinates.return_value = True
+    observatory.slew_to_coordinates.return_value = True
 
     service = _make_service(
-        indi=indi,
+        observatory=observatory,
         imaging_service=_StubImagingService(),
         star_identifier=_StubStarIdentifier(solved_ra, solved_dec),
     )
@@ -236,13 +252,13 @@ def test_alignment_loop_out_of_range_syncs_and_reslews_in_hours():  # ruff: igno
     assert len(attempts) == 1
     assert attempts[0]["status"] == "warning"
 
-    indi.sync_coordinates.assert_called_once()
-    sync_ra_hours, sync_dec_deg = indi.sync_coordinates.call_args.args
+    observatory.sync_coordinates.assert_called_once()
+    sync_ra_hours, sync_dec_deg = observatory.sync_coordinates.call_args.args
     assert sync_ra_hours == pytest.approx(solved_ra / 15.0)
     assert sync_dec_deg == pytest.approx(solved_dec)
 
-    indi.slew.assert_called_once()
-    slew_ra_hours, slew_dec_deg = indi.slew.call_args.args
+    observatory.slew_to_coordinates.assert_called_once()
+    slew_ra_hours, slew_dec_deg = observatory.slew_to_coordinates.call_args.args
     assert slew_ra_hours == pytest.approx(target_ra / 15.0)
     assert slew_dec_deg == pytest.approx(target_dec)
 

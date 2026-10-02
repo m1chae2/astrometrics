@@ -8,6 +8,12 @@ Relocated here from astrometricslib per the cross-library litmus test
 (`Wayfinding_Library_Architecture.md` Design Invariant 4): pulling files
 off a telescope host requires a telescope to be present, so it belongs
 in the observatory-control library rather than the science library.
+
+The first implementation of `RemoteTransferDriver`
+(`wayfindinglib/drivers/protocols/remote_transfer_driver.py`) -- a
+separate, pluggable abstraction from the hardware-control protocol
+drivers, since retrieving files from a telescope host is not part of
+INDI or ASCOM.
 """
 
 import logging
@@ -16,10 +22,18 @@ import subprocess
 import time
 from typing import Any
 
+from wayfindinglib.drivers.protocols.remote_transfer_driver import RemoteTransferDriver
+
 logger = logging.getLogger(__name__)
 
+_RSYNC_BASE_OPTIONS = ("-avz", "--no-p", "--no-g", "--no-o", "-s")
+"""Options every rsync transfer from the telescope computer uses."""
 
-class StellarMateInterface:
+_RSYNC_IDLE_TIMEOUT_SECONDS = 60
+"""Give up a log transfer that moves no data for this long."""
+
+
+class StellarMateInterface(RemoteTransferDriver):
     """Interface driver for the remote StellarMate telescope controller.
 
     Communicates over SSH and Rsync. Configured with a host alias and
@@ -48,6 +62,11 @@ class StellarMateInterface:
         self.frames_path = frames_path
         self._last_connection_status = None  # None=Unknown, True=Online, False=Offline
         self._last_probe_time = 0.0
+
+    @property
+    def driver_name(self) -> str:
+        """Registry key for this driver."""
+        return "stellarmate"
 
     def _update_connection_status(self, is_online: bool) -> None:
         """Update the internal connection status and log state changes.
@@ -341,6 +360,7 @@ class StellarMateInterface:
         os.makedirs(local_target_path, exist_ok=True)
 
         files_from_path = None
+        extra_options: list[str] = []
         if selected_files:
             import tempfile
 
@@ -349,35 +369,73 @@ class StellarMateInterface:
                 files_from_fd.write(fname + "\n")
             files_from_fd.close()
             files_from_path = files_from_fd.name
+            extra_options = ["--files-from", files_from_path]
 
-            rsync_cmd = [
-                "rsync",
-                "-avz",
-                "--no-p",
-                "--no-g",
-                "--no-o",
-                "-s",
-                "--files-from",
-                files_from_path,
-                f"{self.host_alias}:{remote_path}",
-                local_target_path,
-            ]
-        else:
-            rsync_cmd = [
-                "rsync",
-                "-avz",
-                "--no-p",
-                "--no-g",
-                "--no-o",
-                "-s",
-                f"{self.host_alias}:{remote_path}",
-                local_target_path,
-            ]
-
-        logger.info(f"Starting rsync download: {self.host_alias}:{remote_path} -> {local_target_path}")
         if log_callback:
-            log_callback(f"Starting robust download for {remote_target_name}...")
+            log_callback(f"Starting download for {remote_target_name}...")
 
+        try:
+            return self._run_rsync(
+                remote_path,
+                local_target_path,
+                extra_options,
+                remote_target_name,
+                log_callback,
+            )
+        finally:
+            if files_from_path:
+                try:
+                    os.remove(files_from_path)
+                except OSError:
+                    pass
+
+    def _run_rsync(
+        self,
+        remote_path: str,
+        local_path: str,
+        extra_options: list[str],
+        description: str,
+        log_callback: Any | None = None,
+    ) -> bool:
+        """Run one rsync transfer from the telescope computer.
+
+        The one place rsync is invoked, shared by the image downloads and
+        the log downloads so they cannot drift apart. The options every
+        transfer needs are fixed here: archive mode with compression, no
+        permission/group/owner copying (the two computers have different
+        users), and ``-s`` (protect-args) so a remote path containing a
+        space, like ``NGC 7023``, is not split into two words.
+
+        Parameters
+        ----------
+        remote_path : `str`
+            Absolute path on the telescope computer. End it with ``/`` to
+            copy a folder's contents.
+        local_path : `str`
+            Local destination.
+        extra_options : `list` [`str`]
+            Options specific to this transfer, such as ``--files-from`` or
+            ``--include`` filters.
+        description : `str`
+            What is being transferred, for log messages.
+        log_callback : callable, optional
+            Called with a message for each image file transferred.
+
+        Returns
+        -------
+        succeeded : `bool`
+            `True` if rsync exited with status 0. A failure is logged and
+            reported as `False`; it is never retried with another tool
+            (see `download_target_folder`).
+        """
+        rsync_cmd = [
+            "rsync",
+            *_RSYNC_BASE_OPTIONS,
+            *extra_options,
+            f"{self.host_alias}:{remote_path}",
+            local_path,
+        ]
+        logger.info(f"Starting rsync download: {self.host_alias}:{remote_path} -> {local_path}")
         try:
             process = subprocess.Popen(
                 rsync_cmd,
@@ -388,34 +446,216 @@ class StellarMateInterface:
                 universal_newlines=True,
             )
 
-            for line in process.stdout:
-                line = line.strip()
-                if not line:
-                    continue
+            if process.stdout:
+                for line in iter(process.stdout.readline, ""):
+                    line = line.strip()
+                    if not line:
+                        continue
 
-                if line.endswith((".fits", ".fit", ".jpg", ".png")):
-                    if log_callback:
-                        log_callback(f"Downloading: {line}")
+                    if line.endswith((".fits", ".fit", ".jpg", ".png")):
+                        if log_callback:
+                            log_callback(f"Downloading: {line}")
 
-                logger.debug(f"rsync: {line}")
+                    logger.debug(f"rsync: {line}")
 
             return_code = process.wait()
-            if files_from_path:
-                try:
-                    os.remove(files_from_path)
-                except OSError:
-                    pass
             if return_code == 0:
-                logger.info(f"rsync completed successfully for {remote_target_name}")
+                logger.info(f"rsync completed successfully for {description}")
                 return True
-            else:
-                logger.error(f"rsync failed with code {return_code} for {remote_target_name}.")
-                return False
-        except Exception as e:
-            if files_from_path:
-                try:
-                    os.remove(files_from_path)
-                except OSError:
-                    pass
-            logger.error(f"rsync execution error for {remote_target_name}: {e}")
+            logger.error(f"rsync failed with code {return_code} for {description}.")
             return False
+        except Exception as e:
+            logger.error(f"rsync execution error for {description}: {e}")
+            return False
+
+    def _list_remote_files_with_sizes(self, find_command: str) -> dict[str, int]:
+        """Run a ``find`` on the telescope computer and return file sizes.
+
+        Parameters
+        ----------
+        find_command : `str`
+            A ``find`` command whose ``-printf`` prints, on each line, the
+            size in bytes, a tab, and the absolute path. It should end with
+            ``|| true``: ``find`` exits non-zero when any folder it was given
+            is missing (for example no PHD2 folder on an Ekos-only setup), and
+            the folders that do exist still produce output.
+
+        Returns
+        -------
+        sizes_by_path : `dict` [`str`, `int`]
+            Size of each file found, keyed by its absolute remote path, in
+            path order. Empty if the host cannot be reached.
+        """
+        try:
+            output = self._run_command(["ssh", self.host_alias, find_command])
+        except Exception as e:
+            if self._last_connection_status is not False:
+                logger.error(f"Failed to list remote files: {e}")
+            return {}
+        sizes_by_path: dict[str, int] = {}
+        for line in output.split("\n"):
+            size_text, _, remote_path = line.partition("\t")
+            if remote_path.strip() and size_text.strip().isdigit():
+                sizes_by_path[remote_path.strip()] = int(size_text)
+        return dict(sorted(sizes_by_path.items()))
+
+    def _download_remote_files(
+        self,
+        sizes_by_path: dict[str, int],
+        destination_dir: str,
+        name_patterns: tuple[str, ...],
+        description: str,
+    ) -> list[str]:
+        """Sync remote log files into a local directory with rsync.
+
+        The same mechanism the image downloads use: rsync compares each
+        file's size and modification time and copies only what changed, so
+        a log still being written is fetched again and a finished one is
+        not. One rsync run per remote folder keeps it to one connection per
+        folder, which matters because the telescope computer is slow at
+        answering many small file requests.
+
+        If every file is already present with the remote size, rsync is not
+        started at all. As with the image downloads, there is deliberately
+        no fallback to another tool: a failed run is logged and the files
+        that are already current are still returned.
+
+        Parameters
+        ----------
+        sizes_by_path : `dict` [`str`, `int`]
+            Remote absolute path and size of each file wanted.
+        destination_dir : `str`
+            Local directory to sync into.
+        name_patterns : `tuple` [`str`, ...]
+            Shell patterns of the file names to take from each folder.
+        description : `str`
+            What the files are, for log messages.
+
+        Returns
+        -------
+        local_paths : `list` [`str`]
+            Local path of every wanted file that is present with its remote
+            size after the sync.
+        """
+        os.makedirs(destination_dir, exist_ok=True)
+        folders_needing_sync: set[str] = set()
+        for remote_file, remote_size in sizes_by_path.items():
+            local_path = os.path.join(destination_dir, os.path.basename(remote_file))
+            if not (os.path.isfile(local_path) and os.path.getsize(local_path) == remote_size):
+                folders_needing_sync.add(os.path.dirname(remote_file))
+
+        for remote_folder in sorted(folders_needing_sync):
+            self._run_rsync(
+                f"{remote_folder}/",
+                destination_dir + os.sep,
+                [
+                    *(f"--include={pattern}" for pattern in name_patterns),
+                    "--exclude=*",
+                    f"--timeout={_RSYNC_IDLE_TIMEOUT_SECONDS}",
+                ],
+                f"{description}s in {remote_folder}",
+            )
+
+        local_paths = []
+        for remote_file, remote_size in sizes_by_path.items():
+            local_path = os.path.join(destination_dir, os.path.basename(remote_file))
+            if os.path.isfile(local_path) and os.path.getsize(local_path) == remote_size:
+                local_paths.append(local_path)
+            else:
+                logger.warning(f"{description} {remote_file} is not present and current after the sync")
+        return local_paths
+
+    def _remote_guide_log_sizes(self) -> dict[str, int]:
+        """List every remote guide log with its size.
+
+        Looks where PHD2 stores its logs (``~/PHD2`` and ``~/.phd2/logs``)
+        and where the Ekos internal guider stores its own
+        (``~/.local/share/kstars/guidelogs``). Both use the PHD2 log format.
+
+        Returns
+        -------
+        sizes_by_path : `dict` [`str`, `int`]
+            Size in bytes of each guide log, keyed by remote path.
+        """
+        command = (
+            'find "$HOME/PHD2/" "$HOME/.phd2/logs/" "$HOME/.local/share/kstars/guidelogs/" '
+            "-maxdepth 2 -type f \\( -name 'PHD2_GuideLog_*.txt' -o -name 'guide_log*.txt' \\) "
+            "-printf '%s\\t%p\\n' 2>/dev/null || true"
+        )
+        return self._list_remote_files_with_sizes(command)
+
+    def list_remote_guide_logs(self) -> list[str]:
+        """List all remote guide log filenames found on StellarMate.
+
+        Searches the folders where PHD2 stores its logs and the folder
+        where the Ekos internal guider stores its own.
+
+        Returns
+        -------
+        log_files : `list` [`str`]
+            List of absolute paths to remote guide log files.
+        """
+        return list(self._remote_guide_log_sizes())
+
+    def download_guide_logs(self, destination_dir: str) -> list[str]:
+        """Download remote guide logs to a local directory.
+
+        Parameters
+        ----------
+        destination_dir : `str`
+            Local directory to write downloaded log files into.
+
+        Returns
+        -------
+        downloaded_paths : `list` [`str`]
+            Local file paths of the guide logs, downloaded now or already
+            present and unchanged.
+        """
+        return self._download_remote_files(
+            self._remote_guide_log_sizes(),
+            destination_dir,
+            ("PHD2_GuideLog_*.txt", "guide_log*.txt"),
+            "guide log",
+        )
+
+    def _remote_ekos_analyze_log_sizes(self) -> dict[str, int]:
+        """List every remote Ekos analyze log with its size.
+
+        Returns
+        -------
+        sizes_by_path : `dict` [`str`, `int`]
+            Size in bytes of each analyze log, keyed by remote path.
+        """
+        command = (
+            "find \"$HOME/.local/share/kstars/analyze/\" -maxdepth 1 -type f -name 'ekos-*.analyze' "
+            "-printf '%s\\t%p\\n' 2>/dev/null || true"
+        )
+        return self._list_remote_files_with_sizes(command)
+
+    def list_remote_ekos_analyze_logs(self) -> list[str]:
+        """List all Ekos analyze logs found on StellarMate.
+
+        Returns
+        -------
+        log_files : `list` [`str`]
+            Absolute remote paths of the ``ekos-*.analyze`` files.
+        """
+        return list(self._remote_ekos_analyze_log_sizes())
+
+    def download_ekos_analyze_logs(self, destination_dir: str) -> list[str]:
+        """Download remote Ekos analyze logs to a local directory.
+
+        Parameters
+        ----------
+        destination_dir : `str`
+            Local directory to write downloaded log files into.
+
+        Returns
+        -------
+        downloaded_paths : `list` [`str`]
+            Local file paths of the analyze logs, downloaded now or already
+            present and unchanged.
+        """
+        return self._download_remote_files(
+            self._remote_ekos_analyze_log_sizes(), destination_dir, ("ekos-*.analyze",), "Ekos analyze log"
+        )

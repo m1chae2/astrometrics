@@ -17,14 +17,11 @@ import { useState } from 'react';
 export const DEFAULT_OVERLAY_TOGGLES = {
   showStars: true,
   showFOVOutline: false,
-  showFITSOverlays: false,
   showEnvironment: true,
   showGrid: true,
   showCatalog: true,
   showConstellations: true,
   showTelescope: true,
-  showSpectraPlot: false,
-  showPhotometryPlot: false,
 } as const;
 
 /**
@@ -37,9 +34,6 @@ export interface OverlayToggles {
   /** Show sensor FOV outline overlay. */
   showFOVOutline: boolean;
   setShowFOVOutline: (value: boolean) => void;
-  /** Show FITS image overlays. */
-  showFITSOverlays: boolean;
-  setShowFITSOverlays: (value: boolean) => void;
   /** Show local horizon and ground environment overlay. */
   showEnvironment: boolean;
   setShowEnvironment: (value: boolean) => void;
@@ -55,12 +49,6 @@ export interface OverlayToggles {
   /** Show telescope pointing crosshair overlay. */
   showTelescope: boolean;
   setShowTelescope: (value: boolean) => void;
-  /** Whether the full spectroscopy plot panel is visible. */
-  showSpectraPlot: boolean;
-  setShowSpectraPlot: (value: boolean) => void;
-  /** Whether the full photometry plot panel is visible. */
-  showPhotometryPlot: boolean;
-  setShowPhotometryPlot: (value: boolean) => void;
 }
 
 /**
@@ -73,25 +61,19 @@ export interface OverlayToggles {
 export const useOverlayToggles = (): OverlayToggles => {
   const [showStars, setShowStars] = useState<boolean>(DEFAULT_OVERLAY_TOGGLES.showStars);
   const [showFOVOutline, setShowFOVOutline] = useState<boolean>(DEFAULT_OVERLAY_TOGGLES.showFOVOutline);
-  const [showFITSOverlays, setShowFITSOverlays] = useState<boolean>(DEFAULT_OVERLAY_TOGGLES.showFITSOverlays);
   const [showEnvironment, setShowEnvironment] = useState<boolean>(DEFAULT_OVERLAY_TOGGLES.showEnvironment);
   const [showGrid, setShowGrid] = useState<boolean>(DEFAULT_OVERLAY_TOGGLES.showGrid);
   const [showCatalog, setShowCatalog] = useState<boolean>(DEFAULT_OVERLAY_TOGGLES.showCatalog);
   const [showConstellations, setShowConstellations] = useState<boolean>(DEFAULT_OVERLAY_TOGGLES.showConstellations);
   const [showTelescope, setShowTelescope] = useState<boolean>(DEFAULT_OVERLAY_TOGGLES.showTelescope);
-  const [showSpectraPlot, setShowSpectraPlot] = useState<boolean>(DEFAULT_OVERLAY_TOGGLES.showSpectraPlot);
-  const [showPhotometryPlot, setShowPhotometryPlot] = useState<boolean>(DEFAULT_OVERLAY_TOGGLES.showPhotometryPlot);
 
   return {
     showStars, setShowStars,
     showFOVOutline, setShowFOVOutline,
-    showFITSOverlays, setShowFITSOverlays,
     showEnvironment, setShowEnvironment,
     showGrid, setShowGrid,
     showCatalog, setShowCatalog,
     showConstellations, setShowConstellations,
     showTelescope, setShowTelescope,
-    showSpectraPlot, setShowSpectraPlot,
-    showPhotometryPlot, setShowPhotometryPlot,
   };
 };

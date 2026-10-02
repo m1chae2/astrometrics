@@ -15,9 +15,11 @@ import matplotlib.pyplot as plt
 from astrometricslib import Astrometrics
 
 astrometrics = Astrometrics()
-target = astrometrics.targets.get("M 13")
+target = astrometrics.targets.get("M 57")
 if not target:
-    raise ValueError("Target 'M 13' not found in library.")
+    raise ValueError("Target 'M 57' not found in library.")
 
-astrometrics.visualization.plot_target_dashboard(target, limit=15)
+# astrometrics.visualization.plot_target_dashboard(target, limit=30)
+astrometrics.visualization.plot_spectroscopy(target)
+
 plt.show()

@@ -7,9 +7,20 @@ wayfindinglib's Wayfinder high-level interface lives in
 this suite does not require wayfindinglib to be installed.
 """
 
+import asyncio
+import types
+
 import pytest
 
-from astrometricslib.mcp.reflection import generate_tool_schema, parse_docstring_params
+from astrometricslib.drivers.job_logging import background_job
+from astrometricslib.mcp.reflection import (
+    _infer_background_job_target_id,
+    _make_quality_snapshot_fn,
+    generate_tool_schema,
+    parse_docstring_params,
+    register_astrometrics_tools,
+)
+from astrometricslib.mcp.tool_registry import ToolRegistry
 from astrometricslib.mcp.tool_registry import registry as astrometrics_registry
 
 pytestmark = pytest.mark.anyio
@@ -87,9 +98,164 @@ def test_astrometricslib_mcp_reflection_registers_tools():  # ruff: ignore[missi
     assert "visualization_convert_fits_to_png" in tool_names
     assert "star_get_audit" in tool_names
 
+    # Verify nested sub-APIs (dotted branch_mapping keys) are reflected too
+    assert "diagnostics_measure_stack_fwhm" in tool_names
+    assert "calibration_stats" in tool_names
+
 
 async def test_astrometrics_reflected_tool_execution():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verify executing a reflected tool via Astrometrics registry succeeds."""
     res = await astrometrics_registry.execute("target_list", {})
     assert len(res) > 0
     assert res[0].type == "text"
+
+
+def _fake_target(target_id: str) -> types.SimpleNamespace:
+    """Build a bare object with just the attributes a quality snapshot reads.
+
+    Returns
+    -------
+    target : `types.SimpleNamespace`
+        A stand-in for `astrometricslib.models.target.Target`.
+    """
+    return types.SimpleNamespace(
+        id=target_id,
+        stacking=types.SimpleNamespace(quality_summary=None),
+        spectral_stacking=types.SimpleNamespace(quality_summary=None),
+        quality=types.SimpleNamespace(astrometry=None, photometry=None, spectroscopy=None),
+    )
+
+
+def test_infer_background_job_target_id_prefers_a_resolved_target():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify a single-target call's job is tracked under that target's id."""
+    target_id = _infer_background_job_target_id({"target": _fake_target("Vega")})
+    assert target_id == "Vega"
+
+
+def test_infer_background_job_target_id_falls_back_to_a_batch_label():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify an all-targets call gets a synthetic, camera-scoped label."""
+    target_id = _infer_background_job_target_id({"camera_name": "ZWO ASI 533MM Pro"})
+    assert target_id == "batch:ZWO ASI 533MM Pro"
+
+
+def test_infer_background_job_target_id_defaults_when_neither_is_present():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify a call identifying no target at all still gets a label."""
+    assert _infer_background_job_target_id({}) == "unknown"
+
+
+def test_quality_snapshot_fn_covers_a_single_resolved_target():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify a single-target call snapshots exactly that target."""
+    target = _fake_target("Vega")
+    target.stacking.quality_summary = "stack-summary-v1"
+
+    snapshot_fn = _make_quality_snapshot_fn(astrometrics_instance=None, kwargs={"target": target})
+
+    assert snapshot_fn is not None
+    assert snapshot_fn() == {
+        "Vega": {
+            "stack": "stack-summary-v1",
+            "spectralStack": None,
+            "astrometry": None,
+            "photometry": None,
+            "spectroscopy": None,
+        }
+    }
+
+
+def test_quality_snapshot_fn_covers_every_target_in_a_batch_call():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify a batch call snapshots every target it will touch.
+
+    Uses `.list()`, not `.get()`, since each target in a real batch is
+    processed in its own subprocess -- an in-memory cache in this process
+    would not reflect that work by the time the "post" snapshot runs.
+    """
+    fake_targets = {"Vega": _fake_target("Vega"), "Albireo": _fake_target("Albireo")}
+    fake_astrometrics = types.SimpleNamespace(
+        targets=types.SimpleNamespace(list=lambda: list(fake_targets.values()))
+    )
+
+    snapshot_fn = _make_quality_snapshot_fn(fake_astrometrics, {"camera_name": "ZWO ASI 533MM Pro"})
+
+    assert snapshot_fn is not None
+    assert set(snapshot_fn().keys()) == {"Vega", "Albireo"}
+
+
+def test_quality_snapshot_fn_is_none_when_no_target_can_be_identified():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify a call with neither a target nor a camera gets no snapshot."""
+    assert _make_quality_snapshot_fn(astrometrics_instance=None, kwargs={}) is None
+
+
+async def test_a_background_job_marked_method_returns_its_result_without_blocking():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Verify a `@background_job`-marked tool is dispatched as a job.
+
+    A fast call should still get its real return value back, alongside a
+    job id, rather than being called directly and blocking the dispatcher.
+    """
+
+    class FakeApi:
+        """A stand-in `Astrometrics`-like object with one marked method."""
+
+        @background_job("unit_test_job", grace_period_seconds=2.0)
+        def do_work(self) -> dict:
+            """Stand in for real pipeline work.
+
+            Returns
+            -------
+            result : `dict`
+                A trivial, fixed result.
+            """
+            return {"stackedImage": "Vega_Stacked.fits"}
+
+    isolated_registry = ToolRegistry()
+    register_astrometrics_tools(isolated_registry, FakeApi(), {"": "fake"})
+
+    result = await isolated_registry.execute("fake_do_work", {})
+
+    assert len(result) == 1
+    assert '"stackedImage": "Vega_Stacked.fits"' in result[0].text
+    assert '"jobId"' in result[0].text
+
+
+async def test_a_sync_method_that_starts_its_own_event_loop_still_works():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """A sync method bridging into `asyncio.run()` must not crash here.
+
+    Regression test for a real incident: wayfindinglib's
+    `ObservatoryControl` reuses this same reflection engine, and its
+    hardware-facing methods stay synchronous by bridging into async
+    INDI drivers via `hardware_operations._run_sync`'s own
+    `asyncio.run(...)`. Calling such a method directly (as a plain
+    Python call, not via a thread) from inside `execute_reflected`
+    crashed with "asyncio.run() cannot be called from a running event
+    loop", because this test itself (like the real MCP server) already
+    runs inside one -- exactly the same conflict
+    `backend/main_backend.py`'s periodic telemetry loop already hit and
+    fixed calling the same hardware layer, by running it via
+    `asyncio.to_thread` instead of a direct call.
+    """
+
+    class FakeObservatoryControl:
+        """A stand-in with one method that starts its own event loop."""
+
+        def get_telescope_status(self) -> dict:
+            """Stand in for a hardware call bridged via `_run_sync`.
+
+            Returns
+            -------
+            result : `dict`
+                A trivial, fixed result, reached only if a nested
+                `asyncio.run()` succeeds from a plain worker thread.
+            """
+
+            async def _coroutine() -> dict:
+                await asyncio.sleep(0)  # stand in for a real async INDI call
+                return {"trackingStatus": "Parked"}
+
+            return asyncio.run(_coroutine())
+
+    isolated_registry = ToolRegistry()
+    register_astrometrics_tools(isolated_registry, FakeObservatoryControl(), {"": "fake"})
+
+    result = await isolated_registry.execute("fake_get_telescope_status", {})
+
+    assert len(result) == 1
+    assert '"trackingStatus": "Parked"' in result[0].text

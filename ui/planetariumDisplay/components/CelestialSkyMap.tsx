@@ -11,14 +11,13 @@ import { PlanetariumSource, PlanetariumTarget, ObserverLocation, ConstellationLi
 import { getAltAz, getRaDec, projectAltAz, pixelsPerDegree } from '../utils/projectionMath';
 import { safeParse } from '../utils/coordinateUtils';
 import { findNearestSource } from '../utils/hitTesting';
-import { FitsLoaderItem, LoadedFitsEntry } from './FitsLoaderItem';
 import { useTelescopeStatus } from '../../common/hooks/useTelescopeStatus';
+import { emitToast } from '../../common/utils/emitToast';
 import type { ProjectionContext } from '../layers/overlayTypes';
 import { BackgroundOverlay } from '../layers/BackgroundOverlay';
 import { StarOverlay } from '../layers/StarOverlay';
 import { StarSelectionOverlay } from '../layers/StarSelectionOverlay';
 import { TargetOverlay } from '../layers/TargetOverlay';
-import { ImageOverlay } from '../layers/ImageOverlay';
 import { EnvironmentOverlay } from '../layers/EnvironmentOverlay';
 import { GridOverlay } from '../layers/GridOverlay';
 import { FovOverlay } from '../layers/FovOverlay';
@@ -26,7 +25,11 @@ import { TelescopeOverlay } from '../layers/TelescopeOverlay';
 import { CompassOverlay } from '../layers/CompassOverlay';
 import { HudOverlay } from '../layers/HudOverlay';
 import { ConstellationOverlay } from '../layers/ConstellationOverlay';
+import { AlignmentOverlay } from '../layers/AlignmentOverlay';
+import { TrackingRiskOverlay } from '../layers/TrackingRiskOverlay';
 import { StarFieldRenderer } from '../webgl/StarFieldRenderer';
+import { useTimeController } from '../hooks/useTimeController';
+import { useSkyMapInput } from '../hooks/useSkyMapInput';
 
 /**
  * Props for CelestialSkyMap.
@@ -44,8 +47,6 @@ interface Props {
   showStars: boolean;
   /** Show sensor FOV outline overlay. */
   showFOV: boolean;
-  /** Show FITS image overlays. */
-  showFITS: boolean;
   /** Show horizon and ground environment overlay. */
   showEnvironment: boolean;
   /** Show RA/Dec coordinate grid overlay. */
@@ -58,6 +59,20 @@ interface Props {
   constellationLines: ConstellationLineSegment[];
   /** Show telescope pointing crosshair overlay. */
   showTelescope: boolean;
+  /** Show telescope alignment pointing vectors and polar alignment overlay. */
+  showAlignment?: boolean;
+  /** Show mount tracking mechanical risk heatmap overlay. */
+  showTrackingRisk?: boolean;
+  /** Plate-solve alignment attempts to project onto the celestial sphere. */
+  alignmentAttempts?: import('../../common/types/backendTypes').AlignmentAttempt[];
+  /** Cumulative tracking and alignment attempts across all recorded observing sessions. */
+  cumulativeTrackingAttempts?: import('../../common/types/backendTypes').AlignmentAttempt[];
+  /** Polar Alignment Assistant (PAA) status and coordinates. */
+  polarAlignment?: import('../../common/types/backendTypes').PolarAlignmentStatus | null;
+  /** Selected historical session identifier being reviewed. */
+  selectedSessionId?: string | null;
+  /** Active simulation date (from Date & Time modal or simulation clock). */
+  simulationDate?: Date;
   /** Current field of view in degrees. */
   fov: number;
   /** Callback invoked when the user scrolls to change FOV. */
@@ -81,6 +96,8 @@ interface Props {
   sensorFovWidthDeg?: number;
   /** Sensor FOV height in degrees from the active equipment configuration. */
   sensorFovHeightDeg?: number;
+  /** Sensor plate scale in arcseconds per pixel from the active equipment configuration. */
+  plateScaleArcsecPerPx?: number;
 }
 
 
@@ -115,9 +132,8 @@ const LST_REDRAW_EPSILON_DEGREES = 0.001;
 // frame once sidereal drift exceeds this many pixels.
 const LST_REDRAW_EPSILON_PIXELS = 1.5;
 
-const calculateLST = (offsetMinutes: number, lon: number): number => {
-  const baseDate = new Date();
-  const date = new Date(baseDate.getTime() + offsetMinutes * 60 * 1000);
+export const calculateLST = (simDate: Date, offsetMinutes: number, lon: number): number => {
+  const date = new Date(simDate.getTime() + offsetMinutes * 60 * 1000);
 
   const jd2000 = 2451545.0;
   const currentJd = (date.getTime() / 86400000.0) + 2440587.5;
@@ -148,13 +164,19 @@ export const CelestialSkyMap: React.FC<Props> = ({
   location,
   showStars,
   showFOV,
-  showFITS,
   showEnvironment,
   showGrid,
   showCatalog,
   showConstellations,
   constellationLines,
   showTelescope,
+  showAlignment = true,
+  showTrackingRisk = false,
+  alignmentAttempts,
+  cumulativeTrackingAttempts,
+  polarAlignment,
+  selectedSessionId,
+  simulationDate,
   fov,
   onFOVChange,
   onSelectSource,
@@ -164,10 +186,17 @@ export const CelestialSkyMap: React.FC<Props> = ({
   onCenterChange,
   sensorFovWidthDeg,
   sensorFovHeightDeg,
+  plateScaleArcsecPerPx,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const starCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+
+  // Keep a ref to the active simulation date
+  const simulationDateRef = useRef<Date>(simulationDate || new Date());
+  useEffect(() => {
+    simulationDateRef.current = simulationDate || new Date();
+  }, [simulationDate]);
 
   // WebGL star-field renderer: draws the (potentially thousands of) star
   // points on its own canvas via instanced point sprites, instead of
@@ -185,6 +214,14 @@ export const CelestialSkyMap: React.FC<Props> = ({
       setStarRenderMode('webgl');
     } catch (error) {
       console.warn('WebGL2 star field renderer unavailable; falling back to 2D star rendering.', error);
+      // A one-time, mount-only check (empty deps below) — safe to surface to
+      // the user, unlike the per-frame render errors further down this file,
+      // which would spam a toast on every animation frame if reported the same way.
+      emitToast(
+        'WebGL2 unavailable — using slower 2D star rendering.',
+        'warning',
+        'planetarium-renderer'
+      );
       starFieldRendererRef.current = null;
       setStarRenderMode('fallback');
     }
@@ -200,11 +237,12 @@ export const CelestialSkyMap: React.FC<Props> = ({
   // dots on its own canvas) or stays StarOverlay as the WebGL2-unavailable fallback.
   const overlays = useMemo(() => [
     new BackgroundOverlay(),
-    new ImageOverlay(),
+    new TrackingRiskOverlay(),
     new GridOverlay(),
     new ConstellationOverlay(),
     new CompassOverlay(),
     new TargetOverlay(),
+    new AlignmentOverlay(),
     starRenderMode === 'webgl' ? new StarSelectionOverlay() : new StarOverlay(),
     new FovOverlay(),
     new TelescopeOverlay(),
@@ -222,6 +260,7 @@ export const CelestialSkyMap: React.FC<Props> = ({
   const currentLSTRef = useRef<number>(0.0);
   const sensorFovWidthDegRef = useRef<number | undefined>(sensorFovWidthDeg);
   const sensorFovHeightDegRef = useRef<number | undefined>(sensorFovHeightDeg);
+  const plateScaleArcsecPerPxRef = useRef<number | undefined>(plateScaleArcsecPerPx);
 
   // Tracks whether the render loop needs to redraw, so an idle, unchanged
   // view doesn't repaint every star/overlay from scratch on every rAF tick.
@@ -256,21 +295,11 @@ export const CelestialSkyMap: React.FC<Props> = ({
     }
   }, [telemetry.ra, telemetry.dec, telescopeConnection]);
 
-  // Drag interaction
-  const [isDragging, setIsDragging] = useState(false);
-  const isDraggingRef = useRef(false);
-  const dragStart = useRef({ x: 0, y: 0 });
-  const dragLast = useRef({ x: 0, y: 0 });
-  const dragCenterStart = useRef({ az: 0, alt: 0 });
-
   // Time & LST state
-  const [timeOffsetMinutes, setTimeOffsetMinutes] = useState<number>(0);
-  const timeOffsetMinutesRef = useRef<number>(0);
-  useEffect(() => {
-    timeOffsetMinutesRef.current = timeOffsetMinutes;
-  }, [timeOffsetMinutes]);
-  const [isTimePlaying, setIsTimePlaying] = useState<boolean>(false);
-  const [timeSpeed, setTimeSpeed] = useState<number>(1);
+  const {
+    timeOffsetMinutes, setTimeOffsetMinutes, timeOffsetMinutesRef,
+    isTimePlaying, setIsTimePlaying, timeSpeed, setTimeSpeed,
+  } = useTimeController();
   const [trackingMode, setTrackingMode] = useState<boolean>(false);
   const trackedCoords = useRef<{ ra: number; dec: number } | null>(null);
 
@@ -284,7 +313,7 @@ export const CelestialSkyMap: React.FC<Props> = ({
   const observerLat = safeParse(location?.latitude ?? 39.7392);
   const observerLon = safeParse(location?.longitude ?? -104.9903);
 
-  const currentLST = calculateLST(timeOffsetMinutes, observerLon);
+  const currentLST = calculateLST(simulationDate || new Date(), timeOffsetMinutes, observerLon);
 
   // Kept in sync so the 't' keydown handler (subscribed once) can read the
   // latest selection without recreating the window listener on every change.
@@ -312,17 +341,6 @@ export const CelestialSkyMap: React.FC<Props> = ({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
-
-  // Dynamic Sidereal Time play interval loop
-  useEffect(() => {
-    if (!isTimePlaying) return;
-    const interval = setInterval(() => {
-      setTimeOffsetMinutes(prev => prev + (timeSpeed * 0.1));
-    }, 100);
-    return () => clearInterval(interval);
-  }, [isTimePlaying, timeSpeed]);
-
-
 
   // Keep LST ref in sync
   useEffect(() => {
@@ -412,95 +430,6 @@ export const CelestialSkyMap: React.FC<Props> = ({
     };
   }, []);
 
-  const [loadedFits, setLoadedFits] = useState<Record<string, LoadedFitsEntry>>({});
-
-  // Targets (with a stackedImage) currently on screen -- only these get a
-  // FitsLoaderItem mounted. Recomputed inside the render loop below (see
-  // "Determine which stacked-image targets are on screen"), gated on the
-  // camera/overlay-inputs redraw check so it doesn't run every frame, and
-  // only committed to state when the set actually changes so it doesn't
-  // trigger a React re-render on every redrawn frame either. Without this,
-  // showFITS mounted a FitsLoaderItem for every target the (up to
-  // near-whole-sky) source query returned -- confirmed to spawn dozens of
-  // concurrent Web Worker FITS parses all racing to draw onto
-  // FitsLoaderItem's single shared offscreen MTF-stretch canvas, corrupting
-  // each other's output.
-  const [visibleFitsTargetIds, setVisibleFitsTargetIds] = useState<Set<string>>(new Set());
-  const visibleFitsTargetIdsRef = useRef<Set<string>>(new Set());
-
-  const handleFitsLoaded = useCallback((id: string, entry: LoadedFitsEntry) => {
-    setLoadedFits(prev => ({ ...prev, [id]: entry }));
-  }, []);
-
-  /**
-   * Begins a canvas drag operation, capturing the pointer and disabling tracking mode.
-   *
-   * @param {React.PointerEvent} e - The pointer down event.
-   * @returns {void}
-   */
-  const onPointerDown = (e: React.PointerEvent) => {
-    isDraggingRef.current = true;
-    setIsDragging(true);
-    setTrackingMode(false);
-    // Cancel any residual recenter-on-selection easing so the drag starts from
-    // where the camera actually is, not from the still-in-flight animation
-    // target — otherwise the pan fights the leftover lerp and feels locked
-    // back toward the selected object.
-    targetAzRef.current = centerAzRef.current;
-    targetAltRef.current = centerAltRef.current;
-    try {
-      e.currentTarget.setPointerCapture(e.pointerId);
-    } catch (err) {
-      // Ignore setPointerCapture failures
-    }
-    dragStart.current = { x: e.clientX, y: e.clientY };
-    dragLast.current = { x: e.clientX, y: e.clientY };
-    dragCenterStart.current = { az: centerAzRef.current, alt: centerAltRef.current };
-  };
-
-  /**
-   * Pans the viewport by converting pointer delta to Alt/Az coordinate offsets.
-   *
-   * @param {React.PointerEvent} e - The pointer move event.
-   * @returns {void}
-   */
-  const onPointerMove = (e: React.PointerEvent) => {
-    if (!isDraggingRef.current) return;
-    const dx = e.clientX - dragLast.current.x;
-    const dy = e.clientY - dragLast.current.y;
-    dragLast.current = { x: e.clientX, y: e.clientY };
-
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const scale = pixelsPerDegree(canvas.width, canvas.height, localFOVRef.current);
-
-    const dAlt = dy / scale;
-    const dAz = -(dx / scale);
-
-    const nextAlt = Math.max(-89.9, Math.min(89.9, targetAltRef.current + dAlt));
-    const nextAz = (targetAzRef.current + dAz + 360.0) % 360.0;
-
-    targetAzRef.current = nextAz;
-    targetAltRef.current = nextAlt;
-  };
-
-  /**
-   * Ends a canvas drag operation and releases pointer capture.
-   *
-   * @param {React.PointerEvent} e - The pointer up event.
-   * @returns {void}
-   */
-  const onPointerUp = (e: React.PointerEvent) => {
-    isDraggingRef.current = false;
-    setIsDragging(false);
-    try {
-      e.currentTarget.releasePointerCapture(e.pointerId);
-    } catch (err) {
-      // Ignore releasePointerCapture failures
-    }
-  };
-
   // Sync local FOV and sensor FOV refs
   useEffect(() => {
     localFOVRef.current = fov;
@@ -513,6 +442,10 @@ export const CelestialSkyMap: React.FC<Props> = ({
   useEffect(() => {
     sensorFovHeightDegRef.current = sensorFovHeightDeg;
   }, [sensorFovHeightDeg]);
+
+  useEffect(() => {
+    plateScaleArcsecPerPxRef.current = plateScaleArcsecPerPx;
+  }, [plateScaleArcsecPerPx]);
 
   const parentNotifyTimeout = useRef<number | null>(null);
   const notifyParentFOV = useCallback((nextFOV: number) => {
@@ -539,65 +472,11 @@ export const CelestialSkyMap: React.FC<Props> = ({
     };
   }, []);
 
-  // Keyboard listener for arrow key pan (plain arrows) and zoom (Ctrl+Up/Down)
-  useEffect(() => {
-    const handleArrowKey = (e: KeyboardEvent) => {
-      const active = document.activeElement;
-      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return;
-
-      if (e.ctrlKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
-        e.preventDefault();
-        const delta = e.key === 'ArrowUp' ? 0.85 : 1.15;
-        const nextFOV = Math.max(0.05, Math.min(135.0, localFOVRef.current * delta));
-        localFOVRef.current = nextFOV;
-        notifyParentFOV(nextFOV);
-        return;
-      }
-
-      // Pan step is 10% of current FOV so it feels proportional at any zoom level
-      const panStep = localFOVRef.current * 0.1;
-
-      switch (e.key) {
-        case 'ArrowUp':
-          e.preventDefault();
-          setTrackingMode(false);
-          targetAltRef.current = Math.max(-89.9, Math.min(89.9, targetAltRef.current + panStep));
-          break;
-        case 'ArrowDown':
-          e.preventDefault();
-          setTrackingMode(false);
-          targetAltRef.current = Math.max(-89.9, Math.min(89.9, targetAltRef.current - panStep));
-          break;
-        case 'ArrowLeft':
-          e.preventDefault();
-          setTrackingMode(false);
-          targetAzRef.current = (targetAzRef.current - panStep + 360) % 360;
-          break;
-        case 'ArrowRight':
-          e.preventDefault();
-          setTrackingMode(false);
-          targetAzRef.current = (targetAzRef.current + panStep + 360) % 360;
-          break;
-      }
-    };
-
-    window.addEventListener('keydown', handleArrowKey);
-    return () => window.removeEventListener('keydown', handleArrowKey);
-  }, [notifyParentFOV]);
-
-  /**
-   * Adjusts field of view via mouse wheel, clamped to 0.05°–135°.
-   *
-   * @param {React.WheelEvent} e - The wheel event.
-   * @returns {void}
-   */
-  const onWheel = (e: React.WheelEvent) => {
-    const delta = e.deltaY < 0 ? 0.85 : 1.15;
-    const nextFOV = Math.max(0.05, Math.min(135.0, localFOVRef.current * delta));
-
-    localFOVRef.current = nextFOV;
-    notifyParentFOV(nextFOV);
-  };
+  // Pointer-drag panning, wheel zoom, and arrow-key pan/zoom
+  const { isDragging, onPointerDown, onPointerMove, onPointerUp, onWheel } = useSkyMapInput({
+    canvasRef, centerAzRef, centerAltRef, targetAzRef, targetAltRef, localFOVRef,
+    setTrackingMode, notifyParentFOV,
+  });
 
   // Main Fixed-Rate requestAnimationFrame render loop
   useEffect(() => {
@@ -613,8 +492,14 @@ export const CelestialSkyMap: React.FC<Props> = ({
     if (!context) return;
 
     const renderLoop = () => {
+      // 0. Power efficiency: Pause render work if document is hidden or canvas is not visible
+      if (document.hidden || canvas.offsetParent === null) {
+        animFrameId = requestAnimationFrame(renderLoop);
+        return;
+      }
+
       // 1. Advance tracking target position for current sidereal time
-      const currentFrameLST = calculateLST(timeOffsetMinutesRef.current, observerLon);
+      const currentFrameLST = calculateLST(simulationDateRef.current, timeOffsetMinutesRef.current, observerLon);
 
       if (trackingMode && trackedCoords.current) {
         const targetAltAz = getAltAz(trackedCoords.current.ra, trackedCoords.current.dec, currentFrameLST, observerLat);
@@ -686,12 +571,10 @@ export const CelestialSkyMap: React.FC<Props> = ({
         observerLat,
         observerLon,
         selectedTargetId,
-        loadedFits,
         sources,
         targets,
         showStars,
         showFOV,
-        showFITS,
         showEnvironment,
         showGrid,
         showCatalog,
@@ -702,8 +585,15 @@ export const CelestialSkyMap: React.FC<Props> = ({
         telescopeConnected: telescopeConnectedRef.current,
         telescopeRa: telescopeRaRef.current,
         telescopeDec: telescopeDecRef.current,
+        showAlignment,
+        showTrackingRisk,
+        alignmentAttempts,
+        cumulativeTrackingAttempts,
+        polarAlignment,
+        selectedSessionId,
         sensorFovWidthDeg: sensorFovWidthDegRef.current,
         sensorFovHeightDeg: sensorFovHeightDegRef.current,
+        plateScaleArcsecPerPx: plateScaleArcsecPerPxRef.current,
         projectCoords: (ra: number, dec: number) => {
           const { alt, az } = getAltAz(ra, dec, currentFrameLST, observerLat);
           const projection = projectAltAz(alt, az, centerAltRef.current, centerAzRef.current, localFOVRef.current, canvas.width, canvas.height);
@@ -712,33 +602,6 @@ export const CelestialSkyMap: React.FC<Props> = ({
         getAltAz: (ra: number, dec: number) => getAltAz(ra, dec, currentFrameLST, observerLat),
         getRaDec: (alt: number, az: number) => getRaDec(alt, az, currentFrameLST, observerLat)
       };
-
-      // Determine which stacked-image targets are on screen, so only those
-      // get a FitsLoaderItem mounted below (see visibleFitsTargetIds above).
-      // Only recomputed on a real redraw (this point is unreached otherwise,
-      // per the cameraChanged/overlayInputsChanged early-return above), and
-      // only committed to state when the set of IDs actually changed.
-      if (showFITS) {
-        const nextVisibleFitsTargetIds = new Set<string>();
-        targets.forEach(target => {
-          if (!target.stackedImage) return;
-          if (target.ra === 0 && target.dec === 0) return;
-          if (projectionContext.projectCoords(target.ra, target.dec).visible) {
-            nextVisibleFitsTargetIds.add(target.id);
-          }
-        });
-        const previousIds = visibleFitsTargetIdsRef.current;
-        const idsChanged =
-          nextVisibleFitsTargetIds.size !== previousIds.size ||
-          [...nextVisibleFitsTargetIds].some(id => !previousIds.has(id));
-        if (idsChanged) {
-          visibleFitsTargetIdsRef.current = nextVisibleFitsTargetIds;
-          setVisibleFitsTargetIds(nextVisibleFitsTargetIds);
-        }
-      } else if (visibleFitsTargetIdsRef.current.size > 0) {
-        visibleFitsTargetIdsRef.current = new Set();
-        setVisibleFitsTargetIds(new Set());
-      }
 
       // 5. Execute overlay draw stack sequentially
       overlays.forEach(overlay => {
@@ -774,10 +637,12 @@ export const CelestialSkyMap: React.FC<Props> = ({
     animFrameId = requestAnimationFrame(renderLoop);
     return () => cancelAnimationFrame(animFrameId);
   }, [
-    sources, targets, showStars, showFOV, showFITS,
+    sources, targets, showStars, showFOV,
     showEnvironment, showGrid, showCatalog, showTelescope, selectedTargetId,
     showConstellations, constellationLines,
-    loadedFits, trackingMode, observerLat, observerLon, overlays
+    showAlignment, showTrackingRisk, alignmentAttempts, cumulativeTrackingAttempts, polarAlignment, selectedSessionId,
+    simulationDate,
+    trackingMode, observerLat, observerLon, overlays
   ]);
 
   // Click handler to select sources. REQ: PLN-2.5
@@ -789,6 +654,7 @@ export const CelestialSkyMap: React.FC<Props> = ({
       clickX: e.clientX - rect.left,
       clickY: e.clientY - rect.top,
       sources, targets, showStars, showCatalog, showEnvironment,
+      showAlignment, alignmentAttempts,
       canvasWidth: rect.width, canvasHeight: rect.height,
       fov: localFOVRef.current,
       centerAlt: centerAltRef.current,
@@ -796,7 +662,9 @@ export const CelestialSkyMap: React.FC<Props> = ({
       lst: currentLSTRef.current,
       observerLat,
     });
-    onSelectSource(nearest);
+    if (nearest) {
+      onSelectSource(nearest);
+    }
   };
 
   // Context menu handler. REQ: PLN-2.5
@@ -810,6 +678,7 @@ export const CelestialSkyMap: React.FC<Props> = ({
       clickX: e.clientX - rect.left,
       clickY: e.clientY - rect.top,
       sources, targets, showStars, showCatalog, showEnvironment,
+      showAlignment, alignmentAttempts,
       canvasWidth: rect.width, canvasHeight: rect.height,
       fov: localFOVRef.current,
       centerAlt: centerAltRef.current,
@@ -883,16 +752,6 @@ export const CelestialSkyMap: React.FC<Props> = ({
           {timeOffsetMinutes === 0 ? 'Live Time' : `${(timeOffsetMinutes / 60).toFixed(1)}h Offset`}
         </span>
       </div>
-
-      {showFITS && targets.map(target => (
-        target.stackedImage && visibleFitsTargetIds.has(target.id) ? (
-          <FitsLoaderItem
-            key={target.id}
-            target={target}
-            onLoaded={handleFitsLoaded}
-          />
-        ) : null
-      ))}
     </div>
   );
 };

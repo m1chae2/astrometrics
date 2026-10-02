@@ -12,11 +12,16 @@ Three layers, smallest first:
   needs to change.
 - `run_full_pipeline` runs every stage for one target, start to finish:
   stacks its raw frames, plate-solves the result, tracks star
-  brightness (photometry), pulls out light spectra (spectroscopy) when
-  there are any, and saves the target's record -- in that order. Its
-  only caller is `api/batch.py`, which runs many targets through this
-  same sequence in parallel worker processes; this module doesn't know
-  or care about that, it just runs one target's full sequence.
+  brightness (photometry), and pulls out light spectra (spectroscopy)
+  when there are any. It saves the target's record after each stage,
+  not just once at the end, so a later stage crashing (a bad frame, a
+  timed-out solve, an OOM kill) does not throw away an earlier stage's
+  results along with it -- the same per-stage save discipline
+  `backend/services/analysis/analysis_orchestrator.py` already uses
+  for UI-triggered single-stage runs. Its only caller is
+  `api/batch.py`, which runs many targets through this same sequence
+  in parallel worker processes; this module doesn't know or care about
+  that, it just runs one target's full sequence.
 
 Every runner `analyze_target` can dispatch to takes the same five
 arguments (``target``, ``frames``, ``filter_type``, ``catalog_access``,
@@ -109,7 +114,7 @@ def _stack_with_job_tracking(target: Target, frames_to_stack: list[FrameRecord])
 
         from astrometricslib.pipelines.stacking import stage as stacking_tasks
 
-        stacked_path = stacking_tasks.stack_frames(target, frames_to_stack=frames_to_stack)
+        stacked_path = stacking_tasks.stack_frames(target, frames_to_stack=frames_to_stack, job_id=job.job_id)
         # Stacking can finish without raising and still produce no
         # image, so the outcome is decided here rather than left to the
         # context manager's "no exception means success" default.
@@ -192,7 +197,7 @@ def stack_frames_with_timeout(
         # reading the run's output. The summary may be absent entirely --
         # stack_frames builds it, and this stack never got that far -- in
         # which case the timeout stays a log-only fact.
-        summary = getattr(target, "stack_quality_summary", None)
+        summary = target.stacking.quality_summary
         metrics = getattr(summary, "stacking_metrics", None) if summary else None
         if metrics is not None:
             metrics.timed_out = True
@@ -276,10 +281,10 @@ def analyze_target(
         if not path and pipeline_type in ("astrometry", "spectroscopy"):
             if frames:
                 path = frames[0].path
-            elif pipeline_type == "spectroscopy" and target.stacked_spectral_target:
-                path = target.stacked_spectral_target
-            elif pipeline_type == "astrometry" and target.stacked_image:
-                path = target.stacked_image
+            elif pipeline_type == "spectroscopy" and target.spectral_stacking.stacked_image:
+                path = target.spectral_stacking.stacked_image
+            elif pipeline_type == "astrometry" and target.stacking.stacked_image:
+                path = target.stacking.stacked_image
             elif target.frames:
                 path = target.frames[0].path
             else:
@@ -288,6 +293,7 @@ def analyze_target(
                     f" on target {target.id}."
                 )
 
+        kwargs["job_id"] = job.job_id
         return _run_analysis_pipeline_match(
             target, frames, pipeline_type, filter_type, catalog_access, path, **kwargs
         )
@@ -353,24 +359,51 @@ def run_full_pipeline(
 
     standard_frames, spectral_frames = split_standard_and_spectral_frames(target, camera_frames)
     stack_outputs = _stack_camera_frames(target, camera_name, standard_frames, spectral_frames)
-
-    # 2. Astrometry Analysis
-    _run_astrometry_stage(target, astrometrics)
-
-    # 3. Photometry Analysis
+    _save_target(target, astrometrics)
     max_concurrent_jobs = astrometrics.config.get_max_concurrent_jobs()
-    _run_photometry_stage(target, astrometrics, camera_frames, max_workers, max_concurrent_jobs)
+
+    # 2. Astrometry Analysis and 3. Photometry Analysis both work from the
+    # standard stack -- skip them (rather than fail the whole target) when
+    # it didn't stack, so a spectral-only success is still saved below.
+    if "standard" in stack_outputs:
+        _run_astrometry_stage(target, astrometrics)
+        _save_target(target, astrometrics)
+        _run_photometry_stage(target, astrometrics, camera_frames, max_workers, max_concurrent_jobs)
+        _save_target(target, astrometrics)
+    elif standard_frames:
+        print(f"[{target.id}] Standard stacking failed; skipping astrometry and photometry.")
 
     # 4. Spectroscopy Analysis (only when this target actually has a
     # SPEC stack)
-    _run_spectroscopy_stage(target, astrometrics, spectral_frames, max_concurrent_jobs)
+    if "spectral" in stack_outputs:
+        _run_spectroscopy_stage(target, astrometrics, spectral_frames, max_concurrent_jobs)
+        _save_target(target, astrometrics)
+    elif spectral_frames:
+        print(f"[{target.id}] Spectral stacking failed; skipping spectroscopy.")
 
-    # Save this target's own record (safe under concurrent callers,
-    # unlike a full-catalog resync)
-    astrometrics.catalog_access.put(target, "target_record", {})
     print(f"[{target.id}] Processing completed and metadata saved successfully.")
 
     return stack_outputs
+
+
+def _save_target(target: Target, astrometrics: Any) -> None:
+    """Persist a target's current in-memory state as its own database row.
+
+    Called after each pipeline stage in `run_full_pipeline`, rather than
+    once at the very end, so a later stage raising (a bad frame, a
+    timed-out solve, an OOM kill) does not discard an earlier stage's
+    already-computed results along with it. A save failure is logged
+    rather than raised, so it cannot itself turn a successful stage into
+    a failed target -- matching how
+    `backend/services/analysis/analysis_orchestrator.py` already treats
+    save failures for UI-triggered single-stage runs.
+    """
+    try:
+        # Target-scoped write (safe under concurrent callers), unlike a
+        # full-catalog resync.
+        astrometrics.catalog_access.put(target, "target_record", {})
+    except Exception as save_error:
+        print(f"[{target.id}] Failed to save target after pipeline stage: {save_error}")
 
 
 def _stack_camera_frames(
@@ -381,17 +414,20 @@ def _stack_camera_frames(
 ) -> dict[str, str]:
     """Stack a target's standard and/or spectral frames.
 
+    The two kinds are stacked independently, and one kind failing does
+    not stop the other from being attempted: a "mixed" target with a
+    full night of spectral frames alongside a couple of incidental
+    standard-imaging frames should not lose the spectral analysis just
+    because those two throwaway frames could not be stacked together.
+
     Returns
     -------
     stack_outputs : `dict`
         Maps the stack type ("standard" or "spectral") to the final
-        saved image file path, for whichever kinds of frames existed.
-
-    Raises
-    ------
-    ValueError
-        If a kind of frame that needed stacking failed to produce a
-        valid output file.
+        saved image file path, for whichever kind(s) stacked
+        successfully. A kind present in the input but absent from the
+        result failed to stack; the reason is printed at the point of
+        failure.
     """
     stack_outputs: dict[str, str] = {}
 
@@ -406,28 +442,24 @@ def _stack_camera_frames(
         print(
             f"[{target.id}] Target contains mixed frames. Stacking standard and spectral frames separately."
         )
-        stacked_output = stack_frames_with_timeout(target, standard_frames)
-        if not stacked_output or not os.path.exists(stacked_output):
-            raise ValueError("Standard stacking failed on mixed target.")
-        stacked_spectral = stack_frames_with_timeout(target, spectral_frames)
-        if not stacked_spectral or not os.path.exists(stacked_spectral):
-            raise ValueError("Spectral stacking failed on mixed target.")
-        print(f"[{target.id}] Stacking succeeded: Standard={stacked_output}, Spectral={stacked_spectral}")
-        stack_outputs["standard"] = stacked_output
-        stack_outputs["spectral"] = stacked_spectral
-    elif standard_frames:
-        stacked_output = stack_frames_with_timeout(target, standard_frames)
-        if not stacked_output or not os.path.exists(stacked_output):
-            raise ValueError("Standard stacking pipeline returned no valid output path.")
-        print(f"[{target.id}] Standard stacking succeeded: {stacked_output}")
-        stack_outputs["standard"] = stacked_output
-    elif spectral_frames:
-        stacked_spectral = stack_frames_with_timeout(target, spectral_frames)
-        if not stacked_spectral or not os.path.exists(stacked_spectral):
-            raise ValueError("Spectral stacking pipeline returned no valid output path.")
-        print(f"[{target.id}] Spectral stacking succeeded: {stacked_spectral}")
-        stack_outputs["spectral"] = stacked_spectral
-    else:
+
+    for kind, frames in (("standard", standard_frames), ("spectral", spectral_frames)):
+        if not frames:
+            continue
+        try:
+            # Caught broadly and deliberately: this kind's failure, whatever
+            # its cause, must not take down the other kind's stack.
+            stacked_path = stack_frames_with_timeout(target, frames)
+        except Exception as stacking_error:
+            print(f"[{target.id}] {kind.capitalize()} stacking raised an error: {stacking_error!r}")
+            continue
+        if not stacked_path or not os.path.exists(stacked_path):
+            print(f"[{target.id}] {kind.capitalize()} stacking pipeline returned no valid output path.")
+            continue
+        print(f"[{target.id}] {kind.capitalize()} stacking succeeded: {stacked_path}")
+        stack_outputs[kind] = stacked_path
+
+    if not standard_frames and not spectral_frames:
         print(
             f"[{target.id}] No valid frames matching camera '{camera_name}' found for stacking. "
             "Skipping stacking step."

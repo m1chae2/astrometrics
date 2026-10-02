@@ -1,5 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
+import { useBackendFetch } from '../../common/hooks/useBackendFetch';
+import { usePollTick } from '../../common/hooks/usePollTick';
 import { scanRemoteTargets } from '../../common/services/imagingService';
+
+/** How often to re-scan for remote target folders, in milliseconds. */
+const REMOTE_SCAN_POLL_INTERVAL_MS = 30000;
 
 /**
  * Hook to manage ingestion modal state and remote target scanning.
@@ -11,26 +16,24 @@ import { scanRemoteTargets } from '../../common/services/imagingService';
  */
 export const useIngestionLogic = () => {
     const [isIngestModalOpen, setIsIngestModalOpen] = useState(false);
-    const [remoteTargets, setRemoteTargets] = useState<Set<string>>(new Set());
+    const pollTick = usePollTick(REMOTE_SCAN_POLL_INTERVAL_MS);
 
-    useEffect(() => {
-        const scan = () => {
-            scanRemoteTargets().then(res => {
-                const targets = new Set<string>();
-                if (res.folders && Array.isArray(res.folders)) {
-                    res.folders.forEach((f: string) => {
-                        // Normalize to space-separated ID
-                        const normalized = f.replace(/_/g, ' ').trim();
-                        targets.add(normalized);
-                    });
-                }
-                setRemoteTargets(targets);
-            }).catch(err => console.error("Failed to scan remote targets:", err));
-        };
-        scan(); // Initial
-        const interval = setInterval(scan, 30000); // Poll every 30s
-        return () => clearInterval(interval);
-    }, []);
+    const { data } = useBackendFetch<Set<string>>(
+        async () => {
+            const res = await scanRemoteTargets();
+            const targets = new Set<string>();
+            if (res.folders && Array.isArray(res.folders)) {
+                res.folders.forEach((f: string) => {
+                    // Normalize to space-separated ID
+                    const normalized = f.replace(/_/g, ' ').trim();
+                    targets.add(normalized);
+                });
+            }
+            return targets;
+        },
+        [pollTick],
+        { errorMessage: 'Failed to scan remote targets' }
+    );
 
     const openIngestModal = () => setIsIngestModalOpen(true);
     const closeIngestModal = () => setIsIngestModalOpen(false);
@@ -40,6 +43,6 @@ export const useIngestionLogic = () => {
         setIsIngestModalOpen, // Exposed for direct set if needed
         openIngestModal,
         closeIngestModal,
-        remoteTargets
+        remoteTargets: data ?? new Set<string>()
     };
 };

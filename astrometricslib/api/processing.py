@@ -10,10 +10,12 @@ used to remove noise from raw telescope images.
 from contextlib import AbstractContextManager
 from typing import Any, Literal
 
-from astrometricslib.drivers.job_logging import JobHandle, capture_job_logs, registered_job
+from astrometricslib.drivers.job_logging import JobHandle, background_job, capture_job_logs, registered_job
 from astrometricslib.drivers.logger_interface import DbLogHandler, LoggerInterface
 from astrometricslib.drivers.siril_interface import ImageProcessing
-from astrometricslib.models.target import Target
+from astrometricslib.models.target import FrameRecord, Target
+from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
+from astrometricslib.pipelines.stacking.stack_runner import run_siril_stack
 from astrometricslib.utilities.config_loader import AppConfiguration
 
 __all__ = [
@@ -26,6 +28,7 @@ __all__ = [
     "QualityDiagnostics",
     "capture_job_logs",
     "registered_job",
+    "run_siril_stack",
 ]
 
 _CalibrationKind = Literal["dark", "bias", "flat"]
@@ -65,7 +68,7 @@ class QualityDiagnostics:
             Median FWHM in pixels across the measured stars, or `None`
             if it could not be measured.
         """
-        from astrometricslib.pipelines.astrometry.fwhm import measure_image_fwhm
+        from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_image_fwhm
 
         return measure_image_fwhm(path)
 
@@ -145,7 +148,7 @@ class QualityDiagnostics:
             A list the same length as values, `True` where the
             corresponding entry is an outlier.
         """
-        from astrometricslib.pipelines.spectroscopy.registration_quality import flag_outliers
+        from astrometricslib.pipelines.spectroscopy.utilities.registration_quality import flag_outliers
 
         return flag_outliers(values, sigma_threshold, low_is_bad)
 
@@ -158,7 +161,7 @@ class QualityDiagnostics:
         thresholds : `dict` [`str`, `float`]
             Threshold values keyed by threshold name.
         """
-        from astrometricslib.pipelines.spectroscopy import registration_quality as srq
+        from astrometricslib.pipelines.spectroscopy.utilities import registration_quality as srq
 
         return {
             "min_matched_star_pairs": srq.MIN_MATCHED_STAR_PAIRS,
@@ -327,6 +330,7 @@ class ProcessingPipelines:
 
     # -- Pipeline execution, one method per pipeline type -----------------
 
+    @background_job("stacking", grace_period_seconds=5.0)
     def run_stacking(
         self,
         target: Target,
@@ -345,6 +349,11 @@ class ProcessingPipelines:
         Stacking combines many faint, noisy images into one clear image.
         To also plate-solve the result, call `run_astrometry` afterward
         with the same target.
+
+        Called through the MCP server, this runs as a background job (see
+        `astrometricslib.drivers.job_logging.background_job`) rather than
+        blocking the caller until Siril finishes -- called directly, it
+        behaves exactly as before.
 
         Parameters
         ----------
@@ -398,6 +407,7 @@ class ProcessingPipelines:
                 stack_weight=stack_weight,
                 generate_rejmap=generate_rejmap,
                 output_file=output_file,
+                job_id=job.job_id,
             )
             # Stacking can finish without raising and still produce no
             # image, so the outcome is decided here rather than left to
@@ -405,18 +415,42 @@ class ProcessingPipelines:
             job.mark("completed" if stacked_path else "failed", 100)
             return stacked_path
 
-    def run_astrometry(self, target: Target, **kwargs: Any) -> dict[str, Any]:
+    @background_job("astrometry", grace_period_seconds=5.0)
+    def run_astrometry(
+        self,
+        target: Target,
+        *,
+        path: str | None = None,
+        catalog_access: Any = None,
+        register_job: bool = True,
+    ) -> dict[str, Any]:
         """Run astrometric plate-solving and catalog cross-matching.
 
-        See `tasks.target_tasks.pipeline_tasks.analyze_target` for the
-        full parameter/return documentation.
+        See `astrometricslib.pipelines.tasks.analyze_target` for the full
+        return documentation. Astrometry resolves its own input image from
+        `target.stacking.stacked_image` (falling back to the target's first
+        frame) when `path` is omitted, so a bare `run_astrometry(target)` call
+        is normally enough.
+
+        Called through the MCP server, this runs as a background job (see
+        `astrometricslib.drivers.job_logging.background_job`) rather than
+        blocking the caller until astrometry finishes -- called directly,
+        it behaves exactly as before.
 
         Parameters
         ----------
         target : `Target`
             The target to run astrometry against.
-        **kwargs
-            Forwarded to `pipeline_tasks.analyze_target`.
+        path : `str`, optional
+            The FITS image to plate-solve; `target.stacking.stacked_image`
+            (or the target's first frame) is used when omitted.
+        catalog_access : `Any`, optional
+            Override for the star catalog reader/writer; the default is
+            used when omitted.
+        register_job : `bool`, optional
+            Whether this run should show up in the job tracker. Defaults
+            to `True`; pass `False` when the caller already tracks its own
+            job (to avoid double-counting).
 
         Returns
         -------
@@ -425,20 +459,58 @@ class ProcessingPipelines:
         """
         from astrometricslib.pipelines.tasks import analyze_target
 
-        return analyze_target(target, pipeline_type="astrometry", **kwargs)
+        return analyze_target(
+            target,
+            pipeline_type="astrometry",
+            path=path,
+            catalog_access=catalog_access,
+            register_job=register_job,
+        )
 
-    def run_photometry(self, target: Target, **kwargs: Any) -> dict[str, Any]:
+    @background_job("photometry", grace_period_seconds=5.0)
+    def run_photometry(
+        self,
+        target: Target,
+        *,
+        frames: list[FrameRecord] | None = None,
+        filter_type: str | None = None,
+        use_astrometry_seed: bool = True,
+        max_workers: int | None = None,
+        catalog_access: Any = None,
+        register_job: bool = True,
+    ) -> dict[str, Any]:
         """Run ensemble differential photometry.
 
-        See `tasks.target_tasks.pipeline_tasks.analyze_target` for the
-        full parameter/return documentation.
+        See `astrometricslib.pipelines.tasks.analyze_target` for the full
+        return documentation. Photometry resolves its own frames from
+        `target.frames` when `frames` is omitted.
+
+        Called through the MCP server, this runs as a background job (see
+        `astrometricslib.drivers.job_logging.background_job`) rather than
+        blocking the caller until photometry finishes -- called directly,
+        it behaves exactly as before.
 
         Parameters
         ----------
         target : `Target`
             The target to run photometry against.
-        **kwargs
-            Forwarded to `pipeline_tasks.analyze_target`.
+        frames : `list` [`FrameRecord`], optional
+            The frames to use; `target.frames` is used when omitted.
+        filter_type : `str`, optional
+            Only frames with this filter are used; all frames are eligible
+            when omitted.
+        use_astrometry_seed : `bool`, optional
+            Whether to seed each session's plate solve from astrometry's
+            already-solved WCS when one exists. Defaults to `True`.
+        max_workers : `int`, optional
+            Maximum parallel workers per observing session.
+        catalog_access : `Any`, optional
+            Override for the star catalog reader/writer; the default is
+            used when omitted.
+        register_job : `bool`, optional
+            Whether this run should show up in the job tracker. Defaults
+            to `True`; pass `False` when the caller already tracks its own
+            job (to avoid double-counting).
 
         Returns
         -------
@@ -447,20 +519,58 @@ class ProcessingPipelines:
         """
         from astrometricslib.pipelines.tasks import analyze_target
 
-        return analyze_target(target, pipeline_type="photometry", **kwargs)
+        return analyze_target(
+            target,
+            pipeline_type="photometry",
+            frames=frames,
+            filter_type=filter_type,
+            catalog_access=catalog_access,
+            register_job=register_job,
+            use_astrometry_seed=use_astrometry_seed,
+            max_workers=max_workers,
+        )
 
-    def run_spectroscopy(self, target: Target, **kwargs: Any) -> dict[str, Any]:
+    def run_spectroscopy(
+        self,
+        target: Target,
+        *,
+        path: str | None = None,
+        limit: int | None = None,
+        catalog_access: Any = None,
+        register_job: bool = True,
+        photometry_result: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Run spectroscopy extraction and calibration.
 
-        See `tasks.target_tasks.pipeline_tasks.analyze_target` for the
-        full parameter/return documentation.
+        See `astrometricslib.pipelines.tasks.analyze_target` for the full
+        return documentation. Spectroscopy resolves its own input image
+        from `target.spectral_stacking.stacked_image` (falling back to the
+        target's first frame) when `path` is omitted.
 
         Parameters
         ----------
         target : `Target`
             The target to run spectroscopy against.
-        **kwargs
-            Forwarded to `pipeline_tasks.analyze_target`.
+        path : `str`, optional
+            The spectral FITS image to extract from;
+            `target.spectral_stacking.stacked_image` (or the target's
+            first frame) is used when omitted.
+        limit : `int`, optional
+            A cap on how many candidate stars to process; pass a number
+            only to deliberately cap a run (for example a quick
+            interactive check). All candidates are processed when omitted.
+        catalog_access : `Any`, optional
+            Override for the star catalog reader/writer; the default is
+            used when omitted.
+        register_job : `bool`, optional
+            Whether this run should show up in the job tracker. Defaults
+            to `True`; pass `False` when the caller already tracks its own
+            job (to avoid double-counting).
+        photometry_result : `dict[str, Any]`, optional
+            Not consumed by the pipeline yet -- reserved so a future
+            spectroscopy dependency on photometry's output has a real
+            parameter to fill in, rather than one added later across
+            several files. Passing it today is a safe no-op.
 
         Returns
         -------
@@ -469,7 +579,98 @@ class ProcessingPipelines:
         """
         from astrometricslib.pipelines.tasks import analyze_target
 
-        return analyze_target(target, pipeline_type="spectroscopy", **kwargs)
+        return analyze_target(
+            target,
+            pipeline_type="spectroscopy",
+            path=path,
+            catalog_access=catalog_access,
+            register_job=register_job,
+            limit=limit,
+            photometry_result=photometry_result,
+        )
+
+    @background_job("process_target", grace_period_seconds=5.0)
+    def process_target(
+        self,
+        target: Target,
+        *,
+        stages: frozenset[str] = frozenset({"astrometry", "photometry", "spectroscopy"}),
+        photometry: dict[str, Any] | None = None,
+        spectroscopy: dict[str, Any] | None = None,
+        register_job: bool = True,
+    ) -> dict[str, Any]:
+        """Run astrometry, then photometry, then spectroscopy for one target.
+
+        This is the shorter path for "just process my target the right
+        way" -- each of the three stages is still available independently
+        as `run_astrometry`/`run_photometry`/`run_spectroscopy` for when a
+        caller wants to run (or customize) only one of them.
+
+        Called through the MCP server, this runs as a background job (see
+        `astrometricslib.drivers.job_logging.background_job`) rather than
+        blocking the caller until all three stages finish -- called
+        directly, it behaves exactly as before.
+
+        Execution order is always astrometry, then photometry, then
+        spectroscopy, regardless of `stages`' order -- `stages` only
+        selects which ones run, it does not resequence them. Each stage's
+        own options are passed as a plain dict (`photometry=`,
+        `spectroscopy=`) rather than flattened onto this method, so an
+        option meant for one stage can never accidentally reach another.
+        Spectroscopy is skipped with a `{"status": "skipped", ...}` result
+        (not an error) when the target has no spectral data at all, and
+        otherwise receives photometry's result as `photometry_result` (see
+        `run_spectroscopy`'s `photometry_result` parameter).
+
+        Parameters
+        ----------
+        target : `Target`
+            The target to process.
+        stages : `frozenset` [`str`], optional
+            Which of `{"astrometry", "photometry", "spectroscopy"}` to
+            run. Defaults to all three.
+        photometry : `dict[str, Any]`, optional
+            Extra keyword arguments forwarded to `run_photometry` (for
+            example `{"filter_type": "L", "frames": my_frames}`).
+        spectroscopy : `dict[str, Any]`, optional
+            Extra keyword arguments forwarded to `run_spectroscopy`.
+        register_job : `bool`, optional
+            Whether each stage's run should show up in the job tracker.
+            Defaults to `True`.
+
+        Returns
+        -------
+        results : `dict[str, Any]`
+            One entry per stage actually run, keyed by stage name.
+        """
+        results: dict[str, Any] = {}
+
+        if "astrometry" in stages:
+            results["astrometry"] = self.run_astrometry(target, register_job=register_job)
+
+        if "photometry" in stages:
+            results["photometry"] = self.run_photometry(
+                target, register_job=register_job, **(photometry or {})
+            )
+
+        if "spectroscopy" in stages:
+            has_spectral_input = bool(target.spectral_stacking.stacked_image) or any(
+                frame_is_spectral(frame) for frame in target.frames or []
+            )
+            if has_spectral_input:
+                results["spectroscopy"] = self.run_spectroscopy(
+                    target,
+                    register_job=register_job,
+                    photometry_result=results.get("photometry"),
+                    **(spectroscopy or {}),
+                )
+            else:
+                results["spectroscopy"] = {
+                    "status": "skipped",
+                    "reason": "target has no spectral data",
+                }
+
+        return results
 
     def run_spectroscopy_by_session(
         self,
@@ -507,9 +708,21 @@ class ProcessingPipelines:
             batch as spectroscopy_batch_operations,
         )
 
-        return spectroscopy_batch_operations.process_spectroscopy_frames_by_session(
-            astrometrics, target, frame_records, max_workers=max_workers, on_item_complete=on_item_complete
-        )
+        with registered_job(
+            enabled=True,
+            job_type="spectroscopy_session",
+            target_id=target.id,
+            completed_message=f"[{target.id}] Session-based spectroscopy completed successfully.",
+            failed_message=f"[{target.id}] Session-based spectroscopy failed.",
+        ) as job:
+            return spectroscopy_batch_operations.process_spectroscopy_frames_by_session(
+                astrometrics,
+                target,
+                frame_records,
+                max_workers=max_workers,
+                on_item_complete=on_item_complete,
+                job_id=job.job_id,
+            )
 
     def scan_target_directory(self, target: Target, frames_root_path: str) -> None:
         """Scan a folder to find and catalog any new image frames for a target.

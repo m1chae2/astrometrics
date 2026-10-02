@@ -115,3 +115,75 @@ def test_session_token_endpoint_serves_the_token(client: TestClient):  # ruff: i
     response = client.get("/api/session-token")
     assert response.status_code == 200
     assert response.json()["token"] == session_auth.SESSION_TOKEN
+
+
+def test_pairing_info_endpoint_returns_metadata(client: TestClient) -> None:
+    """The companion pairing route must supply complete connection metadata.
+
+    Verifies that host, LAN IP, session token, and endpoint URLs are
+    properly resolved and serialized for remote client consumption.
+    """
+    response = client.get("/api/pairing-info")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["app"] == "Astrometrics"
+    assert data["version"] == "0.2.0"
+    assert "lan_ip" in data
+    assert data["session_token"] == session_auth.SESSION_TOKEN
+    assert "rpc" in data["endpoints"]
+    assert "ws_events" in data["endpoints"]
+    assert "ws_terminal" in data["endpoints"]
+
+
+def test_figure_page_and_websocket(client: TestClient) -> None:
+    """Verify figure HTML page serves WebAgg markup and handles WS auth.
+
+    Ensures the /figure/{id} HTML route renders with Matplotlib scripts,
+    the backend origin is permitted, and unauthorized WebSockets without
+    a session token are rejected while authorized connections succeed.
+    """
+    # HTML endpoint should serve 200 with mpl scripts
+    response = client.get("/figure/1")
+    assert response.status_code == 200
+    assert "mpl.figure" in response.text
+    assert "/figure/mpl.js" in response.text
+    assert '<base href="/"' in response.text
+
+    # Figure JS bundle endpoint should return WebAgg code with toolbar items
+    js_resp = client.get("/figure/mpl.js")
+    assert js_resp.status_code == 200
+    assert "toolbar_items" in js_resp.text
+    assert "zoom_to_rect" in js_resp.text
+
+    # Toolbar icon images should be reachable both at root and figure prefix
+    img_resp = client.get("/_images/zoom_to_rect.png")
+    assert img_resp.status_code == 200
+    fig_img_resp = client.get("/figure/_images/zoom_to_rect.png")
+    assert fig_img_resp.status_code == 200
+
+    # Figure download endpoint should 404 when figure does not exist
+    download_resp = client.get("/figure/999/download.png")
+    assert download_resp.status_code == 404
+
+    # Origin http://127.0.0.1:5000 and http://localhost:5000 must be allowed
+    from backend.main_backend import origins
+
+    assert "http://127.0.0.1:5000" in origins
+    assert "http://localhost:5000" in origins
+    assert session_auth.is_origin_allowed("http://127.0.0.1:5000", origins)
+
+    # Unauthorized WS without token should be disconnected
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect(
+            "/ws/figure/1",
+            headers={"origin": "http://127.0.0.1:5000"},
+        ) as connection:
+            connection.receive_text()
+
+    # Unauthorized WS with disallowed origin should be disconnected
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect(
+            f"/ws/figure/1?token={session_auth.SESSION_TOKEN}",
+            headers={"origin": "https://evil.example.com"},
+        ) as connection:
+            connection.receive_text()

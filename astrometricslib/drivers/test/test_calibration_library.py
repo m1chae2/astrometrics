@@ -374,3 +374,18 @@ def test_calibration_gain_compatibility_compares_numbers_not_text():  # ruff: ig
     assert is_calibration_gain_compatible("800", "800.0")
     assert is_calibration_gain_compatible("0.0", "0")
     assert not is_calibration_gain_compatible("100", "800.0")
+
+
+def test_a_frame_listed_twice_is_returned_once(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Dark, bias and flat getters drop repeated paths, keeping the order."""
+    first = str(tmp_path / "first.fits")
+    second = str(tmp_path / "second.fits")
+    for path in (first, second):
+        _make_small_fits(path)
+    library = CalibrationLibrary()
+    library.bias_frames = {"Cam": {"0.0": [first, second], "0": [first]}}
+    library.dark_frames = {"Cam": {"0.0": {"60.0": [first, second, first]}}}
+    library.flat_frames = {"Scope": {"Cam": {"Luminance": {"0.0": [first]}, "L": {"0.0": [first]}}}}
+    assert library.get_bias_frames(camera="Cam") == [first, second]
+    assert library.get_dark_frames(camera="Cam", exposure=60.0) == [first, second]
+    assert library.get_flat_frames(telescope="Scope", camera="Cam", filter_type="L") == [first]

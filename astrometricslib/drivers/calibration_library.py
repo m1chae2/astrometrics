@@ -119,6 +119,25 @@ def _is_same_setting(key: str, gain: Any, offset: Any) -> bool:
     return gain_matches and key_offset == (0.0 if wanted_offset is None else wanted_offset)
 
 
+def _without_duplicates(paths: list[str]) -> list[str]:
+    """Drop repeated paths from a list, keeping the first of each in order.
+
+    The same file can be listed under more than one gain, offset or filter
+    alias, and a frame that is listed twice is counted and stacked twice.
+
+    Parameters
+    ----------
+    paths : `list` [`str`]
+        Frame paths, possibly with repeats.
+
+    Returns
+    -------
+    unique_paths : `list` [`str`]
+        The paths with each one appearing once.
+    """
+    return list(dict.fromkeys(paths))
+
+
 class CalibrationLibrary(BaseModel):
     """Store dark, flat, and bias calibration frames."""
 
@@ -597,6 +616,7 @@ class CalibrationLibrary(BaseModel):
                         exposure,
                     )
 
+        frames = _without_duplicates(frames)
         if validate_paths:
             return [f for f in frames if os.path.exists(f)]
         return frames
@@ -629,6 +649,7 @@ class CalibrationLibrary(BaseModel):
             if isinstance(setting_list, list):
                 frames.extend(setting_list)
 
+        frames = _without_duplicates(frames)
         if validate_paths:
             return [f for f in frames if os.path.exists(f)]
         return frames
@@ -689,6 +710,7 @@ class CalibrationLibrary(BaseModel):
                 if isinstance(iso_list, list):
                     frames.extend(iso_list)
 
+        frames = _without_duplicates(frames)
         if validate_paths:
             return [f for f in frames if os.path.exists(f)]
         return frames

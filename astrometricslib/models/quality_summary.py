@@ -196,6 +196,18 @@ class StackingPipelineQualityMetrics(BaseModel):
 
     calibration_mismatch_flags: list[str] = Field(default_factory=list, alias="calibrationMismatchFlags")
 
+    # The flat frames the stack was calibrated with. The master flat's noise
+    # is copied into every light frame, so a set with few or faint frames
+    # leaves a fixed noise pattern in the stack. `flat_noise_fraction` is the
+    # master flat's relative noise (0.005 is 0.5%). When it is above the
+    # limit, the master flat is smoothed by `flat_smoothing_sigma_px` pixels
+    # (a Gaussian width). `flat_calibration_issues` states each problem found
+    # in one sentence. All are empty or `None` when the stack used no flats.
+    flat_frame_count: int | None = Field(default=None, alias="flatFrameCount")
+    flat_noise_fraction: float | None = Field(default=None, alias="flatNoiseFraction")
+    flat_smoothing_sigma_px: float | None = Field(default=None, alias="flatSmoothingSigmaPx")
+    flat_calibration_issues: list[str] = Field(default_factory=list, alias="flatCalibrationIssues")
+
     saturated_pixel_fraction: float | None = Field(default=None, alias="saturatedPixelFraction")
     saturation_flagged: bool = Field(default=False, alias="saturationFlagged")
 

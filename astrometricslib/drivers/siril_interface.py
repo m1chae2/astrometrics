@@ -191,7 +191,27 @@ _CALIBRATION_MASTER_KINDS = (
 )
 
 
-def _calibration_source_fingerprint(frames_directory: str) -> str | None:
+def _master_recipe(kind: str) -> str:
+    """Name how a master of this kind is built, for its cache key.
+
+    Parameters
+    ----------
+    kind : `str`
+        The master kind: "bias", "dark" or "flat".
+
+    Returns
+    -------
+    recipe : `str`
+        The recipe name. Empty for kinds built the standard way.
+    """
+    if kind != "flat":
+        return ""
+    from astrometricslib.pipelines.stacking.flat_calibration import FLAT_MASTER_RECIPE
+
+    return FLAT_MASTER_RECIPE
+
+
+def _calibration_source_fingerprint(frames_directory: str, recipe: str = "") -> str | None:
     """Fingerprint the calibration frames staged in a directory.
 
     Each staged frame is a symlink into the shared calibration library,
@@ -201,6 +221,10 @@ def _calibration_source_fingerprint(frames_directory: str) -> str | None:
     ----------
     frames_directory : `str`
         Staging directory holding one master's source frames.
+    recipe : `str`, optional
+        A name for how the master is built from the frames. It is part of
+        the fingerprint, so a master built a different way from the same
+        frames is not mistaken for this one.
 
     Returns
     -------
@@ -218,6 +242,7 @@ def _calibration_source_fingerprint(frames_directory: str) -> str | None:
         return None
 
     digest = hashlib.sha256()
+    digest.update(recipe.encode("utf-8"))
     for frame_name in frame_names:
         frame_path = os.path.join(frames_directory, frame_name)
         try:
@@ -772,7 +797,9 @@ class ImageProcessing:
         os.makedirs(process_directory, exist_ok=True)
 
         for kind, frames_subdirectory, master_filename in _CALIBRATION_MASTER_KINDS:
-            fingerprint = _calibration_source_fingerprint(os.path.join(target_folder, frames_subdirectory))
+            fingerprint = _calibration_source_fingerprint(
+                os.path.join(target_folder, frames_subdirectory), _master_recipe(kind)
+            )
             if fingerprint is None:
                 continue
             cached_master_path = os.path.join(
@@ -804,6 +831,99 @@ class ImageProcessing:
 
         return restored_kinds
 
+    def prepare_flat_master(
+        self,
+        target_folder: str,
+        uses_color_filter_array: bool,
+        restored_from_cache: bool,
+        job_logger: logging.Logger | None = None,
+    ) -> tuple[Any, bool]:
+        """Check the staged flat frames and smooth a noisy master flat.
+
+        The master flat's noise is copied into every calibrated light, and
+        stacking does not average it away unless the frames were dithered
+        (see `pipelines/stacking/flat_calibration.py`). When the master
+        would be noisier than the limit set there, this builds a smoothed
+        master and places it where the Siril script expects the one it
+        builds itself, so the script skips that step.
+
+        A colour (Bayer) sensor's flat is measured but never smoothed,
+        because blurring the mosaic would mix its colours.
+
+        Parameters
+        ----------
+        target_folder : `str`
+            This run's staging directory.
+        uses_color_filter_array : `bool`
+            Whether the lights come from a colour sensor.
+        restored_from_cache : `bool`
+            Whether a master flat has already been copied in from the
+            cache. Its cache key includes the smoothing recipe, so it is
+            already the right one; it is measured but not rebuilt.
+        job_logger : `logging.Logger`, optional
+            Logger for the findings.
+
+        Returns
+        -------
+        assessment : `FlatAssessment`
+            What was measured about the flat set.
+        master_written : `bool`
+            `True` if a smoothed master flat was written into the
+            ``process`` directory.
+        """
+        import dataclasses
+
+        from astrometricslib.pipelines.stacking.flat_calibration import (
+            assess_flats,
+            build_smoothed_master_flat,
+            write_master_flat,
+        )
+
+        flat_directory = os.path.join(target_folder, "flats")
+        bias_directory = os.path.join(target_folder, "biases")
+        flat_paths = sorted(os.path.join(flat_directory, name) for name in os.listdir(flat_directory))
+        assessment = assess_flats(flat_paths)
+
+        def report(message: str) -> None:
+            """Send a finding to the job log, or the module log without one."""
+            (job_logger or logger).warning("Flat calibration: %s", message)
+
+        for issue in assessment.issues:
+            report(issue)
+        if not assessment.needs_smoothing or restored_from_cache:
+            return assessment, False
+
+        def unsmoothed(note: str) -> Any:
+            """Report why the flat is not smoothed.
+
+            Returns
+            -------
+            assessment : `FlatAssessment`
+                The assessment, with the note added and no smoothing.
+            """
+            report(note)
+            return dataclasses.replace(
+                assessment, smoothing_sigma_pixels=None, issues=[*assessment.issues, note]
+            )
+
+        if uses_color_filter_array:
+            return unsmoothed("not smoothed: blurring a colour sensor's flat would mix its colours"), False
+
+        bias_paths = sorted(os.path.join(bias_directory, name) for name in os.listdir(bias_directory))
+        master = build_smoothed_master_flat(flat_paths, bias_paths, assessment.smoothing_sigma_pixels)
+        if master is None:
+            return unsmoothed("not smoothed: the master flat could not be built"), False
+
+        process_directory = os.path.join(target_folder, "process")
+        os.makedirs(process_directory, exist_ok=True)
+        write_master_flat(os.path.join(process_directory, "flat_stacked.fits"), master, flat_paths[0])
+        message = (
+            f"master flat smoothed with a {assessment.smoothing_sigma_pixels:.1f} px Gaussian to bring "
+            f"its noise from {assessment.noise_fraction:.2%} down to the limit"
+        )
+        (job_logger or logger).info("Flat calibration: %s", message)
+        return assessment, True
+
     def store_calibration_masters_in_cache(
         self, target_folder: str, job_logger: logging.Logger | None = None
     ) -> None:
@@ -831,7 +951,9 @@ class ImageProcessing:
             built_master_path = os.path.join(target_folder, "process", master_filename)
             if not os.path.exists(built_master_path):
                 continue
-            fingerprint = _calibration_source_fingerprint(os.path.join(target_folder, frames_subdirectory))
+            fingerprint = _calibration_source_fingerprint(
+                os.path.join(target_folder, frames_subdirectory), _master_recipe(kind)
+            )
             if fingerprint is None:
                 continue
             cached_master_path = os.path.join(cache_directory, f"{kind}_{fingerprint}.fits")
@@ -1795,6 +1917,16 @@ class ImageProcessing:
             restored_master_kinds = self.restore_cached_calibration_masters(
                 target_folder, job_logger=job_logger
             )
+            if num_flats > 0:
+                flat_assessment, smoothed_master_written = self.prepare_flat_master(
+                    target_folder,
+                    uses_color_filter_array,
+                    restored_from_cache="flat" in restored_master_kinds,
+                    job_logger=job_logger,
+                )
+                self.last_run_diagnostics["flat_calibration"] = flat_assessment.as_diagnostics()
+                if smoothed_master_written:
+                    restored_master_kinds.add("flat")
 
             # Automated Master Calibration Generation
             if num_biases > 0 and "bias" not in restored_master_kinds:

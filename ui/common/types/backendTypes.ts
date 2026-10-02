@@ -908,6 +908,10 @@ export interface StackingPipelineQualityMetrics {
   backgroundSplitDetected?: boolean;
   backgroundSplitDetail?: string | null;
   calibrationMismatchFlags?: string[];
+  flatFrameCount?: number | null;
+  flatNoiseFraction?: number | null;
+  flatSmoothingSigmaPx?: number | null;
+  flatCalibrationIssues?: string[];
   saturatedPixelFraction?: number | null;
   saturationFlagged?: boolean;
   exposureGroups?: ExposureGroupSummary[];

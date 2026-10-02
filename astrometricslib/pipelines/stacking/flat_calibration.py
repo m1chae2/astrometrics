@@ -1,0 +1,421 @@
+"""Checks the flat frames used to calibrate a stack, and cleans a noisy one.
+
+A flat frame is a picture of an evenly lit surface. Dividing every light
+frame by the master flat removes vignetting (darker corners) and dust
+shadows. The division also copies the master flat's own noise into every
+light frame. That noise is the same pattern in each frame, so stacking
+does not average it away unless the frames are dithered (moved a few pixels
+between exposures). A master flat with 4% noise puts a 4% fixed pattern into
+a stack whose own noise is only 3-6% of the sky level.
+
+This module has two jobs.
+
+1. Measure the flat set: how many frames, how bright they are, and how
+   noisy the master flat will be. A set that is too faint, too bright or too
+   noisy is reported as an issue.
+2. Replace a noisy master flat with a smoothed one. Vignetting and dust
+   shadows are many pixels wide, so a light Gaussian blur keeps them. The
+   blur width is the smallest that brings the master flat's noise down to
+   `MAXIMUM_FLAT_NOISE_FRACTION`. The cost is that real pixel-to-pixel
+   sensitivity differences are blurred too. They are about 1% on a CMOS
+   sensor, much less than the noise that is removed. Taking more flats is
+   the better cure. The blur is a fallback for the flats at hand.
+
+Colour (Bayer) sensors are measured but not smoothed, because blurring the
+mosaic would mix the colour channels.
+"""
+
+import logging
+import math
+import os
+from dataclasses import dataclass, field
+
+import numpy as np
+from astropy.io.fits import Header
+from scipy.ndimage import gaussian_filter
+
+from astrometricslib.drivers.fits_access import read_header, write_image
+from astrometricslib.drivers.image import AstrometricsImage
+
+logger = logging.getLogger(__name__)
+
+# The largest relative noise (standard deviation divided by the mean) the
+# master flat may have before it is smoothed. A stack's own noise at the sky
+# level measured 3-6% of the sky on the ASI533MM Pro stacks of 20 targets.
+# A fixed 0.5% pattern adds under 3% to that noise's variance, which is
+# invisible. The master flat of the single-flat library measured 4.5%, and
+# the fixed pattern accounted for 86% of the fine-scale noise of the
+# undithered M 101 stack. Smoothing that flat halved the stack's noise.
+MAXIMUM_FLAT_NOISE_FRACTION = 0.005
+
+# Flat frames should sit well above the read noise and well below the
+# point where the pixels stop responding linearly. These two limits are
+# common practice (flats at roughly a quarter to three quarters of full
+# scale are ideal), set at the points where the advice stops being
+# comfortable. They are design estimates and have not been validated on
+# this observatory's data. The one flat measured here sat at 1% of full
+# scale.
+MINIMUM_FLAT_LEVEL_FRACTION = 0.10
+MAXIMUM_FLAT_LEVEL_FRACTION = 0.90
+
+# The smoothing width is kept between these limits, in pixels. Below 1
+# pixel the blur does nothing useful. Above 8 pixels it starts to blur dust
+# shadows (typically tens of pixels wide) and to follow noise structure.
+MINIMUM_SMOOTHING_SIGMA_PIXELS = 1.0
+MAXIMUM_SMOOTHING_SIGMA_PIXELS = 8.0
+
+# Averaging more than this many flat frames adds memory use and no useful
+# noise reduction for a set that is already below the noise limit.
+MAXIMUM_FRAMES_AVERAGED = 32
+
+# Written into the key of the stored master flats, so that a change to the
+# smoothing recipe does not reuse a master flat built the old way. Increase
+# it whenever this module changes what the master flat contains.
+FLAT_MASTER_RECIPE = "flat-recipe-2"
+
+# The master flat is saved with this mean. Siril divides each light frame
+# by the flat and rescales by the flat's own mean, so the value does not
+# change the result. 0.5 keeps every pixel inside the 0-1 range Siril uses
+# for 32-bit floating-point images.
+_MASTER_FLAT_MEAN = 0.5
+
+# A flat pixel at or above this fraction of full scale counts as saturated.
+_SATURATED_FRACTION_OF_FULL_SCALE = 0.98
+
+
+@dataclass(frozen=True)
+class FlatAssessment:
+    """What was measured about a set of flat frames.
+
+    Attributes
+    ----------
+    frame_count : `int`
+        The number of flat frames in the set.
+    level_fraction : `float` or `None`
+        The mean brightness of a flat frame as a fraction of full scale
+        (65535 for 16-bit data). `None` if no frame could be read.
+    noise_fraction : `float` or `None`
+        The expected relative noise of the master flat: the noise of one
+        frame divided by the square root of the frame count. `None` if it
+        could not be measured.
+    smoothing_sigma_pixels : `float` or `None`
+        The Gaussian width that brings the noise down to
+        `MAXIMUM_FLAT_NOISE_FRACTION`. `None` if no smoothing is needed.
+    issues : `list` [`str`]
+        One plain-language sentence for each problem found.
+    """
+
+    frame_count: int
+    level_fraction: float | None = None
+    noise_fraction: float | None = None
+    smoothing_sigma_pixels: float | None = None
+    issues: list[str] = field(default_factory=list)
+
+    @property
+    def needs_smoothing(self) -> bool:
+        """Whether the master flat is too noisy to use as it is."""
+        return self.smoothing_sigma_pixels is not None
+
+    def as_diagnostics(self) -> dict[str, object]:
+        """Return the assessment as a plain dictionary for the run log.
+
+        Returns
+        -------
+        diagnostics : `dict`
+            The assessment's fields, with ``smoothing_sigma_pixels`` set to
+            `None` when the master flat is used unsmoothed.
+        """
+        return {
+            "frame_count": self.frame_count,
+            "level_fraction": self.level_fraction,
+            "noise_fraction": self.noise_fraction,
+            "smoothing_sigma_pixels": self.smoothing_sigma_pixels,
+            "issues": list(self.issues),
+        }
+
+
+def _read_frame(path: str) -> np.ndarray | None:
+    """Read one calibration frame as a 2-D float array.
+
+    Parameters
+    ----------
+    path : `str`
+        Path of the FITS file.
+
+    Returns
+    -------
+    frame : `numpy.ndarray` or `None`
+        The pixel values, or `None` if the file cannot be read or is not a
+        single-plane image.
+    """
+    try:
+        data = np.asarray(AstrometricsImage(path).data, dtype=np.float64)
+    except (OSError, ValueError, KeyError) as error:
+        logger.debug("Could not read calibration frame '%s': %s", path, error)
+        return None
+    if data.ndim == 3 and data.shape[0] == 1:
+        data = data[0]
+    return data if data.ndim == 2 else None
+
+
+def _full_scale(frame: np.ndarray) -> float:
+    """Return the brightest value a pixel of this frame can have.
+
+    Parameters
+    ----------
+    frame : `numpy.ndarray`
+        A calibration frame.
+
+    Returns
+    -------
+    full_scale : `float`
+        1.0 for a frame whose values are all within 0-1 (a floating-point
+        image), otherwise 65535.0 (16-bit counts).
+    """
+    return 1.0 if float(np.nanmax(frame)) <= 1.5 else 65535.0
+
+
+def measure_frame_noise_fraction(frame: np.ndarray) -> float | None:
+    """Measure the pixel-to-pixel noise of one flat frame.
+
+    The noise is estimated from the differences between neighbouring pixels.
+    A smooth vignette cancels in those differences, so only the noise is
+    left. Neighbouring pixels carry independent noise, so the spread of
+    their difference is the square root of two times the noise of one pixel.
+    The spread is measured with the median absolute deviation, which
+    ignores dust specks and dead pixels.
+
+    Parameters
+    ----------
+    frame : `numpy.ndarray`
+        One flat frame, 2-D.
+
+    Returns
+    -------
+    noise_fraction : `float` or `None`
+        The noise divided by the frame's median, or `None` if the frame has
+        no positive median.
+    """
+    median = float(np.nanmedian(frame))
+    if not median > 0.0:
+        return None
+    differences = frame[:, 1:] - frame[:, :-1]
+    mad = float(np.nanmedian(np.abs(differences - np.nanmedian(differences))))
+    return 1.4826 * mad / math.sqrt(2.0) / median
+
+
+def smoothing_sigma_for_noise(noise_fraction: float) -> float | None:
+    """Find the Gaussian width that brings a flat's noise to the limit.
+
+    A Gaussian blur of width sigma reduces the standard deviation of white
+    noise by the factor ``1 / (2 * sigma * sqrt(pi))`` (the factor for a
+    two-dimensional Gaussian kernel). The width is chosen so the result
+    equals `MAXIMUM_FLAT_NOISE_FRACTION`.
+
+    Parameters
+    ----------
+    noise_fraction : `float`
+        The master flat's relative noise.
+
+    Returns
+    -------
+    sigma : `float` or `None`
+        The width in pixels, between `MINIMUM_SMOOTHING_SIGMA_PIXELS` and
+        `MAXIMUM_SMOOTHING_SIGMA_PIXELS`. `None` if the noise is already
+        within the limit.
+    """
+    if noise_fraction <= MAXIMUM_FLAT_NOISE_FRACTION:
+        return None
+    sigma = noise_fraction / (MAXIMUM_FLAT_NOISE_FRACTION * 2.0 * math.sqrt(math.pi))
+    return min(MAXIMUM_SMOOTHING_SIGMA_PIXELS, max(MINIMUM_SMOOTHING_SIGMA_PIXELS, sigma))
+
+
+def _unique_files(paths: list[str]) -> list[str]:
+    """Drop paths that lead to the same file, keeping the first of each.
+
+    Parameters
+    ----------
+    paths : `list` [`str`]
+        Frame paths. Symbolic links count as the file they point to.
+
+    Returns
+    -------
+    unique_paths : `list` [`str`]
+        The paths, each real file once, in the original order.
+    """
+    seen: set[str] = set()
+    unique = []
+    for path in paths:
+        real_path = os.path.realpath(path)
+        if real_path not in seen:
+            seen.add(real_path)
+            unique.append(path)
+    return unique
+
+
+def assess_flats(flat_paths: list[str]) -> FlatAssessment:
+    """Measure a set of flat frames and list what is wrong with it.
+
+    The first frame gives the brightness. The noise of one frame comes from
+    the first frame alone when the set has one frame, and from the
+    difference of the first two frames when it has more. The difference
+    cancels the vignette, dust and the pixel-to-pixel sensitivity pattern
+    exactly, so it measures only the noise.
+
+    Parameters
+    ----------
+    flat_paths : `list` [`str`]
+        Paths of the flat frames.
+
+    Returns
+    -------
+    assessment : `FlatAssessment`
+        The measurements and issues. A set with no readable frame has
+        `level_fraction` and `noise_fraction` of `None` and one issue.
+    """
+    flat_paths = _unique_files(flat_paths)
+    frame_count = len(flat_paths)
+    first = _read_frame(flat_paths[0]) if flat_paths else None
+    if first is None:
+        return FlatAssessment(frame_count, issues=["no flat frame could be read"])
+
+    issues: list[str] = []
+    full_scale = _full_scale(first)
+    level_fraction = float(np.nanmean(first)) / full_scale
+    if level_fraction < MINIMUM_FLAT_LEVEL_FRACTION:
+        issues.append(
+            f"flats are faint: {level_fraction:.1%} of full scale, below "
+            f"{MINIMUM_FLAT_LEVEL_FRACTION:.0%}, so their noise is high"
+        )
+    saturated = float(np.mean(first >= _SATURATED_FRACTION_OF_FULL_SCALE * full_scale))
+    if level_fraction > MAXIMUM_FLAT_LEVEL_FRACTION or saturated > 0.001:
+        issues.append(
+            f"flats are bright: {level_fraction:.1%} of full scale with {saturated:.2%} of "
+            "pixels saturated, so the response may not be linear"
+        )
+
+    single_frame_noise = None
+    second = _read_frame(flat_paths[1]) if frame_count > 1 else None
+    if second is not None and second.shape == first.shape:
+        # Scale the second frame to the first, so a lamp that drifted
+        # between exposures does not look like noise.
+        scaled_second = second * (float(np.nanmedian(first)) / max(float(np.nanmedian(second)), 1e-12))
+        difference = first - scaled_second
+        mad = float(np.nanmedian(np.abs(difference - np.nanmedian(difference))))
+        median = float(np.nanmedian(first))
+        # Two frames that are exactly equal are one file (a copy or a second
+        # listing of it), not two exposures. Their difference is zero, which
+        # would read as a noiseless flat.
+        if mad > 0.0 and median > 0.0:
+            single_frame_noise = 1.4826 * mad / math.sqrt(2.0) / median
+    if single_frame_noise is None:
+        single_frame_noise = measure_frame_noise_fraction(first)
+
+    noise_fraction = None
+    sigma = None
+    if single_frame_noise is not None:
+        noise_fraction = single_frame_noise / math.sqrt(max(1, min(frame_count, MAXIMUM_FRAMES_AVERAGED)))
+        sigma = smoothing_sigma_for_noise(noise_fraction)
+        if sigma is not None:
+            issues.append(
+                f"master flat noise is {noise_fraction:.2%} from {frame_count} frame(s), above the "
+                f"{MAXIMUM_FLAT_NOISE_FRACTION:.1%} limit; take more flats"
+            )
+    return FlatAssessment(frame_count, level_fraction, noise_fraction, sigma, issues)
+
+
+def _mean_of_frames(paths: list[str], limit: int) -> np.ndarray | None:
+    """Average up to `limit` frames, skipping unreadable ones.
+
+    Parameters
+    ----------
+    paths : `list` [`str`]
+        Paths of the frames.
+    limit : `int`
+        The largest number of frames to read.
+
+    Returns
+    -------
+    mean : `numpy.ndarray` or `None`
+        The mean image, or `None` if no frame could be read. Frames whose
+        shape differs from the first readable one are skipped.
+    """
+    total = None
+    used = 0
+    for path in paths[:limit]:
+        frame = _read_frame(path)
+        if frame is None:
+            continue
+        if total is None:
+            total = np.zeros_like(frame)
+        elif frame.shape != total.shape:
+            continue
+        total += frame
+        used += 1
+    return None if total is None else total / used
+
+
+def build_smoothed_master_flat(
+    flat_paths: list[str], bias_paths: list[str], sigma_pixels: float
+) -> np.ndarray | None:
+    """Build a master flat and blur away its pixel noise.
+
+    The flat frames are averaged and the average bias (the electronic
+    offset in every pixel) is subtracted, as Siril does when it builds a
+    master flat. The result is blurred and scaled to a mean of 0.5.
+
+    Parameters
+    ----------
+    flat_paths : `list` [`str`]
+        Paths of the flat frames.
+    bias_paths : `list` [`str`]
+        Paths of the bias frames. May be empty.
+    sigma_pixels : `float`
+        The Gaussian width in pixels.
+
+    Returns
+    -------
+    master : `numpy.ndarray` or `None`
+        The master flat as 32-bit floats with a mean of 0.5, or `None` if
+        no flat frame could be read or its mean is not positive after the
+        bias is subtracted.
+    """
+    flat = _mean_of_frames(flat_paths, MAXIMUM_FRAMES_AVERAGED)
+    if flat is None:
+        return None
+    if bias_paths:
+        bias = _mean_of_frames(bias_paths, MAXIMUM_FRAMES_AVERAGED)
+        if bias is not None and bias.shape == flat.shape:
+            flat = flat - bias
+    smoothed = gaussian_filter(flat, sigma_pixels, mode="nearest")
+    mean = float(np.mean(smoothed))
+    if not mean > 0.0:
+        return None
+    return (smoothed * (_MASTER_FLAT_MEAN / mean)).astype(np.float32)
+
+
+def write_master_flat(destination: str, master: np.ndarray, template_path: str) -> None:
+    """Save a master flat as a FITS file.
+
+    Parameters
+    ----------
+    destination : `str`
+        Path of the file to write. An existing file is replaced.
+    master : `numpy.ndarray`
+        The master flat.
+    template_path : `str`
+        Path of a flat frame whose header supplies the camera, filter and
+        gain keywords.
+    """
+    try:
+        header = read_header(template_path)
+    except OSError:
+        header = Header()
+    for keyword in ("BZERO", "BSCALE", "BLANK", "DATAMIN", "DATAMAX"):
+        header.remove(keyword, ignore_missing=True)
+    header["IMAGETYP"] = "Master Flat"
+    header["HISTORY"] = f"Smoothed master flat; recipe {FLAT_MASTER_RECIPE}"
+    destination_directory = os.path.dirname(destination)
+    if destination_directory:
+        os.makedirs(destination_directory, exist_ok=True)
+    write_image(destination, master, header)

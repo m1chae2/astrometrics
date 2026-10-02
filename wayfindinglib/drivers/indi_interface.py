@@ -1829,14 +1829,15 @@ class IndiInterface(IndiClient):
         device = self._find_guide_camera_device()
         return self.camera_controller.expose(device, exposure_seconds, gain=gain)
 
-    def get_guide_image(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
-        """Retrieve the last image blob from the guide camera.
+    def get_guide_image(self) -> bytes | None:
+        """Retrieve the last image frame from the guide camera, as raw bytes.
 
         Returns
         -------
-        image
-            The last guide camera image blob, as returned by the
-            camera controller.
+        data : `bytes` or `None`
+            The last guide camera frame's raw data (usually a FITS file in
+            memory), as returned by the camera controller, or `None` if
+            there is no guide camera or no frame yet.
         """
         device = self._find_guide_camera_device()
         return self.camera_controller.get_guide_image(device)

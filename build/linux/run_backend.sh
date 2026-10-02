@@ -238,7 +238,19 @@ stop_backend() {
     if kill -0 "$pid" >/dev/null 2>&1; then
       echo "Stopping backend pid $pid..."
       kill "$pid"
-      sleep 1
+      # Grace period before escalating to SIGKILL. A single fixed 1s sleep
+      # used to be here, but that's shorter than shutdown_event() can
+      # legitimately take on its own: IndiWorkerClient.stop() (see
+      # backend/services/infrastructure/indi_worker.py) joins the INDI
+      # worker process for up to 3s, and if that worker is wedged, kills it
+      # and joins again for up to 2s more -- on top of uvicorn's own
+      # shutdown handshake. Polling for up to 10s instead gives that room
+      # while still returning as soon as the process actually exits, so the
+      # common (fast) case isn't slowed down.
+      for _ in $(seq 1 20); do
+        kill -0 "$pid" >/dev/null 2>&1 || break
+        sleep 0.5
+      done
       if kill -0 "$pid" >/dev/null 2>&1; then
         echo "Backend did not exit; sending SIGKILL..."
         kill -9 "$pid" || true

@@ -34,6 +34,7 @@ class Container:
         # Core Infrastructure
         self.config_service = None
         self.indi_driver = None
+        self.indi_worker_client = None
         self.calibration_library = None
 
         # Domain Services
@@ -112,9 +113,19 @@ class Container:
 
             self.indi_driver = SimulatorIndiInterface(config=self.config_service)
         else:
-            from wayfindinglib import IndiInterface
+            # The real IndiInterface runs in its own OS process, not here:
+            # pyindi-client does not release the GIL during its blocking
+            # calls, so running it in this process would freeze the whole
+            # backend (every concurrent request, the event loop, everything)
+            # for however long that call takes -- see
+            # backend/services/infrastructure/indi_worker.py for the full
+            # story and measurements. IndiWorkerProxy forwards every call to
+            # that process and stands in for a real IndiInterface wherever
+            # one is expected.
+            from backend.services.infrastructure.indi_worker import IndiWorkerClient, IndiWorkerProxy
 
-            self.indi_driver = IndiInterface(config=self.config_service)
+            self.indi_worker_client = IndiWorkerClient()
+            self.indi_driver = IndiWorkerProxy(self.indi_worker_client)
 
         self.wayfinder.control.driver = self.indi_driver
 

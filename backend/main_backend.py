@@ -920,9 +920,11 @@ async def startup_event():  # ruff: ignore[missing-return-type-undocumented-publ
 # ruff: ignore[unused-async] -- required async signature for FastAPI's
 # on_event("shutdown") decorator, which awaits this handler.
 async def shutdown_event():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Stop the background DB-log listener thread on FastAPI shutdown."""
+    """Stop background threads/processes on FastAPI shutdown."""
     app.state.telemetry_task.cancel()
     db_log_listener.stop()
+    if container.indi_worker_client is not None:
+        container.indi_worker_client.stop()
 
 
 @app.websocket("/ws/events")

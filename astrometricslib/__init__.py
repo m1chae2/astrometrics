@@ -93,7 +93,7 @@ from astrometricslib.models.target import (
     RenderedImage,
     Target,
 )
-from astrometricslib.pipelines.stacking.exposure_saturation import (
+from astrometricslib.pipelines.stacking.post_processing.exposure_saturation import (
     SATURATED_BLOB_MINIMUM_PIXELS,
     SATURATED_FRAME_FRACTION,
 )

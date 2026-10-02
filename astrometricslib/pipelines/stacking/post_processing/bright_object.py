@@ -33,7 +33,7 @@ from astrometricslib.pipelines.shared.image_scaling import (
     midtones_balance_for,
     white_fraction_after_autostretch,
 )
-from astrometricslib.pipelines.stacking.sky_level import choose_sky_level
+from astrometricslib.pipelines.stacking.post_processing.sky_level import choose_sky_level
 
 logger = logging.getLogger(__name__)
 

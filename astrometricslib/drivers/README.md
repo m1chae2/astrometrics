@@ -6,6 +6,8 @@ This folder holds the code that talks to something outside the pipeline logic it
 
 - `image.py`, `fits_access.py` — `AstrometricsImage`, the main data container for a loaded astronomical image, and the lower-level functions that read pixel data and metadata out of a FITS file.
 - `filter_detection.py` — reads an image's settings to work out what kind of picture it is (which filter, light/dark/flat/bias).
+- `stacking_engine.py` — the contract between the stacking pipeline and a stacking program: the settings, the result, and the methods an engine offers.
+- `siril_stacking_engine.py` — Siril as the stacking engine. It wraps `siril_interface.py` and turns Siril's files into the plain values the contract names.
 - `siril_interface.py`, `siril_output_parsing.py` — runs the external Siril program to stack images, and parses the text files Siril writes describing what it did.
 - `plate_solve_interface.py` — figures out exactly what part of the sky an image shows.
 - `simbad_interface.py` — the process's one client for querying the external SIMBAD astronomical database.

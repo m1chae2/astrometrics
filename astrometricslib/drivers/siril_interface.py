@@ -191,6 +191,54 @@ _CALIBRATION_MASTER_KINDS = (
 )
 
 
+def build_flat_master_commands(
+    num_flats: int, has_bias: bool, color_filter_array_flags: str, smoothing_sigma: float | None
+) -> list[str]:
+    """Write the Siril commands that build the master flat.
+
+    One flat is used as it is. Several are calibrated with the bias master,
+    when there is one, and stacked with rejection. A flat set too noisy to use
+    as it is gets a Gaussian blur (see `assess_staged_flats`). Siril's
+    ``gauss`` mirrors the image at its border. The master flat's own noise is
+    white, so the blur removes it and keeps the vignette and dust shadows.
+
+    Parameters
+    ----------
+    num_flats : `int`
+        How many flat frames are staged.
+    has_bias : `bool`
+        Whether a master bias is available to subtract from several flats.
+    color_filter_array_flags : `str`
+        The colour-sensor flags for ``calibrate``, or an empty string.
+    smoothing_sigma : `float` or `None`
+        The Gaussian width in pixels, or `None` for no blur.
+
+    Returns
+    -------
+    commands : `list` [`str`]
+        The commands, one per entry, starting after ``cd`` into the flats
+        folder and ending with the master saved as ``flat_stacked``.
+    """
+    smoothing = [f"gauss {smoothing_sigma:.4f}"] if smoothing_sigma else []
+    if num_flats == 1:
+        return [
+            "convert flat -out=../process",
+            "cd ../process",
+            "load flat_00001.fits",
+            *smoothing,
+            "save flat_stacked",
+        ]
+    commands = [
+        "convert flat -out=../process -fitseq",
+        "cd ../process",
+        f"calibrate flat {'-bias=bias_stacked' if has_bias else ''}{color_filter_array_flags}",
+        "stack pp_flat rej 3 3 -norm=mul -out=flat_stacked",
+    ]
+    if smoothing:
+        commands += ["load flat_stacked", *smoothing, "save flat_stacked"]
+    return commands
+
+
 def _master_recipe(kind: str) -> str:
     """Name how a master of this kind is built, for its cache key.
 
@@ -206,7 +254,7 @@ def _master_recipe(kind: str) -> str:
     """
     if kind != "flat":
         return ""
-    from astrometricslib.pipelines.stacking.flat_calibration import FLAT_MASTER_RECIPE
+    from astrometricslib.pipelines.stacking.pre_processing.flat_calibration import FLAT_MASTER_RECIPE
 
     return FLAT_MASTER_RECIPE
 
@@ -831,21 +879,21 @@ class ImageProcessing:
 
         return restored_kinds
 
-    def prepare_flat_master(
+    def assess_staged_flats(
         self,
         target_folder: str,
         uses_color_filter_array: bool,
-        restored_from_cache: bool,
         job_logger: logging.Logger | None = None,
-    ) -> tuple[Any, bool]:
-        """Check the staged flat frames and smooth a noisy master flat.
+    ) -> Any:
+        """Measure the staged flat frames and decide whether to smooth them.
 
         The master flat's noise is copied into every calibrated light, and
         stacking does not average it away unless the frames were dithered
-        (see `pipelines/stacking/flat_calibration.py`). When the master
-        would be noisier than the limit set there, this builds a smoothed
-        master and places it where the Siril script expects the one it
-        builds itself, so the script skips that step.
+        (see `stacking/pre_processing/flat_calibration.py`). When the
+        master would be noisier than the limit set there, the assessment
+        carries the Gaussian width to blur it with. The Siril script
+        applies the blur (its ``gauss`` command) to the master flat it
+        builds.
 
         A colour (Bayer) sensor's flat is measured but never smoothed,
         because blurring the mosaic would mix its colours.
@@ -856,73 +904,31 @@ class ImageProcessing:
             This run's staging directory.
         uses_color_filter_array : `bool`
             Whether the lights come from a colour sensor.
-        restored_from_cache : `bool`
-            Whether a master flat has already been copied in from the
-            cache. Its cache key includes the smoothing recipe, so it is
-            already the right one; it is measured but not rebuilt.
         job_logger : `logging.Logger`, optional
             Logger for the findings.
 
         Returns
         -------
         assessment : `FlatAssessment`
-            What was measured about the flat set.
-        master_written : `bool`
-            `True` if a smoothed master flat was written into the
-            ``process`` directory.
+            What was measured about the flat set. `smoothing_sigma_pixels` is
+            `None` when no smoothing is to be applied.
         """
         import dataclasses
 
-        from astrometricslib.pipelines.stacking.flat_calibration import (
-            assess_flats,
-            build_smoothed_master_flat,
-            write_master_flat,
-        )
+        from astrometricslib.pipelines.stacking.pre_processing.flat_calibration import assess_flats
 
         flat_directory = os.path.join(target_folder, "flats")
-        bias_directory = os.path.join(target_folder, "biases")
         flat_paths = sorted(os.path.join(flat_directory, name) for name in os.listdir(flat_directory))
         assessment = assess_flats(flat_paths)
-
-        def report(message: str) -> None:
-            """Send a finding to the job log, or the module log without one."""
-            (job_logger or logger).warning("Flat calibration: %s", message)
-
         for issue in assessment.issues:
-            report(issue)
-        if not assessment.needs_smoothing or restored_from_cache:
-            return assessment, False
-
-        def unsmoothed(note: str) -> Any:
-            """Report why the flat is not smoothed.
-
-            Returns
-            -------
-            assessment : `FlatAssessment`
-                The assessment, with the note added and no smoothing.
-            """
-            report(note)
+            (job_logger or logger).warning("Flat calibration: %s", issue)
+        if assessment.needs_smoothing and uses_color_filter_array:
+            note = "not smoothed: blurring a colour sensor's flat would mix its colours"
+            (job_logger or logger).warning("Flat calibration: %s", note)
             return dataclasses.replace(
                 assessment, smoothing_sigma_pixels=None, issues=[*assessment.issues, note]
             )
-
-        if uses_color_filter_array:
-            return unsmoothed("not smoothed: blurring a colour sensor's flat would mix its colours"), False
-
-        bias_paths = sorted(os.path.join(bias_directory, name) for name in os.listdir(bias_directory))
-        master = build_smoothed_master_flat(flat_paths, bias_paths, assessment.smoothing_sigma_pixels)
-        if master is None:
-            return unsmoothed("not smoothed: the master flat could not be built"), False
-
-        process_directory = os.path.join(target_folder, "process")
-        os.makedirs(process_directory, exist_ok=True)
-        write_master_flat(os.path.join(process_directory, "flat_stacked.fits"), master, flat_paths[0])
-        message = (
-            f"master flat smoothed with a {assessment.smoothing_sigma_pixels:.1f} px Gaussian to bring "
-            f"its noise from {assessment.noise_fraction:.2%} down to the limit"
-        )
-        (job_logger or logger).info("Flat calibration: %s", message)
-        return assessment, True
+        return assessment
 
     def store_calibration_masters_in_cache(
         self, target_folder: str, job_logger: logging.Logger | None = None
@@ -1917,16 +1923,16 @@ class ImageProcessing:
             restored_master_kinds = self.restore_cached_calibration_masters(
                 target_folder, job_logger=job_logger
             )
+            flat_smoothing_sigma = None
             if num_flats > 0:
-                flat_assessment, smoothed_master_written = self.prepare_flat_master(
-                    target_folder,
-                    uses_color_filter_array,
-                    restored_from_cache="flat" in restored_master_kinds,
-                    job_logger=job_logger,
+                flat_assessment = self.assess_staged_flats(
+                    target_folder, uses_color_filter_array, job_logger=job_logger
                 )
                 self.last_run_diagnostics["flat_calibration"] = flat_assessment.as_diagnostics()
-                if smoothed_master_written:
-                    restored_master_kinds.add("flat")
+                # A master restored from the cache was built, smoothed or not,
+                # under the same recipe, so only a master built now is blurred.
+                if "flat" not in restored_master_kinds:
+                    flat_smoothing_sigma = flat_assessment.smoothing_sigma_pixels
 
             # Automated Master Calibration Generation
             if num_biases > 0 and "bias" not in restored_master_kinds:
@@ -1965,21 +1971,9 @@ class ImageProcessing:
 
             if num_flats > 0 and "flat" not in restored_master_kinds:
                 script += [f"cd {os.path.join(target_folder, 'flats')}"]
-                if num_flats == 1:
-                    script += [
-                        "convert flat -out=../process",
-                        "cd ../process",
-                        "load flat_00001.fits",
-                        "save flat_stacked",
-                    ]
-                else:
-                    script += ["convert flat -out=../process -fitseq", "cd ../process"]
-                    # Calibrate flat with bias if available
-                    script += [
-                        f"calibrate flat {'-bias=bias_stacked' if num_biases > 0 else ''}"
-                        f"{color_filter_array_flags}",
-                        "stack pp_flat rej 3 3 -norm=mul -out=flat_stacked",
-                    ]
+                script += build_flat_master_commands(
+                    num_flats, num_biases > 0, color_filter_array_flags, flat_smoothing_sigma
+                )
 
             # Process Lights
             script += [f"cd {os.path.join(target_folder, 'lights')}"]
@@ -2393,7 +2387,7 @@ class ImageProcessing:
             Siril run, or the alignment step in between, produced nothing
             to stack.
         """
-        from astrometricslib.pipelines.stacking.spectral_frame_alignment import (
+        from astrometricslib.pipelines.stacking.processing.spectral_frame_alignment import (
             ALIGNED_SIRIL_SEQUENCE_NAME,
             align_calibrated_frames,
             find_calibrated_frame_paths,

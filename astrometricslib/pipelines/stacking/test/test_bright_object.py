@@ -13,8 +13,8 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from astrometricslib.pipelines.stacking import bright_object
-from astrometricslib.pipelines.stacking.bright_object import (
+from astrometricslib.pipelines.stacking.post_processing import bright_object
+from astrometricslib.pipelines.stacking.post_processing.bright_object import (
     choose_bright_object_stretch,
     choose_bright_object_stretch_for_file,
 )

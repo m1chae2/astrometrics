@@ -15,7 +15,7 @@ from astrometricslib.drivers.logger_interface import DbLogHandler, LoggerInterfa
 from astrometricslib.drivers.siril_interface import ImageProcessing
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
-from astrometricslib.pipelines.stacking.siril_stacking import run_siril_stack
+from astrometricslib.pipelines.stacking.stack_runner import run_siril_stack
 from astrometricslib.utilities.config_loader import AppConfiguration
 
 __all__ = [

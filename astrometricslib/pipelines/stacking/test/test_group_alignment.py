@@ -11,7 +11,7 @@ in are reported.
 import numpy as np
 import pytest
 
-from astrometricslib.pipelines.stacking.group_alignment import (
+from astrometricslib.pipelines.stacking.processing.group_alignment import (
     MINIMUM_ALIGNMENT_CORRELATION,
     NEGLIGIBLE_SHIFT_PIXELS,
     align_images_to_reference,

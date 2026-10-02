@@ -29,7 +29,7 @@ import numpy as np
 from scipy.ndimage import rotate as rotate_image
 from scipy.ndimage import shift as shift_image
 
-from astrometricslib.pipelines.stacking.group_alignment import find_zero_order_position
+from astrometricslib.pipelines.stacking.processing.group_alignment import find_zero_order_position
 
 logger = logging.getLogger(__name__)
 

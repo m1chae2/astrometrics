@@ -11,10 +11,10 @@ This pipeline combines many individual pictures (sub-exposures) of the same targ
     - how many frames it has, how bright they are (as a share of full scale), and how noisy the master flat will be (the noise of one frame divided by the square root of the frame count);
     - whether the noise is above the limit, 0.5% of the flat's level. The limit is set so that the fixed pattern adds under 3% to the variance of a typical stack's own noise.
 
-   When the noise is above the limit, the pipeline builds the master flat itself, blurs it with a Gaussian just wide enough to reach the limit (at most 8 pixels), and gives that master to Siril in place of its own. Vignetting and dust shadows are many pixels wide and survive the blur. The pixel-to-pixel sensitivity differences, about 1% on a CMOS sensor, do not. Taking more flats is the better cure, because the blur is a fallback. A colour (Bayer) sensor's flat is measured but not blurred, because the blur would mix the colour channels.
+   When the noise is above the limit, the pipeline adds Siril's `gauss` command to the script that builds the master flat. The Gaussian is just wide enough to reach the limit (at most 8 pixels). Siril mirrors the image at its border. Vignetting and dust shadows are many pixels wide and survive the blur. The pixel-to-pixel sensitivity differences, about 1% on a CMOS sensor, do not. Taking more flats is the better cure, because the blur is a fallback. A colour (Bayer) sensor's flat is measured but not blurred, because the blur would mix the colour channels.
 
    Each finding is recorded in the stack's quality summary: `flatFrameCount`, `flatNoiseFraction` (relative noise of the master flat before smoothing, 0.005 is 0.5%), `flatSmoothingSigmaPx` (the blur width, empty when none was applied) and `flatCalibrationIssues` (one sentence per problem). Each issue also appears in the summary's flag reasons, which flags the stack.
-5. **Run the external stacker.** `siril_stacking.py` drives Siril, the external program that performs the pixel-rejection and combination, with the two extra safeguards spectroscopy needs (its dispersed images cannot use Siril's normal star-based registration).
+5. **Run the stacking engine.** `stack_runner.py` hands each batch of frames to a stacking engine, the program that calibrates, registers (lines up) and combines them with pixel rejection. Siril is the engine in use. The runner adds the two safeguards spectroscopy needs (its dispersed images cannot use Siril's normal star-based registration). The engine's contract is in `drivers/stacking_engine.py`: a `StackSettings` goes in and a `StackRunResult` comes out, so nothing else in the pipeline reads Siril's commands or files. The quality summary records the engine's name and version (`stackingEngine`, `stackingEngineVersion`). To use another program, write a class with the same methods (see `drivers/siril_stacking_engine.py`); the runner and stage need no change.
 6. **Judge the result.** `stack_quality.py` holds the rules for deciding whether a stacked image is good enough to use. `exposure_saturation.py` checks whether a given exposure length saturates the brightest star in the field, and `exposure_group_report.py` records a description of the exposure groups a stack was built from.
 7. **Save a picture of the stack.** `stack_preview.py` saves a JPEG next to the finished stack, named `<stack name>_preview.jpg`. A stack holds linear data, which looks almost black on a screen, so up to three steps run on a scratch copy first:
     1. GraXpert removes the sky's brightness gradient, if the `[Processing.GraXpert]` setting names a GraXpert command. Its AI model learns what the smooth background looks like and subtracts it.
@@ -29,13 +29,15 @@ This pipeline combines many individual pictures (sub-exposures) of the same targ
 
 ## Where each piece lives
 
+The folders follow the layout in `pipelines/README.md`.
+
 - `stage.py` is the coordinator: it runs the steps above in order for one target, and is what the rest of the codebase calls to stack a target's frames.
-- `exposure_groups.py`, `background_homogeneity.py`, `frame_homogeneity.py`, `group_alignment.py`, `spectral_frame_alignment.py`, `group_derotation.py` each implement one step above.
-- `flat_calibration.py` measures the flat frames and builds the smoothed master flat (step 4). It does not stack the lights.
-- `siril_stacking.py` runs the Siril stack. It is the only file that stacks pixels.
-- `stack_quality.py`, `exposure_saturation.py`, `exposure_group_report.py` judge input or output quality; none of them stack pixels themselves.
-- `bright_object.py` recognises a stack of a large bright object and chooses its stretch (step 7).
-- `stack_preview.py` makes the JPEG picture of a finished stack (step 7). It starts GraXpert, Cosmic Clarity and Siril as separate programs. GraXpert and Siril run under the shared Siril slot limit, and Cosmic Clarity runs under its own exclusive lock.
+- `stack_runner.py` runs the stacking engine (step 5): exposure groups, registration retries and the final read of the engine's files. The engine is the only code that stacks a batch's pixels. `processing/` combines the group stacks.
+- `pre_processing/` checks and prepares the inputs: the gain and background homogeneity checks, the flat-frame check, and the input-quality judgement (`StackingInputQuality`). See its README.
+- `processing/` lines up and combines frames: exposure groups, group alignment, spectral frame alignment and derotation. See its README.
+- `post_processing/` judges and presents the finished stack: the quality thresholds, the saturation check, the exposure-group report, the output-quality judgement (`StackingOutputQuality`), the bright-object rule, the sky level rule and the preview picture. See its README.
+
+`stage.py` stores the two judgements on the stack's quality summary as `inputQuality` and `outputQuality`. Each carries its own flag reasons, so a reader can tell a bad input from a bad result.
 
 ## A note on scope
 

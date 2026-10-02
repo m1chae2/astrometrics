@@ -7,7 +7,7 @@ patterns modeled on real sessions.
 
 from dataclasses import dataclass
 
-from astrometricslib.pipelines.stacking.background_homogeneity import (
+from astrometricslib.pipelines.stacking.pre_processing.background_homogeneity import (
     detect_background_split,
     find_dominant_background_subset,
 )

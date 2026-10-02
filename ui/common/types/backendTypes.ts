@@ -893,6 +893,51 @@ export interface AppliedCameraProfile {
 }
 
 /**
+ * Whether the frames and calibration data going into a stack were sound.
+ *
+ * Answers "was this stack worth running?" using only facts known before
+ * the stacking engine started: how many frames survived the pre-checks,
+ * whether the sky background changed during the session, and whether the
+ * flat frames could be trusted.
+ */
+export interface StackingInputQuality {
+  framesSubmitted: number;
+  framesAccepted: number;
+  framesExcludedForGain?: number;
+  framesExcludedForBackground?: number;
+  backgroundSplitDetected?: boolean;
+  backgroundSplitDetail?: string | null;
+  flatFrameCount?: number | null;
+  flatNoiseFraction?: number | null;
+  flatSmoothingSigmaPx?: number | null;
+  flatCalibrationIssues?: string[];
+  calibrationMismatchFlags?: string[];
+  isFlagged?: boolean;
+  flagReasons?: string[];
+}
+
+/**
+ * Whether a finished stack came out well.
+ *
+ * Answers "can this stacked image be trusted?" using only measurements of
+ * the stacked file and of the per-frame results the engine reported.
+ * Each measurement is `None` when it does not apply or could not be made
+ * (for example the sharpness comparison is only made for images, not for
+ * spectra).
+ */
+export interface StackingOutputQuality {
+  rejectedPixelFraction?: number | null;
+  saturatedPixelFraction?: number | null;
+  zeroPixelFraction?: number | null;
+  negativePixelMaxPercent?: number | null;
+  stackedFwhmPx?: number | null;
+  medianInputFwhmPx?: number | null;
+  spectralRegistrationConcernCount?: number;
+  isFlagged?: boolean;
+  flagReasons?: string[];
+}
+
+/**
  * Measurements recorded when combining (stacking) multiple images.
  *
  * This tracks how many images were successfully combined and records details
@@ -927,6 +972,8 @@ export interface StackingPipelineQualityMetrics {
   stackingDurationSeconds?: number | null;
   timedOut?: boolean;
   debayerApplied?: boolean | null;
+  stackingEngine?: string | null;
+  stackingEngineVersion?: string | null;
   registrationReferenceFrame?: string | null;
   registrationReferenceStarCount?: number | null;
 }
@@ -953,6 +1000,8 @@ export interface StackQualitySummary {
   provenanceActivityId?: string | null;
   upstreamEntityId?: string | null;
   stackingMetrics: StackingPipelineQualityMetrics;
+  inputQuality?: StackingInputQuality | null;
+  outputQuality?: StackingOutputQuality | null;
 }
 
 /**

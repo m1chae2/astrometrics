@@ -66,17 +66,12 @@ def _build_summary(  # ruff: ignore[missing-return-type-private-function]
     from astrometricslib.pipelines.stacking import stage as stacking_tasks
 
     target = Target(id="TestTarget", frames=target_frames)
-    diagnostics = {"symlinked_light_paths": symlinked_light_paths}
+    diagnostics = {
+        "symlinked_light_paths": symlinked_light_paths,
+        "registration_frames": registration_frames,
+    }
 
     with (
-        patch(
-            "astrometricslib.drivers.siril_output_parsing.parse_seq_file",
-            return_value=registration_frames,
-        ),
-        patch(
-            "astrometricslib.pipelines.shared.quality.quality_metrics.measure_rejected_fraction",
-            return_value=None,
-        ),
         patch(
             "astrometricslib.pipelines.shared.quality.quality_metrics.measure_saturated_pixel_fraction",
             return_value=None,

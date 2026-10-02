@@ -31,11 +31,11 @@ import numpy as np
 from astrometricslib import Astrometrics
 from astrometricslib.drivers.fits_access import read_data
 from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral, group_frames_by_configuration
-from astrometricslib.pipelines.stacking.exposure_groups import (
+from astrometricslib.pipelines.stacking.post_processing.stack_quality import is_zero_fraction_significant
+from astrometricslib.pipelines.stacking.processing.exposure_groups import (
     MINIMUM_FRAMES_PER_EXPOSURE_GROUP,
     frame_exposure_seconds,
 )
-from astrometricslib.pipelines.stacking.stack_quality import is_zero_fraction_significant
 
 # Every n-th pixel is read when counting zeros, so a large stack is checked
 # quickly. One pixel in 36 is plenty to tell a stack that is 98% zero from one

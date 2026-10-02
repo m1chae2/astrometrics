@@ -5,7 +5,7 @@ selection.
 """
 
 from astrometricslib.models.target import FrameRecord
-from astrometricslib.pipelines.stacking.frame_homogeneity import find_dominant_gain_subset
+from astrometricslib.pipelines.stacking.pre_processing.frame_homogeneity import find_dominant_gain_subset
 
 
 def _frame(iso="100", path="frame.fits"):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]

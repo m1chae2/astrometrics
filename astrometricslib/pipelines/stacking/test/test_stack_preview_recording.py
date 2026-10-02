@@ -8,7 +8,7 @@ replaces a picture a person attached or one that belongs to another stack.
 from types import SimpleNamespace
 
 from astrometricslib.pipelines.shared.stack_preview_path import is_preview_path
-from astrometricslib.pipelines.stacking.stack_preview import record_preview_as_processed_image
+from astrometricslib.pipelines.stacking.post_processing.stack_preview import record_preview_as_processed_image
 
 _STACK = "/lib/M 13/M_13_L_Stacked.fits"
 _PREVIEW = "/lib/M 13/M_13_L_Stacked_preview.jpg"

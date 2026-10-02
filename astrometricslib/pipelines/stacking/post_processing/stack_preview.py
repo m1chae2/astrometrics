@@ -54,11 +54,11 @@ from astrometricslib.pipelines.shared.stack_preview_path import (
     is_preview_path,
     preview_path_for,
 )
-from astrometricslib.pipelines.stacking.bright_object import (
+from astrometricslib.pipelines.stacking.post_processing.bright_object import (
     BrightObjectStretch,
     choose_bright_object_stretch_for_file,
 )
-from astrometricslib.pipelines.stacking.sky_level import choose_sky_level_for_file
+from astrometricslib.pipelines.stacking.post_processing.sky_level import choose_sky_level_for_file
 from astrometricslib.utilities.config_loader import get_configuration
 
 logger = logging.getLogger(__name__)

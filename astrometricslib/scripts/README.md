@@ -20,6 +20,7 @@ This folder holds standalone command-line scripts: batch processing over the who
 
 - `run_empirical_validation.py` — the master script that runs astrometricslib's pipelines against real stored data to validate their design against actual results, not synthetic test cases.
 - `validate_spectral_and_period_analysis.py` — checks that the spectral and period-search analyses actually tell a real signal from noise.
+- `compare_group_steps_with_siril.py` — compares Siril's registration and stacking with our own group alignment and group combining on the group stacks a target already has, to show whether a replacement would lose quality (it changes nothing in the library).
 - `rejection_threshold_analysis.py` — an empirical grid search over stacking's sigma/filter-percentile rejection thresholds.
 - `spectral_registration_quality_analysis.py` — checks spectral frame registration quality for the SA200 grating.
 - `recompute_spectral_analysis.py` — re-runs the current spectral analysis over every already-stored spectrum, without re-extracting from the raw frames.

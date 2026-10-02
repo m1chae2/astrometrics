@@ -1,9 +1,9 @@
 r"""Make preview pictures for stacks that already exist, and record them.
 
 Stacking now saves a cleaned-up, stretched JPEG next to every new stack (see
-`pipelines/stacking/stack_preview.py`) and shows it as the target's processed
-image. Stacks made earlier have no preview. This script runs the same step on
-them.
+`stacking/post_processing/stack_preview.py`) and shows it as the target's
+processed image. Stacks made earlier have no preview. This script runs the
+same step on them.
 
 For each stack it:
 
@@ -34,7 +34,7 @@ from typing import Any
 
 from astrometricslib import Astrometrics
 from astrometricslib.pipelines.shared.stack_preview_path import preview_path_for
-from astrometricslib.pipelines.stacking.stack_preview import (
+from astrometricslib.pipelines.stacking.post_processing.stack_preview import (
     record_preview_as_processed_image,
     write_stack_preview,
 )
@@ -160,7 +160,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     logging.basicConfig(level=logging.WARNING)
     # Show the sky level chosen for each stack, as well as any warnings.
-    logging.getLogger("astrometricslib.pipelines.stacking.stack_preview").setLevel(logging.INFO)
+    logging.getLogger("astrometricslib.pipelines.stacking.post_processing.stack_preview").setLevel(
+        logging.INFO
+    )
     astrometrics = Astrometrics()
     everything = [astrometrics.targets.get(listed.id) for listed in astrometrics.targets.list()]
     selected = select_targets([t for t in everything if t], arguments.targets, arguments.camera)

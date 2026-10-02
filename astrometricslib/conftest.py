@@ -216,15 +216,15 @@ def no_siril_stack_preview(monkeypatch: pytest.MonkeyPatch) -> None:
     own.
     """
     monkeypatch.setattr(
-        "astrometricslib.pipelines.stacking.stack_preview.run_preview_script",
+        "astrometricslib.pipelines.stacking.post_processing.stack_preview.run_preview_script",
         lambda directory, commands, siril_executable: False,
     )
     monkeypatch.setattr(
-        "astrometricslib.pipelines.stacking.stack_preview.flatten_background",
+        "astrometricslib.pipelines.stacking.post_processing.stack_preview.flatten_background",
         lambda graxpert_executable, input_path, output_stem: False,
     )
     monkeypatch.setattr(
-        "astrometricslib.pipelines.stacking.stack_preview.denoise_with_cosmic_clarity",
+        "astrometricslib.pipelines.stacking.post_processing.stack_preview.denoise_with_cosmic_clarity",
         lambda executable, input_path, output_path, strength: False,
     )
 

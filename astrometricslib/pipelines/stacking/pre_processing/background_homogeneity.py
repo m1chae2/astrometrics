@@ -175,7 +175,7 @@ def find_dominant_background_subset_by_exposure(
         by `find_dominant_background_subset` with an ``"exposure_seconds"``
         entry added.
     """
-    from astrometricslib.pipelines.stacking.exposure_groups import split_frames_by_exposure
+    from astrometricslib.pipelines.stacking.processing.exposure_groups import split_frames_by_exposure
 
     if not frames:
         return [], [], []

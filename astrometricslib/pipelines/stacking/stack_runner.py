@@ -1,7 +1,8 @@
-"""Running Siril for a stack, with the two safeguards spectroscopy needs.
+"""Running a stacking engine, with the two safeguards spectroscopy needs.
 
-`run_siril_stack` is what the stacking stage calls instead of talking to the
-Siril driver directly. It adds two things the driver alone does not do:
+`run_stack` is what the stacking stage calls instead of talking to the
+engine directly (the engine is Siril today, see `drivers/stacking_engine.py`).
+It adds two things the engine alone does not do:
 
 1. Registration fallback. Spectral frames are lined up by matching stars
    against a reference frame. If the standard star detection cannot match
@@ -21,6 +22,8 @@ import logging
 import os
 import shutil
 from typing import Any
+
+from astrometricslib.drivers.stacking_engine import StackingEngine, StackSettings
 
 logger = logging.getLogger(__name__)
 
@@ -46,13 +49,14 @@ MINIMUM_REGISTERED_FRACTION = 0.9
 SPECTRAL_STAR_DETECTION_ORDER = ("standard", "relaxed", "phase_correlation")
 
 
-def run_siril_stack(
-    siril_driver: Any,
+def run_stack(
+    engine: StackingEngine,
     frames: list[Any],
     target_id: str,
     output_file: str | None,
     log_file: str | None,
     is_spectral: bool,
+    job_id: str | None = None,
     **stack_options: Any,
 ) -> tuple[str | None, dict[str, Any]]:
     """Stack frames with Siril, one exposure length at a time if they differ.
@@ -63,8 +67,8 @@ def run_siril_stack(
 
     Parameters
     ----------
-    siril_driver : `ImageProcessing`
-        The Siril driver.
+    engine : `StackingEngine`
+        The program that stacks each batch of frames.
     frames : `list`
         The frame records to stack (or dictionaries of them).
     target_id : `str`
@@ -77,10 +81,13 @@ def run_siril_stack(
     is_spectral : `bool`
         Whether these are spectroscopy frames. The registration fallback
         applies only to them.
+    job_id : `str`, optional
+        The tracked job the stack belongs to, passed to the engine so it can
+        report progress.
     **stack_options
-        The other options `ImageProcessing.process_target` takes
-        (``rejection_sigma``, ``filter_wfwhm``, ``filter_round``,
-        ``stack_weight``, ``generate_rejmap``).
+        The fields of `StackSettings` (``rejection_sigma``,
+        ``filter_wfwhm``, ``filter_round``, ``stack_weight`` and
+        ``generate_rejmap``).
 
     Returns
     -------
@@ -93,7 +100,7 @@ def run_siril_stack(
     """
     if output_file is None:
         output_file = f"{target_id.replace(' ', '_')}_Stacked.fits"
-    from astrometricslib.pipelines.stacking.exposure_groups import (
+    from astrometricslib.pipelines.stacking.processing.exposure_groups import (
         split_frames_by_exposure,
         split_groups_by_night,
     )
@@ -109,24 +116,67 @@ def run_siril_stack(
         # together can lose most frames (see `split_groups_by_night`).
         groups = split_groups_by_night(groups)
     if len(groups) > 1:
-        return _stack_exposure_groups(
-            siril_driver, groups, target_id, output_file, log_file, is_spectral, **stack_options
+        stacked_path, diagnostics = _stack_exposure_groups(
+            engine, groups, target_id, output_file, log_file, is_spectral, job_id=job_id, **stack_options
         )
-    stacked_path, diagnostics = _stack_one_batch(
-        siril_driver, frames, target_id, output_file, log_file, is_spectral, **stack_options
-    )
+    else:
+        stacked_path, diagnostics = _stack_one_batch(
+            engine, frames, target_id, output_file, log_file, is_spectral, job_id=job_id, **stack_options
+        )
+        if stacked_path is not None:
+            _describe_single_group(frames, diagnostics, stacked_path)
     if stacked_path is not None:
-        _describe_single_group(frames, diagnostics, stacked_path)
+        # Read once, from the final files, so a stack made of several groups
+        # reports the combined registration and rejection results.
+        diagnostics.update(engine.read_stack_artifacts(stacked_path))
     return stacked_path, diagnostics
 
 
-def _stack_one_batch(
+def run_siril_stack(
     siril_driver: Any,
+    frames: list[Any],
+    target_id: str,
+    output_file: str | None,
+    log_file: str | None,
+    is_spectral: bool,
+    job_id: str | None = None,
+    **stack_options: Any,
+) -> tuple[str | None, dict[str, Any]]:
+    """Stack frames with a Siril driver (`run_stack` with Siril as the engine).
+
+    Kept for callers that hold an `ImageProcessing` driver. The driver is
+    wrapped in `SirilStackingEngine`. A caller with another engine uses
+    `run_stack` directly.
+
+    Returns
+    -------
+    stacked_path : `str` or `None`
+        Where the stacked image was written, or `None` if stacking failed.
+    diagnostics : `dict`
+        What the run reported (see `run_stack`).
+    """
+    from astrometricslib.drivers.siril_stacking_engine import SirilStackingEngine
+
+    return run_stack(
+        SirilStackingEngine(siril_driver),
+        frames,
+        target_id,
+        output_file,
+        log_file,
+        is_spectral,
+        job_id=job_id,
+        **stack_options,
+    )
+
+
+def _stack_one_batch(
+    engine: StackingEngine,
     frames: list[Any],
     target_id: str,
     output_file: str,
     log_file: str | None,
     is_spectral: bool,
+    job_id: str | None = None,
     **stack_options: Any,
 ) -> tuple[str | None, dict[str, Any]]:
     """Run Siril once for frames that can be stacked together.
@@ -146,22 +196,25 @@ def _stack_one_batch(
     """
     image_files = [frame.model_dump() if hasattr(frame, "model_dump") else frame for frame in frames]
     modes = SPECTRAL_STAR_DETECTION_ORDER if is_spectral else (None,)
+    settings = StackSettings(**stack_options)
     attempts = []
     for attempt_index, mode in enumerate(modes):
         attempt_output = output_file if attempt_index == 0 else _with_suffix(output_file, f"_{mode}")
         attempt_log = log_file if attempt_index == 0 else _with_suffix(log_file, f"_{mode}")
-        options = dict(stack_options)
-        if mode is not None:
-            options["spectral_star_detection"] = mode
-        path = siril_driver.process_target(
-            id=target_id,
-            image_files=image_files,
-            output_file=attempt_output,
-            log_file=attempt_log,
-            is_spectral=is_spectral,
-            **options,
+        result = engine.stack_batch(
+            image_files,
+            target_id,
+            attempt_output,
+            attempt_log,
+            is_spectral,
+            settings,
+            registration=mode,
+            job_id=job_id,
         )
-        diagnostics = dict(siril_driver.last_run_diagnostics)
+        path = result.stacked_path
+        diagnostics = dict(result.diagnostics)
+        diagnostics["stacking_engine"] = result.engine_name
+        diagnostics["stacking_engine_version"] = result.engine_version
         if path and _is_stack_blank(path):
             # A blank stack is not a result. Without this its unreported
             # registration counts as 100% (see `_registered_fraction`), so
@@ -239,7 +292,7 @@ def _is_stack_blank(stack_path: str) -> bool:
     import numpy as np
 
     from astrometricslib.drivers.fits_access import read_data
-    from astrometricslib.pipelines.stacking.exposure_groups import (
+    from astrometricslib.pipelines.stacking.processing.exposure_groups import (
         MINIMUM_STACK_DATA_FRACTION,
         stack_data_fraction,
     )
@@ -351,12 +404,12 @@ def _describe_single_group(frames: list[Any], diagnostics: dict[str, Any], stack
     stacked_path : `str`
         The stack, recorded as the group's path.
     """
-    from astrometricslib.pipelines.stacking.exposure_group_report import (
+    from astrometricslib.pipelines.stacking.post_processing.exposure_group_report import (
         build_group_summary,
         measure_group_saturation,
         recommended_exposure_for_groups,
     )
-    from astrometricslib.pipelines.stacking.exposure_groups import frame_exposure_seconds
+    from astrometricslib.pipelines.stacking.processing.exposure_groups import frame_exposure_seconds
 
     exposure = next((value for value in map(frame_exposure_seconds, frames) if value is not None), 0.0)
     try:
@@ -371,12 +424,13 @@ def _describe_single_group(frames: list[Any], diagnostics: dict[str, Any], stack
 
 
 def _stack_exposure_groups(
-    siril_driver: Any,
+    engine: StackingEngine,
     groups: list[Any],
     target_id: str,
     output_file: str,
     log_file: str | None,
     is_spectral: bool,
+    job_id: str | None = None,
     **stack_options: Any,
 ) -> tuple[str | None, dict[str, Any]]:
     """Stack each exposure group on its own and combine the results.
@@ -402,14 +456,14 @@ def _stack_exposure_groups(
     import numpy as np
 
     from astrometricslib.drivers.fits_access import read_data, read_header, write_image
-    from astrometricslib.pipelines.stacking.exposure_group_report import (
+    from astrometricslib.pipelines.stacking.post_processing.exposure_group_report import (
         build_group_summary,
         groups_directory,
         measure_group_saturation,
         recommended_exposure_for_groups,
         write_group_manifest,
     )
-    from astrometricslib.pipelines.stacking.exposure_groups import (
+    from astrometricslib.pipelines.stacking.processing.exposure_groups import (
         CLIPPED_FRAME_ZERO_FRACTION,
         CLIPPING_FLOOR_SIGMAS,
         combine_exposure_group_images,
@@ -417,11 +471,11 @@ def _stack_exposure_groups(
         merge_registration_sequences,
         merge_rejection_maps,
     )
-    from astrometricslib.pipelines.stacking.group_alignment import (
+    from astrometricslib.pipelines.stacking.processing.group_alignment import (
         SPECTRAL_ALIGNMENT_CENTER_CROP_FRACTION,
         align_images_to_reference,
     )
-    from astrometricslib.pipelines.stacking.group_derotation import derotate_groups_to_common_tilt
+    from astrometricslib.pipelines.stacking.processing.group_derotation import derotate_groups_to_common_tilt
 
     logger.info(
         "Stacking '%s' as %d exposure groups (%s s) and combining them.",
@@ -438,12 +492,13 @@ def _stack_exposure_groups(
         if group.night is not None:
             tag += f"_{group.night}"
         path, diagnostics = _stack_one_batch(
-            siril_driver,
+            engine,
             group.frames,
             target_id,
             _with_suffix(output_file, f"_{tag}"),
             _with_suffix(log_file, f"_{tag}"),
             is_spectral,
+            job_id=job_id,
             **stack_options,
         )
         if path is None:

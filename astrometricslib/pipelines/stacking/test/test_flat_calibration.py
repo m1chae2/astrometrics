@@ -12,8 +12,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 from astropy.io import fits
+from scipy.ndimage import gaussian_filter
 
-from astrometricslib.pipelines.stacking import flat_calibration as fc
+from astrometricslib.pipelines.stacking.pre_processing import flat_calibration as fc
 
 SIZE = 160
 
@@ -89,15 +90,16 @@ def test_smoothing_width_follows_the_noise_and_is_clipped() -> None:
 
 
 def test_the_chosen_width_brings_white_noise_down_to_the_limit(tmp_path: Path) -> None:
-    """Smoothing a noisy flat by the chosen width reaches the noise limit."""
+    """Blurring a noisy flat by the chosen width reaches the noise limit."""
     path = write_flat(tmp_path / "flat.fits", level=0.2, noise=0.045, seed=2)
     assessment = fc.assess_flats([path])
     assert assessment.smoothing_sigma_pixels is not None
-    master = fc.build_smoothed_master_flat([path], [], assessment.smoothing_sigma_pixels)
-    assert master is not None
+    # Siril's `gauss` is SciPy's Gaussian filter in mirror mode, to 4e-7.
+    blurred = gaussian_filter(
+        np.asarray(fits.getdata(path), dtype=np.float64), assessment.smoothing_sigma_pixels, mode="mirror"
+    )
     shape = vignette()
-    # What is left after removing the known vignette is the master's noise.
-    leftover = (master / master.mean()) / (shape / shape.mean()) - 1.0
+    leftover = (blurred / blurred.mean()) / (shape / shape.mean()) - 1.0
     assert float(np.std(leftover[20:-20, 20:-20])) < 1.6 * fc.MAXIMUM_FLAT_NOISE_FRACTION
 
 
@@ -148,53 +150,6 @@ def test_an_unreadable_set_reports_one_issue(tmp_path: Path) -> None:
     assert assessment.noise_fraction is None
     assert assessment.issues == ["no flat frame could be read"]
     assert fc.assess_flats([]).issues == ["no flat frame could be read"]
-
-
-def test_the_smoothed_master_keeps_the_vignette_and_has_mean_one_half(tmp_path: Path) -> None:
-    """Smoothing removes pixel noise, not the corner-to-centre falloff."""
-    path = write_flat(tmp_path / "flat.fits", level=0.2, noise=0.045, seed=6)
-    master = fc.build_smoothed_master_flat([path], [], 3.0)
-    assert master is not None
-    assert master.dtype == np.float32
-    assert float(master.mean()) == pytest.approx(0.5, abs=1e-4)
-    centre = float(master[SIZE // 2 - 5 : SIZE // 2 + 5, SIZE // 2 - 5 : SIZE // 2 + 5].mean())
-    corner = float(master[:8, :8].mean())
-    expected = vignette()[:8, :8].mean() / vignette()[75:85, 75:85].mean()
-    assert corner / centre == pytest.approx(expected, rel=0.03)
-
-
-def test_the_bias_is_subtracted_before_the_flat_is_normalised(tmp_path: Path) -> None:
-    """Removing the bias gives the same master as a flat without offset."""
-    plain = write_flat(tmp_path / "plain.fits", level=0.2, noise=0.0, seed=7)
-    offset_data = np.asarray(fits.getdata(plain), dtype=np.float64) + 2000.0
-    offset = tmp_path / "offset.fits"
-    fits.writeto(offset, offset_data.astype(np.uint16), overwrite=True)
-    bias = tmp_path / "bias.fits"
-    fits.writeto(bias, np.full((SIZE, SIZE), 2000, dtype=np.uint16), overwrite=True)
-    without_bias = fc.build_smoothed_master_flat([str(offset)], [], 2.0)
-    with_bias = fc.build_smoothed_master_flat([str(offset)], [str(bias)], 2.0)
-    reference = fc.build_smoothed_master_flat([plain], [], 2.0)
-    assert with_bias is not None
-    assert reference is not None
-    assert without_bias is not None
-    np.testing.assert_allclose(with_bias, reference, rtol=1e-3)
-    assert not np.allclose(without_bias, reference, rtol=1e-3)
-
-
-def test_the_master_flat_is_written_with_a_clean_header(tmp_path: Path) -> None:
-    """The saved file is a float image with the template's camera keywords."""
-    template = write_flat(tmp_path / "flat.fits", level=0.2, noise=0.01, seed=8)
-    with fits.open(template, mode="update", memmap=False) as hdul:
-        hdul[0].header["INSTRUME"] = "ZWO CCD ASI533MM Pro"
-    master = np.full((SIZE, SIZE), 0.5, dtype=np.float32)
-    destination = tmp_path / "out" / "flat_stacked.fits"
-    fc.write_master_flat(str(destination), master, template)
-    with fits.open(destination, memmap=False) as hdul:
-        header = hdul[0].header
-        assert header["INSTRUME"] == "ZWO CCD ASI533MM Pro"
-        assert header["IMAGETYP"] == "Master Flat"
-        assert "BZERO" not in header
-        assert hdul[0].data.dtype == np.dtype(">f4")
 
 
 def test_a_flat_listed_twice_counts_once_and_is_not_noiseless(tmp_path: Path) -> None:

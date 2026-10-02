@@ -24,7 +24,7 @@ import os
 import numpy as np
 
 from astrometricslib.drivers.fits_access import read_data, read_header, write_image
-from astrometricslib.pipelines.stacking.group_alignment import align_images_to_reference
+from astrometricslib.pipelines.stacking.processing.group_alignment import align_images_to_reference
 
 logger = logging.getLogger(__name__)
 

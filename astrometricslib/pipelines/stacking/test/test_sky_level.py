@@ -14,7 +14,7 @@ import pytest
 from astropy.io import fits
 
 from astrometricslib.pipelines.shared.image_scaling import measure_sky, sky_level_for_peak
-from astrometricslib.pipelines.stacking.sky_level import (
+from astrometricslib.pipelines.stacking.post_processing.sky_level import (
     DARKEST_SKY_LEVEL,
     EXTENDED_LIGHT_BRIGHTNESS,
     FALLBACK_SKY_LEVEL,

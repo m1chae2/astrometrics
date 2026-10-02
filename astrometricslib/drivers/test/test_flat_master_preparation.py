@@ -10,12 +10,14 @@ import os
 from pathlib import Path
 
 import numpy as np
+import pytest
 from astropy.io import fits
 
 from astrometricslib.drivers import siril_interface
 from astrometricslib.drivers.siril_interface import (
     _calibration_source_fingerprint,
     _master_recipe,
+    build_flat_master_commands,
 )
 
 SIZE = 96
@@ -54,52 +56,51 @@ def stage_flats(target_folder: Path, count: int, level: float, noise: float) -> 
         fits.writeto(target_folder / "flats" / f"flat_{index:05d}.fits", data.astype(np.uint16))
 
 
-def test_a_noisy_single_flat_gets_a_smoothed_master(tmp_path: Path) -> None:
-    """The master is written into the process folder and reported."""
+def test_a_noisy_single_flat_is_assessed_for_smoothing(tmp_path: Path) -> None:
+    """The assessment carries the blur width and the issues."""
     stage_flats(tmp_path, count=1, level=0.01, noise=0.045)
-    assessment, written = make_processor().prepare_flat_master(
-        str(tmp_path), uses_color_filter_array=False, restored_from_cache=False
-    )
-    assert written
+    assessment = make_processor().assess_staged_flats(str(tmp_path), uses_color_filter_array=False)
     assert assessment.needs_smoothing
-    master_path = tmp_path / "process" / "flat_stacked.fits"
-    assert master_path.exists()
-    with fits.open(master_path, memmap=False) as hdul:
-        assert abs(float(np.mean(hdul[0].data)) - 0.5) < 1e-3
+    assert assessment.smoothing_sigma_pixels == pytest.approx(2.5, abs=0.2)
+    assert any("take more flats" in issue for issue in assessment.issues)
 
 
-def test_a_good_set_of_flats_is_left_for_siril_to_stack(tmp_path: Path) -> None:
-    """Nothing is written when the master flat is quiet enough."""
+def test_a_good_set_of_flats_is_left_alone(tmp_path: Path) -> None:
+    """A quiet master flat has no issues and no blur."""
     stage_flats(tmp_path, count=30, level=0.4, noise=0.01)
-    assessment, written = make_processor().prepare_flat_master(
-        str(tmp_path), uses_color_filter_array=False, restored_from_cache=False
-    )
-    assert not written
+    assessment = make_processor().assess_staged_flats(str(tmp_path), uses_color_filter_array=False)
     assert assessment.issues == []
-    assert not (tmp_path / "process" / "flat_stacked.fits").exists()
+    assert not assessment.needs_smoothing
 
 
 def test_a_colour_sensor_flat_is_measured_but_not_smoothed(tmp_path: Path) -> None:
     """Blurring a Bayer mosaic would mix colours, so it is only reported."""
     stage_flats(tmp_path, count=1, level=0.01, noise=0.045)
-    assessment, written = make_processor().prepare_flat_master(
-        str(tmp_path), uses_color_filter_array=True, restored_from_cache=False
-    )
-    assert not written
+    assessment = make_processor().assess_staged_flats(str(tmp_path), uses_color_filter_array=True)
     assert not assessment.needs_smoothing
     assert any("colour sensor" in issue for issue in assessment.issues)
-    assert not (tmp_path / "process" / "flat_stacked.fits").exists()
 
 
-def test_a_cached_master_is_not_rebuilt(tmp_path: Path) -> None:
-    """A master restored from the cache already has the right recipe."""
-    stage_flats(tmp_path, count=1, level=0.01, noise=0.045)
-    assessment, written = make_processor().prepare_flat_master(
-        str(tmp_path), uses_color_filter_array=False, restored_from_cache=True
-    )
-    assert not written
-    assert assessment.needs_smoothing
-    assert not (tmp_path / "process" / "flat_stacked.fits").exists()
+def test_one_flat_is_loaded_blurred_and_saved() -> None:
+    """A single flat is used as it is, with the blur before the save."""
+    assert build_flat_master_commands(1, True, "", 2.5) == [
+        "convert flat -out=../process",
+        "cd ../process",
+        "load flat_00001.fits",
+        "gauss 2.5000",
+        "save flat_stacked",
+    ]
+    assert "gauss" not in " ".join(build_flat_master_commands(1, True, "", None))
+
+
+def test_several_flats_are_stacked_and_then_blurred() -> None:
+    """The blur comes after the rejection stack, on the saved master."""
+    commands = build_flat_master_commands(20, True, " -cfa", 3.0)
+    assert commands[2] == "calibrate flat -bias=bias_stacked -cfa"
+    assert commands[3] == "stack pp_flat rej 3 3 -norm=mul -out=flat_stacked"
+    assert commands[4:] == ["load flat_stacked", "gauss 3.0000", "save flat_stacked"]
+    assert build_flat_master_commands(20, False, "", None)[2] == "calibrate flat "
+    assert len(build_flat_master_commands(20, False, "", None)) == 4
 
 
 def test_only_the_flat_master_has_a_recipe_in_its_cache_key() -> None:

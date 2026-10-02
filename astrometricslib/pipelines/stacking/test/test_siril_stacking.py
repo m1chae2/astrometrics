@@ -20,7 +20,7 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from astrometricslib.pipelines.stacking.siril_stacking import (
+from astrometricslib.pipelines.stacking.stack_runner import (
     MINIMUM_REGISTERED_FRACTION,
     run_siril_stack,
 )

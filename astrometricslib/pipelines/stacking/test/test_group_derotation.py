@@ -10,7 +10,7 @@ can be trusted.
 import numpy as np
 import pytest
 
-from astrometricslib.pipelines.stacking.group_derotation import (
+from astrometricslib.pipelines.stacking.processing.group_derotation import (
     NEGLIGIBLE_ROTATION_DEGREES,
     derotate_groups_to_common_tilt,
     rotate_about_point,
@@ -113,7 +113,7 @@ def _stub_measurements(monkeypatch, angles_and_contrasts):  # ruff: ignore[missi
     angles_and_contrasts : `list` [`tuple`]
         One `(angle_degrees, contrast_sigma)` per expected call, in order.
     """
-    import astrometricslib.pipelines.stacking.group_derotation as module
+    import astrometricslib.pipelines.stacking.processing.group_derotation as module
 
     answers = iter(angles_and_contrasts)
     monkeypatch.setattr(module, "measure_trail_angle_degrees", lambda *args, **kwargs: next(answers))

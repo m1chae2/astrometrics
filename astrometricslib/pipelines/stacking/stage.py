@@ -161,7 +161,7 @@ def stack_frames(
     # gain setting has a different amount of read noise and dark current.
     # To protect the final image, we find the most common gain setting
     # and throw out any frames that don't match it.
-    from astrometricslib.pipelines.stacking.frame_homogeneity import find_dominant_gain_subset
+    from astrometricslib.pipelines.stacking.pre_processing.frame_homogeneity import find_dominant_gain_subset
 
     target_frames, excluded_by_gain = find_dominant_gain_subset(target_frames)
     if excluded_by_gain:
@@ -190,7 +190,7 @@ def stack_frames(
             measure_frame_background_level,
             measure_frame_saturated_pixel_fraction,
         )
-        from astrometricslib.pipelines.stacking.background_homogeneity import (
+        from astrometricslib.pipelines.stacking.pre_processing.background_homogeneity import (
             find_dominant_background_subset_by_exposure,
         )
 
@@ -241,20 +241,20 @@ def stack_frames(
                 "Target has no frames available to stack after background-homogeneity filtering."
             )
 
-    from astrometricslib.drivers.siril_interface import ImageProcessing
-    from astrometricslib.pipelines.stacking.siril_stacking import run_siril_stack
-    from astrometricslib.pipelines.stacking.stack_preview import (
+    from astrometricslib.drivers.siril_stacking_engine import SirilStackingEngine
+    from astrometricslib.pipelines.stacking.post_processing.stack_preview import (
         record_preview_as_processed_image,
         write_stack_preview,
     )
+    from astrometricslib.pipelines.stacking.stack_runner import run_stack
 
-    siril_driver = ImageProcessing()
-    # `run_siril_stack` adds two safeguards for spectroscopy: frames of
+    engine = SirilStackingEngine()
+    # `run_stack` adds two safeguards for spectroscopy: frames of
     # different exposure lengths are stacked one length at a time and then
     # combined, and a registration that loses too many frames is retried with
     # a different star detection.
-    stacked_path, diagnostics = run_siril_stack(
-        siril_driver,
+    stacked_path, diagnostics = run_stack(
+        engine,
         target_frames,
         target.id,
         output_file,
@@ -539,24 +539,27 @@ def _base_stack_quality_summary(  # ruff: ignore[missing-return-type-private-fun
             flat_calibration_issues=list((diagnostics.get("flat_calibration") or {}).get("issues", [])),
             stacking_duration_seconds=diagnostics.get("stacking_duration_seconds"),
             debayer_applied=diagnostics.get("debayer_applied"),
+            stacking_engine=diagnostics.get("stacking_engine"),
+            stacking_engine_version=diagnostics.get("stacking_engine_version"),
         ),
     )
 
 
-def _measure_stacked_pixel_fractions(summary, stacked_path: str) -> None:  # ruff: ignore[missing-type-function-argument]
+def _measure_stacked_pixel_fractions(summary, stacked_path: str, diagnostics: dict) -> None:  # ruff: ignore[missing-type-function-argument]
     """Measure the stacked image's rejected and saturated pixel fractions.
 
-    Sets `summary.stacking_metrics`' pixel-fraction fields and their
-    threshold flags in place.
+    The rejected share comes from the engine's report (``diagnostics``);
+    the saturated share is measured on the stacked file. Sets
+    `summary.stacking_metrics`' pixel-fraction fields and their threshold
+    flags in place.
     """
-    from astrometricslib.pipelines.shared.quality.quality_metrics import (
-        measure_rejected_fraction,
-        measure_saturated_pixel_fraction,
-    )
+    from astrometricslib.pipelines.shared.quality.quality_metrics import measure_saturated_pixel_fraction
     from astrometricslib.pipelines.shared.quality.saturation import is_saturation_significant
-    from astrometricslib.pipelines.stacking.stack_quality import is_rejected_fraction_significant
+    from astrometricslib.pipelines.stacking.post_processing.stack_quality import (
+        is_rejected_fraction_significant,
+    )
 
-    rejected_fraction = measure_rejected_fraction(stacked_path)
+    rejected_fraction = diagnostics.get("rejected_pixel_fraction")
     if rejected_fraction is not None:
         summary.stacking_metrics.rejected_pixel_fraction = rejected_fraction
         summary.stacking_metrics.rejected_fraction_flagged = is_rejected_fraction_significant(
@@ -591,10 +594,7 @@ def _update_frame_registration_results(
     identity (no shift of its own) -- and records it onto
     `summary.stacking_metrics`.
     """
-    from astrometricslib.drivers.siril_output_parsing import parse_seq_file
-
-    seq_path = f"{stacked_path.rsplit('.', 1)[0]}_Registration.seq"
-    registration_frames = parse_seq_file(seq_path)
+    registration_frames = diagnostics.get("registration_frames", [])
     registration_frame_paths = diagnostics.get("symlinked_light_paths", [])
 
     # Siril aligns every frame to one reference, so a poor
@@ -678,7 +678,7 @@ def _measure_fwhm_degradation(summary, stacked_path: str, target_frames: list[An
     flag in place.
     """
     from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_image_fwhm
-    from astrometricslib.pipelines.stacking.stack_quality import is_stacked_fwhm_degraded
+    from astrometricslib.pipelines.stacking.post_processing.stack_quality import is_stacked_fwhm_degraded
 
     # Capped at 15 frames (matching FWHM_MEASUREMENT_STAR_COUNT's
     # existing per-image star-count cap) since a median only needs a
@@ -724,14 +724,12 @@ def _check_spectral_registration_quality(summary, stacked_path: str, diagnostics
 
     Sets `summary.stacking_metrics.spectral_registration_flags` in place.
     """
-    from astrometricslib.drivers.siril_output_parsing import parse_seq_file
     from astrometricslib.models.quality_summary import ExcludedFrame
     from astrometricslib.pipelines.spectroscopy.utilities.registration_quality import (
         evaluate_spectral_registration_quality,
     )
 
-    seq_path = f"{stacked_path.rsplit('.', 1)[0]}_Registration.seq"
-    seq_frames = parse_seq_file(seq_path)
+    seq_frames = diagnostics.get("registration_frames", [])
     zero_order_stars = diagnostics.get("zero_order_stars", [])
     frame_paths = diagnostics.get("symlinked_light_paths", [])
 
@@ -748,7 +746,7 @@ def _record_exposure_groups(summary, diagnostics: dict) -> None:  # ruff: ignore
     summary : `StackQualitySummary`
         The summary being built; its metrics are set in place.
     diagnostics : `dict`
-        What the stacking run reported (see `run_siril_stack`).
+        What the stacking run reported (see `run_stack`).
     """
     from astrometricslib.models.quality_summary import ExposureGroupSummary
 
@@ -786,7 +784,7 @@ def _measure_calibration_health(
     import numpy as np
 
     from astrometricslib.drivers.fits_access import read_data
-    from astrometricslib.pipelines.stacking.stack_quality import (
+    from astrometricslib.pipelines.stacking.post_processing.stack_quality import (
         is_negative_pixel_percent_significant,
         is_zero_fraction_significant,
     )
@@ -809,41 +807,19 @@ def _measure_calibration_health(
 
 
 def _finalize_stack_quality_flags(summary) -> None:  # ruff: ignore[missing-type-function-argument]
-    """Derive `summary.flagged` and `flag_reasons` from measured metrics."""
+    """Derive `summary.flagged` and `flag_reasons` from the two judgements.
+
+    The input and output judgements (`summary.input_quality` and
+    `summary.output_quality`) supply their own reasons. This adds the ones
+    that belong to neither: exposure groups left out and single-frame stacks.
+    """
+    from astrometricslib.pipelines.stacking.post_processing.assess_output_quality import (
+        assess_output_quality,
+    )
+
     metrics = summary.stacking_metrics
-    flag_reasons = []
-    if metrics.background_split_detected:
-        flag_reasons.append(f"background split: {metrics.background_split_detail}")
-    if metrics.rejected_fraction_flagged:
-        flag_reasons.append(
-            f"rejected pixel fraction {metrics.rejected_pixel_fraction:.1%} at or above threshold"
-        )
-    if metrics.fwhm_degraded:
-        flag_reasons.append(
-            f"stacked FWHM {metrics.stacked_fwhm_px:.2f}px degraded vs median input "
-            f"{metrics.median_input_fwhm_px:.2f}px"
-        )
-    if metrics.spectral_registration_flags:
-        flag_reasons.append(
-            f"{len(metrics.spectral_registration_flags)} frame(s) with spectral registration concerns"
-        )
-    if metrics.calibration_mismatch_flags:
-        flag_reasons.append(f"{len(metrics.calibration_mismatch_flags)} calibration metadata mismatch(es)")
-    flag_reasons.extend(f"flat calibration: {issue}" for issue in metrics.flat_calibration_issues)
-    if metrics.saturation_flagged:
-        flag_reasons.append(
-            f"saturated pixel fraction {metrics.saturated_pixel_fraction:.2%} at or above threshold"
-        )
-    if metrics.zero_fraction_flagged:
-        flag_reasons.append(
-            f"{metrics.zero_pixel_fraction:.0%} of the stack's pixels are exactly zero: "
-            "calibration removed more than the sky (blank stack)"
-        )
-    if metrics.negative_pixels_flagged:
-        flag_reasons.append(
-            f"Siril reported up to {metrics.negative_pixel_max_percent}% negative pixels after "
-            "dark subtraction: calibration frames are probably incorrect"
-        )
+    summary.output_quality = assess_output_quality(metrics)
+    flag_reasons = [*summary.input_quality.flag_reasons, *summary.output_quality.flag_reasons]
     for group in metrics.exposure_groups:
         if group.left_out_reason:
             flag_reasons.append(f"the {group.exposure_seconds:g} s exposure group {group.left_out_reason}")
@@ -878,30 +854,27 @@ def _build_stack_quality_summary(  # ruff: ignore[missing-return-type-private-fu
         A report card on how well the stacking went, with warnings if
         something looks wrong.
     """
+    from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality import (
+        assess_input_quality,
+        describe_background_splits,
+    )
+
     summary = _base_stack_quality_summary(
         target, is_spectral, frames_submitted, target_frames, excluded_frames, diagnostics
     )
+    summary.input_quality = assess_input_quality(
+        frames_submitted, len(target_frames), excluded_frames, background_split, diagnostics
+    )
 
-    # One split per exposure length that showed one; a single dictionary (the
-    # older shape) is one split with no exposure length attached.
-    splits = [background_split] if isinstance(background_split, dict) else list(background_split or [])
-    if splits:
+    split_detail = describe_background_splits(background_split)
+    if split_detail is not None:
         summary.stacking_metrics.background_split_detected = True
-        details = []
-        for split in splits:
-            prefix = f"{split['exposure_seconds']:g} s frames: " if "exposure_seconds" in split else ""
-            details.append(
-                f"{prefix}{split['low_group_count']} frame(s) at background~"
-                f"{split['low_group_median']:.0f} vs {split['high_group_count']} "
-                f"frame(s) at ~{split['high_group_median']:.0f} (gap ratio "
-                f"{split['gap_ratio']:.1f})"
-            )
-        summary.stacking_metrics.background_split_detail = "; ".join(details)
+        summary.stacking_metrics.background_split_detail = split_detail
 
     _record_exposure_groups(summary, diagnostics)
 
     if stacked_path:
-        _measure_stacked_pixel_fractions(summary, stacked_path)
+        _measure_stacked_pixel_fractions(summary, stacked_path, diagnostics)
         _measure_calibration_health(summary, stacked_path, is_spectral, diagnostics)
 
         if not is_spectral and summary.quality_processing_applied:

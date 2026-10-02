@@ -16,10 +16,10 @@ import pytest
 from astropy.io import fits
 
 from astrometricslib.pipelines.shared.stack_preview_path import preview_path_for
-from astrometricslib.pipelines.stacking import stack_preview
-from astrometricslib.pipelines.stacking.bright_object import BrightObjectStretch
-from astrometricslib.pipelines.stacking.sky_level import SkyLevelChoice
-from astrometricslib.pipelines.stacking.stack_preview import (
+from astrometricslib.pipelines.stacking.post_processing import stack_preview
+from astrometricslib.pipelines.stacking.post_processing.bright_object import BrightObjectStretch
+from astrometricslib.pipelines.stacking.post_processing.sky_level import SkyLevelChoice
+from astrometricslib.pipelines.stacking.post_processing.stack_preview import (
     build_bright_object_script,
     build_picture_script,
     build_preview_script,

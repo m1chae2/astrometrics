@@ -10,8 +10,8 @@ that cannot be confidently aligned instead of silently misaligning it.
 import numpy as np
 from astropy.io import fits
 
-from astrometricslib.pipelines.stacking.group_alignment import apply_shift
-from astrometricslib.pipelines.stacking.spectral_frame_alignment import (
+from astrometricslib.pipelines.stacking.processing.group_alignment import apply_shift
+from astrometricslib.pipelines.stacking.processing.spectral_frame_alignment import (
     align_calibrated_frames,
     find_calibrated_frame_paths,
 )

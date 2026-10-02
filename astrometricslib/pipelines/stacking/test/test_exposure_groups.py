@@ -16,7 +16,7 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from astrometricslib.pipelines.stacking.exposure_groups import (
+from astrometricslib.pipelines.stacking.processing.exposure_groups import (
     CLIPPED_FRAME_ZERO_FRACTION,
     FULL_SCALE_COUNTS,
     PLAUSIBLE_GAIN_RANGE,

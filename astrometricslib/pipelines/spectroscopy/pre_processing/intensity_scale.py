@@ -21,7 +21,7 @@ Deneb's stack tops out at exactly 1.0 where the star saturates.
 import logging
 from typing import Any
 
-from astrometricslib.pipelines.stacking.exposure_groups import FULL_SCALE_COUNTS
+from astrometricslib.pipelines.stacking.processing.exposure_groups import FULL_SCALE_COUNTS
 
 logger = logging.getLogger(__name__)
 

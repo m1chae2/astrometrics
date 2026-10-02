@@ -47,6 +47,7 @@ from astrometricslib.models.spectroscopy_quality import (
     InputQualityAssessment,
     OutputQualityAssessment,
 )
+from astrometricslib.models.stacking_quality import StackingInputQuality, StackingOutputQuality
 from astrometricslib.models.stellar_source import (
     AnalysisResult,
     FileItem,
@@ -318,6 +319,8 @@ def main() -> None:
         generate_interface(TargetSessionContribution, "TargetSessionContribution"),
         generate_interface(ExposureGroupSummary, "ExposureGroupSummary"),
         generate_interface(AppliedCameraProfile, "AppliedCameraProfile"),
+        generate_interface(StackingInputQuality, "StackingInputQuality"),
+        generate_interface(StackingOutputQuality, "StackingOutputQuality"),
         generate_interface(StackingPipelineQualityMetrics, "StackingPipelineQualityMetrics"),
         generate_interface(StackQualitySummary, "StackQualitySummary"),
         generate_interface(AstrometryPipelineQualityMetrics, "AstrometryPipelineQualityMetrics"),

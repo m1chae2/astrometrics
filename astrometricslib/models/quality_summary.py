@@ -12,6 +12,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from astrometricslib.models.stacking_quality import StackingInputQuality, StackingOutputQuality
+
 
 class ExcludedFrame(BaseModel):
     """A record of a single picture that was skipped, and the reason why."""
@@ -40,7 +42,7 @@ class ExposureGroupSummary(BaseModel):
     # stacked without a dark, and its frames are not mixed with darked ones.
     dark_applied: bool = Field(alias="darkApplied")
     # Whether a star is clipped at the camera's ceiling at this exposure
-    # length (see `pipelines/stacking/exposure_saturation.py`).
+    # length (see `pipelines/stacking/post_processing/exposure_saturation.py`).
     saturated: bool = Field(default=False, alias="saturated")
     # Whether this group's raw frames are clipped at zero (the sky sits below
     # the camera's read noise), so their faint pixels read too high.
@@ -244,6 +246,11 @@ class StackingPipelineQualityMetrics(BaseModel):
     stacking_duration_seconds: float | None = Field(default=None, alias="stackingDurationSeconds")
     timed_out: bool = Field(default=False, alias="timedOut")
     debayer_applied: bool | None = Field(default=None, alias="debayerApplied")
+    # The program that did the pixel work (calibration, registration and
+    # combination) and its version, so a stack can be traced to the tool that
+    # made it. `None` on a summary saved before they were recorded.
+    stacking_engine: str | None = Field(default=None, alias="stackingEngine")
+    stacking_engine_version: str | None = Field(default=None, alias="stackingEngineVersion")
     # To align images, one picture is chosen as the "reference" that
     # all others are matched against. Which picture was chosen is recorded.
     registration_reference_frame: str | None = Field(default=None, alias="registrationReferenceFrame")
@@ -262,6 +269,11 @@ class StackQualitySummary(PipelineQualitySummaryBase):
     pipeline_name: str = Field(default="stacking", alias="pipelineName")
     pipeline_version: str = Field(default=STACKING_PIPELINE_VERSION, alias="pipelineVersion")
     stacking_metrics: StackingPipelineQualityMetrics = Field(alias="stackingMetrics")
+    # The same judgement split in two: was the input sound, and did the
+    # stack come out well. Both are `None` on a summary saved before they
+    # existed.
+    input_quality: StackingInputQuality | None = Field(default=None, alias="inputQuality")
+    output_quality: StackingOutputQuality | None = Field(default=None, alias="outputQuality")
 
 
 # ---------------------------------------------------------------------------

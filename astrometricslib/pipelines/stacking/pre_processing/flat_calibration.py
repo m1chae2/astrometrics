@@ -13,13 +13,14 @@ This module has two jobs.
 1. Measure the flat set: how many frames, how bright they are, and how
    noisy the master flat will be. A set that is too faint, too bright or too
    noisy is reported as an issue.
-2. Replace a noisy master flat with a smoothed one. Vignetting and dust
+2. Choose how much to blur a noisy master flat. Vignetting and dust
    shadows are many pixels wide, so a light Gaussian blur keeps them. The
    blur width is the smallest that brings the master flat's noise down to
-   `MAXIMUM_FLAT_NOISE_FRACTION`. The cost is that real pixel-to-pixel
-   sensitivity differences are blurred too. They are about 1% on a CMOS
-   sensor, much less than the noise that is removed. Taking more flats is
-   the better cure. The blur is a fallback for the flats at hand.
+   `MAXIMUM_FLAT_NOISE_FRACTION`. Siril applies the blur (its ``gauss``
+   command) while it builds the master. The cost is that real
+   pixel-to-pixel sensitivity differences are blurred too. They are about 1%
+   on a CMOS sensor, much less than the noise that is removed. Taking more
+   flats is the better cure. The blur is a fallback for the flats at hand.
 
 Colour (Bayer) sensors are measured but not smoothed, because blurring the
 mosaic would mix the colour channels.
@@ -31,10 +32,7 @@ import os
 from dataclasses import dataclass, field
 
 import numpy as np
-from astropy.io.fits import Header
-from scipy.ndimage import gaussian_filter
 
-from astrometricslib.drivers.fits_access import read_header, write_image
 from astrometricslib.drivers.image import AstrometricsImage
 
 logger = logging.getLogger(__name__)
@@ -64,20 +62,16 @@ MAXIMUM_FLAT_LEVEL_FRACTION = 0.90
 MINIMUM_SMOOTHING_SIGMA_PIXELS = 1.0
 MAXIMUM_SMOOTHING_SIGMA_PIXELS = 8.0
 
-# Averaging more than this many flat frames adds memory use and no useful
-# noise reduction for a set that is already below the noise limit.
+# The expected noise of the master flat divides one frame's noise by the square
+# root of the frame count, counting at most this many frames. A set of more
+# frames is already far below the noise limit, and rejection of outliers in
+# Siril's stack makes the true figure only a little better than the estimate.
 MAXIMUM_FRAMES_AVERAGED = 32
 
-# Written into the key of the stored master flats, so that a change to the
-# smoothing recipe does not reuse a master flat built the old way. Increase
-# it whenever this module changes what the master flat contains.
-FLAT_MASTER_RECIPE = "flat-recipe-2"
-
-# The master flat is saved with this mean. Siril divides each light frame
-# by the flat and rescales by the flat's own mean, so the value does not
-# change the result. 0.5 keeps every pixel inside the 0-1 range Siril uses
-# for 32-bit floating-point images.
-_MASTER_FLAT_MEAN = 0.5
+# Written into the key of the stored master flats, so that a change to how
+# the master flat is built or blurred does not reuse one built the old way.
+# Increase it whenever that changes what the master flat contains.
+FLAT_MASTER_RECIPE = "flat-recipe-3"
 
 # A flat pixel at or above this fraction of full scale counts as saturated.
 _SATURATED_FRACTION_OF_FULL_SCALE = 0.98
@@ -322,100 +316,3 @@ def assess_flats(flat_paths: list[str]) -> FlatAssessment:
                 f"{MAXIMUM_FLAT_NOISE_FRACTION:.1%} limit; take more flats"
             )
     return FlatAssessment(frame_count, level_fraction, noise_fraction, sigma, issues)
-
-
-def _mean_of_frames(paths: list[str], limit: int) -> np.ndarray | None:
-    """Average up to `limit` frames, skipping unreadable ones.
-
-    Parameters
-    ----------
-    paths : `list` [`str`]
-        Paths of the frames.
-    limit : `int`
-        The largest number of frames to read.
-
-    Returns
-    -------
-    mean : `numpy.ndarray` or `None`
-        The mean image, or `None` if no frame could be read. Frames whose
-        shape differs from the first readable one are skipped.
-    """
-    total = None
-    used = 0
-    for path in paths[:limit]:
-        frame = _read_frame(path)
-        if frame is None:
-            continue
-        if total is None:
-            total = np.zeros_like(frame)
-        elif frame.shape != total.shape:
-            continue
-        total += frame
-        used += 1
-    return None if total is None else total / used
-
-
-def build_smoothed_master_flat(
-    flat_paths: list[str], bias_paths: list[str], sigma_pixels: float
-) -> np.ndarray | None:
-    """Build a master flat and blur away its pixel noise.
-
-    The flat frames are averaged and the average bias (the electronic
-    offset in every pixel) is subtracted, as Siril does when it builds a
-    master flat. The result is blurred and scaled to a mean of 0.5.
-
-    Parameters
-    ----------
-    flat_paths : `list` [`str`]
-        Paths of the flat frames.
-    bias_paths : `list` [`str`]
-        Paths of the bias frames. May be empty.
-    sigma_pixels : `float`
-        The Gaussian width in pixels.
-
-    Returns
-    -------
-    master : `numpy.ndarray` or `None`
-        The master flat as 32-bit floats with a mean of 0.5, or `None` if
-        no flat frame could be read or its mean is not positive after the
-        bias is subtracted.
-    """
-    flat = _mean_of_frames(flat_paths, MAXIMUM_FRAMES_AVERAGED)
-    if flat is None:
-        return None
-    if bias_paths:
-        bias = _mean_of_frames(bias_paths, MAXIMUM_FRAMES_AVERAGED)
-        if bias is not None and bias.shape == flat.shape:
-            flat = flat - bias
-    smoothed = gaussian_filter(flat, sigma_pixels, mode="nearest")
-    mean = float(np.mean(smoothed))
-    if not mean > 0.0:
-        return None
-    return (smoothed * (_MASTER_FLAT_MEAN / mean)).astype(np.float32)
-
-
-def write_master_flat(destination: str, master: np.ndarray, template_path: str) -> None:
-    """Save a master flat as a FITS file.
-
-    Parameters
-    ----------
-    destination : `str`
-        Path of the file to write. An existing file is replaced.
-    master : `numpy.ndarray`
-        The master flat.
-    template_path : `str`
-        Path of a flat frame whose header supplies the camera, filter and
-        gain keywords.
-    """
-    try:
-        header = read_header(template_path)
-    except OSError:
-        header = Header()
-    for keyword in ("BZERO", "BSCALE", "BLANK", "DATAMIN", "DATAMAX"):
-        header.remove(keyword, ignore_missing=True)
-    header["IMAGETYP"] = "Master Flat"
-    header["HISTORY"] = f"Smoothed master flat; recipe {FLAT_MASTER_RECIPE}"
-    destination_directory = os.path.dirname(destination)
-    if destination_directory:
-        os.makedirs(destination_directory, exist_ok=True)
-    write_image(destination, master, header)

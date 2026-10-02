@@ -7,6 +7,7 @@ This folder holds the library's pydantic data structures: the shapes of the data
 - `target.py` — `Target` and `FrameRecord`, the records for an astronomical target and its individual raw photographs.
 - `stellar_source.py` — `StellarObject` and its nested per-domain results: a star's photometry (light curve) and spectroscopy results.
 - `astrometry_quality.py`, `photometry_quality.py`, `spectroscopy_quality.py` — per-star quality judgments each of those three pipelines attaches to a star's result (for example, how confident a catalog match is, or how good the raw data behind a light curve was).
+- `stacking_quality.py` — the two judgments a stacking run attaches to its summary: whether the inputs were sound (`StackingInputQuality`) and whether the stack came out well (`StackingOutputQuality`).
 - `quality_summary.py` — the batch-wide `*QualitySummary` classes each pipeline run produces, and the shared base class every one of them extends.
 - `moving_object.py`, `moving_object_config.py` — the data structures for tracking a candidate moving object (asteroid) through the detection cascade, and the settings that control that search.
 - `camera_profile.py` — what the pipelines need to know about one camera model: saturation threshold, sensor characteristics.

@@ -10,7 +10,7 @@ import pytest
 from astropy.io import fits
 
 from astrometricslib.pipelines.spectroscopy.pre_processing.intensity_scale import counts_per_second_factor
-from astrometricslib.pipelines.stacking.exposure_groups import FULL_SCALE_COUNTS
+from astrometricslib.pipelines.stacking.processing.exposure_groups import FULL_SCALE_COUNTS
 
 
 def _header(**cards: float) -> fits.Header:

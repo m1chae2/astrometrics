@@ -85,6 +85,10 @@ The pattern instead:
    `interfaces = [...]` list in the same change, or `npm run type-check`
    fails against the regenerated `ui/common/types/backendTypes.ts`.
 
+## Stacking
+
+`stacking/` follows the three-folder split (`pre_processing/`, `processing/`, `post_processing/`) and the structured-object pattern: `StackingInputQuality` and `StackingOutputQuality` live in `models/stacking_quality.py`, are built by `pre_processing/assess_input_quality.py` and `post_processing/assess_output_quality.py`, and are stored on `StackQualitySummary` as `inputQuality` and `outputQuality`. The pixel work runs behind the `StackingEngine` contract in `drivers/stacking_engine.py`, so the pipeline does not depend on Siril's commands or files.
+
 ## Applying this to astrometry and photometry
 
 Not done yet, and not a mechanical copy. `astrometry/` (10 top-level files:

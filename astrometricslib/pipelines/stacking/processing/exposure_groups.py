@@ -539,9 +539,9 @@ def combine_exposure_group_images(
     covered_masks : `list` [`numpy.ndarray`], optional
         For each group, a 2-D mask of the pixels that hold real data. When the
         group stacks have been moved to line up (see
-        `pipelines/stacking/group_alignment.py`), the border the move filled
-        with zeros is left out. A group is left out at pixels its mask marks
-        as empty.
+        `stacking/processing/group_alignment.py`), the border the move
+        filled with zeros is left out. A group is left out at pixels its
+        mask marks as empty.
 
     Returns
     -------
@@ -788,7 +788,7 @@ def merge_rejection_maps(
     written : `bool`
         `True` when a map was written, `False` if no group had one.
     """
-    from astrometricslib.pipelines.stacking.group_alignment import apply_shift
+    from astrometricslib.pipelines.stacking.processing.group_alignment import apply_shift
 
     total = None
     weight_sum = 0.0

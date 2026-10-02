@@ -21,14 +21,14 @@ import numpy as np
 
 from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib.drivers.fits_access import read_data
-from astrometricslib.pipelines.stacking.exposure_groups import FRAMES_SAMPLED_PER_GROUP
-from astrometricslib.pipelines.stacking.exposure_saturation import (
+from astrometricslib.pipelines.stacking.post_processing.exposure_saturation import (
     DEFAULT_STAR_FWHM_PIXELS,
     FrameSaturation,
     group_is_saturated,
     measure_frame_saturation,
     recommend_stack_exposure_seconds,
 )
+from astrometricslib.pipelines.stacking.processing.exposure_groups import FRAMES_SAMPLED_PER_GROUP
 
 logger = logging.getLogger(__name__)
 

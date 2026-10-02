@@ -10,7 +10,7 @@ is still found.
 
 from types import SimpleNamespace
 
-from astrometricslib.pipelines.stacking.background_homogeneity import (
+from astrometricslib.pipelines.stacking.pre_processing.background_homogeneity import (
     find_dominant_background_subset,
     find_dominant_background_subset_by_exposure,
 )

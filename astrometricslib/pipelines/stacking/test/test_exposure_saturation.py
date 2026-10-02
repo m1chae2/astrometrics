@@ -12,7 +12,7 @@ estimate gives no recommendation.
 import numpy as np
 import pytest
 
-from astrometricslib.pipelines.stacking.exposure_saturation import (
+from astrometricslib.pipelines.stacking.post_processing.exposure_saturation import (
     MAXIMUM_RELIABLE_PEAK_TO_ROOM_RATIO,
     SATURATED_BLOB_MINIMUM_PIXELS,
     TARGET_PEAK_FRACTION,

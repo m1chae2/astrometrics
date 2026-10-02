@@ -243,7 +243,10 @@ def stack_frames(
 
     from astrometricslib.drivers.siril_interface import ImageProcessing
     from astrometricslib.pipelines.stacking.siril_stacking import run_siril_stack
-    from astrometricslib.pipelines.stacking.stack_preview import write_stack_preview
+    from astrometricslib.pipelines.stacking.stack_preview import (
+        record_preview_as_processed_image,
+        write_stack_preview,
+    )
 
     siril_driver = ImageProcessing()
     # `run_siril_stack` adds two safeguards for spectroscopy: frames of
@@ -311,8 +314,11 @@ def stack_frames(
             },
         )
         # A picture for people to look at. It never changes the stack and a
-        # failure to make it is logged, not raised.
-        write_stack_preview(stacked_path)
+        # failure to make it is logged, not raised. The image viewer shows it
+        # through the target's processed image.
+        preview_path = write_stack_preview(stacked_path)
+        if preview_path:
+            record_preview_as_processed_image(target, has_spectral, stacked_path, preview_path)
 
     return stacked_path
 
@@ -527,6 +533,10 @@ def _base_stack_quality_summary(  # ruff: ignore[missing-return-type-private-fun
             frames_stacked=frames_stacked,
             excluded_frames=excluded_frames,
             calibration_mismatch_flags=diagnostics.get("calibration_mismatch_flags", []),
+            flat_frame_count=(diagnostics.get("flat_calibration") or {}).get("frame_count"),
+            flat_noise_fraction=(diagnostics.get("flat_calibration") or {}).get("noise_fraction"),
+            flat_smoothing_sigma_px=(diagnostics.get("flat_calibration") or {}).get("smoothing_sigma_pixels"),
+            flat_calibration_issues=list((diagnostics.get("flat_calibration") or {}).get("issues", [])),
             stacking_duration_seconds=diagnostics.get("stacking_duration_seconds"),
             debayer_applied=diagnostics.get("debayer_applied"),
         ),
@@ -819,6 +829,7 @@ def _finalize_stack_quality_flags(summary) -> None:  # ruff: ignore[missing-type
         )
     if metrics.calibration_mismatch_flags:
         flag_reasons.append(f"{len(metrics.calibration_mismatch_flags)} calibration metadata mismatch(es)")
+    flag_reasons.extend(f"flat calibration: {issue}" for issue in metrics.flat_calibration_issues)
     if metrics.saturation_flagged:
         flag_reasons.append(
             f"saturated pixel fraction {metrics.saturated_pixel_fraction:.2%} at or above threshold"

@@ -17,6 +17,8 @@ from astrometricslib.pipelines.shared.image_scaling import (
     _autostretch_parameters,
     _midtones_transfer_function,
     _solve_midtones_balance,
+    midtones_balance_for,
+    white_fraction_after_autostretch,
 )
 
 
@@ -123,3 +125,33 @@ def test_an_image_with_no_background_spread_falls_back_to_a_percentile_stretch()
 def test_an_empty_image_has_no_autostretch_parameters() -> None:
     """Verify a zero-size array is refused rather than raising."""
     assert _autostretch_parameters(np.empty((0, 0))) is None
+
+
+def test_the_public_midtones_solver_matches_the_private_one() -> None:
+    """The public name gives the balance that maps a value to a brightness."""
+    balance = midtones_balance_for(0.3, 0.5)
+    assert balance == pytest.approx(_solve_midtones_balance(0.3, 0.5))
+    assert float(_midtones_transfer_function(np.array([0.3]), balance)[0]) == pytest.approx(0.5)
+
+
+def test_a_star_field_has_almost_no_white_after_the_autostretch() -> None:
+    """Only the star cores are white, far below one percent of the image."""
+    fraction = white_fraction_after_autostretch(_sky_with_stars(), 0.25)
+    assert fraction is not None
+    assert fraction < 0.01
+
+
+def test_a_large_bright_disc_is_mostly_white_after_the_autostretch() -> None:
+    """A big bright object is pushed to white when the sky is lifted."""
+    generator = np.random.default_rng(3)
+    y, x = np.mgrid[0:300, 0:300]
+    image = 0.0002 + 0.00004 * generator.standard_normal((300, 300))
+    image[np.hypot(y - 150, x - 150) < 60] += 0.4
+    fraction = white_fraction_after_autostretch(image, 0.11)
+    assert fraction is not None
+    assert fraction > 0.05
+
+
+def test_the_white_fraction_is_none_without_a_measurable_sky() -> None:
+    """A blank image has nothing to anchor the stretch to."""
+    assert white_fraction_after_autostretch(np.zeros((50, 50)), 0.2) is None

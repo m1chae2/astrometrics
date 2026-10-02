@@ -35,3 +35,22 @@ def preview_path_for(stacked_path: str) -> str:
     """
     stem, _ = os.path.splitext(stacked_path)
     return f"{stem}{PREVIEW_SUFFIX}.jpg"
+
+
+def is_preview_path(path: str) -> bool:
+    """Tell whether a picture path names an automatic stack preview.
+
+    Parameters
+    ----------
+    path : `str`
+        Path of a picture file.
+
+    Returns
+    -------
+    is_preview : `bool`
+        `True` if the name ends with `PREVIEW_SUFFIX` and ``.jpg``, as
+        `preview_path_for` makes it. A picture a person attached to a target
+        by hand does not match.
+    """
+    stem, extension = os.path.splitext(path)
+    return extension.lower() == ".jpg" and stem.endswith(PREVIEW_SUFFIX)

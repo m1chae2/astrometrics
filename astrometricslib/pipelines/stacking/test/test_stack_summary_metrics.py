@@ -179,3 +179,25 @@ def test_a_group_left_out_of_the_combined_image_is_named_in_the_flags() -> None:
 
     assert summary.flagged
     assert "the 0.5 s exposure group could not be stacked" in summary.flag_reasons
+
+
+def test_the_flat_measurements_come_from_the_diagnostics_and_are_flagged() -> None:
+    """Flat issues become flag reasons; the measurements are copied."""
+    summary = make_summary()
+    metrics = summary.stacking_metrics
+    metrics.flat_frame_count = 1
+    metrics.flat_noise_fraction = 0.045
+    metrics.flat_smoothing_sigma_px = 2.5
+    metrics.flat_calibration_issues = ["master flat noise is 4.49% from 1 frame(s)"]
+    _finalize_stack_quality_flags(summary)
+    assert summary.flagged
+    assert "flat calibration: master flat noise is 4.49% from 1 frame(s)" in summary.flag_reasons
+
+
+def test_a_stack_with_good_flats_has_no_flat_flag() -> None:
+    """No flat issues add no flag reason."""
+    summary = make_summary()
+    summary.stacking_metrics.flat_frame_count = 40
+    summary.stacking_metrics.flat_noise_fraction = 0.001
+    _finalize_stack_quality_flags(summary)
+    assert not any(reason.startswith("flat calibration") for reason in summary.flag_reasons)

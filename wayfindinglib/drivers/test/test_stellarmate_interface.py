@@ -316,3 +316,22 @@ def test_listing_commands_tolerate_missing_folders():  # ruff: ignore[missing-re
 
     assert guide_command.rstrip().endswith("|| true")
     assert analyze_command.rstrip().endswith("|| true")
+
+
+def test_kstars_logs_go_into_their_own_folder(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify the KStars text logs are fetched into ``kstars_logs`` only."""
+    driver = _make_driver()
+    (tmp_path / "kstars_logs").mkdir()
+    listing = "40\t/home/stellarmate/.local/share/kstars/logs/2026-10-02/log_20-14-00.txt\n"
+    with (
+        patch.object(driver, "_run_command", return_value=listing) as mock_command,
+        patch(
+            "subprocess.Popen",
+            side_effect=_rsync_writing({"log_20-14-00.txt": b"x" * 40}, tmp_path / "kstars_logs"),
+        ) as mock_popen,
+    ):
+        local_paths = driver.download_kstars_logs(str(tmp_path))
+
+    assert "-mtime -3" in mock_command.call_args.args[0][-1]
+    assert "--include=log_*.txt" in mock_popen.call_args.args[0]
+    assert local_paths == [str(tmp_path / "kstars_logs" / "log_20-14-00.txt")]

@@ -659,3 +659,53 @@ class StellarMateInterface(RemoteTransferDriver):
         return self._download_remote_files(
             self._remote_ekos_analyze_log_sizes(), destination_dir, ("ekos-*.analyze",), "Ekos analyze log"
         )
+
+    def _remote_kstars_log_sizes(self, days: int = 3) -> dict[str, int]:
+        """List the recent KStars text logs with their sizes.
+
+        KStars writes these when logging is switched on in Ekos (Setup tab,
+        Logs, output to File), one ``log_<time>.txt`` per run inside a folder
+        for each date. They record what the alignment, focus, guide and mount
+        modules did, including why a plate solve failed.
+
+        Parameters
+        ----------
+        days : `int`, optional
+            Only files changed within this many days are listed. Verbose logs
+            are large, so older ones are left on the telescope computer.
+
+        Returns
+        -------
+        sizes_by_path : `dict` [`str`, `int`]
+            Size in bytes of each log, keyed by remote path.
+        """
+        command = (
+            "find \"$HOME/.local/share/kstars/logs/\" -maxdepth 2 -type f -name 'log_*.txt' "
+            f"-mtime -{int(days)} -printf '%s\\t%p\\n' 2>/dev/null || true"
+        )
+        return self._list_remote_files_with_sizes(command)
+
+    def download_kstars_logs(self, destination_dir: str) -> list[str]:
+        """Download the recent KStars text logs to a local directory.
+
+        The logs go into a ``kstars_logs`` folder inside `destination_dir`,
+        so they stay apart from the analyze and guide logs that are read
+        and stored.
+
+        Parameters
+        ----------
+        destination_dir : `str`
+            Local directory that holds the other downloaded logs.
+
+        Returns
+        -------
+        downloaded_paths : `list` [`str`]
+            Local file paths of the logs, downloaded now or already present
+            and unchanged.
+        """
+        return self._download_remote_files(
+            self._remote_kstars_log_sizes(),
+            os.path.join(destination_dir, "kstars_logs"),
+            ("log_*.txt",),
+            "KStars log",
+        )

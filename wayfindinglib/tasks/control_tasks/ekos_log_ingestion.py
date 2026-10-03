@@ -360,8 +360,10 @@ def fetch_and_ingest_ekos_session_logs(
     """Download Ekos's logs from the telescope computer, then ingest them.
 
     Files already present and unchanged in `destination_dir` are not
-    downloaded again. If the configured remote-transfer driver cannot fetch
-    these logs, whatever is already in `destination_dir` is still ingested.
+    downloaded again. The recent KStars text logs are fetched too, into a
+    ``kstars_logs`` folder, for reading by hand; they are not ingested. If
+    the configured remote-transfer driver cannot fetch these logs, whatever
+    is already in `destination_dir` is still ingested.
 
     Parameters
     ----------
@@ -380,7 +382,7 @@ def fetch_and_ingest_ekos_session_logs(
         What was read and stored.
     """
     driver = observatory.remote_transfer_driver
-    for method_name in ("download_guide_logs", "download_ekos_analyze_logs"):
+    for method_name in ("download_guide_logs", "download_ekos_analyze_logs", "download_kstars_logs"):
         download = getattr(driver, method_name, None)
         if download is None:
             logger.info("Remote-transfer driver has no %s; reading local files only", method_name)

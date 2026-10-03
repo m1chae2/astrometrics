@@ -46,13 +46,16 @@ from collections.abc import Callable
 
 import numpy as np
 
+from astrometricslib.drivers.fits_access import read_data, read_header, write_image
 from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.drivers.siril_interface import siril_process_lock
 from astrometricslib.pipelines.shared.image_scaling import AUTOSTRETCH_SHADOWS_CLIP_SIGMA
 from astrometricslib.pipelines.shared.stack_preview_path import (
     PREVIEW_JPEG_QUALITY,
     is_preview_path,
+    is_processed_fits_path,
     preview_path_for,
+    processed_fits_path_for,
 )
 from astrometricslib.pipelines.stacking.post_processing.bright_object import (
     BrightObjectStretch,
@@ -104,6 +107,11 @@ _STALE_SCRATCH_SECONDS = 3600
 # Only files with these names are ever deleted from those folders.
 _OWN_STAGED_FILE = re.compile(r"^stack_preview_\d+(_denoised)?\.fits$")
 
+# The file name, without extension, under which each final script also saves
+# the stretched picture as FITS. `write_stack_preview` moves it next to the
+# stack.
+_PROCESSED_STEM = "processed"
+
 # The oldest Siril that has the `autostretch` and `savejpg` commands used here.
 _MINIMUM_SIRIL_VERSION = "1.2.0"
 
@@ -126,7 +134,10 @@ def _autostretch_command(sky_level: float) -> str:
 
 
 def build_preview_script(stacked_file_name: str, preview_stem: str, sky_level: float) -> list[str]:
-    """Write the Siril commands that stretch one stack and save a JPEG.
+    """Write the Siril commands that stretch one stack and save it.
+
+    The picture is saved twice: as FITS (``processed.fits``, numbers between
+    0 and 1) and as JPEG.
 
     Names are put in quotes so a file name with a space still works.
 
@@ -150,6 +161,7 @@ def build_preview_script(stacked_file_name: str, preview_stem: str, sky_level: f
         f"requires {_MINIMUM_SIRIL_VERSION}",
         f'load "{stacked_file_name}"',
         _autostretch_command(sky_level),
+        f'save "{_PROCESSED_STEM}"',
         f'savejpg "{preview_stem}" {PREVIEW_JPEG_QUALITY}',
         "close",
     ]
@@ -158,7 +170,9 @@ def build_preview_script(stacked_file_name: str, preview_stem: str, sky_level: f
 def build_bright_object_script(
     source_file_name: str, preview_stem: str, stretch: BrightObjectStretch
 ) -> list[str]:
-    """Write the Siril commands that stretch a bright object and save a JPEG.
+    """Write the Siril commands that stretch a bright object and save it.
+
+    The picture is saved as FITS (``processed.fits``) and as JPEG.
 
     Siril's ``mtf`` command clips the image between a black and a white
     point (both between 0 and 1) and applies the midtones curve. A stack with
@@ -184,6 +198,7 @@ def build_bright_object_script(
         commands.append(f"fmul {stretch.scale:.9f}")
     commands += [
         f"mtf {stretch.black_point:.6f} {stretch.midtones:.6f} {stretch.white_point:.6f}",
+        f'save "{_PROCESSED_STEM}"',
         f'savejpg "{preview_stem}" {PREVIEW_JPEG_QUALITY}',
         "close",
     ]
@@ -223,7 +238,9 @@ def build_stretch_script(source_file_name: str, stretched_stem: str, sky_level: 
 
 
 def build_picture_script(source_file_name: str, preview_stem: str) -> list[str]:
-    """Write the Siril commands that save an already stretched image as JPEG.
+    """Write the Siril commands that save an already stretched image.
+
+    The picture is saved as FITS (``processed.fits``) and as JPEG.
 
     Parameters
     ----------
@@ -242,6 +259,7 @@ def build_picture_script(source_file_name: str, preview_stem: str) -> list[str]:
     return [
         f"requires {_MINIMUM_SIRIL_VERSION}",
         f'load "{source_file_name}"',
+        f'save "{_PROCESSED_STEM}"',
         f'savejpg "{preview_stem}" {PREVIEW_JPEG_QUALITY}',
         "close",
     ]
@@ -576,11 +594,62 @@ def _picture_script(scratch: str, siril_executable: str) -> list[str] | None:
     return build_picture_script(name, "preview")
 
 
-def write_stack_preview(stacked_path: str) -> str | None:
-    """Save a cleaned-up, stretched JPEG of a stack beside it.
+# Header keywords that describe the file's own layout. They are never copied
+# from the stack to its stretched FITS: the stretched file keeps its own.
+_LAYOUT_KEYWORDS = frozenset({
+    "SIMPLE",
+    "BITPIX",
+    "NAXIS",
+    "NAXIS1",
+    "NAXIS2",
+    "NAXIS3",
+    "EXTEND",
+    "BZERO",
+    "BSCALE",
+    "ROWORDER",
+    "COMMENT",
+    "HISTORY",
+})
 
-    Any earlier preview of the same stack is removed first, so a failed run
-    never leaves a picture of an older stack behind.
+
+def _copy_observation_header(stacked_path: str, processed_path: str) -> None:
+    """Copy the observation keywords from a stack to its stretched FITS.
+
+    The cleanup programs can drop the stack's header, which holds the total
+    exposure time, the telescope, the object and similar facts. The viewer
+    reads some of them, so they are copied back. Keywords the stretched file
+    already has, and the keywords that describe the file's layout, are left
+    as they are. A note in the header says the pixels are a stretched picture
+    and not linear data. A failure is logged and does not fail the preview.
+
+    Parameters
+    ----------
+    stacked_path : `str`
+        Path of the stack.
+    processed_path : `str`
+        Path of the stretched FITS, which is rewritten.
+    """
+    try:
+        stack_header = read_header(stacked_path)
+        data = read_data(processed_path)
+        header = read_header(processed_path)
+        for keyword in stack_header:
+            if keyword in _LAYOUT_KEYWORDS or keyword in header:
+                continue
+            header[keyword] = (stack_header[keyword], stack_header.comments[keyword])
+        header["HISTORY"] = "Stretched picture for display; not linear data."
+        write_image(processed_path, data, header)
+    except (OSError, ValueError) as error:
+        logger.warning("Could not copy the stack's header into '%s': %s.", processed_path, error)
+
+
+def write_stack_preview(stacked_path: str) -> str | None:
+    """Save a cleaned-up, stretched JPEG and FITS of a stack beside it.
+
+    The FITS (see `processed_fits_path_for`) holds the same picture as the
+    JPEG as 32-bit numbers between 0 and 1. Any earlier pictures of the same
+    stack are removed first, so a failed run never leaves a picture of an
+    older stack behind.
 
     Parameters
     ----------
@@ -590,12 +659,14 @@ def write_stack_preview(stacked_path: str) -> str | None:
     Returns
     -------
     preview_path : `str` or `None`
-        Path of the new picture, or `None` if the stack file is missing, Siril
+        Path of the new JPEG, or `None` if the stack file is missing, Siril
         is not configured, or Siril failed. The reason is logged as a warning.
     """
     preview_path = preview_path_for(stacked_path)
-    if os.path.exists(preview_path):
-        os.remove(preview_path)
+    processed_path = processed_fits_path_for(stacked_path)
+    for old_picture in (preview_path, processed_path):
+        if os.path.exists(old_picture):
+            os.remove(old_picture)
     if not os.path.isfile(stacked_path):
         logger.warning("No preview made: stack '%s' does not exist.", stacked_path)
         return None
@@ -616,6 +687,12 @@ def write_stack_preview(stacked_path: str) -> str | None:
             logger.warning("No preview made for '%s': Siril did not save the picture.", stacked_path)
             return None
         shutil.move(picture, preview_path)
+        # The FITS copy is a bonus for the viewer. Without it the JPEG alone
+        # is still a good preview, so a missing file is not a failure.
+        stretched_fits = os.path.join(scratch, f"{_PROCESSED_STEM}.fits")
+        if os.path.isfile(stretched_fits):
+            shutil.move(stretched_fits, processed_path)
+            _copy_observation_header(stacked_path, processed_path)
     except (OSError, subprocess.SubprocessError) as error:
         logger.warning("No preview made for '%s': %s.", stacked_path, error)
         return None
@@ -635,8 +712,9 @@ def record_preview_as_processed_image(
     """Show a stack's preview picture as its target's processed image.
 
     The image viewer shows a target's processed image first, so recording the
-    preview there makes the picture appear. Two cases are left alone, because
-    the picture there is not an automatic preview of this stack:
+    preview there makes the picture appear. The stack's stretched FITS is
+    recorded when it exists, and the JPEG otherwise. Two cases are left alone,
+    because the picture there is not an automatic preview of this stack:
 
     - The target already has a processed image that a person attached. It is
       their finished picture, and an automatic preview does not replace it
@@ -661,13 +739,18 @@ def record_preview_as_processed_image(
     Returns
     -------
     recorded : `bool`
-        `True` if the target's processed image now names `preview_path`.
+        `True` if the target's processed image now names the stack's
+        stretched FITS or `preview_path`.
     """
     stacking = target.spectral_stacking if is_spectral else target.stacking
     if stacking.stacked_image != stacked_path:
         return False
     current = stacking.processed_image
-    if current and current != preview_path and not replace_attached and not is_preview_path(current):
+    is_automatic = is_preview_path(current or "") or is_processed_fits_path(current or "")
+    if current and current != preview_path and not replace_attached and not is_automatic:
         return False
-    stacking.processed_image = preview_path
+    # The stretched FITS is shown when there is one, because the viewer can
+    # zoom into it. The JPEG is the fallback.
+    processed_path = processed_fits_path_for(stacked_path)
+    stacking.processed_image = processed_path if os.path.isfile(processed_path) else preview_path
     return True

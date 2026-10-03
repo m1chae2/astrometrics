@@ -5,9 +5,14 @@ that an automatic preview fills that slot when it is free, and that it never
 replaces a picture a person attached or one that belongs to another stack.
 """
 
+from pathlib import Path
 from types import SimpleNamespace
 
-from astrometricslib.pipelines.shared.stack_preview_path import is_preview_path
+from astrometricslib.pipelines.shared.stack_preview_path import (
+    is_preview_path,
+    is_processed_fits_path,
+    processed_fits_path_for,
+)
 from astrometricslib.pipelines.stacking.post_processing.stack_preview import record_preview_as_processed_image
 
 _STACK = "/lib/M 13/M_13_L_Stacked.fits"
@@ -86,3 +91,33 @@ def test_only_preview_names_are_recognised() -> None:
     assert is_preview_path("/x/Y_preview.JPG")
     assert not is_preview_path("/home/me/Pictures/M13_final.jpg")
     assert not is_preview_path("/lib/M 13/M_13_L_Stacked_preview.png")
+
+
+def test_the_stretched_fits_is_recorded_when_it_exists(tmp_path: Path) -> None:
+    """Verify the FITS picture is preferred over the JPEG."""
+    stack = str(tmp_path / "M_13_L_Stacked.fits")
+    preview = str(tmp_path / "M_13_L_Stacked_preview.jpg")
+    processed = Path(processed_fits_path_for(stack))
+    processed.write_bytes(b"fits")
+    target = _target(stacked=stack)
+
+    assert record_preview_as_processed_image(target, False, stack, preview)
+    assert target.stacking.processed_image == str(processed)
+
+
+def test_an_earlier_stretched_fits_is_replaced_but_a_persons_picture_is_not(tmp_path: Path) -> None:
+    """Verify automatic FITS pictures count as automatic."""
+    stack = str(tmp_path / "M_13_L_Stacked.fits")
+    preview = str(tmp_path / "M_13_L_Stacked_preview.jpg")
+    target = _target(stacked=stack, processed=str(tmp_path / "M_13_L_Stacked_OLD_processed.fits"))
+
+    assert record_preview_as_processed_image(target, False, stack, preview)
+    assert target.stacking.processed_image == preview
+
+
+def test_only_stretched_fits_names_are_recognised() -> None:
+    """Verify the FITS name check matches the automatic file only."""
+    assert processed_fits_path_for("/x/M_13_L_Stacked.fits") == "/x/M_13_L_Stacked_processed.fits"
+    assert is_processed_fits_path("/x/M_13_L_Stacked_processed.fits")
+    assert not is_processed_fits_path("/x/M_13_L_Stacked.fits")
+    assert not is_processed_fits_path("/x/M_13_L_Stacked_processed.jpg")

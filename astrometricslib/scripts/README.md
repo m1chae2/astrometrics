@@ -13,7 +13,7 @@ This folder holds standalone command-line scripts: batch processing over the who
 - `migrate_config_to_toml.py` — migrates the old INI configuration file and JSON camera profiles into the current TOML configuration format.
 - `merge_duplicate_catalog_stars.py`, `merge_spectroscopy_star_rows.py`, `reconcile_position_only_star_catalog.py` — fold duplicate or split stellar catalog rows for the same real star back into one row.
 - `backfill_focal_length.py` — fills in a missing `FOCALLEN` header value on frames captured before the pipeline started requiring it.
-- `backfill_stack_previews.py` — makes the preview picture for stacks that were made before stacking started saving one, and records it as the target's processed image (never replacing a picture a person attached).
+- `backfill_stack_previews.py` — makes the stretched JPEG and FITS pictures for stacks that were made before stacking saved them (it never restacks), and records the FITS as the target's processed image (never replacing a picture a person attached).
 - `report_equipment_disagreements.py` — reports stored telescope/ISO values that a fresh re-scan of the frame would change, without changing anything itself.
 
 ## Empirical validation and analysis

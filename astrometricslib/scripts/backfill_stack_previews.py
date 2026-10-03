@@ -1,16 +1,19 @@
 r"""Make preview pictures for stacks that already exist, and record them.
 
-Stacking now saves a cleaned-up, stretched JPEG next to every new stack (see
-`stacking/post_processing/stack_preview.py`) and shows it as the target's
-processed image. Stacks made earlier have no preview. This script runs the
-same step on them.
+Stacking now saves a cleaned-up, stretched picture next to every new stack,
+as a JPEG and as a FITS file (see
+`stacking/post_processing/stack_preview.py`), and shows it as the target's
+processed image. Stacks made earlier lack one or both. This script runs the
+same step on them. It never restacks.
 
 For each stack it:
 
-1. Makes the preview, unless one that is at least as new as the stack
-   exists. ``--force`` makes it again, for example after a setting change.
-2. Records the preview as the target's processed image, so the image viewer
-   shows it. A picture a person attached to the target is kept unless
+1. Makes the pictures, unless a JPEG and a FITS that are both at least as new
+   as the stack exist. ``--force`` makes them again, for example after a
+   setting change.
+2. Records the stretched FITS as the target's processed image, so the image
+   viewer shows it. The JPEG is recorded when the FITS is missing. A picture
+   a person attached to the target is kept unless
    ``--replace-attached-pictures`` is given. The picture of a stack the target
    does not show is never replaced.
 
@@ -33,7 +36,7 @@ import sys
 from typing import Any
 
 from astrometricslib import Astrometrics
-from astrometricslib.pipelines.shared.stack_preview_path import preview_path_for
+from astrometricslib.pipelines.shared.stack_preview_path import preview_path_for, processed_fits_path_for
 from astrometricslib.pipelines.stacking.post_processing.stack_preview import (
     record_preview_as_processed_image,
     write_stack_preview,
@@ -130,15 +133,17 @@ def stacks_of(target: Any, kind: str) -> list[tuple[bool, str]]:
 
 
 def preview_is_current(stacked_path: str) -> bool:
-    """Tell whether a stack already has a preview at least as new as itself.
+    """Tell whether a stack already has both pictures, each as new as itself.
 
     Returns
     -------
     current : `bool`
-        `True` if the preview file exists and is not older than the stack.
+        `True` if the preview JPEG and the stretched FITS both exist and
+        neither is older than the stack.
     """
-    preview = preview_path_for(stacked_path)
-    return os.path.isfile(preview) and os.path.getmtime(preview) >= os.path.getmtime(stacked_path)
+    stack_time = os.path.getmtime(stacked_path)
+    pictures = (preview_path_for(stacked_path), processed_fits_path_for(stacked_path))
+    return all(os.path.isfile(path) and os.path.getmtime(path) >= stack_time for path in pictures)
 
 
 def main(argv: list[str] | None = None) -> int:

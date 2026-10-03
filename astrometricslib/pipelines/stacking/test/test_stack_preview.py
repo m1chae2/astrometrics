@@ -139,6 +139,8 @@ class _Programs:
         if self.siril_result:
             if 'save "stretched"' in commands:
                 (Path(directory) / "stretched.fits").write_bytes(b"stretched")
+            if 'save "processed"' in commands:
+                (Path(directory) / "processed.fits").write_bytes(b"processed")
             if any(command.startswith("savejpg") for command in commands):
                 (Path(directory) / "preview.jpg").write_bytes(b"jpeg")
         return self.siril_result
@@ -156,15 +158,16 @@ def test_the_preview_is_named_after_the_stack() -> None:
 
 
 def test_the_script_stretches_and_saves_without_touching_the_stack() -> None:
-    """Verify the script saves a JPEG and never saves a FITS."""
+    """Verify the script saves a FITS and a JPEG under new names only."""
     commands = build_preview_script("M_13_L_Stacked.fits", "M_13_L_Stacked_preview", 0.21)
 
-    assert commands[1:4] == [
+    assert commands[1:5] == [
         'load "M_13_L_Stacked.fits"',
         "autostretch -2.8 0.210",
+        'save "processed"',
         'savejpg "M_13_L_Stacked_preview" 90',
     ]
-    assert not any(command.startswith(("save ", "savefits")) for command in commands)
+    assert not any('M_13_L_Stacked"' in command for command in commands if command.startswith("save"))
 
 
 def test_without_graxpert_the_stack_copy_is_stretched(
@@ -367,7 +370,7 @@ def test_the_stretch_script_saves_a_fits_and_the_picture_script_does_not_stretch
     picture = build_picture_script("denoised.fits", "preview")
 
     assert stretch[1:4] == ['load "flat.fits"', "autostretch -2.8 0.150", 'save "stretched"']
-    assert picture[1:3] == ['load "denoised.fits"', 'savejpg "preview" 90']
+    assert picture[1:4] == ['load "denoised.fits"', 'save "processed"', 'savejpg "preview" 90']
     assert not any(command.startswith("autostretch") for command in picture)
 
 
@@ -664,12 +667,13 @@ def test_the_bright_object_script_clips_stretches_and_saves_a_jpeg() -> None:
     """The script applies Siril's mtf between two points, then saves a JPEG."""
     stretch = BrightObjectStretch(1.0, 0.0002, 0.361, 0.509, 0.044)
     commands = build_bright_object_script("Moon.fits", "Moon_preview", stretch)
-    assert commands[1:4] == [
+    assert commands[1:5] == [
         'load "Moon.fits"',
         "mtf 0.000200 0.361000 0.509000",
+        'save "processed"',
         'savejpg "Moon_preview" 90',
     ]
-    assert not any(command.startswith(("fmul", "save ", "autostretch")) for command in commands)
+    assert not any(command.startswith(("fmul", "autostretch")) for command in commands)
 
 
 def test_a_stack_with_values_above_one_is_multiplied_down_before_the_stretch() -> None:
@@ -706,3 +710,69 @@ def test_a_bright_object_skips_graxpert_and_the_denoise(
     assert any(command.startswith("mtf ") for command in script)
     assert not any(command.startswith("autostretch") for command in script)
     assert list(scratch_root.iterdir()) == []
+
+
+def test_the_stretched_fits_is_saved_beside_the_stack(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify the FITS picture lands by the stack and a rerun replaces it."""
+    _configure(monkeypatch, "siril-cli", None)
+    _Programs().install(monkeypatch)
+    processed = stack.with_name("M_13_L_Stacked_processed.fits")
+    processed.write_bytes(b"old")
+
+    assert write_stack_preview(str(stack)) is not None
+
+    assert processed.read_bytes() == b"processed"
+    assert list(scratch_root.iterdir()) == []
+
+
+def test_a_failed_siril_removes_the_old_fits_picture_too(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify no FITS picture of an older stack is left behind."""
+    _configure(monkeypatch, "siril-cli", None)
+    _Programs(siril_result=False).install(monkeypatch)
+    processed = stack.with_name("M_13_L_Stacked_processed.fits")
+    processed.write_bytes(b"old")
+
+    assert write_stack_preview(str(stack)) is None
+    assert not processed.exists()
+
+
+def test_the_observation_header_is_copied_to_the_stretched_fits(tmp_path: Path) -> None:
+    """Verify the stack's keywords are added and the file's own are kept."""
+    stack_path = tmp_path / "S_Stacked.fits"
+    header = fits.Header()
+    header["EXPTIME"] = (300.0, "total exposure")
+    header["OBJECT"] = "M 57"
+    header["ROWORDER"] = "TOP-DOWN"
+    fits.writeto(stack_path, np.ones((8, 8), dtype=np.float32), header)
+    processed_path = tmp_path / "S_Stacked_processed.fits"
+    own = fits.Header()
+    own["ROWORDER"] = "BOTTOM-UP"
+    fits.writeto(processed_path, np.full((8, 8), 0.25, dtype=np.float32), own)
+
+    stack_preview._copy_observation_header(str(stack_path), str(processed_path))
+
+    with fits.open(processed_path) as hdul:
+        result = hdul[0].header
+        assert result["EXPTIME"] == pytest.approx(300.0)
+        assert result["OBJECT"] == "M 57"
+        assert result["ROWORDER"] == "BOTTOM-UP"
+        assert "not linear data" in str(result["HISTORY"])
+        assert hdul[0].data.dtype.kind == "f"
+        assert hdul[0].data.dtype.itemsize == 4
+        assert hdul[0].data[0, 0] == pytest.approx(0.25)
+
+
+def test_an_unreadable_stretched_fits_is_left_and_logged(tmp_path: Path) -> None:
+    """Verify a header copy that cannot work does not raise."""
+    stack_path = tmp_path / "S_Stacked.fits"
+    fits.writeto(stack_path, np.ones((4, 4), dtype=np.float32))
+    processed_path = tmp_path / "S_Stacked_processed.fits"
+    processed_path.write_bytes(b"not a fits file")
+
+    stack_preview._copy_observation_header(str(stack_path), str(processed_path))
+
+    assert processed_path.read_bytes() == b"not a fits file"

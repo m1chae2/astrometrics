@@ -61,10 +61,15 @@ def test_a_preview_is_current_only_if_it_is_not_older_than_the_stack(tmp_path: P
     stack = tmp_path / "S_Stacked.fits"
     stack.write_bytes(b"x")
     preview = tmp_path / "S_Stacked_preview.jpg"
+    processed = tmp_path / "S_Stacked_processed.fits"
     assert not preview_is_current(str(stack))
 
     preview.write_bytes(b"j")
     os.utime(preview, (stack.stat().st_mtime + 5, stack.stat().st_mtime + 5))
+    assert not preview_is_current(str(stack))  # the FITS picture is missing
+
+    processed.write_bytes(b"f")
+    os.utime(processed, (stack.stat().st_mtime + 5, stack.stat().st_mtime + 5))
     assert preview_is_current(str(stack))
 
     os.utime(preview, (stack.stat().st_mtime - 5, stack.stat().st_mtime - 5))

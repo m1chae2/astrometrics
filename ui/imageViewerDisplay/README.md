@@ -10,6 +10,11 @@ Left column: `TargetListManager` — shows available processed targets and lets 
 Center column: `TargetViewerManager` — displays the processed image. The
   parent (`ImageViewerDisplay.tsx`) orchestrates fetching the processed image data
   (via `src/services/backendApi.ts`), and passes the image info to the viewer.
+  The viewer is the same renderer the FITS viewer uses (`FitsRenderer`), so it
+  has the same zoom, pan, Fit and 1:1 controls. The stacking pipeline saves the
+  processed image as a stretched FITS file (`<stack>_processed.fits`), which the
+  viewer shows as it is, without stretching it again. A JPEG or PNG processed
+  image is shown the same way.
 
 Right column: `TargetDetailsManager` — shows metadata and actions (analyze,
   stack, download). Actions here generally call backend endpoints and may
@@ -21,7 +26,7 @@ Data flow summary
 2. `TargetListManager` sets `pendingTarget` in the parent.
 3. `ImageViewerDisplay.tsx` observes `pendingTarget`, calls the backend service,
    and manages caching of image URLs for the session.
-4. `TargetViewerManager` receives the `imageUrl` and renders the image.
+4. `TargetViewerManager` receives the `imageUrl` or `imageBlob` and renders the image.
 
 Tips for exploring the code
 

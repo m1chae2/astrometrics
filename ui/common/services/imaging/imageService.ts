@@ -6,6 +6,18 @@ import { reportError } from '../../utils/reportError';
  * Aligns with the Google TypeScript Style Guide.
  */
 
+/** MIME type given to a stretched FITS picture so the viewer parses it as FITS. */
+export const FITS_BLOB_TYPE = 'application/fits';
+
+/**
+ * Tells whether a path names the stretched FITS picture the stacking pipeline
+ * saves next to a stack (`<stack>_processed.fits`). That file is already
+ * stretched, so it is shown as it is and never stretched again.
+ */
+export function isProcessedFitsPath(path: string): boolean {
+    return /_processed\.fits?$/i.test(path);
+}
+
 /**
  * Fetches the processed image blob for a target object using its registered target details.
  * Retrieves target metadata through the JSON-RPC backend call, resolves the static path,
@@ -38,6 +50,24 @@ export async function fetchProcessedImage(
         }
 
         const ext = imagePath.split('.').pop()?.toLowerCase();
+        if (isProcessedFitsPath(imagePath)) {
+            const src = resolveImageSrc(imagePath);
+            if (!src) {
+                return null;
+            }
+            const response = await fetch(src, { method: 'GET', signal });
+            if (response.status === 404 || response.status === 204) {
+                return null;
+            }
+            if (!response.ok) {
+                throw new Error(
+                    `Failed to fetch processed FITS from static path ${src}: ${response.status} ${response.statusText}`
+                );
+            }
+            // Retyped because a static server may label FITS as an image type,
+            // which the viewer would try to decode as a picture.
+            return new Blob([await response.arrayBuffer()], { type: FITS_BLOB_TYPE });
+        }
         if (ext === 'fits' || ext === 'fit') {
             const result = await callBackend("images:convert_fits", { path: imagePath, stretch: true });
             // Some backend paths return the snake_case name; the generated

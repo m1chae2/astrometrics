@@ -108,6 +108,27 @@ def setup_test_environment():  # ruff: ignore[missing-return-type-undocumented-p
         _test_tmp_dir.cleanup()
 
 
+@pytest.fixture(scope="session", autouse=True)
+def initialized_container():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Build the shared container once for the whole test session.
+
+    Importing `backend.main_backend` builds nothing; the server's lifespan
+    does it. The `client` fixture does not run the lifespan, so tests that
+    need the services get them from this fixture instead. It uses the
+    simulated INDI driver because `ASTROMETRICS_TESTING` is set above.
+
+    Yields
+    ------
+    container : `Container`
+        The initialized shared container.
+    """
+    from backend.container import container
+
+    container.init_resources()
+    yield container
+    container.shutdown_resources()
+
+
 @pytest.fixture
 def client():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """FastAPI test client fixture.

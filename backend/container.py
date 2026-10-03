@@ -3,6 +3,11 @@
 Constructs and holds the single `Container` instance (`container`) that
 `backend/routers/` reach through `backend.container.get_container()` to
 obtain fully wired service instances.
+
+Creating the `Container` builds nothing. `init_resources()` builds the
+services and `shutdown_resources()` stops them. The backend calls them from
+the app's lifespan in `backend/main_backend.py`, so importing that module
+starts nothing.
 """
 
 import os
@@ -65,15 +70,40 @@ class Container:
 
         self.initialized = False
 
-    def init_resources(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def init_resources(self) -> None:
         """Initialize all resources.
 
         Safe to call multiple times; subsequent calls are no-ops once
-        `initialized` is `True`.
+        `initialized` is `True`. If building fails partway, whatever was
+        started (the maintenance thread, the INDI worker client) is stopped
+        and the container is reset, so a later call starts clean instead of
+        building a second set of services.
+        The error from the failing step is raised again after the cleanup.
         """
         if self.initialized:
             return
+        try:
+            self._build_resources()
+        except Exception:
+            self.shutdown_resources()
+            self.__init__()
+            raise
 
+    def shutdown_resources(self) -> None:
+        """Stop the background threads and processes the container started.
+
+        Stops the maintenance thread and the INDI worker client. Safe to
+        call more than once, and safe on a container that was never
+        initialized or only partly built.
+        """
+        if self.maintenance_service is not None:
+            self.maintenance_service.stop()
+        if self.indi_worker_client is not None:
+            self.indi_worker_client.stop()
+        self.initialized = False
+
+    def _build_resources(self) -> None:
+        """Construct and wire every service, then start maintenance."""
         # 1. Initialize Configuration
         from astrometricslib import get_configuration
 

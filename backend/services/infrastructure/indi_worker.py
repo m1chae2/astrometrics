@@ -170,22 +170,11 @@ class IndiWorkerClient:
         """Set up the client; the worker process itself starts on first use.
 
         Starting the worker process is deliberately deferred to the first
-        `call_sync()` rather than done here. `multiprocessing`'s "spawn"
-        method re-imports the main module in the child process to rebuild
-        its globals -- but this client is constructed from
-        `backend/container.py`'s `init_resources()`, which runs as bare
-        module-level code in `backend/main_backend.py` (no `if __name__ ==
-        "__main__":` guard, since that module must also work when imported
-        rather than run directly). Spawning a child process *during* that
-        same top-to-bottom module execution means the child's re-import of
-        the not-yet-fully-loaded main module recurses back into this same
-        constructor -- Python's `multiprocessing` detects exactly this and
-        refuses with `RuntimeError: ... before the current process has
-        finished its bootstrapping phase`. Deferring the actual
-        `Process.start()` until a real call happens (well after the module
-        has finished loading) avoids this entirely. The dispatch thread
-        started here is unaffected -- only `multiprocessing.Process` has
-        this restriction, not `threading.Thread`.
+        `call_sync()`, so a backend that never talks to INDI never starts
+        it. `multiprocessing`'s "spawn" method re-imports the main module in
+        the child process. That import builds nothing, because the backend
+        starts its services in the app's lifespan and not at import (see
+        `backend/main_backend.py`), so the child stays small.
 
         Parameters
         ----------

@@ -110,15 +110,9 @@ def worker_client():  # ruff: ignore[missing-return-type-undocumented-public-fun
 def test_the_worker_process_does_not_start_until_the_first_call() -> None:
     """Constructing the client must not itself spawn the worker process.
 
-    `multiprocessing`'s "spawn" method re-imports the real entry point
-    module (`backend/main_backend.py`) in the child -- but that module runs
-    `container.init_resources()`, which builds this client, as bare
-    module-level code (no `__name__ == "__main__"` guard). Spawning eagerly
-    in `__init__` would mean the child re-imports a main module that is
-    still in the middle of its own first execution pass, which
-    `multiprocessing` correctly refuses with a `RuntimeError`. This is a
-    regression test for exactly that failure mode, reproduced live against
-    the real backend before this was fixed.
+    The worker starts on the first call, so a backend that never uses INDI
+    never starts it. The spawned child re-imports the main module, which
+    builds nothing (see `test_startup_lifecycle.py`).
     """
     client = IndiWorkerClient(worker_target=_dummy_worker_main)
     try:

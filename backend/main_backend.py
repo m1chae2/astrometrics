@@ -12,6 +12,7 @@ import socket
 import threading
 import time
 import warnings
+from collections.abc import AsyncIterator
 from typing import Any
 
 import uvicorn
@@ -80,19 +81,7 @@ def _use_bundled_earth_orientation_data() -> None:
 
 _use_bundled_earth_orientation_data()
 
-# Initialize Container Resources
-container.init_resources()
-
 # Register Socket Logging Handler
-from backend.services.infrastructure import session_auth
-from backend.services.infrastructure.fallback_static_files import FallbackStaticFiles
-from backend.services.infrastructure.socket_manager import SocketLoggingHandler
-
-socket_handler = SocketLoggingHandler(container.socket_manager)
-socket_handler.setLevel(logging.INFO)  # Only send INFO and above to UI to avoid flood
-socket_handler.setFormatter(logging.Formatter("%(message)s"))
-logging.getLogger().addHandler(socket_handler)
-
 # Register DB Log Handler (general/unscoped logs; job-scoped loggers attach
 # their own job_id-bound instance directly and do not propagate here since
 # they set propagate = False).
@@ -105,23 +94,99 @@ logging.getLogger().addHandler(socket_handler)
 # Route it through a QueueListener so the DB write happens on a dedicated
 # background thread instead of the request thread.
 import queue
+from contextlib import asynccontextmanager
 from logging.handlers import QueueHandler, QueueListener
 
 from astrometricslib import DbLogHandler
+from backend.services.infrastructure import session_auth
+from backend.services.infrastructure.fallback_static_files import FallbackStaticFiles
+from backend.services.infrastructure.socket_manager import SocketLoggingHandler
 
-db_log_handler = DbLogHandler(container.job_repository)
-db_log_handler.setLevel(logging.INFO)
+# The handlers made by `_attach_log_handlers`, kept so `_detach_log_handlers`
+# can remove them.
+_log_handlers: dict[str, Any] = {}
 
-db_log_queue: queue.Queue = queue.Queue()
-db_log_queue_handler = QueueHandler(db_log_queue)
-db_log_queue_handler.setLevel(logging.INFO)
-logging.getLogger().addHandler(db_log_queue_handler)
 
-db_log_listener = QueueListener(db_log_queue, db_log_handler)
-db_log_listener.start()
+def _attach_log_handlers() -> None:
+    """Send log records to the UI and to the log database.
+
+    Needs the container's socket manager and job repository, so it runs
+    after `container.init_resources()`.
+    """
+    socket_handler = SocketLoggingHandler(container.socket_manager)
+    socket_handler.setLevel(logging.INFO)  # Only send INFO and above to UI to avoid flood
+    socket_handler.setFormatter(logging.Formatter("%(message)s"))
+
+    db_log_handler = DbLogHandler(container.job_repository)
+    db_log_handler.setLevel(logging.INFO)
+    db_log_queue: queue.Queue = queue.Queue()
+    db_log_queue_handler = QueueHandler(db_log_queue)
+    db_log_queue_handler.setLevel(logging.INFO)
+    db_log_listener = QueueListener(db_log_queue, db_log_handler)
+
+    root_logger = logging.getLogger()
+    root_logger.addHandler(socket_handler)
+    root_logger.addHandler(db_log_queue_handler)
+    db_log_listener.start()
+    _log_handlers.update(
+        socket_handler=socket_handler,
+        db_log_queue_handler=db_log_queue_handler,
+        db_log_listener=db_log_listener,
+    )
+
+
+def _detach_log_handlers() -> None:
+    """Remove the handlers added by `_attach_log_handlers`."""
+    root_logger = logging.getLogger()
+    for name in ("socket_handler", "db_log_queue_handler"):
+        handler = _log_handlers.pop(name, None)
+        if handler is not None:
+            root_logger.removeHandler(handler)
+    listener = _log_handlers.pop("db_log_listener", None)
+    if listener is not None:
+        listener.stop()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Start the services when the server starts and stop them after.
+
+    Importing this module builds nothing. The services, the log handlers and
+    the background tasks all start here, when uvicorn starts the app. This
+    runs on the event loop thread before the server accepts requests, so the
+    socket manager and the astrometrics service capture the running loop
+    when they are built.
+
+    Parameters
+    ----------
+    app : `FastAPI`
+        The application being started.
+
+    Yields
+    ------
+    None
+        Control, while the server runs.
+    """
+    container.init_resources()
+    _attach_log_handlers()
+    try:
+        require_mounted_storage(app_configuration.get_frames_path(), app_configuration)
+    except StorageNotMountedError as not_mounted:
+        # Not fatal: images from the stacks folder still load, and the frames
+        # folder is served as soon as the drive is mounted.
+        logger.warning("%s", not_mounted)
+    app.state.telemetry_task = asyncio.create_task(periodic_telemetry_loop())
+    app.state.sky_warmup_task = asyncio.create_task(asyncio.to_thread(_warm_sky_catalog))
+    try:
+        yield
+    finally:
+        app.state.telemetry_task.cancel()
+        _detach_log_handlers()
+        container.shutdown_resources()
+
 
 # Initialize FastAPI App
-app = FastAPI(title="Astrometrics API", version="2.0.0")
+app = FastAPI(title="Astrometrics API", version="2.0.0", lifespan=lifespan)
 
 # Configure CORS
 origins = [
@@ -202,16 +267,9 @@ app.include_router(rpc_router.router)
 # lights, darks, etc.) while the library path holds index/metadata
 # files. Frames is mounted first as a separate prefix so both
 # locations are reachable.
-_frames_path = container.config_service.get_frames_path()
-_stacks_path = container.config_service.get_stacks_path()
-_library_path = container.config_service.get_library_path()
-
-try:
-    require_mounted_storage(_frames_path, container.config_service)
-except StorageNotMountedError as not_mounted:
-    # Not fatal: images from the stacks folder still load, and the frames
-    # folder is served as soon as the drive is mounted.
-    logger.warning("%s", not_mounted)
+_frames_path = app_configuration.get_frames_path()
+_stacks_path = app_configuration.get_stacks_path()
+_library_path = app_configuration.get_library_path()
 
 if _frames_path != _library_path:
     # The pipeline's output can live on another disk (the stacks path), with
@@ -954,26 +1012,6 @@ def _warm_sky_catalog() -> None:
             step_thread.join()
     finally:
         sky_catalog_warmup_finished.set()
-
-
-@app.on_event("startup")
-# ruff: ignore[unused-async] -- required async signature for FastAPI's
-# on_event("startup") decorator, which awaits this handler.
-async def startup_event():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Launch the telemetry loop and sky catalog warm-up on startup."""
-    app.state.telemetry_task = asyncio.create_task(periodic_telemetry_loop())
-    app.state.sky_warmup_task = asyncio.create_task(asyncio.to_thread(_warm_sky_catalog))
-
-
-@app.on_event("shutdown")
-# ruff: ignore[unused-async] -- required async signature for FastAPI's
-# on_event("shutdown") decorator, which awaits this handler.
-async def shutdown_event():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Stop background threads/processes on FastAPI shutdown."""
-    app.state.telemetry_task.cancel()
-    db_log_listener.stop()
-    if container.indi_worker_client is not None:
-        container.indi_worker_client.stop()
 
 
 @app.websocket("/ws/events")

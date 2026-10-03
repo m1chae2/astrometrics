@@ -1,8 +1,9 @@
 """Tests for showing a stack's preview as its target's processed image.
 
 The image viewer shows a target's processed image first. These tests check
-that an automatic preview fills that slot when it is free, and that it never
-replaces a picture a person attached or one that belongs to another stack.
+that an automatic preview fills that slot, replaces a picture a person
+attached unless told to keep it, and never touches one that belongs to
+another stack.
 """
 
 from pathlib import Path
@@ -42,20 +43,20 @@ def test_an_empty_processed_image_takes_the_preview() -> None:
     assert target.stacking.processed_image == _PREVIEW
 
 
-def test_a_picture_a_person_attached_is_left_alone() -> None:
-    """Verify a hand-processed picture is never replaced by a preview."""
+def test_a_picture_a_person_attached_is_replaced() -> None:
+    """Verify the new picture replaces an attached one, by default."""
     target = _target(processed="/home/me/Pictures/M13_final.jpg")
 
-    assert not record_preview_as_processed_image(target, False, _STACK, _PREVIEW)
-    assert target.stacking.processed_image == "/home/me/Pictures/M13_final.jpg"
-
-
-def test_a_picture_a_person_attached_is_replaced_only_when_asked() -> None:
-    """Verify the explicit option replaces an attached picture."""
-    target = _target(processed="/home/me/Pictures/M13_final.jpg")
-
-    assert record_preview_as_processed_image(target, False, _STACK, _PREVIEW, replace_attached=True)
+    assert record_preview_as_processed_image(target, False, _STACK, _PREVIEW)
     assert target.stacking.processed_image == _PREVIEW
+
+
+def test_a_picture_a_person_attached_is_kept_only_when_asked() -> None:
+    """Verify the explicit option keeps an attached picture."""
+    target = _target(processed="/home/me/Pictures/M13_final.jpg")
+
+    assert not record_preview_as_processed_image(target, False, _STACK, _PREVIEW, keep_attached=True)
+    assert target.stacking.processed_image == "/home/me/Pictures/M13_final.jpg"
 
 
 def test_an_earlier_automatic_preview_is_replaced() -> None:

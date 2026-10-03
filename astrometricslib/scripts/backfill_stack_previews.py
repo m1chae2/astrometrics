@@ -13,9 +13,9 @@ For each stack it:
    setting change.
 2. Records the stretched FITS as the target's processed image, so the image
    viewer shows it. The JPEG is recorded when the FITS is missing. A picture
-   a person attached to the target is kept unless
-   ``--replace-attached-pictures`` is given. The picture of a stack the target
-   does not show is never replaced.
+   a person attached to the target is replaced too (the attached file stays
+   where it is), unless ``--keep-attached-pictures`` is given. The picture
+   of a stack the target does not show is never replaced.
 
 The stack files are never changed. Targets are saved once, at the end, and
 only with ``--apply``.
@@ -68,9 +68,9 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--force", action="store_true", help="Remake previews that are already current.")
     parser.add_argument(
-        "--replace-attached-pictures",
+        "--keep-attached-pictures",
         action="store_true",
-        help="Also replace a processed image that a person attached with the preview.",
+        help="Keep a processed image that a person attached, instead of replacing it.",
     )
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--dry-run", action="store_true", help="List what would happen and change nothing.")
@@ -185,7 +185,7 @@ def main(argv: list[str] | None = None) -> int:
                 failures += 1
                 continue
             recorded = record_preview_as_processed_image(
-                target, is_spectral, stacked_path, preview, arguments.replace_attached_pictures
+                target, is_spectral, stacked_path, preview, arguments.keep_attached_pictures
             )
             made = "kept" if current else "made"
             image = "set" if recorded else "left as it was"

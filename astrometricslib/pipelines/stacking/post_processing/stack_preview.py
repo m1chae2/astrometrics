@@ -112,6 +112,14 @@ _OWN_STAGED_FILE = re.compile(r"^stack_preview_\d+(_denoised)?\.fits$")
 # stack.
 _PROCESSED_STEM = "processed"
 
+# Siril's `savejpg` writes the picture upside down compared with the FITS file
+# it was made from (checked on NGC 6888, M 57, M 101 and NGC 7000: the FITS
+# array, which matches the camera's own view, correlates 1.0 with the JPEG only
+# after a vertical flip). `mirrorx` flips the loaded image vertically just
+# before the JPEG is saved, after the FITS copy, so both pictures show the
+# same way up.
+_JPEG_ORIENTATION_COMMAND = "mirrorx"
+
 # The oldest Siril that has the `autostretch` and `savejpg` commands used here.
 _MINIMUM_SIRIL_VERSION = "1.2.0"
 
@@ -162,6 +170,7 @@ def build_preview_script(stacked_file_name: str, preview_stem: str, sky_level: f
         f'load "{stacked_file_name}"',
         _autostretch_command(sky_level),
         f'save "{_PROCESSED_STEM}"',
+        _JPEG_ORIENTATION_COMMAND,
         f'savejpg "{preview_stem}" {PREVIEW_JPEG_QUALITY}',
         "close",
     ]
@@ -199,6 +208,7 @@ def build_bright_object_script(
     commands += [
         f"mtf {stretch.black_point:.6f} {stretch.midtones:.6f} {stretch.white_point:.6f}",
         f'save "{_PROCESSED_STEM}"',
+        _JPEG_ORIENTATION_COMMAND,
         f'savejpg "{preview_stem}" {PREVIEW_JPEG_QUALITY}',
         "close",
     ]
@@ -260,6 +270,7 @@ def build_picture_script(source_file_name: str, preview_stem: str) -> list[str]:
         f"requires {_MINIMUM_SIRIL_VERSION}",
         f'load "{source_file_name}"',
         f'save "{_PROCESSED_STEM}"',
+        _JPEG_ORIENTATION_COMMAND,
         f'savejpg "{preview_stem}" {PREVIEW_JPEG_QUALITY}',
         "close",
     ]
@@ -707,20 +718,21 @@ def record_preview_as_processed_image(
     is_spectral: bool,
     stacked_path: str,
     preview_path: str,
-    replace_attached: bool = False,
+    keep_attached: bool = False,
 ) -> bool:
     """Show a stack's preview picture as its target's processed image.
 
     The image viewer shows a target's processed image first, so recording the
     preview there makes the picture appear. The stack's stretched FITS is
-    recorded when it exists, and the JPEG otherwise. Two cases are left alone,
-    because the picture there is not an automatic preview of this stack:
+    recorded when it exists, and the JPEG otherwise. A processed image that a
+    person attached is replaced too: only the target's pointer changes, and
+    the attached file stays where it is. One case is left alone, because the
+    picture there is not a preview of this stack:
 
-    - The target already has a processed image that a person attached. It is
-      their finished picture, and an automatic preview does not replace it
-      unless `replace_attached` is set.
     - The stack is not the one the target shows. A target with stacks from
       several telescope setups shows only one of them.
+
+    `keep_attached` keeps an attached picture instead.
 
     Parameters
     ----------
@@ -732,9 +744,9 @@ def record_preview_as_processed_image(
         Path of the stacked FITS file.
     preview_path : `str`
         Path of the preview picture made from it.
-    replace_attached : `bool`, optional
-        If `True`, a picture a person attached is replaced too. Use it only
-        when the person has asked for that. The default keeps their picture.
+    keep_attached : `bool`, optional
+        If `True`, a picture a person attached is kept. The default replaces
+        it with the new picture.
 
     Returns
     -------
@@ -747,7 +759,7 @@ def record_preview_as_processed_image(
         return False
     current = stacking.processed_image
     is_automatic = is_preview_path(current or "") or is_processed_fits_path(current or "")
-    if current and current != preview_path and not replace_attached and not is_automatic:
+    if current and current != preview_path and keep_attached and not is_automatic:
         return False
     # The stretched FITS is shown when there is one, because the viewer can
     # zoom into it. The JPEG is the fallback.

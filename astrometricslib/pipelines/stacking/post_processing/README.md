@@ -14,7 +14,7 @@ This step judges the finished stack and makes a picture of it for people. It nev
 
 - **Rejected pixel fraction.** The share of pixel values the stacker threw out, 0 to 1. A high value means many artifacts or a poor alignment.
 - **Saturated pixel fraction.** The share of pixels at the camera's saturation level.
-- **Zero pixel fraction.** The share of exactly-zero pixels. A mostly-zero stack is blank, because calibration removed more than the sky.
+- **Zero pixel fraction.** The share of exactly-zero pixels. For a colour stack it is the share in the worst channel. A mostly-zero stack is blank, because calibration removed more than the sky.
 - **Negative pixel maximum percent.** The worst "many negative pixels" warning Siril printed after dark subtraction.
 - **Stacked and median input FWHM.** Star width in the stack and in the input frames, images only. A wider stack means alignment blurred it.
 - **Spectral registration concern count.** Spectral frames the registration check questioned.

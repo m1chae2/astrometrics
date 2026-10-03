@@ -764,7 +764,8 @@ def _measure_calibration_health(
 ) -> None:
     """Record whether calibration left the stack mostly zeros.
 
-    Two signs are used: the share of exactly-zero pixels in the stack, and the
+    Two signs are used: the share of exactly-zero pixels in the stack (for a
+    colour stack, the share in its worst channel), and the
     worst "many negative pixels" percentage Siril printed after subtracting the
     dark. Both are recorded for every stack. The zero share is flagged only for
     images, because the sky of a spectral stack is legitimately at or below
@@ -795,8 +796,13 @@ def _measure_calibration_health(
     except OSError as read_error:
         logger.warning("Could not read '%s' to check for a blank stack: %s", stacked_path, read_error)
     else:
-        plane = data[data.shape[0] // 2] if data.ndim == 3 else data
-        metrics.zero_pixel_fraction = float(np.count_nonzero(plane == 0) / plane.size)
+        # A colour stack is judged by its worst channel: one dead channel
+        # (the red of a Nikon stack whose bias was subtracted twice) gives a
+        # strongly tinted picture even when the other channels are fine.
+        planes = list(data) if data.ndim == 3 else [data]
+        metrics.zero_pixel_fraction = max(
+            float(np.count_nonzero(plane == 0) / plane.size) for plane in planes
+        )
         metrics.zero_fraction_flagged = (not is_spectral) and is_zero_fraction_significant(
             metrics.zero_pixel_fraction
         )

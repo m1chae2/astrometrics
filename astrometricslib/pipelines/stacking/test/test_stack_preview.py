@@ -161,10 +161,11 @@ def test_the_script_stretches_and_saves_without_touching_the_stack() -> None:
     """Verify the script saves a FITS and a JPEG under new names only."""
     commands = build_preview_script("M_13_L_Stacked.fits", "M_13_L_Stacked_preview", 0.21)
 
-    assert commands[1:5] == [
+    assert commands[1:6] == [
         'load "M_13_L_Stacked.fits"',
         "autostretch -2.8 0.210",
         'save "processed"',
+        "mirrorx",
         'savejpg "M_13_L_Stacked_preview" 90',
     ]
     assert not any('M_13_L_Stacked"' in command for command in commands if command.startswith("save"))
@@ -370,7 +371,7 @@ def test_the_stretch_script_saves_a_fits_and_the_picture_script_does_not_stretch
     picture = build_picture_script("denoised.fits", "preview")
 
     assert stretch[1:4] == ['load "flat.fits"', "autostretch -2.8 0.150", 'save "stretched"']
-    assert picture[1:4] == ['load "denoised.fits"', 'save "processed"', 'savejpg "preview" 90']
+    assert picture[1:5] == ['load "denoised.fits"', 'save "processed"', "mirrorx", 'savejpg "preview" 90']
     assert not any(command.startswith("autostretch") for command in picture)
 
 
@@ -667,10 +668,11 @@ def test_the_bright_object_script_clips_stretches_and_saves_a_jpeg() -> None:
     """The script applies Siril's mtf between two points, then saves a JPEG."""
     stretch = BrightObjectStretch(1.0, 0.0002, 0.361, 0.509, 0.044)
     commands = build_bright_object_script("Moon.fits", "Moon_preview", stretch)
-    assert commands[1:5] == [
+    assert commands[1:6] == [
         'load "Moon.fits"',
         "mtf 0.000200 0.361000 0.509000",
         'save "processed"',
+        "mirrorx",
         'savejpg "Moon_preview" 90',
     ]
     assert not any(command.startswith(("fmul", "autostretch")) for command in commands)

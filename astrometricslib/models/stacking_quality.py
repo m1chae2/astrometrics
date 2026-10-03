@@ -75,8 +75,9 @@ class StackingOutputQuality(BaseModel):
     rejected_pixel_fraction: float | None = Field(default=None, alias="rejectedPixelFraction")
     # The share of pixels at the camera's saturation level, 0 to 1.
     saturated_pixel_fraction: float | None = Field(default=None, alias="saturatedPixelFraction")
-    # The share of pixels that are exactly zero, 0 to 1. A mostly-zero stack
-    # has been over-subtracted and is blank.
+    # The share of pixels that are exactly zero, 0 to 1 (for a colour stack,
+    # in its worst channel). A mostly-zero stack has been over-subtracted and
+    # is blank.
     zero_pixel_fraction: float | None = Field(default=None, alias="zeroPixelFraction")
     # The worst "many negative pixels" percentage the engine reported after
     # subtracting the dark, or `None` if it did not warn.

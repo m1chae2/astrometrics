@@ -214,3 +214,20 @@ def test_a_stack_with_good_flats_has_no_flat_flag() -> None:
     )
     _finalize_stack_quality_flags(summary)
     assert not any(reason.startswith("flat calibration") for reason in summary.flag_reasons)
+
+
+def test_a_colour_stack_with_one_dead_channel_is_flagged(tmp_path: Path) -> None:
+    """A red channel that is 90% zero flags the stack (worst channel)."""
+    generator = np.random.default_rng(1)
+    data = generator.uniform(0.01, 0.5, (3, 100, 100)).astype(np.float32)
+    data[0][generator.random((100, 100)) < 0.9] = 0.0
+    path = tmp_path / "dead_red.fits"
+    fits.writeto(path, data, overwrite=True)
+    summary = make_summary()
+
+    _measure_calibration_health(summary, str(path), False, {})
+    _finalize_stack_quality_flags(summary)
+
+    assert summary.stacking_metrics.zero_pixel_fraction == pytest.approx(0.9, abs=0.03)
+    assert summary.stacking_metrics.zero_fraction_flagged
+    assert any("exactly zero" in reason for reason in summary.flag_reasons)

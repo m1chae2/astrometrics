@@ -7,7 +7,9 @@ results into standard Target/StellarObject domain model instances.
 """
 
 import logging
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 from typing import Any
 
 import astropy.units as u
@@ -94,6 +96,143 @@ def _filter_within_radius(
     ]
 
 
+_DATABASE_FILES = ("astrometrics.db", "astrometrics.db-wal")
+
+_target_position_cache: dict[str, tuple[tuple[int, ...], list[tuple[str, float, float]]]] = {}
+"""Parsed target positions per library folder, with the database version."""
+_target_position_cache_lock = threading.Lock()
+
+
+def _database_version(astrometrics) -> tuple[str, tuple[int, ...]] | None:  # ruff: ignore[missing-type-function-argument]
+    """Identify the state of the library database file.
+
+    Parameters
+    ----------
+    astrometrics : `Astrometrics`
+        The science library handle, which knows where the library is.
+
+    Returns
+    -------
+    version : `tuple` or `None`
+        The library folder and the modification times of the database file
+        and its write-ahead log. Any write to the library changes it. `None`
+        when the files cannot be inspected, which turns caching off.
+    """
+    try:
+        library = Path(astrometrics.config.get_library_path())
+    except AttributeError, TypeError:
+        return None
+    modification_times = []
+    for name in _DATABASE_FILES:
+        try:
+            modification_times.append((library / name).stat().st_mtime_ns)
+        except OSError:
+            # The write-ahead log exists only while the database is written.
+            modification_times.append(0)
+    if not modification_times[0]:
+        return None
+    return str(library), tuple(modification_times)
+
+
+def _parse_target_positions(targets: list[Target]) -> list[tuple[str, float, float]]:
+    """Turn targets into ``(id, ra, dec)`` in degrees, skipping blank ones.
+
+    Coordinates are parsed once per candidate via the canonical
+    `parse_coordinate_string` (RA=hourangle, Dec=degrees, unit markers
+    stripped). A single malformed target cannot fail the whole batch: it is
+    skipped and logged individually.
+
+    Returns
+    -------
+    positions : `list` of `tuple`
+        One entry per target that has a usable position.
+    """
+    positions: list[tuple[str, float, float]] = []
+    for target in targets:
+        # Skip default, empty, or uninitialized coordinates to speed
+        # up matching
+        is_blank = not target.ra or not target.dec or target.ra.isspace() or target.dec.isspace()
+        is_placeholder = target.ra in (None, "", "None", "0h 0m 0s") and target.dec in (
+            None,
+            "",
+            "None",
+            "0° 0′ 0′′",
+            "0d 0m 0s",
+            "0° 0′ 0″",
+        )
+        if is_blank or is_placeholder:
+            continue
+        try:
+            ra_deg = parse_coordinate_string(target.ra, is_ra=True)
+            dec_deg = parse_coordinate_string(target.dec, is_ra=False)
+        except Exception as parse_error:
+            logger.warning("Failed to parse coordinates for local target %s: %s", target.id, parse_error)
+            continue
+        positions.append((target.id, ra_deg, dec_deg))
+    return positions
+
+
+def _targets_within_radius(astrometrics, center: SkyCoord, radius_deg: float) -> list[Target]:  # ruff: ignore[missing-type-function-argument]
+    """Find the library targets inside a circle on the sky.
+
+    Reading and validating every target record from the database took about
+    120 ms for 53 targets, and every Planetarium pan or zoom paid it just to
+    learn the targets' positions. The parsed positions are kept until the
+    database changes, so only the few targets that match are looked up in
+    full.
+
+    Parameters
+    ----------
+    astrometrics : `Astrometrics`
+        The science library handle.
+    center : `SkyCoord`
+        Scalar search center.
+    radius_deg : `float`
+        Search radius in degrees.
+
+    Returns
+    -------
+    targets : `list` [`Target`]
+        The targets whose position falls within `radius_deg` of `center`.
+    """
+    version = _database_version(astrometrics)
+    loaded_targets: list[Target] | None = None
+    positions: list[tuple[str, float, float]] | None = None
+    if version is not None:
+        with _target_position_cache_lock:
+            cached = _target_position_cache.get(version[0])
+        if cached is not None and cached[0] == version[1]:
+            positions = cached[1]
+
+    if positions is None:
+        loaded_targets = astrometrics.targets.list()
+        positions = _parse_target_positions(loaded_targets)
+        if version is not None:
+            with _target_position_cache_lock:
+                _target_position_cache[version[0]] = (version[1], positions)
+
+    if not positions:
+        return []
+    # Converting to numpy arrays before SkyCoord() matters: given plain
+    # Python lists, astropy falls back to constructing one Angle per
+    # element in a Python-level loop instead of a vectorized numpy path.
+    coordinates = SkyCoord(
+        ra=np.asarray([ra for _, ra, _ in positions], dtype=float),
+        dec=np.asarray([dec for _, _, dec in positions], dtype=float),
+        unit=(u.deg, u.deg),
+        frame="icrs",
+    )
+    within_radius = center.separation(coordinates).deg <= radius_deg
+    matching_ids = [
+        target_id for (target_id, _, _), is_within in zip(positions, within_radius, strict=False) if is_within
+    ]
+    if loaded_targets is not None:
+        by_id = {target.id: target for target in loaded_targets}
+        return [by_id[target_id] for target_id in matching_ids if target_id in by_id]
+    matched = (astrometrics.targets.get(target_id) for target_id in matching_ids)
+    return [target for target in matched if target is not None]
+
+
 def astrometrics_catalog(
     sky,  # ruff: ignore[missing-type-function-argument]
     ra_deg: float,
@@ -137,47 +276,7 @@ def astrometrics_catalog(
     # single malformed target can't fail the whole batch — it's
     # skipped and logged individually, same as the StellarObjects
     # branch below.
-    targets = sky._astrometrics.targets.list()
-    candidate_targets: list[Target] = []
-    candidate_ra_deg: list[float] = []
-    candidate_dec_deg: list[float] = []
-    for target in targets:
-        # Skip default, empty, or uninitialized coordinates to speed
-        # up matching
-        is_blank = not target.ra or not target.dec or target.ra.isspace() or target.dec.isspace()
-        is_placeholder = target.ra in (None, "", "None", "0h 0m 0s") and target.dec in (
-            None,
-            "",
-            "None",
-            "0° 0′ 0′′",
-            "0d 0m 0s",
-            "0° 0′ 0″",
-        )
-        if is_blank or is_placeholder:
-            continue
-        try:
-            ra_deg = parse_coordinate_string(target.ra, is_ra=True)
-            dec_deg = parse_coordinate_string(target.dec, is_ra=False)
-        except Exception as parse_error:
-            logger.warning("Failed to parse coordinates for local target %s: %s", target.id, parse_error)
-            continue
-        candidate_targets.append(target)
-        candidate_ra_deg.append(ra_deg)
-        candidate_dec_deg.append(dec_deg)
-
-    if candidate_targets:
-        # Converting to numpy arrays before SkyCoord() matters: given plain
-        # Python lists, astropy falls back to constructing one Angle per
-        # element in a Python-level loop instead of a vectorized numpy path
-        # -- for this catalog's ~270k stellar objects (see the stars branch
-        # below) that turned a sub-10ms array build into a ~40s one.
-        target_coordinates = SkyCoord(
-            ra=np.asarray(candidate_ra_deg, dtype=float),
-            dec=np.asarray(candidate_dec_deg, dtype=float),
-            unit=(u.deg, u.deg),
-            frame="icrs",
-        )
-        results.extend(_filter_within_radius(candidate_targets, target_coordinates, center, radius_deg))
+    results.extend(_targets_within_radius(sky._astrometrics, center, radius_deg))
 
     if not include_stars:
         return results

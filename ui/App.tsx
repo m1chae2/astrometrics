@@ -59,15 +59,33 @@ const CommandConsole = React.lazy(() =>
 );
 
 /**
+ * Slowest render time (ms) that goes unreported. 50 ms is about three frames:
+ * long enough to be felt as a stutter. The old limit of one frame (16 ms) printed
+ * a console warning for most ordinary renders, which buried real problems and
+ * looked like errors. Set `localStorage.profilerThresholdMs` (for example to
+ * 16) to see more while hunting for slow components.
+ */
+const DEFAULT_PROFILER_THRESHOLD_MS = 50;
+
+const profilerThresholdMs = (): number => {
+  try {
+    const stored = Number(window.localStorage.getItem('profilerThresholdMs'));
+    return stored > 0 ? stored : DEFAULT_PROFILER_THRESHOLD_MS;
+  } catch {
+    return DEFAULT_PROFILER_THRESHOLD_MS;
+  }
+};
+
+/**
  * Profiler callback — dev only. React strips onRender calls in production builds.
- * Logs any render that takes longer than one frame (>16ms) so slow components
- * are immediately visible in the DevTools console.
+ * Logs any render slower than `profilerThresholdMs()` so slow components
+ * are visible in the DevTools console.
  */
 const onRenderProfile: ProfilerOnRenderCallback = (
   id, phase, actualDuration, baseDuration
 ) => {
-  if (actualDuration > 16) {
-    console.warn(
+  if (actualDuration > profilerThresholdMs()) {
+    console.info(
       `[Profiler] %c${id}%c (${phase}) | actual: ${actualDuration.toFixed(1)}ms | base: ${baseDuration.toFixed(1)}ms`,
       'color: #f97316; font-weight: bold',
       'color: inherit'

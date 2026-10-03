@@ -898,32 +898,60 @@ def _warm_earth_orientation_data() -> None:
 
 
 def _warm_sky_catalog() -> None:
-    """Load the Planetarium's star catalog into memory ahead of first use.
+    """Warm the caches the first screens need, all at once, ahead of first use.
 
-    The first `planetarium:get_sources` request otherwise pays a one-time
-    cost of tens of seconds (deserializing every stored star) while the
-    user waits on an empty sky. A tiny query constructs the sky engine and
-    loads that catalog now, in a worker thread, so it doesn't delay startup
-    or block other requests.
+    Three independent pieces of start-up work run side by side instead of one
+    after another, so the splash waits for the slowest (about 2.6 s on the
+    real library) rather than their sum (about 3.6 s):
+
+    * the Planetarium's star catalog, which the first `planetarium:get_sources`
+      request would otherwise load while the user waits on an empty sky;
+    * astropy's Earth-orientation table, read by the first altitude/azimuth
+      conversion;
+    * the Astronomy Manager's stellar summary cache.
+
+    Each step logs its own failure and never stops the others;
+    `sky_catalog_warmup_finished` is set when all of them are done.
     """
-    started_at = time.monotonic()
+
+    def warm_sky() -> None:
+        """Construct the sky engine and load its catalog with a tiny query."""
+        started_at = time.monotonic()
+        try:
+            container.wayfinder.planning.get_sources(0.0, 0.0, 0.01)
+            logger.info("Sky catalog warmed in %.1fs", time.monotonic() - started_at)
+        except Exception as warm_error:
+            logger.warning("Sky catalog warm-up failed; first Planetarium load will be slow: %s", warm_error)
+
+    def warm_earth_orientation() -> None:
+        """Load astropy's Earth-orientation table."""
+        try:
+            _warm_earth_orientation_data()
+        except Exception as warm_error:
+            logger.warning(
+                "Earth-orientation warm-up failed; the first star click will be slow: %s", warm_error
+            )
+
+    def warm_stellar_summaries() -> None:
+        """Fill the stellar catalog summary cache."""
+        try:
+            stellar_started_at = time.monotonic()
+            container.stellar_service.warm_catalog_summary_cache()
+            logger.info("Stellar catalog summary warmed in %.1fs", time.monotonic() - stellar_started_at)
+        except Exception as warm_error:
+            logger.warning(
+                "Stellar summary warm-up failed; first Astronomy Manager load will be slow: %s", warm_error
+            )
+
     try:
-        container.wayfinder.planning.get_sources(0.0, 0.0, 0.01)
-        logger.info("Sky catalog warmed in %.1fs", time.monotonic() - started_at)
-    except Exception as warm_error:
-        logger.warning("Sky catalog warm-up failed; first Planetarium load will be slow: %s", warm_error)
-    try:
-        _warm_earth_orientation_data()
-    except Exception as warm_error:
-        logger.warning("Earth-orientation warm-up failed; the first star click will be slow: %s", warm_error)
-    try:
-        stellar_started_at = time.monotonic()
-        container.stellar_service.warm_catalog_summary_cache()
-        logger.info("Stellar catalog summary warmed in %.1fs", time.monotonic() - stellar_started_at)
-    except Exception as warm_error:
-        logger.warning(
-            "Stellar summary warm-up failed; first Astronomy Manager load will be slow: %s", warm_error
-        )
+        steps = [
+            threading.Thread(target=step, name=step.__name__, daemon=True)
+            for step in (warm_sky, warm_earth_orientation, warm_stellar_summaries)
+        ]
+        for step_thread in steps:
+            step_thread.start()
+        for step_thread in steps:
+            step_thread.join()
     finally:
         sky_catalog_warmup_finished.set()
 

@@ -21,8 +21,9 @@ from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
-from astropy.io import fits
 from scipy import ndimage
+
+from astrometricslib.drivers.fits_access import read_data
 
 logger = logging.getLogger(__name__)
 
@@ -236,8 +237,7 @@ def measure_raw_frame(path: str) -> dict[str, Any]:
         ``saturated_pixels``, ``width_px``, and the private ``_stars`` array
         used for matching.
     """
-    with fits.open(path, memmap=False) as hdul:
-        image = np.asarray(hdul[0].data, dtype=float)
+    image = np.asarray(read_data(path), dtype=float)
     stars, blob_count, longest_blob = _detect_stars(image)
     fwhm = roundness = None
     if len(stars):

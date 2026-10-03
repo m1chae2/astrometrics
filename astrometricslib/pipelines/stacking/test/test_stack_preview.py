@@ -69,8 +69,13 @@ def _configure(
     graxpert: str | None,
     cosmic_clarity: str | None = None,
     strength: float = 1.0,
+    star_tone: bool = False,
 ) -> None:
-    """Give the module the commands for Siril, GraXpert and Cosmic Clarity."""
+    """Give the module the commands for Siril, GraXpert and Cosmic Clarity.
+
+    The star toning is off unless asked for, so the tests of the other steps
+    see the pipeline without it.
+    """
     monkeypatch.setattr(
         stack_preview,
         "get_configuration",
@@ -79,6 +84,7 @@ def _configure(
             get_graxpert_executable=lambda: graxpert,
             get_cosmic_clarity_denoise_executable=lambda: cosmic_clarity,
             get_cosmic_clarity_denoise_strength=lambda: strength,
+            get_preview_star_tone_enabled=lambda: star_tone,
         ),
     )
 
@@ -96,6 +102,8 @@ class _Programs:
         self.flatten_calls: list[tuple[str, str, str]] = []
         self.denoise_calls: list[tuple[str, str, str, float]] = []
         self.siril_calls: list[tuple[str, list[str]]] = []
+        self.tone_calls: list[tuple[str, str]] = []
+        self.tone_result = True
 
     def flatten(self, graxpert_executable: str, input_path: str, output_stem: str) -> bool:
         """Act like GraXpert, writing the flattened copy if told to succeed.
@@ -124,6 +132,19 @@ class _Programs:
             Path(output_path).write_bytes(b"denoised")
         return self.denoise_result
 
+    def tone(self, input_path: str, output_path: str) -> bool:
+        """Act like the star toning, writing a toned copy if told to succeed.
+
+        Returns
+        -------
+        succeeded : `bool`
+            Whether this stand-in was told to succeed.
+        """
+        self.tone_calls.append((input_path, output_path))
+        if self.tone_result:
+            Path(output_path).write_bytes(b"toned")
+        return self.tone_result
+
     def siril(self, directory: str, commands: list[str], siril_executable: str) -> bool:
         """Act like Siril, writing what the script asks for if told to succeed.
 
@@ -150,6 +171,7 @@ class _Programs:
         monkeypatch.setattr(stack_preview, "flatten_background", self.flatten)
         monkeypatch.setattr(stack_preview, "denoise_with_cosmic_clarity", self.denoise)
         monkeypatch.setattr(stack_preview, "run_preview_script", self.siril)
+        monkeypatch.setattr(stack_preview, "tone_stars_in_file", self.tone)
 
 
 def test_the_preview_is_named_after_the_stack() -> None:
@@ -297,6 +319,64 @@ def test_without_cosmic_clarity_one_siril_script_stretches_and_saves(
     assert len(programs.siril_calls) == 1
     assert any(command.startswith("autostretch") for command in programs.siril_calls[0][1])
     assert programs.denoise_calls == []
+
+
+def test_the_star_toning_runs_after_the_denoise_and_feeds_the_picture(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify the order: stretch, Cosmic Clarity, star toning, JPEG."""
+    _configure(monkeypatch, "siril-cli", "graxpert-gpu", "/opt/cc/denoise", star_tone=True)
+    programs = _Programs()
+    programs.install(monkeypatch)
+
+    assert write_stack_preview(str(stack)) is not None
+
+    tone_input, tone_output = programs.tone_calls[0]
+    assert Path(tone_input).name == "denoised.fits"
+    assert Path(tone_output).name == "toned.fits"
+    assert 'load "toned.fits"' in programs.siril_calls[1][1]
+    assert not any(command.startswith("autostretch") for command in programs.siril_calls[1][1])
+
+
+def test_the_star_toning_alone_takes_a_separate_stretch(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify the toning works without a denoise, on the stretched copy."""
+    _configure(monkeypatch, "siril-cli", None, None, star_tone=True)
+    programs = _Programs()
+    programs.install(monkeypatch)
+
+    assert write_stack_preview(str(stack)) is not None
+
+    assert len(programs.siril_calls) == 2
+    assert 'save "stretched"' in programs.siril_calls[0][1]
+    assert Path(programs.tone_calls[0][0]).name == "stretched.fits"
+    assert 'load "toned.fits"' in programs.siril_calls[1][1]
+
+
+def test_a_failed_star_toning_keeps_the_picture_before_it(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a toning failure still gives the denoised picture."""
+    _configure(monkeypatch, "siril-cli", None, "/opt/cc/denoise", star_tone=True)
+    programs = _Programs()
+    programs.tone_result = False
+    programs.install(monkeypatch)
+
+    assert write_stack_preview(str(stack)) is not None
+    assert 'load "denoised.fits"' in programs.siril_calls[1][1]
+
+
+def test_the_star_toning_is_skipped_when_the_setting_is_off(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify nothing tones the stars when the setting is off."""
+    _configure(monkeypatch, "siril-cli", None, "/opt/cc/denoise", star_tone=False)
+    programs = _Programs()
+    programs.install(monkeypatch)
+
+    assert write_stack_preview(str(stack)) is not None
+    assert programs.tone_calls == []
 
 
 def test_a_failed_denoise_keeps_the_stretched_copy(
@@ -698,7 +778,7 @@ def test_a_bright_object_skips_graxpert_and_the_denoise(
     folder.mkdir()
     path = folder / "Moon_L_Stacked.fits"
     fits.writeto(path, disc.astype(np.float32))
-    _configure(monkeypatch, "siril-cli", "graxpert-gpu", "/opt/cc/denoise")
+    _configure(monkeypatch, "siril-cli", "graxpert-gpu", "/opt/cc/denoise", star_tone=True)
     programs = _Programs()
     programs.install(monkeypatch)
 
@@ -707,6 +787,7 @@ def test_a_bright_object_skips_graxpert_and_the_denoise(
     assert picture is not None
     assert programs.flatten_calls == []
     assert programs.denoise_calls == []
+    assert programs.tone_calls == []
     assert len(programs.siril_calls) == 1
     script = programs.siril_calls[0][1]
     assert any(command.startswith("mtf ") for command in script)

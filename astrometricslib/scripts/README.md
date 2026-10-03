@@ -14,6 +14,7 @@ This folder holds standalone command-line scripts: batch processing over the who
 - `merge_duplicate_catalog_stars.py`, `merge_spectroscopy_star_rows.py`, `reconcile_position_only_star_catalog.py` — fold duplicate or split stellar catalog rows for the same real star back into one row.
 - `backfill_focal_length.py` — fills in a missing `FOCALLEN` header value on frames captured before the pipeline started requiring it.
 - `move_stacks_to_stacks_path.py` — moves the pipeline's existing output (stacks, group stacks, rejection maps, previews, processed pictures) from the frames folder to the `stacks_path` folder, and rewrites the paths in the database. Dry run by default; the backend must be stopped for `--apply`.
+- `restore_excluded_frames.py` — a command-line wrapper around `ProcessingPipelines.restore_excluded_frames`. It lists the frames the stacking pipeline moved into `_excluded` folders (clouds or trailed stars) and, with `--apply`, moves them back and re-scans their targets. Dry run by default.
 - `backfill_stack_previews.py` — makes the stretched JPEG and FITS pictures for stacks that were made before stacking saved them (it never restacks), and records the FITS as the target's processed image (replacing a picture a person attached unless `--keep-attached-pictures` is given; the attached file stays where it is).
 - `report_equipment_disagreements.py` — reports stored telescope/ISO values that a fresh re-scan of the frame would change, without changing anything itself.
 

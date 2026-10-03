@@ -267,6 +267,8 @@ class AppConfiguration:
                 "stack_weight": "",
                 "generate_rejmap": "true",
                 "background_homogeneity_check_enabled": "true",
+                "quarantine_bad_frames_enabled": "true",
+                "preview_star_tone_enabled": "true",
                 "auto_open_gui": "false",
             },
             # Blank: no gradient removal. Stack previews are then stretched
@@ -472,6 +474,39 @@ class AppConfiguration:
             `True` if the background-homogeneity check should run.
         """
         val = self.get_value("Processing.Siril", "background_homogeneity_check_enabled", fallback="true")
+        return str(val).lower() == "true"
+
+    def get_quarantine_bad_frames_enabled(self) -> bool:
+        """Return whether stacking moves cloudy or trailed frames aside.
+
+        When on, each stack measures its light frames and moves the ones with
+        clouds or trailed stars into an ``_excluded`` folder beside them (see
+        `pipelines/stacking/pre_processing/frame_quarantine.py`). The frames
+        are never deleted and `restore_excluded_frames.py` moves them back.
+        Measuring takes about a second per frame.
+
+        Returns
+        -------
+        enabled : `bool`
+            `True` if the quarantine step should run.
+        """
+        val = self.get_value("Processing.Siril", "quarantine_bad_frames_enabled", fallback="true")
+        return str(val).lower() == "true"
+
+    def get_preview_star_tone_enabled(self) -> bool:
+        """Return whether the stack preview tones down its stars.
+
+        When on, the preview dims stars in proportion to their brightness and
+        compresses the brightest values below pure white (see
+        `pipelines/stacking/post_processing/star_tone.py`). The stack itself
+        is never changed.
+
+        Returns
+        -------
+        enabled : `bool`
+            `True` if the star toning step should run.
+        """
+        val = self.get_value("Processing.Siril", "preview_star_tone_enabled", fallback="true")
         return str(val).lower() == "true"
 
     def get_maximum_identified_stars(self) -> int | None:
@@ -851,6 +886,31 @@ class AppConfiguration:
             pass
         return self.get_library_path() / "frames"
 
+    def get_frames_mount_point(self) -> Path | None:
+        """Return the folder where the raw frames' drive must be mounted.
+
+        Reads the optional ``"frames_mount_point"`` entry from the
+        ``[Image Library]`` section. Set it when the frames live on a drive
+        that is not always attached, such as a USB disk or a network share.
+        Downloads and file sorting then refuse to write below it unless
+        something is mounted there (see
+        `astrometricslib.utilities.storage_mount`). It is usually the frames
+        path or a folder above it.
+
+        Returns
+        -------
+        mount_point : `Path` or `None`
+            The absolute mount point, or `None` if the entry is missing or
+            empty, which turns the check off.
+        """
+        try:
+            path_str = self.app_config.get("Image Library", "frames_mount_point")
+        except configparser.NoSectionError, configparser.NoOptionError, KeyError:
+            return None
+        if not path_str:
+            return None
+        return Path(path_str).absolute()
+
     def get_stacks_path(self) -> Path:
         """Return the absolute path where stacks and other derived files go.
 
@@ -1080,6 +1140,7 @@ class AppConfiguration:
             stack_weight=self.get_stack_weight(),
             generate_rejmap=self.get_stack_generate_rejmap(),
             background_homogeneity_check_enabled=self.get_background_homogeneity_check_enabled(),
+            quarantine_bad_frames_enabled=self.get_quarantine_bad_frames_enabled(),
         )
 
         # Build camera configs

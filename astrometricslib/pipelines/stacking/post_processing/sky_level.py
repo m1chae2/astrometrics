@@ -66,14 +66,17 @@ A middle value: 0.18 was the level that kept the faint arms of M 81 and M 101
 visible while giving a visibly darker, cleaner sky than 0.25.
 """
 
-# The display brightness the extended light is placed at. Chosen so that the
-# M 81 stack comes out at a sky level of 0.18, the middle level judged to look
-# best on that target. It is the rule's only tuned number. With it, M 101 and
-# the faint star fields land at the lightest level, and M 42 and M 45 at the
-# darkest. Calibrated on one target by eye, then checked on 19 other ASI533MM
-# Pro stacks, where the levels came out in the expected order (fainter
-# targets lighter). Not validated on stacks from other cameras.
-EXTENDED_LIGHT_BRIGHTNESS = 0.30
+# The display brightness the extended light is placed at. It is the rule's
+# only tuned number. It was first set to 0.30 so that the M 81 stack came out
+# at a sky level of 0.18. On the Bubble Nebula stack that gave a sky level of
+# 0.15, which the user found too black, and the user chose a sky level near
+# 0.20 from rendered options. 0.36 gives the Bubble Nebula stack about 0.19.
+# The same change lifts M 81 from 0.19 to about 0.23 and puts the faintest
+# fields (M 101, M 57) at the lightest level; M 42 stays at the darkest level.
+# Calibrated on one target by eye, then checked on 22 other ASI533MM Pro
+# stacks, where the levels stayed in the expected order (fainter targets
+# lighter). Not validated on stacks from other cameras.
+EXTENDED_LIGHT_BRIGHTNESS = 0.36
 
 # The stack is cut into blocks of this many pixels on a side. A star is a few
 # pixels wide, so the median of such a block ignores it. Real extended light

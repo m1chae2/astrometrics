@@ -97,7 +97,11 @@ class ImageConverter:
         vmin = (center - width / 2.0) if center is not None and width is not None else None
         vmax = (center + width / 2.0) if center is not None and width is not None else None
 
-        img8, vmin, vmax = ImageScaler.scale_to_uint8(data, vmin=vmin, vmax=vmax, stretch=stretch)
+        # Measuring the sky from a sample of the pixels gives the same picture
+        # in a fraction of the time on a large frame (see `measure_sky`).
+        img8, vmin, vmax = ImageScaler.scale_to_uint8(
+            data, vmin=vmin, vmax=vmax, stretch=stretch, sample_sky=True
+        )
 
         pil_image = Image.fromarray(img8)
         if pil_image.mode != "L":
@@ -113,7 +117,10 @@ class ImageConverter:
             pil_image = pil_image.resize((round(width_px * scale), round(height_px * scale)), Image.LANCZOS)
 
         buffer = BytesIO()
-        pil_image.save(buffer, format="PNG", optimize=False)
+        # Compression level 1 encodes about 2.5 times faster than the default 6
+        # and makes the file about 10% bigger. The picture goes to the app on
+        # this computer, where the extra size costs almost nothing.
+        pil_image.save(buffer, format="PNG", optimize=False, compress_level=1)
         png_bytes = buffer.getvalue()
 
         # Simple cache pruning: evict oldest entry if cache grows too large

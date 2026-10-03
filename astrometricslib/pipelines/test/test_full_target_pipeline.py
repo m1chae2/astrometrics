@@ -174,3 +174,53 @@ def test_a_later_stage_crashing_does_not_discard_an_earlier_stage_save(monkeypat
     assert len(catalog_access.saved) == 2
     saved_target = catalog_access.saved[-1][0]
     assert saved_target.stacking.stacked_image == stacked_path
+
+
+def test_frames_the_stacking_stage_removed_are_not_handed_to_photometry(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Photometry gets only the frames the target still lists after stacking.
+
+    The stacking stage moves frames with clouds or trailed stars out of the
+    target. Photometry once received the list made before stacking and
+    stopped on a file that had been moved.
+    """
+    stacked_path = str(tmp_path / "stacked.fits")
+    Path(stacked_path).touch()
+    target = Target(
+        id="RegressionTarget",
+        frames=[
+            FrameRecord(path="/fake/frame1.fits", camera="TestCam", filter="Luminance"),
+            FrameRecord(path="/fake/frame2.fits", camera="TestCam", filter="Luminance"),
+            FrameRecord(path="/fake/frame3.fits", camera="TestCam", filter="Luminance"),
+        ],
+    )
+
+    def _fake_stack_frames(target: Target, **kwargs: Any) -> str:
+        target.frames = [frame for frame in target.frames if frame.path != "/fake/frame2.fits"]
+        target.stacking.stacked_image = stacked_path
+        return stacked_path
+
+    monkeypatch.setattr(stacking_stage, "stack_frames", _fake_stack_frames)
+    frames_seen_by_photometry: list[list[str]] = []
+
+    def _fake_run_analysis_pipeline_match(
+        target: Target,
+        frames: list[FrameRecord],
+        pipeline_type: str,
+        filter_type: Any,
+        catalog_access: Any,
+        path: str,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        if pipeline_type == "photometry":
+            frames_seen_by_photometry.append([frame.path for frame in frames])
+            return {"starsFound": 0}
+        return {"wcs": object()}
+
+    monkeypatch.setattr(tasks, "_run_analysis_pipeline_match", _fake_run_analysis_pipeline_match)
+    astrometrics = SimpleNamespace(catalog_access=_StubCatalogAccess(), config=_StubConfig(tmp_path))
+
+    tasks.run_full_pipeline(target, astrometrics, camera_name="TestCam")
+
+    assert frames_seen_by_photometry == [["/fake/frame1.fits", "/fake/frame3.fits"]]

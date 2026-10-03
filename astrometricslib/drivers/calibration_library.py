@@ -5,6 +5,7 @@ import logging
 import os
 import threading
 from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import Any
 
 from astropy.io import fits
@@ -117,6 +118,34 @@ def _is_same_setting(key: str, gain: Any, offset: Any) -> bool:
         gain_matches = key_gain.strip() == str(gain).strip()
     wanted_offset = _as_float(offset)
     return gain_matches and key_offset == (0.0 if wanted_offset is None else wanted_offset)
+
+
+@dataclass(frozen=True)
+class FlatGroup:
+    """The flat frames filed under one set of settings.
+
+    Attributes
+    ----------
+    telescope : `str`
+        The telescope the flats were taken through.
+    camera : `str`
+        The camera name the flats are filed under.
+    filter : `str`
+        The filter name the flats are filed under.
+    gain : `str`
+        The gain (or ISO) setting, as text.
+    offset : `float`
+        The camera offset (0.0 when the flats record none).
+    paths : `list` [`str`]
+        The flat frame file paths.
+    """
+
+    telescope: str
+    camera: str
+    filter: str
+    gain: str
+    offset: float
+    paths: list[str]
 
 
 def _without_duplicates(paths: list[str]) -> list[str]:
@@ -510,6 +539,37 @@ class CalibrationLibrary(BaseModel):
         except Exception:
             return False
 
+    def _find_camera_key(self, frame_dict: dict[str, Any], camera: str) -> str | None:
+        """Find the key a camera is filed under, allowing fuzzy matching.
+
+        Returns
+        -------
+        camera_key : `str` or `None`
+            The matching key, or `None` if no key matches.
+        """
+        if not camera or camera == "Unknown":
+            # Fallback to first camera if only one exists
+            if len(frame_dict) == 1:
+                return next(iter(frame_dict))
+            return None
+
+        if camera in frame_dict:
+            return camera
+
+        # The same camera under another spelling: "Nikon D5300" is
+        # "Nikon DSLR DSC D5300", found through the camera's profile.
+        wanted_identity = camera_identity(camera)
+        for key in frame_dict:
+            if camera_identity(key) == wanted_identity:
+                return key
+
+        # Partial names: a name that is part of another, or contains it.
+        for key in frame_dict:
+            if camera.upper() in key.upper() or key.upper() in camera.upper():
+                return key
+
+        return None
+
     def _get_camera_dict(self, frame_dict: dict[str, Any], camera: str) -> dict[str, Any]:
         """Find camera data in `frame_dict`, allowing fuzzy matching.
 
@@ -519,28 +579,8 @@ class CalibrationLibrary(BaseModel):
             The matching camera's frame data, or an empty dict if no
             match is found.
         """
-        if not camera or camera == "Unknown":
-            # Fallback to first camera if only one exists
-            if len(frame_dict) == 1:
-                return next(iter(frame_dict.values()))
-            return {}
-
-        if camera in frame_dict:
-            return frame_dict[camera]
-
-        # The same camera under another spelling: "Nikon D5300" is
-        # "Nikon DSLR DSC D5300", found through the camera's profile.
-        wanted_identity = camera_identity(camera)
-        for key in frame_dict:
-            if camera_identity(key) == wanted_identity:
-                return frame_dict[key]
-
-        # Partial names: a name that is part of another, or contains it.
-        for key in frame_dict:
-            if camera.upper() in key.upper() or key.upper() in camera.upper():
-                return frame_dict[key]
-
-        return {}
+        camera_key = self._find_camera_key(frame_dict, camera)
+        return {} if camera_key is None else frame_dict[camera_key]
 
     def get_dark_frames(  # ruff: ignore[missing-return-type-undocumented-public-function]
         self,
@@ -677,20 +717,7 @@ class CalibrationLibrary(BaseModel):
             Matching flat frame file paths, filtered to existing
             files if `validate_paths` is `True`.
         """
-        f_val = filter_type.value if hasattr(filter_type, "value") else str(filter_type)
-
-        # Filter aliases to handle terminology updates
-        filter_aliases = {
-            "L": ["Luminance", "L", "None", "NONE", ""],
-            "Luminance": ["Luminance", "L", "None", "NONE", ""],
-            "SPEC": ["Star Analyzer 200", "SPEC", "SA200"],
-            "Star Analyzer 200": ["Star Analyzer 200", "SPEC", "SA200"],
-            "None": ["None", "NONE", "", "Luminance", "L"],
-            "NONE": ["None", "NONE", "", "Luminance", "L"],
-            "": ["None", "NONE", "", "Luminance", "L"],
-        }
-
-        search_filters = filter_aliases.get(f_val, [f_val])
+        search_filters = flat_filter_names(filter_type)
 
         telescope_data = self.flat_frames.get(telescope, {})
         if not telescope_data and len(self.flat_frames) > 0:
@@ -714,6 +741,73 @@ class CalibrationLibrary(BaseModel):
         if validate_paths:
             return [f for f in frames if os.path.exists(f)]
         return frames
+
+    def list_flat_groups(
+        self,
+        telescope: str | None = None,
+        camera: str | None = None,
+        filter_type: Any = None,
+        gain: Any = None,
+        offset: Any = None,
+        validate_paths: bool = True,
+    ) -> list[FlatGroup]:
+        """List the flat sets in the library, one per gain and offset.
+
+        Flats at different gains or offsets never mix in one group, because
+        a flat only calibrates lights taken at the same settings. Leave an
+        argument as `None` to include every value of it.
+
+        Parameters
+        ----------
+        telescope : `str`, optional
+            Only this telescope's flats.
+        camera : `str`, optional
+            Only this camera's flats. Other spellings of the name match.
+        filter_type : `Any`, optional
+            Only flats for this filter. Older and newer names of the same
+            filter match (see `FLAT_FILTER_ALIASES`).
+        gain : `Any`, optional
+            Only flats at this gain.
+        offset : `Any`, optional
+            With `gain`, only flats at this camera offset.
+        validate_paths : `bool`, optional
+            Drop files that no longer exist, by default `True`. A group left
+            with no files is dropped.
+
+        Returns
+        -------
+        groups : `list` [`FlatGroup`]
+            The matching flat sets, in the order the library holds them.
+        """
+        wanted_names = None
+        if filter_type is not None:
+            wanted_names = {name.upper() for name in flat_filter_names(filter_type)}
+        groups = []
+        with self._lock:
+            for telescope_name, camera_index in self.flat_frames.items():
+                if telescope is not None and telescope_name != telescope:
+                    continue
+                camera_key = None if camera is None else self._find_camera_key(camera_index, camera)
+                if camera is not None and camera_key is None:
+                    continue
+                for camera_name, filter_index in camera_index.items():
+                    if camera_key is not None and camera_name != camera_key:
+                        continue
+                    for filter_name, setting_index in filter_index.items():
+                        if wanted_names is not None and filter_name.upper() not in wanted_names:
+                            continue
+                        for setting_key, paths in setting_index.items():
+                            if gain is not None and not _is_same_setting(setting_key, gain, offset):
+                                continue
+                            kept = [p for p in paths if os.path.exists(p)] if validate_paths else list(paths)
+                            if not kept:
+                                continue
+                            key_gain, key_offset = split_calibration_setting_key(setting_key)
+                            group = FlatGroup(
+                                telescope_name, camera_name, filter_name, key_gain, key_offset, kept
+                            )
+                            groups.append(group)
+        return groups
 
     def refresh_dark_frames(self, prune_missing=False):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
         """Rescan the dark-frames directory and re-add any FITS files found.
@@ -801,6 +895,38 @@ class CalibrationLibrary(BaseModel):
                             continue
                         if os.path.isfile(file_path):
                             self.add_flat_frame(file_path, telescope)
+
+
+# Names a flat's filter may be filed under. Flat folders and FITS headers use
+# older and newer names for the same filter, so a lookup for one name must
+# also find the others. A frame with no filter counts as luminance.
+FLAT_FILTER_ALIASES: dict[str, list[str]] = {
+    "L": ["Luminance", "L", "None", "NONE", ""],
+    "Luminance": ["Luminance", "L", "None", "NONE", ""],
+    "SPEC": ["Star Analyzer 200", "SPEC", "SA200"],
+    "Star Analyzer 200": ["Star Analyzer 200", "SPEC", "SA200"],
+    "None": ["None", "NONE", "", "Luminance", "L"],
+    "NONE": ["None", "NONE", "", "Luminance", "L"],
+    "": ["None", "NONE", "", "Luminance", "L"],
+}
+
+
+def flat_filter_names(filter_type: Any) -> list[str]:
+    """List every name a flat for this filter may be filed under.
+
+    Parameters
+    ----------
+    filter_type : `Any`
+        A `FilterType` or a filter name.
+
+    Returns
+    -------
+    names : `list` [`str`]
+        The filter's own name first, then its aliases. A name with no
+        aliases gives a list of just that name.
+    """
+    name = filter_type.value if hasattr(filter_type, "value") else str(filter_type)
+    return list(FLAT_FILTER_ALIASES.get(name, [name]))
 
 
 def is_calibration_gain_compatible(light_gain: str, master_gain: str) -> bool:

@@ -104,6 +104,7 @@ from astrometricslib.utilities.enums import FilterType
 from astrometricslib.utilities.observing_night import observing_night_id
 from astrometricslib.utilities.parallel_batch import BatchRunSummary, run_parallel_batch
 from astrometricslib.utilities.pipeline_models import ProcessingJob
+from astrometricslib.utilities.storage_mount import StorageNotMountedError, require_mounted_storage
 
 if TYPE_CHECKING:
     from astrometricslib.api.moving_objects import MovingObjectRecovery
@@ -310,6 +311,7 @@ __all__ = [
     "StarIdentifier",
     "StellarCatalog",
     "StellarObject",
+    "StorageNotMountedError",
     "Target",
     "TargetCatalog",
     "TargetFilesResponse",
@@ -334,6 +336,7 @@ __all__ = [
     "observing_night_id",
     "parse_coordinate_string",
     "registered_job",
+    "require_mounted_storage",
     "resolve_camera_profile",
     "resolve_worker_counts",
     "run_parallel_batch",

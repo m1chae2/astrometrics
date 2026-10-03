@@ -13,7 +13,14 @@ from typing import Any, Literal
 from astrometricslib.drivers.job_logging import JobHandle, background_job, capture_job_logs, registered_job
 from astrometricslib.drivers.logger_interface import DbLogHandler, LoggerInterface
 from astrometricslib.drivers.siril_interface import ImageProcessing
+from astrometricslib.models.calibration_ingest import CalibrationIngestReport, FlatSetAssessment
+from astrometricslib.models.excluded_frames import QuarantinePreview, RestoreReport, SetAsideFrame
 from astrometricslib.models.target import FrameRecord, Target
+from astrometricslib.pipelines.shared.calibration_ingest import (
+    assess_flat_group,
+    build_ingest_report,
+    flatten_frame_index,
+)
 from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
 from astrometricslib.pipelines.stacking.stack_runner import run_siril_stack
 from astrometricslib.utilities.config_loader import AppConfiguration
@@ -71,6 +78,35 @@ class QualityDiagnostics:
         from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_image_fwhm
 
         return measure_image_fwhm(path)
+
+    def check_raw_frames(self, folder_path: str, last_count: int | None = None) -> dict[str, Any]:
+        """Check raw light frames in a folder and flag the ones that stand out.
+
+        Works on frames that are not in the library yet, such as a staging
+        folder filled during an observing session. For each frame it
+        measures the star count, star width and roundness, the longest star
+        streak, the sky level, the saturated pixels, and how far the star
+        field moved since the previous frame. A frame is flagged when it
+        differs from the batch median: too few stars, trailed, soft,
+        elongated, or moved a long way.
+
+        Parameters
+        ----------
+        folder_path : `str`
+            A folder of ``*.fits`` light frames, read in file-name order.
+        last_count : `int`, optional
+            Check only the newest this many frames.
+
+        Returns
+        -------
+        report : `dict`
+            ``frames`` (the measurements and ``flags`` for each frame) and
+            ``batch`` (frame count, median star count and width, and how
+            many frames were flagged).
+        """
+        from astrometricslib.pipelines.shared.quality.raw_frame_check import check_raw_frames
+
+        return check_raw_frames(folder=folder_path, last_count=last_count)
 
     def measure_stack_rejected_fraction(self, stacked_path: str) -> float | None:
         """Get the mean per-pixel rejected-frame fraction from the rejmap.
@@ -292,8 +328,12 @@ class CalibrationCatalog:
         method = getattr(self.library, f"get_{kind}_frames")
         return method(**kwargs)
 
-    def refresh(self, kind: _CalibrationKind, prune_missing: bool = False) -> None:
-        """Rescan the given kind's directory and re-index any FITS files.
+    def refresh(self, kind: _CalibrationKind, prune_missing: bool = False) -> CalibrationIngestReport:
+        """Rescan one kind of calibration frame and report what was found.
+
+        Use this after new calibration frames have been downloaded. The
+        report says how many frames were found, which groups they were
+        filed under and, for flats, whether each new set is good enough.
 
         Parameters
         ----------
@@ -303,14 +343,62 @@ class CalibrationCatalog:
             If `True`, remove index entries whose files no longer
             exist on disk. Defaults to `False`.
 
+        Returns
+        -------
+        report : `CalibrationIngestReport`
+            The frames added and removed, per group, and the assessment of
+            each flat set that gained frames.
+
         Raises
         ------
         ValueError
             If `kind` is not one of ``"dark"``, ``"bias"``, ``"flat"``.
         """  # ruff: ignore[docstring-extraneous-exception] -- genuinely raised by self._validate_kind
         self._validate_kind(kind)
+        before = flatten_frame_index(getattr(self.library, f"{kind}_frames"))
         method = getattr(self.library, f"refresh_{kind}_frames")
         method(prune_missing=prune_missing)
+        after = flatten_frame_index(getattr(self.library, f"{kind}_frames"))
+        flat_groups = self.library.list_flat_groups() if kind == "flat" else ()
+        return build_ingest_report(kind, before, after, flat_groups)
+
+    def assess_flats(
+        self,
+        telescope: str | None = None,
+        camera: str | None = None,
+        filter_type: str | None = None,
+        gain: float | None = None,
+        offset: float | None = None,
+    ) -> list[FlatSetAssessment]:
+        """Check whether the flats in the library are good enough to use.
+
+        Each set (one telescope, camera, filter, gain and offset) is
+        measured on its own with the check the stacker runs: how many
+        frames, how bright, how noisy the master flat will be, and any
+        problems. Leave an argument out to include every value of it.
+
+        Parameters
+        ----------
+        telescope : `str`, optional
+            Only this telescope's flats.
+        camera : `str`, optional
+            Only this camera's flats.
+        filter_type : `str`, optional
+            Only flats for this filter, such as ``"L"`` or ``"SPEC"``.
+        gain : `float`, optional
+            Only flats at this gain.
+        offset : `float`, optional
+            With `gain`, only flats at this camera offset.
+
+        Returns
+        -------
+        assessments : `list` [`FlatSetAssessment`]
+            One assessment per matching set. Empty if no flats match.
+        """
+        groups = self.library.list_flat_groups(
+            telescope=telescope, camera=camera, filter_type=filter_type, gain=gain, offset=offset
+        )
+        return [assess_flat_group(group) for group in groups]
 
 
 class ProcessingPipelines:
@@ -737,6 +825,101 @@ class ProcessingPipelines:
         from astrometricslib.pipelines.shared.frame_scanning import scan_target_directory
 
         scan_target_directory(target, frames_root_path)
+
+    def preview_quarantine(self, target: Target) -> QuarantinePreview:
+        """Show which frames the stacker would set aside, without moving any.
+
+        Before each stack, the pipeline moves light frames with clouds or
+        trailed stars into an `_excluded` folder. This runs the same
+        check and reports the result only. It measures every light frame
+        (about a second each), so a large target takes a while.
+
+        Parameters
+        ----------
+        target : `Target`
+            The target to check.
+
+        Returns
+        -------
+        preview : `QuarantinePreview`
+            The frames the check would move, with the measurements behind
+            each, the batches it would leave alone, and any frame it could
+            not read.
+        """
+        from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
+            decision_to_set_aside_frame,
+            find_frames_to_quarantine,
+        )
+
+        light_frames = [
+            frame
+            for frame in target.frames
+            if str(frame.role).upper() == "LIGHT" and not frame_is_spectral(frame)
+        ]
+        report = find_frames_to_quarantine(light_frames)
+        return QuarantinePreview(
+            target_id=target.id,
+            frames_checked=len(light_frames),
+            would_move=[decision_to_set_aside_frame(decision) for decision in report.moved],
+            notes=report.notes,
+            unreadable=report.unreadable,
+        )
+
+    def list_excluded_frames(self, target: Target) -> list[SetAsideFrame]:
+        """List the frames the stacker has set aside for a target.
+
+        Parameters
+        ----------
+        target : `Target`
+            The target to look up.
+
+        Returns
+        -------
+        frames : `list` [`SetAsideFrame`]
+            One entry per frame now in an `_excluded` folder, with why it
+            was moved and the measurements behind that.
+        """
+        from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import list_set_aside_frames
+
+        return list_set_aside_frames(str(self._config.get_frames_path()), target.id)
+
+    def restore_excluded_frames(self, target: Target, apply: bool = False) -> RestoreReport:
+        """List, or move back, the frames the stacker set aside for a target.
+
+        By default nothing moves: the call only lists the frames. With
+        ``apply=True`` it moves them back and re-scans the target so it
+        lists them again. The target is changed in memory, so save it
+        afterwards. The next stack may set the same frames aside again. To
+        keep them in the stack, turn off ``quarantine_bad_frames_enabled``
+        in the configuration first.
+
+        Parameters
+        ----------
+        target : `Target`
+            The target whose frames to restore.
+        apply : `bool`, optional
+            Move the frames back. Defaults to `False`, which only lists them.
+
+        Returns
+        -------
+        report : `RestoreReport`
+            The frames that were set aside, and how many were moved back.
+        """
+        from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
+            find_quarantine_folders,
+            list_set_aside_frames,
+            restore_quarantined_frames,
+        )
+
+        frames_path = str(self._config.get_frames_path())
+        frames = list_set_aside_frames(frames_path, target.id)
+        restored_count = 0
+        if apply:
+            for folder in find_quarantine_folders(frames_path, target.id):
+                restored_count += len(restore_quarantined_frames(folder))
+            if restored_count:
+                self.scan_target_directory(target, frames_path)
+        return RestoreReport(target_id=target.id, applied=apply, frames=frames, restored_count=restored_count)
 
     def create_frame_record(self, path: str, camera: str | None = None) -> Any:
         """Create a frame record by reading a FITS image's header data.

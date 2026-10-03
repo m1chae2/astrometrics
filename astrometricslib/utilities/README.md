@@ -16,6 +16,7 @@ This folder holds small, generic helpers used across the library that do not bel
 - `rejection_thresholds.py`, `stack_filter_floor.py` — generic algorithms for adjusting a pixel-rejection threshold by frame count, and for keeping a sharpness filter from discarding too many frames.
 - `spectroscopy_models.py` — pydantic models for spectroscopy camera and session configuration.
 - `pipeline_models.py` — domain models for tracking a background processing task's status.
+- `storage_mount.py` — checks that the drive holding the raw frames (a USB disk or a network share) is mounted before anything is written there. Without the check, a missing drive leaves an empty folder on the computer's own disk, and downloads would fill it. It reads the optional `frames_mount_point` setting and does nothing when that is not set.
 - `warn_once.py` — logs a given warning only once per process run, instead of once per occurrence.
 
 For exact behavior, read the code — the code is always the source of truth.

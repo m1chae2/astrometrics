@@ -265,3 +265,56 @@ def test_sorting_a_stack_files_it_under_others_not_the_lights(tmp_path: Path) ->
     assert moved == 1
     assert (tmp_path / "library" / "frames" / "others" / "final.fits").exists()
     assert not (tmp_path / "library" / "frames" / "lights").exists()
+
+
+def test_sorting_reports_the_new_path_of_each_added_file(tmp_path: Path) -> None:
+    """Check that `added_paths` lists a moved file's new location."""
+    incoming = tmp_path / "incoming"
+    incoming.mkdir()
+    write_frame(
+        incoming / "dark.fits", INSTRUME="ZWO CCD ASI533MM Pro", FRAME="Dark", GAIN=100.0, EXPTIME=30.0
+    )
+    config = make_config(frames_root=tmp_path / "library")
+    added_paths: list[str] = []
+
+    classify_and_sort_fits_files([str(incoming)], "M31", config, "Apertura 75Q", added_paths)
+
+    folder = tmp_path / "library" / "frames" / "darks" / "ZWO ASI 533MM Pro" / "100.0" / "30.0"
+    assert added_paths == [str(folder / "dark.fits")]
+
+
+def test_sorting_does_not_report_a_file_that_replaced_one_of_the_same_name(tmp_path: Path) -> None:
+    """Check that `added_paths` counts only new files."""
+    incoming = tmp_path / "incoming"
+    incoming.mkdir()
+    write_frame(
+        incoming / "dark.fits", INSTRUME="ZWO CCD ASI533MM Pro", FRAME="Dark", GAIN=100.0, EXPTIME=30.0
+    )
+    config = make_config(frames_root=tmp_path / "library")
+    folder = tmp_path / "library" / "frames" / "darks" / "ZWO ASI 533MM Pro" / "100.0" / "30.0"
+    folder.mkdir(parents=True)
+    (folder / "dark.fits").write_bytes(b"old")
+    added_paths: list[str] = []
+
+    moved = classify_and_sort_fits_files([str(incoming)], "M31", config, "Apertura 75Q", added_paths)
+
+    assert moved == 1
+    assert added_paths == []
+
+
+def test_sorting_refuses_and_moves_nothing_when_the_frames_drive_is_missing(tmp_path: Path) -> None:
+    """Check that files stay in place if the frames mount point is empty."""
+    from astrometricslib.utilities.storage_mount import StorageNotMountedError
+
+    incoming = tmp_path / "incoming"
+    incoming.mkdir()
+    write_frame(incoming / "light.fits", INSTRUME="ZWO CCD ASI533MM Pro", FRAME="Light", GAIN=0.0)
+    config = make_config(frames_root=tmp_path / "library")
+    # tmp_path is a plain folder, not a mount, so this drive counts as missing.
+    config.app_config.set("Image Library", "frames_mount_point", str(tmp_path / "library"))
+
+    with pytest.raises(StorageNotMountedError):
+        classify_and_sort_fits_files([str(incoming)], "M31", config, "Apertura 75Q")
+
+    assert (incoming / "light.fits").exists()
+    assert not (tmp_path / "library" / "frames" / "lights").exists()

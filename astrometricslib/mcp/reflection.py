@@ -242,10 +242,52 @@ def _make_quality_snapshot_fn(
     return snapshot_all_batch_targets
 
 
+def _prepare_arguments(
+    kwargs: dict[str, Any],
+    injected: dict[str, Callable[[], Any]],
+    resolvers: dict[str, Callable[[Any], Any]] | None,
+) -> dict[str, Any]:
+    """Apply injected values and argument converters to one tool call.
+
+    Parameters
+    ----------
+    kwargs : `dict` [`str`, `Any`]
+        The arguments the client sent.
+    injected : `dict` [`str`, `Callable`]
+        Factories for parameters the server supplies. A factory fills its
+        parameter when the client left it out or sent a plain string,
+        since a client has no way to build the real object.
+    resolvers : `dict` [`str`, `Callable`] or `None`
+        Converters applied to any supplied parameter of the same name.
+
+    Returns
+    -------
+    prepared : `dict` [`str`, `Any`]
+        A new arguments dictionary ready to pass to the method.
+    """
+    prepared = dict(kwargs)
+    for name, factory in injected.items():
+        if prepared.get(name) is None or isinstance(prepared[name], str):
+            prepared[name] = factory()
+    for name, convert in (resolvers or {}).items():
+        if name in prepared and prepared[name] is not None:
+            prepared[name] = convert(prepared[name])
+    return prepared
+
+
+# Methods whose names start with one of these are never offered as tools.
+# An AI client cannot be trusted to confirm a deletion with the person first
+# (a target was once deleted on an unclear request), so deleting is left to
+# the app's own UI, which asks the person directly.
+WITHHELD_METHOD_PREFIXES = ("delete",)
+
+
 def register_astrometrics_tools(
     registry: Any,
     astrometrics_instance: Any,
     branch_mapping: dict[str, str],
+    argument_resolvers: dict[str, Callable[[Any], Any]] | None = None,
+    injected_arguments: dict[str, Callable[[], Any]] | None = None,
 ) -> int:
     """Introspect an astrometrics object and register public methods as tools.
 
@@ -260,6 +302,18 @@ def register_astrometrics_tools(
         (e.g. ``"targets"``) to its tool prefix (e.g. ``"target"``). A
         key of ``""`` maps to root astrometrics methods. A dotted name
         (e.g. ``"processing.diagnostics"``) walks nested attributes.
+    argument_resolvers : `dict` [`str`, `Callable`], optional
+        Converters from what an MCP client can send (a name, an id, an
+        ISO time string) to the object a method needs. Keyed by
+        parameter name; a converter runs on any tool call that supplies
+        that parameter. A converter raises `ValueError` with a plain
+        message when it cannot convert, so the client sees the reason
+        rather than a later `AttributeError`.
+    injected_arguments : `dict` [`str`, `Callable`], optional
+        Factories for parameters the server supplies itself (for example
+        the `Astrometrics` handle). Keyed by parameter name. The
+        parameter is hidden from the tool's schema, and the factory
+        fills it whenever the client leaves it out or sends a string.
 
     Returns
     -------
@@ -282,7 +336,7 @@ def register_astrometrics_tools(
             continue
 
         for method_name in dir(target_obj):
-            if method_name.startswith("_"):
+            if method_name.startswith("_") or method_name.startswith(WITHHELD_METHOD_PREFIXES):
                 continue
 
             method = getattr(target_obj, method_name)
@@ -298,6 +352,16 @@ def register_astrometrics_tools(
                 summary = f"Reflected tool {tool_name}"
 
             schema = generate_tool_schema(method)
+            method_parameter_names = set(inspect.signature(method).parameters)
+            method_injected = {
+                name: factory
+                for name, factory in (injected_arguments or {}).items()
+                if name in method_parameter_names
+            }
+            for injected_name in method_injected:
+                schema["properties"].pop(injected_name, None)
+                if injected_name in schema["required"]:
+                    schema["required"].remove(injected_name)
 
             try:
                 type_hints = typing.get_type_hints(method)
@@ -306,7 +370,11 @@ def register_astrometrics_tools(
 
             # Create closure for invocation with domain model identifier
             # resolution
-            def make_executor(target_callable: Callable[..., Any], hints: dict[str, Any]):  # ruff: ignore[missing-return-type-private-function]
+            def make_executor(  # ruff: ignore[missing-return-type-private-function]
+                target_callable: Callable[..., Any],
+                hints: dict[str, Any],
+                injected: dict[str, Callable[[], Any]],
+            ):
                 async def execute_reflected(**kwargs: Any) -> Any:
                     # Auto-resolve target string IDs to Target domain
                     # instances if expected
@@ -321,8 +389,19 @@ def register_astrometrics_tools(
                                 targets_api = getattr(astrometrics_instance, "targets", None)
                                 if targets_api and hasattr(targets_api, "get"):
                                     resolved = targets_api.get(param_v)
-                                    if resolved:
-                                        kwargs[param_k] = resolved
+                                    if not resolved:
+                                        raise ValueError(f"No target with id {param_v!r} in the library.")
+                                    kwargs[param_k] = resolved
+
+                    # Fill the server-supplied parameters and convert
+                    # client-friendly values (names, ISO strings) in a
+                    # worker thread: a converter may read the library or
+                    # query SIMBAD, which must not block this server's
+                    # single event loop.
+                    if injected or argument_resolvers:
+                        kwargs = await asyncio.to_thread(
+                            _prepare_arguments, kwargs, injected, argument_resolvers
+                        )
 
                     # A method marked with `@background_job` (see
                     # `astrometricslib.drivers.job_logging`) runs slowly
@@ -367,7 +446,7 @@ def register_astrometrics_tools(
 
                 return execute_reflected
 
-            registry.register(tool_name, summary, schema)(make_executor(method, type_hints))
+            registry.register(tool_name, summary, schema)(make_executor(method, type_hints, method_injected))
             count += 1
 
     return count

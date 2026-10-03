@@ -39,6 +39,9 @@ class StackingInputQuality(BaseModel):
     # Frames set aside because their sky background was at a different
     # level from the rest (clouds, twilight, a lamp).
     frames_excluded_for_background: int = Field(default=0, alias="framesExcludedForBackground")
+    # Frames with clouds or trailed stars that the stage moved into the
+    # `_excluded` folder before stacking.
+    frames_quarantined: int = Field(default=0, alias="framesQuarantined")
     # Whether the frames fell into two sky-background groups.
     background_split_detected: bool = Field(default=False, alias="backgroundSplitDetected")
     background_split_detail: str | None = Field(default=None, alias="backgroundSplitDetail")

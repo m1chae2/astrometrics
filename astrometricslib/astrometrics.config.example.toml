@@ -30,6 +30,12 @@ path = "./library"
 # disk (for example a shared Windows partition) and the pipeline's output on
 # another.
 # stacks_path = "/home/you/Astrometrics/stacks"
+# OPTIONAL: the folder where the raw frames' drive must be mounted, for frames
+# kept on a USB disk or a network share (NAS). While nothing is mounted there,
+# downloads and file sorting stop with an error. Without this check, they would
+# write the frames into the empty folder on your own disk. Leave it out for a
+# frames folder on your own disk.
+# frames_mount_point = "/mnt/nas"
 
 ["Observatory.Filters"]
 # Filters this observatory's filter wheel is actually loaded with, as
@@ -253,6 +259,18 @@ siril_executable = "siril-cli"
 # --siril-source=flatpak (see build/linux/install_ubuntu_deps.sh), set
 # this to wfwhm to weight each frame by its measured star sharpness.
 stack_weight = ""
+# "true" (the default): before each stack of light frames, measure the frames
+# and move the ones with clouds or trailed stars into a folder named
+# "_excluded" beside them. Frames are moved, never deleted; the folder holds
+# excluded_frames.json (why each was moved), and
+# astrometricslib/scripts/restore_excluded_frames.py moves them back. Set
+# "false" to leave every frame where it is.
+quarantine_bad_frames_enabled = "true"
+# "true" (the default): the stack preview picture dims stars in proportion to
+# their brightness and softens the brightest values, so stars no longer look
+# like equally bright white dots. The stack file itself is never changed. Set
+# "false" for the plain stretched picture.
+preview_star_tone_enabled = "true"
 
 ["Processing.Parallelism"]
 target_workers = "auto"

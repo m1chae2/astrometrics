@@ -15,6 +15,9 @@ from astrometricslib.models.stacking_quality import StackingInputQuality
 # writes them; this module counts them.
 GAIN_EXCLUSION_REASON = "minority gain setting"
 BACKGROUND_EXCLUSION_REASON = "background-homogeneity split"
+# A frame moved aside for clouds or trailed stars has a reason that starts
+# with this text (see `frame_quarantine`), followed by what was measured.
+QUARANTINE_EXCLUSION_REASON_PREFIX = "moved to _excluded"
 
 
 def describe_background_splits(background_split: dict | list[dict] | None) -> str | None:
@@ -80,7 +83,15 @@ def assess_input_quality(
     flat_issues = list(flat.get("issues", []))
     detail = describe_background_splits(background_split)
 
+    quarantined = [
+        frame for frame in excluded_frames if frame.reason.startswith(QUARANTINE_EXCLUSION_REASON_PREFIX)
+    ]
+
     reasons = []
+    if quarantined:
+        reasons.append(
+            f"{len(quarantined)} frame(s) with clouds or trailed stars moved to the _excluded folder"
+        )
     if detail is not None:
         reasons.append(f"background split: {detail}")
     if mismatches:
@@ -94,6 +105,7 @@ def assess_input_quality(
         frames_excluded_for_background=sum(
             1 for frame in excluded_frames if frame.reason == BACKGROUND_EXCLUSION_REASON
         ),
+        frames_quarantined=len(quarantined),
         background_split_detected=detail is not None,
         background_split_detail=detail,
         flat_frame_count=flat.get("frame_count"),

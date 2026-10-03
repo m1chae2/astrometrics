@@ -103,6 +103,14 @@ def test_astrometricslib_mcp_reflection_registers_tools():  # ruff: ignore[missi
     assert "calibration_stats" in tool_names
 
 
+def test_delete_methods_are_never_offered_as_tools():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Deleting is left to the app's own UI, so no delete tool is reflected."""
+    tool_names = {t.name for t in astrometrics_registry.get_tool_definitions()}
+
+    assert not [name for name in tool_names if "_delete" in name or name.startswith("delete")]
+    assert "target_save" in tool_names
+
+
 async def test_astrometrics_reflected_tool_execution():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verify executing a reflected tool via Astrometrics registry succeeds."""
     res = await astrometrics_registry.execute("target_list", {})
@@ -259,3 +267,86 @@ async def test_a_sync_method_that_starts_its_own_event_loop_still_works():  # ru
 
     assert len(result) == 1
     assert '"trackingStatus": "Parked"' in result[0].text
+
+
+async def test_injected_arguments_are_hidden_and_filled_in():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """A server-supplied parameter is hidden but reaches the method."""
+
+    class FakeApi:
+        """A stand-in with one method that needs a server-built handle."""
+
+        def describe(self, handle: object, label: str) -> dict:
+            """Report what the method received.
+
+            Returns
+            -------
+            received : `dict`
+                The label and the handle's type name.
+            """
+            return {"label": label, "handle": type(handle).__name__}
+
+    class Handle:
+        """The object the server supplies."""
+
+    isolated_registry = ToolRegistry()
+    register_astrometrics_tools(
+        isolated_registry, FakeApi(), {"": "fake"}, injected_arguments={"handle": Handle}
+    )
+
+    schema = next(
+        t for t in isolated_registry.get_tool_definitions() if t.name == "fake_describe"
+    ).inputSchema
+    assert "handle" not in schema["properties"]
+    assert schema["required"] == ["label"]
+
+    result = await isolated_registry.execute("fake_describe", {"label": "x"})
+    assert '"handle": "Handle"' in result[0].text
+
+
+async def test_argument_resolvers_convert_a_supplied_value():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """A resolver turns the client's plain value into what the method needs."""
+
+    class FakeApi:
+        """A stand-in with one method that needs an integer."""
+
+        def double(self, count: int) -> dict:
+            """Double the number.
+
+            Returns
+            -------
+            doubled : `dict`
+                Twice the received count.
+            """
+            return {"doubled": count * 2}
+
+    isolated_registry = ToolRegistry()
+    register_astrometrics_tools(isolated_registry, FakeApi(), {"": "fake"}, argument_resolvers={"count": int})
+
+    result = await isolated_registry.execute("fake_double", {"count": 21})
+    assert '"doubled": 42' in result[0].text
+
+
+async def test_an_unknown_target_id_is_reported_not_passed_on_as_a_string():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """An id the library does not have fails with a message naming it."""
+    from astrometricslib.models.target import Target
+
+    class FakeApi:
+        """A stand-in with a target catalog that finds nothing."""
+
+        targets = types.SimpleNamespace(get=lambda target_id: None)
+
+        def inspect_target(self, target: Target) -> dict:
+            """Return the target's id.
+
+            Returns
+            -------
+            result : `dict`
+                The id of the received target.
+            """
+            return {"id": target.id}
+
+    isolated_registry = ToolRegistry()
+    register_astrometrics_tools(isolated_registry, FakeApi(), {"": "fake"})
+
+    result = await isolated_registry.execute("fake_inspect_target", {"target": "Missing"})
+    assert "No target with id 'Missing'" in result[0].text

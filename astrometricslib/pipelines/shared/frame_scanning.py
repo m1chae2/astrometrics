@@ -17,8 +17,11 @@ from astrometricslib.drivers.fits_access import read_header
 from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.frame_optics import resolve_frame_telescope
+from astrometricslib.pipelines.shared.quarantine_path import QUARANTINE_FOLDER_NAME
+from astrometricslib.utilities.config_loader import AppConfiguration
 from astrometricslib.utilities.enums import FilterType
 from astrometricslib.utilities.iso_text import iso_or_gain_text
+from astrometricslib.utilities.storage_mount import require_mounted_storage
 from astrometricslib.utilities.warn_once import warn_once
 
 logger = logging.getLogger(__name__)
@@ -401,7 +404,11 @@ def scan_target_directory(target: Target, frames_root_path: str, refresh_headers
     if not found_directory:
         return
 
-    for root, _, files in os.walk(found_directory):
+    for root, directories, files in os.walk(found_directory):
+        # Frames the stacking pipeline set aside for clouds or trailed stars
+        # live in an `_excluded` folder; walking into it would add them
+        # straight back to the target.
+        directories[:] = [d for d in directories if d != QUARANTINE_FOLDER_NAME]
         for file in files:
             if file.lower().endswith((".fits", ".fit")):
                 if is_stacked_output(file):
@@ -437,7 +444,13 @@ def _read_header_or_none(file_path: str) -> Any:
         return None
 
 
-def classify_and_sort_fits_files(scan_list: list[str], target_id: str, config, telescope_name: str) -> int:  # ruff: ignore[missing-type-function-argument]
+def classify_and_sort_fits_files(
+    scan_list: list[str],
+    target_id: str,
+    config: AppConfiguration,
+    telescope_name: str,
+    added_paths: list[str] | None = None,
+) -> int:
     """Sort new image files into the correct folders.
 
     This reads new images, figures out what kind they are (like a dark frame,
@@ -454,6 +467,10 @@ def classify_and_sort_fits_files(scan_list: list[str], target_id: str, config, t
         Application settings to know where the main folder is.
     telescope_name : `str`
         The name of the telescope used.
+    added_paths : `list` of `str`, optional
+        If given, the new path of every file that was moved to a place where
+        no file of that name was yet. A caller can count the additions from
+        this list, instead of walking the whole library before and after.
 
     Returns
     -------
@@ -466,7 +483,9 @@ def classify_and_sort_fits_files(scan_list: list[str], target_id: str, config, t
     fits_files = []
 
     for src in scan_list:
-        for root, _dirs, files in os.walk(src):
+        for root, directories, files in os.walk(src):
+            # Frames set aside by the stacking pipeline stay where they are.
+            directories[:] = [d for d in directories if d != QUARANTINE_FOLDER_NAME]
             # Avoid recursively walking into destination structures if
             # they exist inside src
             if any(part in root.split(os.sep) for part in [telescope_name, "darks", "biases", "flats"]):
@@ -476,6 +495,9 @@ def classify_and_sort_fits_files(scan_list: list[str], target_id: str, config, t
                     fits_files.append((os.path.join(root, file), file))
 
     frames_path = config.get_frames_path()
+    if fits_files:
+        # Refuse before moving anything, so the files stay where they were.
+        require_mounted_storage(frames_path, config)
 
     for file_path, file in fits_files:
         try:
@@ -508,8 +530,12 @@ def classify_and_sort_fits_files(scan_list: list[str], target_id: str, config, t
 
             if dest_path:
                 os.makedirs(dest_path, exist_ok=True)
-                shutil.move(file_path, os.path.join(dest_path, file))
+                destination_file = os.path.join(dest_path, file)
+                is_new_file = not os.path.exists(destination_file)
+                shutil.move(file_path, destination_file)
                 processed_count += 1
+                if added_paths is not None and is_new_file:
+                    added_paths.append(destination_file)
         except Exception as e:
             logger.error(f"Error classifying frame {file}: {e}")
 

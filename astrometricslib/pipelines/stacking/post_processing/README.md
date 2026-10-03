@@ -8,7 +8,7 @@ This step judges the finished stack and makes a picture of it for people. It nev
 2. **Thresholds** (`stack_quality.py`). The limits for the rejected-pixel share, the zero-pixel share and the negative-pixel warning.
 3. **Saturation check** (`exposure_saturation.py`). Finds whether an exposure length saturates the brightest star and recommends one that does not.
 4. **Exposure-group report** (`exposure_group_report.py`). Describes each exposure group in the summary.
-5. **Preview** (`stack_preview.py`, `sky_level.py`, `bright_object.py`). Makes the stretched JPEG. See `../README.md`, step 7.
+5. **Preview** (`stack_preview.py`, `sky_level.py`, `star_tone.py`, `bright_object.py`). Makes the stretched JPEG. See `../README.md`, step 7.
 
 ## The quality metrics
 

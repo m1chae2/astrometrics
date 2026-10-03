@@ -906,6 +906,7 @@ export interface StackingInputQuality {
   framesAccepted: number;
   framesExcludedForGain?: number;
   framesExcludedForBackground?: number;
+  framesQuarantined?: number;
   backgroundSplitDetected?: boolean;
   backgroundSplitDetail?: string | null;
   flatFrameCount?: number | null;

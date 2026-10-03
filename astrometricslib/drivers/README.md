@@ -4,7 +4,7 @@ This folder holds the code that talks to something outside the pipeline logic it
 
 ## What each file is for
 
-- `image.py`, `fits_access.py` — `AstrometricsImage`, the main data container for a loaded astronomical image, and the lower-level functions that read pixel data and metadata out of a FITS file.
+- `image.py`, `fits_access.py` — `AstrometricsImage`, the main data container for a loaded astronomical image, and the lower-level functions that read pixel data and metadata out of a FITS file. `AstrometricsImage` fixes old-style header keywords (`RADECSYS`, a missing `MJD-OBS`) in memory only. It never rewrites a frame, so a frame on a backed-up network drive stays as it was downloaded.
 - `filter_detection.py` — reads an image's settings to work out what kind of picture it is (which filter, light/dark/flat/bias).
 - `stacking_engine.py` — the contract between the stacking pipeline and a stacking program: the settings, the result, and the methods an engine offers.
 - `siril_stacking_engine.py` — Siril as the stacking engine. It wraps `siril_interface.py` and turns Siril's files into the plain values the contract names.
@@ -12,7 +12,7 @@ This folder holds the code that talks to something outside the pipeline logic it
 - `plate_solve_interface.py` — figures out exactly what part of the sky an image shows.
 - `simbad_interface.py` — the process's one client for querying the external SIMBAD astronomical database.
 - `camera_profile_store.py` — finds and loads the stored profile (sensor characteristics, saturation threshold) for a given camera.
-- `calibration_library.py` — the model describing the library of dark/bias/flat calibration frames.
+- `calibration_library.py` — the model describing the library of dark/bias/flat calibration frames. It can also list the flats as sets, one per telescope, camera, filter, gain and offset (`list_flat_groups`), so each set is checked on its own.
 - `local_database.py`, `catalog_store.py` — the local SQLite databases holding the target/star catalog and the cached Gaia star catalog.
 - `catalog_access.py` — reads and writes catalog data (targets, stars) to and from the local database.
 - `job_logging.py`, `logger_interface.py` — record a long-running job (a pipeline run) and capture its log messages, and the repository that persists those job records. `logger_interface.py` also stores telescope telemetry in `astrometrics_log.db`:

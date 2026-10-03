@@ -49,6 +49,21 @@ _AUTOSTRETCH_DUST_FRACTION_OF_PEAK = 1e-6
 # median/MAD from resting on a handful of pixels.
 _AUTOSTRETCH_MINIMUM_POPULATED_PIXELS = 100
 
+# How many randomly chosen pixels stand in for the whole image when the sky
+# is measured from a sample (see `measure_sky`). The median's error shrinks
+# with the square root of the sample size: at this size it is about 0.2% of
+# the noise (sigma) for a typical image, far below one display grey level,
+# while measuring a 24-megapixel frame takes about 20 ms instead of 1-2 s.
+# Checked on two real 24-megapixel frames, not tuned further.
+_AUTOSTRETCH_SKY_SAMPLE_COUNT = 500_000
+
+# The picture is scaled to 0-255 this many pixels at a time. Whole-image
+# arithmetic makes several temporary copies of the image (192 MB each for a
+# 24-megapixel float64 frame); a block this size stays in the processor's
+# cache and the result is identical. About one million pixels was fastest on
+# the two real frames it was timed on.
+_SCALING_BLOCK_PIXELS = 1_000_000
+
 
 def _midtones_transfer_function(x: np.ndarray, midtones: float) -> np.ndarray:
     """Apply the midtones transfer function (MTF) PixInsight/Siril use.
@@ -102,13 +117,20 @@ def _solve_midtones_balance(normalized_median: float, target_background: float) 
     return float(numerator / denominator)
 
 
-def measure_sky(arr: np.ndarray) -> tuple[float, float, float] | None:
+def measure_sky(arr: np.ndarray, sample_pixels: bool = False) -> tuple[float, float, float] | None:
     """Measure the sky level and noise of an image, as the autostretch does.
 
     Parameters
     ----------
     arr : `numpy.ndarray`
         The image, 2-D or colour.
+    sample_pixels : `bool`, optional
+        When `True`, the sky level and noise are measured from about
+        500,000 randomly chosen pixels instead of every pixel. That is much
+        faster on a large image and gives nearly the same numbers. The
+        brightest pixel is always found from the whole image. The same
+        pixels are chosen every time, so the same image always gives the
+        same answer. Defaults to `False`, which uses every pixel.
 
     Returns
     -------
@@ -126,8 +148,12 @@ def measure_sky(arr: np.ndarray) -> tuple[float, float, float] | None:
     peak = float(np.nanmax(arr))
     if not np.isfinite(peak):
         return None
-    populated = arr[np.abs(arr) > peak * _AUTOSTRETCH_DUST_FRACTION_OF_PEAK]
-    stats_source = populated if populated.size >= _AUTOSTRETCH_MINIMUM_POPULATED_PIXELS else arr
+    sky_pixels = arr
+    if sample_pixels and arr.size > _AUTOSTRETCH_SKY_SAMPLE_COUNT:
+        chosen = np.random.default_rng(0).integers(0, arr.size, _AUTOSTRETCH_SKY_SAMPLE_COUNT)
+        sky_pixels = arr.flat[chosen]
+    populated = sky_pixels[np.abs(sky_pixels) > peak * _AUTOSTRETCH_DUST_FRACTION_OF_PEAK]
+    stats_source = populated if populated.size >= _AUTOSTRETCH_MINIMUM_POPULATED_PIXELS else sky_pixels
     median = float(np.nanmedian(stats_source))
     sigma = float(np.nanmedian(np.abs(stats_source - median))) * _MAD_TO_SIGMA
     if not sigma > 0.0:
@@ -239,13 +265,18 @@ def white_fraction_after_autostretch(arr: np.ndarray, sky_level: float) -> float
     return float(np.mean(stretched >= _WHITE_FRACTION_OF_FULL_BRIGHTNESS))
 
 
-def _autostretch_parameters(arr: np.ndarray) -> tuple[float, float, float] | None:
+def _autostretch_parameters(
+    arr: np.ndarray, sample_pixels: bool = False
+) -> tuple[float, float, float] | None:
     """Choose the black point, white point and midtones balance for an image.
 
     Parameters
     ----------
     arr : `numpy.ndarray`
         The image, 2-D or colour.
+    sample_pixels : `bool`, optional
+        Measure the sky from a sample of the pixels (see `measure_sky`).
+        Defaults to `False`.
 
     Returns
     -------
@@ -255,7 +286,7 @@ def _autostretch_parameters(arr: np.ndarray) -> tuple[float, float, float] | Non
         (for instance one that is almost entirely exactly 0). The caller
         should fall back to a plain percentile stretch then.
     """
-    sky = measure_sky(arr)
+    sky = measure_sky(arr, sample_pixels=sample_pixels)
     if sky is None:
         logger.debug("Image background has no measurable spread; using a percentile stretch instead.")
         return None
@@ -270,6 +301,55 @@ def _autostretch_parameters(arr: np.ndarray) -> tuple[float, float, float] | Non
     return black_point, peak, _solve_midtones_balance(normalized_median, _AUTOSTRETCH_TARGET_BACKGROUND)
 
 
+def _scale_to_uint8_in_blocks(
+    arr: np.ndarray, vmin: float, vmax: float, midtones: float | None
+) -> np.ndarray:
+    """Map brightness values to 0-255, a block of rows at a time.
+
+    Gives exactly the same numbers as doing the whole image in one step, but
+    without making several full-size temporary copies (see
+    `_SCALING_BLOCK_PIXELS`).
+
+    Parameters
+    ----------
+    arr : `numpy.ndarray`
+        The image (2-D, or colour with the colour axis last).
+    vmin : `float`
+        The brightness that becomes 0.
+    vmax : `float`
+        The brightness that becomes 255.
+    midtones : `float` or `None`
+        The midtones balance for the nonlinear curve, or `None` for a plain
+        linear scaling.
+
+    Returns
+    -------
+    img8 : `numpy.ndarray`
+        The image as unsigned 8-bit numbers, with the same shape as `arr`.
+    """
+
+    def scale(block: np.ndarray) -> np.ndarray:
+        """Scale one block of rows.
+
+        Returns
+        -------
+        scaled : `numpy.ndarray`
+            The block as unsigned 8-bit numbers.
+        """
+        img = np.clip((block - vmin) / (vmax - vmin), 0.0, 1.0)
+        if midtones is not None:
+            img = _midtones_transfer_function(img, midtones)
+        return (img * 255.0).astype(np.uint8)
+
+    if arr.ndim < 2 or arr.size == 0:
+        return scale(arr)
+    img8 = np.empty(arr.shape, dtype=np.uint8)
+    rows_per_block = max(1, _SCALING_BLOCK_PIXELS // max(1, arr[0].size))
+    for first_row in range(0, arr.shape[0], rows_per_block):
+        img8[first_row : first_row + rows_per_block] = scale(arr[first_row : first_row + rows_per_block])
+    return img8
+
+
 class ImageScaler:
     """Adjust an astronomy image's brightness and contrast for viewing."""
 
@@ -280,6 +360,7 @@ class ImageScaler:
         vmax: float | None = None,
         stretch: bool = True,
         percentiles: tuple[float, float] = (1.0, 99.0),
+        sample_sky: bool = False,
     ) -> tuple[np.ndarray, float, float]:
         """Convert raw image data into standard computer colors (0-255).
 
@@ -301,13 +382,28 @@ class ImageScaler:
         absolute brightness range, not a request for the automatic
         display stretch.
 
+        Parameters
+        ----------
+        data : `numpy.ndarray`
+            The raw image data, 2-D or colour.
+        vmin, vmax : `float`, optional
+            A fixed brightness range to map to 0-255 (see above).
+        stretch : `bool`, optional
+            Whether to apply the automatic stretch. Defaults to `True`.
+        percentiles : `tuple` [`float`, `float`], optional
+            Percentiles used for the plain linear stretch.
+        sample_sky : `bool`, optional
+            Measure the sky for the autostretch from a sample of the pixels
+            instead of all of them (see `measure_sky`). Much faster on a
+            large image, with nearly identical output. Defaults to `False`.
+
         Returns
         -------
         result : `tuple`
             The new image data, the black point used, and the white
             point used.
         """
-        arr = np.array(data, dtype=float)
+        arr = np.asarray(data, dtype=float)
 
         # Handle multi-channel data (e.g. RGB FITS)
         if arr.ndim == 3:
@@ -316,7 +412,11 @@ class ImageScaler:
             elif arr.shape[2] not in [3, 4]:
                 arr = arr[0] if arr.shape[0] == 1 else arr[:, :, 0]
 
-        autostretch = _autostretch_parameters(arr) if stretch and vmin is None and vmax is None else None
+        autostretch = (
+            _autostretch_parameters(arr, sample_pixels=sample_sky)
+            if stretch and vmin is None and vmax is None
+            else None
+        )
         midtones: float | None = None
         if autostretch is not None:
             vmin, vmax, midtones = autostretch
@@ -350,7 +450,4 @@ class ImageScaler:
             vmax = vmin + 1.0
 
         # Clip and scale
-        img = np.clip((arr - vmin) / (vmax - vmin), 0.0, 1.0)
-        if midtones is not None:
-            img = _midtones_transfer_function(img, midtones)
-        return (img * 255.0).astype(np.uint8), float(vmin), float(vmax)
+        return _scale_to_uint8_in_blocks(arr, vmin, vmax, midtones), float(vmin), float(vmax)

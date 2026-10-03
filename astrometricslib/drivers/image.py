@@ -38,83 +38,52 @@ class AstrometricsImage:
         self._wcs: WCS | None = None
         self._loaded = False
 
-    def _auto_repair_fits_if_needed(self) -> fits.Header | None:
-        """Repair deprecated headers or extra padding in the FITS file.
+    def _read_header_with_fixes(self) -> fits.Header | None:
+        """Read the header and fix old-style keywords in memory only.
 
-        If any deprecated headers (like RADECSYS) or missing MJD-OBS
-        keywords, or extra padding warnings are detected, the file is
-        overwritten with a clean FITS structure to fix these issues.
+        Some older files use the deprecated ``RADECSYS`` keyword or give
+        ``DATE-OBS`` without ``MJD-OBS``. Astropy warns about these. This
+        method returns a header with ``RADESYS`` and ``MJD-OBS`` filled in.
+        It never writes to the file. A raw frame may sit on a network drive
+        that backups and snapshots watch, and a read must not change it.
 
         Returns
         -------
         header : `astropy.io.fits.Header` or `None`
-            The header read during the detection pass (repaired, if a
-            repair was performed) so callers can reuse it instead of
-            reopening the file themselves, or `None` if reading the
-            file failed.
+            The header, with the fixes applied, so callers can reuse it
+            instead of opening the file again. `None` if reading the file
+            failed.
         """
         try:
             import warnings
 
             from astropy.time import Time
 
-            needs_repair = False
-            detected_header = None
-
-            # Catch warnings to detect unexpected extra padding or
-            # other FITS/WCS warnings
-            with warnings.catch_warnings(record=True) as caught_warnings:
-                warnings.simplefilter("always")
+            with warnings.catch_warnings():
+                # Old files make astropy warn on every open. The fixes below
+                # cover what the warnings are about.
+                warnings.simplefilter("ignore")
                 with fits.open(self.path, memmap=False) as hdul:
-                    if len(hdul) > 0:
-                        hdu = hdul[1] if hdul[0].data is None and len(hdul) > 1 else hdul[0]
-                        header = hdu.header
-                        detected_header = header.copy()
-                        if "RADECSYS" in header:
-                            needs_repair = True
-                        if "DATE-OBS" in header and "MJD-OBS" not in header:
-                            needs_repair = True
+                    if len(hdul) == 0:
+                        return None
+                    hdu = hdul[1] if hdul[0].data is None and len(hdul) > 1 else hdul[0]
+                    header = hdu.header.copy()
 
-                if caught_warnings:
-                    for w in caught_warnings:
-                        msg = str(w.message).lower()
-                        if "extra padding" in msg or "fitsfixedwarning" in w.category.__name__.lower():
-                            needs_repair = True
-                            break
+            if "RADECSYS" in header:
+                value = header["RADECSYS"]
+                del header["RADECSYS"]
+                header["RADESYS"] = value
+                header["RADESYSa"] = value
 
-            if needs_repair:
-                logger.info(f"Auto-repairing FITS file to fix deprecated headers/padding: {self.path}")
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore")
-                    with fits.open(self.path, memmap=False) as hdul:
-                        idx = 1 if len(hdul) > 1 and hdul[0].data is None else 0
-                        data = hdul[idx].data
-                        header = hdul[idx].header.copy()
+            if "DATE-OBS" in header and "MJD-OBS" not in header:
+                try:
+                    header["MJD-OBS"] = (Time(header["DATE-OBS"]).mjd, "MJD of observation")
+                except Exception as exc:
+                    logger.debug("Could not derive MJD-OBS from DATE-OBS: %s", exc)
 
-                        # Fix RADECSYS
-                        if "RADECSYS" in header:
-                            val = header["RADECSYS"]
-                            del header["RADECSYS"]
-                            header["RADESYS"] = val
-                            header["RADESYSa"] = val
-
-                        # Fix DATE-OBS / MJD-OBS
-                        if "DATE-OBS" in header and "MJD-OBS" not in header:
-                            try:
-                                t = Time(header["DATE-OBS"])
-                                header["MJD-OBS"] = (t.mjd, "MJD of observation")
-                            except Exception as exc:
-                                logger.debug("Could not derive MJD-OBS from DATE-OBS: %s", exc)
-
-                    # Rewrite the file back cleanly only after the
-                    # read handle above is closed
-                    fits.writeto(self.path, data, header, overwrite=True)
-                    detected_header = header
-                    del data
-
-            return detected_header
+            return header
         except Exception as e:
-            logger.debug(f"Failed to auto-repair FITS file {self.path}: {e}")
+            logger.debug(f"Failed to read FITS header {self.path}: {e}")
             return None
 
     def _load_header(self):  # ruff: ignore[missing-return-type-private-function]
@@ -135,9 +104,9 @@ class AstrometricsImage:
             raise FileNotFoundError(f"Image not found at {self.path}")
 
         try:
-            repaired_header = self._auto_repair_fits_if_needed()
-            if repaired_header is not None:
-                self._header = repaired_header
+            fixed_header = self._read_header_with_fixes()
+            if fixed_header is not None:
+                self._header = fixed_header
             else:
                 with fits.open(self.path, memmap=False) as hdul:
                     if len(hdul) > 0:

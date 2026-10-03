@@ -176,6 +176,28 @@ def stack_frames(
     if not target_frames:
         raise ValueError("Target has no frames available to stack after gain-homogeneity filtering.")
 
+    # Move frames with clouds or trailed stars out of the target's folder.
+    # The background check below only catches one sudden jump in sky
+    # brightness, and the stacker's weighting only lowers the influence of a
+    # bad frame. Moving the frame aside keeps it out of this stack and every
+    # later one, and `ProcessingPipelines.restore_excluded_frames` puts it
+    # back. Spectral frames are skipped: their streaks are the spectra
+    # themselves.
+    from astrometricslib.utilities.config_loader import get_configuration
+
+    if not has_spectral and get_configuration().get_quarantine_bad_frames_enabled():
+        from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import quarantine_bad_frames
+
+        target_frames, quarantine_report = quarantine_bad_frames(target, target_frames)
+        excluded_frames.extend(
+            ExcludedFrame(path=path, reason=reason)
+            for path, reason in quarantine_report.reasons_by_path().items()
+        )
+        for note in quarantine_report.notes:
+            logger.info(f"Quarantine check for target '{target.id}': {note}")
+        if not target_frames:
+            raise ValueError("Target has no frames available to stack after quarantining bad frames.")
+
     # Check for sudden changes in the sky background (like clouds moving in).
     # Standard calibration and pixel rejection aren't enough to catch these
     # massive, image-wide changes. Because checking every frame takes extra

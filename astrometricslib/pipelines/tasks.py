@@ -359,6 +359,14 @@ def run_full_pipeline(
 
     standard_frames, spectral_frames = split_standard_and_spectral_frames(target, camera_frames)
     stack_outputs = _stack_camera_frames(target, camera_name, standard_frames, spectral_frames)
+    # The stacking stage moves frames with clouds or trailed stars out of the
+    # target (see `stacking/pre_processing/frame_quarantine.py`) and no longer
+    # lists them in `target.frames`. The frame lists above were made before
+    # that, so drop the moved frames here: the later stages would otherwise
+    # try to open files that are no longer where the list says.
+    still_listed = {frame.path for frame in target.frames}
+    camera_frames = [frame for frame in camera_frames if frame.path in still_listed]
+    spectral_frames = [frame for frame in spectral_frames if frame.path in still_listed]
     _save_target(target, astrometrics)
     max_concurrent_jobs = astrometrics.config.get_max_concurrent_jobs()
 

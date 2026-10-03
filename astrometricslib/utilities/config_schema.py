@@ -86,6 +86,12 @@ class ProcessingConfig(BaseModel):
     background_homogeneity_check_enabled : `bool`
         Whether to run the background homogeneity check, by default
         `True`.
+    quarantine_bad_frames_enabled : `bool`
+        Whether stacking moves frames with clouds or trailed stars into an
+        ``_excluded`` folder before it runs, by default `True`.
+    preview_star_tone_enabled : `bool`
+        Whether the stack preview dims stars in proportion to their
+        brightness and softens the brightest values, by default `True`.
     """
 
     siril_executable: str | None = None
@@ -99,6 +105,8 @@ class ProcessingConfig(BaseModel):
     stack_weight: str | None = None
     generate_rejmap: bool = True
     background_homogeneity_check_enabled: bool = True
+    quarantine_bad_frames_enabled: bool = True
+    preview_star_tone_enabled: bool = True
 
 
 class ParallelismConfig(BaseModel):

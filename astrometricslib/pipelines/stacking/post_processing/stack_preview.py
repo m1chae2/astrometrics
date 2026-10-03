@@ -2,7 +2,7 @@
 
 A stacked FITS file holds linear data: pixel values proportional to the
 light collected. Most of the sky is far too dark in that form to see
-anything. Up to three steps turn it into a picture.
+anything. Up to four steps turn it into a picture.
 
 1. GraXpert, if it is configured, removes the sky's brightness gradient.
    Its AI model learns what the smooth background looks like and subtracts
@@ -20,6 +20,12 @@ anything. Up to three steps turn it into a picture.
    with extra blotchy structure. Measured on the M 13 stack, the visible
    grain fell by only 22 percent that way, against 73 percent when the
    denoise ran after the stretch.
+4. Star toning (see `star_tone`) dims the stars in proportion to their
+   brightness and compresses the brightest values below pure white. The
+   stretch makes nearly every star a small white dot of about the same
+   brightness. The toning brings back some of their real range. It acts on
+   the stretched picture and leaves the background and nebulae alone. The
+   setting ``preview_star_tone_enabled`` turns it off.
 
 A stack of a bright extended object, such as the Moon, takes a different
 route. The normal stretch would push the whole object to white (see
@@ -30,8 +36,8 @@ All steps run on a scratch copy of the stack and the result is saved as a
 JPEG beside the stack. The JPEG is only a picture for people to look at. The
 stack itself is never changed, so photometry, spectroscopy and plate solving
 keep reading the linear data. A failed or skipped step never fails the stack:
-if GraXpert or Cosmic Clarity fails, the picture is made from the result of
-the step before it, and if Siril fails, there is no picture.
+if GraXpert, Cosmic Clarity or the star toning fails, the picture is made from
+the result of the step before it, and if Siril fails, there is no picture.
 """
 
 import logging
@@ -62,6 +68,7 @@ from astrometricslib.pipelines.stacking.post_processing.bright_object import (
     choose_bright_object_stretch_for_file,
 )
 from astrometricslib.pipelines.stacking.post_processing.sky_level import choose_sky_level_for_file
+from astrometricslib.pipelines.stacking.post_processing.star_tone import tone_stars_in_file
 from astrometricslib.utilities.config_loader import get_configuration
 
 logger = logging.getLogger(__name__)
@@ -534,10 +541,10 @@ def _picture_script(scratch: str, siril_executable: str) -> list[str] | None:
     """Run the cleanup steps on the scratch copy and choose the final script.
 
     The steps run in this order: GraXpert on the linear copy, then Siril's
-    stretch, then Cosmic Clarity on the stretched copy. GraXpert and Cosmic
-    Clarity each run only if configured, and each starts from the result of
-    the step before it. Without Cosmic Clarity, one Siril script stretches
-    and saves the picture.
+    stretch, then Cosmic Clarity and the star toning on the stretched copy.
+    Each of those runs only if configured, and each starts from the result of
+    the step before it. With neither Cosmic Clarity nor the star toning, one
+    Siril script stretches and saves the picture.
 
     A stack of a bright extended object skips all of this and gets one script
     with its own stretch (see `bright_object`).
@@ -582,26 +589,31 @@ def _picture_script(scratch: str, siril_executable: str) -> list[str] | None:
     choice = choose_sky_level_for_file(os.path.join(scratch, name))
     logger.info("Preview sky level %.2f: %s.", choice.sky_level, choice.reason)
     denoise_executable = configuration.get_cosmic_clarity_denoise_executable()
-    if not denoise_executable:
+    tone_stars = configuration.get_preview_star_tone_enabled()
+    if not denoise_executable and not tone_stars:
         return build_preview_script(name, "preview", choice.sky_level)
     stretched = run_preview_script(
         scratch, build_stretch_script(name, "stretched", choice.sky_level), siril_executable
     )
     if not stretched or not os.path.isfile(os.path.join(scratch, "stretched.fits")):
         return None
-    strength = configuration.get_cosmic_clarity_denoise_strength()
+    name = "stretched.fits"
+    if denoise_executable:
+        strength = configuration.get_cosmic_clarity_denoise_strength()
 
-    def denoise(input_path: str, output_path: str) -> bool:
-        """Run Cosmic Clarity's denoise program.
+        def denoise(input_path: str, output_path: str) -> bool:
+            """Run Cosmic Clarity's denoise program.
 
-        Returns
-        -------
-        succeeded : `bool`
-            Whether Cosmic Clarity succeeded.
-        """
-        return denoise_with_cosmic_clarity(denoise_executable, input_path, output_path, strength)
+            Returns
+            -------
+            succeeded : `bool`
+                Whether Cosmic Clarity succeeded.
+            """
+            return denoise_with_cosmic_clarity(denoise_executable, input_path, output_path, strength)
 
-    name = _next_source("Cosmic Clarity", "stretched.fits", "denoised.fits", scratch, denoise)
+        name = _next_source("Cosmic Clarity", name, "denoised.fits", scratch, denoise)
+    if tone_stars:
+        name = _next_source("Star toning", name, "toned.fits", scratch, tone_stars_in_file)
     return build_picture_script(name, "preview")
 
 

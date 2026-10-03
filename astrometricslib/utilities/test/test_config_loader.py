@@ -197,3 +197,29 @@ def test_a_blank_stacks_path_counts_as_unset(tmp_path: Path) -> None:
     config.app_config.set("Image Library", "stacks_path", "")
 
     assert config.get_stacks_path() == config.get_frames_path()
+
+
+def test_quarantine_of_bad_frames_is_on_by_default(tmp_path: Path) -> None:
+    """Stacking moves clouded and trailed frames aside unless told not to."""
+    config = _make_isolated_config(tmp_path)
+    assert config.get_quarantine_bad_frames_enabled() is True
+
+
+def test_quarantine_of_bad_frames_can_be_turned_off(tmp_path: Path) -> None:
+    """The ``quarantine_bad_frames_enabled`` setting switches the step off."""
+    config = _make_isolated_config(tmp_path)
+    config.app_config.set("Processing.Siril", "quarantine_bad_frames_enabled", "false")
+    assert config.get_quarantine_bad_frames_enabled() is False
+
+
+def test_star_toning_of_the_preview_is_on_by_default(tmp_path: Path) -> None:
+    """The stack preview tones its stars unless told not to."""
+    config = _make_isolated_config(tmp_path)
+    assert config.get_preview_star_tone_enabled() is True
+
+
+def test_star_toning_of_the_preview_can_be_turned_off(tmp_path: Path) -> None:
+    """The ``preview_star_tone_enabled`` setting switches the step off."""
+    config = _make_isolated_config(tmp_path)
+    config.app_config.set("Processing.Siril", "preview_star_tone_enabled", "false")
+    assert config.get_preview_star_tone_enabled() is False

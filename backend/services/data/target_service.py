@@ -328,7 +328,11 @@ class TargetService:
         Returns
         -------
         result : `list` of `dict` of `str`
-            FITS header key/value pairs for the specified frame.
+            FITS header key/value pairs for the specified frame. Empty when
+            the file is no longer on disk: a stack that was moved or deleted
+            is a normal state for a target record, not a server error (a
+            server error would be logged and shown as a failed request every
+            time the target is opened).
 
         Raises
         ------
@@ -338,7 +342,11 @@ class TargetService:
         target = self.astrometrics.targets.get(target_id)
         if not target:
             raise ValueError(f"Target not found: {target_id}")
-        return self.astrometrics.targets.get_header(frame_path, target=target)
+        try:
+            return self.astrometrics.targets.get_header(frame_path, target=target)
+        except FileNotFoundError:
+            logger.debug("Frame file for %s is missing, returning an empty header: %s", target_id, frame_path)
+            return []
 
     def refresh_target_images_by_id(self, target_id: str, prune_missing: bool = False) -> None:
         """RPC wrapper to trigger frame scans on a target.

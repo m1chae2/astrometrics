@@ -13,6 +13,7 @@ export default defineConfig({
     // Only include the unit tests folder pattern. Exclude Playwright specs.
     include: ['tests/unit/**/*.test.{ts,tsx,js}', 'tests/test_*.{ts,tsx}', 'ui/**/tests/test_*.{ts,tsx}'],
     exclude: ['**/node_modules/**', '**/dist/**', '**/*.spec.{ts,tsx}', '**/.venv/**'],
+    globalSetup: ['./ui/globalSetup.ts'],
     setupFiles: ['./ui/setupTests.ts'],
     // Note: `test.deps.inline` is deprecated in recent Vitest versions.
     // Use `server.deps.inline` below to inline project source during

@@ -1,8 +1,9 @@
 import React, { useState, useEffect, Suspense, Profiler, ProfilerOnRenderCallback } from 'react';
+import { getBackendBase } from './common/services/backendApi';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StatusHeader } from './statusHeader/StatusHeader';
 import { TitleBar } from './titleBar/TitleBar';
-import { TargetProvider } from './common/context/TargetContext';
+import { TargetProvider, DeferWhileHidden } from './common/context/TargetContext';
 import { PlanningProvider } from './observationManager/context/PlanningContext';
 import { TerminalProvider } from './statusHeader/context/TerminalContext';
 import { RemoteStatusProvider } from './common/context/RemoteStatusContext';
@@ -221,7 +222,7 @@ const AppContent: React.FC = () => {
       } catch {
         // Ignore localStorage access failures
       }
-      fetch('/api/handoff/state', {
+      fetch(`${getBackendBase()}/api/handoff/state`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ active_mode: detail, origin_device: 'desktop' }),
@@ -297,9 +298,11 @@ const AppContent: React.FC = () => {
                   key={id}
                   className={mode === panelMode ? 'app__mode-panel--visible' : 'app__mode-panel--hidden'}
                 >
-                  <Profiler id={id} onRender={onRenderProfile}>
-                    <Component />
-                  </Profiler>
+                  <DeferWhileHidden active={mode === panelMode}>
+                    <Profiler id={id} onRender={onRenderProfile}>
+                      <Component />
+                    </Profiler>
+                  </DeferWhileHidden>
                 </div>
               )
             )}

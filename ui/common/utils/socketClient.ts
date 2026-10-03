@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { getBackendBase, withSessionToken } from '../services/backendApi';
+import { getBackendBase, resetSessionToken, withSessionToken } from '../services/backendApi';
 
 class SocketClient extends EventEmitter {
     private socket: WebSocket | null = null;
@@ -33,8 +33,10 @@ class SocketClient extends EventEmitter {
             }
 
             this.socket = new WebSocket(url);
+            let hasOpened = false;
 
             this.socket.onopen = () => {
+                hasOpened = true;
                 console.log("[Socket] Connected");
                 this.emit('connected');
                 if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
@@ -54,6 +56,11 @@ class SocketClient extends EventEmitter {
 
             this.socket.onclose = () => {
                 console.log("[Socket] Disconnected");
+                // Closing without ever opening means the handshake was refused,
+                // most likely because the backend restarted and now holds a
+                // different session token. Drop the cached one so the next
+                // attempt fetches the current token instead of retrying a dead one.
+                if (!hasOpened) resetSessionToken();
                 this.cleanup();
                 this.scheduleReconnect();
             };

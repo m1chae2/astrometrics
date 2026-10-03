@@ -9,7 +9,8 @@
  * polled fetch with proper cancellation on every tick.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useIsDisplayActive } from '../context/DisplayActiveContext';
 
 /**
  * Returns a counter that increments every `intervalMs` milliseconds.
@@ -21,18 +22,29 @@ import { useEffect, useState } from 'react';
  * const { data } = useBackendFetch((signal) => fetchThing(signal), [pollTick]);
  * ```
  *
+ * The counter pauses while the display this hook belongs to is hidden
+ * (hidden displays stay mounted), and advances once when the display is
+ * shown again so its data refreshes at once.
+ *
  * @param intervalMs How often to tick, in milliseconds. Pass 0 or undefined
  *   to disable polling (the counter never advances) without a separate
  *   `enabled` flag at each call site.
  */
 export function usePollTick(intervalMs?: number): number {
   const [tick, setTick] = useState(0);
+  const isActive = useIsDisplayActive();
+  const wasActive = useRef(isActive);
 
   useEffect(() => {
-    if (!intervalMs) return;
+    if (isActive && !wasActive.current && intervalMs) setTick(t => t + 1);
+    wasActive.current = isActive;
+  }, [isActive, intervalMs]);
+
+  useEffect(() => {
+    if (!intervalMs || !isActive) return;
     const intervalId = setInterval(() => setTick(t => t + 1), intervalMs);
     return () => clearInterval(intervalId);
-  }, [intervalMs]);
+  }, [intervalMs, isActive]);
 
   return tick;
 }

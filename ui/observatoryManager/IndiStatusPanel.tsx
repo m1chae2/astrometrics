@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useIsDisplayActive } from '../common/context/DisplayActiveContext';
 import { IndiDevicePanel } from './panels/IndiDevicePanel';
 import { IndiPropertyInspector } from './panels/IndiPropertyInspector';
 import { fetchIndiDevices, fetchIndiProperties, setIndiProperty } from '../common/services/telescopeService';
@@ -24,7 +25,10 @@ export const IndiStatusPanel: React.FC = () => {
     const [selectedDevice, setSelectedDevice] = useState<string>('');
     const [properties, setProperties] = useState<Record<string, IndiPropertyData>>({});
 
+    const isActive = useIsDisplayActive();
+
     useEffect(() => {
+        if (!isActive) return;
         let mounted = true;
         const loadDevices = async () => {
             const devs = await fetchIndiDevices();
@@ -36,13 +40,14 @@ export const IndiStatusPanel: React.FC = () => {
         loadDevices();
         const interval = setInterval(loadDevices, 5000);
         return () => { mounted = false; clearInterval(interval); };
-    }, []);
+    }, [isActive]);
 
     useEffect(() => {
         if (!selectedDevice) {
             setProperties({});
             return;
         }
+        if (!isActive) return;
         let mounted = true;
         const loadProps = async () => {
             const props = await fetchIndiProperties(selectedDevice);
@@ -53,7 +58,7 @@ export const IndiStatusPanel: React.FC = () => {
         loadProps();
         const interval = setInterval(loadProps, 2000);
         return () => { mounted = false; clearInterval(interval); };
-    }, [selectedDevice]);
+    }, [selectedDevice, isActive]);
 
     const handleApply = async (device: string, prop: string, val: string, element?: string) => {
         await setIndiProperty(device, prop, val, element);

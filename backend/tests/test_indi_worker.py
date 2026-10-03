@@ -32,6 +32,29 @@ class _DummySession:
         # read directly via getattr(driver, "status", {}), not a method.
         self.status = {"TEMPERATURE": "12.3"}
 
+    def isServerConnected(self) -> bool:  # ruff: ignore[invalid-function-name] (PyIndi's own name)
+        """Report a server that is down.
+
+        Returns
+        -------
+        connected : `bool`
+            Always `False`.
+        """
+        return False
+
+    def connect_to_server_if_due(self) -> None:
+        """Do nothing: there is no server to connect to."""
+
+    def get_device_names(self) -> list[str]:
+        """Report no devices.
+
+        Returns
+        -------
+        names : `list` [`str`]
+            An empty list.
+        """
+        return []
+
     def echo_after_delay(self, value, delay_seconds: float) -> Any:  # ruff: ignore[missing-type-function-argument]
         """Sleep `delay_seconds`, then return `value`.
 
@@ -189,3 +212,16 @@ def test_a_plain_data_attribute_comes_back_as_its_value_not_a_callable(worker_cl
     proxy = IndiWorkerProxy(worker_client)
 
     assert getattr(proxy, "status", {}) == {"TEMPERATURE": "12.3"}
+
+
+def test_the_device_listing_works_through_the_worker_proxy(worker_client) -> None:  # ruff: ignore[missing-type-function-argument]
+    """`IndiDiagnostics` uses only methods the proxy can forward.
+
+    The proxy returns a forwarding function for any attribute name, so code
+    that reads a plain attribute off the session (such as the connection
+    manager) breaks with "'function' object has no attribute ...". This is
+    the regression test for exactly that error.
+    """
+    from wayfindinglib.drivers.indi.diagnostics import IndiDiagnostics
+
+    assert IndiDiagnostics(IndiWorkerProxy(worker_client)).get_devices() == []

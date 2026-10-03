@@ -40,6 +40,7 @@ uniform float uShadows;
 uniform float uRange;
 uniform float uMidtones;
 uniform bool uIsColor;
+uniform bool uFlipVertical;
 out vec4 fragColor;
 
 float applyMidtoneTransferFunction(float midtones, float x) {
@@ -58,7 +59,10 @@ float stretchChannel(float rawValue) {
 }
 
 void main() {
-  vec4 texel = texture(uSourceTexture, vTexCoord);
+  // The texture is always uploaded in file order (row 0 at v = 0, the bottom of the canvas).
+  // Flipping here instead of during upload lets one upload serve either row order.
+  vec2 sourceCoord = vec2(vTexCoord.x, uFlipVertical ? 1.0 - vTexCoord.y : vTexCoord.y);
+  vec4 texel = texture(uSourceTexture, sourceCoord);
   if (uIsColor) {
     fragColor = vec4(stretchChannel(texel.r), stretchChannel(texel.g), stretchChannel(texel.b), 1.0);
   } else {
@@ -81,13 +85,19 @@ interface CachedGLResources {
     range: WebGLUniformLocation | null;
     midtones: WebGLUniformLocation | null;
     isColor: WebGLUniformLocation | null;
+    flipVertical: WebGLUniformLocation | null;
+    sourceTexture: WebGLUniformLocation | null;
   };
+  /** Caller-chosen key of the image currently held in `sourceTexture`, or `undefined` if none/unknown. */
+  uploadedTextureKey: unknown;
+  /** Size and channel count of the upload, so a key match on a different layout never skips the upload. */
+  uploadedLayout: string;
 }
 
 // One set of GL resources per context: each call site owns a long-lived
-// canvas/context (FitsLoaderItem's offscreen canvas, fitsWorker's
-// OffscreenCanvas), so compiling the shader once per context and reusing it
-// across repeated render calls avoids relinking on every frame.
+// canvas/context (fitsWorker keeps a single OffscreenCanvas for its whole
+// life), so compiling the shader once per context and reusing it across
+// repeated render calls avoids relinking on every frame.
 const resourcesByContext = new WeakMap<WebGL2RenderingContext, CachedGLResources>();
 
 function getOrCreateResources(gl: WebGL2RenderingContext): CachedGLResources {
@@ -122,7 +132,11 @@ function getOrCreateResources(gl: WebGL2RenderingContext): CachedGLResources {
       range: gl.getUniformLocation(program, 'uRange'),
       midtones: gl.getUniformLocation(program, 'uMidtones'),
       isColor: gl.getUniformLocation(program, 'uIsColor'),
+      flipVertical: gl.getUniformLocation(program, 'uFlipVertical'),
+      sourceTexture: gl.getUniformLocation(program, 'uSourceTexture'),
     },
+    uploadedTextureKey: undefined,
+    uploadedLayout: '',
   };
   resourcesByContext.set(gl, resources);
   return resources;
@@ -216,6 +230,20 @@ export function computeMtfStretchParameters(raw: Float32Array, sampleCap: number
   return { shadows, range, midtones };
 }
 
+/**
+ * Builds the parameters for a plain linear (unstretched) view: the darkest
+ * pixel maps to black, the brightest to white, and the midtones curve is
+ * switched off (a midtones balance of 0.5 leaves values unchanged), so the
+ * same shader draws both views.
+ *
+ * @param {number} minimum - The darkest pixel value in the image.
+ * @param {number} maximum - The brightest pixel value in the image.
+ * @returns {MtfStretchParameters} Parameters for a linear mapping of [minimum, maximum] to [0, 1].
+ */
+export function computeLinearStretchParameters(minimum: number, maximum: number): MtfStretchParameters {
+  return { shadows: minimum, range: maximum > minimum ? maximum - minimum : 1, midtones: 0.5 };
+}
+
 /** Input describing one MTF-stretch render pass. */
 export interface MtfStretchRenderInput {
   /** Raw physical pixel values: single-channel (grayscale) or 3 concatenated planes (planar RGB, R then G then B). */
@@ -234,6 +262,12 @@ export interface MtfStretchRenderInput {
   destinationHeight: number;
   /** Precomputed stretch parameters; derived from `raw` via computeMtfStretchParameters() when omitted. */
   parameters?: MtfStretchParameters;
+  /**
+   * Identifies the image in `raw`. When the same key (and size, channels and row order) is
+   * passed again on the same context, the pixel upload is skipped and the texture already on
+   * the GPU is redrawn. Leave it out to always upload.
+   */
+  textureKey?: unknown;
 }
 
 /**
@@ -253,46 +287,58 @@ export function renderMtfStretch(gl: WebGL2RenderingContext, input: MtfStretchRe
   const parameters = input.parameters ?? computeMtfStretchParameters(raw);
 
   const canvas = gl.canvas as HTMLCanvasElement | OffscreenCanvas;
-  canvas.width = destinationWidth;
-  canvas.height = destinationHeight;
+  // Assigning a size, even the same one, can reallocate the drawing buffer; only do it on a real change.
+  if (canvas.width !== destinationWidth) canvas.width = destinationWidth;
+  if (canvas.height !== destinationHeight) canvas.height = destinationHeight;
   gl.viewport(0, 0, destinationWidth, destinationHeight);
 
   gl.bindTexture(gl.TEXTURE_2D, resources.sourceTexture);
-  // Row order is handled entirely via this flip flag rather than a shader
-  // uniform: WebGL's default (unflipped) upload places raw's row 0 at the
-  // texture's v=0 edge, which the full-viewport quad below maps to the
-  // bottom of the canvas — exactly the BOTTOM-UP convention. Flipping during
-  // upload for TOP-DOWN data places raw's row 0 at the top instead.
-  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, isTopDownRowOrder);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  // NEAREST (not LINEAR): float textures aren't linear-filterable without the
-  // optional OES_texture_float_linear extension, and NEAREST also faithfully
-  // reproduces FitsLoaderItem's original nearest-neighbor downsample when
-  // destinationWidth/Height are smaller than sourceWidth/Height.
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  const layout = `${sourceWidth}x${sourceHeight}x${channels}`;
+  const canReuseUpload =
+    input.textureKey !== undefined &&
+    resources.uploadedTextureKey === input.textureKey &&
+    resources.uploadedLayout === layout;
 
-  if (channels === 3) {
-    const planeSize = sourceWidth * sourceHeight;
-    const interleaved = new Float32Array(planeSize * 3);
-    for (let i = 0; i < planeSize; i++) {
-      interleaved[i * 3] = raw[i];
-      interleaved[i * 3 + 1] = raw[planeSize + i];
-      interleaved[i * 3 + 2] = raw[planeSize * 2 + i];
+  if (!canReuseUpload) {
+    // The upload is never flipped: raw's row 0 lands at the texture's v=0 edge,
+    // which the full-viewport quad maps to the bottom of the canvas — exactly
+    // the BOTTOM-UP convention. TOP-DOWN data is flipped by the shader's
+    // uFlipVertical uniform instead, so the texture does not depend on row order.
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    // NEAREST (not LINEAR): float textures aren't linear-filterable without the
+    // optional OES_texture_float_linear extension, and NEAREST also faithfully
+    // reproduces FitsLoaderItem's original nearest-neighbor downsample when
+    // destinationWidth/Height are smaller than sourceWidth/Height.
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+
+    // Forget the old upload first: if the upload below throws, the texture must not be trusted.
+    resources.uploadedTextureKey = undefined;
+    resources.uploadedLayout = '';
+    if (channels === 3) {
+      const planeSize = sourceWidth * sourceHeight;
+      const interleaved = new Float32Array(planeSize * 3);
+      for (let i = 0; i < planeSize; i++) {
+        interleaved[i * 3] = raw[i];
+        interleaved[i * 3 + 1] = raw[planeSize + i];
+        interleaved[i * 3 + 2] = raw[planeSize * 2 + i];
+      }
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB32F, sourceWidth, sourceHeight, 0, gl.RGB, gl.FLOAT, interleaved);
+    } else {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, sourceWidth, sourceHeight, 0, gl.RED, gl.FLOAT, raw);
     }
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB32F, sourceWidth, sourceHeight, 0, gl.RGB, gl.FLOAT, interleaved);
-  } else {
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, sourceWidth, sourceHeight, 0, gl.RED, gl.FLOAT, raw);
+    resources.uploadedTextureKey = input.textureKey;
+    resources.uploadedLayout = layout;
   }
-  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
 
   gl.useProgram(resources.program);
   gl.uniform1f(resources.uniformLocations.shadows, parameters.shadows);
   gl.uniform1f(resources.uniformLocations.range, parameters.range);
   gl.uniform1f(resources.uniformLocations.midtones, parameters.midtones);
   gl.uniform1i(resources.uniformLocations.isColor, channels === 3 ? 1 : 0);
-  gl.uniform1i(gl.getUniformLocation(resources.program, 'uSourceTexture'), 0);
+  gl.uniform1i(resources.uniformLocations.flipVertical, isTopDownRowOrder ? 1 : 0);
+  gl.uniform1i(resources.uniformLocations.sourceTexture, 0);
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, resources.sourceTexture);
 

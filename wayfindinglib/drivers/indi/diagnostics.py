@@ -35,16 +35,13 @@ class IndiDiagnostics:
             Names of the currently connected INDI devices. Empty when the
             server is down and the wait between connection attempts has not
             passed yet. A connection attempt to a telescope that is switched
-            off blocks for seconds, so this shares the session's wait timer
-            (and its growing back-off) instead of trying on every call.
+            off blocks for seconds, so the session's own timer (with its
+            growing back-off) decides whether to try. That logic lives on the
+            session, not here, because this class may be talking to the
+            session through a worker-process proxy.
         """
         if not self._session.isServerConnected():
-            manager = getattr(self._session, "connection_manager", None)
-            if manager is not None and not manager.can_attempt_reconnect():
-                return []
-            self._session.connect_to_server()
-            if manager is not None:
-                manager.record_connection_result(self._session.isServerConnected())
+            self._session.connect_to_server_if_due()
         return list(self._session.get_device_names())
 
     def get_properties(self, device_name: str) -> dict[str, Any]:

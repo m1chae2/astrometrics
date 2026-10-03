@@ -65,7 +65,7 @@ def test_a_disconnected_session_is_connected_first() -> None:
     calls = []
     session = SimpleNamespace(
         isServerConnected=lambda: False,
-        connect_to_server=lambda: calls.append("connect"),
+        connect_to_server_if_due=lambda: calls.append("connect"),
         get_device_names=lambda: ["Mount"],
     )
     assert IndiDiagnostics(session).get_devices() == ["Mount"]
@@ -87,25 +87,21 @@ def test_names_fall_back_to_the_server_device_list() -> None:
 
 
 def test_a_down_server_is_not_retried_before_the_wait_has_passed() -> None:
-    """Listing devices shares the session's connection wait timer."""
+    """The session's connect-if-due method shares the connection wait timer."""
     from wayfindinglib.drivers.indi.connection_manager import ConnectionManager
 
     calls = []
-    manager = ConnectionManager("host")
-    session = SimpleNamespace(
-        isServerConnected=lambda: False,
+    fake_session = SimpleNamespace(
+        connection_manager=ConnectionManager("host"),
         connect_to_server=lambda: calls.append("connect"),
-        get_device_names=lambda: [],
-        connection_manager=manager,
+        isServerConnected=lambda: False,
     )
-    diagnostics = IndiDiagnostics(session)
 
-    diagnostics.get_devices()
-    diagnostics.get_devices()
-    diagnostics.get_devices()
+    for _ in range(3):
+        IndiInterface.connect_to_server_if_due(fake_session)
 
     assert calls == ["connect"]
-    assert manager.consecutive_failures == 1
+    assert fake_session.connection_manager.consecutive_failures == 1
 
 
 def test_the_wait_between_connection_attempts_doubles_up_to_a_limit_and_resets() -> None:

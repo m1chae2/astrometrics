@@ -1,5 +1,6 @@
 import React from 'react';
 import { SectionPanel } from '../../common/components/SectionPanel';
+import { SwitchDisplayButton } from '../../common/components/SwitchDisplayButton';
 import { FitsViewerManager, FitsRendererHandle } from '../../common/fitsViewer/FitsViewerManager';
 import { FileBrowser, FileBrowserToolbar } from '../fileBrowser/FileBrowser';
 import { AstrometryOverlayStar } from '../../common/services/astronomyService';
@@ -103,6 +104,7 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
             <button className="btn btn--tiny" onClick={() => fitsRendererRef.current?.zoomOut()} title="Zoom Out">-</button>
             <button className="btn btn--tiny" onClick={() => fitsRendererRef.current?.zoomToFit()} title="Zoom to Fit">Fit</button>
             <button className="btn btn--tiny" onClick={() => fitsRendererRef.current?.zoomToScale(1.0)} title="Actual Size">1:1</button>
+            <SwitchDisplayButton targetDisplay="Image Viewer" selectedTarget={selectedTarget} />
           </div>
         }
       >

@@ -267,17 +267,26 @@ export async function fetchVisibleTargets(): Promise<VisibleTarget[]> {
  * Fetches the FITS header info for a specific frame of a target.
  * @param targetId The identifier of the target.
  * @param framePath The system file path to the FITS frame.
+ * @param options Set `silent` for an optional lookup: a failure (for example a file that is
+ *   missing from disk) is thrown to the caller without a toast or an error report.
  * @return List of FITS header entry objects.
  */
 export async function fetchTargetFrameHeader(
     targetId: string,
-    framePath: string
+    framePath: string,
+    options?: { silent?: boolean }
 ): Promise<FitsHeaderEntry[]> {
     try {
-        const data = await callBackend("target:get_frame_header", { target_id: targetId, frame_path: framePath });
+        const data = await callBackend(
+            "target:get_frame_header",
+            { target_id: targetId, frame_path: framePath },
+            options?.silent ? { silent: true } : undefined
+        );
         return (data || []) as FitsHeaderEntry[];
     } catch (err: unknown) {
-        reportError(err instanceof Error ? err : new Error(String(err)), 'backend');
+        if (!options?.silent) {
+            reportError(err instanceof Error ? err : new Error(String(err)), 'backend');
+        }
         throw err;
     }
 }

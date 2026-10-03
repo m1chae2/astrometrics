@@ -1,6 +1,8 @@
 /**
  * @fileoverview Test suite validating the 17 use cases mapping to astrometrics/scripts
  * inside the frontend client services layer, fully integrated with the running backend.
+ *
+ * @requires-test-backend
  */
 
 import { describe, it, expect, beforeAll } from 'vitest';

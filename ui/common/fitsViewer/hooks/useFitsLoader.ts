@@ -1,29 +1,18 @@
 import { useState, useEffect, useRef } from 'react';
+import { ParsedFitsCache, PARSED_FITS_CACHE_LIMIT } from '../parsedFitsCache';
 
-// Type definitions for jsfitsio (ambient)
-interface FITS {
-    HDUs: HDU[];
-}
-interface HDU {
-    header: Header;
-    data: Data;
-}
-interface Header {
-    get(key: string): string | number | undefined;
-    cards: Record<string, unknown>;
-}
-interface Data {
-    width: number;
-    height: number;
-    getFrame(): Float32Array;
-}
-declare const window: any;
-
+/**
+ * What the main thread knows about a decoded FITS image.
+ *
+ * The pixels themselves are not here: they stay inside the FITS worker (see
+ * `fitsWorker.ts`), filed under `imageId`, so they are never copied between threads.
+ */
 export interface ParsedFitsData {
+    /** Id the worker filed the decoded pixels under; pass it back to the worker to draw or release them. */
+    imageId: number;
     w: number;
     h: number;
     channels: number;
-    raw: Float32Array;
     min: number;
     max: number;
     crval1?: number;
@@ -33,9 +22,15 @@ export interface ParsedFitsData {
     roworder?: string;
 }
 
+/** Source of fresh ids for decoded images, unique across every viewer on the page. */
+let nextImageId = 1;
+
 /**
  * Hook to fetch and parse FITS data from a URL or Blob.
- * Now uses a Web Worker for parsing to avoid blocking the main thread.
+ *
+ * Decoding happens in one long-lived Web Worker per viewer, which also keeps the
+ * decoded pixels and draws them (see `useCanvasDrawer`). The worker is returned
+ * so the drawer can talk to the same one.
  */
 export const useFitsLoader = (
     imageUrl: string | null,
@@ -45,16 +40,34 @@ export const useFitsLoader = (
     const [parsedData, setParsedData] = useState<ParsedFitsData | null>(null);
     const [bitmap, setBitmap] = useState<ImageBitmap | null>(null);
     const parsedRef = useRef<ParsedFitsData | null>(null);
+    const workerRef = useRef<Worker | null>(null);
 
     // Caches
-    const blobCacheRef = useRef<WeakMap<Blob, ParsedFitsData>>(new WeakMap());
-    const urlCacheRef = useRef<Map<string, ParsedFitsData>>(new Map());
+    const parsedCacheRef = useRef<ParsedFitsCache<ParsedFitsData> | null>(null);
     const bitmapBlobCacheRef = useRef<WeakMap<Blob, ImageBitmap>>(new WeakMap());
     const bitmapUrlCacheRef = useRef<Map<string, ImageBitmap>>(new Map());
 
+    // Stop the worker (and with it every decoded image) when the viewer goes away.
+    useEffect(() => {
+        // Created here, not during render: a record that falls out of the cache
+        // must also free its pixels inside the worker.
+        parsedCacheRef.current = new ParsedFitsCache<ParsedFitsData>(PARSED_FITS_CACHE_LIMIT, (dropped) => {
+            workerRef.current?.postMessage({ cmd: 'release', imageId: dropped.imageId });
+        });
+        return () => {
+            parsedCacheRef.current?.clear();
+            parsedCacheRef.current = null;
+            workerRef.current?.terminate();
+            workerRef.current = null;
+        };
+    }, []);
+
     useEffect(() => {
         let cancelled = false;
-        let worker: Worker | null = null;
+        let activeWorker: Worker | null = null;
+        // Id of a parse still in flight; if this load is cancelled first, the worker must drop the result.
+        let pendingImageId: number | null = null;
+        let removeMessageListener: (() => void) | null = null;
         const abortController = new AbortController();
 
         const load = async () => {
@@ -65,14 +78,11 @@ export const useFitsLoader = (
             }
 
             // check caches
-            if (imageBlob && blobCacheRef.current.has(imageBlob)) {
-                setParsedData(blobCacheRef.current.get(imageBlob)!);
-                setBitmap(null);
-                setStatus(null);
-                return;
-            }
-            if (imageUrl && urlCacheRef.current.has(imageUrl)) {
-                setParsedData(urlCacheRef.current.get(imageUrl)!);
+            const parsedKey = imageBlob ?? imageUrl;
+            const cachedParsed = parsedKey ? parsedCacheRef.current?.get(parsedKey) : undefined;
+            if (cachedParsed) {
+                parsedRef.current = cachedParsed;
+                setParsedData(cachedParsed);
                 setBitmap(null);
                 setStatus(null);
                 return;
@@ -211,143 +221,84 @@ export const useFitsLoader = (
                 const bzero = Number(headerInfo['BZERO'] || 0);
                 const bscale = Number(headerInfo['BSCALE'] || 1);
 
-                // Offload Heavy Parsing to Worker with main-thread fallback
-                let workerSpawned = false;
-                try {
-                    worker = new Worker(new URL('../fitsWorker.ts', import.meta.url), { type: 'module' });
-                    workerSpawned = true;
-                } catch (e) {
-                    console.warn("Failed to spawn Web Worker, falling back to main-thread FITS parsing:", e);
-                }
-
-                if (workerSpawned && worker) {
-                    worker.onerror = (e) => {
-                        console.error("Worker error:", e);
+                // Decode in the worker, which keeps the pixels for drawing.
+                if (!workerRef.current) {
+                    try {
+                        workerRef.current = new Worker(new URL('../fitsWorker.ts', import.meta.url), { type: 'module' });
+                    } catch (e) {
+                        console.error("Failed to spawn the FITS Web Worker:", e);
                         if (!cancelled) setStatus("Worker Error");
-                    };
-
-                    worker.onmessage = (ev) => {
-                        if (cancelled) return;
-                        const { cmd, result, error } = ev.data;
-                        if (error) {
-                            console.error("Worker parse error:", error);
-                            setStatus(`Error: ${error}`);
-                            return;
-                        }
-                        if (cmd === 'parseComplete' && result) {
-                            result.crval1 = headerInfo['CRVAL1'] !== undefined ? Number(headerInfo['CRVAL1']) : undefined;
-                            result.crval2 = headerInfo['CRVAL2'] !== undefined ? Number(headerInfo['CRVAL2']) : undefined;
-                            result.cdelt1 = headerInfo['CDELT1'] !== undefined ? Number(headerInfo['CDELT1']) : undefined;
-                            result.cdelt2 = headerInfo['CDELT2'] !== undefined ? Number(headerInfo['CDELT2']) : undefined;
-                            if (result.cdelt1 === undefined && headerInfo['SCALE'] !== undefined) {
-                                result.cdelt1 = -Number(headerInfo['SCALE']) / 3600.0;
-                            }
-                            if (result.cdelt2 === undefined && headerInfo['SCALE'] !== undefined) {
-                                result.cdelt2 = Number(headerInfo['SCALE']) / 3600.0;
-                            }
-                            result.roworder = headerInfo['ROWORDER'] !== undefined ? String(headerInfo['ROWORDER']).trim() : undefined;
-                            // result.raw is the Float32Array
-                            if (imageBlob) {
-                                blobCacheRef.current.set(imageBlob, result);
-                            } else if (imageUrl) {
-                                const cache = urlCacheRef.current;
-                                if (cache.size >= 5) {
-                                    const firstKey = cache.keys().next().value;
-                                    if (firstKey) cache.delete(firstKey);
-                                }
-                                cache.set(imageUrl, result);
-                            }
-
-                            parsedRef.current = result;
-                            setParsedData(result);
-                            setStatus(null);
-                        }
-                    };
-
-                    // Send data to worker
-                    worker.postMessage({
-                        cmd: 'parse',
-                        pw: naxis1,
-                        ph: naxis2,
-                        channels: naxis3,
-                        rawBuffer: arrayBuffer,
-                        bitpix,
-                        bzero,
-                        bscale,
-                        dataOffset: offset
-                    }, [arrayBuffer]);
-                } else {
-                    // Synchronous Main-Thread FITS Parsing Fallback
-                    const channels = naxis3 || 1;
-                    const bytesPerPixel = Math.abs(bitpix) / 8;
-                    const totalElements = naxis1 * naxis2 * channels;
-                    const floatData = new Float32Array(totalElements);
-                    const dataView = new DataView(arrayBuffer);
-
-                    let min = Infinity;
-                    let max = -Infinity;
-                    const littleEndian = false; // FITS is Big Endian
-
-                    for (let i = 0; i < totalElements; i++) {
-                        const byteOffset = offset + i * bytesPerPixel;
-                        if (byteOffset + bytesPerPixel > dataView.byteLength) break;
-
-                        let val = 0;
-                        if (bitpix === -32) {
-                            val = dataView.getFloat32(byteOffset, littleEndian);
-                        } else if (bitpix === -64) {
-                            val = dataView.getFloat64(byteOffset, littleEndian);
-                        } else if (bitpix === 16) {
-                            val = dataView.getInt16(byteOffset, littleEndian);
-                        } else if (bitpix === 32) {
-                            val = dataView.getInt32(byteOffset, littleEndian);
-                        } else if (bitpix === 8) {
-                            val = dataView.getUint8(byteOffset);
-                        }
-
-                        const physicalVal = (bzero || 0) + (bscale || 1) * val;
-                        floatData[i] = physicalVal;
-
-                        if (physicalVal < min) min = physicalVal;
-                        if (physicalVal > max) max = physicalVal;
+                        return;
                     }
+                }
+                const worker = workerRef.current;
+                const imageId = nextImageId++;
+                pendingImageId = imageId;
+                activeWorker = worker;
 
-                    if (min === Infinity) {
-                        min = 0;
-                        max = 65535;
+                worker.onerror = (e) => {
+                    console.error("Worker error:", e);
+                    if (!cancelled) setStatus("Worker Error");
+                };
+
+                const handleMessage = (ev: MessageEvent) => {
+                    if (ev.data.requestId !== imageId) return;
+                    worker.removeEventListener('message', handleMessage);
+                    if (cancelled) return;
+                    const { cmd, result, error } = ev.data;
+                    if (error) {
+                        console.error("Worker parse error:", error);
+                        setStatus(`Error: ${error}`);
+                        return;
                     }
-
-                    const result = {
-                        w: naxis1,
-                        h: naxis2,
-                        channels,
-                        min,
-                        max,
-                        raw: floatData,
-                        crval1: headerInfo['CRVAL1'] !== undefined ? Number(headerInfo['CRVAL1']) : undefined,
-                        crval2: headerInfo['CRVAL2'] !== undefined ? Number(headerInfo['CRVAL2']) : undefined,
-                        cdelt1: headerInfo['CDELT1'] !== undefined ? Number(headerInfo['CDELT1']) : (headerInfo['SCALE'] !== undefined ? -Number(headerInfo['SCALE']) / 3600.0 : undefined),
-                        cdelt2: headerInfo['CDELT2'] !== undefined ? Number(headerInfo['CDELT2']) : (headerInfo['SCALE'] !== undefined ? Number(headerInfo['SCALE']) / 3600.0 : undefined),
-                        roworder: headerInfo['ROWORDER'] !== undefined ? String(headerInfo['ROWORDER']).trim() : undefined,
-                    };
-
-                    if (imageBlob) {
-                        blobCacheRef.current.set(imageBlob, result);
-                    } else if (imageUrl) {
-                        const cache = urlCacheRef.current;
-                        if (cache.size >= 5) {
-                            const firstKey = cache.keys().next().value;
-                            if (firstKey) cache.delete(firstKey);
+                    if (cmd === 'parseComplete' && result) {
+                        const parsed: ParsedFitsData = {
+                            imageId,
+                            w: result.w,
+                            h: result.h,
+                            channels: result.channels,
+                            min: result.min,
+                            max: result.max,
+                            crval1: headerInfo['CRVAL1'] !== undefined ? Number(headerInfo['CRVAL1']) : undefined,
+                            crval2: headerInfo['CRVAL2'] !== undefined ? Number(headerInfo['CRVAL2']) : undefined,
+                            cdelt1: headerInfo['CDELT1'] !== undefined ? Number(headerInfo['CDELT1']) : undefined,
+                            cdelt2: headerInfo['CDELT2'] !== undefined ? Number(headerInfo['CDELT2']) : undefined,
+                            roworder: headerInfo['ROWORDER'] !== undefined ? String(headerInfo['ROWORDER']).trim() : undefined,
+                        };
+                        if (parsed.cdelt1 === undefined && headerInfo['SCALE'] !== undefined) {
+                            parsed.cdelt1 = -Number(headerInfo['SCALE']) / 3600.0;
                         }
-                        cache.set(imageUrl, result);
-                    }
+                        if (parsed.cdelt2 === undefined && headerInfo['SCALE'] !== undefined) {
+                            parsed.cdelt2 = Number(headerInfo['SCALE']) / 3600.0;
+                        }
 
-                    if (!cancelled) {
-                        parsedRef.current = result;
-                        setParsedData(result);
+                        const parsedKey = imageBlob ?? imageUrl;
+                        if (parsedKey) parsedCacheRef.current?.set(parsedKey, parsed);
+                        pendingImageId = null;
+
+                        parsedRef.current = parsed;
+                        setParsedData(parsed);
                         setStatus(null);
                     }
-                }
+                };
+                worker.addEventListener('message', handleMessage);
+                removeMessageListener = () => worker.removeEventListener('message', handleMessage);
+
+                // Send data to worker
+                worker.postMessage({
+                    cmd: 'parse',
+                    requestId: imageId,
+                    imageId,
+                    pw: naxis1,
+                    ph: naxis2,
+                    channels: naxis3,
+                    roworder: headerInfo['ROWORDER'] !== undefined ? String(headerInfo['ROWORDER']).trim() : undefined,
+                    rawBuffer: arrayBuffer,
+                    bitpix,
+                    bzero,
+                    bscale,
+                    dataOffset: offset
+                }, [arrayBuffer]);
 
             } catch (err) {
                 if (!cancelled) {
@@ -362,9 +313,12 @@ export const useFitsLoader = (
         return () => {
             cancelled = true;
             abortController.abort();
-            if (worker) worker.terminate();
+            removeMessageListener?.();
+            if (activeWorker && pendingImageId !== null) {
+                activeWorker.postMessage({ cmd: 'release', imageId: pendingImageId });
+            }
         };
     }, [imageUrl, imageBlob, setStatus]);
 
-    return { parsedData, parsedRef, bitmap };
+    return { parsedData, parsedRef, bitmap, workerRef };
 };

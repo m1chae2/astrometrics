@@ -96,14 +96,17 @@ export const PlanetariumDisplay: React.FC = () => {
   // Date and Time controls
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
   const [isTimeModalOpen, setIsTimeModalOpen] = useState<boolean>(false);
-  // When true, currentDate ticks forward with the system clock every second
+  // When true, the sky follows the system clock. Nothing ticks in React state
+  // for this: a tick re-rendered this whole display (and restarted the sky
+  // map's render loop) every second. The sky map reads the clock itself.
   const [isLiveTime, setIsLiveTime] = useState<boolean>(true);
 
-  useEffect(() => {
-    if (!isLiveTime) return;
-    const interval = setInterval(() => setCurrentDate(new Date()), 1000);
-    return () => clearInterval(interval);
-  }, [isLiveTime]);
+  // The date the time dialog starts from: now (when it opens) in live mode.
+  const dialogDate = useMemo(
+    () => (isLiveTime ? new Date() : currentDate),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refreshed each time the dialog opens
+    [isLiveTime, currentDate, isTimeModalOpen],
+  );
 
   const handleDateChange = useCallback((date: Date) => {
     setIsLiveTime(false);
@@ -579,7 +582,7 @@ export const PlanetariumDisplay: React.FC = () => {
         cumulativeTrackingAttempts={activeCumulativeTrackingAttempts}
         polarAlignment={activePolarAlignment}
         selectedSessionId={selectedSessionId}
-        simulationDate={currentDate}
+        simulationDate={isLiveTime ? undefined : currentDate}
         fov={currentFOV}
         onFOVChange={setCurrentFOV}
         onSelectSource={handleSelectSource}
@@ -606,7 +609,7 @@ export const PlanetariumDisplay: React.FC = () => {
       <PlanetariumDateTimeModal
         isOpen={isTimeModalOpen}
         onClose={() => setIsTimeModalOpen(false)}
-        currentDate={currentDate}
+        currentDate={dialogDate}
         onDateChange={handleDateChange}
         onResetToNow={handleResetToNow}
       />

@@ -37,7 +37,7 @@ export const StackedImagePanel: React.FC<StackedImagePanelProps> = ({
         const normPath = activePath ? activePath.toLowerCase().replace(/[^a-z0-9]/g, '') : '';
 
         if (activePath && targetId && normPath.includes(normTarget)) {
-            fetchTargetFrameHeader(targetId, activePath)
+            fetchTargetFrameHeader(targetId, activePath, { silent: true })
                 .then(entries => {
                     if (entries) {
                         const exptimeEntry = entries.find(e => e.key.toUpperCase() === 'EXPTIME');

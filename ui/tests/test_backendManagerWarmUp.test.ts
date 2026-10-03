@@ -7,6 +7,9 @@
  * false (gave up), and none of them hangs.
  */
 
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('electron-log', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
@@ -119,10 +122,29 @@ describe('BackendManager.waitUntilWarm', () => {
     const manager = new BackendManager({}, mockPlatform as any);
     manager.backendProcess = { killed: false, pid: 1234 } as any;
 
-    const cleanupSpy = vi.spyOn(manager as any, '_cleanupOrphanedRunPids');
+    // Replaced, not just watched: the real method reads .run_pids/ in the
+    // current directory and kills whatever it names, which here is the
+    // developer's own running backend and Vite server.
+    const cleanupSpy = vi.spyOn(manager as any, '_cleanupOrphanedRunPids').mockImplementation(() => {});
     manager.stop();
 
     expect(mockTerminate).toHaveBeenCalledWith(manager.backendProcess);
     expect(cleanupSpy).toHaveBeenCalled();
+  });
+
+  it('the run-pid cleanup only touches the app folder it is given, never the real repo', () => {
+    const appFolder = fs.mkdtempSync(path.join(os.tmpdir(), 'backend-manager-test-'));
+    fs.mkdirSync(path.join(appFolder, '.run_pids'));
+    const pidFile = path.join(appFolder, '.run_pids', 'backend.pid');
+    fs.writeFileSync(pidFile, '999999');
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+    const manager = new BackendManager({ getAppPath: () => appFolder } as any);
+
+    (manager as any)._cleanupOrphanedRunPids();
+
+    expect(killSpy).toHaveBeenCalledWith(-999999, 'SIGTERM');
+    expect(fs.existsSync(pidFile)).toBe(false);
+    killSpy.mockRestore();
+    fs.rmSync(appFolder, { recursive: true, force: true });
   });
 });

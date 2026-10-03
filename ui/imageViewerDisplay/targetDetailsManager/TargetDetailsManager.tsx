@@ -140,7 +140,7 @@ export const TargetDetailsManager: React.FC<TargetDetailsManagerProps> = ({
 
     if (processedPath && isFits && selectedTarget) {
       try {
-        const entries = await fetchTargetFrameHeader(selectedTarget, processedPath);
+        const entries = await fetchTargetFrameHeader(selectedTarget, processedPath, { silent: true });
         if (entries) {
           const exptimeEntry = entries.find(e => e.key.toUpperCase() === 'EXPTIME');
           if (exptimeEntry && exptimeEntry.value != null) {

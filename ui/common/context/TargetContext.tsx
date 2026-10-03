@@ -4,8 +4,9 @@
  * Synchronizes selected targets with local storage and global application events.
  */
 
-import React, { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef, ReactNode } from 'react';
 import { on as onEvent } from '../utils/eventBus';
+import { DisplayActiveContext } from './DisplayActiveContext';
 
 export type InvalidationScope = 'targets' | 'frames' | 'all';
 
@@ -148,6 +149,43 @@ export const TargetProvider: React.FC<TargetProviderProps> = ({ children }) => {
         <TargetContext.Provider value={value}>
             {children}
         </TargetContext.Provider>
+    );
+};
+
+interface DeferWhileHiddenProps {
+    /** Whether the display wrapped by this component is the one on screen. */
+    active: boolean;
+    children: ReactNode;
+}
+
+/**
+ * Keeps a hidden display from reacting to target changes.
+ *
+ * Every visited display stays mounted and is only hidden with CSS, so each
+ * click on a target used to make all of them fetch that target's data, even
+ * the ones nobody could see (about 20 network calls per click). While
+ * `active` is false this passes down the last target state the display saw
+ * while it was on screen; when the display is shown again it gets the
+ * current state and loads it then.
+ *
+ * @param props Whether the display is active, and the display itself.
+ * It also tells the display whether it is active (see `DisplayActiveContext`) so
+ * its pollers can pause while hidden.
+ *
+ * @return The children, inside a target context that holds still while hidden.
+ */
+export const DeferWhileHidden: React.FC<DeferWhileHiddenProps> = ({ active, children }) => {
+    const live = useContext(TargetContext);
+    const [lastSeen, setLastSeen] = useState(live);
+    useEffect(() => {
+        if (active) setLastSeen(live);
+    }, [active, live]);
+    // While active the live value is used directly; the saved copy is only read once hidden.
+    const value = active ? live : lastSeen;
+    return (
+        <DisplayActiveContext.Provider value={active}>
+            <TargetContext.Provider value={value}>{children}</TargetContext.Provider>
+        </DisplayActiveContext.Provider>
     );
 };
 

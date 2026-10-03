@@ -23,184 +23,36 @@ if (typeof window !== 'undefined') {
 //   toBeProcessing(received) { ... }
 // });
 
-import { vi, beforeAll, afterAll } from 'vitest';
-import { spawn, ChildProcess } from 'child_process';
+import { vi, beforeAll, afterAll, inject } from 'vitest';
 import fs from 'fs';
-import net from 'net';
-import path from 'path';
-import os from 'os';
+import { TEST_BACKEND_MARKER } from './testBackendMarker';
 
 const nativeFetch = global.fetch;
-let backendProcess: ChildProcess | null = null;
-let tempDir: string = '';
 
 /**
- * Origin of the spawned test backend, e.g. `http://127.0.0.1:38979`.
+ * Origin of the shared test backend, e.g. `http://127.0.0.1:38979`, or an empty
+ * string for test files that did not ask for one.
  *
- * The fetch mock below uses this to decide which requests to pass through to
- * the real backend instead of answering from its canned responses. It is
- * assigned in `beforeAll` once a port has been reserved; the mock must read
- * it at call time rather than capturing it, since the mock is installed at
- * module scope before the port is known.
+ * `ui/globalSetup.ts` starts one backend for the whole run, and only when a test
+ * file contains the marker `@requires-test-backend`. The fetch mock below uses
+ * this to decide which requests to pass through to the real backend instead of
+ * answering from its canned responses. It is read at call time because the mock
+ * is installed at module scope, before `beforeAll` runs.
  */
 let testBackendOrigin = '';
 
-/**
- * Reserves an unused TCP port from the OS.
- *
- * A fixed port made this suite flaky: consecutive runs raced each other for
- * it while a previous backend was still releasing the socket, and parallel
- * CI jobs collided outright. Binding port 0 lets the kernel allocate a free
- * one, which is then handed to the backend via ASTROMETRICS_PORT.
- *
- * @return {Promise<number>} A port number that was free at time of checking.
- */
-function reserveFreePort(): Promise<number> {
-    return new Promise((resolve, reject) => {
-        const probe = net.createServer();
-        probe.on('error', reject);
-        probe.listen(0, '127.0.0.1', () => {
-            const { port } = probe.address() as net.AddressInfo;
-            probe.close(() => {
-                // Avoid TIME_WAIT on Linux by offsetting by 1 from the just-closed socket
-                resolve(port + 1);
-            });
-        });
-    });
-}
-
-/**
- * Spawns the test backend on a freshly reserved port and waits for it to
- * answer an RPC probe.
- *
- * @param {string} configPath - Path to the sandbox config file to pass via ASTROMETRICS_CONFIG_PATH.
- * @return {Promise<{ port: number, addressInUse: boolean }>} The port it was attempted on, and whether
- *   it failed specifically because that port was already bound by another process (as opposed to any
- *   other startup failure) -- the only case worth retrying with a fresh port.
- */
-async function trySpawnBackend(configPath: string): Promise<{ port: number; addressInUse: boolean }> {
-    const port = await reserveFreePort();
-
-    const repoRoot = path.resolve(__dirname, '..');
-    const venvPythonPath = path.join(repoRoot, '.venv', 'bin', 'python3');
-    const pythonPath = fs.existsSync(venvPythonPath) ? venvPythonPath : (process.env.PYTHON_BIN || 'python3');
-
-    backendProcess = spawn(pythonPath, ['-m', 'backend.main_backend'], {
-        cwd: repoRoot,
-        env: {
-            ...process.env,
-            ASTROMETRICS_CONFIG_PATH: configPath,
-            ASTROMETRICS_TESTING: '1',
-            ASTROMETRICS_PORT: String(port),
-        },
-        stdio: 'pipe'
-    });
-
-    // Retain stderr so a backend that dies during startup reports *why*,
-    // instead of surfacing as an indistinguishable readiness timeout.
-    let backendStderr = '';
-    backendProcess.stderr?.on('data', (chunk) => {
-        backendStderr += String(chunk);
-    });
-
-    let exitInfo: string | null = null;
-    backendProcess.on('exit', (code, signal) => {
-        exitInfo = `backend exited early (code=${code}, signal=${signal})`;
-    });
-
-    // Importing astropy/astroquery is slow, and slower still on a loaded CI
-    // runner or alongside a parallel pytest run, so allow generous headroom.
-    const readinessTimeoutMs = Number(process.env.ASTROMETRICS_TEST_BACKEND_TIMEOUT_MS ?? 60000);
-
-    let ready = false;
-    const start = Date.now();
-    while (Date.now() - start < readinessTimeoutMs) {
-        if (exitInfo) break;
-        try {
-            const res = await nativeFetch(`http://127.0.0.1:${port}/api/rpc`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    jsonrpc: '2.0',
-                    method: 'system:save',
-                    params: {},
-                    id: 'probe'
-                })
-            });
-            if (res.ok) {
-                ready = true;
-                break;
-            }
-        } catch {
-            await new Promise(resolve => setTimeout(resolve, 200));
-        }
+beforeAll(() => {
+    const origin = inject('testBackendOrigin');
+    const testPath = expect.getState().testPath;
+    if (origin && testPath && fs.readFileSync(testPath, 'utf8').includes(TEST_BACKEND_MARKER)) {
+        testBackendOrigin = origin;
+        process.env.BACKEND_URL = origin;
     }
-
-    if (!ready) {
-        // reserveFreePort's own free-at-the-time port can still lose a race
-        // to another concurrently starting test file's backend between the
-        // probe and the real bind -- rare, but worth a clean retry on a new
-        // port rather than failing the whole suite over it.
-        const addressInUse = backendStderr.includes('address already in use');
-        if (!addressInUse) {
-            const elapsedSeconds = ((Date.now() - start) / 1000).toFixed(1);
-            const reason = exitInfo ?? `no successful probe within ${elapsedSeconds}s`;
-            throw new Error(
-                `Test backend server failed to start on port ${port}: ${reason}.\n` +
-                `Backend stderr:\n${backendStderr.slice(-4000) || '(none captured)'}`
-            );
-        }
-        return { port, addressInUse: true };
-    }
-
-    return { port, addressInUse: false };
-}
-
-beforeAll(async () => {
-    // 1. Create sandbox directory
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'astrometrics-test-ui-'));
-
-    const libDir = path.join(tempDir, 'library');
-    const framesDir = path.join(libDir, 'frames');
-    fs.mkdirSync(libDir, { recursive: true });
-    fs.mkdirSync(framesDir, { recursive: true });
-
-    // Write sandbox config file
-    const configPath = path.join(tempDir, 'astrometrics.config.toml');
-    fs.writeFileSync(configPath, `["Image Library"]
-path = "${libDir}"
-frames_path = "${framesDir}"
-`);
-
-    // 2. Spawn the backend process, retrying on a lost port-reservation race
-    const maxAttempts = 3;
-    let backendPort = -1;
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        const { port, addressInUse } = await trySpawnBackend(configPath);
-        backendPort = port;
-        if (!addressInUse) break;
-        if (attempt === maxAttempts) {
-            throw new Error(
-                `Test backend could not bind a free port after ${maxAttempts} attempts ` +
-                `(last tried port ${port}: address already in use).`
-            );
-        }
-        backendProcess?.kill('SIGTERM');
-    }
-
-    testBackendOrigin = `http://127.0.0.1:${backendPort}`;
-    process.env.BACKEND_URL = testBackendOrigin;
-}, 120000);
+});
 
 afterAll(() => {
-    if (backendProcess) {
-        backendProcess.kill('SIGTERM');
-    }
-    try {
-        fs.rmSync(tempDir, { recursive: true, force: true });
-    } catch {
-        // ignore
-    }
+    testBackendOrigin = '';
+    delete process.env.BACKEND_URL;
 });
 
 /**

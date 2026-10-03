@@ -682,6 +682,9 @@ export async function callBackend<A extends keyof ActionRegistry>(
  */
 let cachedSessionToken: string | null = null;
 
+/** The token lookup in progress, shared so a burst of callers makes one request. */
+let sessionTokenRequest: Promise<string> | null = null;
+
 /**
  * Resolves the session token required by the backend's WebSocket endpoints.
  *
@@ -701,6 +704,20 @@ let cachedSessionToken: string | null = null;
  */
 export async function getSessionToken(): Promise<string> {
     if (cachedSessionToken) return cachedSessionToken;
+    if (!sessionTokenRequest) {
+        sessionTokenRequest = resolveSessionToken().finally(() => {
+            sessionTokenRequest = null;
+        });
+    }
+    return sessionTokenRequest;
+}
+
+/**
+ * Looks the session token up from the backend, then the Electron bridge.
+ *
+ * @return The session token, or an empty string if it could not be resolved.
+ */
+async function resolveSessionToken(): Promise<string> {
 
     try {
         const response = await fetch(getBackendUrl('/api/session-token'));
@@ -731,6 +748,20 @@ export async function getSessionToken(): Promise<string> {
     }
 
     return '';
+}
+
+/**
+ * Forgets the cached session token so the next `getSessionToken()` asks the
+ * backend again.
+ *
+ * A backend restart mints a new token, so a page that was already open keeps
+ * presenting the old one and is refused on every reconnect. Browsers do not
+ * report why a WebSocket handshake failed, so callers use this when a socket
+ * closes without ever opening.
+ */
+export function resetSessionToken(): void {
+    cachedSessionToken = null;
+    sessionTokenRequest = null;
 }
 
 /**

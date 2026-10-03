@@ -192,10 +192,12 @@ export const CelestialSkyMap: React.FC<Props> = ({
   const starCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
-  // Keep a ref to the active simulation date
-  const simulationDateRef = useRef<Date>(simulationDate || new Date());
+  // Keep a ref to the active simulation date. It is undefined in live mode,
+  // where the render loop reads the system clock itself each frame, so no
+  // React state has to tick once a second just to move the sky.
+  const simulationDateRef = useRef<Date | undefined>(simulationDate);
   useEffect(() => {
-    simulationDateRef.current = simulationDate || new Date();
+    simulationDateRef.current = simulationDate;
   }, [simulationDate]);
 
   // WebGL star-field renderer: draws the (potentially thousands of) star
@@ -499,7 +501,17 @@ export const CelestialSkyMap: React.FC<Props> = ({
       }
 
       // 1. Advance tracking target position for current sidereal time
-      const currentFrameLST = calculateLST(simulationDateRef.current, timeOffsetMinutesRef.current, observerLon);
+      // In live mode the clock is read once per second (as the React state
+      // tick used to deliver it): the sky turns 0.001 degrees in 0.25 s, so
+      // an unrounded clock would redraw the whole canvas four times a second.
+      const liveNow = new Date(Math.floor(Date.now() / 1000) * 1000);
+      const currentFrameLST = calculateLST(
+        simulationDateRef.current ?? liveNow,
+        timeOffsetMinutesRef.current,
+        observerLon,
+      );
+      // Keeps click and key handlers on the current time when nothing re-renders.
+      currentLSTRef.current = currentFrameLST;
 
       if (trackingMode && trackedCoords.current) {
         const targetAltAz = getAltAz(trackedCoords.current.ra, trackedCoords.current.dec, currentFrameLST, observerLat);

@@ -445,6 +445,20 @@ class IndiInterface(IndiClient):
         self.connect_to_server()
         self.connection_manager.record_connection_result(self.isServerConnected())
 
+    def connect_to_server_if_due(self) -> None:
+        """Try to connect to the INDI server, but only when the wait is over.
+
+        Shares the connection timer with `_ensure_connection`, and records
+        whether the attempt worked so the wait grows while the server stays
+        down (see `ConnectionManager.record_connection_result`). Callers that
+        only want to read, such as the device listing, use this instead of
+        connecting on every call: an attempt to a telescope that is switched
+        off blocks for seconds.
+        """
+        if self.connection_manager.can_attempt_reconnect():
+            self.connect_to_server()
+            self.connection_manager.record_connection_result(self.isServerConnected())
+
     def _is_server_responsive(self):  # ruff: ignore[missing-return-type-private-function]
         """Check if the INDI server is reachable and responsive.
 

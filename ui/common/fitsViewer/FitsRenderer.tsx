@@ -143,7 +143,7 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
   }, []);
 
   // Hooks
-  const { parsedData, bitmap } = useFitsLoader(imageUrl, imageBlob, setStatus);
+  const { parsedData, bitmap, workerRef } = useFitsLoader(imageUrl, imageBlob, setStatus);
 
   const {
     zoom, panX, panY,
@@ -160,7 +160,7 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
   const effectiveStretch = props.stretch ?? !isStacked;
 
   // Automatically draw with AutoStretch (handled in worker for FITS)
-  useCanvasDrawer(canvasRef, parsedData, bitmap, handleSetDrawnSize, effectiveStretch);
+  useCanvasDrawer(canvasRef, workerRef, parsedData, bitmap, handleSetDrawnSize, effectiveStretch);
 
   // Expose methods via REF
   useImperativeHandle(ref, () => ({

@@ -2,6 +2,7 @@ import React, { useRef } from 'react';
 import { FitsViewerManager } from '../../common/fitsViewer/FitsViewerManager';
 import type { FitsRendererHandle } from '../../common/fitsViewer/FitsViewerManager';
 import { SectionPanel } from '../../common/components/SectionPanel';
+import { SwitchDisplayButton } from '../../common/components/SwitchDisplayButton';
 import '../../common/styles/panels.css';
 
 /** Props for the TargetViewerManager component. */
@@ -45,6 +46,7 @@ export const TargetViewerManager: React.FC<Props> = ({
             <button className="btn btn--tiny" onClick={() => rendererRef.current?.zoomOut()} title="Zoom Out">-</button>
             <button className="btn btn--tiny" onClick={() => rendererRef.current?.zoomToFit()} title="Zoom to Fit">Fit</button>
             <button className="btn btn--tiny" onClick={() => rendererRef.current?.zoomToScale(1.0)} title="Actual Size">1:1</button>
+            <SwitchDisplayButton targetDisplay="Image Processing" selectedTarget={selectedTarget} />
           </div>
         }
       >

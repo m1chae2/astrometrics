@@ -32,7 +32,7 @@ from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.drivers.plate_solve_interface import PlateSolver
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.astrometry.post_processing.assess_match_quality import assess_match_quality
-from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_fwhm_from_data
+from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_blob_width_from_data
 from astrometricslib.pipelines.astrometry.pre_processing.source_detection import SourceDetector
 from astrometricslib.utilities.config_loader import AppConfiguration
 from astrometricslib.utilities.exceptions import AstroLibError
@@ -507,13 +507,16 @@ class StarIdentifier:
             return sources, unique_sources
 
         try:
-            measured_fwhm = measure_fwhm_from_data(data) if data is not None else None
-        except Exception as fwhm_error:
-            logger.debug("Could not measure detection FWHM, keeping the configured default: %s", fwhm_error)
-            measured_fwhm = None
-        if measured_fwhm is not None:
-            logger.debug(f"Matching detection kernel to measured FWHM: {measured_fwhm:.2f}px")
-            self.detector.fwhm = measured_fwhm
+            blob_width = measure_blob_width_from_data(data) if data is not None else None
+        except Exception as width_error:
+            logger.debug(
+                "Could not measure the detection kernel width, keeping the configured default: %s",
+                width_error,
+            )
+            blob_width = None
+        if blob_width is not None:
+            logger.debug(f"Sizing the detection kernel from the measured blob width: {blob_width:.2f}px")
+            self.detector.fwhm = blob_width
 
         sources = self.detector.detect(data)
         unique_sources = self.detector.deduplicate(sources)

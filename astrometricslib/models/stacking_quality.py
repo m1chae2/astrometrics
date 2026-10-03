@@ -89,6 +89,10 @@ class StackingOutputQuality(BaseModel):
     # the median of the input frames. Images only.
     stacked_fwhm_px: float | None = Field(default=None, alias="stackedFwhmPx")
     median_input_fwhm_px: float | None = Field(default=None, alias="medianInputFwhmPx")
+    # The star width the stack should have given its input frames (RMS of a
+    # sample of their widths); a stack wider than this by the degradation
+    # ratio is flagged.
+    expected_stack_fwhm_px: float | None = Field(default=None, alias="expectedStackFwhmPx")
     # How many spectral frames the registration check questioned. Spectra
     # only.
     spectral_registration_concern_count: int = Field(default=0, alias="spectralRegistrationConcernCount")

@@ -202,7 +202,7 @@ def test_mono_frame_detection_matches_the_kernel_to_the_measured_fwhm():  # ruff
     data = np.zeros((4, 4))
 
     with patch(
-        "astrometricslib.pipelines.astrometry.processing.star_identifier.measure_fwhm_from_data",
+        "astrometricslib.pipelines.astrometry.processing.star_identifier.measure_blob_width_from_data",
         return_value=6.75,
     ):
         identifier.detect_stars(data, is_color_frame=False)
@@ -219,7 +219,7 @@ def test_mono_frame_detection_keeps_the_default_fwhm_when_measurement_fails():  
     data = np.zeros((4, 4))
 
     with patch(
-        "astrometricslib.pipelines.astrometry.processing.star_identifier.measure_fwhm_from_data",
+        "astrometricslib.pipelines.astrometry.processing.star_identifier.measure_blob_width_from_data",
         return_value=None,
     ):
         identifier.detect_stars(data, is_color_frame=False)
@@ -239,7 +239,7 @@ def test_mono_frame_detection_survives_a_measurement_exception():  # ruff: ignor
     data = np.zeros((4, 4))
 
     with patch(
-        "astrometricslib.pipelines.astrometry.processing.star_identifier.measure_fwhm_from_data",
+        "astrometricslib.pipelines.astrometry.processing.star_identifier.measure_blob_width_from_data",
         side_effect=RuntimeError("boom"),
     ):
         sources, unique_sources = identifier.detect_stars(data, is_color_frame=False)

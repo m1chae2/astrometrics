@@ -17,6 +17,7 @@ from astrometricslib.drivers.fits_access import read_header
 from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.frame_optics import resolve_frame_telescope
+from astrometricslib.pipelines.shared.previous_stack_path import PREVIOUS_STACK_FOLDER_NAME
 from astrometricslib.pipelines.shared.quarantine_path import QUARANTINE_FOLDER_NAME
 from astrometricslib.utilities.config_loader import AppConfiguration
 from astrometricslib.utilities.enums import FilterType
@@ -25,6 +26,10 @@ from astrometricslib.utilities.storage_mount import require_mounted_storage
 from astrometricslib.utilities.warn_once import warn_once
 
 logger = logging.getLogger(__name__)
+
+# Folders the pipeline keeps inside a target's folder that are not inputs:
+# frames it set aside, and the stack a restack replaced.
+_SKIPPED_FOLDER_NAMES = (QUARANTINE_FOLDER_NAME, PREVIOUS_STACK_FOLDER_NAME)
 
 # The ISO or gain written on a record when the image header gives none, the
 # camera's config section gives no `default_iso`, and so nothing is known.
@@ -408,7 +413,7 @@ def scan_target_directory(target: Target, frames_root_path: str, refresh_headers
         # Frames the stacking pipeline set aside for clouds or trailed stars
         # live in an `_excluded` folder; walking into it would add them
         # straight back to the target.
-        directories[:] = [d for d in directories if d != QUARANTINE_FOLDER_NAME]
+        directories[:] = [d for d in directories if d not in _SKIPPED_FOLDER_NAMES]
         for file in files:
             if file.lower().endswith((".fits", ".fit")):
                 if is_stacked_output(file):
@@ -485,7 +490,7 @@ def classify_and_sort_fits_files(
     for src in scan_list:
         for root, directories, files in os.walk(src):
             # Frames set aside by the stacking pipeline stay where they are.
-            directories[:] = [d for d in directories if d != QUARANTINE_FOLDER_NAME]
+            directories[:] = [d for d in directories if d not in _SKIPPED_FOLDER_NAMES]
             # Avoid recursively walking into destination structures if
             # they exist inside src
             if any(part in root.split(os.sep) for part in [telescope_name, "darks", "biases", "flats"]):

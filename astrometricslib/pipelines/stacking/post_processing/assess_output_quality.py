@@ -30,8 +30,8 @@ def assess_output_quality(metrics: StackingPipelineQualityMetrics) -> StackingOu
         reasons.append(f"rejected pixel fraction {metrics.rejected_pixel_fraction:.1%} at or above threshold")
     if metrics.fwhm_degraded:
         reasons.append(
-            f"stacked FWHM {metrics.stacked_fwhm_px:.2f}px degraded vs median input "
-            f"{metrics.median_input_fwhm_px:.2f}px"
+            f"stacked FWHM {metrics.stacked_fwhm_px:.2f}px degraded vs the "
+            f"{metrics.expected_stack_fwhm_px:.2f}px its input frames predict"
         )
     if metrics.spectral_registration_flags:
         reasons.append(
@@ -58,6 +58,7 @@ def assess_output_quality(metrics: StackingPipelineQualityMetrics) -> StackingOu
         negative_pixel_max_percent=metrics.negative_pixel_max_percent,
         stacked_fwhm_px=metrics.stacked_fwhm_px,
         median_input_fwhm_px=metrics.median_input_fwhm_px,
+        expected_stack_fwhm_px=metrics.expected_stack_fwhm_px,
         spectral_registration_concern_count=len(metrics.spectral_registration_flags),
         is_flagged=bool(reasons),
         flag_reasons=reasons,

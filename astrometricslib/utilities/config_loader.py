@@ -269,6 +269,7 @@ class AppConfiguration:
                 "background_homogeneity_check_enabled": "true",
                 "quarantine_bad_frames_enabled": "true",
                 "preview_star_tone_enabled": "true",
+                "keep_previous_stack_enabled": "true",
                 "auto_open_gui": "false",
             },
             # Blank: no gradient removal. Stack previews are then stretched
@@ -491,6 +492,23 @@ class AppConfiguration:
             `True` if the quarantine step should run.
         """
         val = self.get_value("Processing.Siril", "quarantine_bad_frames_enabled", fallback="true")
+        return str(val).lower() == "true"
+
+    def get_keep_previous_stack_enabled(self) -> bool:
+        """Return whether a restack keeps the stack it replaces.
+
+        When on, a restack first moves the current stack and its pictures into
+        a ``_previous`` folder beside it (see
+        `pipelines/stacking/post_processing/previous_stack.py`). Only one
+        previous version is kept; the next restack replaces it. Nothing
+        deletes it until the user calls `discard_previous_stack`.
+
+        Returns
+        -------
+        enabled : `bool`
+            `True` if the previous stack should be kept.
+        """
+        val = self.get_value("Processing.Siril", "keep_previous_stack_enabled", fallback="true")
         return str(val).lower() == "true"
 
     def get_preview_star_tone_enabled(self) -> bool:

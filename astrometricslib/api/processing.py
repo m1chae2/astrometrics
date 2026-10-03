@@ -15,6 +15,7 @@ from astrometricslib.drivers.logger_interface import DbLogHandler, LoggerInterfa
 from astrometricslib.drivers.siril_interface import ImageProcessing
 from astrometricslib.models.calibration_ingest import CalibrationIngestReport, FlatSetAssessment
 from astrometricslib.models.excluded_frames import QuarantinePreview, RestoreReport, SetAsideFrame
+from astrometricslib.models.stack_comparison import StackComparison
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.calibration_ingest import (
     assess_flat_group,
@@ -107,6 +108,32 @@ class QualityDiagnostics:
         from astrometricslib.pipelines.shared.quality.raw_frame_check import check_raw_frames
 
         return check_raw_frames(folder=folder_path, last_count=last_count)
+
+    def compare_stacks(self, before_path: str, after_path: str) -> StackComparison:
+        """Measure two stacks and say how they differ.
+
+        Both stacks are measured the same way: sky level, pixel noise, how
+        flat the sky is across the frame, and star width. The result gives the
+        numbers, the change in each, and a plain sentence for each. It does
+        not pick a winner, because that depends on what the change was for.
+        New flats should lower the flatness number and leave the noise alone;
+        more frames should lower the noise and leave the flatness alone.
+
+        Parameters
+        ----------
+        before_path : `str`
+            Path of the older stack's FITS file.
+        after_path : `str`
+            Path of the newer stack's FITS file.
+
+        Returns
+        -------
+        comparison : `StackComparison`
+            The measurements of both stacks and the change between them.
+        """
+        from astrometricslib.pipelines.stacking.post_processing.stack_comparison import compare_stacks
+
+        return compare_stacks(before_path, after_path)
 
     def measure_stack_rejected_fraction(self, stacked_path: str) -> float | None:
         """Get the mean per-pixel rejected-frame fraction from the rejmap.
@@ -920,6 +947,108 @@ class ProcessingPipelines:
             if restored_count:
                 self.scan_target_directory(target, frames_path)
         return RestoreReport(target_id=target.id, applied=apply, frames=frames, restored_count=restored_count)
+
+    @staticmethod
+    def _stack_path_of(target: Target, spectral: bool) -> str:
+        """Find the path of a target's current stack.
+
+        Returns
+        -------
+        path : `str`
+            The path of the spectral stack if `spectral`, otherwise the
+            imaging stack.
+
+        Raises
+        ------
+        ValueError
+            If the target has no such stack.
+        """
+        stacking = target.spectral_stacking if spectral else target.stacking
+        path = getattr(stacking, "stacked_image", None)
+        if not path:
+            raise ValueError(f"Target '{target.id}' has no {'spectral ' if spectral else ''}stack.")
+        return str(path)
+
+    def compare_with_previous_stack(self, target: Target, spectral: bool = False) -> StackComparison | None:
+        """Compare a target's stack with the one the last restack replaced.
+
+        A restack keeps the stack it replaces in a ``_previous`` folder (the
+        setting ``keep_previous_stack_enabled``, on by default). Only one
+        previous version is kept.
+
+        Parameters
+        ----------
+        target : `Target`
+            The target whose stack to compare.
+        spectral : `bool`, optional
+            Compare the spectral stack instead of the imaging stack.
+
+        Returns
+        -------
+        comparison : `StackComparison` or `None`
+            The previous stack as ``before`` and the current one as ``after``.
+            `None` if no previous stack is kept.
+        """
+        from astrometricslib.pipelines.stacking.post_processing.previous_stack import previous_stack_path
+        from astrometricslib.pipelines.stacking.post_processing.stack_comparison import compare_stacks
+
+        current = self._stack_path_of(target, spectral)
+        previous = previous_stack_path(current)
+        if previous is None:
+            return None
+        return compare_stacks(previous, current)
+
+    def discard_previous_stack(self, target: Target, spectral: bool = False) -> list[str]:
+        """Delete the kept previous stack of a target.
+
+        Use this once the new stack looks good. It deletes the old stack and
+        its pictures, and it cannot be undone. The pipeline never does this by
+        itself; it only replaces the previous stack with a newer one at the
+        next restack.
+
+        Parameters
+        ----------
+        target : `Target`
+            The target whose previous stack to delete.
+        spectral : `bool`, optional
+            Delete the previous spectral stack instead of the imaging stack.
+
+        Returns
+        -------
+        removed : `list` [`str`]
+            The files deleted. Empty if no previous stack was kept.
+        """
+        from astrometricslib.pipelines.stacking.post_processing.previous_stack import discard_previous_stack
+
+        return discard_previous_stack(self._stack_path_of(target, spectral))
+
+    def swap_with_previous_stack(self, target: Target, spectral: bool = False) -> list[str]:
+        """Put the previous stack back as the current one.
+
+        Use this when the new stack turned out worse. The current stack
+        moves into ``_previous`` in the same step, so calling this again undoes
+        it. Only the files change places. The stored quality summary describes
+        the stack that was current when it was written, so restack to refresh
+        it.
+
+        Parameters
+        ----------
+        target : `Target`
+            The target whose stacks to swap.
+        spectral : `bool`, optional
+            Swap the spectral stacks instead of the imaging stacks.
+
+        Returns
+        -------
+        restored : `list` [`str`]
+            The files now current that came from the previous stack. Empty if
+            no previous stack was kept, in which case nothing moves.
+        """
+        from astrometricslib.pipelines.stacking.post_processing.previous_stack import (
+            swap_with_previous_stack,
+        )
+
+        return swap_with_previous_stack(self._stack_path_of(target, spectral))
 
     def create_frame_record(self, path: str, camera: str | None = None) -> Any:
         """Create a frame record by reading a FITS image's header data.

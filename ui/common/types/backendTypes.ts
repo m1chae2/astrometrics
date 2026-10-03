@@ -934,6 +934,7 @@ export interface StackingOutputQuality {
   negativePixelMaxPercent?: number | null;
   stackedFwhmPx?: number | null;
   medianInputFwhmPx?: number | null;
+  expectedStackFwhmPx?: number | null;
   spectralRegistrationConcernCount?: number;
   isFlagged?: boolean;
   flagReasons?: string[];
@@ -969,6 +970,7 @@ export interface StackingPipelineQualityMetrics {
   negativePixelsFlagged?: boolean;
   stackedFwhmPx?: number | null;
   medianInputFwhmPx?: number | null;
+  expectedStackFwhmPx?: number | null;
   fwhmDegraded?: boolean;
   spectralRegistrationFlags?: ExcludedFrame[];
   stackingDurationSeconds?: number | null;

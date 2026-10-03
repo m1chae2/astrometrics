@@ -6,7 +6,8 @@ Pre-processing works directly on image pixels. It does not know about star catal
 
 1. **Detect star-like points.** The image is scanned for points of light that stand out from the background. Each one becomes a candidate star, with a position and a brightness.
 2. **Remove duplicates.** The pipeline merges detections that sit right on top of each other into one, so it does not count a single bright star twice.
-3. **Measure sharpness (when needed).** A separate tool measures how wide a star's light spreads across the pixels around it. A tighter, narrower spread means a sharper image.
+3. **Measure sharpness (when needed).** A separate tool (`fwhm.py`) fits a bell-shaped curve (a Gaussian) to each of the brightest unsaturated stars and reports the median full width at half maximum (FWHM) in pixels. A tighter, narrower fit means a sharper image. It skips stars whose cores are clipped, because they fit wider than their neighbours. On the 2026-10-02 Bubble Nebula stack it reads 2.5 px, which agrees with an independent fit (2.4 px). Siril's own PSF fit reads about 20% wider (2.8 px). Do not compare FWHM values from different estimators.
+4. **Size the detection kernel.** The astrometry stage sizes its star-detection filter from a different number, the blob width (`measure_blob_width_from_data`): the spread of all the light in a 30-pixel box. It reads about twice the FWHM (4.9 px on the same stack). Astrometry was validated with it, and sizing the filter from the FWHM instead cut the catalogue matches on that stack from 335 to 181 and raised the residual from 1.04 to 5.0 arcseconds. The blob width is not a star width and is never reported as one.
 
 ## The quality metric this stage produces
 

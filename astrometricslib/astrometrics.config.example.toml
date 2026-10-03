@@ -271,6 +271,12 @@ quarantine_bad_frames_enabled = "true"
 # like equally bright white dots. The stack file itself is never changed. Set
 # "false" for the plain stretched picture.
 preview_star_tone_enabled = "true"
+# "true" (the default): before a restack replaces a stack, move the old stack
+# and its pictures into a folder named "_previous" beside it, so the two can be
+# compared. Only one previous version is kept; the next restack replaces it.
+# Nothing deletes it until you call discard_previous_stack. Set "false" to
+# overwrite stacks in place.
+keep_previous_stack_enabled = "true"
 
 ["Processing.Parallelism"]
 target_workers = "auto"

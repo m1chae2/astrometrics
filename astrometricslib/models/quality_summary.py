@@ -234,6 +234,10 @@ class StackingPipelineQualityMetrics(BaseModel):
     # Standard-imaging-only.
     stacked_fwhm_px: float | None = Field(default=None, alias="stackedFwhmPx")
     median_input_fwhm_px: float | None = Field(default=None, alias="medianInputFwhmPx")
+    # The star width the stack should have given its input frames: the root
+    # mean square of a sample of their widths. The degradation flag compares
+    # the stack with this, not with the median.
+    expected_stack_fwhm_px: float | None = Field(default=None, alias="expectedStackFwhmPx")
     fwhm_degraded: bool = Field(default=False, alias="fwhmDegraded")
 
     # Spectral-only.

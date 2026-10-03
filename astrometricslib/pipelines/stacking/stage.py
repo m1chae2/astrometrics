@@ -275,19 +275,28 @@ def stack_frames(
     # different exposure lengths are stacked one length at a time and then
     # combined, and a registration that loses too many frames is retried with
     # a different star detection.
-    stacked_path, diagnostics = run_stack(
-        engine,
-        target_frames,
-        target.id,
-        output_file,
-        log_file,
-        has_spectral,
-        rejection_sigma=rejection_sigma,
-        filter_wfwhm=filter_wfwhm,
-        filter_round=filter_round,
-        stack_weight=stack_weight,
-        generate_rejmap=generate_rejmap,
-    )
+    # A restack overwrites the stack file. The old stack and its pictures wait
+    # in a staging folder until the new stack exists; if the restack fails,
+    # they go back where they were.
+    staging = _archive_stack_before_restack(target.id, output_file)
+    try:
+        stacked_path, diagnostics = run_stack(
+            engine,
+            target_frames,
+            target.id,
+            output_file,
+            log_file,
+            has_spectral,
+            rejection_sigma=rejection_sigma,
+            filter_wfwhm=filter_wfwhm,
+            filter_round=filter_round,
+            stack_weight=stack_weight,
+            generate_rejmap=generate_rejmap,
+        )
+    except BaseException:
+        _finish_stack_archive(staging, output_file, target.id, kept=False)
+        raise
+    _finish_stack_archive(staging, output_file, target.id, kept=bool(stacked_path))
     excluded_frames.extend(
         ExcludedFrame(path=path, reason="corrupt or unreadable FITS file")
         for path in diagnostics.get("corrupt_frames_skipped", [])
@@ -343,6 +352,94 @@ def stack_frames(
             record_preview_as_processed_image(target, has_spectral, stacked_path, preview_path)
 
     return stacked_path
+
+
+def _expected_stack_path(target_id: str, output_file: str) -> str:
+    """Give the path the stack will be written to.
+
+    Parameters
+    ----------
+    target_id : `str`
+        The target's id, which names its folder under the stacks path.
+    output_file : `str`
+        The stack's file name, or a full path.
+
+    Returns
+    -------
+    path : `str`
+        `output_file` when it is a full path, otherwise the file inside the
+        target's folder under the stacks path.
+    """
+    import os
+
+    from astrometricslib.utilities.config_loader import get_configuration
+
+    if os.path.isabs(output_file):
+        return output_file
+    return os.path.join(str(get_configuration().get_stacks_path()), "lights", target_id, output_file)
+
+
+def _archive_stack_before_restack(target_id: str, output_file: str) -> str | None:
+    """Move the current stack aside before a restack, if the setting is on.
+
+    Parameters
+    ----------
+    target_id : `str`
+        The target's id.
+    output_file : `str`
+        The stack's file name, or a full path.
+
+    Returns
+    -------
+    staging : `str` or `None`
+        The staging folder holding the old files, or `None` if the setting is
+        off, there was no stack, or the files could not be moved. A failure to
+        move is logged and does not stop the restack.
+    """
+    from astrometricslib.pipelines.stacking.post_processing.previous_stack import archive_current_stack
+    from astrometricslib.utilities.config_loader import get_configuration
+
+    if not get_configuration().get_keep_previous_stack_enabled():
+        return None
+    try:
+        return archive_current_stack(_expected_stack_path(target_id, output_file))
+    except OSError as error:
+        logger.warning(
+            "Could not keep the previous stack of '%s': %s. The restack goes on.", target_id, error
+        )
+        return None
+
+
+def _finish_stack_archive(staging: str | None, output_file: str, target_id: str, *, kept: bool) -> None:
+    """Make the staged stack the previous one, or put it back.
+
+    Parameters
+    ----------
+    staging : `str` or `None`
+        The folder `_archive_stack_before_restack` returned.
+    output_file : `str`
+        The stack's file name, or a full path.
+    target_id : `str`
+        The target's id.
+    kept : `bool`
+        `True` if the restack produced a new stack, so the old one becomes the
+        previous stack. `False` if it failed, so the old one is restored.
+    """
+    from astrometricslib.pipelines.stacking.post_processing.previous_stack import (
+        commit_archive,
+        rollback_archive,
+    )
+
+    if staging is None:
+        return
+    stack_path = _expected_stack_path(target_id, output_file)
+    try:
+        if kept:
+            commit_archive(stack_path, staging)
+        else:
+            rollback_archive(stack_path, staging)
+    except OSError as error:
+        logger.warning("Could not finish keeping the previous stack of '%s': %s", target_id, error)
 
 
 def _disambiguating_configuration_tag(target, target_frames) -> str:  # ruff: ignore[missing-type-function-argument]
@@ -688,26 +785,31 @@ def _update_frame_registration_results(
 def _measure_fwhm_degradation(summary, stacked_path: str, target_frames: list[Any]) -> None:  # ruff: ignore[missing-type-function-argument]
     """Compare the stacked image's sharpness against its input frames.
 
-    Measured with the same `measure_image_fwhm` function on both sides,
-    not Siril's own PSF-fit FWHM from the preserved .seq file -- those
-    two methods aren't on the same absolute scale (confirmed
-    empirically: Siril's fit reported ~2.6px median on a real M 13
-    session where `measure_image_fwhm` reported ~4.25px on the *same
-    raw input frames*), so comparing across methods produced a false
-    "degraded" flag on every stack rather than a real signal.
+    Measured with the same `measure_image_fwhm` function on both sides. The
+    input sample is spread evenly over all the frames, so a stack of several
+    nights is judged against all of them and not only the first night. The
+    stack is compared with the width its inputs predict (see
+    `expected_stack_fwhm`), not with their median.
 
     Sets `summary.stacking_metrics`' FWHM fields and the degradation
     flag in place.
     """
-    from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_image_fwhm
-    from astrometricslib.pipelines.stacking.post_processing.stack_quality import is_stacked_fwhm_degraded
+    from astrometricslib.pipelines.astrometry.pre_processing.fwhm import (
+        FWHM_MEASUREMENT_STAR_COUNT,
+        measure_image_fwhm,
+    )
+    from astrometricslib.pipelines.stacking.post_processing.stack_quality import (
+        expected_stack_fwhm,
+        is_stacked_fwhm_degraded,
+    )
 
-    # Capped at 15 frames (matching FWHM_MEASUREMENT_STAR_COUNT's
-    # existing per-image star-count cap) since a median only needs a
-    # representative sample, unlike the background-split check which
-    # needs every frame to avoid missing a split.
+    # A sample of at most 15 frames (matching FWHM_MEASUREMENT_STAR_COUNT),
+    # spaced evenly over the whole set. A median or an RMS only needs a
+    # representative sample, unlike the background-split check, which needs
+    # every frame to avoid missing a split.
+    step = max(1, len(target_frames) // FWHM_MEASUREMENT_STAR_COUNT)
     input_fwhms = []
-    for frame in target_frames[:15]:
+    for frame in target_frames[::step][:FWHM_MEASUREMENT_STAR_COUNT]:
         try:
             fwhm = measure_image_fwhm(frame.path)
             if fwhm is not None:
@@ -715,18 +817,18 @@ def _measure_fwhm_degradation(summary, stacked_path: str, target_frames: list[An
         except Exception as exc:
             logger.debug("Skipping FWHM measurement for '%s': %s", frame.path, exc)
             continue
+    expected = expected_stack_fwhm(input_fwhms)
     if input_fwhms:
         import statistics as _statistics
 
         summary.stacking_metrics.median_input_fwhm_px = _statistics.median(input_fwhms)
+        summary.stacking_metrics.expected_stack_fwhm_px = expected
 
     stacked_fwhm = measure_image_fwhm(stacked_path)
     if stacked_fwhm is not None:
         summary.stacking_metrics.stacked_fwhm_px = stacked_fwhm
-        if summary.stacking_metrics.median_input_fwhm_px is not None:
-            summary.stacking_metrics.fwhm_degraded = is_stacked_fwhm_degraded(
-                stacked_fwhm, summary.stacking_metrics.median_input_fwhm_px
-            )
+        if expected is not None:
+            summary.stacking_metrics.fwhm_degraded = is_stacked_fwhm_degraded(stacked_fwhm, expected)
 
 
 def _check_spectral_registration_quality(summary, stacked_path: str, diagnostics: dict) -> None:  # ruff: ignore[missing-type-function-argument]

@@ -1,10 +1,14 @@
 """Manages the lifecycle and health of the INDI server connection."""
 
+import concurrent.futures
 import logging
 import socket
 import time
 
 logger = logging.getLogger(__name__)
+
+_LOOKUP_THREAD = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="IndiHostLookup")
+"""One helper thread for name lookups; slow lookups cannot pile up."""
 
 
 class ConnectionManager:
@@ -49,6 +53,38 @@ class ConnectionManager:
             return self.last_responsive_value
         except Exception:
             self.last_responsive_value = False
+            return False
+
+    def is_host_resolvable(self, host: str, port: int, timeout: float = 1.0) -> bool:
+        """Check, without waiting long, that the server name can be looked up.
+
+        Looking up a ``.local`` name that nothing answers takes about 5 seconds
+        inside the INDI client's own connect call, and that call holds the one
+        worker that serves every INDI request, so a switched-off telescope
+        stalled unrelated calls (such as the device list) for seconds. The
+        lookup is done here in a helper thread instead and given `timeout`
+        seconds; a lookup that is still running is left to finish in the
+        background and the attempt is skipped.
+
+        Parameters
+        ----------
+        host : `str`
+            Server host name or address.
+        port : `int`
+            Server port.
+        timeout : `float`, optional
+            Seconds to wait for the lookup. Defaults to 1.
+
+        Returns
+        -------
+        resolvable : `bool`
+            `True` if the name resolved within `timeout`.
+        """
+        lookup = _LOOKUP_THREAD.submit(socket.getaddrinfo, host, port, type=socket.SOCK_STREAM)
+        try:
+            lookup.result(timeout=timeout)
+            return True
+        except concurrent.futures.TimeoutError, OSError:
             return False
 
     def record_connection_result(self, connected: bool) -> None:

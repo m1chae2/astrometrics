@@ -343,6 +343,16 @@ class _SimulatedConnectionManager:
         """
         return True
 
+    def is_host_resolvable(self, host, port, timeout=1.0):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+        """Report resolvable: the simulator has no host to look up.
+
+        Returns
+        -------
+        resolvable : `bool`
+            Always `True`.
+        """
+        return True
+
     def record_connection_result(self, connected):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
         """Ignore the result: the simulator keeps no back-off."""
 

@@ -366,6 +366,13 @@ class IndiInterface(IndiClient):
         if not self.isServerConnected():
             self._sync_config()
 
+        if not self.connection_manager.is_host_resolvable(self.getHost(), self.getPort()):
+            # Skips the client's own connect call, which would wait about five
+            # seconds on the name lookup while holding the INDI worker.
+            print(f"No indiserver running on {self.getHost()}:{self.getPort()}")
+            self._reset_status()
+            return None
+
         if not self.connectServer():
             # Only print if we haven't already logged this recently
             print(f"No indiserver running on {self.getHost()}:{self.getPort()}")

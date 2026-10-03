@@ -7,6 +7,8 @@ These tests check the listing uses the picklable `get_device_names` method and
 never reads `deviceMap`.
 """
 
+import socket
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -117,3 +119,32 @@ def test_the_wait_between_connection_attempts_doubles_up_to_a_limit_and_resets()
     assert waits == pytest.approx([5.0, 10.0, 20.0, 30.0, 30.0, 30.0])
     manager.record_connection_result(True)
     assert manager.connection_cooldown == pytest.approx(5.0)
+
+
+def test_a_host_name_that_does_not_resolve_quickly_is_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A slow or failing lookup returns False within the timeout."""
+    from wayfindinglib.drivers.indi.connection_manager import ConnectionManager
+
+    manager = ConnectionManager("host")
+
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *args, **kwargs: time.sleep(1.5))
+    started = time.monotonic()
+    assert manager.is_host_resolvable("slow.local", 7624, timeout=0.2) is False
+    assert time.monotonic() - started < 1.0
+
+    def fail(*args: object, **kwargs: object) -> None:
+        """Fail the lookup the way an unknown host does.
+
+        Raises
+        ------
+        socket.gaierror
+            Always.
+        """
+        raise socket.gaierror("unknown host")
+
+    time.sleep(1.5)  # let the slow lookup finish so the helper thread is free
+    monkeypatch.setattr(socket, "getaddrinfo", fail)
+    assert manager.is_host_resolvable("nowhere.local", 7624, timeout=1.0) is False
+
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *args, **kwargs: [("ok",)])
+    assert manager.is_host_resolvable("localhost", 7624, timeout=1.0) is True

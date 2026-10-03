@@ -25,6 +25,9 @@ coverage/
 astrometricslib/library/astrometrics.db
 astrometricslib/library/astrometrics_log.db
 wayfindinglib/library/*.db
+# Ekos and KStars logs downloaded from the telescope computer. They are a
+# personal observing record (targets, times, paths), like the databases.
+wayfindinglib/library/ekos_logs/
 # Downloaded and cached star catalogs. The Gaia cone-search cache
 # (catalog_cache.db) is regenerated on demand by star_identifier.py, and its
 # cached_regions rows encode the sky coordinates actually pointed at, so a

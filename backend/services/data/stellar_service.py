@@ -5,9 +5,12 @@ import math
 import re
 import threading
 import time
+from collections import OrderedDict
+from pathlib import Path
 from typing import Any
 
 from astrometricslib import Astrometrics, StellarObject
+from backend.services.data.deletion_archive import archive_record_before_delete
 
 logger = logging.getLogger(__name__)
 
@@ -281,6 +284,7 @@ class StellarService:
 
     def __init__(self, config, astrometrics=None, wayfinder=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
         self.config = config
+        self._overlay_cache: OrderedDict[tuple, list[dict]] = OrderedDict()
         self.astrometrics = astrometrics or Astrometrics(config)
         self._wayfinder = wayfinder
         self._period_search_slots = threading.BoundedSemaphore(_MAXIMUM_CONCURRENT_PERIOD_SEARCHES)
@@ -425,7 +429,66 @@ class StellarService:
             if not _is_per_frame_photometry_detection(obj.id)
         ]
 
+    def _catalog_version(self) -> tuple[int, ...]:
+        """Say whether the star database may have changed since last asked.
+
+        Returns
+        -------
+        version : `tuple` [`int`, ...]
+            The modification times of the database file and its write-ahead
+            log. Any write to the library changes it, whichever code made
+            the write.
+        """
+        library = Path(self.config.get_library_path())
+        times = []
+        for name in ("astrometrics.db", "astrometrics.db-wal"):
+            try:
+                times.append((library / name).stat().st_mtime_ns)
+            except OSError:
+                times.append(0)
+        return tuple(times)
+
     def get_astrometry_overlay_stars(self, target_id: str, limit: int = 35) -> list[dict]:
+        """Retrieve star centroids and labels, remembering recent answers.
+
+        Working out the overlay for a target with tens of thousands of
+        stars takes seconds. The answer only changes when the library
+        database or the target's reference image changes, so it is kept
+        (the 64 most recent) and reused until one of them does.
+
+        Parameters
+        ----------
+        target_id : `str`
+            Target identifier to retrieve overlay stars for.
+        limit : `int`, optional
+            Maximum number of stars to return (default 35).
+
+        Returns
+        -------
+        result : `list` of `dict`
+            See `_compute_astrometry_overlay_stars`.
+        """
+        try:
+            target_entity = self.astrometrics.targets.get(target_id) if target_id else None
+            image_path = getattr(target_entity, "stacked_image", None) or getattr(
+                target_entity, "processed_image", None
+            )
+            image_time = Path(image_path).stat().st_mtime_ns if image_path else 0
+            key = (target_id, limit, str(image_path), image_time, self._catalog_version())
+        except Exception:
+            return self._compute_astrometry_overlay_stars(target_id, limit)
+
+        cache = self._overlay_cache
+        if key in cache:
+            cache.move_to_end(key)
+            return [dict(star) for star in cache[key]]
+        result = self._compute_astrometry_overlay_stars(target_id, limit)
+        cache[key] = [dict(star) for star in result]
+        while len(cache) > 64:
+            cache.popitem(last=False)
+        return result
+
+    def _compute_astrometry_overlay_stars(self, target_id: str, limit: int = 35) -> list[dict]:
         """Retrieve star pixel centroids and labels for astrometry overlay.
 
         Attempts to retrieve catalog-identified stars and their pixel positions
@@ -575,8 +638,8 @@ class StellarService:
                     return results
 
         norm_target_ids = {str(tid).replace("_", " ").strip().lower() for tid in candidate_ids}
-        # Only the stars of the target itself are read, once under each
-        # spelling of its id ("M 13" and "M_13"), not the whole catalog.
+        # Only the stars of the target itself are read, under the first
+        # spelling of its id that has any ("M 13" or "M_13").
         objects = []
         seen_star_ids: set[str] = set()
         for candidate_id in candidate_ids:
@@ -584,6 +647,10 @@ class StellarService:
                 if star.id not in seen_star_ids:
                     seen_star_ids.add(star.id)
                     objects.append(star)
+            if objects:
+                # The other spellings name the same target; reading its
+                # tens of thousands of stars again only repeats the work.
+                break
         candidates: list[tuple[Any, float, float]] = []
 
         for obj in objects:
@@ -1097,6 +1164,11 @@ class StellarService:
         result : `bool`
             `True` if the object was deleted, `False` otherwise.
         """
+        existing = self.astrometrics.stars.get_object(object_id)
+        if existing is not None:
+            archive_record_before_delete(
+                self.config.get_library_path(), "stellar_object", existing.id, existing.serialize()
+            )
         return self.astrometrics.stars.delete(object_id)
 
     def update_object(self, object_id: str, updates: dict) -> StellarObject | None:

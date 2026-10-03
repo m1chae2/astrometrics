@@ -10,6 +10,9 @@ from typing import Any
 
 from mcp.types import TextContent, Tool
 
+from backend.services.infrastructure.agent_code_policy import check_agent_code
+from backend.services.infrastructure.destructive_guard import destructive_rpc_reason
+
 
 class ToolRegistry:
     """Centralized model context protocol tool registration and dispatching."""
@@ -363,6 +366,12 @@ async def tool_backend_call_rpc(method: str, params: dict[str, Any] | None = Non
     """
     import time
 
+    refusal = destructive_rpc_reason(method)
+    if method.startswith("terminal:"):
+        refusal = "Terminal methods run code and are only available through electron_run_python."
+    if refusal:
+        return {"status": "error", "method": method, "elapsed_ms": 0.0, "data": None, "message": refusal}
+
     start_time = time.perf_counter()
     res = await execute_rpc(method, params or {})
     elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
@@ -542,6 +551,9 @@ async def tool_electron_run_python(code: str) -> dict[str, Any]:
         plots, execution time in milliseconds, and active workspace
         manifest.
     """
+    refusal = check_agent_code(code)
+    if refusal:
+        return {"status": "error", "message": refusal}
     res = await execute_rpc("terminal:execute", {"code_str": code, "source": "agent"})
     if res.get("status") == "success" and "data" in res:
         return res["data"]
@@ -599,7 +611,7 @@ async def tool_terminal_inspect_api(target: str) -> dict[str, Any]:
         Method signatures and numpydoc summaries.
     """
     code = f"result = inspect_api({target})"
-    res = await execute_rpc("terminal:execute", {"code_str": code})
+    res = await execute_rpc("terminal:execute", {"code_str": code, "source": "agent"})
     if res.get("status") == "success" and "data" in res:
         return res["data"].get("result", res["data"])
     return res

@@ -20,6 +20,8 @@ import traceback
 from pathlib import Path
 from typing import Any
 
+from backend.services.infrastructure.agent_code_policy import AGENT_VISIBLE_NAMES, check_agent_code
+
 logger = logging.getLogger(__name__)
 
 
@@ -520,6 +522,25 @@ class ScriptingService:
             })
         return manifest
 
+    def _agent_scope(self) -> dict[str, Any]:
+        """Return the reduced variable scope that agent code runs in.
+
+        The scope holds only the names in `AGENT_VISIBLE_NAMES` (refreshed
+        from the console each time) plus whatever variables the agent
+        created itself on earlier calls.
+
+        Returns
+        -------
+        scope : `dict[str, Any]`
+            The variables agent code can see.
+        """
+        if not hasattr(self, "_agent_variables"):
+            self._agent_variables: dict[str, Any] = {}
+        for name in AGENT_VISIBLE_NAMES:
+            if name in self.console.locals:
+                self._agent_variables[name] = self.console.locals[name]
+        return self._agent_variables
+
     def execute_structured(self, code_str: str, source: str = "repl") -> dict[str, Any]:
         """Execute code and return a structured result envelope.
 
@@ -535,7 +556,14 @@ class ScriptingService:
         -------
         envelope : `dict[str, Any]`
             Contains status, stdout, stderr, result, plots, and
-            updated workspace manifest.
+            updated workspace manifest. Agent code that breaks the rules in
+            `agent_code_policy` is not run and comes back as an error.
+
+        Raises
+        ------
+        PermissionError
+            Raised inside the run when agent code breaks the policy; it is
+            caught and reported in the envelope, not passed to the caller.
         """
         start_time = time.time()
         stdout_buf = io.StringIO()
@@ -553,17 +581,27 @@ class ScriptingService:
                 {"code": code_str, "timestamp": time.time()},
             )
 
+        # Code from an agent may only use the public astrometrics libraries
+        # (see agent_code_policy) and runs in a reduced scope, so the app's
+        # internal services are not reachable by name.
+        refusal = check_agent_code(code_str) if source == "agent" else None
+        scope = self._agent_scope() if source == "agent" else self.console.locals
+
         with contextlib.redirect_stdout(stdout_buf), contextlib.redirect_stderr(stderr_buf):
             try:
                 plt = self.console.locals.get("plt")
 
-                if "\n" in code_str.strip():
-                    exec(code_str, self.console.locals)  # ruff: ignore[exec-builtin]
+                if refusal:
+                    raise PermissionError(refusal)
+                if source == "agent":
+                    exec(code_str, scope)  # ruff: ignore[exec-builtin]
+                elif "\n" in code_str.strip():
+                    exec(code_str, scope)  # ruff: ignore[exec-builtin]
                 else:
                     self.console.push(code_str)
 
-                if "result" in self.console.locals:
-                    raw_res = self.console.locals["result"]
+                if "result" in scope:
+                    raw_res = scope["result"]
                     try:
                         json.dumps(raw_res)
                         result = raw_res

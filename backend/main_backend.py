@@ -32,7 +32,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
-from astrometricslib import get_configuration
+from astrometricslib import StorageNotMountedError, get_configuration, require_mounted_storage
 from backend.container import container
 
 # Configure Logging
@@ -206,17 +206,24 @@ _frames_path = container.config_service.get_frames_path()
 _stacks_path = container.config_service.get_stacks_path()
 _library_path = container.config_service.get_library_path()
 
-if _frames_path.is_dir() and _frames_path != _library_path:
+try:
+    require_mounted_storage(_frames_path, container.config_service)
+except StorageNotMountedError as not_mounted:
+    # Not fatal: images from the stacks folder still load, and the frames
+    # folder is served as soon as the drive is mounted.
+    logger.warning("%s", not_mounted)
+
+if _frames_path != _library_path:
     # The pipeline's output can live on another disk (the stacks path), with
     # the same lights/<target>/ layout. Files not found among the frames are
-    # looked up there.
+    # looked up there. The mount is made even if a folder is missing now (a
+    # network drive not mounted yet): the server answers 404 until the folder
+    # appears, then serves it, with no restart.
     app.mount(
         "/static/frames",
         FallbackStaticFiles(
             directory=str(_frames_path),
-            fallback_directory=str(_stacks_path)
-            if _stacks_path != _frames_path and _stacks_path.is_dir()
-            else None,
+            fallback_directory=str(_stacks_path) if _stacks_path != _frames_path else None,
         ),
         name="static_frames",
     )

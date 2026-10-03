@@ -293,6 +293,7 @@ class RPCHandlerRegistry:
         self.register("astronomy:stars_by_spectral_class", ("stellar_service", "get_stars_by_spectral_class"))
         self.register("astronomy:get", ("stellar_service", "get_object_fuzzy_by_id"))
         self.register("astronomy:save", ("stellar_service", "save_objects"))
+        self.register("astronomy:delete", ("stellar_service", "delete_object"))
         self.register("astronomy:analyze_periodicity", ("stellar_service", "analyze_periodicity"))
         self.register("astronomy:get_stellar_objects", ("stellar_service", "get_stellar_objects"))
         self.register("astronomy:get_overlay_stars", ("stellar_service", "get_astrometry_overlay_stars"))

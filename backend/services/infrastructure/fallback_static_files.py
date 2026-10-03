@@ -5,6 +5,11 @@ previews, processed pictures) can live in another folder, set by the
 ``stacks_path`` setting. Both use the same layout, ``lights/<target>/...``,
 so the image viewer asks for one URL either way. This server tries the frames
 folder first and then the stacks folder.
+
+Either folder can be missing when the server starts, for example a network
+drive that is not mounted yet. The server then answers 404 for files that
+are not found, and serves the folder as soon as it appears. It does not need
+a restart.
 """
 
 import os
@@ -26,8 +31,17 @@ class FallbackStaticFiles(StaticFiles):
 
     def __init__(self, *, directory: str, fallback_directory: str | None = None, **kwargs: object) -> None:
         """Set up the primary folder and, if given, the fallback one."""
+        kwargs.setdefault("check_dir", False)
         super().__init__(directory=directory, **kwargs)
         self._fallback = StaticFiles(directory=fallback_directory, **kwargs) if fallback_directory else None
+
+    async def check_config(self) -> None:
+        """Skip Starlette's check that the folder exists.
+
+        Starlette answers a request with an error when the folder is missing.
+        This server treats a missing folder as "no such file" (404) and looks
+        again on the next request, so a drive that is mounted later works.
+        """
 
     def lookup_path(self, path: str) -> tuple[str, os.stat_result | None]:
         """Find a file in the primary folder, then in the fallback folder.

@@ -72,3 +72,25 @@ def test_without_a_fallback_only_the_frames_folder_is_used(tmp_path: Path) -> No
     (tmp_path / "frames").mkdir()
 
     assert _client(tmp_path / "frames", None).get("/static/frames/x.fits").status_code == 404
+
+
+def test_a_missing_frames_folder_serves_stacks_and_answers_404_for_the_rest(tmp_path: Path) -> None:
+    """With the frames drive missing, stacks still load."""
+    (tmp_path / "stacks" / "lights" / "M 27").mkdir(parents=True)
+    (tmp_path / "stacks" / "lights" / "M 27" / "M_27_Stacked.fits").write_bytes(b"stack")
+    client = _client(tmp_path / "missing_drive", tmp_path / "stacks")
+
+    assert client.get("/static/frames/lights/M 27/M_27_Stacked.fits").status_code == 200
+    assert client.get("/static/frames/lights/M 27/frame.fits").status_code == 404
+
+
+def test_the_frames_folder_is_served_once_it_appears(tmp_path: Path) -> None:
+    """A drive mounted after the server started works without a restart."""
+    frames = tmp_path / "drive" / "frames"
+    client = _client(frames, None)
+    assert client.get("/static/frames/lights/M 27/frame.fits").status_code == 404
+
+    (frames / "lights" / "M 27").mkdir(parents=True)
+    (frames / "lights" / "M 27" / "frame.fits").write_bytes(b"raw")
+
+    assert client.get("/static/frames/lights/M 27/frame.fits").status_code == 200

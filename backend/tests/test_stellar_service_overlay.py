@@ -6,6 +6,10 @@ pseudo-objects and detection stubs, sorts catalog-identified stars first,
 and respects the limit.
 """
 
+import os
+from collections import OrderedDict
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -185,3 +189,57 @@ def test_get_astrometry_overlay_stars_projects_celestial_coords_with_wcs() -> No
     results = service.get_astrometry_overlay_stars(target_id="M 13")
     # Since no WCS is loaded from file, stars without x/y are skipped
     assert results == []
+
+
+def _service_with_counting_overlay(library_path: Path) -> tuple[StellarService, list[str]]:
+    """Build a service whose overlay work is replaced by a counter.
+
+    Returns
+    -------
+    service : `StellarService`
+        A service with no real catalog behind it.
+    calls : `list` [`str`]
+        One entry is added each time the overlay is really computed.
+    """
+    service = StellarService.__new__(StellarService)
+    service.config = SimpleNamespace(get_library_path=lambda: library_path)
+    service._overlay_cache = OrderedDict()
+    service.astrometrics = SimpleNamespace(
+        targets=SimpleNamespace(
+            get=lambda target_id: SimpleNamespace(stacked_image=None, processed_image=None)
+        )
+    )
+    calls: list[str] = []
+
+    def compute(target_id: str, limit: int = 35) -> list[dict]:
+        """Count the call and return one star.
+
+        Returns
+        -------
+        stars : `list` [`dict`]
+            A single fake overlay star.
+        """
+        calls.append(target_id)
+        return [{"id": "S1", "x": 1.0}]
+
+    service._compute_astrometry_overlay_stars = compute
+    return service, calls
+
+
+def test_the_overlay_is_reused_until_the_database_changes(tmp_path: Path) -> None:
+    """A repeat request is answered from memory until a write."""
+    database = tmp_path / "astrometrics.db"
+    database.write_text("a")
+    service, calls = _service_with_counting_overlay(tmp_path)
+
+    first = service.get_astrometry_overlay_stars("M 51")
+    second = service.get_astrometry_overlay_stars("M 51")
+    assert calls == ["M 51"]
+    assert first == second
+
+    second[0]["x"] = 99.0
+    assert service.get_astrometry_overlay_stars("M 51")[0]["x"] == pytest.approx(1.0)
+
+    os.utime(database, ns=(1, 1))
+    service.get_astrometry_overlay_stars("M 51")
+    assert calls == ["M 51", "M 51"]

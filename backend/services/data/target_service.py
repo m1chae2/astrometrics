@@ -9,6 +9,7 @@ import os
 from typing import Any, ClassVar
 
 from astrometricslib import FilterType, Target
+from backend.services.data.deletion_archive import archive_record_before_delete
 from backend.services.data.image_service import ImageService
 
 logger = logging.getLogger(__name__)
@@ -223,6 +224,11 @@ class TargetService:
         result : `bool`
             `True` if the target was deleted, `False` otherwise.
         """
+        target = self.astrometrics.targets.get(target_id)
+        if target is not None:
+            archive_record_before_delete(
+                self.config.get_library_path(), "target", target.id, target.serialize()
+            )
         return self.astrometrics.targets.delete(target_id)
 
     def get_frame_stats(self, target_id: str) -> dict[str, list[dict[str, Any]]]:

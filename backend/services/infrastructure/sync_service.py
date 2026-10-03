@@ -6,6 +6,7 @@ import threading
 from datetime import UTC
 from typing import Any
 
+from astrometricslib import require_mounted_storage
 from backend.services.infrastructure import thread_management
 from wayfindinglib.api.control_registry import ObservatoryControl
 
@@ -182,6 +183,7 @@ class SyncService:
                 self._config.get_frames_path(), f"lights/{target_name}/Apertura 75Q/{camera_name}/"
             )
 
+            require_mounted_storage(destination_path, self._config)
             if not os.path.exists(destination_path):
                 os.makedirs(destination_path)
 
@@ -207,6 +209,7 @@ class SyncService:
                 self._config.get_frames_path(), f"{dest_type_map[sync_type]}/{camera_name}/"
             )
 
+            require_mounted_storage(destination_path, self._config)
             if not os.path.exists(destination_path):
                 os.makedirs(destination_path)
 

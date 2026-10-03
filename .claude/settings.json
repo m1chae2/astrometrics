@@ -180,6 +180,30 @@
     ],
     "additionalDirectories": [
       "/tmp/claude-1000"
+    ],
+    "ask": [
+      "mcp__astrometricslib-core__target_delete",
+      "mcp__astrometricslib-core__target_delete_images",
+      "mcp__astrometricslib-core__star_delete",
+      "mcp__astrometricslib-core__calibration_save",
+      "mcp__astrometricslib-core__target_save",
+      "mcp__astrometricslib-core__star_save_all",
+      "mcp__astrometrics-backend__backend_call_rpc",
+      "Bash(rm *)",
+      "Bash(sqlite3 *)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard_destructive.py\""
+          }
+        ]
+      }
     ]
   }
 }

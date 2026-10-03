@@ -5,6 +5,7 @@ visibility calculations into a single astrometrics backed by descriptive
 operations modules under `tasks/planning_tasks/`.
 """
 
+import logging
 from datetime import datetime
 from typing import Any
 
@@ -15,6 +16,8 @@ from astropy.time import Time
 from astrometricslib import StellarObject, Target
 from wayfindinglib.tasks.planning_tasks.catalog_operations import build_catalog_driver_registry
 from wayfindinglib.tasks.planning_tasks.constellation_operations import ConstellationLineLibrary
+
+logger = logging.getLogger(__name__)
 
 
 class Sky:
@@ -55,6 +58,12 @@ class Sky:
 
         # Read from config if available and args are None
         if config is not None and hasattr(config, "app_config"):
+            if config.app_config.get("Observatory.Location", "latitude", fallback=None) is None:
+                logger.warning(
+                    "No Observatory.Location latitude/longitude in the configuration; using the "
+                    "default site (Denver). Altitudes, rise and set times will be wrong for "
+                    "any other observatory."
+                )
             self.latitude = latitude or float(
                 config.app_config.get("Observatory.Location", "latitude", fallback="39.7392")
             )

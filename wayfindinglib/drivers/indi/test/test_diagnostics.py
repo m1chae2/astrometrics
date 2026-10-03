@@ -9,6 +9,8 @@ never reads `deviceMap`.
 
 from types import SimpleNamespace
 
+import pytest
+
 from wayfindinglib.drivers.indi.diagnostics import IndiDiagnostics
 from wayfindinglib.drivers.indi_interface import IndiInterface
 
@@ -82,3 +84,40 @@ def test_names_fall_back_to_the_server_device_list() -> None:
     camera = SimpleNamespace(getDeviceName=lambda: "CCD Simulator")
     session = SimpleNamespace(deviceMap={}, getDevices=lambda: [broken, camera])
     assert IndiInterface.get_device_names(session) == ["CCD Simulator"]
+
+
+def test_a_down_server_is_not_retried_before_the_wait_has_passed() -> None:
+    """Listing devices shares the session's connection wait timer."""
+    from wayfindinglib.drivers.indi.connection_manager import ConnectionManager
+
+    calls = []
+    manager = ConnectionManager("host")
+    session = SimpleNamespace(
+        isServerConnected=lambda: False,
+        connect_to_server=lambda: calls.append("connect"),
+        get_device_names=lambda: [],
+        connection_manager=manager,
+    )
+    diagnostics = IndiDiagnostics(session)
+
+    diagnostics.get_devices()
+    diagnostics.get_devices()
+    diagnostics.get_devices()
+
+    assert calls == ["connect"]
+    assert manager.consecutive_failures == 1
+
+
+def test_the_wait_between_connection_attempts_doubles_up_to_a_limit_and_resets() -> None:
+    """Repeated failures back off; a success returns to the base wait."""
+    from wayfindinglib.drivers.indi.connection_manager import ConnectionManager
+
+    manager = ConnectionManager("host")
+    waits = []
+    for _ in range(6):
+        manager.record_connection_result(False)
+        waits.append(manager.connection_cooldown)
+
+    assert waits == pytest.approx([5.0, 10.0, 20.0, 30.0, 30.0, 30.0])
+    manager.record_connection_result(True)
+    assert manager.connection_cooldown == pytest.approx(5.0)

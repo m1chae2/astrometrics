@@ -146,8 +146,8 @@ def local_fits_fingerprints(directories: list[str]) -> set[tuple[str, int]]:
     Pairing it with byte size -- rsync's own primary quick check --
     keeps a new frame from being mistaken for one already held.
 
-    Size is stable across the library's FITS header auto-repair, which
-    rewrites headers within the existing 2880-byte block structure.
+    The size stays the same after download, because the library never
+    rewrites a frame it has stored.
 
     Parameters
     ----------
@@ -484,31 +484,6 @@ def list_remote_files_with_sizes(api, folder_name: str) -> list[tuple[str, int]]
     return api.remote_transfer_driver.list_remote_files_with_sizes(folder_name)
 
 
-def _library_fits_paths(frames_path: str) -> set[str]:
-    """List every FITS file path in the calibration library folders.
-
-    Used to work out which files a calibration sync added, by taking a
-    snapshot before and after the download and sorting step.
-
-    Parameters
-    ----------
-    frames_path : `str`
-        The image library's root folder.
-
-    Returns
-    -------
-    paths : `set` [`str`]
-        Absolute path of every ``.fits``/``.fit`` file found.
-    """
-    paths: set[str] = set()
-    for library_folder in ("darks", "biases", "flats"):
-        for root, _, files in os.walk(os.path.join(frames_path, library_folder)):
-            for file_name in files:
-                if file_name.lower().endswith((".fits", ".fit")):
-                    paths.add(os.path.join(root, file_name))
-    return paths
-
-
 def sync_calibration_folder(api, remote_folder_name: str) -> dict[str, Any]:  # ruff: ignore[missing-type-function-argument]
     """Download a Bias/Dark/Flat remote folder into the calibration library.
 
@@ -569,7 +544,6 @@ def sync_calibration_folder(api, remote_folder_name: str) -> dict[str, Any]:  # 
     # baseline has to be assembled from those directories explicitly.
     remote_files = list_remote_files_with_sizes(api, remote_folder_name)
     files_to_transfer = None
-    library_paths_before = _library_fits_paths(frames_path)
     if remote_files:
         already_held = local_fits_fingerprints([
             staging_dir,
@@ -608,13 +582,16 @@ def sync_calibration_folder(api, remote_folder_name: str) -> dict[str, Any]:  # 
     if not success:
         return summary
 
-    classify_and_sort_fits_files([staging_dir], "Calibration", config, _DEFAULT_TELESCOPE_NAME)
+    # The sorter reports where it put each new file, so the summary needs no
+    # walk of the whole calibration library (slow on a network drive).
+    added_paths: list[str] = []
+    classify_and_sort_fits_files([staging_dir], "Calibration", config, _DEFAULT_TELESCOPE_NAME, added_paths)
 
     astrometrics.processing.calibration.refresh(kind)
     astrometrics.processing.calibration.save()
 
     added_by_folder: dict[str, int] = {}
-    for added_path in _library_fits_paths(frames_path) - library_paths_before:
+    for added_path in added_paths:
         folder = os.path.relpath(os.path.dirname(added_path), frames_path)
         added_by_folder[folder] = added_by_folder.get(folder, 0) + 1
     summary["added_by_folder"] = dict(sorted(added_by_folder.items()))

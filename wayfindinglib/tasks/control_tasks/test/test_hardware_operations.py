@@ -705,3 +705,89 @@ def test_close_enclosure_raises_when_no_enclosure_configured(mocker):  # ruff: i
     with pytest.raises(AstrometryHardwareError, match="no Enclosure is configured"):
         ops.close_enclosure(manager)
     enclosure_driver.close.assert_not_called()
+
+
+class _FakeAppConfig:
+    """A stand-in for the configuration's `app_config` lookup."""
+
+    def __init__(self, values: dict[tuple[str, str], str]) -> None:
+        """Hold the settings as `{(section, key): value}`."""
+        self._values = values
+
+    def get(self, section: str, key: str, fallback: Any = None) -> Any:
+        """Return one setting, or `fallback` when it is not set.
+
+        Returns
+        -------
+        value : `Any`
+            The stored value, or `fallback`.
+        """
+        return self._values.get((section, key), fallback)
+
+
+def _configured_site(**overrides: str) -> Any:
+    """Build a fake configuration holding an observatory site.
+
+    Returns
+    -------
+    config : `Any`
+        An object with an `app_config` carrying the site settings.
+    """
+    values = {
+        ("Observatory.Location", "latitude"): "45.76",
+        ("Observatory.Location", "longitude"): "-110.74",
+        ("Observatory.Location", "elevation"): "1500",
+    }
+    values.update({("Observatory.Location", key): value for key, value in overrides.items()})
+
+    class _Config:
+        """Carries the fake settings."""
+
+        app_config = _FakeAppConfig(values)
+
+    return _Config()
+
+
+def test_get_observer_location_falls_back_to_the_configuration_when_the_mount_is_offline(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """An unreachable mount does not leave the tool with no answer."""
+    mount_driver = mocker.Mock()
+    mount_driver.get_observer_location = mocker.AsyncMock(side_effect=ConnectionError("not connected"))
+    manager = _FakeManager(mount_driver=mount_driver, config=_configured_site())
+
+    assert ops.get_observer_location(manager) == {
+        "latitude": 45.76,
+        "longitude": -110.74,
+        "elevation": 1500.0,
+    }
+
+
+def test_get_observer_location_falls_back_when_the_mount_reports_nothing(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """A mount that reports no location defers to the configured site."""
+    mount_driver = mocker.Mock()
+    mount_driver.get_observer_location = mocker.AsyncMock(return_value=None)
+    manager = _FakeManager(mount_driver=mount_driver, config=_configured_site())
+
+    assert ops.get_observer_location(manager)["latitude"] == pytest.approx(45.76)
+
+
+def test_get_observer_location_prefers_the_mount_over_the_configuration(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """The telescope's own location wins when it reports one."""
+    mount_driver = mocker.Mock()
+    mount_driver.get_observer_location = mocker.AsyncMock(
+        return_value={"latitude": 1.0, "longitude": 2.0, "elevation": 3.0}
+    )
+    manager = _FakeManager(mount_driver=mount_driver, config=_configured_site())
+
+    assert ops.get_observer_location(manager)["latitude"] == pytest.approx(1.0)
+
+
+def test_configured_observer_location_is_none_without_a_latitude_and_longitude():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """A configuration with no site gives no location, not a made-up one."""
+
+    class _EmptyConfig:
+        """Carries no site settings."""
+
+        app_config = _FakeAppConfig({})
+
+    assert ops.configured_observer_location(_EmptyConfig()) is None
+    assert ops.configured_observer_location(None) is None

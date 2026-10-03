@@ -13,9 +13,12 @@ duck-typed shape the deprecated `ObservatoryManager` already used.
 """
 
 import asyncio
+import logging
 from typing import Any
 
 from wayfindinglib.models.policy.delegation import ObservatoryCapability
+
+logger = logging.getLogger(__name__)
 
 
 def _run_sync(coroutine: Any) -> Any:
@@ -629,10 +632,45 @@ def get_observer_location(manager) -> dict[str, float] | None:  # ruff: ignore[m
     -------
     location : `dict[str, float]` or `None`
         Geographical location dictionary with ``"latitude"``,
-        ``"longitude"``, and ``"elevation"`` keys, or `None` if the
-        telescope does not report a location.
+        ``"longitude"``, and ``"elevation"`` keys, or `None` if neither
+        the telescope nor the configuration supplies one.
     """
-    return _run_sync(manager.mount_driver.get_observer_location())
+    try:
+        mount_location = _run_sync(manager.mount_driver.get_observer_location())
+    except Exception as mount_error:
+        logger.info("Mount did not report an observer location (%s); trying the configuration.", mount_error)
+        mount_location = None
+    if mount_location:
+        return mount_location
+    return configured_observer_location(getattr(manager, "_config", None))
+
+
+def configured_observer_location(config) -> dict[str, float] | None:  # ruff: ignore[missing-type-function-argument]
+    """Read the observatory site from the ``Observatory.Location`` settings.
+
+    Used when the telescope is not connected, so a location tool still
+    answers instead of returning nothing.
+
+    Parameters
+    ----------
+    config : `AppConfiguration` or `None`
+        The application configuration.
+
+    Returns
+    -------
+    location : `dict` [`str`, `float`] or `None`
+        The ``"latitude"``, ``"longitude"`` and ``"elevation"`` (metres,
+        0.0 if unset), or `None` if latitude or longitude is not set.
+    """
+    app_config = getattr(config, "app_config", None)
+    if app_config is None:
+        return None
+    latitude = app_config.get("Observatory.Location", "latitude", fallback=None)
+    longitude = app_config.get("Observatory.Location", "longitude", fallback=None)
+    if latitude is None or longitude is None:
+        return None
+    elevation = app_config.get("Observatory.Location", "elevation", fallback=0.0)
+    return {"latitude": float(latitude), "longitude": float(longitude), "elevation": float(elevation)}
 
 
 def refresh_safety_assessment(observatory):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]

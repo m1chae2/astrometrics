@@ -7,7 +7,11 @@ SIMBAD, and retrieves objects within a sky region for wayfindinglib.sky.Sky.
 from typing import Any
 
 from astrometricslib import StellarObject, Target
-from wayfindinglib.drivers.catalog.simbad_catalog_driver import resolve_simbad_radec
+from wayfindinglib.drivers.catalog.simbad_catalog_driver import (
+    format_target_coordinates,
+    read_simbad_field,
+    resolve_simbad_radec,
+)
 from wayfindinglib.exceptions import AstrometryHardwareError
 
 
@@ -60,25 +64,24 @@ def resolve_target_coordinates(sky, target_name: str) -> Target | StellarObject:
     except ImportError as e:
         raise AstrometryHardwareError(f"Cannot resolve '{target_name}': astroquery not installed.") from e
 
+    # Ask only for the object-type and spectral-type columns. Adding the V
+    # magnitude here would make SIMBAD return only objects that have one,
+    # which drops clusters and nebulae such as M 52.
     custom_simbad = Simbad()
     custom_simbad.TIMEOUT = 5
-    custom_simbad.add_votable_fields("otype", "sp", "flux(V)")
+    custom_simbad.add_votable_fields("otype", "sp")
 
     try:
         table = custom_simbad.query_object(target_name)
         if table is not None and len(table) > 0:
             row = table[0]
-            main_id = str(row["MAIN_ID"])
-            ra_str = str(row["RA"])
-            dec_str = str(row["DEC"])
-            otype = str(row.get("OTYPE", "")).upper()
-            sp_type = str(row.get("SP_TYPE", ""))
+            main_id = str(read_simbad_field(row, "main_id"))
+            ra_str = str(read_simbad_field(row, "ra"))
+            dec_str = str(read_simbad_field(row, "dec"))
+            otype = str(read_simbad_field(row, "otype", "")).upper()
+            sp_type = str(read_simbad_field(row, "sp_type", ""))
 
-            magnitude = None
-            if "FLUX_V" in row.colnames and not row["FLUX_V"].mask:
-                magnitude = float(row["FLUX_V"])
-
-            is_star = "STAR" in otype or "WD" in otype or sp_type
+            is_star = "STAR" in otype or "WD" in otype or bool(sp_type)
 
             try:
                 ra_degrees_value, dec_degrees_value = resolve_simbad_radec(ra_str, dec_str)
@@ -86,6 +89,8 @@ def resolve_target_coordinates(sky, target_name: str) -> Target | StellarObject:
                 raise AstrometryHardwareError(
                     f"Resolved target '{target_name}' coordinates are invalid: {coordinate_error}"
                 ) from coordinate_error
+
+            magnitude = _query_visual_magnitude(main_id) if is_star else None
 
             if is_star:
                 return StellarObject(
@@ -97,7 +102,8 @@ def resolve_target_coordinates(sky, target_name: str) -> Target | StellarObject:
                     spectralType=sp_type or "",
                 )
             else:
-                return Target(id=main_id, commonName=main_id, ra=ra_str, dec=dec_str)
+                ra_text, dec_text = format_target_coordinates(ra_degrees_value, dec_degrees_value)
+                return Target(id=main_id, commonName=main_id, ra=ra_text, dec=dec_text)
 
     except Exception as simbad_error:
         raise AstrometryHardwareError(
@@ -250,3 +256,34 @@ def get_online_catalog_sources(
         enabled_driver_names=enabled_driver_names,
         magnitude_limit=magnitude_limit,
     )
+
+
+def _query_visual_magnitude(object_name: str) -> float | None:
+    """Look up a star's V magnitude in a separate SIMBAD query.
+
+    Kept apart from the main lookup because requesting the V column
+    there would drop every object that has no V magnitude.
+
+    Parameters
+    ----------
+    object_name : `str`
+        The SIMBAD main identifier of the star.
+
+    Returns
+    -------
+    magnitude : `float` or `None`
+        The V magnitude, or `None` if SIMBAD has none or the query fails.
+    """
+    try:
+        from astroquery.simbad import Simbad
+
+        magnitude_client = Simbad()
+        magnitude_client.TIMEOUT = 5
+        magnitude_client.add_votable_fields("V")
+        table = magnitude_client.query_object(object_name)
+        if table is None or len(table) == 0:
+            return None
+        value = read_simbad_field(table[0], "V")
+        return None if value is None else float(value)
+    except Exception:
+        return None

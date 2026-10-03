@@ -552,9 +552,17 @@ def test_sync_calibration_folder_summarises_what_was_added(tmp_path, monkeypatch
         def download_remote_frames(self, target: object, **kwargs: object) -> bool:
             return True
 
-    def fake_classify(scan_list: list[str], target_id: str, config: object, telescope_name: str) -> int:
+    def fake_classify(
+        scan_list: list[str],
+        target_id: str,
+        config: object,
+        telescope_name: str,
+        added_paths: list[str] | None = None,
+    ) -> int:
         for name in ("Dark_002.fits", "Dark_003.fits"):
             (held_folder / name).write_bytes(b"y" * 10)
+            if added_paths is not None:
+                added_paths.append(str(held_folder / name))
         return 2
 
     monkeypatch.setattr(astrometricslib, "get_configuration", lambda: _Configuration())

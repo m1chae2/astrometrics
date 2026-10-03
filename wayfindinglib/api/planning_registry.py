@@ -302,6 +302,17 @@ class ObservationPlanning:
     def get_visibility(self, objects: list[Any], time_input: Any = None) -> list[dict[str, Any]]:
         """Return altitude/azimuth/rise/set/transit for a list of objects.
 
+        Parameters
+        ----------
+        objects : `list`
+            Names or ids (looked up in the library, then SIMBAD), or
+            dictionaries ``{"id", "ra_deg", "dec_deg"}``. Through the MCP
+            server these are converted to sky objects automatically.
+        time_input : `datetime`, `Time`, or `str`, optional
+            When to compute for; default is now. Through the MCP server,
+            an ISO 8601 string (an offset such as ``-06:00`` is honored;
+            no offset means UTC).
+
         Returns
         -------
         visibility : `list` [`dict`]

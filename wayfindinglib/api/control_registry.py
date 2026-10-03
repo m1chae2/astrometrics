@@ -1357,6 +1357,47 @@ class ObservatoryControl:
             for context in contexts
         ]
 
+    def get_live_session_status(
+        self, window_minutes: float = 10.0, refresh: bool = True, destination_dir: str | None = None
+    ) -> dict[str, Any]:
+        """Report how the current observing session is going, right now.
+
+        Reads the telescope computer's latest Ekos analyze log and KStars
+        text log, and reports the guiding accuracy over the last few
+        minutes, the latest exposures with any that look ruined (too few
+        stars, or a guiding excursion during them), each dither and whether
+        it worked, and guiding excursions with their drift rate. Nothing is
+        stored; the answer is recomputed on every call.
+
+        Parameters
+        ----------
+        window_minutes : `float`, optional
+            Length of the recent-guiding window, in minutes.
+        refresh : `bool`, optional
+            Whether to download the latest logs first. `False` reads what
+            is already in `destination_dir`.
+        destination_dir : `str` or `None`, optional
+            Local folder for the logs. Defaults to ``ekos_logs`` inside
+            this library's own data folder.
+
+        Returns
+        -------
+        status : `dict`
+            See `LiveSessionStatus`. Empty with an ``"error"`` key if no
+            readable analyze log exists.
+        """
+        from wayfindinglib.drivers import local_database
+        from wayfindinglib.tasks.control_tasks import live_session_status_task
+
+        if destination_dir is None:
+            destination_dir = str(local_database._wayfinding_library_path(self._config) / "ekos_logs")
+        status = live_session_status_task.get_live_session_status(
+            self, destination_dir, window_minutes=window_minutes, refresh=refresh
+        )
+        if status is None:
+            return {"error": f"No readable Ekos analyze log found in {destination_dir}."}
+        return status.model_dump(mode="json")
+
     def ingest_ekos_session_logs(
         self, destination_dir: str | None = None, download: bool = True
     ) -> dict[str, Any]:
@@ -2317,6 +2358,12 @@ class ObservatoryControl:
     def check_for_new_remote_images(self, target) -> dict[str, Any]:  # ruff: ignore[missing-type-function-argument]
         """Check for new FITS files on the telescope pictures path.
 
+        Parameters
+        ----------
+        target : `Target`
+            The library target to check. Through the MCP server, give its
+            id (for example ``"M 52"``).
+
         Returns
         -------
         result : `dict`
@@ -2335,6 +2382,18 @@ class ObservatoryControl:
         local_subfolder: str = "lights",
     ) -> bool:
         """Download remote frames from the telescope, then index them.
+
+        Parameters
+        ----------
+        target : `Target`
+            The library target the frames belong to. Through the MCP
+            server, give its id (for example ``"M 52"``).
+        selected_files : `list` [`str`], optional
+            Remote file paths to download; default is the whole folder.
+        remote_target_name : `str`, optional
+            The remote folder name when it differs from the target id.
+        local_subfolder : `str`, optional
+            The folder under the frames path to download into.
 
         Returns
         -------

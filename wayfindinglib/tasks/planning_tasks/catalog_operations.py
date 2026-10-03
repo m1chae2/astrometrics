@@ -21,7 +21,11 @@ from wayfindinglib.drivers.catalog import (
     DeepStarSource,
     LocalBrightStarCatalogDriver,
 )
-from wayfindinglib.drivers.catalog.simbad_catalog_driver import resolve_simbad_radec
+from wayfindinglib.drivers.catalog.simbad_catalog_driver import (
+    format_target_coordinates,
+    read_simbad_field,
+    resolve_simbad_radec,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -264,7 +268,9 @@ def global_catalog(sky, ra_deg: float, dec_deg: float, radius_deg: float) -> lis
 
     custom_simbad = Simbad()
     custom_simbad.TIMEOUT = 10
-    custom_simbad.add_votable_fields("otype", "sp", "flux(V)")
+    # No V-magnitude column: requesting it hides objects without one,
+    # such as clusters and nebulae.
+    custom_simbad.add_votable_fields("otype", "sp")
 
     center = SkyCoord(ra=ra_deg, dec=dec_deg, unit=(u.deg, u.deg), frame="icrs")
 
@@ -274,20 +280,14 @@ def global_catalog(sky, ra_deg: float, dec_deg: float, radius_deg: float) -> lis
             return results
 
         for row in table:
-            main_id = str(row["main_id"] if "main_id" in row.colnames else row["MAIN_ID"])
-            ra_str = str(row["ra"] if "ra" in row.colnames else row["RA"])
-            dec_str = str(row["dec"] if "dec" in row.colnames else row["DEC"])
-            otype = str(row.get("OTYPE", "")).upper()
-            sp_type = str(row.get("SP_TYPE", ""))
-
+            main_id = str(read_simbad_field(row, "main_id"))
+            ra_str = str(read_simbad_field(row, "ra"))
+            dec_str = str(read_simbad_field(row, "dec"))
+            otype = str(read_simbad_field(row, "otype", "")).upper()
+            sp_type = str(read_simbad_field(row, "sp_type", ""))
             magnitude = None
-            if "FLUX_V" in row.colnames and not row["FLUX_V"].mask:
-                try:
-                    magnitude = float(row["FLUX_V"])
-                except ValueError, TypeError:
-                    pass
 
-            is_star = "STAR" in otype or "WD" in otype or sp_type
+            is_star = "STAR" in otype or "WD" in otype or bool(sp_type)
 
             try:
                 ra_degrees_value, dec_degrees_value = resolve_simbad_radec(ra_str, dec_str)
@@ -309,7 +309,8 @@ def global_catalog(sky, ra_deg: float, dec_deg: float, radius_deg: float) -> lis
                     )
                 )
             else:
-                results.append(Target(id=main_id, commonName=main_id, ra=ra_str, dec=dec_str))
+                ra_text, dec_text = format_target_coordinates(ra_degrees_value, dec_degrees_value)
+                results.append(Target(id=main_id, commonName=main_id, ra=ra_text, dec=dec_text))
 
     except Exception as query_error:
         logger.warning("SIMBAD online query failed or timed out (offline mode): %s", query_error)

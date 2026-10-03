@@ -4,7 +4,11 @@ Description: Verifies folder-name resolution and offline-cooldown
 fail-fast behavior, without requiring a real SSH-reachable host.
 """
 
+import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import threading
 import time
+from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -335,3 +339,73 @@ def test_kstars_logs_go_into_their_own_folder(tmp_path):  # ruff: ignore[missing
     assert "-mtime -3" in mock_command.call_args.args[0][-1]
     assert "--include=log_*.txt" in mock_popen.call_args.args[0]
     assert local_paths == [str(tmp_path / "kstars_logs" / "log_20-14-00.txt")]
+
+
+def test_download_refuses_and_creates_nothing_when_the_frames_drive_is_missing(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify a download below an unmounted mount point makes no folders."""
+    from astrometricslib import StorageNotMountedError
+
+    mount_point = tmp_path / "nas"
+
+    class _Settings:
+        def get_frames_mount_point(self) -> Path:
+            return mount_point
+
+    monkeypatch.setattr("astrometricslib.utilities.storage_mount.get_configuration", lambda: _Settings())
+    driver = StellarMateInterface(host_alias="test-host", remote_pictures_path="/home/stellarmate/Pictures")
+
+    with (
+        patch.object(driver, "_resolve_remote_folder_name", return_value="M_27"),
+        patch("subprocess.Popen") as mock_popen,
+        pytest.raises(StorageNotMountedError),
+    ):
+        driver.download_target_folder(remote_target_name="M_27", local_dest_path=str(mount_point / "frames"))
+
+    assert not mount_point.exists()
+    mock_popen.assert_not_called()
+
+
+def test_a_host_known_offline_fails_fast_even_after_the_cooldown_and_rechecks_in_the_background():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """A caller never waits on an offline host; a background check follows."""
+    driver = StellarMateInterface(host_alias="test-host")
+    driver._last_connection_status = False
+    driver._last_probe_time = time.time() - 60.0
+    started = []
+
+    with patch.object(driver, "_start_background_probe", lambda: started.append(True)):
+        with patch("subprocess.run") as mock_run:
+            with pytest.raises(RuntimeError, match="known offline"):
+                driver._run_command(["ssh", "test-host", "ls"])
+            mock_run.assert_not_called()
+
+    assert started == [True]
+
+
+def test_the_first_call_probes_once_and_concurrent_calls_share_the_answer():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """Many callers at start-up cost one slow probe, not one each."""
+    driver = StellarMateInterface(host_alias="test-host")
+    calls = []
+
+    def slow_failure(*args: Any, **kwargs: Any) -> None:
+        calls.append(1)
+        time.sleep(0.3)
+        raise subprocess.CalledProcessError(255, "ssh", stderr="Could not resolve hostname")
+
+    errors = []
+
+    def call() -> None:
+        """Make one call and keep its error."""
+        try:
+            driver._run_command(["ssh", "test-host", "ls"])
+        except RuntimeError as error:
+            errors.append(str(error))
+
+    with patch("subprocess.run", side_effect=slow_failure):
+        threads = [threading.Thread(target=call) for _ in range(4)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+    assert len(calls) == 1
+    assert len(errors) == 4

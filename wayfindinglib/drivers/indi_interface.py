@@ -443,6 +443,7 @@ class IndiInterface(IndiClient):
         self.deviceMap = {}
         self._reset_status()
         self.connect_to_server()
+        self.connection_manager.record_connection_result(self.isServerConnected())
 
     def _is_server_responsive(self):  # ruff: ignore[missing-return-type-private-function]
         """Check if the INDI server is reachable and responsive.

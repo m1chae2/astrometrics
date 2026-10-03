@@ -333,6 +333,19 @@ class _SimulatedConnectionManager:
         """
         return True
 
+    def can_attempt_reconnect(self):  # ruff: ignore[missing-return-type-private-function]
+        """Allow every attempt: the simulator has no connection to wait for.
+
+        Returns
+        -------
+        can_reconnect : `bool`
+            Always `True`.
+        """
+        return True
+
+    def record_connection_result(self, connected):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+        """Ignore the result: the simulator keeps no back-off."""
+
 
 class SimulatorIndiInterface(IndiInterface):
     """In-memory simulator for INDI hardware.

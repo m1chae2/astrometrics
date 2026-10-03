@@ -19,9 +19,11 @@ INDI or ASCOM.
 import logging
 import os
 import subprocess
+import threading
 import time
 from typing import Any
 
+from astrometricslib import require_mounted_storage
 from wayfindinglib.drivers.protocols.remote_transfer_driver import RemoteTransferDriver
 
 logger = logging.getLogger(__name__)
@@ -31,6 +33,9 @@ _RSYNC_BASE_OPTIONS = ("-avz", "--no-p", "--no-g", "--no-o", "-s")
 
 _RSYNC_IDLE_TIMEOUT_SECONDS = 60
 """Give up a log transfer that moves no data for this long."""
+
+_OFFLINE_REPROBE_SECONDS = 10.0
+"""While the host is offline, recheck in the background this often."""
 
 
 class StellarMateInterface(RemoteTransferDriver):
@@ -62,6 +67,8 @@ class StellarMateInterface(RemoteTransferDriver):
         self.frames_path = frames_path
         self._last_connection_status = None  # None=Unknown, True=Online, False=Offline
         self._last_probe_time = 0.0
+        self._first_probe_lock = threading.Lock()
+        self._background_probe_running = False
 
     @property
     def driver_name(self) -> str:
@@ -86,8 +93,13 @@ class StellarMateInterface(RemoteTransferDriver):
     def _run_command(self, cmd_list: list[str]) -> str:
         """Run a shell command as a subprocess.
 
-        Injects a ConnectTimeout for SSH commands and implements
-        cooldown fail-fast checks if the host is known offline.
+        Injects a ConnectTimeout for SSH commands. While the host is known
+        to be offline, a call fails at once instead of waiting: looking up
+        a ``.local`` name that does not answer takes about 5 seconds, and
+        every screen that asks about the telescope used to wait that long.
+        A background check finds out when the host comes back. The very
+        first call, when nothing is known yet, does the check itself; other
+        calls made at the same moment wait for it and share the answer.
 
         Parameters
         ----------
@@ -102,20 +114,67 @@ class StellarMateInterface(RemoteTransferDriver):
         Raises
         ------
         RuntimeError
-            Raised if the host is known offline within the cooldown
-            window, or if the command itself fails.
+            Raised if the host is known offline, or if the command itself
+            fails.
+        """
+        if self._last_connection_status is None:
+            with self._first_probe_lock:
+                if self._last_connection_status is None:
+                    return self._execute_command(cmd_list)
+
+        if self._last_connection_status is False:
+            if (time.time() - self._last_probe_time) >= _OFFLINE_REPROBE_SECONDS:
+                self._start_background_probe()
+            raise RuntimeError("SSH/Command Failed: Remote host is known offline (cooldown active).")
+
+        return self._execute_command(cmd_list)
+
+    def _start_background_probe(self) -> None:
+        """Check in a background thread whether the offline host is back.
+
+        Only one check runs at a time. The result updates the connection
+        status, so later calls go through (or keep failing fast).
+        """
+        if self._background_probe_running:
+            return
+        self._background_probe_running = True
+        self._last_probe_time = time.time()
+
+        def probe() -> None:
+            """Run one connection check and record the answer."""
+            try:
+                self._execute_command(["ssh", self.host_alias, "echo", "connected"])
+            except RuntimeError:
+                pass
+            finally:
+                self._background_probe_running = False
+
+        threading.Thread(target=probe, daemon=True, name="StellarMateProbe").start()
+
+    def _execute_command(self, cmd_list: list[str]) -> str:
+        """Run the command now and record whether the host answered.
+
+        Parameters
+        ----------
+        cmd_list : `list` [`str`]
+            List of shell command tokens.
+
+        Returns
+        -------
+        stdout : `str`
+            Stripped standard output produced by the command.
+
+        Raises
+        ------
+        RuntimeError
+            Raised if the command fails.
         """
         if cmd_list and cmd_list[0] == "ssh":
             cmd_list = cmd_list.copy()
             cmd_list.insert(1, "-o")
             cmd_list.insert(2, "ConnectTimeout=2")
 
-        now = time.time()
-        if self._last_connection_status is False:
-            if (now - self._last_probe_time) < 10.0:
-                raise RuntimeError("SSH/Command Failed: Remote host is known offline (cooldown active).")
-
-        self._last_probe_time = now
+        self._last_probe_time = time.time()
 
         try:
             result = subprocess.run(cmd_list, capture_output=True, text=True, check=True)
@@ -128,6 +187,7 @@ class StellarMateInterface(RemoteTransferDriver):
                 "could not resolve hostname" in err_msg
                 or "timed out" in err_msg
                 or "connection refused" in err_msg
+                or "no route to host" in err_msg
             )
 
             if is_conn_error:
@@ -355,6 +415,9 @@ class StellarMateInterface(RemoteTransferDriver):
         if not remote_path.endswith("/"):
             remote_path += "/"
 
+        # Refuse before creating folders: with the frames drive missing, they
+        # would be made on the computer's own disk.
+        require_mounted_storage(local_dest_path)
         os.makedirs(local_dest_path, exist_ok=True)
         local_target_path = os.path.join(local_dest_path, remote_target_name)
         os.makedirs(local_target_path, exist_ok=True)

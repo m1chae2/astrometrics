@@ -13,7 +13,10 @@ class ConnectionManager:
     def __init__(self, hostname: str, port: int = 7624):  # ruff: ignore[missing-return-type-special-method]
         self.hostname = hostname
         self.port = port
-        self.connection_cooldown = 5.0  # Seconds between connection attempts
+        self.base_connection_cooldown = 5.0  # Seconds between attempts while connected or newly failed
+        self.max_connection_cooldown = 30.0  # Longest wait between attempts to a host that stays down
+        self.connection_cooldown = self.base_connection_cooldown  # Seconds between connection attempts
+        self.consecutive_failures = 0
         self.last_connection_attempt = 0
         self.last_responsive_check = 0
         self.last_responsive_value = False
@@ -47,6 +50,30 @@ class ConnectionManager:
         except Exception:
             self.last_responsive_value = False
             return False
+
+    def record_connection_result(self, connected: bool) -> None:
+        """Remember whether a connection attempt worked, and adjust the wait.
+
+        A failed attempt to a host that is switched off can block for about
+        5 seconds (looking up a ``.local`` name that does not answer), so
+        retrying every 5 seconds kept the connection thread busy nearly all
+        the time. Each failure in a row doubles the wait, up to
+        `max_connection_cooldown`; a success puts it back to the base value.
+
+        Parameters
+        ----------
+        connected : `bool`
+            Whether the attempt ended with a connected server.
+        """
+        if connected:
+            self.consecutive_failures = 0
+            self.connection_cooldown = self.base_connection_cooldown
+            return
+        self.consecutive_failures += 1
+        self.connection_cooldown = min(
+            self.max_connection_cooldown,
+            self.base_connection_cooldown * 2 ** (self.consecutive_failures - 1),
+        )
 
     def can_attempt_reconnect(self) -> bool:
         """Determine if enough time has passed to attempt a reconnection.

@@ -6,6 +6,7 @@ Ekos writes two kinds of file:
 
 - **Guide logs** (`guide_log-*.txt`) record the guiding error frame by frame. They use the PHD2 log format, so `wayfindinglib/drivers/phd2/guide_log_parser.py` reads them. They are not read here.
 - **Analyze logs** (`ekos-*.analyze`) record the rest of a session. `analyze_log_parser.py` reads them.
+- **KStars text logs** (`log_*.txt`) record what each Ekos module did, in words, when logging is on. `kstars_log_parser.py` reads the guider's dither messages from them.
 
 ## What `analyze_log_parser.py` does
 
@@ -15,6 +16,12 @@ Ekos writes two kinds of file:
 4. Returns an `EkosSessionContext` and a list of guide statistics. The context holds the mount position, temperature readings, finished and aborted exposures, autofocus runs, and the plate-solve, guider and mount state changes.
 
 A record the parser cannot read is skipped. The other records in the file still load. A file with no start time, or an empty file, returns `None`, because no record in it could be placed in time.
+
+## What `kstars_log_parser.py` does
+
+A dither is a small deliberate move of the guide star between exposures. It spreads the sensor's fixed pattern across the stack. The guider logs each dither as a fixed set of messages: the start with its size, a warning if the guide star never reached its new position, the wait before the next exposure, and a completion message.
+
+The parser turns each set into one `DitherEvent`. The event records the start time, the requested size in guide pixels, whether the dither worked, the settle time, and the duration. A dither that the log cuts off keeps `succeeded=None`. Log times carry a zone abbreviation, which the parser converts the same way the analyze parser does.
 
 ## Measurements the parser produces
 

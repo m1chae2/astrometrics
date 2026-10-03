@@ -6,6 +6,7 @@ and reflection engine with its own, separate registered-tools instance.
 
 from astrometricslib.mcp.reflection import register_astrometrics_tools
 from astrometricslib.mcp.tool_registry import ToolRegistry
+from wayfindinglib.mcp.argument_resolution import build_argument_hooks
 
 registry = ToolRegistry()
 
@@ -38,7 +39,14 @@ def register_wayfinder_reflected_tools():  # ruff: ignore[missing-return-type-un
         "planning": "planning",
         "execution": "execution",
     }
-    register_astrometrics_tools(registry, wayfinder, branch_mapping)
+    argument_resolvers, injected_arguments = build_argument_hooks(wayfinder)
+    register_astrometrics_tools(
+        registry,
+        wayfinder,
+        branch_mapping,
+        argument_resolvers=argument_resolvers,
+        injected_arguments=injected_arguments,
+    )
 
 
 register_wayfinder_reflected_tools()

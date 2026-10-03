@@ -69,6 +69,7 @@ def captured_calibration_script(tmp_path, monkeypatch):  # ruff: ignore[missing-
         mock_config.get_siril_executable.return_value = "siril"
         mock_config.get_logs_path.return_value = str(tmp_path)
         mock_config.get_frames_path.return_value = str(tmp_path / "frames")
+        mock_config.get_stacks_path.return_value = str(tmp_path / "frames")
         mock_config.get_stack_rejection_sigma_mode.return_value = "fixed"
         mock_config.get_stack_rejection_sigma.return_value = (3.0, 3.0)
         mock_config.get_stack_weight.return_value = "wfwhm"

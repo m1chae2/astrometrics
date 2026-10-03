@@ -1750,8 +1750,10 @@ class ImageProcessing:
         job_logger.info(f"JOB START: {id}")
 
         try:
-            frames_path = self.config.get_frames_path()
-            library_dest = os.path.join(frames_path, "lights", id)
+            # Stacks and the files made with them go to the stacks path, which
+            # is the frames path unless the configuration sets another disk.
+            stacks_path = self.config.get_stacks_path()
+            library_dest = os.path.join(stacks_path, "lights", id)
         except Exception:
             library_dest = None
 

@@ -1093,7 +1093,7 @@ class CatalogAccess(AbstractCatalogAccess):
         if dataset_type == "stacked_image":
             safe_target = target.replace(" ", "_")
             return os.path.join(
-                self.config.get_frames_path(), "lights", target, f"{safe_target}_Stacked.fits"
+                self.config.get_stacks_path(), "lights", target, f"{safe_target}_Stacked.fits"
             )
         elif dataset_type == "raw_frame":
             # Just fallback to frames root lights mapping

@@ -39,6 +39,10 @@ The folders follow the layout in `pipelines/README.md`.
 
 `stage.py` stores the two judgements on the stack's quality summary as `inputQuality` and `outputQuality`. Each carries its own flag reasons, so a reader can tell a bad input from a bad result.
 
+## Where the output goes
+
+The pipeline writes its output (stacks, group stacks, rejection maps, registration files, previews and processed pictures) to `<stacks_path>/lights/<target>/`. The `stacks_path` entry in the `[Image Library]` section of the configuration sets that folder. Without it, the output goes beside the raw frames, in the frames path. The setting lets the large raw frames stay on one disk while the output goes to another. The backend's image server looks for a file in the frames folder first and then in the stacks folder, so the viewer asks for one URL either way. `scripts/move_stacks_to_stacks_path.py` moves the files that already exist and updates the paths in the database.
+
 ## A note on scope
 
 This pipeline produces one combined image (or one per exposure group/camera setup) from a target's raw frames. It does not detect stars, solve the sky position, or measure brightness — those are astrometry and photometry, which read this pipeline's output rather than duplicate its work.

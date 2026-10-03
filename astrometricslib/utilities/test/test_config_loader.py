@@ -172,3 +172,28 @@ def test_the_denoise_strength_is_read_and_kept_between_zero_and_one(tmp_path: Pa
 
     config.update_config({"Processing.CosmicClarity": {"denoise_strength": "not a number"}})
     assert config.get_cosmic_clarity_denoise_strength() == pytest.approx(0.9)
+
+
+def test_get_stacks_path_defaults_to_the_frames_path(tmp_path: Path) -> None:
+    """Without a stacks_path entry, derived files go beside the raw frames."""
+    config = _make_isolated_config(tmp_path)
+
+    assert config.get_stacks_path() == config.get_frames_path()
+
+
+def test_get_stacks_path_reads_the_configured_folder(tmp_path: Path) -> None:
+    """An explicit stacks_path sends derived files to another folder."""
+    config = _make_isolated_config(tmp_path)
+    other = (tmp_path / "other_disk" / "stacks").absolute()
+    config.app_config.set("Image Library", "stacks_path", str(other))
+
+    assert config.get_stacks_path() == other
+    assert config.get_frames_path() != other
+
+
+def test_a_blank_stacks_path_counts_as_unset(tmp_path: Path) -> None:
+    """An empty entry behaves as if the setting were left out."""
+    config = _make_isolated_config(tmp_path)
+    config.app_config.set("Image Library", "stacks_path", "")
+
+    assert config.get_stacks_path() == config.get_frames_path()

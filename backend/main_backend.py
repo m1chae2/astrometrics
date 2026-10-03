@@ -85,6 +85,7 @@ container.init_resources()
 
 # Register Socket Logging Handler
 from backend.services.infrastructure import session_auth
+from backend.services.infrastructure.fallback_static_files import FallbackStaticFiles
 from backend.services.infrastructure.socket_manager import SocketLoggingHandler
 
 socket_handler = SocketLoggingHandler(container.socket_manager)
@@ -202,10 +203,23 @@ app.include_router(rpc_router.router)
 # files. Frames is mounted first as a separate prefix so both
 # locations are reachable.
 _frames_path = container.config_service.get_frames_path()
+_stacks_path = container.config_service.get_stacks_path()
 _library_path = container.config_service.get_library_path()
 
 if _frames_path.is_dir() and _frames_path != _library_path:
-    app.mount("/static/frames", StaticFiles(directory=str(_frames_path)), name="static_frames")
+    # The pipeline's output can live on another disk (the stacks path), with
+    # the same lights/<target>/ layout. Files not found among the frames are
+    # looked up there.
+    app.mount(
+        "/static/frames",
+        FallbackStaticFiles(
+            directory=str(_frames_path),
+            fallback_directory=str(_stacks_path)
+            if _stacks_path != _frames_path and _stacks_path.is_dir()
+            else None,
+        ),
+        name="static_frames",
+    )
 app.mount("/static", StaticFiles(directory=str(_library_path)), name="static")
 
 # Mount Matplotlib WebAgg static assets and toolbar images for

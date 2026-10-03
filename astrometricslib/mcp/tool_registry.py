@@ -123,6 +123,7 @@ class ToolRegistry:
             config = get_configuration()
             lib_path = os.path.realpath(str(config.get_library_path()))
             frm_path = os.path.realpath(str(config.get_frames_path()))
+            stk_path = os.path.realpath(str(config.get_stacks_path()))
 
             for key, val in list(arguments.items()):
                 if "path" in key.lower() and isinstance(val, str):
@@ -137,11 +138,13 @@ class ToolRegistry:
                             if os.path.exists(alt):
                                 check_val = alt
                     real_val = os.path.realpath(check_val)
-                    # Allow validation if it starts with either of
-                    # our valid sandbox roots
+                    # Allow validation if it starts with one of our valid
+                    # sandbox roots: the library, the frames, or the stacks
+                    # (the pipeline's output, which can be on another disk)
                     is_under_lib = os.path.commonpath([lib_path, real_val]) == lib_path
                     is_under_frm = os.path.commonpath([frm_path, real_val]) == frm_path
-                    if not (is_under_lib or is_under_frm):
+                    is_under_stk = os.path.commonpath([stk_path, real_val]) == stk_path
+                    if not (is_under_lib or is_under_frm or is_under_stk):
                         raise PermissionError(
                             f"Access denied: path '{val}' is outside the allowed sandbox directories."
                         )

@@ -24,6 +24,12 @@
 # EDIT ME: absolute path to your own library. Captured frames always
 # live in a "frames" subfolder underneath this path.
 path = "./library"
+# OPTIONAL: where stacks, group stacks, rejection maps, previews and processed
+# pictures are written, under <stacks_path>/lights/<target>/. Leave it out to
+# keep them beside the raw frames. Set it to put the large raw frames on one
+# disk (for example a shared Windows partition) and the pipeline's output on
+# another.
+# stacks_path = "/home/you/Astrometrics/stacks"
 
 ["Observatory.Filters"]
 # Filters this observatory's filter wheel is actually loaded with, as

@@ -851,6 +851,33 @@ class AppConfiguration:
             pass
         return self.get_library_path() / "frames"
 
+    def get_stacks_path(self) -> Path:
+        """Return the absolute path where stacks and other derived files go.
+
+        Reads the optional ``"stacks_path"`` entry from the ``[Image Library]``
+        section. Stacks, group stacks, rejection maps, previews and processed
+        pictures are written under ``<stacks_path>/lights/<target>/``. This
+        lets the large raw frames stay on one disk while the files the
+        pipeline makes go to another. If the entry is omitted or empty, the
+        files go beside the raw frames, in the frames path.
+
+        Returns
+        -------
+        stacks_path : `Path`
+            Absolute path of the folder that holds the ``lights`` folder for
+            derived files. The folder is not created here.
+        """
+        try:
+            path_str = self.app_config.get("Image Library", "stacks_path")
+        except configparser.NoSectionError, configparser.NoOptionError, KeyError:
+            path_str = None
+        if not path_str:
+            return self.get_frames_path()
+        path = Path(path_str)
+        if not path.is_absolute():
+            path = self.get_project_root() / path
+        return path.absolute()
+
     def get_library_file_path(self, filename: str) -> Path:
         """Return the absolute path to a file within `library`.
 

@@ -1524,6 +1524,33 @@ class IndiInterface(IndiClient):
         except Exception as text_error:
             logger.debug(f"Error checking external text property: {text_error}")
 
+    def get_device_names(self) -> list[str]:
+        """List the names of the INDI devices the client knows about.
+
+        Callers outside this process (the INDI worker proxy) use this instead
+        of reading `deviceMap`: the map's values are PyIndi device objects,
+        which cannot be sent between processes, but the names can.
+
+        Returns
+        -------
+        device_names : `list` [`str`]
+            The device names, from the device map when it has any, otherwise
+            from the server's device list. Empty when there are none.
+        """
+        device_map = getattr(self, "deviceMap", None)
+        if device_map:
+            return [name for name in device_map if name and str(name).strip()]
+        names = []
+        for device in self.getDevices() or []:
+            try:
+                name = device.getDeviceName()
+            except Exception as error:
+                logger.debug(f"Failed to read an INDI device name: {error}")
+                continue
+            if name and name.strip():
+                names.append(name)
+        return names
+
     def get_device_properties(self, device_name):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
         """Retrieve all properties for a device in a structured format.
 

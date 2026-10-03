@@ -36,12 +36,7 @@ class IndiDiagnostics:
         """
         if not self._session.isServerConnected():
             self._session.connect_to_server()
-        if hasattr(self._session, "deviceMap") and self._session.deviceMap:
-            return list(self._session.deviceMap.keys())
-        devices = self._session.getDevices()
-        if devices:
-            return [d.getDeviceName() for d in devices]
-        return []
+        return list(self._session.get_device_names())
 
     def get_properties(self, device_name: str) -> dict[str, Any]:
         """List all registered properties for an INDI device.

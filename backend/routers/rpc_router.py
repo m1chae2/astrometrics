@@ -36,6 +36,34 @@ def _save_config(config: dict[str, Any]) -> None:
         container.indi_driver._sync_config()
 
 
+_FRONTEND_LOG_LEVELS = {"info": logging.INFO, "warn": logging.WARNING, "error": logging.ERROR}
+
+
+def _log_frontend_message(level: str, message: str, stack: str | None = None, **extra: Any) -> None:
+    """Write a message from the browser app to the backend log.
+
+    The app's remote logger sends uncaught errors and failed promises here, so
+    they appear in the same log as the backend's own messages.
+
+    Parameters
+    ----------
+    level : `str`
+        ``"info"``, ``"warn"`` or ``"error"``. Any other value is logged as an
+        error.
+    message : `str`
+        The message text.
+    stack : `str`, optional
+        The JavaScript stack trace, when there is one.
+    **extra
+        Other keys the app sends. ``componentStack`` is the React component
+        stack, when there is one.
+    """
+    details = [text for text in (stack, extra.get("componentStack")) if text]
+    logging.getLogger("frontend").log(
+        _FRONTEND_LOG_LEVELS.get(level, logging.ERROR), "%s", "\n".join([message, *details])
+    )
+
+
 def _capture_guide_frame(exposure: float = 1.0, gain: float | None = None) -> bool:
     """Take one exposure with the guide camera.
 
@@ -149,6 +177,7 @@ class RPCHandlerRegistry:
         """
         # --- System (Infrastructure level) ---
         self.register("system:health", ("maintenance_service", "check_health"))
+        self.register("system:frontend_log", _log_frontend_message)
         self.register("system:completions", ("scripting_service", "get_completions"))
         self.register("system:get_config", ("config_service", "get_all_config"))
         self.register("system:save_config", lambda config: (_save_config(config), True)[1])

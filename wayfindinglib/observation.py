@@ -43,6 +43,10 @@ class CalibrationEntry(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
     camera: str = Field(..., alias="camera")
     iso: str = Field(..., alias="iso")
+    # The camera's offset setting (a constant added to every pixel). Frames
+    # taken at different offsets are never mixed, so each offset is its own
+    # row. `None` when the frame's header does not record it.
+    offset: float | None = Field(default=None, alias="offset")
     exposure: float | None = Field(default=None, alias="exposure")
     filter: str | None = Field(default=None, alias="filter")
     count: int = Field(..., alias="count")

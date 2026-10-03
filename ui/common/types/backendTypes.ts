@@ -808,6 +808,7 @@ export interface SequencePlan {
 export interface CalibrationEntry {
   camera: string;
   iso: string;
+  offset?: number | null;
   exposure?: number | null;
   filter?: string | null;
   count: number;

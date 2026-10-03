@@ -37,7 +37,7 @@ export const CalibrationPanel: React.FC = () => {
     const biases = stats?.biases || [];
     const flats = stats?.flats || [];
 
-    const filteredDarks = darks.filter(d => d.camera === selectedCamera).sort((a, b) => (a.exposure ?? 0) - (b.exposure ?? 0));
+    const filteredDarks = darks.filter(d => d.camera === selectedCamera).sort((a, b) => (a.exposure ?? 0) - (b.exposure ?? 0) || (a.offset ?? 0) - (b.offset ?? 0));
     const filteredBiases = biases.filter(b => b.camera === selectedCamera);
     const filteredFlats = flats.filter(f => f.camera === selectedCamera);
 
@@ -84,13 +84,15 @@ export const CalibrationPanel: React.FC = () => {
                             <thead>
                                 <tr>
                                     <th>Exposure</th>
+                                    <th className="data-table-cell-right">Offset</th>
                                     <th className="data-table-cell-right">Count</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {filteredDarks.map(r => (
-                                    <tr key={r.exposure}>
+                                    <tr key={`${r.exposure}-${r.offset ?? ''}-${r.iso}`}>
                                         <td>{r.exposure}s</td>
+                                        <td className="data-table-cell-right">{r.offset ?? '—'}</td>
                                         <td className="data-table-cell-right">{r.count}</td>
                                     </tr>
                                 ))}

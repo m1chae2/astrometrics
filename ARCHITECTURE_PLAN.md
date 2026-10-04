@@ -29,7 +29,8 @@ The repository has four kinds of code. Each layer may call only the layer below 
    - astrometricslib never imports wayfindinglib.
    
    astrometricslib therefore also holds the infrastructure both libraries share: the error classes,
-   logging setup, the job framework, and the configuration loader (section 7).
+   logging setup, the job framework, the configuration loader (section 7), and generic storage and
+   process locks (section 6.2, item 11). No other shared package exists.
 2. **Delivery adapters**, which sit side by side at the same level:
    - `backend/` serves the desktop app over `/api/rpc`. RPC (remote procedure call) means the UI
      names a function and the backend runs it.
@@ -311,7 +312,7 @@ logging in detail.
 
 | # | Item | Action |
 |---|---|---|
-| 1 | Duplicate models and a second storage path in wayfindinglib: two `ObservationSession` classes, two `EquipmentConfiguration` classes, a copy of `AbstractButler`, and `drivers/local_database.save_model`/`load_models` | Keep one model in `models/`. Use `datastore.AbstractButler`. Send all storage through `DiskButler`, matching astrometricslib's single path through `CatalogAccess`. |
+| 1 | Duplicate models and a second storage path in wayfindinglib: two `ObservationSession` classes, two `EquipmentConfiguration` classes, a copy of `AbstractButler`, and `drivers/local_database.save_model`/`load_models` | Keep one model in `models/`. Use the shared `AbstractButler` in `astrometricslib/foundation/storage/` (item 11). Send all storage through `DiskButler`, matching astrometricslib's single path through `CatalogAccess`. |
 | 2 | Leftover packages: `wayfindinglib/sky.py`, `observation.py`, `observationlib/`, `observatorylib/` | Move logic into `tasks/planning_tasks`, models into `models/`, and configuration reads into `data_access/`, then delete the packages. |
 | 3 | wayfindinglib builds a fresh `Astrometrics` at about 18 sites, and some ignore the configuration they were given | `Wayfinder` holds one injected handle and passes it down. |
 | 4 | Exceptions: `AstroLibError`, `AstrometryHardwareError`, `StorageNotMountedError(RuntimeError)`, `DelegationPolicyValidationError(ValueError)`, and `backend/exceptions.py` are unrelated | Replace them with the shared error model in section 7.2. |
@@ -321,7 +322,7 @@ logging in detail.
 | 8 | Scripts: 16 of 23 astrometricslib scripts and `wayfindinglib/scripts/build_deep_star_catalog.py` import internals | Allowed (decided, section 11). A script may import the internals of the library it lives in, and the public API of any library below it. `TID251` exempts each library's `scripts/` folder for its own library only. A script never imports another script; code that two scripts share moves into the library. |
 | 9 | Alignment and guiding records live in `astrometricslib/drivers/logger_interface.py`, but only wayfindinglib and backend services that move into wayfindinglib read or write them | wayfindinglib owns them (decided, section 11). They move into wayfindinglib storage behind `DiskButler`. `control.history.query(kind="alignment")` reads them from there. |
 | 10 | Documentation drift: garbled "astrometrics" wording in wayfindinglib docstrings, citations to architecture sections that do not exist, 353 `ruff: ignore` suppressions in wayfindinglib | Fix these as each file is touched, per CLAUDE.md. `Wayfinding_Library_Architecture.md` gains the `control` children. |
-| 11 | `datastore/` sits below both libraries, and only the two libraries import it. Its `DeviceInUseError` cannot join the error categories without importing astrometricslib, which would create an import cycle. | Move `datastore/` into astrometricslib as a storage driver package. wayfindinglib's `DiskButler` builds on its public base class. |
+| 11 | `datastore/` is a third shared layer below both libraries: the generic `Butler`, SQLite connection setup, file-based process locks, and `DeviceInUseError`. Only the two libraries import it. | Move it into astrometricslib as `foundation/storage/` (decided, section 11). `DeviceInUseError` becomes a subclass of `ConflictError`. wayfindinglib's `DiskButler`, database drivers, and INDI hardware lock use the storage classes through astrometricslib's public API. The `datastore/test/` files move with the code. |
 
 ### 6.3 Legacy code to remove
 
@@ -605,8 +606,9 @@ Each phase ends with `ruff check`, the affected `pytest` suites, and, for `ui/` 
    logging lint rules from section 9, with an explicit
    allow-list of today's violations so CI stays green.
    Done when: CI runs both checks, and the allow-list is the to-do list for phases 4 to 6.
-3. **Build the shared error and logging code (section 7).** Create `astrometricslib/foundation/`
-   with the error classes, `ErrorInfo`, `to_error_info`, `configure_logging`, the log context, and the job log
+3. **Build the shared error and logging code (section 7).** Create `astrometricslib/foundation/`,
+   move `datastore/` into it as `foundation/storage/` (section 6.2, item 11), and add the error
+   classes, `ErrorInfo`, `to_error_info`, `configure_logging`, the log context, and the job log
    router. Switch the RPC router, the MCP registries, the UI's `callBackend`, and every program
    entry point to them. While library code still raises built-in types, the adapters report a
    plain `ValueError` as `invalid_argument`. Phase 5 deletes that mapping.
@@ -658,6 +660,7 @@ Decided on 2026-10-04:
   imports wayfindinglib. astrometricslib holds the shared errors, logging setup, job framework, and
   configuration in its `foundation/` subpackage. There is no separate shared package (section 1,
   item 1; section 7).
+- **`datastore/`.** It moves into astrometricslib as `foundation/storage/` (section 6.2, item 11).
 - **Maintenance scripts.** A script in a library's `scripts/` folder may import that library's
   internals (section 6.2, item 8).
 - **Errors and logging.** The design in section 7 stands, including:
@@ -665,9 +668,7 @@ Decided on 2026-10-04:
   - HTTP 200 for every well-formed JSON-RPC reply;
   - JSON Lines as the log file format.
 
-Open:
-
-1. Whether `datastore/` moves into astrometricslib (section 6.2, item 11).
+Open: none.
 
 ## Appendix A. Confirmed bugs
 

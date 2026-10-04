@@ -342,7 +342,8 @@ async def execute_rpc(method: str, params: dict | None = None) -> dict:
 
     container_inst = get_container()
     if container_inst and container_inst.initialized:
-        from backend.routers.rpc_router import rpc_registry, serialize_rpc_result
+        from backend.routers.rpc_router import rpc_registry
+        from backend.services.rpc_protocol import serialize_rpc_result
 
         try:
             res = await rpc_registry.execute(method, params)

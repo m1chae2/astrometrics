@@ -16,6 +16,7 @@ from fastapi import APIRouter
 
 from backend.container import container
 from backend.services.rpc_protocol import (
+    RPCMethodNotFoundError,
     RPCRequest,
     make_rpc_error_response,
     make_rpc_success_response,
@@ -539,7 +540,7 @@ class RPCHandlerRegistry:
         ValueError
             If a registered service/method cannot be found, or if a
             required parameter for the handler is missing.
-        KeyError
+        RPCMethodNotFoundError
             If no handler can be resolved for `method`, either
             explicitly registered or dynamically reflected.
         """
@@ -563,7 +564,7 @@ class RPCHandlerRegistry:
             handler = self._resolve_dynamic_reflected_handler(method)
 
         if not handler:
-            raise KeyError(f"Method '{method}' not found in RPC registry")
+            raise RPCMethodNotFoundError(f"Method '{method}' not found in RPC registry")
 
         # Build kwargs using signature analysis
         kwargs = {}
@@ -620,7 +621,7 @@ async def handle_rpc(request: RPCRequest):  # ruff: ignore[missing-return-type-u
     try:
         result = await rpc_registry.execute(request.method, request.params)
         return make_rpc_success_response(result, request.id)
-    except KeyError as e:
+    except RPCMethodNotFoundError as e:
         logger.warning(f"RPC method not found: {request.method}")
         return make_rpc_error_response(-32601, f"Method not found: {e!s}", request.id, 404)
     except ValueError as e:

@@ -22,6 +22,14 @@ class RPCRequest(BaseModel):
     id: int | str | None = Field(None, description="Request identifier")
 
 
+class RPCMethodNotFoundError(Exception):
+    """Raised when a JSON-RPC method name matches no registered handler.
+
+    This is a dedicated class so the router can tell "no such method" apart
+    from a `KeyError` that a service raises while it runs.
+    """
+
+
 def get_cors_headers() -> dict[str, str]:
     """Get standardized CORS headers to avoid browser CORS issues.
 
@@ -65,13 +73,23 @@ def serialize_rpc_result(obj: Any) -> Any:
 
     if isinstance(obj, datetime):
         return obj.isoformat()
+
+    # NumPy scalars and arrays are not JSON-serializable. Convert them to
+    # plain Python values (CLAUDE.md: use `.item()` / `.tolist()`), and send
+    # the result back through this function so NaN/Inf are still handled.
+    import numpy as np
+
+    if isinstance(obj, np.generic):
+        return serialize_rpc_result(obj.item())
+    if isinstance(obj, np.ndarray):
+        return serialize_rpc_result(obj.tolist())
     if hasattr(obj, "serialize") and callable(obj.serialize):
         return serialize_rpc_result(obj.serialize())
     if hasattr(obj, "model_dump") and callable(obj.model_dump):
         return serialize_rpc_result(obj.model_dump(by_alias=True))
     if hasattr(obj, "dict") and callable(obj.dict):
         return serialize_rpc_result(obj.dict())
-    if isinstance(obj, list):
+    if isinstance(obj, (list, tuple, set, frozenset)):
         return [serialize_rpc_result(item) for item in obj]
     if isinstance(obj, dict):
         return {k: serialize_rpc_result(v) for k, v in obj.items()}
@@ -83,6 +101,11 @@ def serialize_rpc_result(obj: Any) -> Any:
         json.dumps(obj)
         return obj
     except TypeError, OverflowError:
+        logger.warning(
+            "serialize_rpc_result: %s is not JSON-serializable; sending str(). "
+            "Convert it to a plain Python value in the service that returns it.",
+            type(obj).__name__,
+        )
         return str(obj)
 
 

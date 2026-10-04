@@ -19,10 +19,40 @@ export interface TargetDetailsProps {
   onCommonNameChange?: (value: string) => void;
 }
 
+/** Pulls the numbers out of a sexagesimal string such as "10h 6m 41s", "10:6:41" or "10 6 41". */
+function sexagesimalParts(str: string): string[] {
+  return str.match(/-?\d+(?:\.\d+)?/g) ?? [];
+}
+
 /**
- * Formats coordinate strings into standard ° ′ ″ notation if not already present.
+ * Formats a right ascension (RA) as hours, minutes and seconds ("10h 6m 41s").
+ *
+ * RA is measured in hours, so it never gets degree symbols. A value that
+ * already uses "h" is returned unchanged. A lone number has no known unit
+ * (hours or degrees), so it is also returned unchanged.
  */
-export function formatRaDecString(val: string | number | null | undefined): string {
+export function formatRaString(val: string | number | null | undefined): string {
+  if (val == null || val === '') return '—';
+  const str = String(val).trim();
+  if (!str) return '—';
+
+  if (/h/i.test(str)) return str;
+
+  const parts = sexagesimalParts(str);
+  if (parts.length >= 3) {
+    return `${parts[0]}h ${parts[1]}m ${Math.round(parseFloat(parts[2]))}s`;
+  }
+  if (parts.length === 2) {
+    return `${parts[0]}h ${parts[1]}m 0s`;
+  }
+  return str;
+}
+
+/**
+ * Formats a declination as degrees, arcminutes and arcseconds ("-5° 3′ 2″")
+ * if it is not already written that way.
+ */
+export function formatDecString(val: string | number | null | undefined): string {
   if (val == null || val === '') return '—';
   const str = String(val).trim();
   if (!str) return '—';
@@ -32,9 +62,8 @@ export function formatRaDecString(val: string | number | null | undefined): stri
     return str;
   }
 
-  // Parse numbers from strings like "10h 6m 41s", "10:6:41", "10 6 41"
-  const matches = str.match(/-?\d+(?:\.\d+)?/g);
-  if (!matches || matches.length === 0) return str;
+  const matches = sexagesimalParts(str);
+  if (matches.length === 0) return str;
 
   if (matches.length >= 3) {
     const d = matches[0];
@@ -116,7 +145,7 @@ export const TargetDetails: React.FC<TargetDetailsProps> = ({
           <span className="tree-branch">└─</span>
           <span className="tree-label">Coordinates:</span>
           <span className="tree-value">
-            {ra || dec ? `${formatRaDecString(ra)} • ${formatRaDecString(dec)}` : '—'}
+            {ra || dec ? `${formatRaString(ra)} • ${formatDecString(dec)}` : '—'}
           </span>
         </div>
 

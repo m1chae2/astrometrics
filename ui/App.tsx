@@ -1,5 +1,6 @@
 import React, { useState, useEffect, Suspense, Profiler, ProfilerOnRenderCallback } from 'react';
 import { getBackendBase } from './common/services/backendApi';
+import { emergencyParkMount } from './common/services/telescope/emergencyPark';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StatusHeader } from './statusHeader/StatusHeader';
 import { TitleBar } from './titleBar/TitleBar';
@@ -276,7 +277,7 @@ const AppContent: React.FC = () => {
 
     // Native OS Integration: Emergency park telescope command from tray
     const onEmergencyPark = (): void => {
-      fetch('/api/telescope/park', { method: 'POST' }).catch(() => {});
+      void emergencyParkMount();
     };
     window.addEventListener('emergency-park-mount', onEmergencyPark);
 

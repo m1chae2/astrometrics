@@ -1,6 +1,7 @@
 import { ipcMain, dialog, Notification, autoUpdater, app, powerSaveBlocker, BrowserWindow } from 'electron';
 import path from 'path';
 import { getPlatform } from './platforms/index.js';
+import { emergencyPark } from './emergency_park.js';
 
 let powerSaveBlockerId = null;
 
@@ -430,14 +431,18 @@ export function registerIpcHandlers(
   // confirm mount state after triggering the park command.
   ipcMain.on('tray-popover-action', async (_event, { action, payload }) => {
     switch (action) {
-      case 'park':
+      case 'park': {
         // Fire park request; the popover stays open for the user to confirm
-        try {
-          await fetch('http://127.0.0.1:5000/api/telescope/park', { method: 'POST' });
-        } catch (err) {
-          console.warn('[TrayPopover] Emergency park request failed:', err);
+        const result = await emergencyPark();
+        if (!result.ok) {
+          console.error('[TrayPopover] Emergency park failed:', result.error);
+          new Notification({
+            title: 'Emergency park failed',
+            body: `The mount was not parked: ${result.error}. Park it manually.`,
+          }).show();
         }
         break;
+      }
 
       case 'navigate': {
         const mode = payload?.mode;

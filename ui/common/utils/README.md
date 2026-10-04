@@ -10,6 +10,7 @@ This folder contains small cross-cutting utilities used by the UI.
 - **ToastProvider.tsx**: Global React provider for the toast system.
 - **ConfirmDialog.tsx**: Reusable confirmation modal.
 - **plotTools.ts**: Shared physics and plotting utilities.
+- **dataUrl.ts**: Decodes a `data:` URL (a picture sent as text) into a Blob. The app's security policy blocks `fetch` on `data:` URLs, so use this instead.
 
 ## Deprecated
 

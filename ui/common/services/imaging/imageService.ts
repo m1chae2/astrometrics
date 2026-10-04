@@ -1,5 +1,6 @@
 import { callBackend, resolveImageSrc } from '../backendApi';
 import { reportError } from '../../utils/reportError';
+import { dataUrlToBlob } from '../../utils/dataUrl';
 
 /**
  * @fileoverview Service for managing, retrieving, and converting FITS files and target images.
@@ -74,8 +75,8 @@ export async function fetchProcessedImage(
             // `RenderedImage` type only knows `imageData`.
             const dataUrl = result?.imageData || (result as { image_data?: string } | null)?.image_data;
             if (dataUrl) {
-                const res = await fetch(dataUrl, { signal });
-                return res.blob();
+                // Decoded directly: the Content Security Policy blocks fetch() on data: URLs.
+                return dataUrlToBlob(dataUrl);
             }
             return null;
         }

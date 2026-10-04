@@ -11,6 +11,7 @@ tests use an autospec'd mock that raises AttributeError like the real
 class would.
 """
 
+import math
 from types import SimpleNamespace
 from unittest.mock import MagicMock, create_autospec
 
@@ -190,11 +191,12 @@ def test_alignment_loop_within_threshold_reports_aligned_and_stops():  # ruff: i
 
 
 def test_alignment_loop_computes_arcsec_delta_without_hours_factor():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify the reported arcsec delta is a plain degrees*3600 conversion.
+    """Verify the reported arcsec delta has no hours-to-degrees factor.
 
     Both solve_result.ra and target_ra are already decimal degrees at
     this point in the pipeline, so no *15 hours-to-degrees factor
-    belongs in this calculation (see module docstring).
+    belongs in this calculation (see module docstring). The RA delta is
+    a distance on the sky, so it is scaled by cos(dec).
     """
     target_ra, target_dec = 100.0, 20.0
     solved_ra = target_ra + 0.01  # 0.01 deg = 36 arcsec
@@ -208,8 +210,48 @@ def test_alignment_loop_computes_arcsec_delta_without_hours_factor():  # ruff: i
     service._alignment_loop(target_ra=target_ra, target_dec=target_dec)
 
     first_attempt = service.get_attempts()[0]
-    assert first_attempt["deltaRaArcsec"] == pytest.approx(36.0)
+    # 0.01 deg of RA is 36 arcsec of coordinate difference, or 36 * cos(20 deg)
+    # arcsec of distance on the sky.
+    assert first_attempt["deltaRaArcsec"] == pytest.approx(36.0 * math.cos(math.radians(target_dec)))
     assert first_attempt["deltaDecArcsec"] == pytest.approx(72.0)
+
+
+@pytest.mark.parametrize(
+    ("target_ra", "solved_ra", "expected_delta_deg"),
+    [
+        (359.995, 0.005, 0.01),  # solution just east of 0h: wraps forward
+        (0.005, 359.995, -0.01),  # solution just west of 0h: wraps backward
+    ],
+)
+def test_alignment_loop_wraps_ra_across_zero_hours(
+    target_ra: float, solved_ra: float, expected_delta_deg: float
+) -> None:
+    """Verify an RA delta across 0h/24h is small, not about 360 degrees."""
+    target_dec = 0.0
+    service = _make_service(
+        imaging_service=_StubImagingService(),
+        star_identifier=_StubStarIdentifier(solved_ra, target_dec),
+    )
+    service.accuracy_threshold = 1.0
+    service._alignment_loop(target_ra=target_ra, target_dec=target_dec)
+
+    first_attempt = service.get_attempts()[0]
+    assert first_attempt["deltaRaArcsec"] == pytest.approx(expected_delta_deg * 3600.0)
+
+
+def test_alignment_loop_shrinks_ra_delta_near_the_pole() -> None:
+    """Verify one degree of RA at high declination is a short sky distance."""
+    target_ra, target_dec = 10.0, 80.0
+    solved_ra = target_ra + 1.0  # 1 degree of RA at dec 80 is ~0.17 degrees of sky
+    service = _make_service(
+        imaging_service=_StubImagingService(),
+        star_identifier=_StubStarIdentifier(solved_ra, target_dec),
+    )
+    service.accuracy_threshold = 1.0
+    service._alignment_loop(target_ra=target_ra, target_dec=target_dec)
+
+    first_attempt = service.get_attempts()[0]
+    assert first_attempt["deltaRaArcsec"] == pytest.approx(3600.0 * math.cos(math.radians(80.0)))
 
 
 def test_alignment_loop_out_of_range_syncs_and_reslews_in_hours():  # ruff: ignore[missing-return-type-undocumented-public-function]

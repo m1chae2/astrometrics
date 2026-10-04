@@ -674,9 +674,9 @@ def test_sync_service_extract_fits_header_solves(tmp_path: Path) -> None:
 def test_guiding_service_labels_pulse_derived_samples_as_estimates_when_persisting() -> None:
     """Verify INDI-pulse samples are stored as estimates, not measurements.
 
-    Their drift values are reconstructed from the pulse length plus
-    random jitter, so storing them unlabeled would let later analysis
-    mistake a model's output for a real guide-star measurement.
+    Their drift values are reconstructed from the pulse length alone, so
+    storing them unlabeled would let later analysis mistake a model's
+    output for a real guide-star measurement.
     """
     from backend.services.observatory.guiding_service import GuidingService
 
@@ -695,3 +695,55 @@ def test_guiding_service_labels_pulse_derived_samples_as_estimates_when_persisti
     persisted = logger_mock.record_guiding_samples.call_args[0][0]
     assert len(persisted) == 1
     assert persisted[0]["source"] == "indi_pulse_estimate"
+
+
+def _poll_pulses(pulses: list[dict[str, float]]) -> list[dict[str, float]]:
+    """Run one passive INDI poll over some pulses and return what was stored.
+
+    Parameters
+    ----------
+    pulses : `list` [`dict`]
+        The guide pulses the mount reports.
+
+    Returns
+    -------
+    persisted : `list` [`dict`]
+        The samples handed to the logger.
+    """
+    from backend.services.observatory.guiding_service import GuidingService
+
+    phd2_mock = MagicMock()
+    phd2_mock.drain_guiding_samples.return_value = []
+    observatory_mock = MagicMock()
+    observatory_mock.drain_external_pulses.return_value = pulses
+    observatory_mock.get_telescope_status.return_value = {}
+    logger_mock = MagicMock()
+    service = GuidingService(
+        observatory_api=observatory_mock, phd2_service=phd2_mock, logger_interface=logger_mock
+    )
+    service.poll_external_telemetry()
+    return logger_mock.record_guiding_samples.call_args[0][0]
+
+
+def test_pulse_estimates_are_the_pulse_length_times_the_guide_rate() -> None:
+    """Store exactly pulse length times 7.52 arcsec/s, with nothing added."""
+    # 250 ms west and 100 ms north at 7.52 arcsec/s.
+    persisted = _poll_pulses([{"time": 1700000000.0, "pulse_w": 250.0, "pulse_n": 100.0}])
+    assert persisted[0]["dra"] == pytest.approx(1.88)
+    assert persisted[0]["ddec"] == pytest.approx(0.752)
+
+
+def test_an_axis_with_no_pulse_has_zero_estimate() -> None:
+    """Do not invent a drift for an axis that received no pulse."""
+    persisted = _poll_pulses([{"time": 1700000000.0, "pulse_w": 250.0}])
+    assert persisted[0]["ddec"] == pytest.approx(0.0)
+
+
+def test_pulse_estimates_are_repeatable() -> None:
+    """Two polls over the same pulses store identical samples."""
+    pulses = [{"time": 1700000000.0, "pulse_e": 400.0, "pulse_s": 120.0}]
+    first = _poll_pulses(pulses)
+    second = _poll_pulses(pulses)
+    assert first == second
+    assert first[0]["dra"] == pytest.approx(-3.008)
+    assert first[0]["ddec"] == pytest.approx(-0.902)

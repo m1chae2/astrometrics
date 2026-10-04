@@ -51,8 +51,6 @@ class GuidingService:
 
         # Persistent drift states across pulse cycles to avoid
         # orthogonal axes collapse
-        self._residual_dra = 0.0
-        self._residual_ddec = 0.0
         self._sim_drift_ra = 0.0
         self._sim_drift_dec = 0.0
 
@@ -113,8 +111,6 @@ class GuidingService:
         """Clear the guiding history (plots)."""
         self._history = []
         self._latest_stats = GuidingStats()  # Reset stats too
-        self._residual_dra = 0.0
-        self._residual_ddec = 0.0
 
     def stop_guiding(self) -> bool:
         """Stop the background guiding loop and wait for it to exit.
@@ -264,30 +260,14 @@ class GuidingService:
                 if abs(pulse_ns) < 1e-6 and abs(pulse_we) < 1e-6:
                     continue
 
-                # Timed guide pulse (ms) proportional drift estimation:
-                # 0.5x sidereal guide speed = 7.52 arcsec/s.
-                import random
-
-                if abs(pulse_we) >= 1e-3:
-                    raw_dra = (pulse_we / 1000.0) * 7.52
-                    dra = raw_dra + random.gauss(0.0, 0.05)
-                    self._residual_dra = raw_dra * 0.15
-                else:
-                    # Retain deadband residual and atmospheric seeing jitter
-                    dra = self._residual_dra + random.gauss(0.0, 0.06)
-                    self._residual_dra *= 0.85
-
-                if abs(pulse_ns) >= 1e-3:
-                    raw_ddec = (pulse_ns / 1000.0) * 7.52
-                    ddec = raw_ddec + random.gauss(0.0, 0.05)
-                    self._residual_ddec = raw_ddec * 0.15
-                else:
-                    # Retain deadband residual and atmospheric seeing jitter
-                    ddec = self._residual_ddec + random.gauss(0.0, 0.06)
-                    self._residual_ddec *= 0.85
-
-                self._sim_drift_ra = dra
-                self._sim_drift_dec = ddec
+                # Estimate the correction each timed guide pulse (ms) applied:
+                # pulse length times the guide rate (0.5x sidereal guide
+                # speed = 7.52 arcsec/s). An axis with no pulse had no
+                # correction, so its estimate is zero. Nothing is added to
+                # this estimate; the stored samples are labeled
+                # `INDI_PULSE_ESTIMATE` and hold only what the pulses say.
+                dra = (pulse_we / 1000.0) * 7.52 if abs(pulse_we) >= 1e-3 else 0.0
+                ddec = (pulse_ns / 1000.0) * 7.52 if abs(pulse_ns) >= 1e-3 else 0.0
 
                 n = len(self._history) + 1
                 sq_sum_ra = sum(s["dra"] ** 2 for s in self._history) + dra**2

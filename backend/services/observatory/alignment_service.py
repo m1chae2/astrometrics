@@ -1,6 +1,7 @@
 """Iterative plate-solving alignment loop for the telescope mount."""
 
 import logging
+import math
 import threading
 import time
 from dataclasses import dataclass
@@ -451,7 +452,11 @@ class AlignmentService:
                 # decimal degrees, so no hours-to-degrees factor applies here
                 # -- that factor is only needed when RA is expressed in time
                 # units, which it isn't at this point in the pipeline.
-                ra_error_arcsec = (solve_result.ra - target_ra) * 3600.0
+                # The RA difference is wrapped into -180..180 degrees so a
+                # target near 0h/24h does not read as a ~360 degree error,
+                # and scaled by cos(dec) so it is a distance on the sky.
+                d_ra_deg = (solve_result.ra - target_ra + 180.0) % 360.0 - 180.0
+                ra_error_arcsec = d_ra_deg * 3600.0 * math.cos(math.radians(target_dec))
                 dec_error_arcsec = (solve_result.dec - target_dec) * 3600.0
 
                 solving_attempt.delta_ra_arcsec = ra_error_arcsec

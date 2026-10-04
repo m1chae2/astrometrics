@@ -318,7 +318,7 @@ logging in detail.
 | 5 | Driver interfaces: astrometricslib mixes a typing `Protocol`, an `Abstract*` class, and concrete-only classes | Use wayfindinglib's style, `abc.ABC` base classes named `*Driver`, for the Siril, plate-solve, and SIMBAD interfaces. Rename `wayfindinglib/drivers/protocols/`, because it holds abstract classes, not typing Protocols. |
 | 6 | wayfindinglib imports astrometricslib internals for shared infrastructure (`LoggerInterface`, `DbLogHandler`, `capture_job_logs`, `get_current_job`) and for pipeline helpers (`FrameSelection`, `select_library_frames`, `derive_field_centers`, `classify_and_sort_fits_files`, `derive_target_sessions`, `resolve_camera_profile`, `SATURATED_*`, `DEFAULT_DARK_TEMPERATURE_TOLERANCE_C`) | The shared infrastructure becomes documented public API in astrometricslib's `foundation/` subpackage (section 7). Each pipeline helper becomes a proper public method, or the wayfindinglib code that needs it moves into astrometricslib. The MCP registry and reflection move to `mcp_servers/` (section 8.2). |
 | 7 | File names: `wayfindinglib/api/*_registry.py` hold ordinary classes, not registries | Rename the files to `control.py`, `planning.py`, `execution.py`. Put the `control` children in a `control/` package with one module per child. |
-| 8 | Scripts: 16 of 23 astrometricslib scripts and `wayfindinglib/scripts/build_deep_star_catalog.py` import internals | Scripts use the public API only, or the scripts README states the exemption. |
+| 8 | Scripts: 16 of 23 astrometricslib scripts and `wayfindinglib/scripts/build_deep_star_catalog.py` import internals | Allowed (decided, section 11). A script may import the internals of the library it lives in, and the public API of any library below it. `TID251` exempts each library's `scripts/` folder for its own library only. A script never imports another script; code that two scripts share moves into the library. |
 | 9 | Alignment and guiding records live in `astrometricslib/drivers/logger_interface.py`, but only wayfindinglib and backend services that move into wayfindinglib read or write them | wayfindinglib owns them (decided, section 11). They move into wayfindinglib storage behind `DiskButler`. `control.history.query(kind="alignment")` reads them from there. |
 | 10 | Documentation drift: garbled "astrometrics" wording in wayfindinglib docstrings, citations to architecture sections that do not exist, 353 `ruff: ignore` suppressions in wayfindinglib | Fix these as each file is touched, per CLAUDE.md. `Wayfinding_Library_Architecture.md` gains the `control` children. |
 | 11 | `datastore/` sits below both libraries, and only the two libraries import it. Its `DeviceInUseError` cannot join the error categories without importing astrometricslib, which would create an import cycle. | Move `datastore/` into astrometricslib as a storage driver package. wayfindinglib's `DiskButler` builds on its public base class. |
@@ -658,6 +658,8 @@ Decided on 2026-10-04:
   imports wayfindinglib. astrometricslib holds the shared errors, logging setup, job framework, and
   configuration in its `foundation/` subpackage. There is no separate shared package (section 1,
   item 1; section 7).
+- **Maintenance scripts.** A script in a library's `scripts/` folder may import that library's
+  internals (section 6.2, item 8).
 - **Errors and logging.** The design in section 7 stands, including:
   - the nine error categories;
   - HTTP 200 for every well-formed JSON-RPC reply;
@@ -665,9 +667,7 @@ Decided on 2026-10-04:
 
 Open:
 
-1. Whether maintenance scripts may import library internals, or use only the public API through a
-   new `astrometrics.maintenance` sub-API.
-2. Whether `datastore/` moves into astrometricslib (section 6.2, item 11).
+1. Whether `datastore/` moves into astrometricslib (section 6.2, item 11).
 
 ## Appendix A. Confirmed bugs
 

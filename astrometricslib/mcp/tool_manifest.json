@@ -520,6 +520,13 @@
       "merge_into": "target_index_frames",
       "interim_block": ""
     },
+    "target_remake_preview": {
+      "tool_class": "process",
+      "category": "targets",
+      "disposition": "keep",
+      "merge_into": "",
+      "interim_block": ""
+    },
     "target_save": {
       "tool_class": "change-data",
       "category": "targets",

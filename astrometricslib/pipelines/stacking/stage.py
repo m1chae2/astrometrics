@@ -9,9 +9,29 @@ import os
 from typing import Any
 
 from astrometricslib.drivers.camera_profile_store import camera_identity
+from astrometricslib.drivers.job_logging import get_current_job
 from astrometricslib.utilities.enums import FilterType
 
 logger = logging.getLogger(__name__)
+
+
+def _report_stage(progress_current: int, message: str) -> None:
+    """Tell the running job which step the stack has reached.
+
+    The step goes to the job's log and moves its progress bar, so a person
+    watching the job list can tell a slow stack from a stuck one. Does
+    nothing when the stack is not running as a tracked job.
+
+    Parameters
+    ----------
+    progress_current : `int`
+        How far along the stack is, out of 100.
+    message : `str`
+        A short description of the step.
+    """
+    job = get_current_job()
+    if job is not None:
+        job.stage(progress_current, message)
 
 
 def stack_frames(
@@ -27,6 +47,7 @@ def stack_frames(
     output_file: str | None = None,
     job_id: str | None = None,
     force: bool = False,
+    preview_settings: Any | None = None,
 ) -> str | None:
     """Run the main stacking process using the ImageProcessing driver.
 
@@ -69,6 +90,9 @@ def stack_frames(
         it (and with the setting ``skip_unchanged_stacks_enabled`` on), an
         unchanged stack is kept and its path returned (see
         `stack_inputs.py`).
+    preview_settings : `PreviewSettings` or `None`, optional
+        Choices for this run's preview picture that replace the saved
+        settings (see `stack_preview.PreviewSettings`).
 
     Returns
     -------
@@ -81,7 +105,8 @@ def stack_frames(
     ------
     ValueError
         If the target has no usable frames to stack, either at the
-        start or after filtering out mismatched frames.
+        start or after filtering out mismatched frames, or if the frames
+        come from more than one camera.
     """
     if frames_to_stack is not None:
         target_frames = frames_to_stack
@@ -112,6 +137,14 @@ def stack_frames(
 
     if not target_frames:
         raise ValueError("Target has no frames available to stack.")
+
+    # Frames from different cameras cannot be stacked together. Without this
+    # check the gain filter below would keep whichever camera had more frames.
+    from astrometricslib.pipelines.stacking.pre_processing.camera_selection import ensure_single_camera
+
+    ensure_single_camera(target_frames)
+
+    _report_stage(5, f"Checking {len(target_frames)} frames")
 
     # Validate that only homogeneous frame types are stacked (no mixed
     # spectral/standard frames)
@@ -185,6 +218,30 @@ def stack_frames(
         )
     if not target_frames:
         raise ValueError("Target has no frames available to stack after gain-homogeneity filtering.")
+
+    # A frame an earlier run moved into `_excluded` can still be listed on the
+    # target, if that run's save of the target did not last. Count it as set
+    # aside, not as a frame that was kept.
+    from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
+        drop_frames_already_set_aside,
+    )
+    from astrometricslib.utilities.config_loader import get_configuration
+
+    target_frames, already_set_aside = drop_frames_already_set_aside(
+        target, target_frames, str(get_configuration().get_frames_path())
+    )
+    if already_set_aside:
+        logger.info(
+            "Left out %d frame(s) that an earlier run moved into _excluded for target '%s'.",
+            len(already_set_aside),
+            target.id,
+        )
+        excluded_frames.extend(
+            ExcludedFrame(path=frame.path, reason="set aside by an earlier quarantine")
+            for frame in already_set_aside
+        )
+    if not target_frames:
+        raise ValueError("Target has no frames available to stack after leaving out set-aside frames.")
 
     # Move frames with clouds or trailed stars out of the target's folder.
     # The background check below only catches one sudden jump in sky
@@ -273,6 +330,8 @@ def stack_frames(
                 "Target has no frames available to stack after background-homogeneity filtering."
             )
 
+    _report_stage(15, f"Frame checks done, {len(target_frames)} frames kept")
+
     from astrometricslib.drivers.siril_stacking_engine import SirilStackingEngine
     from astrometricslib.pipelines.stacking.post_processing.stack_preview import (
         record_preview_as_processed_image,
@@ -338,6 +397,7 @@ def stack_frames(
     # in a staging folder until the new stack exists; if the restack fails,
     # they go back where they were.
     staging = _archive_stack_before_restack(target.id, output_file)
+    _report_stage(20, f"Calibrating, aligning and stacking {len(target_frames)} frames in Siril")
     try:
         stacked_path, diagnostics = run_stack(
             engine,
@@ -346,6 +406,7 @@ def stack_frames(
             output_file,
             log_file,
             has_spectral,
+            job_id=job_id,
             rejection_sigma=rejection_sigma,
             filter_wfwhm=filter_wfwhm,
             filter_round=filter_round,
@@ -356,6 +417,7 @@ def stack_frames(
         _finish_stack_archive(staging, output_file, target.id, kept=False)
         raise
     _finish_stack_archive(staging, output_file, target.id, kept=bool(stacked_path))
+    _report_stage(70, "Siril stack finished" if stacked_path else "Siril produced no stack")
 
     # Frames shift between nights, so the edges of a stack of several nights
     # are covered by fewer frames and are noisier. Trim them off. The check
@@ -415,7 +477,8 @@ def stack_frames(
         # A picture for people to look at. It never changes the stack and a
         # failure to make it is logged, not raised. The image viewer shows it
         # through the target's processed image.
-        preview_path = write_stack_preview(stacked_path)
+        _report_stage(80, "Making the preview picture (GraXpert, Cosmic Clarity, star toning)")
+        preview_path = write_stack_preview(stacked_path, preview_settings)
         if preview_path:
             record_preview_as_processed_image(target, has_spectral, stacked_path, preview_path)
         # Saved last, once the stack, its quality summary and its picture are
@@ -423,6 +486,17 @@ def stack_frames(
         # that stopped before this point leaves a stack that is built again.
         if inputs_record is not None:
             write_stack_inputs(stacked_path, inputs_record)
+        # One closing line, so a reader of the log does not have to piece the
+        # outcome together. The preview steps line above says which cleanup
+        # programs ran.
+        logger.info(
+            "Stack of '%s' finished: stack %s; preview %s; %d frames submitted, %d set aside.",
+            target.id,
+            stacked_path,
+            preview_path or "not made (see the warning above)",
+            frames_submitted,
+            len(excluded_frames),
+        )
 
     return stacked_path
 

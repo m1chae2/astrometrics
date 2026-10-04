@@ -16,12 +16,19 @@ the storage side lives in `datastore.local_database`.
 """
 
 import contextlib
+import contextvars
 import fcntl
 import logging
 import os
 import time
 
 logger = logging.getLogger(__name__)
+
+# The resources whose slot the calling work already holds. A slot taken again
+# by the same work is reused (see `acquire_resource_slot`).
+_held_resource_names: contextvars.ContextVar[tuple[str, ...]] = contextvars.ContextVar(
+    "held_resource_names", default=()
+)
 
 
 @contextlib.contextmanager
@@ -98,6 +105,13 @@ def acquire_resource_slot(  # ruff: ignore[missing-return-type-undocumented-publ
     poll_interval_seconds : `float`
         How long to sleep between sweeps when every slot is held.
 
+    A slot the calling work already holds is reused, not taken again: a
+    nested request for the same resource runs at once inside the slot already
+    held. Without this, two jobs that each hold one slot and each ask for a
+    second one wait for each other forever (the cause of two stacks hanging
+    together). The work must be running in the same thread, or in a copy of
+    its context (see `contextvars.copy_context`), for this to apply.
+
     Yields
     ------
     None
@@ -113,12 +127,24 @@ def acquire_resource_slot(  # ruff: ignore[missing-return-type-undocumented-publ
     locks_directory = os.path.join(str(app_config.get_library_path()), "locks")
     max_slots = max(1, max_slots)
 
+    if resource_name in _held_resource_names.get():
+        # This work already holds a slot of the resource. Asking again would
+        # queue behind other work for a second slot, and two jobs that each
+        # hold one slot and wait for another would wait for each other
+        # forever.
+        yield
+        return
+
     while True:
         for slot_index in range(max_slots):
             lock_path = os.path.join(locks_directory, f"{resource_name}_slot_{slot_index}.lock")
             try:
                 with file_lock(lock_path):
-                    yield
+                    held_token = _held_resource_names.set((*_held_resource_names.get(), resource_name))
+                    try:
+                        yield
+                    finally:
+                        _held_resource_names.reset(held_token)
                 return
             except DeviceInUseError:
                 continue

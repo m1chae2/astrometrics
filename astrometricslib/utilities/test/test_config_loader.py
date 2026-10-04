@@ -12,49 +12,39 @@ import pytest
 from astrometricslib.utilities.config_loader import AppConfiguration
 
 
-def _make_isolated_config(tmp_path: Path) -> AppConfiguration:
-    """Build an AppConfiguration pointed at a fresh, empty tmp_path library.
-
-    Returns
-    -------
-    AppConfiguration
-        A configuration pointed at a fresh, empty library under tmp_path.
-    """
-    library_path = tmp_path / "library"
-    (library_path / "targets").mkdir(parents=True)
-    frames_path = library_path / "frames"
-    frames_path.mkdir(parents=True)
-
-    config = AppConfiguration()
-    config.update_config({"Image Library": {"path": str(library_path)}})
-    return config
-
-
-def test_a_fresh_config_defaults_the_identified_star_ceiling_to_500(tmp_path: Path) -> None:
+def test_a_fresh_config_defaults_the_identified_star_ceiling_to_500(
+    config_in_tmp_path: AppConfiguration,
+) -> None:
     """A fresh install must not default to unlimited identification."""
-    config = _make_isolated_config(tmp_path)
+    config = config_in_tmp_path
 
     assert config.get_maximum_identified_stars() == 500
 
 
-def test_an_explicit_zero_in_configuration_still_means_unlimited(tmp_path: Path) -> None:
+def test_an_explicit_zero_in_configuration_still_means_unlimited(
+    config_in_tmp_path: AppConfiguration,
+) -> None:
     """A caller who wants full completeness back can still opt in."""
-    config = _make_isolated_config(tmp_path)
+    config = config_in_tmp_path
     config.app_config.set("Processing.Astrometry", "maximum_identified_stars", "0")
 
     assert config.get_maximum_identified_stars() is None
 
 
-def test_get_frames_path_defaults_to_frames_subfolder(tmp_path: Path) -> None:
+def test_get_frames_path_defaults_to_frames_subfolder(
+    config_in_tmp_path: AppConfiguration, tmp_path: Path
+) -> None:
     """Verify that get_frames_path defaults to a 'frames' subfolder."""
-    config = _make_isolated_config(tmp_path)
+    config = config_in_tmp_path
     expected = (tmp_path / "library" / "frames").absolute()
     assert config.get_frames_path() == expected
 
 
-def test_get_frames_path_reads_configured_frames_path(tmp_path: Path) -> None:
+def test_get_frames_path_reads_configured_frames_path(
+    config_in_tmp_path: AppConfiguration, tmp_path: Path
+) -> None:
     """Verify that get_frames_path respects explicit frames_path config."""
-    config = _make_isolated_config(tmp_path)
+    config = config_in_tmp_path
     custom_frames = (tmp_path / "external_frames").absolute()
     custom_frames.mkdir(parents=True)
     config.app_config.set("Image Library", "frames_path", str(custom_frames))
@@ -73,25 +63,9 @@ def test_a_camera_section_is_found_whatever_the_spacing_case_or_punctuation() ->
         assert config.get_camera_config(spelling) == {"grating_lines_per_mm": "200"}
 
 
-def _isolated_from_shared_config(tmp_path: Path) -> AppConfiguration:
-    """Build an AppConfiguration over shared fixture data, writing to tmp_path.
-
-    Reads the shared test fixture's real camera data but writes to its own
-    tmp_path file, so a test that calls `update_config` can't leave the
-    shared fixture mutated for later tests.
-
-    Returns
-    -------
-    AppConfiguration
-        A configuration seeded from the shared fixture, redirected to an
-        isolated write target.
-    """
-    config = AppConfiguration()
-    config.config_file_path = tmp_path / "isolated.config.toml"
-    return config
-
-
-def test_update_config_leaves_untouched_camera_calibration_fields_alone(tmp_path: Path) -> None:
+def test_update_config_leaves_untouched_camera_calibration_fields_alone(
+    config_in_tmp_path: AppConfiguration,
+) -> None:
     """A sparse update_config call must not disturb sections it wasn't given.
 
     Settings used to send `update_config` the *entire* fetched config
@@ -105,7 +79,7 @@ def test_update_config_leaves_untouched_camera_calibration_fields_alone(tmp_path
     this test guards the assumption that fix relies on: `update_config`
     only touches the sections/keys it's given.
     """
-    config = _isolated_from_shared_config(tmp_path)
+    config = config_in_tmp_path
     before = config.get_camera_config("Nikon D5300")["clip_ceiling_adu"]
     assert isinstance(before, dict)  # a real inline table, not a string
 
@@ -116,7 +90,9 @@ def test_update_config_leaves_untouched_camera_calibration_fields_alone(tmp_path
     assert after == before
 
 
-def test_resending_an_already_stringified_field_would_corrupt_it(tmp_path: Path) -> None:
+def test_resending_an_already_stringified_field_would_corrupt_it(
+    config_in_tmp_path: AppConfiguration,
+) -> None:
     """Document the exact failure mode a sparse patch avoids.
 
     `_TomlSectionedConfig.set()` (`config.app_config`) is
@@ -127,7 +103,7 @@ def test_resending_an_already_stringified_field_would_corrupt_it(tmp_path: Path)
     This is not new behavior to fix here -- it is why Settings must never
     resend a section it did not actually edit.
     """
-    config = _isolated_from_shared_config(tmp_path)
+    config = config_in_tmp_path
     already_stringified = str(config.get_camera_config("Nikon D5300")["clip_ceiling_adu"])
 
     config.update_config({"Observatory.Camera.Nikon D5300": {"clip_ceiling_adu": already_stringified}})
@@ -137,31 +113,33 @@ def test_resending_an_already_stringified_field_would_corrupt_it(tmp_path: Path)
     assert not isinstance(corrupted, dict)
 
 
-def test_graxpert_is_off_unless_a_command_is_configured(tmp_path: Path) -> None:
+def test_graxpert_is_off_unless_a_command_is_configured(config_in_tmp_path: AppConfiguration) -> None:
     """A blank or missing setting turns the gradient-removal step off."""
-    config = _make_isolated_config(tmp_path)
+    config = config_in_tmp_path
 
     assert config.get_graxpert_executable() is None
 
 
-def test_a_configured_graxpert_command_is_returned_as_written(tmp_path: Path) -> None:
+def test_a_configured_graxpert_command_is_returned_as_written(config_in_tmp_path: AppConfiguration) -> None:
     """The command may be a path or a command with arguments."""
-    config = _make_isolated_config(tmp_path)
+    config = config_in_tmp_path
     config.update_config({"Processing.GraXpert": {"graxpert_executable": "/opt/GraXpert-linux/GraXpert"}})
 
     assert config.get_graxpert_executable() == "/opt/GraXpert-linux/GraXpert"
 
 
-def test_cosmic_clarity_is_off_unless_a_program_is_configured(tmp_path: Path) -> None:
+def test_cosmic_clarity_is_off_unless_a_program_is_configured(config_in_tmp_path: AppConfiguration) -> None:
     """A blank or missing setting turns the denoise step off."""
-    config = _make_isolated_config(tmp_path)
+    config = config_in_tmp_path
 
     assert config.get_cosmic_clarity_denoise_executable() is None
 
 
-def test_the_denoise_strength_is_read_and_kept_between_zero_and_one(tmp_path: Path) -> None:
+def test_the_denoise_strength_is_read_and_kept_between_zero_and_one(
+    config_in_tmp_path: AppConfiguration,
+) -> None:
     """A fresh install uses 0.9; out-of-range values are clipped."""
-    config = _make_isolated_config(tmp_path)
+    config = config_in_tmp_path
     assert config.get_cosmic_clarity_denoise_strength() == pytest.approx(0.9)
 
     config.update_config({"Processing.CosmicClarity": {"denoise_strength": "0.4"}})
@@ -174,16 +152,18 @@ def test_the_denoise_strength_is_read_and_kept_between_zero_and_one(tmp_path: Pa
     assert config.get_cosmic_clarity_denoise_strength() == pytest.approx(0.9)
 
 
-def test_get_stacks_path_defaults_to_the_frames_path(tmp_path: Path) -> None:
+def test_get_stacks_path_defaults_to_the_frames_path(config_in_tmp_path: AppConfiguration) -> None:
     """Without a stacks_path entry, derived files go beside the raw frames."""
-    config = _make_isolated_config(tmp_path)
+    config = config_in_tmp_path
 
     assert config.get_stacks_path() == config.get_frames_path()
 
 
-def test_get_stacks_path_reads_the_configured_folder(tmp_path: Path) -> None:
+def test_get_stacks_path_reads_the_configured_folder(
+    config_in_tmp_path: AppConfiguration, tmp_path: Path
+) -> None:
     """An explicit stacks_path sends derived files to another folder."""
-    config = _make_isolated_config(tmp_path)
+    config = config_in_tmp_path
     other = (tmp_path / "other_disk" / "stacks").absolute()
     config.app_config.set("Image Library", "stacks_path", str(other))
 
@@ -191,74 +171,74 @@ def test_get_stacks_path_reads_the_configured_folder(tmp_path: Path) -> None:
     assert config.get_frames_path() != other
 
 
-def test_a_blank_stacks_path_counts_as_unset(tmp_path: Path) -> None:
+def test_a_blank_stacks_path_counts_as_unset(config_in_tmp_path: AppConfiguration) -> None:
     """An empty entry behaves as if the setting were left out."""
-    config = _make_isolated_config(tmp_path)
+    config = config_in_tmp_path
     config.app_config.set("Image Library", "stacks_path", "")
 
     assert config.get_stacks_path() == config.get_frames_path()
 
 
-def test_quarantine_of_bad_frames_is_on_by_default(tmp_path: Path) -> None:
+def test_quarantine_of_bad_frames_is_on_by_default(config_in_tmp_path: AppConfiguration) -> None:
     """Stacking moves clouded and trailed frames aside unless told not to."""
-    config = _make_isolated_config(tmp_path)
+    config = config_in_tmp_path
     assert config.get_quarantine_bad_frames_enabled() is True
 
 
-def test_quarantine_of_bad_frames_can_be_turned_off(tmp_path: Path) -> None:
+def test_quarantine_of_bad_frames_can_be_turned_off(config_in_tmp_path: AppConfiguration) -> None:
     """The ``quarantine_bad_frames_enabled`` setting switches the step off."""
-    config = _make_isolated_config(tmp_path)
+    config = config_in_tmp_path
     config.app_config.set("Processing.Siril", "quarantine_bad_frames_enabled", "false")
     assert config.get_quarantine_bad_frames_enabled() is False
 
 
-def test_star_toning_of_the_preview_is_on_by_default(tmp_path: Path) -> None:
+def test_star_toning_of_the_preview_is_on_by_default(config_in_tmp_path: AppConfiguration) -> None:
     """The stack preview tones its stars unless told not to."""
-    config = _make_isolated_config(tmp_path)
+    config = config_in_tmp_path
     assert config.get_preview_star_tone_enabled() is True
 
 
-def test_star_toning_of_the_preview_can_be_turned_off(tmp_path: Path) -> None:
+def test_star_toning_of_the_preview_can_be_turned_off(config_in_tmp_path: AppConfiguration) -> None:
     """The ``preview_star_tone_enabled`` setting switches the step off."""
-    config = _make_isolated_config(tmp_path)
+    config = config_in_tmp_path
     config.app_config.set("Processing.Siril", "preview_star_tone_enabled", "false")
     assert config.get_preview_star_tone_enabled() is False
 
 
-def test_keeping_the_previous_stack_is_on_by_default(tmp_path: Path) -> None:
+def test_keeping_the_previous_stack_is_on_by_default(config_in_tmp_path: AppConfiguration) -> None:
     """A restack keeps the stack it replaces unless told not to."""
-    config = _make_isolated_config(tmp_path)
+    config = config_in_tmp_path
     assert config.get_keep_previous_stack_enabled() is True
 
 
-def test_keeping_the_previous_stack_can_be_turned_off(tmp_path: Path) -> None:
+def test_keeping_the_previous_stack_can_be_turned_off(config_in_tmp_path: AppConfiguration) -> None:
     """The ``keep_previous_stack_enabled`` setting switches the step off."""
-    config = _make_isolated_config(tmp_path)
+    config = config_in_tmp_path
     config.app_config.set("Processing.Siril", "keep_previous_stack_enabled", "false")
     assert config.get_keep_previous_stack_enabled() is False
 
 
-def test_trimming_noisy_stack_edges_is_on_by_default(tmp_path: Path) -> None:
+def test_trimming_noisy_stack_edges_is_on_by_default(config_in_tmp_path: AppConfiguration) -> None:
     """A finished stack has its noisy edges trimmed unless told not to."""
-    config = _make_isolated_config(tmp_path)
+    config = config_in_tmp_path
     assert config.get_trim_noisy_stack_edges_enabled() is True
 
 
-def test_trimming_noisy_stack_edges_can_be_turned_off(tmp_path: Path) -> None:
+def test_trimming_noisy_stack_edges_can_be_turned_off(config_in_tmp_path: AppConfiguration) -> None:
     """The ``trim_noisy_stack_edges_enabled`` setting switches the trim off."""
-    config = _make_isolated_config(tmp_path)
+    config = config_in_tmp_path
     config.app_config.set("Processing.Siril", "trim_noisy_stack_edges_enabled", "false")
     assert config.get_trim_noisy_stack_edges_enabled() is False
 
 
-def test_unchanged_stacks_are_skipped_by_default(tmp_path: Path) -> None:
+def test_unchanged_stacks_are_skipped_by_default(config_in_tmp_path: AppConfiguration) -> None:
     """A stack whose inputs have not changed is skipped unless told not to."""
-    config = _make_isolated_config(tmp_path)
+    config = config_in_tmp_path
     assert config.get_skip_unchanged_stacks_enabled() is True
 
 
-def test_skipping_unchanged_stacks_can_be_turned_off(tmp_path: Path) -> None:
+def test_skipping_unchanged_stacks_can_be_turned_off(config_in_tmp_path: AppConfiguration) -> None:
     """The ``skip_unchanged_stacks_enabled`` setting switches the skip off."""
-    config = _make_isolated_config(tmp_path)
+    config = config_in_tmp_path
     config.app_config.set("Processing.Siril", "skip_unchanged_stacks_enabled", "false")
     assert config.get_skip_unchanged_stacks_enabled() is False

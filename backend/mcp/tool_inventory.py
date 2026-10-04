@@ -343,7 +343,7 @@ CLASSIFICATION_RULES = (
         "Lists the frame files on the telescope computer, the drive and the library. Changes nothing.",
     ),
     _rule(
-        r"^target_stack$",
+        r"^(target_stack|target_remake_preview)$",
         "process",
         "high",
         "Stacks a target's chosen frames with the app's own stage, like the Stack button.",

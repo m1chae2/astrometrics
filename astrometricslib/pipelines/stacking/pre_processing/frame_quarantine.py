@@ -22,6 +22,7 @@ The measurements come from `raw_frame_check`, the same code that checks
 frames during an observing session.
 """
 
+import contextvars
 import json
 import logging
 import os
@@ -48,6 +49,7 @@ __all__ = [
     "QuarantineDecision",
     "QuarantineReport",
     "decision_to_set_aside_frame",
+    "drop_frames_already_set_aside",
     "find_frames_to_quarantine",
     "find_quarantine_folders",
     "judge_batch",
@@ -317,15 +319,40 @@ def _measure_frames(
         try:
             measurement = measure(frame.path)
         except Exception as error:
-            logger.warning("Cannot measure '%s' for the quarantine check: %s", frame.path, error)
+            logger.debug("Cannot measure '%s' for the quarantine check: %s", frame.path, error)
             return None
         measurement.pop("_stars", None)
         measurement["path"] = frame.path
         return measurement
 
+    # Worker threads start without the caller's job context. Each task gets
+    # its own copy, so the messages it logs go to this job's log and not to
+    # the log of every job that is running.
+    caller_context = contextvars.copy_context()
+
+    def measure_in_job_context(frame: Any) -> dict[str, Any] | None:
+        """Measure one frame inside a copy of the caller's job context.
+
+        Returns
+        -------
+        measurement : `dict` or `None`
+            The frame's measurements, or `None` if it could not be read.
+        """
+        return caller_context.copy().run(safe_measure, frame)
+
     with ThreadPoolExecutor(max_workers=MEASUREMENT_THREADS) as pool:
-        results = list(pool.map(safe_measure, frames))
+        results = list(pool.map(measure_in_job_context, frames))
     unreadable = [frame.path for frame, result in zip(frames, results, strict=True) if result is None]
+    if unreadable:
+        # One line, not one per frame: a folder of missing frames would
+        # otherwise bury the rest of the log.
+        logger.warning(
+            "Could not measure %d of %d frames for the quarantine check (first: '%s'). "
+            "Run with debug logging to see each reason.",
+            len(unreadable),
+            len(frames),
+            unreadable[0],
+        )
     return [result for result in results if result is not None], unreadable
 
 
@@ -499,6 +526,56 @@ def quarantine_bad_frames(
         target.recalculate_total_exposure()
     kept_frames = [frame for frame in frames if frame.path not in moved_paths]
     return kept_frames, report
+
+
+def drop_frames_already_set_aside(
+    target: Any, frames: Sequence[Any], frames_path: str
+) -> tuple[list[Any], list[Any]]:
+    """Drop frames that an earlier run moved into `_excluded`.
+
+    The quarantine step removes the frames it moves from the target's
+    records, but that change only lasts if the target was saved afterwards.
+    When it was not, the target still lists files that are no longer in
+    their folder, and the stack would count them as frames it kept. A frame
+    is dropped only when the `_excluded` manifest lists its original path
+    and no file lies there now, so a frame that was restored stays.
+
+    The target is changed in memory; the caller saves it.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target being stacked.
+    frames : `Sequence`
+        The frames the stack is about to use.
+    frames_path : `str`
+        The library's frames folder, where the `_excluded` folders are found.
+
+    Returns
+    -------
+    kept_frames : `list`
+        `frames` without the ones already set aside.
+    set_aside_frames : `list`
+        The frames that were dropped.
+    """
+    target_id = getattr(target, "id", "")
+    set_aside_paths = {
+        os.path.normpath(entry.original_path) for entry in list_set_aside_frames(frames_path, target_id)
+    }
+    if not set_aside_paths:
+        return list(frames), []
+    set_aside_frames = [
+        frame
+        for frame in frames
+        if os.path.normpath(frame.path) in set_aside_paths and not os.path.exists(frame.path)
+    ]
+    if not set_aside_frames:
+        return list(frames), []
+    dropped_paths = {frame.path for frame in set_aside_frames}
+    target.frames = [frame for frame in target.frames if frame.path not in dropped_paths]
+    target.recalculate_total_exposure()
+    kept_frames = [frame for frame in frames if frame.path not in dropped_paths]
+    return kept_frames, set_aside_frames
 
 
 def restore_quarantined_frames(directory: str) -> list[str]:

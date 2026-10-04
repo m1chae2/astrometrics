@@ -13,18 +13,26 @@ from backend.services.observatory.execution_service import ExecutionService
 
 
 @pytest.fixture
-def execution_service():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Build an ExecutionService against the sandboxed test config.
+def execution_service(config_in_tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Build an ExecutionService over a library of its own.
+
+    Each test gets a new, empty library, so a session one test stores cannot
+    show up in another test, whatever order they run in.
+
+    Parameters
+    ----------
+    config_in_tmp_path : `AppConfiguration`
+        The test's own settings, with its own library.
 
     Returns
     -------
     service : `ExecutionService`
-        A service wired to the temporary library the test suite configures.
+        A service wired to the test's own library.
     """
-    from astrometricslib import Astrometrics, get_configuration
+    from astrometricslib import Astrometrics
     from wayfindinglib import Wayfinder
 
-    config = get_configuration()
+    config = config_in_tmp_path
     return ExecutionService(wayfinder=Wayfinder(config), astrometrics=Astrometrics(config), config=config)
 
 

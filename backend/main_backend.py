@@ -33,7 +33,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
-from astrometricslib import StorageNotMountedError, get_configuration, require_mounted_storage
+from astrometricslib import (
+    StorageNotMountedError,
+    close_interrupted_jobs,
+    get_configuration,
+    require_mounted_storage,
+)
 from backend.container import container
 
 # Configure Logging
@@ -169,6 +174,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """
     container.init_resources()
     _attach_log_handlers()
+    # Close the jobs an earlier run left open and put back any stack it left
+    # parked in a staging folder. Another program's running jobs are left as
+    # they are.
+    app_configuration.watch_for_changes()
+    close_interrupted_jobs(app_configuration)
     try:
         require_mounted_storage(app_configuration.get_frames_path(), app_configuration)
     except StorageNotMountedError as not_mounted:

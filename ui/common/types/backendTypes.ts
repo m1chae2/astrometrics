@@ -657,6 +657,13 @@ export interface ProcessStatus {
  * Timestamp the job was last updated, by default `None`.
  * completed_at : `str` or `None`
  * Timestamp the job completed, by default `None`.
+ * owner_pid : `int` or `None`
+ * Number of the program running the job, by default `None` (jobs
+ * recorded before this was kept).
+ * owner_started_at : `str` or `None`
+ * When that program started. With `owner_pid` it tells whether the
+ * program is still the one that took the job (see
+ * `astrometricslib.utilities.process_identity`).
  */
 export interface ProcessingJob {
   id: string;
@@ -672,6 +679,8 @@ export interface ProcessingJob {
   completedAt?: string | null;
   inputMetrics?: Record<string, any> | null;
   outputMetrics?: Record<string, any> | null;
+  ownerPid?: number | null;
+  ownerStartedAt?: string | null;
 }
 
 /**

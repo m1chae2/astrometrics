@@ -19,6 +19,7 @@ from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality impo
 )
 from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
     MANIFEST_FILE_NAME,
+    drop_frames_already_set_aside,
     find_frames_to_quarantine,
     judge_batch,
     quarantine_bad_frames,
@@ -204,6 +205,64 @@ def test_quarantine_moves_files_records_them_and_updates_the_target(tmp_path: Pa
     assert manifest[0]["original_path"] == bad_path
     assert manifest[0]["kind"] == "trailed"
     assert report.reasons_by_path()[bad_path].startswith(QUARANTINE_EXCLUSION_REASON_PREFIX)
+
+
+def test_frames_set_aside_earlier_are_dropped_even_if_the_target_still_lists_them(
+    tmp_path: Path,
+) -> None:
+    """A moved frame the target still lists counts as set aside, not kept."""
+    directory = tmp_path / "lights" / "M 1" / "Scope" / "Camera"
+    directory.mkdir(parents=True)
+    frames = []
+    for index in range(10):
+        path = directory / f"M1_{index:03d}.fits"
+        path.write_bytes(b"frame")
+        frames.append(make_frame(path, float(index) * 120.0))
+    bad_path = frames[4].path
+    first_run_target = SimpleNamespace(id="M 1", frames=list(frames), recalculate_total_exposure=lambda: None)
+    quarantine_bad_frames(
+        first_run_target,
+        frames,
+        measure=lambda path: make_measurement(path, roundness=0.4 if path == bad_path else 0.97),
+    )
+    # The first run's save of the target did not last: it still lists all ten.
+    recalculations: list[int] = []
+    stale_target = SimpleNamespace(
+        id="M 1", frames=list(frames), recalculate_total_exposure=lambda: recalculations.append(1)
+    )
+
+    kept, set_aside = drop_frames_already_set_aside(stale_target, frames, str(tmp_path))
+
+    assert [frame.path for frame in set_aside] == [bad_path]
+    assert bad_path not in [frame.path for frame in kept]
+    assert len(kept) == 9
+    assert bad_path not in [frame.path for frame in stale_target.frames]
+    assert recalculations == [1]
+
+
+def test_a_restored_frame_is_not_dropped(tmp_path: Path) -> None:
+    """A frame back in its folder stays, though the manifest lists it."""
+    directory = tmp_path / "lights" / "M 1" / "Scope" / "Camera"
+    directory.mkdir(parents=True)
+    frames = []
+    for index in range(10):
+        path = directory / f"M1_{index:03d}.fits"
+        path.write_bytes(b"frame")
+        frames.append(make_frame(path, float(index) * 120.0))
+    bad_path = frames[4].path
+    target = SimpleNamespace(id="M 1", frames=list(frames), recalculate_total_exposure=lambda: None)
+    quarantine_bad_frames(
+        target,
+        frames,
+        measure=lambda path: make_measurement(path, roundness=0.4 if path == bad_path else 0.97),
+    )
+    # Put the moved file back without clearing the manifest.
+    Path(bad_path).write_bytes(b"frame")
+
+    kept, set_aside = drop_frames_already_set_aside(target, frames, str(tmp_path))
+
+    assert set_aside == []
+    assert len(kept) == 10
 
 
 def test_quarantine_ignores_calibration_frames(tmp_path: Path) -> None:

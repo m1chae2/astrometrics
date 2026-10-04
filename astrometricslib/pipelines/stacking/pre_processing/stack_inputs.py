@@ -101,6 +101,7 @@ SETTINGS_THAT_CHANGE_A_STACK = (
 #   FITS, made by a separate step after the stack, and never the stack itself.
 SETTINGS_THAT_DO_NOT_CHANGE_A_STACK = (
     "get_stacks_path",
+    "get_frames_path",
     "get_logs_path",
     "get_siril_executable",
     "get_auto_open_siril_gui",
@@ -111,6 +112,8 @@ SETTINGS_THAT_DO_NOT_CHANGE_A_STACK = (
     "get_primary_focal_length_mm",
     "get_graxpert_executable",
     "get_cosmic_clarity_denoise_executable",
+    "get_cosmic_clarity_denoise_path",
+    "get_cosmic_clarity_denoise_enabled",
     "get_cosmic_clarity_denoise_strength",
     "get_preview_star_tone_enabled",
 )

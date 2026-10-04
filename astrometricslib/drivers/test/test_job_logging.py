@@ -308,3 +308,71 @@ class TestRunAsBackgroundJob:
             "pre": {"rejectedFraction": 0.10},
             "post": {"rejectedFraction": 0.05},
         }
+
+
+def test_a_nested_job_of_the_same_kind_joins_the_running_one(isolated_logs):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify the same work is not listed twice.
+
+    The MCP wrapper around a stacking method and the method's own
+    registration used to make two job rows for one stack.
+    """
+    from astrometricslib.drivers.logger_interface import LoggerInterface
+
+    with registered_job(enabled=True, job_type="stacking", target_id="Vega") as outer:
+        with registered_job(enabled=True, job_type="stacking", target_id="Vega") as inner:
+            assert inner is outer
+            inner.mark("failed", 100)
+
+    stacking_jobs = LoggerInterface(isolated_logs).get_jobs_by_target("Vega")
+    assert len(stacking_jobs) == 1
+    assert outer.terminal_status == "failed"
+
+
+def test_a_nested_job_of_another_kind_gets_its_own_row(isolated_logs):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify a stacking job inside a batch job is still listed separately."""
+    with registered_job(enabled=True, job_type="batch_processing", target_id="Vega") as batch:
+        with registered_job(enabled=True, job_type="stacking", target_id="Vega") as stacking:
+            assert stacking.job_id != batch.job_id
+
+
+def test_each_job_log_holds_only_its_own_work(isolated_logs):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify two jobs running at once do not write into each other's log."""
+    import threading
+
+    package_logger = logging.getLogger(f"{PACKAGE_LOGGER_NAME}.test_isolation")
+    both_registered = threading.Barrier(2)
+    log_paths: dict[str, str] = {}
+
+    def run_job(target_id: str) -> None:
+        """Log one line as a job, once both jobs are registered."""
+        with registered_job(enabled=True, job_type="stacking", target_id=target_id) as job:
+            log_paths[target_id] = job.log_file_path
+            both_registered.wait(timeout=10)
+            package_logger.info("line from %s", target_id)
+            both_registered.wait(timeout=10)
+
+    threads = [threading.Thread(target=run_job, args=(name,)) for name in ("Vega", "Deneb")]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+
+    with open(log_paths["Vega"]) as vega_log, open(log_paths["Deneb"]) as deneb_log:
+        vega_text, deneb_text = vega_log.read(), deneb_log.read()
+    assert "line from Vega" in vega_text
+    assert "line from Deneb" not in vega_text
+    assert "line from Deneb" in deneb_text
+    assert "line from Vega" not in deneb_text
+
+
+def test_stage_moves_progress_and_keeps_a_finished_status(isolated_logs):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify stage reports a running step and never undoes a finished job."""
+    from astrometricslib.drivers.logger_interface import LoggerInterface
+
+    with registered_job(enabled=True, job_type="stacking", target_id="Vega") as job:
+        job.stage(40, "Stacking")
+        stored = LoggerInterface(isolated_logs).get_job(job.job_id)
+        assert (stored.status, stored.progress_current, stored.message) == ("running", 40, "Stacking")
+        job.mark("failed", 100)
+        job.stage(80, "Too late")
+        assert LoggerInterface(isolated_logs).get_job(job.job_id).status == "failed"

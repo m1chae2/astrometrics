@@ -40,6 +40,13 @@ class ProcessingJob(BaseModel):
         Timestamp the job was last updated, by default `None`.
     completed_at : `str` or `None`
         Timestamp the job completed, by default `None`.
+    owner_pid : `int` or `None`
+        Number of the program running the job, by default `None` (jobs
+        recorded before this was kept).
+    owner_started_at : `str` or `None`
+        When that program started. With `owner_pid` it tells whether the
+        program is still the one that took the job (see
+        `astrometricslib.utilities.process_identity`).
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -56,6 +63,8 @@ class ProcessingJob(BaseModel):
     completed_at: str | None = Field(None, alias="completedAt")
     input_metrics: dict[str, Any] | None = Field(default_factory=dict, alias="inputMetrics")
     output_metrics: dict[str, Any] | None = Field(default_factory=dict, alias="outputMetrics")
+    owner_pid: int | None = Field(None, alias="ownerPid")
+    owner_started_at: str | None = Field(None, alias="ownerStartedAt")
 
 
 class ProcessStatus(BaseModel):

@@ -95,6 +95,7 @@ from astrometricslib.models.target import (
     RenderedImage,
     Target,
 )
+from astrometricslib.pipelines.shared.interrupted_jobs import close_interrupted_jobs
 from astrometricslib.pipelines.stacking.post_processing.exposure_saturation import (
     SATURATED_BLOB_MINIMUM_PIXELS,
     SATURATED_FRAME_FRACTION,
@@ -235,6 +236,10 @@ class Astrometrics:
         until: str | None = None,
         force: bool = False,
         plan_only: bool = False,
+        denoise: bool | None = None,
+        denoise_strength: float | None = None,
+        star_toning: bool | None = None,
+        camera: str | None = None,
     ) -> dict[str, Any]:
         """Stack a target's light frames, choosing which frames go in.
 
@@ -268,6 +273,22 @@ class Astrometrics:
         plan_only : `bool`, optional
             Only report which frames would be stacked. Nothing is stacked
             or saved.
+        denoise : `bool`, optional
+            For this run's preview picture: `False` skips Cosmic Clarity,
+            `True` runs it even if the settings have it switched off. Left
+            out, the settings apply. Never written to the settings. It has
+            no effect when an unchanged stack is kept (see ``force``).
+        denoise_strength : `float`, optional
+            Cosmic Clarity's denoise strength for this run, from 0 to 1.
+        star_toning : `bool`, optional
+            Turn the preview's star toning on or off for this run.
+
+        camera : `str`, optional
+            Only frames from this camera, such as ``"ASI 533MM"``. Chosen
+            before any other frame check. Frames from different cameras are
+            never stacked together, so a target that has frames from more
+            than one camera needs this; without it the answer is an error
+            that names the cameras and how many frames each took.
 
         Returns
         -------
@@ -282,9 +303,15 @@ class Astrometrics:
             parse_iso_time,
             select_library_frames,
         )
+        from astrometricslib.pipelines.stacking.post_processing.stack_preview import PreviewSettings
 
         if frame_type not in ("imaging", "spectral"):
             return {"error": "frame_type must be 'imaging' or 'spectral'."}
+        if denoise_strength is not None and not 0.0 <= denoise_strength <= 1.0:
+            return {"error": "denoise_strength must be between 0 and 1."}
+        preview_settings = PreviewSettings(
+            denoise=denoise, denoise_strength=denoise_strength, star_toning=star_toning
+        )
         spectral = frame_type == "spectral"
         try:
             selection = FrameSelection(
@@ -304,12 +331,32 @@ class Astrometrics:
             and not any(word in frame.path.lower() for word in ("_stacked", "starless", "starmask"))
             and frame_is_spectral(frame) == spectral
         ]
+        from astrometricslib.pipelines.stacking.pre_processing.camera_selection import (
+            choose_camera_frames,
+            describe_cameras,
+            split_frames_by_camera,
+        )
+
+        if camera:
+            lights, camera_problem = choose_camera_frames(lights, camera)
+            if camera_problem:
+                return {"error": camera_problem}
         chosen = select_library_frames(lights, selection)
         if not chosen:
             return {"error": f"No {frame_type} light frames of {target.id!r} match that selection."}
+        cameras_chosen = split_frames_by_camera(chosen)
+        if len(cameras_chosen) > 1:
+            return {
+                "error": (
+                    f"The selected frames of {target.id!r} come from more than one camera: "
+                    f"{describe_cameras(cameras_chosen)}. Frames from different cameras are never "
+                    "stacked together. Pass camera to choose one."
+                )
+            }
         result: dict[str, Any] = {
             "target_id": target.id,
             "frame_type": frame_type,
+            "camera": next(iter(cameras_chosen), None),
             "frames_selected": len(chosen),
             "first_file": os.path.basename(chosen[0].path),
             "last_file": os.path.basename(chosen[-1].path),
@@ -317,7 +364,9 @@ class Astrometrics:
         if plan_only:
             return {**result, "plan_only": True, "note": "Nothing was stacked or saved."}
         with self.processing.acquire_stacking_slot():
-            stacked_path = self.processing.run_stacking(target, frames_to_stack=chosen, force=force)
+            stacked_path = self.processing.run_stacking(
+                target, frames_to_stack=chosen, force=force, preview_settings=preview_settings
+            )
         if stacked_path:
             self.targets.save()
         stacking = target.spectral_stacking if spectral else target.stacking
@@ -329,6 +378,66 @@ class Astrometrics:
             "flag_reasons": getattr(quality, "flag_reasons", []),
             "note": "For the numbers behind this stack, call processing_stack_summary.",
         }
+
+    @background_job("preview", grace_period_seconds=20.0)
+    def remake_preview(
+        self,
+        target: Target,
+        frame_type: str = "imaging",
+        denoise: bool | None = None,
+        denoise_strength: float | None = None,
+        star_toning: bool | None = None,
+        keep_previous: bool = True,
+    ) -> dict[str, Any]:
+        """Make a target's preview picture again from its existing stack.
+
+        Runs only the preview step (GraXpert, Siril stretch, Cosmic Clarity,
+        star toning), so a changed post-processing setting shows up without a
+        restack. The stack file is not changed. The overrides apply to this
+        run only and are never written to the configuration. By default the
+        old pictures are copied into a ``_previous_preview`` folder beside
+        the stack first, so the two can be compared; a failed run puts them
+        back. Through the MCP server a slow run returns a job id; follow it
+        with ``jobs_query``.
+
+        Parameters
+        ----------
+        target : `Target`
+            The target whose stack to make a picture of.
+        frame_type : `str`, optional
+            ``"imaging"`` (default) or ``"spectral"``.
+        denoise : `bool`, optional
+            `False` skips Cosmic Clarity for this run. `True` runs it even if
+            the settings have it switched off. Left out, the settings apply.
+        denoise_strength : `float`, optional
+            Cosmic Clarity's denoise strength for this run, from 0 to 1.
+        star_toning : `bool`, optional
+            Turn the star toning on or off for this run.
+        keep_previous : `bool`, optional
+            Copy the current pictures aside first. On by default.
+
+        Returns
+        -------
+        result : `dict` [`str`, `Any`]
+            ``preview_path``, ``processed_fits_path``, ``steps_run``,
+            ``shown_in_viewer``, ``previous_pictures`` and
+            ``stack_file_unchanged``. A problem comes back under ``error``.
+        """
+        from astrometricslib.pipelines.stacking.post_processing.preview_remake import remake_stack_preview
+        from astrometricslib.pipelines.stacking.post_processing.stack_preview import PreviewSettings
+
+        if frame_type not in ("imaging", "spectral"):
+            return {"error": "frame_type must be 'imaging' or 'spectral'."}
+        if denoise_strength is not None and not 0.0 <= denoise_strength <= 1.0:
+            return {"error": "denoise_strength must be between 0 and 1."}
+        settings = PreviewSettings(
+            denoise=denoise, denoise_strength=denoise_strength, star_toning=star_toning
+        )
+        with self.processing.acquire_stacking_slot():
+            result = remake_stack_preview(target, frame_type == "spectral", settings, keep_previous)
+        if result.get("shown_in_viewer"):
+            self.targets.save()
+        return result
 
     @background_job("batch_processing", grace_period_seconds=8.0)
     def process_all_targets(
@@ -451,6 +560,7 @@ __all__ = [
     "WasGeneratedBy",
     "capture_job_logs",
     "classify_and_sort_fits_files",
+    "close_interrupted_jobs",
     "derive_field_centers",
     "derive_target_sessions",
     "export_target_lineage_as_prov_xml",

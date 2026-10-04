@@ -1,79 +1,39 @@
-"""Setup tools for running automated tests.
+"""Setup tools for running the astrometricslib tests.
 
-This file creates a safe, temporary environment for tests to run in,
-so they don't accidentally overwrite your real astronomy data. It also
-fakes (mocks) connections to online astronomy databases so tests can run
-offline and quickly.
+The temporary library, database and settings file the tests use are made once
+for the whole repository, in the root `conftest.py`. This file adds only what
+the astrometricslib tests need on top of them: a small synthetic library
+(fake images and a fake database), fake connections to online astronomy
+databases so tests run offline, and a stop on starting Siril for previews.
 """
 
 import os
 import sys
-import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
-# 1. Set testing flag immediately so any module loading later sees it
+import pytest
+
+# Set the testing flag immediately so any module loading later sees it
 os.environ["ASTROMETRICS_TESTING"] = "1"
 
-# 2. Configure Matplotlib to use the headless Agg backend to avoid
-# Tkinter warnings
+# Use the headless Agg backend for Matplotlib, to avoid Tkinter warnings
 import matplotlib
 
 matplotlib.use("Agg")
-
-# 2. Setup a global temporary directory for tests
-_test_tmp_dir = tempfile.TemporaryDirectory()
-TEST_TEMP_DIR = Path(_test_tmp_dir.name)
-
-# 3. Create isolated library and frames directories
-test_library_path = TEST_TEMP_DIR / "library"
-test_frames_path = test_library_path / "frames"
-test_targets_path = test_library_path / "targets"
-test_calibration_path = test_library_path / "calibration"
-
-test_library_path.mkdir(parents=True, exist_ok=True)
-test_frames_path.mkdir(parents=True, exist_ok=True)
-test_targets_path.mkdir(parents=True, exist_ok=True)
-test_calibration_path.mkdir(parents=True, exist_ok=True)
-
-
-def _shipped_camera_sections_toml() -> str:
-    """Read the real camera sections out of the shipped config template.
-
-    Keeps the test fixture's camera catalog (aliases, record names,
-    quantum efficiency curves) identical to the shipped one without
-    duplicating it by hand.
-
-    Returns
-    -------
-    sections_text : `str`
-        Every ``[Observatory.Camera.<name>]`` section's TOML text,
-        concatenated.
-    """
-    import tomlkit
-
-    template_path = Path(__file__).parent / "astrometrics.config.example.toml"
-    document = tomlkit.parse(template_path.read_text(encoding="utf-8"))
-    blocks = []
-    for section_name, table in document.items():
-        if section_name.startswith("Observatory.Camera.") and "clip_ceiling_adu" in table:
-            blocks.append(f'["{section_name}"]\n{tomlkit.dumps(table)}')
-    return "\n".join(blocks)
-
-
-test_config_path = TEST_TEMP_DIR / "astrometrics.config.toml"
-test_config_path.write_text(
-    f'["Image Library"]\npath = "{test_library_path}"\n\n' + _shipped_camera_sections_toml()
-)
-os.environ["ASTROMETRICS_CONFIG"] = str(test_config_path)
-os.environ["ASTROMETRICS_CONFIG_PATH"] = str(test_config_path)
 
 # Populate synthetic test data for CI/CD environment
 import astropy.io.fits as fits
 import numpy as np
 
 
-def _seed_synthetic_test_library():  # ruff: ignore[missing-return-type-private-function]
+def _seed_synthetic_test_library(directories: SimpleNamespace) -> None:
     """Create fake images and a fake database for testing.
+
+    Parameters
+    ----------
+    directories : `types.SimpleNamespace`
+        The shared test folders (see the root `conftest.py`).
 
     Raises
     ------
@@ -81,9 +41,9 @@ def _seed_synthetic_test_library():  # ruff: ignore[missing-return-type-private-
         If it accidentally points to your real database instead of the
         safe temporary one.
     """
-    m81_dir = test_frames_path / "lights" / "M 81" / "ZWO ASI 533MM Pro"
-    vega_dir = test_frames_path / "lights" / "Vega"
-    m13_dir = test_frames_path / "lights" / "M 13"
+    m81_dir = directories.frames / "lights" / "M 81" / "ZWO ASI 533MM Pro"
+    vega_dir = directories.frames / "lights" / "Vega"
+    m13_dir = directories.frames / "lights" / "M 13"
 
     m81_dir.mkdir(parents=True, exist_ok=True)
     vega_dir.mkdir(parents=True, exist_ok=True)
@@ -136,11 +96,11 @@ def _seed_synthetic_test_library():  # ruff: ignore[missing-return-type-private-
 
     app_config = AppConfiguration()
     resolved_library_path = Path(str(app_config.get_library_path())).resolve()
-    if TEST_TEMP_DIR not in resolved_library_path.parents and resolved_library_path != TEST_TEMP_DIR:
+    if directories.temp not in resolved_library_path.parents and resolved_library_path != directories.temp:
         raise RuntimeError(
             "Refusing to seed synthetic test data: resolved library path "
             f"'{resolved_library_path}' is outside the sandboxed test directory "
-            f"'{TEST_TEMP_DIR}'. This would overwrite the real production "
+            f"'{directories.temp}'. This would overwrite the real production "
             "astrometrics.db. Check AppConfiguration._find_config_file patching."
         )
 
@@ -153,18 +113,6 @@ def _seed_synthetic_test_library():  # ruff: ignore[missing-return-type-private-
     save_target(app_config=app_config, target=t_m13)
 
 
-# 4. Patch AppConfiguration so it always uses this temporary directory,
-# BEFORE seeding the synthetic library below -- otherwise seeding would
-# resolve the real production config/database and write synthetic test
-# data into it.
-from astrometricslib.utilities import config_loader
-from astrometricslib.utilities.config_loader import AppConfiguration
-
-AppConfiguration._find_config_file = lambda self: test_config_path
-AppConfiguration.get_project_root = lambda self: TEST_TEMP_DIR
-
-_seed_synthetic_test_library()
-
 # 5. Mock astroquery to avoid external calls
 from unittest.mock import MagicMock
 
@@ -175,8 +123,6 @@ sys.modules["astroquery.astrometry_net"] = mock_astroquery.astrometry_net
 sys.modules["astroquery.imcce"] = mock_astroquery.imcce
 sys.modules["astroquery.gaia"] = mock_astroquery.gaia
 
-import pytest
-
 
 def pytest_configure(config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Register custom markers to stop pytest from printing warnings."""
@@ -184,26 +130,21 @@ def pytest_configure(config):  # ruff: ignore[missing-type-function-argument, mi
 
 
 @pytest.fixture(scope="session", autouse=True)
-def isolate_config_singleton():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Create a temporary settings object for the tests.
+def synthetic_test_library(test_directories: SimpleNamespace, isolate_config_singleton: object) -> None:
+    """Fill the shared test library with fake images and a fake database.
 
-    This makes sure tests don't accidentally change the real settings
-    used by the main program. It puts the original settings back when
-    the tests are done.
+    Runs once per session, after the root `conftest.py` has pointed every
+    settings object at the shared test settings file, so nothing is written
+    to the real library.
 
-    Yields
-    ------
-    sandbox_config : `AppConfiguration`
-        The temporary settings object tests should use.
+    Parameters
+    ----------
+    test_directories : `types.SimpleNamespace`
+        The shared test folders.
+    isolate_config_singleton : `AppConfiguration`
+        Makes sure the shared settings object exists and is the test one.
     """
-    original_instance = getattr(config_loader, "_instance", None)
-
-    sandbox_config = AppConfiguration()
-    config_loader._instance = sandbox_config
-
-    yield sandbox_config
-
-    config_loader._instance = original_instance
+    _seed_synthetic_test_library(test_directories)
 
 
 @pytest.fixture(autouse=True)
@@ -227,20 +168,3 @@ def no_siril_stack_preview(monkeypatch: pytest.MonkeyPatch) -> None:
         "astrometricslib.pipelines.stacking.post_processing.stack_preview.denoise_with_cosmic_clarity",
         lambda executable, input_path, output_path, strength: False,
     )
-
-
-@pytest.fixture(scope="session", autouse=True)
-def setup_test_environment():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Create the safe testing folder and delete it when tests are finished."""
-    yield
-    # Cleanup temp directory when test session ends. SQLite connections
-    # can lazily create -wal/-shm files after the last query, which
-    # occasionally races shutil.rmtree's directory walk and raises
-    # ENOTEMPTY; retry once after a short pause to absorb that.
-    import time
-
-    try:
-        _test_tmp_dir.cleanup()
-    except OSError:
-        time.sleep(0.5)
-        _test_tmp_dir.cleanup()

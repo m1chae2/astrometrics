@@ -291,6 +291,8 @@ AGENT_PROMPT = (
     "frames it would use, then run it, follow the job with `jobs_query`, and read the result with "
     "`processing_stack_summary`. It replaces the target's current stack (the app keeps one previous "
     "copy) and sets bad frames aside without deleting them, so say which frames you chose and why. "
+    "If only a preview setting changed (denoise, star toning), use `target_remake_preview` instead of "
+    "restacking: it remakes the picture from the existing stack and keeps the old one. "
     "Then measure the frames "
     "with `diagnostics_frame_quality`. To look at a frame, use `visualization_render_fits`: it returns "
     "a real image, and a crop zooms on stars. For the live telescope (position, parked or tracking, "

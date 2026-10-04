@@ -20,6 +20,7 @@ from astrometricslib.pipelines.stacking.post_processing import stack_preview
 from astrometricslib.pipelines.stacking.post_processing.bright_object import BrightObjectStretch
 from astrometricslib.pipelines.stacking.post_processing.sky_level import SkyLevelChoice
 from astrometricslib.pipelines.stacking.post_processing.stack_preview import (
+    PreviewSettings,
     build_bright_object_script,
     build_picture_script,
     build_preview_script,
@@ -83,6 +84,7 @@ def _configure(
             get_siril_executable=lambda: siril,
             get_graxpert_executable=lambda: graxpert,
             get_cosmic_clarity_denoise_executable=lambda: cosmic_clarity,
+            get_cosmic_clarity_denoise_path=lambda: cosmic_clarity,
             get_cosmic_clarity_denoise_strength=lambda: strength,
             get_preview_star_tone_enabled=lambda: star_tone,
         ),
@@ -903,3 +905,49 @@ def test_an_unreadable_stretched_fits_is_left_and_logged(tmp_path: Path) -> None
     stack_preview._copy_observation_header(str(stack_path), str(processed_path))
 
     assert processed_path.read_bytes() == b"not a fits file"
+
+
+def test_a_run_can_turn_the_denoise_off_without_changing_the_setting(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify denoise=False skips Cosmic Clarity though it is configured."""
+    _configure(monkeypatch, "siril-cli", None, "/opt/cc/denoise")
+    programs = _Programs()
+    programs.install(monkeypatch)
+    steps: list[str] = []
+
+    assert write_stack_preview(str(stack), PreviewSettings(denoise=False), steps) is not None
+
+    assert programs.denoise_calls == []
+    assert "Cosmic Clarity off for this run" in steps
+
+
+def test_a_run_can_set_its_own_denoise_strength_and_star_toning(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify the strength and toning overrides reach the steps."""
+    _configure(monkeypatch, "siril-cli", None, "/opt/cc/denoise", strength=0.9, star_tone=False)
+    programs = _Programs()
+    programs.install(monkeypatch)
+    steps: list[str] = []
+
+    settings = PreviewSettings(denoise_strength=0.4, star_toning=True)
+    assert write_stack_preview(str(stack), settings, steps) is not None
+
+    assert programs.denoise_calls[0][3] == pytest.approx(0.4)
+    assert len(programs.tone_calls) == 1
+    assert "Star toning done" in steps
+
+
+def test_the_steps_are_reported_without_any_override(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a plain run reports its steps to a caller that asks."""
+    _configure(monkeypatch, "siril-cli", None)
+    programs = _Programs()
+    programs.install(monkeypatch)
+    steps: list[str] = []
+
+    assert write_stack_preview(str(stack), steps_log=steps) is not None
+
+    assert steps[0] == "GraXpert not configured"

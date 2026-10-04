@@ -3,6 +3,9 @@
 import configparser
 import logging
 import os
+import threading
+import time
+from collections.abc import Callable
 from pathlib import Path
 
 import tomlkit
@@ -14,6 +17,13 @@ from .observatory_setups import ObservatorySetups, load_observatory_setups
 _instance = None
 
 _UNSET = object()
+
+# How often, at most, a config file is checked for changes, in seconds. A
+# check is one `stat` call, so this keeps even a tight loop of settings reads
+# cheap, while an edit still reaches a running process within a second.
+CONFIG_RECHECK_SECONDS = 1.0
+
+reload_logger = logging.getLogger(__name__)
 
 
 class _TomlSectionedConfig:
@@ -33,12 +43,31 @@ class _TomlSectionedConfig:
     (`camera_profile_store.py`), not by these generic string-based getters.
     """
 
-    def __init__(self) -> None:
-        """Start with an empty TOML document."""
+    def __init__(self, after_reload: Callable[[], None] | None = None) -> None:
+        """Start with an empty TOML document.
+
+        Parameters
+        ----------
+        after_reload : `Callable`, optional
+            Called after the file was read again because it changed on disk,
+            so the owner can put back anything the file does not hold, such
+            as default values.
+        """
         self._document: tomlkit.TOMLDocument = tomlkit.document()
+        self._after_reload = after_reload
+        self._watched_path: str | None = None
+        self._watched_encoding = "utf-8"
+        self._watching = False
+        self._seen_modified_time: int | None = None
+        self._next_check_time = 0.0
+        self._reload_lock = threading.Lock()
 
     def read(self, path: str, encoding: str = "utf-8") -> list[str]:
         """Parse a TOML file into this config, `configparser.read`-style.
+
+        The file is remembered, and once `watch_for_changes` has been called,
+        later reads of this config re-read it if it changes on disk (see
+        `_reload_if_file_changed`).
 
         Returns
         -------
@@ -50,7 +79,77 @@ class _TomlSectionedConfig:
         except OSError:
             return []
         self._document = tomlkit.parse(text)
+        self._watched_path = path
+        self._watched_encoding = encoding
+        self.note_file_written()
         return [path]
+
+    def watch_for_changes(self) -> None:
+        """Start re-reading the file whenever it changes on disk.
+
+        Off by default, so a config object only follows its file when it is
+        told to. The backend and the MCP server turn it on, so an edit
+        reaches them without a restart. Tests leave it off, so a settings
+        file changed by one test cannot reach another.
+        """
+        self._watching = True
+        self.note_file_written()
+
+    def note_file_written(self) -> None:
+        """Record the file's current modification time as already loaded.
+
+        Called after this config reads or writes the file itself, so its own
+        save is not mistaken for an edit made by someone else.
+        """
+        if self._watched_path is None:
+            return
+        try:
+            self._seen_modified_time = os.stat(self._watched_path).st_mtime_ns
+        except OSError:
+            self._seen_modified_time = None
+
+    def _reload_if_file_changed(self) -> None:
+        """Read the file again if it changed since it was last read.
+
+        Lets a running process pick up a settings edit without a restart, once
+        `watch_for_changes` has been called. It checks at most once per
+        `CONFIG_RECHECK_SECONDS`. A file that cannot
+        be read or parsed, such as one caught half written, is skipped with a
+        warning and the settings already loaded stay in use; the change is
+        tried again when the file changes next. The edit replaces the values
+        in place, so every holder of this config sees it.
+        """
+        if not self._watching or self._watched_path is None:
+            return
+        now = time.perf_counter()
+        if now < self._next_check_time:
+            return
+        self._next_check_time = now + CONFIG_RECHECK_SECONDS
+        try:
+            modified_time = os.stat(self._watched_path).st_mtime_ns
+        except OSError:
+            return
+        if modified_time == self._seen_modified_time:
+            return
+        with self._reload_lock:
+            if modified_time == self._seen_modified_time:
+                return
+            self._seen_modified_time = modified_time
+            try:
+                text = Path(self._watched_path).read_text(encoding=self._watched_encoding)
+                document = tomlkit.parse(text)
+            except (OSError, ValueError) as error:
+                reload_logger.warning(
+                    "The configuration file '%s' changed but could not be read (%s). "
+                    "The settings already loaded stay in use.",
+                    self._watched_path,
+                    error,
+                )
+                return
+            self._document = document
+            reload_logger.info("Reloaded the configuration from '%s' after it changed.", self._watched_path)
+        if self._after_reload is not None:
+            self._after_reload()
 
     def write(self, fileobj) -> None:  # ruff: ignore[missing-type-function-argument]
         """Serialize this config to `fileobj`, keeping comments/formatting."""
@@ -68,6 +167,7 @@ class _TomlSectionedConfig:
         section_names : `list` [`str`]
             Every top-level section name, in document order.
         """
+        self._reload_if_file_changed()
         return list(self._document.keys())
 
     def has_section(self, section: str) -> bool:
@@ -78,6 +178,7 @@ class _TomlSectionedConfig:
         exists : `bool`
             `True` if `section` is present.
         """
+        self._reload_if_file_changed()
         return section in self._document
 
     def add_section(self, section: str) -> None:
@@ -102,6 +203,7 @@ class _TomlSectionedConfig:
         KeyError
             If `section`/`key` does not exist and no `fallback` was given.
         """
+        self._reload_if_file_changed()
         try:
             return str(self._document[section][key])
         except KeyError:
@@ -123,6 +225,7 @@ class _TomlSectionedConfig:
         KeyError
             If `section`/`key` does not exist and no `fallback` was given.
         """
+        self._reload_if_file_changed()
         try:
             raw = self._document[section][key]
         except KeyError:
@@ -141,6 +244,7 @@ class _TomlSectionedConfig:
         exists : `bool`
             `True` if `section` is present.
         """
+        self._reload_if_file_changed()
         return section in self._document
 
     def __getitem__(self, section: str) -> object:
@@ -151,6 +255,7 @@ class _TomlSectionedConfig:
         table : `Any`
             The section's underlying TOML table.
         """
+        self._reload_if_file_changed()
         return self._document[section]
 
 
@@ -179,7 +284,7 @@ class AppConfiguration:
     def __init__(self):  # ruff: ignore[missing-return-type-special-method]
         # Get the directory of the current script
         self.base_dir = Path(__file__).parent.absolute()
-        self.app_config = _TomlSectionedConfig()
+        self.app_config = _TomlSectionedConfig(after_reload=self._populate_defaults)
         self.config_file_path: Path | None = None
         self.load_configuration()
 
@@ -219,6 +324,16 @@ class AppConfiguration:
         # Default to primary astrometrics folder if not found
         return candidates[0]
 
+    def watch_for_changes(self) -> None:
+        """Pick up edits to the config file without a restart.
+
+        Settings are then re-read from the file when it changes, at most once
+        a second, in place, so everything holding this configuration sees the
+        new values. Off by default: the backend and the MCP server turn it
+        on, and tests do not.
+        """
+        self.app_config.watch_for_changes()
+
     def save_configuration(self) -> None:
         """Save the current config to the resolved astrometrics config file."""
         import os
@@ -232,6 +347,7 @@ class AppConfiguration:
             return
         with open(path, "w", encoding="utf-8") as configfile:
             self.app_config.write(configfile)
+        self.app_config.note_file_written()
 
     def _populate_defaults(self) -> None:
         """Populate the config with sensible defaults if it's empty."""
@@ -278,7 +394,11 @@ class AppConfiguration:
             # without it. See get_graxpert_executable.
             "Processing.GraXpert": {"graxpert_executable": ""},
             # Blank: no denoising. See get_cosmic_clarity_denoise_executable.
-            "Processing.CosmicClarity": {"denoise_executable": "", "denoise_strength": "0.9"},
+            "Processing.CosmicClarity": {
+                "denoise_executable": "",
+                "denoise_enabled": "true",
+                "denoise_strength": "0.9",
+            },
             # 500; see get_maximum_identified_stars for why this isn't 0
             # (unlimited) despite that having been this setting's first
             # default.
@@ -359,7 +479,39 @@ class AppConfiguration:
             setting is blank or missing. The program works in the ``input``
             and ``output`` folders next to it.
         """
+        if not self.get_cosmic_clarity_denoise_enabled():
+            return None
+        return self.get_cosmic_clarity_denoise_path()
+
+    def get_cosmic_clarity_denoise_path(self) -> str | None:
+        """Retrieve the path of Cosmic Clarity's denoise program, on or off.
+
+        The path is kept apart from the on/off switch so the denoise can be
+        switched off in the settings and still be turned on for a single
+        preview run (see `get_cosmic_clarity_denoise_enabled`).
+
+        Returns
+        -------
+        path : `str` or `None`
+            The path of ``SetiAstroCosmicClarity_denoise``, or `None` if the
+            setting is blank or missing.
+        """
         return self.get_value("Processing.CosmicClarity", "denoise_executable", fallback="") or None
+
+    def get_cosmic_clarity_denoise_enabled(self) -> bool:
+        """Return whether previews are denoised by default.
+
+        A single preview run can still turn the denoise on or off, whatever
+        this says (see `PreviewSettings`).
+
+        Returns
+        -------
+        enabled : `bool`
+            `True` (the default) if Cosmic Clarity runs on previews whenever
+            its path is set.
+        """
+        raw = self.get_value("Processing.CosmicClarity", "denoise_enabled", fallback="true")
+        return str(raw).strip().lower() in ("true", "1", "yes", "on")
 
     def get_cosmic_clarity_denoise_strength(self) -> float:
         """Return how strongly Cosmic Clarity removes noise, from 0 to 1.

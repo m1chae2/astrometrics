@@ -44,7 +44,51 @@ _TERMINAL_STATUSES = frozenset({"completed", "failed"})
 
 
 _current_job: ContextVar[JobHandle | None] = ContextVar("current_job", default=None)
-"""The job being run, set by `run_as_background_job`."""
+"""The job being run, set by `registered_job` and `run_as_background_job`."""
+
+_active_job_ids: ContextVar[tuple[str, ...]] = ContextVar("active_job_ids", default=())
+"""Ids of the jobs the calling work is running inside, outermost first.
+
+Several jobs can run at once, and they all log through the same shared
+logger. Each job's log handler uses this to take only the messages from its
+own work (see `_OwnJobFilter`).
+"""
+
+
+class _OwnJobFilter(logging.Filter):
+    """Let a job's log handler take only messages from that job's own work.
+
+    The handlers sit on the shared package logger, so without this filter two
+    jobs running together each write the other's messages to their log. A
+    message is kept when the work that wrote it is running inside this job,
+    which includes jobs nested inside it, such as the stacking job inside a
+    batch job.
+
+    Work that has lost the job context, such as a worker thread started
+    without copying it, cannot be told apart. Its messages are kept, which is
+    the behaviour before this filter existed.
+    """
+
+    def __init__(self, job_id: str) -> None:
+        super().__init__()
+        self._job_id = job_id
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        """Decide whether this job's handler should write a message.
+
+        Parameters
+        ----------
+        record : `logging.LogRecord`
+            The message being logged.
+
+        Returns
+        -------
+        keep : `bool`
+            `True` if the message came from this job's own work, or from
+            work whose job cannot be known.
+        """
+        active_job_ids = _active_job_ids.get()
+        return not active_job_ids or self._job_id in active_job_ids
 
 
 def get_current_job() -> JobHandle | None:
@@ -79,6 +123,13 @@ class JobHandle:
         Logger writing to this job's own log file and database rows.
     log_file_path : `str` or `None`
         Where this job's log file is being written.
+    job_type : `str` or `None`
+        What kind of job this is, such as "stacking".
+    target_id : `str` or `None`
+        Which target the job is working on.
+    terminal_status : `str` or `None`
+        How the job ended ("completed" or "failed") once the work has said
+        so, otherwise `None`.
     """
 
     def __init__(  # ruff: ignore[missing-return-type-special-method]
@@ -87,12 +138,35 @@ class JobHandle:
         job_logger: logging.Logger | None = None,
         log_file_path: str | None = None,
         logger_interface: object | None = None,
+        job_type: str | None = None,
+        target_id: str | None = None,
     ):
         self.job_id = job_id
         self.job_logger = job_logger
         self.log_file_path = log_file_path
+        self.job_type = job_type
+        self.target_id = target_id
         self._logger_interface = logger_interface
         self.reached_terminal_status = False
+        self.terminal_status: str | None = None
+
+    def stage(self, progress_current: int, message: str) -> None:
+        """Report that the job has reached a named step.
+
+        Writes the step to the job's log and moves the job's progress bar, so
+        a person watching the job list can tell a slow job from a stuck one.
+        Does nothing to the status once the job has finished.
+
+        Parameters
+        ----------
+        progress_current : `int`
+            How far along the job is, out of 100.
+        message : `str`
+            A short description of the step, such as "Stacking frames".
+        """
+        self.info(f"Stage ({progress_current}%): {message}")
+        if not self.reached_terminal_status:
+            self.mark("running", progress_current, message=message)
 
     def info(self, message: str) -> None:
         """Write an informational line to this job's log.
@@ -152,6 +226,7 @@ class JobHandle:
         """
         if status in _TERMINAL_STATUSES:
             self.reached_terminal_status = True
+            self.terminal_status = status
 
         if not (self._logger_interface and self.job_id):
             return
@@ -233,13 +308,16 @@ def capture_job_logs(
 
     package_logger = logging.getLogger(package_logger_name)
     for handler in attached_handlers:
+        handler.addFilter(_OwnJobFilter(job_id))
         job_logger.addHandler(handler)
         package_logger.addHandler(handler)
     package_logger.setLevel(logging.INFO)
+    active_ids_token = _active_job_ids.set((*_active_job_ids.get(), job_id))
 
     try:
         yield job_logger
     finally:
+        _active_job_ids.reset(active_ids_token)
         for handler in attached_handlers:
             job_logger.removeHandler(handler)
             package_logger.removeHandler(handler)
@@ -264,9 +342,12 @@ def _create_job_row(*, job_type: str, target_id: str, log_file: str | None) -> t
     from astrometricslib.drivers.logger_interface import LoggerInterface
     from astrometricslib.utilities.config_loader import get_configuration
     from astrometricslib.utilities.pipeline_models import ProcessingJob
+    from astrometricslib.utilities.process_identity import current_process_identity
 
     configuration = get_configuration()
     logger_interface = LoggerInterface(configuration.get_logs_db_path())
+    _recover_interrupted_jobs(configuration)
+    owner_pid, owner_started_at = current_process_identity()
     job_id = str(uuid.uuid4())
 
     safe_target = target_id.replace(" ", "_").replace("/", "_")
@@ -286,9 +367,24 @@ def _create_job_row(*, job_type: str, target_id: str, log_file: str | None) -> t
             log_file_path=log_file_path,
             created_at=datetime.now().isoformat(),
             updated_at=datetime.now().isoformat(),
+            owner_pid=owner_pid,
+            owner_started_at=owner_started_at,
         )
     )
     return job_id, log_file_path, logger_interface
+
+
+def _recover_interrupted_jobs(configuration: Any) -> None:
+    """Close jobs that a program left open, before a new job is recorded.
+
+    Parameters
+    ----------
+    configuration : `AppConfiguration`
+        Where the logs database and the stacks folder are found.
+    """
+    from astrometricslib.pipelines.shared.interrupted_jobs import close_interrupted_jobs
+
+    close_interrupted_jobs(configuration)
 
 
 @contextmanager
@@ -342,6 +438,29 @@ def registered_job(
     handle : `JobHandle`
         Used to log messages and report progress.
     """
+    running_job = _current_job.get()
+    if (
+        enabled
+        and running_job is not None
+        and running_job.job_id is not None
+        and running_job.job_type == job_type
+        and running_job.target_id == target_id
+    ):
+        # The caller is already running as this very job, for example the
+        # MCP wrapper around a stacking method that registers its own job.
+        # Join it instead of listing the same work twice. The outer owner
+        # decides how the job ends.
+        try:
+            yield running_job
+        except Exception:
+            if failed_message:
+                running_job.error(failed_message)
+            raise
+        else:
+            if completed_message:
+                running_job.info(completed_message)
+        return
+
     handle = JobHandle()
 
     with ExitStack() as log_capture:
@@ -363,12 +482,15 @@ def registered_job(
                     job_logger=job_logger,
                     log_file_path=log_file_path,
                     logger_interface=logger_interface,
+                    job_type=job_type,
+                    target_id=target_id,
                 )
             except Exception as registration_error:
                 # A job we cannot record is still a job worth doing.
                 logger.warning("Could not register %s job: %s", job_type, registration_error)
                 handle = JobHandle()
 
+        job_token = _current_job.set(handle if handle.job_id else _current_job.get())
         try:
             yield handle
         except Exception:
@@ -381,6 +503,8 @@ def registered_job(
                 handle.mark("completed", 100)
             if completed_message:
                 handle.info(completed_message)
+        finally:
+            _current_job.reset(job_token)
 
 
 def _to_plain(value: Any) -> Any:
@@ -517,19 +641,18 @@ def run_as_background_job(
                 job_created.set()
 
                 pre_quality = _snapshot("pre")
-                token = _current_job.set(job)
                 try:
                     result = work_fn(job)
                 except Exception as work_error:
                     outcome["error"] = repr(work_error)
                     raise
-                finally:
-                    _current_job.reset(token)
                 outcome["result"] = result
                 metrics: dict[str, Any] = {"result": _to_plain(result)}
                 if snapshot_fn is not None:
                     metrics["quality"] = _to_plain({"pre": pre_quality, "post": _snapshot("post")})
-                job.mark("completed", 100, output_metrics=metrics)
+                # The work may already have decided the job failed (stacking
+                # that makes no image); do not turn that into a success.
+                job.mark(job.terminal_status or "completed", 100, output_metrics=metrics)
         except Exception as background_error:
             # `registered_job` already marked the job failed and re-raises
             # by contract, for callers that run it synchronously and want

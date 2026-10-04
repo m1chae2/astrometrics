@@ -14,6 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from astrometricslib import close_interrupted_jobs, get_configuration
 from astrometricslib.mcp.profile import GAP_REPORT_GUIDANCE
 from astrometricslib.mcp.tool_registry import registry
 
@@ -55,6 +56,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
 async def main():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Run the stdio MCP server loop for the core library."""
+    get_configuration().watch_for_changes()
+    close_interrupted_jobs()
     async with stdio_server() as (read_stream, write_stream):
         await app.run(read_stream, write_stream, app.create_initialization_options())
 

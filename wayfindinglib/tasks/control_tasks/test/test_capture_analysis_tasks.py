@@ -30,7 +30,9 @@ _NIGHT_ONE = 1790217108.0
 
 
 @pytest.fixture
-def camera_profile_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
+def camera_profile_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shipped_camera_sections: str
+) -> Any:
     """Build a config holding the shipped camera profiles.
 
     Returns
@@ -38,10 +40,8 @@ def camera_profile_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> An
     config : `AppConfiguration`
         A configuration with every shipped camera profile.
     """
-    from wayfindinglib.conftest import _shipped_camera_sections_toml
-
     config_path = tmp_path / "astrometrics.config.toml"
-    config_path.write_text(_shipped_camera_sections_toml(), encoding="utf-8")
+    config_path.write_text(shipped_camera_sections, encoding="utf-8")
     monkeypatch.setattr(AppConfiguration, "_find_config_file", lambda self: config_path)
     return AppConfiguration()
 

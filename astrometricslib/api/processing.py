@@ -24,6 +24,7 @@ from astrometricslib.pipelines.shared.calibration_ingest import (
     flatten_frame_index,
 )
 from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
+from astrometricslib.pipelines.stacking.post_processing.stack_preview import PreviewSettings
 from astrometricslib.pipelines.stacking.stack_runner import run_siril_stack
 from astrometricslib.pipelines.stacking.stage import stack_frames
 from astrometricslib.utilities.config_loader import AppConfiguration
@@ -838,6 +839,7 @@ class ProcessingPipelines:
         log_file: str | None = None,
         generate_rejmap: bool | None = None,
         force: bool = False,
+        preview_settings: PreviewSettings | None = None,
     ) -> str | None:
         """Stack multiple images into one clean image.
 
@@ -879,6 +881,9 @@ class ProcessingPipelines:
             settings are the same as when the stack on disk was made.
             Without it, an unchanged stack is kept and its path returned
             (see the setting ``skip_unchanged_stacks_enabled``).
+        preview_settings : `PreviewSettings`, optional
+            Choices for this run's preview picture that replace the saved
+            settings. Never written to the settings.
 
         Returns
         -------
@@ -910,6 +915,7 @@ class ProcessingPipelines:
                 output_file=output_file,
                 job_id=job.job_id,
                 force=force,
+                preview_settings=preview_settings,
             )
             # Stacking can finish without raising and still produce no
             # image, so the outcome is decided here rather than left to

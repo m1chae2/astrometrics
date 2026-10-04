@@ -13,16 +13,21 @@ import pytest
 from astrometricslib import Astrometrics, FrameRecord, Target
 
 
-def make_frame(name: str, filter_name: str = "Luminance") -> FrameRecord:
+def make_frame(name: str, filter_name: str = "Luminance", camera: str = "Unknown") -> FrameRecord:
     """Make a 60 second light frame.
 
     Returns
     -------
     frame : `FrameRecord`
-        The frame, with the file name given.
+        The frame, with the file name and camera given.
     """
     return FrameRecord(
-        path=f"/lights/{name}", role="LIGHT", filter=filter_name, exposure="60", timestamp=1000.0
+        path=f"/lights/{name}",
+        role="LIGHT",
+        filter=filter_name,
+        exposure="60",
+        timestamp=1000.0,
+        camera=camera,
     )
 
 
@@ -37,7 +42,9 @@ def library() -> tuple[Astrometrics, SimpleNamespace]:
     """
     record = SimpleNamespace(stacked_with=None, saved=0, forced=None)
 
-    def run_stacking(target: Target, frames_to_stack: list, force: bool = False) -> str:
+    def run_stacking(
+        target: Target, frames_to_stack: list, force: bool = False, preview_settings: object = None
+    ) -> str:
         """Pretend to stack.
 
         Returns
@@ -112,3 +119,45 @@ def test_a_wrong_frame_type_is_refused(library: tuple) -> None:
     """Only imaging and spectral are accepted."""
     astrometrics, _ = library
     assert "frame_type" in astrometrics.stack(make_target(), frame_type="all")["error"]
+
+
+def make_two_camera_target() -> Target:
+    """Make a target with spectra from two cameras, more from the Nikon.
+
+    Returns
+    -------
+    target : `Target`
+        Three Nikon spectra and two ASI spectra.
+    """
+    frames = [
+        make_frame(f"T_Nikon_{number}.fits", "Spectroscopy", "Nikon DSLR DSC D5300") for number in (1, 2, 3)
+    ]
+    frames += [make_frame(f"T_Asi_{number}.fits", "Spectroscopy", "ZWO ASI 533MM Pro") for number in (1, 2)]
+    return Target(id="T 2", frames=frames)
+
+
+def test_frames_from_two_cameras_are_never_stacked_together(library: tuple) -> None:
+    """Without a camera named, a mixed target is refused and says why."""
+    astrometrics, record = library
+    result = astrometrics.stack(make_two_camera_target(), frame_type="spectral")
+    assert "more than one camera" in result["error"]
+    assert "Nikon DSLR DSC D5300" in result["error"]
+    assert "ZWO ASI 533MM Pro" in result["error"]
+    assert record.stacked_with is None
+
+
+def test_naming_the_camera_stacks_only_its_frames_even_when_it_has_fewer(library: tuple) -> None:
+    """The two ASI frames are stacked, though the Nikon has more."""
+    astrometrics, record = library
+    result = astrometrics.stack(make_two_camera_target(), frame_type="spectral", camera="ASI 533MM")
+    assert record.stacked_with == ["/lights/T_Asi_1.fits", "/lights/T_Asi_2.fits"]
+    assert result["camera"] == "ZWO ASI 533MM Pro"
+
+
+def test_a_camera_that_took_none_of_the_frames_is_an_error(library: tuple) -> None:
+    """Naming a camera that is not there lists the cameras that are."""
+    astrometrics, record = library
+    result = astrometrics.stack(make_two_camera_target(), frame_type="spectral", camera="QHY")
+    assert "No frames from a camera matching" in result["error"]
+    assert "Nikon DSLR DSC D5300" in result["error"]
+    assert record.stacked_with is None

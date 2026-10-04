@@ -107,6 +107,7 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "WasGeneratedBy",
     "capture_job_logs",
     "classify_and_sort_fits_files",
+    "close_interrupted_jobs",
     "derive_field_centers",
     "derive_target_sessions",
     "export_target_lineage_as_prov_xml",

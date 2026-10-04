@@ -49,6 +49,7 @@ import subprocess
 import tempfile
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -538,7 +539,37 @@ def _next_source(
     return new_name
 
 
-def _picture_script(scratch: str, siril_executable: str) -> list[str] | None:
+@dataclass(frozen=True)
+class PreviewSettings:
+    """Choices for one preview run that replace the saved settings.
+
+    Each field left as `None` uses the app's configured value. The values
+    apply to the run they are given to and are never written to the
+    configuration.
+
+    Attributes
+    ----------
+    denoise : `bool` or `None`
+        `False` skips Cosmic Clarity even if it is configured. `True` runs it
+        even if the settings have it switched off (it cannot run without its
+        program path).
+    denoise_strength : `float` or `None`
+        Cosmic Clarity's denoise strength for this run.
+    star_toning : `bool` or `None`
+        Turn the star toning on or off for this run.
+    """
+
+    denoise: bool | None = None
+    denoise_strength: float | None = None
+    star_toning: bool | None = None
+
+
+def _picture_script(
+    scratch: str,
+    siril_executable: str,
+    settings: PreviewSettings | None = None,
+    steps_log: list[str] | None = None,
+) -> list[str] | None:
     """Run the cleanup steps on the scratch copy and choose the final script.
 
     The steps run in this order: GraXpert on the linear copy, then Siril's
@@ -556,6 +587,11 @@ def _picture_script(scratch: str, siril_executable: str) -> list[str] | None:
         The scratch folder, holding a copy of the stack named ``stack.fits``.
     siril_executable : `str`
         The command that starts Siril.
+    settings : `PreviewSettings`, optional
+        Choices for this run that replace the saved settings.
+    steps_log : `list` [`str`], optional
+        If given, the name of each step and whether it ran is added to it,
+        so the caller can report what was done.
 
     Returns
     -------
@@ -564,6 +600,7 @@ def _picture_script(scratch: str, siril_executable: str) -> list[str] | None:
         step needed before Cosmic Clarity did not work.
     """
     configuration = get_configuration()
+    settings = settings or PreviewSettings()
     name = "stack.fits"
     bright_object = choose_bright_object_stretch_for_file(os.path.join(scratch, name))
     if bright_object is not None:
@@ -572,6 +609,8 @@ def _picture_script(scratch: str, siril_executable: str) -> list[str] | None:
             "using a stretch scaled to the object, without GraXpert or the denoise.",
             100 * bright_object.white_fraction,
         )
+        if steps_log is not None:
+            steps_log.append("Bright object: its own stretch, without GraXpert or the denoise")
         return build_bright_object_script(name, "preview", bright_object)
     steps: list[str] = []
     graxpert_executable = configuration.get_graxpert_executable()
@@ -595,14 +634,25 @@ def _picture_script(scratch: str, siril_executable: str) -> list[str] | None:
     choice = choose_sky_level_for_file(os.path.join(scratch, name))
     logger.info("Preview sky level %.2f: %s.", choice.sky_level, choice.reason)
     denoise_executable = configuration.get_cosmic_clarity_denoise_executable()
+    denoise_note = "Cosmic Clarity not configured"
+    if not denoise_executable and configuration.get_cosmic_clarity_denoise_path():
+        denoise_note = "Cosmic Clarity off in the settings"
+    if settings.denoise is True and not denoise_executable:
+        # Asked for on this run: use the program even if the settings have
+        # the denoise switched off. It still cannot run without its path.
+        denoise_executable = configuration.get_cosmic_clarity_denoise_path()
+        if not denoise_executable:
+            denoise_note = "Cosmic Clarity not configured (no program path set)"
+    if settings.denoise is False and denoise_executable:
+        denoise_executable, denoise_note = None, "Cosmic Clarity off for this run"
     tone_stars = configuration.get_preview_star_tone_enabled()
+    if settings.star_toning is not None:
+        tone_stars = settings.star_toning
     if not denoise_executable and not tone_stars:
-        steps.extend([
-            "Siril stretch done in the final script",
-            "Cosmic Clarity not configured",
-            "Star toning off",
-        ])
+        steps.extend(["Siril stretch done in the final script", denoise_note, "Star toning off"])
         logger.info("Preview steps: %s.", "; ".join(steps))
+        if steps_log is not None:
+            steps_log.extend(steps)
         return build_preview_script(name, "preview", choice.sky_level)
     stretched = run_preview_script(
         scratch, build_stretch_script(name, "stretched", choice.sky_level), siril_executable
@@ -610,11 +660,17 @@ def _picture_script(scratch: str, siril_executable: str) -> list[str] | None:
     if not stretched or not os.path.isfile(os.path.join(scratch, "stretched.fits")):
         steps.append("Siril stretch failed")
         logger.info("Preview steps: %s.", "; ".join(steps))
+        if steps_log is not None:
+            steps_log.extend(steps)
         return None
     name = "stretched.fits"
     steps.append("Siril stretch done")
     if denoise_executable:
-        strength = configuration.get_cosmic_clarity_denoise_strength()
+        strength = (
+            settings.denoise_strength
+            if settings.denoise_strength is not None
+            else configuration.get_cosmic_clarity_denoise_strength()
+        )
 
         def denoise(input_path: str, output_path: str) -> bool:
             """Run Cosmic Clarity's denoise program.
@@ -630,7 +686,7 @@ def _picture_script(scratch: str, siril_executable: str) -> list[str] | None:
         steps.append("Cosmic Clarity " + ("done" if denoised_name != name else "skipped after a failure"))
         name = denoised_name
     else:
-        steps.append("Cosmic Clarity not configured")
+        steps.append(denoise_note)
     if tone_stars:
         toned_name = _next_source("Star toning", name, "toned.fits", scratch, tone_stars_in_file)
         steps.append("Star toning " + ("done" if toned_name != name else "skipped after a failure"))
@@ -638,6 +694,8 @@ def _picture_script(scratch: str, siril_executable: str) -> list[str] | None:
     else:
         steps.append("Star toning off")
     logger.info("Preview steps: %s.", "; ".join(steps))
+    if steps_log is not None:
+        steps_log.extend(steps)
     return build_picture_script(name, "preview")
 
 
@@ -690,7 +748,11 @@ def _copy_observation_header(stacked_path: str, processed_path: str) -> None:
         logger.warning("Could not copy the stack's header into '%s': %s.", processed_path, error)
 
 
-def write_stack_preview(stacked_path: str) -> str | None:
+def write_stack_preview(
+    stacked_path: str,
+    settings: PreviewSettings | None = None,
+    steps_log: list[str] | None = None,
+) -> str | None:
     """Save a cleaned-up, stretched JPEG and FITS of a stack beside it.
 
     The FITS (see `processed_fits_path_for`) holds the same picture as the
@@ -702,6 +764,11 @@ def write_stack_preview(stacked_path: str) -> str | None:
     ----------
     stacked_path : `str`
         Path of the stacked FITS file.
+    settings : `PreviewSettings`, optional
+        Choices for this run that replace the saved settings. Nothing is
+        written to the configuration.
+    steps_log : `list` [`str`], optional
+        If given, the steps that ran are added to it.
 
     Returns
     -------
@@ -727,7 +794,7 @@ def write_stack_preview(stacked_path: str) -> str | None:
         _remove_stale_scratch_folders()
         scratch = tempfile.mkdtemp(prefix="stack_preview_", dir=_SCRATCH_ROOT)
         shutil.copyfile(stacked_path, os.path.join(scratch, "stack.fits"))
-        commands = _picture_script(scratch, siril_executable)
+        commands = _picture_script(scratch, siril_executable, settings, steps_log)
         succeeded = commands is not None and run_preview_script(scratch, commands, siril_executable)
         picture = os.path.join(scratch, "preview.jpg")
         if not succeeded or not os.path.isfile(picture):

@@ -76,6 +76,28 @@ def _staging_for(stack_path: str) -> str:
     return os.path.join(os.path.dirname(stack_path), _STAGING_FOLDER_PREFIX + stem)
 
 
+def staging_folder_stack_path(staging: str) -> str | None:
+    """Work out which stack a staging folder holds the old files of.
+
+    The reverse of `_staging_for`.
+
+    Parameters
+    ----------
+    staging : `str`
+        A path inside a stack's folder.
+
+    Returns
+    -------
+    stack_path : `str` or `None`
+        Where the stack lies, or `None` if `staging` is not a staging folder.
+    """
+    folder_name = os.path.basename(os.path.normpath(staging))
+    if not folder_name.startswith(_STAGING_FOLDER_PREFIX) or folder_name.endswith(".exchange"):
+        return None
+    stem = folder_name[len(_STAGING_FOLDER_PREFIX) :]
+    return os.path.join(os.path.dirname(os.path.normpath(staging)), stem + ".fits")
+
+
 def _previous_files(stack_path: str) -> list[str]:
     """List the previous version's files for one stack.
 

@@ -11,7 +11,7 @@ emitted log records into that same database.
 import json
 import logging
 import sqlite3
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -98,7 +98,9 @@ class LoggerInterface:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     completed_at TIMESTAMP,
                     input_metrics TEXT,
-                    output_metrics TEXT
+                    output_metrics TEXT,
+                    owner_pid INTEGER,
+                    owner_started_at TEXT
                 )
             """)
 
@@ -110,6 +112,10 @@ class LoggerInterface:
                 cursor.execute("ALTER TABLE processing_jobs ADD COLUMN input_metrics TEXT")
             if "output_metrics" not in cols:
                 cursor.execute("ALTER TABLE processing_jobs ADD COLUMN output_metrics TEXT")
+            if "owner_pid" not in cols:
+                cursor.execute("ALTER TABLE processing_jobs ADD COLUMN owner_pid INTEGER")
+            if "owner_started_at" not in cols:
+                cursor.execute("ALTER TABLE processing_jobs ADD COLUMN owner_started_at TEXT")
 
             # Interaction logging for audit and reflection
             cursor.execute("""
@@ -290,8 +296,8 @@ class LoggerInterface:
                     INSERT INTO processing_jobs (
                         id, target_id, job_type, status, progress_current,
                         progress_total, message, log_file_path, created_at, updated_at,
-                        input_metrics, output_metrics
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        input_metrics, output_metrics, owner_pid, owner_started_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                     (
                         job.id,
@@ -306,6 +312,8 @@ class LoggerInterface:
                         now,
                         input_metrics_json,
                         output_metrics_json,
+                        job.owner_pid,
+                        job.owner_started_at,
                     ),
                 )
 
@@ -539,7 +547,79 @@ class LoggerInterface:
             completed_at=row["completed_at"],
             input_metrics=input_metrics,
             output_metrics=output_metrics,
+            owner_pid=row["owner_pid"] if "owner_pid" in row.keys() else None,
+            owner_started_at=row["owner_started_at"] if "owner_started_at" in row.keys() else None,
         )
+
+    def interrupt_orphaned_jobs(
+        self,
+        is_process_alive: Callable[[int, str], bool],
+        stale_after_minutes: int = 60,
+    ) -> list[ProcessingJob]:
+        """Close the jobs that a program left open when it ended.
+
+        A job is closed by the code that runs it. If that program is killed or
+        crashes, the job stays "started" or "running" forever. This finds those
+        jobs and marks them "interrupted". Two kinds are found:
+
+        - A job whose owner program (number and start time) no longer runs.
+        - A job recorded before owners were kept, which has not been updated
+          for `stale_after_minutes`. Nothing says who owns it, so only age
+          can.
+
+        A job owned by a program that still runs is never touched, even when
+        that program is a different one, such as the backend while the MCP
+        server runs this.
+
+        Parameters
+        ----------
+        is_process_alive : `Callable`
+            Given a program's number and start time, says if it still runs.
+        stale_after_minutes : `int`, optional
+            Minutes without an update after which a job with no recorded owner
+            counts as left behind. Defaults to 60.
+
+        Returns
+        -------
+        interrupted : `list` [`ProcessingJob`]
+            The jobs that were closed, as they were before.
+        """
+        interrupted: list[ProcessingJob] = []
+        try:
+            conn = self._connect()
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM processing_jobs WHERE status IN ('started', 'running')")
+            open_jobs = [self._row_to_job(row) for row in cursor.fetchall()]
+            now = datetime.now()
+            for job in open_jobs:
+                if job.owner_pid is not None and job.owner_started_at is not None:
+                    orphaned = not is_process_alive(job.owner_pid, job.owner_started_at)
+                else:
+                    last_update = datetime.fromisoformat(job.updated_at) if job.updated_at else None
+                    orphaned = (
+                        last_update is not None
+                        and (now - last_update).total_seconds() > stale_after_minutes * 60
+                    )
+                if not orphaned:
+                    continue
+                cursor.execute(
+                    "UPDATE processing_jobs SET status = 'interrupted', message = ?, "
+                    "updated_at = ?, completed_at = ? WHERE id = ? AND status IN ('started', 'running')",
+                    (
+                        "The program running this job ended before it finished.",
+                        now.isoformat(),
+                        now.isoformat(),
+                        job.id,
+                    ),
+                )
+                if cursor.rowcount:
+                    interrupted.append(job)
+            conn.commit()
+            conn.close()
+        except Exception as error:
+            logger.error("Could not close interrupted jobs: %s", error)
+        return interrupted
 
     # --- Agent LTM Methods ---
 

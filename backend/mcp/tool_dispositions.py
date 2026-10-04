@@ -952,6 +952,15 @@ DECISIONS = {
         "Built 2026-10-04. Counts a target's frames at the telescope, on the drive and in the library, and "
         "names the frames that are in one place but not the next. Reads only.",
     ),
+    "target_remake_preview": ToolDecision(
+        "keep",
+        "Built 2026-10-04 from gap report #1. Makes a target's preview picture again from its existing "
+        "stack, without restacking. denoise, denoise_strength and star_toning apply to that run only and "
+        "never reach the configuration. The old pictures are copied into _previous_preview first and put "
+        "back if the run fails. The stack file is never written. Writes only the preview JPEG, the "
+        "processed FITS and the target's processed-image pointer.",
+        "process",
+    ),
     "target_stack": ToolDecision(
         "keep",
         "Built 2026-10-04 at the user's request: the AI may stack a target the way the app's Stack "

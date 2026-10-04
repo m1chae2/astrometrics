@@ -100,9 +100,20 @@ These rules decide whether a change becomes an argument on an existing function 
 6. **An object accessor and a report are different functions.** `TargetCatalog.get` returns a
    `Target` for code to work with. `TargetCatalog.query` returns a bounded summary for people and
    agents. Both are needed, and neither should absorb the other.
-7. **A narrow method that a general one replaces becomes a private helper.** For one release, a
-   thin public alias stays in place and raises `DeprecationWarning`, because scripts, tests, and
-   RPC method names still call it.
+7. **No aliases and no legacy names.** A narrow method that a general one replaces becomes a
+   private helper or goes away. A renamed function, class, module, RPC method, or MCP tool keeps
+   no alias and raises no `DeprecationWarning`. The change that renames or removes it also updates
+   every caller in the repository:
+   - library code, scripts, and tests;
+   - backend services and RPC method names;
+   - the UI's `ActionRegistry` and its callers;
+   - the MCP dispositions and manifests;
+   - `.claude/` agent tool lists and permission rules;
+   - documentation.
+8. **No compatibility code for old formats of our own.** When the code reads an older format of
+   its own configuration or stored data, a one-time migration script converts the data, and the
+   reading code supports only the current format. Formats defined by other software (FITS
+   keywords, INDI properties, Siril files) are outside this rule.
 
 Two guards apply to every `kind=` or `include=` function:
 
@@ -152,9 +163,10 @@ driver lookup. They do not hold a reference back to `control`. The driver proper
 (`mount_driver`, `camera_driver`, and the rest) stay on `control` as the place where tests and the
 backend inject drivers. Setting one updates the shared context.
 
-Moved methods keep their current names. Methods this plan creates take names relative to their
-child, for example `control.remote.list(kind)` rather than `control.remote.list_remote(kind)`.
-Every child that has readable state gets one `status(include=[...])` read. `include` chooses the
+Names inside a child do not repeat the child's topic, for example `control.guiding.run_calibration`
+rather than `control.guiding.run_guider_calibration`, and `control.remote.list(kind)` rather than
+`control.remote.list_remote(kind)`. Names and arguments also follow section 6.1. The table lists
+the final names. Every child that has readable state gets one `status(include=[...])` read. `include` chooses the
 sections of the reply, such as live hardware readings and saved models.
 
 | Attribute | What it covers | Public members after this plan | Folded in from today's `ObservatoryControl` |
@@ -162,10 +174,10 @@ sections of the reply, such as live hardware readings and saved models.
 | `control` | Driver injection | `driver`, `mount_driver`, `focuser_driver`, `filter_wheel_driver`, `camera_driver`, `guide_camera_driver`, `enclosure_driver`, `switch_driver`, `weather_driver`, `remote_transfer_driver` | `guiding_service` and `sync_service` go away (section 8.1) |
 | `control.mount` | Pointing and tracking | `status`, `slew_to_target`, `slew_to_coordinates(ra_deg, dec_deg, center=False, tolerance_arcsec=..., max_iterations=...)`, `sync_coordinates`, `park`, `unpark`, `set_tracking`, `manual_move`, `abort_motion`, `set_slew_rate`, `compute_pointing_correction`, `run_polar_alignment_assist` | `get_telescope_status`, plus the INDI mount decoding in `backend/mcp/tool_registry.py` (pier side, park, tracking) |
 | `control.imaging` | Main camera, filter wheel, focuser | `status`, `capture_image(exposure_seconds, count=1, filter_name=None, dither=False)`, `set_filter`, `focus_move`, `compute_focus_correction`, `save_focus_model` | `get_filter_names`, `get_focuser_position`, `active_focus_model` |
-| `control.guiding` | Guide camera, guide pulses, guider models | `status`, `pulse_guide`, `guide_expose`, `get_guide_image`, `drain_external_pulses`, `compute_guiding_correction`, `run_guider_calibration`, `run_backlash_calibration`, `run_guide_exposure_test`, `refit_guiding_spectrum`, `save_guider_calibration`, `save_guiding_spectrum_analysis`, `save_guiding_run` | `active_guider_calibration`, `active_guiding_spectrum_analysis`, `guider_plate_scale_arcsec_per_px` |
-| `control.remote` | The observatory computer's files and logs | `list(kind, folder_name=None, sizes=False)`, `check_remote_connection`, `frame_status`, `sync_remote_frames(target_id=None, dry_run=False, ...)`, `sync_remote_logs` | `list_remote_targets`, `list_remote_target_folders`, `list_remote_calibration_folders`, `discover_unassociated_remote_targets`, `list_remote_files`, `list_remote_files_with_sizes`, `check_for_new_remote_images`, `download_remote_frames`, `download_remote_targets`, `sync`, `sync_calibration_folder`, `sync_all_remote_folders`, `ingest_guiding_log_file`, `fetch_and_ingest_new_guide_logs`, `ingest_ekos_session_logs`. `is_syncing` moves to `Jobs.query`. |
-| `control.history` | Past and current observing sessions | `night_history(kind, ...)`, `get_live_session_status`, `frame_guiding`, `get_performance_envelope`, `save_ekos_session_context` | `analyze_capture_session`, `analyze_guiding_session`, `analyze_sky_coverage`, `summarize_capture_sessions`, `summarize_guiding_sessions`, `summarize_recurring_issues`, `list_ekos_session_summaries`, `get_ekos_session_context`, `list_guiding_runs`, `get_pointing_model`. `night_history` gains `kind="alignment"` (section 5). |
-| `control.safety` | Weather, enclosure, and who is allowed to act | `status`, `assess_safety`, `save_safety_rule_set`, `execute_safe_state`, `open_enclosure`, `close_enclosure`, `apply_promotion_decision`, `enter_monitoring_mode`, `enter_controller_mode` | `get_safety_rule_set`, `active_enclosure`, `get_enclosure_state`, `delegation_policy`, `summarize_divergence_evidence`, and `refresh_safety_assessment` if it only reads |
+| `control.guiding` | Guide camera, guide pulses, guider models | `status`, `pulse` (was `pulse_guide`), `expose` (was `guide_expose`), `get_image` (was `get_guide_image`), `drain_external_pulses`, `compute_correction` (was `compute_guiding_correction`), `run_calibration` (was `run_guider_calibration`), `run_backlash_calibration`, `run_exposure_test` (was `run_guide_exposure_test`), `refit_spectrum` (was `refit_guiding_spectrum`), `save_calibration` (was `save_guider_calibration`), `save_spectrum_analysis` (was `save_guiding_spectrum_analysis`), `save_run` (was `save_guiding_run`) | `active_guider_calibration`, `active_guiding_spectrum_analysis`, `guider_plate_scale_arcsec_per_px` |
+| `control.remote` | The observatory computer's files and logs | `list(kind, folder_name=None, sizes=False)`, `check_connection` (was `check_remote_connection`), `frame_status(target)`, `sync_frames(target=None, dry_run=False, ...)` (was `sync_remote_frames`), `sync_logs` (was `sync_remote_logs`) | `list_remote_targets`, `list_remote_target_folders`, `list_remote_calibration_folders`, `discover_unassociated_remote_targets`, `list_remote_files`, `list_remote_files_with_sizes`, `check_for_new_remote_images`, `download_remote_frames`, `download_remote_targets`, `sync`, `sync_calibration_folder`, `sync_all_remote_folders`, `ingest_guiding_log_file`, `fetch_and_ingest_new_guide_logs`, `ingest_ekos_session_logs`. `is_syncing` moves to `Jobs.query`. |
+| `control.history` | Past and current observing sessions | `query(kind, ...)` (was `night_history`), `get_live_session_status`, `frame_guiding`, `get_performance_envelope`, `save_ekos_session_context` | `analyze_capture_session`, `analyze_guiding_session`, `analyze_sky_coverage`, `summarize_capture_sessions`, `summarize_guiding_sessions`, `summarize_recurring_issues`, `list_ekos_session_summaries`, `get_ekos_session_context`, `list_guiding_runs`, `get_pointing_model`. `query` gains `kind="alignment"` (section 5). |
+| `control.safety` | Weather, enclosure, and who is allowed to act | `status`, `assess` (was `assess_safety`), `save_rule_set` (was `save_safety_rule_set`), `execute_safe_state`, `open_enclosure`, `close_enclosure`, `apply_promotion_decision`, `enter_monitoring_mode`, `enter_controller_mode` | `get_safety_rule_set`, `active_enclosure`, `get_enclosure_state`, `delegation_policy`, `summarize_divergence_evidence`, and `refresh_safety_assessment` if it only reads |
 | `control.equipment` | The equipment profile and device connections | `status`, `connect`, `disconnect`, `set_active_telescope`, `set_active_camera`, `cooling_ramp_rate`, `summarize_device`, `save_commissioning_run` | `active_telescope`, `active_camera`, `active_guide_scope`, `active_guide_camera`, `list_camera_profiles`, `get_equipment_configuration`, `get_observer_location`, `indi_diagnostics`, `get_commissioning_runs` |
 
 `control` drops from 112 public members to about 70, spread over the root and seven children. The
@@ -173,8 +185,9 @@ largest child, `control.guiding`, has 13. Every member of today's `ObservatoryCo
 exactly one row above.
 
 The MCP servers derive tool names from the attribute path. Moving members into children therefore
-renames their tools, for example from `observatory_park` to `observatory_mount_park`.
-`backend/mcp/tool_dispositions.py` and the RPC method names change with them.
+renames their tools, for example from `observatory_park` to `observatory_mount_park`. The same
+change updates the RPC method names, `backend/mcp/tool_dispositions.py`, the generated manifests,
+and the tool lists in `.claude/agents/` and `.claude/settings.json` (rule 7).
 
 `planning` and `execution` stay single classes:
 
@@ -212,11 +225,11 @@ follow section 4, and no row adds a function beyond those listed there.
 | `backend/services/observatory/mosaic_service.py` `create_mosaic_targets` | `ObservationPlanning.create_mosaic_targets`, then `create_mosaic` |
 | `backend/services/data/stellar_service.py` spectral-class labels, aliases, summary, and by-class listing | `StellarCatalog.spectral_class_counts`, `StellarCatalog.query(spectral_class=...)` |
 | `backend/services/data/stellar_service.py` `get_visible_targets` | `ObservationPlanning.get_visibility` |
-| `backend/services/observatory/observatory_service.py` humidity safety rule | `control.safety.assess_safety` |
+| `backend/services/observatory/observatory_service.py` humidity safety rule | `control.safety.assess` |
 | `backend/services/observatory/telescope_service.py` `_infer_target_at_coordinates` (small-angle distance, 1° match) | `TargetCatalog.query(ra=..., dec=..., radius_deg=...)` |
 | `backend/services/analysis/analysis_orchestrator.py` frame classification (spectroscopy versus photometry) | `ProcessingPipelines.process_target(stages=...)`, which already chooses, using `frame_is_spectral` |
-| `backend/services/infrastructure/sync_service.py` folder layout, calibration and log sync | `control.remote.sync_remote_frames`, `control.remote.sync_remote_logs` |
-| `backend/services/processing/ingestion_service.py` remote folder name matching and calibration folder loop | `control.remote.list`, `control.remote.sync_remote_frames`. The library name matcher is the single rule. |
+| `backend/services/infrastructure/sync_service.py` folder layout, calibration and log sync | `control.remote.sync_frames`, `control.remote.sync_logs` |
+| `backend/services/processing/ingestion_service.py` remote folder name matching and calibration folder loop | `control.remote.list`, `control.remote.sync_frames`. The library name matcher is the single rule. |
 | `backend/services/data/image_service.py` `get_filter_type` | `FrameRecord.normalize_filter` (the backend copy appears unused) |
 | `backend/services/observatory/alignment_service.py` raw `sqlite3` read of `astrometrics.db` | `TargetCatalog.query`, with night ids from `observing_night_id` |
 
@@ -226,7 +239,7 @@ follow section 4, and no row adds a function beyond those listed there.
 |---|---|---|
 | `backend/services/observatory/guiding_service.py` | Merges guide pulses, converts pulses to arcseconds, computes root-mean-square (RMS) guiding error, and runs a simulated guiding loop | A guiding driver chosen by the `protocol` setting (`phd2`, `internal`, `simulator`), using the same driver registry `mount_driver` uses. RMS goes into `control.history.get_live_session_status`. The backend keeps only thread start and stop. |
 | `backend/services/observatory/alignment_service.py` | Runs the capture, plate-solve, sync, re-slew loop, and reads the solved center from the WCS header. WCS (world coordinate system) is the FITS header block that maps pixels to sky positions. | `control.mount.slew_to_coordinates(center=True)`, using `control.mount.compute_pointing_correction` |
-| `backend/services/infrastructure/sync_service.py` pointing-error extraction | Parses FITS headers for commanded and solved positions and computes the pointing error | A post-download step of `control.remote.sync_remote_frames`. The results are read through `control.history.night_history(kind="alignment")`. |
+| `backend/services/infrastructure/sync_service.py` pointing-error extraction | Parses FITS headers for commanded and solved positions and computes the pointing error | A post-download step of `control.remote.sync_frames`. The results are read through `control.history.query(kind="alignment")`. |
 | `backend/services/observatory/target_imaging_executor.py` | Keeps its own observation queue and run loop | `ObservationPlanning.edit_queue` and `ObservationExecution.advance_session` |
 | `backend/services/observatory/imaging_service.py` | Runs a capture loop with filter changes and dithering. Dithering means shifting the pointing slightly between exposures. | `control.imaging.capture_image(count=..., dither=...)` |
 | `backend/services/data/stellar_service.py` overlay code | Projects catalog stars onto an image through its WCS and ranks them | `StellarCatalog.query(target_id=..., detail="overlay")`, which adds pixel positions |
@@ -237,7 +250,7 @@ follow section 4, and no row adds a function beyond those listed there.
 | `astrometricslib/mcp/reflection.py` job wrapping and quality snapshots | Runs calls as background jobs and records stack quality before and after | A consistent `register_job=` argument, as `process_target` already has. `process_target` returns the quality summary. |
 | `astrometricslib/mcp/tool_registry.py`, `backend/services/data/image_service.py`, `astrometricslib/utilities/config_loader.py`, `astrometricslib/utilities/storage_mount.py` | Four copies of the data-folder path check and the `/media` to `/run/media` swap | One helper built from `storage_mount._path_variants` and `_is_below`, exposed on `AppConfiguration` |
 | `backend/mcp/tool_registry.py` `app_status` | Decodes INDI mount properties | `control.mount.status` |
-| `ui/planetariumDisplay/utils/alignmentClustering.ts` | Groups plate-solve attempts into sessions, then computes RMS jitter and drift rates | `control.history.night_history(kind="alignment")`, built on the existing `get_alignment_sessions` so that "alignment session" has one definition. The RA average must wrap at 0h/24h. |
+| `ui/planetariumDisplay/utils/alignmentClustering.ts` | Groups plate-solve attempts into sessions, then computes RMS jitter and drift rates | `control.history.query(kind="alignment")`, built on the existing `get_alignment_sessions` so that "alignment session" has one definition. The RA average must wrap at 0h/24h. |
 | `ui/planetariumDisplay/layers/TrackingRiskOverlay.ts` | Scores mount risk by sky position (meridian side, high declination, low altitude) and by measured RMS | A field on the `PerformanceEnvelope` model that `control.history.get_performance_envelope` returns. The UI only colors it. |
 | `ui/astronomyManager/utils/starDisplayFormat.ts` | Applies spectral-match thresholds: poor fit, disagreement with the catalog, separation between candidates | Fields on the spectroscopy result: `is_poor_match`, `differs_from_catalog`, `candidate_separation` |
 | `ui/common/hooks/targetListFiltering.ts` | Classifies targets by name (solar system body, Messier, NGC, IC, comet) | An `object_type` field on `Target` and a `TargetCatalog.query(object_type=...)` filter, built on `is_solar_system_target` |
@@ -255,7 +268,7 @@ follow-ups apply:
 - Check whether the mount position reaches the UI in the current-epoch frame (JNow) while catalog
   stars use J2000. The two frames differ by about 0.36° in 2026.
 
-## 6. API conventions and library consistency
+## 6. API conventions, library consistency, and legacy code
 
 ### 6.1 Shared API conventions
 
@@ -287,19 +300,51 @@ logging in detail.
 | 1 | Duplicate models and a second storage path in wayfindinglib: two `ObservationSession` classes, two `EquipmentConfiguration` classes, a copy of `AbstractButler`, and `drivers/local_database.save_model`/`load_models` | Keep one model in `models/`. Use `datastore.AbstractButler`. Send all storage through `DiskButler`, matching astrometricslib's single path through `CatalogAccess`. |
 | 2 | Leftover packages: `wayfindinglib/sky.py`, `observation.py`, `observationlib/`, `observatorylib/` | Move logic into `tasks/planning_tasks`, models into `models/`, and configuration reads into `data_access/`, then delete the packages. |
 | 3 | wayfindinglib builds a fresh `Astrometrics` at about 18 sites, and some ignore the configuration they were given | `Wayfinder` holds one injected handle and passes it down. |
-| 4 | Exceptions: `AstroLibError`, `AstrometryHardwareError`, `StorageNotMountedError(RuntimeError)`, `DelegationPolicyValidationError(ValueError)`, and `backend/exceptions.py` are unrelated | Replace them with the shared error model in section 7.2. The old names stay as aliases for one release. |
+| 4 | Exceptions: `AstroLibError`, `AstrometryHardwareError`, `StorageNotMountedError(RuntimeError)`, `DelegationPolicyValidationError(ValueError)`, and `backend/exceptions.py` are unrelated | Replace them with the shared error model in section 7.2. |
 | 5 | Driver interfaces: astrometricslib mixes a typing `Protocol`, an `Abstract*` class, and concrete-only classes | Use wayfindinglib's style, `abc.ABC` base classes named `*Driver`, for the Siril, plate-solve, and SIMBAD interfaces. Rename `wayfindinglib/drivers/protocols/`, because it holds abstract classes, not typing Protocols. |
 | 6 | Shared infrastructure owned by astrometricslib: the MCP registry and reflection, `job_logging`, and the configuration loader | Move the job framework and the configuration loader into `corelib` (section 7), next to the new error and logging code. Move the MCP registry and reflection into the MCP package (section 8.2). wayfindinglib then stops importing astrometricslib internals. |
 | 7 | File names: `wayfindinglib/api/*_registry.py` hold ordinary classes, not registries | Rename the files to `control.py`, `planning.py`, `execution.py`. Put the `control` children in a `control/` package with one module per child. |
 | 8 | Scripts: 16 of 23 astrometricslib scripts and `wayfindinglib/scripts/build_deep_star_catalog.py` import internals | Scripts use the public API only, or the scripts README states the exemption. |
-| 9 | Alignment logs live in `astrometricslib/drivers/logger_interface.py`, but mount alignment is a wayfindinglib concern | Decide which library owns alignment records before building `control.history.night_history(kind="alignment")`. |
+| 9 | Alignment logs live in `astrometricslib/drivers/logger_interface.py`, but mount alignment is a wayfindinglib concern | Decide which library owns alignment records before building `control.history.query(kind="alignment")`. |
 | 10 | Documentation drift: garbled "astrometrics" wording in wayfindinglib docstrings, citations to architecture sections that do not exist, 353 `ruff: ignore` suppressions in wayfindinglib | Fix these as each file is touched, per CLAUDE.md. `Wayfinding_Library_Architecture.md` gains the `control` children. |
+
+### 6.3 Legacy code to remove
+
+Under section 3, rules 7 and 8, the code below goes away. Each removal updates every caller in the
+same change.
+
+| Location | What it keeps alive | Action |
+|---|---|---|
+| `astrometricslib/pipelines/astrometry/pipeline.py` | A wrapper that keeps the old name of `process` | Delete it. Callers use `process`. |
+| `astrometricslib/utilities/parallel_batch.py` | A worker initializer marked deprecated | Delete it. Callers use `_initialize_worker_process`. |
+| `backend/services/data/target_service.py`, `backend/services/data/stellar_service.py`, `backend/services/infrastructure/scripting_service.py` | A deprecated method, two no-op methods kept for compatibility, and a legacy wrapper around `execute` | Delete them and their RPC registrations. |
+| `backend/services/infrastructure/base_service.py`, `backend/services/infrastructure/system_status_service.py` | Fallback paths: an in-memory job when no `JobService` is given, and on-demand status aggregation | Delete the fallbacks. The container always provides the real dependency. |
+| `backend/routers/rpc_router.py` | The two-part `namespace:method` reflection fallback, `method_aliases`, and duplicate registrations such as `target:get`/`target:get_targets` and `observatory:connect`/`telescope:connect` | One explicit RPC name per method (section 8.1). |
+| `wayfindinglib/drivers/phd2/phd2_events.py`, `phd2_guiding_service.py` | `to_legacy_history_entry` and the legacy-shaped `get_status()` | Use `GuidingSample` from end to end. |
+| `wayfindinglib/data_access/equipment_catalog_reader.py`, `astrometricslib/utilities/spectroscopy_models.py` | Reading of the old `[Telescope]` configuration section and conversion of old configuration values | A one-time configuration migration script, then current-format reading only (rule 8). |
+| `wayfindinglib/sky.py`, `observation.py`, `observationlib/`, `observatorylib/` | Older planning engines and models | Section 6.2, item 2. |
+| `backend/mcp/tools/*`, `backend/mcp/mcp_diagnostics.py` | Dead MCP tools | Section 8.2. |
+| `build/mcp/astrometrics_mcp_server.py`, the `legacy` `.claude/mcp.json` output of `build/mcp/generate_client_configs.py` | A backward-compatible server entry point and client configuration | Delete them. |
+| `ui/common/services/telescopeService.ts`, `ui/common/services/imagingService.ts` | Modules that only re-export other services for backward compatibility | Delete them. Callers import the real services. |
+| `ui/common/context/TargetContext.tsx`, `ui/common/types/vite-env.d.ts` | A type alias kept for old hook signatures, and the `electronAPI` declaration | Delete them. |
+| `ui/common/services/backendApi.ts`, `ui/setupTests.ts` | Parsing of legacy REST error shapes (`detail`, `error`), and REST routing in the test mock | JSON-RPC errors only (section 7.4). |
+| `backend/main_backend.py` | A global filter that hides `AstropyDeprecationWarning` | Remove the filter and update the astropy calls it hides. |
+| About 15 wayfindinglib module docstrings | Text that describes a deprecated predecessor ("relocated verbatim from the deprecated ...", "pre-redesign") | Rewrite to describe current behavior, per the `code-documentation-style` skill. |
+
+Some code handles older data that cannot be upgraded, or formats that other software defines. It
+stays:
+
+- `astrometricslib/pipelines/shared/staleness.py` treats a result with no recorded provenance as
+  "unknown". A migration cannot recreate provenance that was never recorded.
+- `astrometricslib/drivers/image.py` reads the FITS `RADECSYS` keyword.
+- `wayfindinglib/drivers/indi/filter_wheel_controller.py` falls back to the INDI text property.
+- `astrometricslib/pipelines/stacking/stage.py` handles Siril `r_` sequences.
 
 ## 7. Errors and logging
 
 This section defines one way to report errors and one way to write logs, for both libraries, the
 backend, the MCP servers, and the scripts. A neutral shared package next to `datastore/` holds the
-code. Its name is open (section 11, decision 8). This section calls it `corelib`.
+code. Its name is open (section 11, decision 7). This section calls it `corelib`.
 
 ### 7.1 Current state
 
@@ -325,8 +370,8 @@ or the backend raise on purpose belongs to one category.
 | Class | `code` | Meaning | Examples today |
 |---|---|---|---|
 | `AstrometricsError` | (base) | Base of every expected error. It carries `code`, `message` (one plain sentence a user can read), `details` (a dictionary of JSON-safe values), and `retryable` (whether the same call may succeed later). | `AstroLibError` |
-| `InvalidArgumentError` | `invalid_argument` | The caller passed a bad value. Also subclasses `ValueError`, so existing `except ValueError` code keeps working. | `{"error": "detail must be one of: ..."}`, backend `InvalidArgumentError` |
-| `NotFoundError` | `not_found` | A named target, star, job, session, or file does not exist. Subclasses `LookupError`, not `KeyError`. | backend `TargetNotFoundError`, `FilterNotFoundError`, `ToolNotFoundError` |
+| `InvalidArgumentError` | `invalid_argument` | The caller passed a bad value. | `{"error": "detail must be one of: ..."}`, backend `InvalidArgumentError` |
+| `NotFoundError` | `not_found` | A named target, star, job, session, or file does not exist. | backend `TargetNotFoundError`, `FilterNotFoundError`, `ToolNotFoundError` |
 | `ConflictError` | `conflict` | The request is valid, but the current state forbids it: a device is in use, a job is already running, the mount is parked. | `datastore.DeviceInUseError` |
 | `PermissionDeniedError` | `permission_denied` | A policy forbids the action: the delegation policy, a read-only profile, a path outside the allowed folders. | MCP sandbox check |
 | `ConfigurationError` | `configuration` | The configuration is missing or invalid. | `DelegationPolicyValidationError` |
@@ -339,8 +384,12 @@ Any other exception means a bug and has the code `internal`.
 
 Each library adds specific subclasses where callers need to tell cases apart, for example
 `PlateSolveFailedError(ProcessingError)` or `MountParkedError(ConflictError)`. Each library exports
-the shared classes and its own subclasses from its package root. The old class names remain as
-aliases for one release.
+the shared classes and its own subclasses from its package root.
+
+No category subclasses a built-in exception such as `ValueError` or `KeyError`. Code that catches
+an `AstrometricsError` category therefore never catches an error from Python itself or from a
+third-party library by accident. That accident is the cause of the `KeyError` bug in Appendix A,
+item 7.
 
 `corelib.errors.ErrorInfo` is the serializable form of an error, a Pydantic model with fields
 `code`, `message`, `details`, `retryable`, and `request_id`. Every adapter sends this shape, and
@@ -416,7 +465,7 @@ each category to its transport codes.
    
    `LoggerInterface` holds both kinds today. Job records and job log lines move to a
    `corelib.jobs` store. Alignment, guiding, and telemetry records move to the library that owns
-   them (decision 4), behind its normal storage class. AI interactions and the knowledge table
+   them (section 11, decision 3), behind its normal storage class. AI interactions and the knowledge table
    move to the backend.
 2. **One logger per module.** Every module uses `logger = logging.getLogger(__name__)`. The
    `job_{id}`, `siril_{id}`, and per-target worker loggers go away. Job and run identity travel in
@@ -532,17 +581,20 @@ Each phase ends with `ruff check`, the affected `pytest` suites, and, for `ui/` 
 3. **Build the shared error and logging code (section 7).** Create `corelib` with the error
    classes, `ErrorInfo`, `to_error_info`, `configure_logging`, the log context, and the job log
    router. Switch the RPC router, the MCP registries, the UI's `callBackend`, and every program
-   entry point to them. Library code keeps raising its current types for now, and the adapters map
-   `ValueError` to `invalid_argument` until phase 5 finishes.
+   entry point to them. While library code still raises built-in types, the adapters report a
+   plain `ValueError` as `invalid_argument`. Phase 5 deletes that mapping.
    Done when: every RPC and MCP error reply carries an `ErrorInfo` with a `request_id`, and every
    program sets up logging through `configure_logging`.
-4. **Delete the copies in section 5.1.**
-   Done when: those backend functions are gone, and the RPC methods call the library functions.
+4. **Delete the copies in section 5.1 and the legacy code in section 6.3.**
+   Done when: those backend functions and shims are gone, the configuration migration has run, and
+   the RPC methods call the library functions.
 5. **Consolidate the library API (section 4) and apply the conventions in section 6.1.** Add
-   arguments and new general methods. Split `control` into its children. Turn the narrow methods
-   into private helpers with deprecated aliases. Return typed models. Replace error replies with
-   raises, and narrow the broad `except Exception` handlers (section 7.3).
-   Done when: both public-surface tests pin the section 4 list, and the MCP tool list matches it.
+   arguments and new general methods. Split `control` into its children under their final names.
+   Make the narrow methods private or delete them, and update every caller in the same change
+   (section 3, rule 7). Return typed models. Replace error replies with raises, narrow the broad
+   `except Exception` handlers (section 7.3), and delete the adapters' `ValueError` mapping.
+   Done when: both public-surface tests pin the section 4 list, the MCP tool list matches it, and
+   no old name remains anywhere in the repository.
 6. **Move the logic in section 5.2.**
    Done when: the allow-lists from phase 2 are empty.
 7. **Restructure the MCP servers (section 8.2) and the backend (section 8.1).**
@@ -552,7 +604,6 @@ Each phase ends with `ruff check`, the affected `pytest` suites, and, for `ui/` 
    `LoggerInterface` (section 7.5, item 1).
    Done when: no library defines its own unrelated exception classes, each concept has one model,
    and no leftover packages remain.
-9. **Remove the deprecated aliases** after one release.
 
 Phases 4 and 5 can overlap. Phase 5 depends on phase 3, because the raises it adds need the
 adapters to report them. Phase 6 depends on phase 5, because the moved logic lands in the
@@ -567,23 +618,24 @@ Decided:
   rule for both libraries (section 6.1).
 - **Naming a target (2026-10-04).** Every method that acts on a target takes
   `target: str | Target` (section 6.1).
+- **No deprecated or legacy names (2026-10-04).** Renames and removals keep no aliases. The change
+  that makes them updates every caller (section 3, rules 7 and 8; section 6.3).
 
 Open:
 
 1. The name and location of the top-level MCP package (for example `agent_servers/`).
-2. How long deprecated aliases stay: one release, or until no caller in the repository uses them.
-3. Whether maintenance scripts may import library internals.
-4. Which library owns alignment records (section 6.2, item 9). This also decides where those
+2. Whether maintenance scripts may import library internals.
+3. Which library owns alignment records (section 6.2, item 9). This also decides where those
    records go when `LoggerInterface` is split (section 7.5, item 1).
-5. Whether `control.mount.slew_to_target` folds into `slew_to_coordinates` through
+4. Whether `control.mount.slew_to_target` folds into `slew_to_coordinates` through
    `target: str | Target`.
-6. The exact list of non-RPC routes the UI may use (WebSockets, static images, handoff), to record
+5. The exact list of non-RPC routes the UI may use (WebSockets, static images, handoff), to record
    in CLAUDE.md.
-7. Approval of the error and logging design in section 7, in particular:
+6. Approval of the error and logging design in section 7, in particular:
    - the category list in section 7.2;
    - the JSON-RPC codes and HTTP statuses in section 7.4;
    - JSON Lines as the log file format.
-8. The name of the shared package that holds errors, logging, jobs, and configuration (section 7
+7. The name of the shared package that holds errors, logging, jobs, and configuration (section 7
    calls it `corelib`).
 
 ## Appendix A. Confirmed bugs

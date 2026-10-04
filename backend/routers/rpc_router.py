@@ -259,6 +259,7 @@ class RPCHandlerRegistry:
         self.register("processing:cancel", ("image_processing_service", "cancel_processing_jobs"))
         self.register("processing:status", ("image_processing_service", "get_processing_status"))
         self.register("processing:list_jobs", ("job_service", "list_jobs"))
+        self.register("processing:active_jobs", ("job_service", "get_active_jobs"))
         self.register("processing:get_job", ("job_service", "get_job"))
         self.register("processing:delete_job", ("job_service", "delete_job"))
         self.register("processing:jobs_for_target", ("job_service", "get_jobs_for_target"))

@@ -88,7 +88,10 @@ class Visualization:
             Longest side of the picture in pixels, from 100 to 2000.
             Defaults to 1200. Smaller pictures cost the client less.
         stretch : `bool`, optional
-            Brighten faint detail automatically. Defaults to `True`.
+            Brighten faint detail automatically. Defaults to `True`. A
+            stack's ``_processed.fits`` file is already stretched by the
+            stacking stage, so it is drawn as it is and this is ignored for
+            it. The description's ``stretched`` field says what was done.
         center : `float`, optional
             Middle of a manual brightness range, in pixel values. Needs
             ``width``.
@@ -121,9 +124,12 @@ class Visualization:
 
         from astrometricslib.drivers.image import AstrometricsImage
         from astrometricslib.pipelines.shared.image_scaling import ImageScaler
+        from astrometricslib.pipelines.shared.stack_preview_path import is_processed_fits_path
 
         if path is None:
             path = self._find_target_frame_path(target, file_name)
+        if stretch and is_processed_fits_path(path):
+            stretch = False
         if (center is None) != (width is None):
             raise ValueError("Give both center and width for a manual brightness range, or neither.")
         crop_values = (crop_center_x, crop_center_y, crop_size)

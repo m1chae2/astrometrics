@@ -213,6 +213,9 @@ class ToolRegistry:
                     TextContent(type="text", text=json.dumps(result.description, indent=2, default=str)),
                 ]
 
+            if hasattr(result, "savefig") and callable(result.savefig):
+                return _figure_as_image(result)
+
             serialized = _serialize_result(result)
             result_str = json.dumps(serialized, indent=2, default=str)
             max_bytes = 40000  # Cap output to ~10k tokens to prevent transport and context blowout
@@ -225,6 +228,57 @@ class ToolRegistry:
             return [TextContent(type="text", text=result_str)]
         except Exception as e:
             return [TextContent(type="text", text=f"Error during tool execution: {e!s}")]
+
+
+FIGURE_DOTS_PER_INCH = 100
+"""Resolution of a plot sent to a client. A 16 x 9 inch figure becomes a
+1600 x 900 picture, large enough to read axis labels and small enough (a few
+hundred kilobytes) for the MCP transport."""
+
+
+def _figure_as_image(figure: Any) -> list[ImageContent | TextContent]:
+    """Turn a matplotlib figure into an image reply and free the figure.
+
+    A plot tool returns a figure object. Sent as text it reads
+    ``Figure(1600x900)``, which tells a client nothing, so it is drawn to a
+    PNG here instead. The figure is closed afterwards so repeated calls do
+    not use up memory.
+
+    Parameters
+    ----------
+    figure : `matplotlib.figure.Figure`
+        The figure to draw.
+
+    Returns
+    -------
+    content : `list` [`ImageContent` or `TextContent`]
+        The picture, and a short description of its size and titles.
+    """
+    import io
+
+    buffer = io.BytesIO()
+    figure.savefig(buffer, format="png", dpi=FIGURE_DOTS_PER_INCH, bbox_inches="tight")
+    width_inches, height_inches = figure.get_size_inches()
+    titles = [axis.get_title() for axis in figure.get_axes() if axis.get_title()]
+    description = {
+        "size_pixels": [
+            round(width_inches * FIGURE_DOTS_PER_INCH),
+            round(height_inches * FIGURE_DOTS_PER_INCH),
+        ],
+        "panel_titles": titles[:12],
+    }
+    try:
+        import matplotlib.pyplot as plt
+
+        plt.close(figure)
+    except ImportError:
+        pass
+    return [
+        ImageContent(
+            type="image", data=base64.b64encode(buffer.getvalue()).decode("ascii"), mimeType="image/png"
+        ),
+        TextContent(type="text", text=json.dumps(description, indent=2)),
+    ]
 
 
 def _serialize_result(val: Any) -> Any:

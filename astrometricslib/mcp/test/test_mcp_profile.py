@@ -138,7 +138,7 @@ def test_investigator_profile_offers_only_reading_tools() -> None:
     assert copy.tools
     for name in copy.tools:
         entry = manifest["tools"][name]
-        assert entry["tool_class"] in ("observe", "compute", "ingest"), name
+        assert entry["tool_class"] in ("observe", "compute", "ingest", "process"), name
         assert entry["disposition"] in ("keep", "merge"), name
 
 

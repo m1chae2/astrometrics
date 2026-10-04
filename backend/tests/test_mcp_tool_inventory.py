@@ -310,7 +310,7 @@ def test_writers_are_withheld_because_the_ai_is_read_only() -> None:
 def test_no_proposed_tool_offers_a_writer_to_the_investigator() -> None:
     """A writing proposed tool gives the investigator safe values or none."""
     for proposed in PROPOSED_TOOLS:
-        if proposed.tool_class not in ("observe", "compute", "ingest"):
+        if proposed.tool_class not in ("observe", "compute", "ingest", "process"):
             assert proposed.investigator_access() in ("limited", "none"), proposed.name
         assert "operator" not in proposed.argument_rules, proposed.name
 

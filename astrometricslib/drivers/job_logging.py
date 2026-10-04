@@ -32,6 +32,7 @@ import threading
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
+from contextvars import ContextVar
 from datetime import datetime
 from typing import Any
 
@@ -40,6 +41,26 @@ logger = logging.getLogger(__name__)
 # Statuses that mean the job is over. Once the work sets one of these, the
 # context manager stops second-guessing it -- see `registered_job`.
 _TERMINAL_STATUSES = frozenset({"completed", "failed"})
+
+
+_current_job: ContextVar[JobHandle | None] = ContextVar("current_job", default=None)
+"""The job being run, set by `run_as_background_job`."""
+
+
+def get_current_job() -> JobHandle | None:
+    """Give the job the calling work is running as, if any.
+
+    Work started through `run_as_background_job` (every tool marked with
+    `background_job`) can use this to write log lines and report progress
+    without being handed the job.
+
+    Returns
+    -------
+    job : `JobHandle` or `None`
+        The running job's handle, or `None` when the code is not running
+        as a background job, such as in a plain function call or a test.
+    """
+    return _current_job.get()
 
 
 class JobHandle:
@@ -496,17 +517,19 @@ def run_as_background_job(
                 job_created.set()
 
                 pre_quality = _snapshot("pre")
+                token = _current_job.set(job)
                 try:
                     result = work_fn(job)
                 except Exception as work_error:
                     outcome["error"] = repr(work_error)
                     raise
-                else:
-                    outcome["result"] = result
-                    metrics: dict[str, Any] = {"result": _to_plain(result)}
-                    if snapshot_fn is not None:
-                        metrics["quality"] = _to_plain({"pre": pre_quality, "post": _snapshot("post")})
-                    job.mark("completed", 100, output_metrics=metrics)
+                finally:
+                    _current_job.reset(token)
+                outcome["result"] = result
+                metrics: dict[str, Any] = {"result": _to_plain(result)}
+                if snapshot_fn is not None:
+                    metrics["quality"] = _to_plain({"pre": pre_quality, "post": _snapshot("post")})
+                job.mark("completed", 100, output_metrics=metrics)
         except Exception as background_error:
             # `registered_job` already marked the job failed and re-raises
             # by contract, for callers that run it synchronously and want

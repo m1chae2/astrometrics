@@ -266,3 +266,154 @@ def test_concurrent_processes_do_not_clobber_each_others_target_edits(tmp_path):
     reloaded = Astrometrics(app_config=config)
     assert reloaded.targets.get("Target Alpha").common_name == "Alpha Mutated"
     assert reloaded.targets.get("Target Beta").common_name == "Beta Mutated"
+
+
+def test_a_listing_during_a_long_edit_does_not_orphan_the_edit(tmp_path: Path) -> None:
+    """The stack a job records survives a target list read while it runs.
+
+    Reproduces how the NGC 7331 stack of 2026-10-04 was lost. The backend gave
+    the stacking stage its target with `get`. While the stack ran, something
+    listed the targets (the viewer does, and so does ingestion). `list` swapped
+    freshly read objects into the catalog, so the stage went on editing an
+    object the catalog no longer held. The save at the end wrote the new
+    objects, which knew nothing about the stack: the library kept the old
+    stack's path and had no processed image.
+    """
+    config = _make_isolated_config(tmp_path)
+    old_stack = "/stacks/lights/Stacked Target/Stacked_Target_Stacked.fits"
+    new_stack = "/stacks/lights/Stacked Target/Stacked_Target_L_Stacked.fits"
+    new_picture = "/stacks/lights/Stacked Target/Stacked_Target_L_Stacked_processed.fits"
+    target = Target(id="Stacked Target")
+    target.stacking.stacked_image = old_stack
+    local_database.save_target(app_config=config, target=target)
+
+    astrometrics = Astrometrics(app_config=config)
+    # What the service hands the stacking stage.
+    stage_target = astrometrics.targets.get("Stacked Target")
+    stage_target.stacking.stacked_image = new_stack
+
+    # The viewer asks for the target list while the stack is still running.
+    astrometrics.targets.list()
+
+    # The stage finishes: it records the picture, then the service saves.
+    stage_target.stacking.processed_image = new_picture
+    astrometrics.targets.save()
+
+    saved = Astrometrics(app_config=config).targets.get("Stacked Target")
+    assert saved.stacking.stacked_image == new_stack
+    assert saved.stacking.processed_image == new_picture
+
+
+def test_a_listing_does_not_make_a_later_save_overwrite_other_targets(tmp_path: Path) -> None:
+    """Reading the target list must not turn every target into one to save.
+
+    A process lists the targets and edits only "Target Alpha". Another process
+    changes "Target Charlie" on disk. The first process's save should leave
+    Charlie's edit alone, as it does when the process never listed the
+    targets (see the untouched-targets test above).
+    """
+    config = _make_isolated_config(tmp_path)
+    local_database.save_target(app_config=config, target=Target(id="Target Alpha"))
+    local_database.save_target(app_config=config, target=Target(id="Target Charlie", common_name="original"))
+
+    astrometrics = Astrometrics(app_config=config)
+    astrometrics.targets.list()
+    astrometrics.targets.get("Target Alpha").common_name = "Alpha Mutated"
+
+    # Another process updates Charlie on disk after the listing.
+    local_database.save_target(
+        app_config=config, target=Target(id="Target Charlie", common_name="changed by other process")
+    )
+
+    astrometrics.targets.save()
+
+    reloaded = Astrometrics(app_config=config)
+    assert reloaded.targets.get("Target Alpha").common_name == "Alpha Mutated"
+    assert reloaded.targets.get("Target Charlie").common_name == "changed by other process"
+
+
+def test_a_target_fetched_before_a_listing_is_still_the_one_the_catalog_holds(tmp_path: Path) -> None:
+    """A long job that edits its target only at the end still saves the edit.
+
+    The stacking stage gets its target and edits it minutes later. A listing
+    in between must not swap that object out, even though the stage has not
+    changed anything yet.
+    """
+    config = _make_isolated_config(tmp_path)
+    local_database.save_target(app_config=config, target=Target(id="Stacked Target"))
+    astrometrics = Astrometrics(app_config=config)
+    stage_target = astrometrics.targets.get("Stacked Target")
+
+    listed = astrometrics.targets.list()
+
+    assert listed[0] is stage_target
+    stage_target.stacking.stacked_image = "/stacks/Stacked_Target_L_Stacked.fits"
+    astrometrics.targets.save()
+    saved = Astrometrics(app_config=config).targets.get("Stacked Target")
+    assert saved.stacking.stacked_image == "/stacks/Stacked_Target_L_Stacked.fits"
+
+
+def test_a_listing_refreshes_an_unedited_target_with_what_another_process_saved(tmp_path: Path) -> None:
+    """An unedited target still picks up other programs' changes."""
+    config = _make_isolated_config(tmp_path)
+    local_database.save_target(app_config=config, target=Target(id="Target Alpha", common_name="original"))
+    astrometrics = Astrometrics(app_config=config)
+    held = astrometrics.targets.get("Target Alpha")
+
+    local_database.save_target(
+        app_config=config, target=Target(id="Target Alpha", common_name="changed by other process")
+    )
+    listed = astrometrics.targets.list()
+
+    assert listed[0] is held
+    assert held.common_name == "changed by other process"
+
+
+def test_a_listing_keeps_a_target_that_has_unsaved_edits(tmp_path: Path) -> None:
+    """A target edited in this process is not overwritten by a listing."""
+    config = _make_isolated_config(tmp_path)
+    local_database.save_target(app_config=config, target=Target(id="Target Alpha", common_name="original"))
+    astrometrics = Astrometrics(app_config=config)
+    held = astrometrics.targets.get("Target Alpha")
+    held.common_name = "edited here"
+
+    local_database.save_target(
+        app_config=config, target=Target(id="Target Alpha", common_name="changed by other process")
+    )
+    astrometrics.targets.list()
+
+    assert held.common_name == "edited here"
+    astrometrics.targets.save()
+    assert Astrometrics(app_config=config).targets.get("Target Alpha").common_name == "edited here"
+
+
+def test_scripts_that_edit_listed_targets_can_still_save_them(tmp_path: Path) -> None:
+    """Edits made to listed targets are still saved."""
+    config = _make_isolated_config(tmp_path)
+    local_database.save_target(app_config=config, target=Target(id="Target Alpha"))
+    local_database.save_target(app_config=config, target=Target(id="Target Beta"))
+    astrometrics = Astrometrics(app_config=config)
+
+    for target in astrometrics.targets.list():
+        target.common_name = f"{target.id} edited"
+    astrometrics.targets.save()
+
+    reloaded = Astrometrics(app_config=config)
+    assert reloaded.targets.get("Target Alpha").common_name == "Target Alpha edited"
+    assert reloaded.targets.get("Target Beta").common_name == "Target Beta edited"
+
+
+def test_read_saved_returns_what_is_stored_not_what_is_in_memory(tmp_path: Path) -> None:
+    """The read-back shows storage, not memory."""
+    config = _make_isolated_config(tmp_path)
+    local_database.save_target(app_config=config, target=Target(id="Target Alpha"))
+    astrometrics = Astrometrics(app_config=config)
+    target = astrometrics.targets.get("Target Alpha")
+    target.stacking.stacked_image = "/stacks/Alpha_L_Stacked.fits"
+
+    assert astrometrics.targets.read_saved("Target Alpha").stacking.stacked_image == ""
+    astrometrics.targets.save()
+    assert astrometrics.targets.read_saved("Target Alpha").stacking.stacked_image == (
+        "/stacks/Alpha_L_Stacked.fits"
+    )
+    assert astrometrics.targets.read_saved("No Such Target") is None

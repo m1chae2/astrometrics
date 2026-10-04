@@ -183,3 +183,10 @@ def test_process_target_skips_spectroscopy_without_spectral_data(recording_pipel
 
     assert "spectroscopy" not in [call["pipeline_type"] for call in recorder.calls]
     assert results["spectroscopy"] == {"status": "skipped", "reason": "target has no spectral data"}
+
+
+def test_stack_summary_reports_a_target_with_no_stack() -> None:
+    """A target without a saved stack summary gets an error, not a crash."""
+    target = Target(id="Nothing_Yet", name="Nothing Yet")
+    answer = ProcessingPipelines(AppConfiguration()).stack_summary(target)
+    assert "has no saved summary" in answer["error"]

@@ -9,6 +9,7 @@ in the database.
 import logging
 from typing import Any
 
+from astrometricslib.api.star_analysis import SPECTRAL_CLASS_LABELS, spectral_class_letter, summarize_star
 from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.utilities.config_loader import AppConfiguration
@@ -32,15 +33,18 @@ logger = logging.getLogger(__name__)
 # the summary path documented for UI catalog-browsing callers.
 DEFAULT_UNFILTERED_SUMMARY_LIMIT = 5000
 
-QUERY_LIMITS = {"ids": 2000, "summary": 500, "full": 10}
-"""Most stars one `StellarCatalog.query` answer holds, by detail level.
-A full star record can carry a spectrum and a light curve, so few fit."""
+QUERY_LIMITS = {"ids": 2000, "summary": 500, "full": 10, "analysis": 10}
+"""Most stars one `StellarCatalog.query` answer holds, by detail level. An
+analysis record is about two kilobytes, so ten fit well inside a reply."""
+
+MAXIMUM_MATCH_RANKING = 200
+"""Most stars with spectra read when ranking a class by spectrum match."""
 
 QUERY_MAXIMUM_RADIUS_DEGREES = 5.0
 """Widest region `StellarCatalog.query` searches. A wider circle on a
 274,000-star library returns more than a client can use."""
 
-QUERY_DETAILS = ("exists", "ids", "summary", "full", "stats")
+QUERY_DETAILS = ("exists", "ids", "summary", "analysis", "full", "class_counts", "stats")
 """The detail levels `StellarCatalog.query` accepts."""
 
 
@@ -709,6 +713,7 @@ class StellarCatalog:
         magnitude_min: float | None = None,
         magnitude_max: float | None = None,
         has_spectra: bool | None = None,
+        spectral_class: str | None = None,
         detail: str = "summary",
         limit: int = 50,
         offset: int = 0,
@@ -745,12 +750,21 @@ class StellarCatalog:
             Keep stars no fainter than this magnitude.
         has_spectra : `bool`, optional
             Keep only stars that do (or do not) have a recorded spectrum.
+        spectral_class : `str`, optional
+            Keep only stars whose catalog spectral type is this class
+            (O, B, A, F, G, K, M, C or W; a full type such as ``"G2V"``
+            uses its first letter).
         detail : `str`, optional
             ``"summary"`` (default): id, name, position, magnitude, spectral
             type, targets and data flags. ``"ids"``: only ids. ``"exists"``:
-            which of ``ids`` are in the library. ``"full"``: whole records,
-            at most 10. ``"stats"``: counts and coverage for the whole
-            library (no selector).
+            which of ``ids`` are in the library. ``"analysis"`` (or its old
+            name ``"full"``): what the analysis found for each star, at most
+            10 -- the star's own spectral type and how well it matched, the
+            absorption features and emission lines, and whether the
+            brightness repeats, with no raw arrays. With ``spectral_class``
+            the best-matched stars come first. ``"class_counts"``: how many
+            stars each spectral class has (no selector). ``"stats"``:
+            counts and coverage for the whole library (no selector).
         limit : `int`, optional
             How many stars to return. At most 2000 for ids, 500 for
             summaries and 10 for full records. Defaults to 50.
@@ -786,6 +800,10 @@ class StellarCatalog:
             return {"error": f"Give one selector, not several: {', '.join(selectors)}."}
         if detail == "stats":
             return {"stats": self.get_audit()}
+        if detail == "class_counts":
+            return {"classes": self.spectral_class_counts()}
+        if spectral_class is not None and not spectral_class_letter(spectral_class):
+            return {"error": f"spectral_class must start with one of: {', '.join(SPECTRAL_CLASS_LABELS)}."}
         if detail == "exists":
             if ids is None:
                 return {"error": "detail='exists' needs ids."}
@@ -795,6 +813,8 @@ class StellarCatalog:
         if region_given and not 0 < radius_deg <= QUERY_MAXIMUM_RADIUS_DEGREES:
             return {"error": f"radius_deg must be above 0 and at most {QUERY_MAXIMUM_RADIUS_DEGREES}."}
 
+        if detail == "full":
+            detail = "analysis"
         limit = max(1, min(int(limit), QUERY_LIMITS["ids" if detail == "ids" else detail]))
         offset = max(0, int(offset))
         magnitude_range = None
@@ -819,8 +839,15 @@ class StellarCatalog:
             return {"stars": [], "total_matching": 0, "truncated": False}
         if has_spectra is not None:
             summaries = [item for item in summaries if bool(item["hasSpectra"]) is has_spectra]
+        if spectral_class is not None:
+            wanted = spectral_class_letter(spectral_class)
+            summaries = [
+                item for item in summaries if spectral_class_letter(item["spectralType"] or "") == wanted
+            ]
         summaries.sort(key=lambda item: item["id"])
         total = len(summaries)
+        if detail == "analysis" and spectral_class is not None:
+            summaries = self._best_matched_first(summaries)
         page = summaries[offset : offset + limit]
         answer: dict[str, Any] = {
             "total_matching": total,
@@ -832,8 +859,57 @@ class StellarCatalog:
         elif detail == "summary":
             answer["stars"] = page
         else:
-            answer["stars"] = self.list_objects_by_ids([item["id"] for item in page])
+            answer["stars"] = [
+                summarize_star(star) for star in self.list_objects_by_ids([item["id"] for item in page])
+            ]
         return answer
+
+    def spectral_class_counts(self) -> list[dict[str, Any]]:
+        """Count the library's stars by catalog spectral class.
+
+        Returns
+        -------
+        classes : `list` [`dict`]
+            One entry per class present, in class order, with the letter, a
+            short label and the count. Stars with no catalog type are not
+            counted.
+        """
+        counts: dict[str, int] = {}
+        for row in self.list_object_summaries(apply_default_limit=False):
+            letter = spectral_class_letter(row["spectralType"] or "")
+            if letter:
+                counts[letter] = counts.get(letter, 0) + 1
+        return [
+            {"spectralClass": letter, "label": SPECTRAL_CLASS_LABELS[letter], "count": counts[letter]}
+            for letter in SPECTRAL_CLASS_LABELS
+            if letter in counts
+        ]
+
+    def _best_matched_first(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Put stars whose own spectrum matched best first.
+
+        Only stars that have a spectrum are measured; the rest keep their
+        order at the end. Reading a spectrum record is cheap next to
+        building a reply, but it is skipped for a long list.
+
+        Parameters
+        ----------
+        rows : `list` [`dict`]
+            Summary rows of one class.
+
+        Returns
+        -------
+        rows : `list` [`dict`]
+            The same rows, matched stars first, by how well their own
+            spectrum matched a reference (lowest difference first).
+        """
+        with_spectra = [row for row in rows if row["hasSpectra"]][:MAXIMUM_MATCH_RANKING]
+        scored = {}
+        for star in self.list_objects_by_ids([row["id"] for row in with_spectra]):
+            rms = star.spectroscopy.self_determined_spectral_type_rms if star.spectroscopy else None
+            if rms is not None:
+                scored[star.id] = rms
+        return sorted(rows, key=lambda row: (row["id"] not in scored, scored.get(row["id"], 0.0)))
 
     def _query_summaries(
         self,

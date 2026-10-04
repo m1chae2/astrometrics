@@ -25,6 +25,7 @@ from astrometricslib.pipelines.shared.calibration_ingest import (
 )
 from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
 from astrometricslib.pipelines.stacking.stack_runner import run_siril_stack
+from astrometricslib.pipelines.stacking.stage import stack_frames
 from astrometricslib.utilities.config_loader import AppConfiguration
 
 __all__ = [
@@ -38,10 +39,25 @@ __all__ = [
     "capture_job_logs",
     "registered_job",
     "run_siril_stack",
+    "stack_frames",
 ]
 
 _CalibrationKind = Literal["dark", "bias", "flat"]
 _CALIBRATION_KINDS: frozenset[str] = frozenset({"dark", "bias", "flat"})
+
+
+def _exposure_matches(recorded: Any, wanted: float) -> bool:
+    """Say whether a frame's recorded exposure equals a wanted length.
+
+    Returns
+    -------
+    matches : `bool`
+        `True` if the two agree to a thousandth of a second.
+    """
+    try:
+        return abs(float(recorded) - wanted) < 0.001
+    except TypeError, ValueError:
+        return False
 
 
 class QualityDiagnostics:
@@ -63,8 +79,13 @@ class QualityDiagnostics:
         """
         self._config = config
 
+    @background_job("diagnostics", grace_period_seconds=20.0)
     def measure_stack_fwhm(self, path: str) -> float | None:
         """Get the median FWHM (pixels) of the brightest stars in a FITS image.
+
+        A stack combined from several exposure groups has its bright star
+        cores patched from a shorter exposure. Those stars are left out, as
+        the stacking stage leaves them out, so this gives the stage's number.
 
         Parameters
         ----------
@@ -77,9 +98,9 @@ class QualityDiagnostics:
             Median FWHM in pixels across the measured stars, or `None`
             if it could not be measured.
         """
-        from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_image_fwhm
+        from astrometricslib.pipelines.stacking.post_processing.stack_comparison import measure_stack_fwhm
 
-        return measure_image_fwhm(path)
+        return measure_stack_fwhm(path)
 
     def check_raw_frames(self, folder_path: str, last_count: int | None = None) -> dict[str, Any]:
         """Check raw light frames in a folder and flag the ones that stand out.
@@ -110,6 +131,7 @@ class QualityDiagnostics:
 
         return check_raw_frames(folder=folder_path, last_count=last_count)
 
+    @background_job("diagnostics", grace_period_seconds=20.0)
     def frame_quality(
         self,
         target: Target | None = None,
@@ -125,6 +147,8 @@ class QualityDiagnostics:
         since: str | None = None,
         until: str | None = None,
         include_spectra: bool = False,
+        trend_frames: int = 10,
+        trend_threshold_percent: float = 15.0,
     ) -> dict[str, Any]:
         """Measure raw frames, or preview what the stacker would set aside.
 
@@ -181,13 +205,26 @@ class QualityDiagnostics:
         include_spectra : `bool`, optional
             Also measure spectroscopy frames. Defaults to `False`; their
             smeared stars are flagged as trailing, which is not a fault.
+        trend_frames : `int`, optional
+            For ``raw_check`` and ``input_quality``, how many of the newest
+            measured frames to check for a slow drift. Defaults to 10.
+        trend_threshold_percent : `float`, optional
+            How far, as a percentage of its starting level, a number must
+            move across those frames to count as a trend. Defaults to 15.
 
         Returns
         -------
         report : `dict` [`str`, `Any`]
-            The mode and the results. A problem comes back under ``"error"``.
+            The mode and the results. They include ``trends``: for star
+            width, star count and sky level, how far each moved across the
+            newest frames and whether it moved steadily, with a plain
+            sentence in ``alerts`` for each worrying drift (a widening
+            star width, falling star count, or a sky level moving either
+            way). Frames are taken in file-name order, so the order is time
+            order. A problem comes back under ``"error"``.
         """
         from astrometricslib.pipelines.shared.quality import frame_selection, frame_statistics
+        from astrometricslib.pipelines.shared.quality.frame_trends import find_trends
 
         limit = max(1, min(int(limit), 300))
         try:
@@ -221,12 +258,19 @@ class QualityDiagnostics:
             from astrometricslib.pipelines.shared.quality.raw_frame_check import check_raw_frames
 
             report = check_raw_frames(paths=paths)
+            trends = find_trends(
+                report.get("frames", []),
+                {"fwhm_px": "rising", "star_count": "falling", "sky_median_adu": "either"},
+                trend_frames,
+                trend_threshold_percent,
+            )
             return {
                 "mode": mode,
                 "folder_path": folder_path,
                 "frames_matching": matching,
                 "frames_checked": len(paths),
                 **report,
+                "trends": trends,
             }
         if mode not in ("input_quality", "quarantine_preview"):
             return {"error": "mode must be one of: input_quality, raw_check, quarantine_preview."}
@@ -297,14 +341,152 @@ class QualityDiagnostics:
             "mode": mode,
             "target_id": target.id,
             "light_frames_in_target": len(lights),
+            "spectral_light_frames_in_target": sum(1 for frame in every_light if frame_is_spectral(frame)),
             "frames_matching": frames_matching,
             "frames_measured": len(rows),
             "counts": counts,
             "summary": summary,
+            "trends": find_trends(
+                rows,
+                {"measured_fwhm_px": "rising", "background_level": "either"},
+                trend_frames,
+                trend_threshold_percent,
+            ),
             "frames": rows,
             "note": "Nothing was saved. Frames that were already measured keep their stored values.",
         }
 
+    @background_job("diagnostics", grace_period_seconds=20.0)
+    def spectral_frame_check(
+        self,
+        target: Target,
+        first_file: str | None = None,
+        last_file: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        exposure_seconds: float | None = None,
+        predict_exposure_seconds: float | None = None,
+        limit: int = 30,
+    ) -> dict[str, Any]:
+        """Measure a target's raw spectrum frames and where they clip.
+
+        For each slitless-spectrum frame it finds the zero-order star and
+        measures the streak's tilt and width across, the sky level, the
+        peak of the zero order and of the spectrum, and every saturated
+        patch with its distance along the spectrum from the zero order. A
+        clipped zero order is normal; clipped pixels inside the spectrum
+        lose real data. Given ``predict_exposure_seconds`` it scales the
+        measured peaks to that exposure and says whether the spectrum would
+        clip there (a clipped peak is a lower bound, and the reply says so).
+
+        The summary groups the frames by exposure length (how many clip the
+        zero order or the spectrum) and by pier side (the median, smallest
+        and largest tilt), so a tilt that depends on the side of the pier
+        shows up. Nothing is saved. A frame takes about a second.
+
+        Parameters
+        ----------
+        target : `Target`
+            The target whose spectrum frames to measure.
+        first_file : `str`, optional
+            Only frames from this file onward. A bare number such as
+            ``"013"`` means frame 013.
+        last_file : `str`, optional
+            Only frames up to this file or number.
+        since : `str`, optional
+            Only frames taken at or after this ISO 8601 time (UTC if no
+            offset).
+        until : `str`, optional
+            Only frames taken at or before this ISO 8601 time.
+        exposure_seconds : `float`, optional
+            Only frames with this exposure length.
+        predict_exposure_seconds : `float`, optional
+            An exposure to predict the peaks at, in seconds.
+        limit : `int`, optional
+            How many frames to measure, from 1 to 100. Defaults to 30. With
+            a range or a time bound these are the first frames inside it,
+            otherwise the newest.
+
+        Returns
+        -------
+        report : `dict` [`str`, `Any`]
+            ``frames`` (one row each) and ``summary``. A problem comes back
+            under ``error``.
+        """
+        from astrometricslib.pipelines.shared.quality import frame_selection, spectral_frame_check
+        from astrometricslib.pipelines.stacking.processing.group_derotation import (
+            MINIMUM_TRAIL_CONTRAST_SIGMA,
+        )
+
+        limit = max(1, min(int(limit), 100))
+        try:
+            selection = frame_selection.FrameSelection(
+                first_file=first_file,
+                last_file=last_file,
+                since=frame_selection.parse_iso_time(since),
+                until=frame_selection.parse_iso_time(until),
+                include_spectra=True,
+            )
+        except ValueError as error:
+            return {"error": f"since and until must be ISO 8601 times: {error}"}
+        lights = [
+            frame
+            for frame in target.frames
+            if str(frame.role).upper() == "LIGHT" and frame_is_spectral(frame)
+        ]
+        chosen = frame_selection.select_library_frames(lights, selection)
+        if exposure_seconds is not None:
+            chosen = [frame for frame in chosen if _exposure_matches(frame.exposure, exposure_seconds)]
+        matching = len(chosen)
+        if not chosen:
+            return {"target_id": target.id, "frames_matching": 0, "frames": [], "summary": {}}
+        chosen = chosen[:limit] if selection.has_bounds else chosen[-limit:]
+
+        from astrometricslib.drivers.job_logging import get_current_job
+
+        job = get_current_job()
+        geometry_by_camera: dict[str, dict[str, Any]] = {}
+        rows = []
+        for index, frame in enumerate(chosen):
+            if job is not None:
+                job.mark(
+                    "running",
+                    index,
+                    progress_total=len(chosen),
+                    message=f"Measured {index} of {len(chosen)} spectrum frames",
+                )
+            row: dict[str, Any] = {
+                "file": os.path.basename(frame.path),
+                "exposure_seconds": float(frame.exposure),
+                "pier_side": frame.pier_side,
+            }
+            try:
+                if frame.camera not in geometry_by_camera:
+                    geometry_by_camera[frame.camera] = spectral_frame_check.load_dispersion_geometry(
+                        frame.camera
+                    )
+                row.update(
+                    spectral_frame_check.measure_spectral_frame_file(
+                        frame.path,
+                        frame.camera,
+                        row["exposure_seconds"],
+                        geometry_by_camera[frame.camera],
+                        predict_exposure_seconds,
+                    )
+                )
+            except (OSError, ValueError) as error:
+                row["error"] = str(error)
+            rows.append(row)
+        return {
+            "target_id": target.id,
+            "frames_matching": matching,
+            "frames_measured": len(rows),
+            "summary": spectral_frame_check.summarize_spectral_frames(rows, MINIMUM_TRAIL_CONTRAST_SIGMA),
+            "frames": rows,
+            "note": "Nothing was saved. Peaks above 65,000 ADU are lower bounds; predictions scale linearly.",
+        }
+
+    @background_job("diagnostics", grace_period_seconds=20.0)
     def compare_stacks(self, before_path: str, after_path: str) -> StackComparison:
         """Measure two stacks and say how they differ.
 
@@ -585,6 +767,7 @@ class CalibrationCatalog:
         flat_groups = self.library.list_flat_groups() if kind == "flat" else ()
         return build_ingest_report(kind, before, after, flat_groups)
 
+    @background_job("diagnostics", grace_period_seconds=20.0)
     def assess_flats(
         self,
         telescope: str | None = None,
@@ -654,6 +837,7 @@ class ProcessingPipelines:
         output_file: str | None = None,
         log_file: str | None = None,
         generate_rejmap: bool | None = None,
+        force: bool = False,
     ) -> str | None:
         """Stack multiple images into one clean image.
 
@@ -690,12 +874,18 @@ class ProcessingPipelines:
         generate_rejmap : `bool`, optional
             Whether to also generate a rejection map alongside the
             stack.
+        force : `bool`, optional
+            Rebuild the stack even if its frames, calibration frames and
+            settings are the same as when the stack on disk was made.
+            Without it, an unchanged stack is kept and its path returned
+            (see the setting ``skip_unchanged_stacks_enabled``).
 
         Returns
         -------
         stacked_path : `str` or `None`
             The path to the stacked output file, or `None` if
-            stacking did not produce an output.
+            stacking did not produce an output. For a stack kept as
+            unchanged, the path of the stack already on disk.
         """
         from astrometricslib.pipelines.stacking import stage as stacking_tasks
 
@@ -719,6 +909,7 @@ class ProcessingPipelines:
                 generate_rejmap=generate_rejmap,
                 output_file=output_file,
                 job_id=job.job_id,
+                force=force,
             )
             # Stacking can finish without raising and still produce no
             # image, so the outcome is decided here rather than left to
@@ -1165,6 +1356,84 @@ class ProcessingPipelines:
             raise ValueError(f"Target '{target.id}' has no {'spectral ' if spectral else ''}stack.")
         return str(path)
 
+    def stack_summary(self, target: Target, spectral: bool = False) -> dict[str, Any]:
+        """Summarize a target's current stack in one short answer.
+
+        Reads the numbers the stacking stage saved with the stack, so nothing
+        is measured again. The answer covers how many frames went in and how
+        many were set aside, the share of pixels rejected, the star width
+        against what the input frames predict, the flags, and what happened
+        to each exposure group (its frames, whether it clipped, how far it
+        was moved to line up, and why it was left out if it was).
+
+        Parameters
+        ----------
+        target : `Target`
+            The target to summarize.
+        spectral : `bool`, optional
+            Summarize the spectral stack rather than the imaging stack.
+
+        Returns
+        -------
+        summary : `dict` [`str`, `Any`]
+            The summary, or ``{"error": ...}`` when the target has no stack
+            or no saved summary for it.
+        """
+        stacking = target.spectral_stacking if spectral else target.stacking
+        quality = getattr(stacking, "quality_summary", None)
+        metrics = getattr(quality, "stacking_metrics", None)
+        if quality is None or metrics is None:
+            kind = "spectral stack" if spectral else "stack"
+            return {"error": f"Target '{target.id}' has no saved summary for its {kind}."}
+        groups = [
+            {
+                "exposure_seconds": group.exposure_seconds,
+                "frames_submitted": group.frames_submitted,
+                "frames_stacked": group.frames_stacked,
+                "saturated": group.saturated,
+                "clipped_at_zero": group.clipped_at_zero,
+                "alignment_shift_pixels": group.alignment_shift_pixels,
+                "left_out_reason": group.left_out_reason,
+            }
+            for group in metrics.exposure_groups
+        ]
+        excluded = metrics.excluded_frames
+        return {
+            "target_id": target.id,
+            "stack_path": getattr(stacking, "stacked_image", None),
+            "made_at": quality.created_at.isoformat(),
+            "frames_submitted": metrics.frames_submitted,
+            "frames_stacked": metrics.frames_stacked,
+            "frames_skipped": len(excluded),
+            "skipped_reasons": [
+                {"file": frame.path.rsplit("/", 1)[-1], "reason": frame.reason} for frame in excluded[:10]
+            ],
+            "frames_set_aside_before_stacking": quality.input_quality.frames_quarantined,
+            "sessions": [
+                {
+                    "session": session.session_id,
+                    "frames": session.frames_contributed,
+                    "clipped": session.frames_clipped,
+                }
+                for session in quality.target_session_breakdown
+            ],
+            "rejected_pixel_fraction": metrics.rejected_pixel_fraction,
+            "rejected_fraction_flagged": metrics.rejected_fraction_flagged,
+            "star_width_px": {
+                "stack": metrics.stacked_fwhm_px,
+                "expected_from_inputs": metrics.expected_stack_fwhm_px,
+                "median_of_inputs": metrics.median_input_fwhm_px,
+                "degraded": metrics.fwhm_degraded,
+            },
+            "saturated_pixel_fraction": metrics.saturated_pixel_fraction,
+            "zero_pixel_fraction": metrics.zero_pixel_fraction,
+            "exposure_groups": groups,
+            "flagged": quality.flagged,
+            "flag_reasons": quality.flag_reasons,
+            "calibration_mismatches": len(metrics.calibration_mismatch_flags),
+        }
+
+    @background_job("diagnostics", grace_period_seconds=20.0)
     def compare_with_previous_stack(self, target: Target, spectral: bool = False) -> StackComparison | None:
         """Compare a target's stack with the one the last restack replaced.
 

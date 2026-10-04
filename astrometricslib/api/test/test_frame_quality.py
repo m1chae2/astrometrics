@@ -144,6 +144,8 @@ def test_the_mcp_server_offers_the_tool() -> None:
         "since",
         "until",
         "include_spectra",
+        "trend_frames",
+        "trend_threshold_percent",
         "mode",
         "include_fwhm",
         "remeasure",

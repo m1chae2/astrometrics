@@ -88,6 +88,10 @@ TOOL_CLASSES = {
     "observe": "Reads state: lists, lookups, status, saved results.",
     "compute": "Calculates or plots from existing data. Writes nothing the app keeps.",
     "ingest": "Brings data from the telescope into the library. Adds files and records, never deletes.",
+    "process": (
+        "Runs the app's own processing stage on library frames, as its buttons do. Writes stacks and "
+        "records, sets bad frames aside, never deletes."
+    ),
     "change-data": "Writes the catalog, database, settings, frames or stacks.",
     "actuate": "Moves or changes hardware, or starts a session that does.",
     "safe-stop": "Stops motion or puts the equipment in a safe state. Always allowed.",
@@ -332,6 +336,18 @@ CLASSIFICATION_RULES = (
         "high",
         "Calculates from stored records and the sky. Saves nothing.",
     ),
+    _rule(
+        r"^observatory_frame_status$",
+        "observe",
+        "high",
+        "Lists the frame files on the telescope computer, the drive and the library. Changes nothing.",
+    ),
+    _rule(
+        r"^target_stack$",
+        "process",
+        "high",
+        "Stacks a target's chosen frames with the app's own stage, like the Stack button.",
+    ),
     _rule(r"^app_status$", "observe", "high", "Reads the app's health, connections, resources and jobs."),
     _rule(
         r"^app_controls$",
@@ -340,6 +356,24 @@ CLASSIFICATION_RULES = (
         "Switches the view or shows a notification. Pause and resume are not offered.",
     ),
     _rule(r"^star_query$", "observe", "high", "Reads library stars. Row counts are capped."),
+    _rule(
+        r"^(target_query|target_imaged_field_centers|planning_find_sources|planning_lookup_coordinates)$",
+        "observe",
+        "high",
+        "Reads targets or stars in short, capped records.",
+    ),
+    _rule(
+        r"^diagnostics_spectral_frame_check$",
+        "compute",
+        "high",
+        "Measures raw spectrum frames and returns statistics. Saves nothing.",
+    ),
+    _rule(
+        r"^processing_stack_summary$",
+        "observe",
+        "high",
+        "Reads the summary saved with a target's stack. Measures and saves nothing.",
+    ),
     _rule(
         r"^visualization_render_fits$",
         "observe",

@@ -817,8 +817,57 @@ async def tool_ui_editor_sync(code: str | None = None) -> dict[str, Any]:
 # What the person sees in the app: status and the two allowed controls
 # ---------------------------------------------------------------------------
 
-APP_STATUS_SECTIONS = ("health", "connections", "system", "active_jobs", "view")
+APP_STATUS_SECTIONS = (
+    "health",
+    "connections",
+    "system",
+    "active_jobs",
+    "view",
+    "telescope",
+    "guiding",
+    "indi_devices",
+    "indi_properties",
+)
 """The parts of the app's state `tool_app_status` can report."""
+
+DEFAULT_STATUS_SECTIONS = tuple(name for name in APP_STATUS_SECTIONS if name != "indi_properties")
+"""What `tool_app_status` reports when no section is asked for.
+``indi_properties`` is left out because it needs a device name."""
+
+MOUNT_DEVICE_KEYWORDS = (
+    "mount",
+    "telescope",
+    "gti",
+    "adventurer",
+    "eq",
+    "lx200",
+    "celestron",
+    "ioptron",
+    "skywatcher",
+)
+"""Words that mark an INDI device as the mount, in lower case."""
+
+MOUNT_PROPERTIES = (
+    "TELESCOPE_PIER_SIDE",
+    "TELESCOPE_TRACK_STATE",
+    "TELESCOPE_TRACK_MODE",
+    "TELESCOPE_PARK",
+    "EQUATORIAL_EOD_COORD",
+    "HORIZONTAL_COORD",
+    "TELESCOPE_SLEW_RATE",
+    "HEMISPHERE",
+)
+"""The few mount properties worth reporting with the telescope status."""
+
+GUIDING_SAMPLES_REPORTED = 20
+"""How many of the newest guide samples the guiding section lists."""
+
+GUIDING_SAMPLE_KEYS = ("time", "dra", "ddec", "pulse_ra", "pulse_dec", "snr", "rms_ra", "rms_dec")
+"""The fields of a guide sample worth reporting. The backend repeats each in
+camelCase for the web page, which a client does not need."""
+
+MAXIMUM_INDI_PROPERTIES = 80
+"""Most INDI properties one device answer lists."""
 
 APP_CONTROL_ACTIONS = ("navigate", "notify")
 """What an AI may do in the app. Pausing and resuming pipelines freeze or
@@ -828,8 +877,9 @@ thaw Siril and the plate solver, so they are not offered."""
 @registry.register(
     "app_status",
     (
-        "Report the app's state: backend health, device connections, system resources, and the jobs "
-        "that are running. Reads only."
+        "Report the app's live state: backend health, the telescope (position, tracking or parked, pier "
+        "side, ambient and camera temperature, focuser, filter), guiding, INDI devices and their "
+        "properties, system resources, and the jobs that are running. Reads only."
     ),
     {
         "type": "object",
@@ -837,18 +887,39 @@ thaw Siril and the plate solver, so they are not offered."""
             "include": {
                 "type": "array",
                 "items": {"type": "string", "enum": list(APP_STATUS_SECTIONS)},
-                "description": "Which parts to report. Defaults to all of them.",
+                "description": (
+                    "Which parts to report. Defaults to all of them except indi_properties, which "
+                    "needs a device."
+                ),
+            },
+            "device": {
+                "type": "string",
+                "description": "For indi_properties: the INDI device name, from indi_devices.",
+            },
+            "property_names": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "For indi_properties: only these property names, such as TELESCOPE_PIER_SIDE.",
             },
         },
     },
 )
-async def tool_app_status(include: list[str] | None = None) -> dict[str, Any]:
-    """Report the running app's health, connections, resources and jobs.
+async def tool_app_status(
+    include: list[str] | None = None,
+    device: str | None = None,
+    property_names: list[str] | None = None,
+) -> dict[str, Any]:
+    """Report the running app's live state, resources and jobs.
 
     Parameters
     ----------
     include : `list` [`str`], optional
-        Sections to report, from `APP_STATUS_SECTIONS`. All when omitted.
+        Sections to report, from `APP_STATUS_SECTIONS`. All but
+        ``indi_properties`` when omitted.
+    device : `str`, optional
+        The INDI device for ``indi_properties``.
+    property_names : `list` [`str`], optional
+        Only these INDI properties.
 
     Returns
     -------
@@ -856,7 +927,7 @@ async def tool_app_status(include: list[str] | None = None) -> dict[str, Any]:
         One key per section asked for, ``unavailable`` for what the app
         cannot say, or ``{"error": ...}`` for an unknown section.
     """
-    sections = list(include) if include else list(APP_STATUS_SECTIONS)
+    sections = list(include) if include else list(DEFAULT_STATUS_SECTIONS)
     unknown = [name for name in sections if name not in APP_STATUS_SECTIONS]
     if unknown:
         return {"error": f"Unknown section(s) {unknown}. Choose from {list(APP_STATUS_SECTIONS)}."}
@@ -867,8 +938,8 @@ async def tool_app_status(include: list[str] | None = None) -> dict[str, Any]:
         answer["health"] = await tool_backend_health_check()
     if "connections" in sections or "system" in sections:
         health = await execute_rpc("system:health", {})
-        data = (health.get("data") or {}).get("data") if health.get("status") == "success" else None
-        if data is None:
+        data = _unwrap(health)
+        if not isinstance(data, dict) or "indi" not in data:
             note = health.get("message", "the backend did not answer")
             for section in ("connections", "system"):
                 if section in sections:
@@ -880,6 +951,14 @@ async def tool_app_status(include: list[str] | None = None) -> dict[str, Any]:
                 answer["system"] = data.get("resources")
     if "active_jobs" in sections:
         answer["active_jobs"] = await _active_jobs()
+    if "telescope" in sections:
+        answer["telescope"] = await _telescope_status()
+    if "guiding" in sections:
+        answer["guiding"] = await _guiding_status()
+    if "indi_devices" in sections:
+        answer["indi_devices"] = await _indi_devices()
+    if "indi_properties" in sections:
+        answer["indi_properties"] = await _indi_properties(device, property_names)
     if "view" in sections:
         unavailable.append(
             "view: the backend does not keep track of which view the window shows, so the current view "
@@ -888,6 +967,187 @@ async def tool_app_status(include: list[str] | None = None) -> dict[str, Any]:
     if unavailable:
         answer["unavailable"] = unavailable
     return answer
+
+
+def _unwrap(response: Any) -> Any:
+    """Strip the success and data layers around a backend answer.
+
+    A backend call comes back wrapped by the HTTP proxy, by the RPC router
+    and sometimes by the service itself, so the real answer can be two or
+    three levels down.
+
+    Parameters
+    ----------
+    response : `Any`
+        What `execute_rpc` returned.
+
+    Returns
+    -------
+    payload : `Any`
+        The innermost value, or the response itself if it was an error.
+    """
+    value = response
+    while isinstance(value, dict) and value.get("status") == "success" and "data" in value:
+        value = value["data"]
+    if isinstance(value, dict) and value.get("status") == "error":
+        return {"error": value.get("message", "the backend reported an error")}
+    return value
+
+
+async def _telescope_status() -> dict[str, Any]:
+    """Report the live telescope state the app shows in its header.
+
+    The pointing, tracking, temperatures, focuser and filter come from the
+    backend, which holds the hardware connection. Pier side is not in that
+    status, so it is read from the mount's INDI properties.
+
+    Returns
+    -------
+    telescope : `dict` [`str`, `Any`]
+        The status without its guiding history, plus ``mount_indi`` with
+        the pier side and tracking switches when the mount device is found.
+    """
+    status = _unwrap(await execute_rpc("telescope:status", {}))
+    if not isinstance(status, dict) or "error" in status:
+        return status if isinstance(status, dict) else {"error": "the backend did not answer"}
+    answer = {
+        key: value for key, value in status.items() if key not in ("guidingHistory", "alignmentAttempts")
+    }
+    devices = _unwrap(await execute_rpc("telescope:indi_devices", {}))
+    mount = next(
+        (name for name in (devices if isinstance(devices, list) else []) if _looks_like_a_mount(name)), None
+    )
+    if mount is not None:
+        properties = await _indi_properties(mount, list(MOUNT_PROPERTIES))
+        if isinstance(properties, dict) and "properties" in properties:
+            answer["mount_indi"] = {"device": mount, **_describe_switches(properties["properties"])}
+    return answer
+
+
+def _looks_like_a_mount(device_name: str) -> bool:
+    """Say whether an INDI device name looks like a telescope mount.
+
+    Returns
+    -------
+    is_mount : `bool`
+        `True` if the name contains a mount keyword.
+    """
+    lowered = device_name.lower()
+    return any(keyword in lowered for keyword in MOUNT_DEVICE_KEYWORDS)
+
+
+def _describe_switches(properties: dict[str, Any]) -> dict[str, Any]:
+    """Boil mount properties down to the values a person reads.
+
+    Parameters
+    ----------
+    properties : `dict` [`str`, `Any`]
+        Property name to its INDI record.
+
+    Returns
+    -------
+    summary : `dict` [`str`, `Any`]
+        ``pier_side``, ``tracking``, ``parked`` and ``track_mode`` where
+        the mount reports them, and the raw elements of the rest.
+    """
+
+    def on(name: str) -> list[str]:
+        """List the switch elements that are on in one property.
+
+        Returns
+        -------
+        names : `list` [`str`]
+            The element names set to ``On``.
+        """
+        record = properties.get(name) or {}
+        return [element for element, value in (record.get("elements") or {}).items() if value == "On"]
+
+    summary: dict[str, Any] = {}
+    if "TELESCOPE_PIER_SIDE" in properties:
+        side = on("TELESCOPE_PIER_SIDE")
+        summary["pier_side"] = side[0].removeprefix("PIER_") if side else None
+    if "TELESCOPE_TRACK_STATE" in properties:
+        summary["tracking"] = "TRACK_ON" in on("TELESCOPE_TRACK_STATE")
+    if "TELESCOPE_PARK" in properties:
+        summary["parked"] = "PARK" in on("TELESCOPE_PARK")
+    if "TELESCOPE_TRACK_MODE" in properties:
+        mode = on("TELESCOPE_TRACK_MODE")
+        summary["track_mode"] = mode[0].removeprefix("TRACK_") if mode else None
+    for name in ("EQUATORIAL_EOD_COORD", "HORIZONTAL_COORD"):
+        if name in properties:
+            summary[name.lower()] = (properties[name] or {}).get("elements")
+    return summary
+
+
+async def _guiding_status() -> dict[str, Any]:
+    """Report the live guiding state and its newest samples.
+
+    Returns
+    -------
+    guiding : `dict` [`str`, `Any`]
+        ``is_guiding``, the running ``stats`` (RMS in arcseconds), and the
+        newest `GUIDING_SAMPLES_REPORTED` samples.
+    """
+    status = _unwrap(await execute_rpc("guiding:status", {}))
+    if not isinstance(status, dict) or "error" in status:
+        return status if isinstance(status, dict) else {"error": "the backend did not answer"}
+    history = status.get("history") or []
+    return {
+        **{key: value for key, value in status.items() if key != "history"},
+        "samples_total": len(history),
+        "recent_samples": [
+            {key: sample.get(key) for key in GUIDING_SAMPLE_KEYS if key in sample}
+            for sample in history[-GUIDING_SAMPLES_REPORTED:]
+        ],
+    }
+
+
+async def _indi_devices() -> Any:
+    """List the INDI devices the app can see.
+
+    Returns
+    -------
+    devices : `list` [`str`] or `dict`
+        The device names, or an error.
+    """
+    return _unwrap(await execute_rpc("telescope:indi_devices", {}))
+
+
+async def _indi_properties(device: str | None, property_names: list[str] | None) -> dict[str, Any]:
+    """Read the properties of one INDI device. Nothing is changed.
+
+    Parameters
+    ----------
+    device : `str`, optional
+        The device name.
+    property_names : `list` [`str`], optional
+        Only these properties.
+
+    Returns
+    -------
+    answer : `dict` [`str`, `Any`]
+        ``device``, ``properties`` (each with its label, state, type and
+        elements) and how many exist, or ``{"error": ...}``.
+    """
+    if not device:
+        return {"error": "Give a device name; list them with the indi_devices section."}
+    properties = _unwrap(await execute_rpc("telescope:indi_properties", {"device_name": device}))
+    if not isinstance(properties, dict) or "error" in properties:
+        return properties if isinstance(properties, dict) else {"error": "the backend did not answer"}
+    total = len(properties)
+    if property_names:
+        wanted = set(property_names)
+        properties = {name: record for name, record in properties.items() if name in wanted}
+    shown = dict(list(properties.items())[:MAXIMUM_INDI_PROPERTIES])
+    return {
+        "device": device,
+        "properties_total": total,
+        "properties_shown": len(shown),
+        "properties": {
+            name: {key: record.get(key) for key in ("label", "state", "type", "perm", "elements")}
+            for name, record in shown.items()
+        },
+    }
 
 
 async def _active_jobs() -> dict[str, Any]:

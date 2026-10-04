@@ -107,6 +107,13 @@
       "merge_into": "diagnostics_stack_quality",
       "interim_block": ""
     },
+    "diagnostics_spectral_frame_check": {
+      "tool_class": "compute",
+      "category": "image-processing",
+      "disposition": "keep",
+      "merge_into": "",
+      "interim_block": ""
+    },
     "jobs_query": {
       "tool_class": "observe",
       "category": "jobs-history",
@@ -215,8 +222,8 @@
     "processing_run_stacking": {
       "tool_class": "change-data",
       "category": "image-processing",
-      "disposition": "merge",
-      "merge_into": "pipeline_run",
+      "disposition": "withhold",
+      "merge_into": "",
       "interim_block": ""
     },
     "processing_scan_target_directory": {
@@ -224,6 +231,13 @@
       "category": "targets",
       "disposition": "merge",
       "merge_into": "target_index_frames",
+      "interim_block": ""
+    },
+    "processing_stack_summary": {
+      "tool_class": "observe",
+      "category": "image-processing",
+      "disposition": "keep",
+      "merge_into": "",
       "interim_block": ""
     },
     "processing_swap_with_previous_stack": {
@@ -373,6 +387,13 @@
       "merge_into": "",
       "interim_block": ""
     },
+    "star_spectral_class_counts": {
+      "tool_class": "unclassified",
+      "category": "stars",
+      "disposition": "undecided",
+      "merge_into": "",
+      "interim_block": ""
+    },
     "star_tune_spectroscopy_calibration": {
       "tool_class": "change-data",
       "category": "stars",
@@ -404,7 +425,7 @@
     "target_camera_index": {
       "tool_class": "observe",
       "category": "targets",
-      "disposition": "merge",
+      "disposition": "merged",
       "merge_into": "target_query",
       "interim_block": ""
     },
@@ -418,7 +439,7 @@
     "target_get": {
       "tool_class": "observe",
       "category": "targets",
-      "disposition": "merge",
+      "disposition": "merged",
       "merge_into": "target_query",
       "interim_block": ""
     },
@@ -443,17 +464,24 @@
       "merge_into": "",
       "interim_block": ""
     },
+    "target_imaged_field_centers": {
+      "tool_class": "observe",
+      "category": "targets",
+      "disposition": "keep",
+      "merge_into": "",
+      "interim_block": ""
+    },
     "target_list": {
       "tool_class": "observe",
       "category": "targets",
-      "disposition": "merge",
+      "disposition": "merged",
       "merge_into": "target_query",
       "interim_block": ""
     },
     "target_list_camera_names": {
       "tool_class": "observe",
       "category": "targets",
-      "disposition": "merge",
+      "disposition": "merged",
       "merge_into": "target_query",
       "interim_block": ""
     },
@@ -471,6 +499,20 @@
       "merge_into": "pipeline_run_batch",
       "interim_block": ""
     },
+    "target_query": {
+      "tool_class": "observe",
+      "category": "targets",
+      "disposition": "keep",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "target_read_saved": {
+      "tool_class": "unclassified",
+      "category": "targets",
+      "disposition": "keep",
+      "merge_into": "",
+      "interim_block": ""
+    },
     "target_reindex_frames": {
       "tool_class": "change-data",
       "category": "targets",
@@ -482,6 +524,13 @@
       "tool_class": "change-data",
       "category": "targets",
       "disposition": "withhold",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "target_stack": {
+      "tool_class": "process",
+      "category": "targets",
+      "disposition": "keep",
       "merge_into": "",
       "interim_block": ""
     },

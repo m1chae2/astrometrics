@@ -10,6 +10,7 @@ main control panel, giving you access to all the sub-tools like targets,
 stars, and image processing.
 """
 
+import os
 from collections.abc import Callable
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _distribution_version
@@ -33,6 +34,7 @@ from astrometricslib.api.processing import (
     capture_job_logs,
     registered_job,
     run_siril_stack,
+    stack_frames,
 )
 from astrometricslib.api.targets import (
     classify_and_sort_fits_files,
@@ -41,7 +43,7 @@ from astrometricslib.api.targets import (
 )
 from astrometricslib.drivers.calibration_library import DEFAULT_DARK_TEMPERATURE_TOLERANCE_C
 from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
-from astrometricslib.drivers.job_logging import background_job
+from astrometricslib.drivers.job_logging import background_job, get_current_job
 from astrometricslib.drivers.provenance_store import ProvenanceStore, export_target_lineage_as_prov_xml
 from astrometricslib.models.moving_object import AsteroidDetectionCandidate
 from astrometricslib.models.moving_object_config import MovingObjectConfig
@@ -221,6 +223,113 @@ class Astrometrics:
         self.visualization = Visualization(self)
         self.jobs = Jobs(self.config)
 
+    @background_job("stacking", grace_period_seconds=8.0)
+    def stack(
+        self,
+        target: Target,
+        frame_type: str = "imaging",
+        filter_name: str | None = None,
+        first_file: str | None = None,
+        last_file: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        force: bool = False,
+        plan_only: bool = False,
+    ) -> dict[str, Any]:
+        """Stack a target's light frames, choosing which frames go in.
+
+        This runs the same stacking stage as the Stack button in the app:
+        it sets aside bad frames, stacks, trims the noisy edges, records the
+        quality summary and the preview, and saves the target. Imaging and
+        spectroscopy frames are never mixed, so ``frame_type`` picks one.
+        Through the MCP server a slow stack returns a job id; follow it with
+        ``jobs_query``. An unchanged stack is kept unless ``force`` is set.
+
+        Parameters
+        ----------
+        target : `Target`
+            The target to stack.
+        frame_type : `str`, optional
+            ``"imaging"`` (default) or ``"spectral"``.
+        filter_name : `str`, optional
+            Only frames of this filter, such as ``"L"`` or ``"Luminance"``.
+        first_file : `str`, optional
+            Only frames from this file onward. A bare number such as
+            ``"013"`` means frame 013.
+        last_file : `str`, optional
+            Only frames up to this file or number.
+        since : `str`, optional
+            Only frames taken at or after this ISO 8601 time (UTC if no
+            offset).
+        until : `str`, optional
+            Only frames taken at or before this ISO 8601 time.
+        force : `bool`, optional
+            Rebuild even if nothing changed since the stack on disk.
+        plan_only : `bool`, optional
+            Only report which frames would be stacked. Nothing is stacked
+            or saved.
+
+        Returns
+        -------
+        result : `dict` [`str`, `Any`]
+            ``frames_selected``, the first and last file, and, unless
+            ``plan_only``, the ``stacked_path`` and the stack's summary. A
+            problem comes back under ``error``.
+        """
+        from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
+        from astrometricslib.pipelines.shared.quality.frame_selection import (
+            FrameSelection,
+            parse_iso_time,
+            select_library_frames,
+        )
+
+        if frame_type not in ("imaging", "spectral"):
+            return {"error": "frame_type must be 'imaging' or 'spectral'."}
+        spectral = frame_type == "spectral"
+        try:
+            selection = FrameSelection(
+                filter_name=filter_name,
+                first_file=first_file,
+                last_file=last_file,
+                since=parse_iso_time(since),
+                until=parse_iso_time(until),
+                include_spectra=spectral,
+            )
+        except ValueError as error:
+            return {"error": f"since and until must be ISO 8601 times: {error}"}
+        lights = [
+            frame
+            for frame in target.frames
+            if str(frame.role).upper() == "LIGHT"
+            and not any(word in frame.path.lower() for word in ("_stacked", "starless", "starmask"))
+            and frame_is_spectral(frame) == spectral
+        ]
+        chosen = select_library_frames(lights, selection)
+        if not chosen:
+            return {"error": f"No {frame_type} light frames of {target.id!r} match that selection."}
+        result: dict[str, Any] = {
+            "target_id": target.id,
+            "frame_type": frame_type,
+            "frames_selected": len(chosen),
+            "first_file": os.path.basename(chosen[0].path),
+            "last_file": os.path.basename(chosen[-1].path),
+        }
+        if plan_only:
+            return {**result, "plan_only": True, "note": "Nothing was stacked or saved."}
+        with self.processing.acquire_stacking_slot():
+            stacked_path = self.processing.run_stacking(target, frames_to_stack=chosen, force=force)
+        if stacked_path:
+            self.targets.save()
+        stacking = target.spectral_stacking if spectral else target.stacking
+        quality = getattr(stacking, "quality_summary", None)
+        return {
+            **result,
+            "stacked_path": stacked_path,
+            "flagged": getattr(quality, "flagged", None),
+            "flag_reasons": getattr(quality, "flag_reasons", []),
+            "note": "For the numbers behind this stack, call processing_stack_summary.",
+        }
+
     @background_job("batch_processing", grace_period_seconds=8.0)
     def process_all_targets(
         self,
@@ -357,4 +466,5 @@ __all__ = [
     "run_parallel_batch",
     "run_siril_stack",
     "select_library_frames",
+    "stack_frames",
 ]

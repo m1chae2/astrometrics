@@ -146,3 +146,34 @@ def test_bad_requests_are_errors(catalog: StellarCatalog) -> None:
     assert "not both" in catalog.query(ra=1.0, dec=0.0, radius_deg=1.0, tolerance_arcsec=2.0)["error"]
     assert "detail must be" in catalog.query(detail="everything")["error"]
     assert "needs ids" in catalog.query(detail="exists")["error"]
+
+
+def test_spectral_class_filter_and_counts(catalog: StellarCatalog) -> None:
+    """The fake stars are all class G, so G keeps them all and K keeps none."""
+    assert catalog.query(spectral_class="G2V", detail="ids", limit=100)["total_matching"] == 30
+    assert catalog.query(spectral_class="K", detail="ids")["total_matching"] == 0
+    assert "spectral_class must" in catalog.query(spectral_class="Z")["error"]
+    counts = catalog.query(detail="class_counts")["classes"]
+    assert counts == [{"spectralClass": "G", "label": "Yellow dwarfs", "count": 30}]
+
+
+def test_analysis_detail_returns_short_records_not_raw_arrays() -> None:
+    """A star's analysis record holds no wavelength list."""
+    from astrometricslib.api.star_analysis import summarize_star
+    from astrometricslib.models.stellar_source import SpectroscopyResult
+
+    star = StellarObject(
+        id="S1",
+        spectral_type="A0V",
+        spectroscopy=SpectroscopyResult(
+            wavelengths_angstrom=[4000.0, 5000.0, 6000.0],
+            intensities=[1.0, 2.0, 3.0],
+            self_determined_spectral_type="A3V",
+            self_determined_spectral_type_rms=0.06,
+        ),
+    )
+    summary = summarize_star(star)
+    assert summary["spectrum"]["points"] == 3
+    assert summary["spectrum"]["own_type_percent_off"] == pytest.approx(6.0)
+    assert summary["spectrum"]["no_good_match"] is False
+    assert "wavelengths_angstrom" not in str(summary)

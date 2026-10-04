@@ -39,8 +39,8 @@ DEFAULT_PROFILE = "investigator"
 """The profile used when the variable is unset or not recognized."""
 
 PROFILE_CLASSES = {
-    "investigator": frozenset({"observe", "compute", "ingest", "ui-control"}),
-    "developer": frozenset({"observe", "compute", "ingest", "ui-control", "develop"}),
+    "investigator": frozenset({"observe", "compute", "ingest", "process", "ui-control"}),
+    "developer": frozenset({"observe", "compute", "ingest", "process", "ui-control", "develop"}),
 }
 """Profile name -> the tool classes it may use."""
 
@@ -50,8 +50,9 @@ until the tool that replaces it exists."""
 
 
 GAP_REPORT_GUIDANCE = (
-    "These tools look things up and calculate. The only write is bringing frames from the telescope into "
-    "the library. If none of the tools you can use can do what you need, stop. Do not look "
+    "These tools look things up and calculate. The only writes are bringing frames from the telescope into "
+    "the library and stacking a target's frames the way the app does. If none of the tools you can use "
+    "can do what you need, stop. Do not look "
     "for a workaround: do not chain tools to imitate a missing one, and do not ask for code to be run. "
     "Call report_capability_gap on the astrometrics-gaps server. Say what you tried, why it fell short, "
     "and what tool would help. Then tell the person you cannot do it with the current tools."

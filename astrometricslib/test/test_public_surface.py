@@ -120,6 +120,7 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "resolve_worker_counts",
     "run_parallel_batch",
     "run_siril_stack",
+    "stack_frames",
 })
 
 

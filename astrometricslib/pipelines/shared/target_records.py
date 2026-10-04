@@ -6,6 +6,7 @@ delete targets (like galaxies or stars) in the catalog. It goes through
 the program does, so nothing here opens a database connection itself.
 """
 
+import hashlib
 import os
 from typing import Any
 
@@ -30,6 +31,85 @@ def _mark_touched(api, target_id: str) -> None:  # ruff: ignore[missing-type-fun
         touched_ids = set()
         api._touched_target_ids = touched_ids
     touched_ids.add(target_id)
+
+
+def _fingerprint(target: Target) -> str:
+    """Summarize everything a target holds as a short fixed-size code.
+
+    Two targets with the same contents give the same code, and any edit to
+    the target, its frames or its stacks changes it.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target to summarize.
+
+    Returns
+    -------
+    fingerprint : `str`
+        A short code for the target's current contents.
+    """
+    return hashlib.blake2b(target.model_dump_json().encode("utf-8"), digest_size=16).hexdigest()
+
+
+def _saved_fingerprints(api) -> dict[str, str]:  # ruff: ignore[missing-type-function-argument]
+    """Get the codes of the target contents as last read or saved.
+
+    Parameters
+    ----------
+    api : `Any`
+        The system that keeps track of loaded targets.
+
+    Returns
+    -------
+    fingerprints : `dict` [`str`, `str`]
+        The code of each target's contents when this process last read it
+        from storage or wrote it there, by target id. The dict is created on
+        first use.
+    """
+    fingerprints = getattr(api, "_saved_fingerprints", None)
+    if fingerprints is None:
+        fingerprints = {}
+        api._saved_fingerprints = fingerprints
+    return fingerprints
+
+
+def remember_stored_state(api, targets: list[Any]) -> None:  # ruff: ignore[missing-type-function-argument]
+    """Record that these targets match what is in storage right now.
+
+    Later, `save_targets` writes only the targets whose contents have changed
+    since this point, and `list_targets` refreshes only the ones that have
+    not.
+
+    Parameters
+    ----------
+    api : `Any`
+        The system that keeps track of loaded targets.
+    targets : `list`
+        Targets just read from, or written to, storage.
+    """
+    fingerprints = _saved_fingerprints(api)
+    for target in targets:
+        fingerprints[target.id] = _fingerprint(target)
+
+
+def _has_unsaved_changes(api, target: Target) -> bool:  # ruff: ignore[missing-type-function-argument]
+    """Tell whether a target differs from what this process last stored.
+
+    Parameters
+    ----------
+    api : `Any`
+        The system that keeps track of loaded targets.
+    target : `Target`
+        The in-memory target to check.
+
+    Returns
+    -------
+    changed : `bool`
+        `True` if the target was edited since it was read or saved, or if
+        this process has no record of its stored state.
+    """
+    return _fingerprint(target) != _saved_fingerprints(api).get(target.id)
 
 
 def _find_target(targets: list[Any], target_id: str) -> Any | None:
@@ -82,10 +162,17 @@ def _find_target(targets: list[Any], target_id: str) -> Any | None:
 
 
 def list_targets(api) -> list[Any]:  # ruff: ignore[missing-type-function-argument]
-    """Load and return all the targets from the database.
+    """Return all the targets, seeing what other programs have saved.
 
-    This always reads fresh from the hard drive, so if another program
-    added a target, it will be seen.
+    It reads the stored targets fresh, so a target another program added or
+    changed shows up. A target this process already holds keeps its object:
+    code that fetched it earlier (a stack that takes minutes to run) is still
+    editing the object the catalog holds, so its edits are not lost. If the
+    held target has no unsaved edits, the object is refreshed in place with
+    what is stored. If it has, the held object is kept as it is.
+
+    Every listed target counts as touched, so scripts that edit the targets
+    they list can save them. A save writes only those that changed.
 
     Parameters
     ----------
@@ -97,10 +184,27 @@ def list_targets(api) -> list[Any]:  # ruff: ignore[missing-type-function-argume
     targets : `list`
         A list of all targets in the database.
     """
-    api._targets = api.catalog_access.get("target_catalog", {}) or []
-    for target in api._targets:
+    stored_targets = api.catalog_access.get("target_catalog", {}) or []
+    held = {target.id: target for target in api._targets}
+    fingerprints = _saved_fingerprints(api)
+    merged = []
+    for stored in stored_targets:
+        current = held.get(stored.id)
+        if current is None:
+            merged.append(stored)
+            fingerprints[stored.id] = _fingerprint(stored)
+            continue
+        if not _has_unsaved_changes(api, current):
+            # Same object, new contents: assigning fields one by one would
+            # check each value again, so the stored values are moved over.
+            current.__dict__.update(stored.__dict__)
+            current.__pydantic_fields_set__ = set(stored.__pydantic_fields_set__)
+            fingerprints[current.id] = _fingerprint(current)
+        merged.append(current)
+    api._targets = merged
+    for target in merged:
         _mark_touched(api, target.id)
-    return api._targets
+    return merged
 
 
 def get_target(api, target_id: str) -> Any | None:  # ruff: ignore[missing-type-function-argument]
@@ -129,6 +233,7 @@ def get_target(api, target_id: str) -> Any | None:  # ruff: ignore[missing-type-
         for fresh_target in api.catalog_access.get("target_catalog", {}) or []:
             if fresh_target.id not in known_ids:
                 api._targets.append(fresh_target)
+                remember_stored_state(api, [fresh_target])
         target = _find_target(api._targets, target_id)
 
     if target is not None:
@@ -262,6 +367,8 @@ def delete_target(api, target_id: str) -> bool:  # ruff: ignore[missing-type-fun
         api.catalog_access.put(filtered_targets, "target_catalog", {})
         api._targets = api.catalog_access.get("target_catalog", {}) or []
         getattr(api, "_touched_target_ids", set()).discard(target.id)
+        _saved_fingerprints(api).pop(target.id, None)
+        remember_stored_state(api, api._targets)
         return True
     return False
 
@@ -294,9 +401,10 @@ def refresh_target(api, target_id: str, prune_missing: bool = False) -> None:  #
 def save_targets(api) -> None:  # ruff: ignore[missing-type-function-argument]
     """Save changes back to the database.
 
-    This is smart and only saves the specific targets actually changed
-    or looked at. This prevents accidentally deleting changes that
-    other parts of the program might be making at the same time.
+    This writes only the targets that were touched and that really changed
+    since this process read or last saved them. A target that was only
+    looked at is left alone, so a stale copy of it cannot overwrite what
+    another program saved in the meantime.
 
     Parameters
     ----------
@@ -309,15 +417,41 @@ def save_targets(api) -> None:  # ruff: ignore[missing-type-function-argument]
 
     if not hasattr(api.catalog_access, "merge_and_record"):
         api.catalog_access.put(api._targets, "target_catalog", {})
+        remember_stored_state(api, api._targets)
         return
 
-    touched_targets = [target for target in api._targets if target.id in touched_ids]
-    if not touched_targets:
+    changed_targets = [
+        target for target in api._targets if target.id in touched_ids and _has_unsaved_changes(api, target)
+    ]
+    if not changed_targets:
         return
 
     api.catalog_access.merge_and_record(
-        "target_catalog", touched_targets, lambda existing_target, updated_target: updated_target
+        "target_catalog", changed_targets, lambda existing_target, updated_target: updated_target
     )
+    remember_stored_state(api, changed_targets)
+
+
+def read_saved_target(api, target_id: str) -> Any | None:  # ruff: ignore[missing-type-function-argument]
+    """Read one target's saved record straight from storage.
+
+    The in-memory catalog is not used, so the answer is what another program
+    would see.
+
+    Parameters
+    ----------
+    api : `Any`
+        The system that manages the targets.
+    target_id : `str`
+        The exact id of the target.
+
+    Returns
+    -------
+    target : `Any` or `None`
+        The stored target, or `None` if nothing is stored under that id.
+    """
+    stored = api.catalog_access.get_by_ids("target_catalog", [target_id])
+    return stored[0] if stored else None
 
 
 def add_data(api, target_id: str, image_file: Any, camera: str | None = None) -> dict[str, Any]:  # ruff: ignore[missing-type-function-argument]

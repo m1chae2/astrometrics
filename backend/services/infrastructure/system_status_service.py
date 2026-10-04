@@ -94,6 +94,9 @@ class SystemStatusService:
                 guidingHistory=tele.get("guidingHistory", tele.get("guiding_history", [])),
                 alignmentAttempts=tele.get("alignmentAttempts", tele.get("alignment_attempts", [])),
                 alignmentActive=tele.get("alignmentActive", tele.get("alignment_active", False)),
+                cameraTemperature=tele.get("cameraTemperature", tele.get("camera_temperature")),
+                cameraStatus=tele.get("cameraStatus", tele.get("camera_status")),
+                targetName=tele.get("targetName", tele.get("target_name")),
             )
 
             proc_jobs = []

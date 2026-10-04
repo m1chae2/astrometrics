@@ -322,6 +322,19 @@ class TargetService:
             logger.error(f"Failed to save target {target.id}: {e}")
             raise e
 
+    def read_saved_target(self, target_id: str) -> Target | None:
+        """Read one target's saved record straight from storage.
+
+        Memory is not used, so this shows what another program would see
+        after a save.
+
+        Returns
+        -------
+        target : `Target` or `None`
+            The stored target, or `None` if nothing is stored under that id.
+        """
+        return self.astrometrics.targets.read_saved(target_id)
+
     def save_targets(self) -> None:
         """Commit all active targets catalog arrays.
 

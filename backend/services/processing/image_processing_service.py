@@ -1,4 +1,4 @@
-"""Background image stacking/processing service backed by Siril."""
+"""Background image stacking service: runs the full stacking stage as jobs."""
 
 import logging
 import os
@@ -214,6 +214,44 @@ class ImageProcessingService(BaseBackgroundService):
         }
 
 
+def _log_what_the_saved_record_names(
+    target_service: Any, target_id: str, final_path: str, logger: logging.Logger
+) -> None:
+    """Read the target back and log whether it names the new stack.
+
+    A save can report success and still leave the stored record unchanged,
+    for example if another program wrote the target in between. Reading the
+    record back shows that in the job log instead of leaving the viewer to
+    show an older stack with no explanation.
+
+    Parameters
+    ----------
+    target_service : `Any`
+        The service that saved the target.
+    target_id : `str`
+        The target that was stacked.
+    final_path : `str`
+        The stack the job made.
+    logger : `logging.Logger`
+        The job's logger.
+    """
+    saved = target_service.read_saved_target(target_id)
+    if saved is None:
+        logger.error(f"The saved record for {target_id} could not be read back after the save.")
+        return
+    recorded_stacks = {saved.stacking.stacked_image, saved.spectral_stacking.stacked_image}
+    recorded_stacks.update(result.stacked_image for result in saved.stacking.stacks_by_configuration.values())
+    if final_path not in recorded_stacks:
+        logger.error(
+            f"The stack was made at {final_path}, but the saved record for {target_id} does not "
+            f"name it (it names {saved.stacking.stacked_image or 'no stack'}). The viewer will "
+            "not show this stack until the record is repaired."
+        )
+        return
+    picture = saved.stacking.processed_image or saved.spectral_stacking.processed_image
+    logger.info(f"The saved record for {target_id} names the stack. Processed image: {picture or 'none'}.")
+
+
 def start_siril_processing_task(
     job_id: str,
     target_id: str,
@@ -224,97 +262,90 @@ def start_siril_processing_task(
     notification_service: Any = None,
     **kwargs: Any,
 ) -> str | None:
-    """Worker task to execute Siril processing.
+    """Worker task that stacks a target's frames with the full stacking stage.
+
+    This is the same stage the batch script runs, so a stack made from the
+    viewer gets the same quality summary, provenance record and processed
+    picture as one made in a batch. The ``siril`` driver is used only to
+    reach the job log database; the stage makes its own Siril driver.
 
     Returns
     -------
     final_path : `str` or `None`
         Path to the completed stacked image, or `None` if
         processing did not produce an output.
+
+    Raises
+    ------
+    ValueError
+        If the target is not in the library.
     """
-    import logging
+    from astrometricslib import capture_job_logs
 
     if log_file_path:
-        # Clear old logs for this target at the start of a new job
-        handler = logging.FileHandler(log_file_path, mode="w")
-        handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
-        logger = logging.getLogger(f"job_{job_id}")
-        logger.propagate = False
-        # Clear existing handlers if any
-        for h in logger.handlers[:]:
-            logger.removeHandler(h)
-        logger.addHandler(handler)
+        # Clear old logs for this target at the start of a new job. The
+        # capture below then appends to the file.
+        with open(log_file_path, "w", encoding="utf-8"):
+            pass
 
-        job_repository = getattr(siril, "job_repository", None)
-        if job_repository is not None:
-            from astrometricslib import DbLogHandler
-
-            logger.addHandler(DbLogHandler(job_repository, job_id=job_id))
-
-        logger.setLevel(logging.INFO)
+    # The stacking stage writes its decisions (which frames were set aside,
+    # which preview steps ran) through the shared "astrometricslib" logger,
+    # not through this job's own logger. `capture_job_logs` sends both to the
+    # job's log file and its database rows, so the job log shows them.
+    job_repository = getattr(siril, "job_repository", None)
+    with capture_job_logs(
+        job_id=job_id, log_file_path=log_file_path, logger_interface=job_repository
+    ) as logger:
         logger.info(f"Starting new processing task for {target_id} (Job: {job_id})")
-    else:
-        logger = None
 
-    # Driver must be provided via DI
-    if not siril:
-        from astrometricslib import ImageProcessing
+        # The stacking stage works on the target's own frame records, so
+        # the frames the viewer sent (as paths or as dicts) are matched back
+        # to them.
+        target = target_service.get_target(target_id) if target_service else None
+        if target is None:
+            raise ValueError(f"Cannot stack '{target_id}': the target is not in the library.")
+        requested_paths = {frame if isinstance(frame, str) else frame.get("path") for frame in image_files}
+        frames_to_stack = [frame for frame in target.frames if frame.path in requested_paths]
 
-        # This fallback is discouraged but kept for safety if not
-        # wired correctly
-        logging.error("Siril driver NOT provided to task! Creating un-configured instance.")
-        siril = ImageProcessing(None, None)
+        # Bound how many Siril subprocesses run concurrently system-wide,
+        # whether they were started here or by the offline batch script
+        # (pipeline_tasks.run_full_pipeline) -- an OS-level lock, respected
+        # across processes.
+        from astrometricslib import ProcessingPipelines, get_configuration, stack_frames
 
-    # REQ: IMG-4.2 - Route spectral stacks to specialized property and
-    # dispatch Siril processing with shift-only registration when handling
-    # spectroscopy frames.
-    from astrometricslib import frame_is_spectral
+        # `stack_frames` is the whole stacking stage, the same one the batch
+        # script runs: it sets aside bad frames, stacks (spectral frames of
+        # different exposure lengths one length at a time), trims the noisy
+        # edges, records the quality summary and provenance, and makes the
+        # preview picture the viewer shows as the processed image.
+        with ProcessingPipelines(get_configuration()).acquire_stacking_slot():
+            final_path = stack_frames(
+                target,
+                log_file=log_file_path,
+                frames_to_stack=frames_to_stack,
+                job_id=job_id,
+            )
 
-    is_spectral = any(frame_is_spectral(f) for f in image_files) if image_files else False
+        if notification_service:
+            if final_path:
+                message = f"Stacking complete for {target_id}. Output saved to {final_path}"
+                status = "success"
+            else:
+                message = f"Stacking failed for {target_id}. Check logs for details."
+                status = "error"
 
-    # Bound how many Siril subprocesses run concurrently system-wide,
-    # whether they were started here or by the offline batch script
-    # (pipeline_tasks.run_full_pipeline) -- an OS-level lock, respected
-    # across processes.
-    from astrometricslib import ProcessingPipelines, get_configuration, run_siril_stack
+            notification_service.notify(target_id, message, status=status)
 
-    with ProcessingPipelines(get_configuration()).acquire_stacking_slot():
-        # Goes through `run_siril_stack` so that spectral frames of different
-        # exposure lengths are stacked one length at a time, and a
-        # registration that loses too many frames is retried.
-        final_path, _diagnostics = run_siril_stack(
-            siril,
-            image_files,
-            target_id,
-            None,
-            log_file_path,
-            is_spectral,
-            job_id=job_id,
-        )
-
-    if notification_service:
-        if final_path:
-            message = f"Stacking complete for {target_id}. Output saved to {final_path}"
-            status = "success"
-        else:
-            message = f"Stacking failed for {target_id}. Check logs for details."
-            status = "error"
-
-        notification_service.notify(target_id, message, status=status)
-
-    if final_path and target_service:
-        try:
-            target = target_service.get_target(target_id)
-            if target:
-                if is_spectral:
-                    target.spectral_stacking.stacked_image = final_path
-                else:
-                    target.stacking.stacked_image = final_path
+        # The stage records the stack, its quality summary and its processed
+        # picture on the target; this saves them.
+        if final_path and target_service:
+            try:
                 target_service.save_targets()
                 if logger:
-                    logger.info(f"Updated target {target_id} metadata with stacked image: {final_path}")
-        except Exception as e:
-            if logger:
-                logger.error(f"Failed to update target metadata: {e}")
+                    logger.info(f"Saved target {target_id} with stacked image: {final_path}")
+                    _log_what_the_saved_record_names(target_service, target_id, final_path, logger)
+            except Exception as e:
+                if logger:
+                    logger.error(f"Failed to update target metadata: {e}")
 
-    return final_path
+        return final_path

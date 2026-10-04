@@ -97,7 +97,27 @@ def test_active_only_returns_running_jobs(jobs: Jobs) -> None:
     """Only a job that has not finished counts as active."""
     answer = jobs.query(active_only=True)
     assert [job["id"] for job in answer["jobs"]] == ["job-c"]
-    assert answer["jobs"][0]["is_active"] is True
+
+
+def test_an_unfinished_job_that_stopped_updating_looks_stale(database: Path, jobs: Jobs) -> None:
+    """A row left at running since 2026-10-01 is shown as stale, not active."""
+    with sqlite3.connect(database) as connection:  # the store stamps now on every write
+        connection.execute("UPDATE processing_jobs SET updated_at = '2026-10-01T00:03:00' WHERE id = 'job-c'")
+    stale = jobs.query(active_only=True)["jobs"][0]
+    assert stale["looks_stale"] is True
+    assert stale["is_active"] is False
+    assert stale["idle_minutes"] > 60
+
+
+def test_a_job_updated_just_now_is_active(tmp_path: Path) -> None:
+    """A running job with a fresh update is not marked stale."""
+    path = tmp_path / "fresh.db"
+    fresh = _job("job-f", "M 57", "stacking", "running", 0)
+    fresh.created_at = fresh.updated_at = datetime.now().isoformat()
+    LoggerInterface(str(path)).upsert_job(fresh)
+    job = Jobs(SimpleNamespace(get_logs_db_path=lambda: str(path))).query(active_only=True)["jobs"][0]
+    assert job["is_active"] is True
+    assert job["looks_stale"] is False
 
 
 def test_limit_is_clamped(jobs: Jobs) -> None:

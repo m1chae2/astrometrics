@@ -93,3 +93,20 @@ def test_a_target_frame_is_found_by_its_number(frame_path: str) -> None:
         Visualization(None).render_fits(target=target, file_name="999")
     with pytest.raises(ValueError):
         Visualization(None).render_fits()
+
+
+def test_a_processed_fits_is_drawn_without_a_second_stretch(tmp_path: Path) -> None:
+    """A processed FITS is already stretched, so it is not stretched again."""
+    generator = np.random.default_rng(2)
+    data = np.clip(generator.normal(0.2, 0.01, (200, 300)), 0.0, 1.0).astype(np.float32)
+    processed = tmp_path / "M_13_L_Stacked_processed.fits"
+    plain = tmp_path / "M_13_L_Stacked.fits"
+    for path in (processed, plain):
+        fits.PrimaryHDU(data).writeto(path)
+
+    drawn_processed = Visualization(None).render_fits(str(processed), max_dimensions=150)
+    drawn_plain = Visualization(None).render_fits(str(plain), max_dimensions=150)
+
+    assert drawn_processed.description["stretched"] is False
+    assert drawn_plain.description["stretched"] is True
+    assert drawn_processed.png_bytes != drawn_plain.png_bytes

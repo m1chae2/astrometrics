@@ -82,6 +82,30 @@ INTERIM_BLOCKS = {
         "Connects through connect_to_telescope, which sends CONNECTION=ON to every INDI device that is off. "
         "Blocked until observatory_hardware_status uses the connect-only path."
     ),
+    "planning_get_sources": (
+        "Returns whole target records and every star, which overflows the 40,000 character reply. Use "
+        "planning_find_sources, which caps the list, brightest first."
+    ),
+    "planning_get_library_star_summaries": (
+        "Returns every star in the circle, which can overflow the 40,000 character reply. Use "
+        "planning_find_sources, which caps the list, brightest first."
+    ),
+    "planning_resolve_target_coordinates": (
+        "Returns the whole target record, frames and all, which overflows the reply. Use "
+        "planning_lookup_coordinates, which returns the position."
+    ),
+    "observatory_get_focuser_position": (
+        "Returned 0 because the MCP process has no hardware connection. Use app_status with the telescope "
+        "section (focuser position, filter, pier side, tracking)."
+    ),
+    "observatory_get_filter_names": (
+        "Returned an empty list because the MCP process has no hardware connection. Use app_status with "
+        "the telescope section for the current filter."
+    ),
+    "observatory_get_enclosure_state": (
+        "Returned unknown because the MCP process has no hardware connection. Use app_status with the "
+        "telescope section."
+    ),
     "visualization_get_last_captured_image": (
         "Returns the picture as base64 text, which the 40,000 character reply limit cuts in half. Use "
         "visualization_render_fits with a path, which returns a real image."
@@ -100,7 +124,7 @@ INTERIM_BLOCKS = {
 """Read-only tools that stay hidden from the AI until a known hazard is fixed.
 They keep their merge disposition."""
 
-INVESTIGATOR_CLASSES = ("observe", "compute", "ingest")
+INVESTIGATOR_CLASSES = ("observe", "compute", "ingest", "process")
 """Classes the investigator profile may use without argument rules."""
 
 PROFILES = ("investigator",)
@@ -227,18 +251,20 @@ PROPOSED_TOOLS = (
             "target_list",
             "target_list_camera_names",
             "target_camera_index",
-            "planning_get_imaged_field_centers",
         ),
         (
-            "target_id or region{ra, dec, radius_deg}",
-            "detail: summary | full | cameras | field_centers",
-            "limit",
+            "target_id, text, camera, or region{ra, dec, radius_deg}",
+            "detail: summary | full | cameras",
+            "include_frames, sort, include_empty, limit, offset",
         ),
         "observe",
         notes=(
-            "summary must leave out the frame list. target_get and target_list mark targets as touched, so a "
-            "later save writes them; the new tool must not do that."
+            "Built 2026-10-04 as TargetCatalog.query. summary leaves out the frame list and the empty "
+            "placeholder targets; full groups one target's frames by night, filter, exposure and camera "
+            "and condenses its quality summaries (about 13 KB for M 57, where target_get was cut at 40 KB). "
+            "Looking does not mark targets as touched, so a later save never writes them."
         ),
+        built=True,
     ),
     ProposedTool(
         "target_index_frames",
@@ -302,7 +328,6 @@ PROPOSED_TOOLS = (
             "processing_run_astrometry",
             "processing_run_photometry",
             "processing_run_spectroscopy",
-            "processing_run_stacking",
             "moving_object_detect_asteroids",
         ),
         (
@@ -536,7 +561,10 @@ PROPOSED_TOOLS = (
             "off, which is "
             "a device command. The user decided on the connect-only path. Report 'not connected' instead of "
             "0, [] or unknown: in the MCP process the INDI reads return those silently until something "
-            "connects. Opening the INDI connection and the PHD2 polling thread are allowed."
+            "connects. Opening the INDI connection and the PHD2 polling thread are allowed. Built "
+            "2026-10-04 differently: app_status reports the telescope, guiding and INDI devices and "
+            "properties by asking the backend, which already holds the connection. The three MCP-side "
+            "reads that returned 0, [] and unknown are withheld."
         ),
     ),
     # ---- Observatory synchronization ----
@@ -919,6 +947,55 @@ DECISIONS = {
     "app_controls": ToolDecision(
         "keep", "Built 2026-10-03. Navigate and notify only; pause and resume are not offered."
     ),
+    "observatory_frame_status": ToolDecision(
+        "keep",
+        "Built 2026-10-04. Counts a target's frames at the telescope, on the drive and in the library, and "
+        "names the frames that are in one place but not the next. Reads only.",
+    ),
+    "target_stack": ToolDecision(
+        "keep",
+        "Built 2026-10-04 at the user's request: the AI may stack a target the way the app's Stack "
+        "button does, choosing imaging or spectral frames, a filter and a file or time range. "
+        "plan_only lists the frames without stacking. It runs the app's own stage: sets aside bad "
+        "frames into _excluded (never deletes), keeps one previous stack, and saves the target.",
+        "process",
+    ),
+    "processing_run_stacking": ToolDecision(
+        "withhold",
+        "Replaced by target_stack, which picks the frames, holds the stacking slot and saves the result.",
+    ),
+    "diagnostics_spectral_frame_check": ToolDecision(
+        "keep",
+        "Built 2026-10-04. Measures raw spectrum frames: zero-order position, tilt, width, peaks, saturated "
+        "patches along the spectrum, a predicted peak at another exposure, and a summary by exposure and by "
+        "pier side. Nothing is saved.",
+    ),
+    "planning_get_imaged_field_centers": ToolDecision(
+        "withhold", "Replaced by target_imaged_field_centers, which runs as a background job."
+    ),
+    "target_imaged_field_centers": ToolDecision(
+        "keep",
+        "Built 2026-10-04. The distinct sky positions imaged, read from FITS headers (about 35 s on this "
+        "library), so it runs as a background job.",
+    ),
+    "target_query": ToolDecision(
+        "keep",
+        "Built 2026-10-04. Targets as short rows or one grouped record; replaces target_get, target_list, "
+        "target_list_camera_names and target_camera_index.",
+    ),
+    "planning_find_sources": ToolDecision(
+        "keep",
+        "Built 2026-10-04. Library targets and stars near a point, brightest stars first, cut at a limit "
+        "with the total reported.",
+    ),
+    "planning_lookup_coordinates": ToolDecision(
+        "keep", "Built 2026-10-04. The position of a named object, from the library or SIMBAD. Reads only."
+    ),
+    "processing_stack_summary": ToolDecision(
+        "keep",
+        "Built 2026-10-04. One short answer for a target's stack: frames stacked and skipped, rejected "
+        "fraction, star width against the inputs, flags and each exposure group. Reads the saved summary.",
+    ),
     "star_query": ToolDecision(
         "keep", "Built 2026-10-03. Library star lookup with hard caps on rows, region size and full records."
     ),
@@ -962,6 +1039,7 @@ DECISIONS = {
     "calibration_save": ToolDecision("withhold", "Writes the calibration index. The AI is read-only."),
     "calibration_assess_flats": ToolDecision("keep", "Checks flats. Writes nothing."),
     "target_get_header": ToolDecision("keep", "Reads one FITS header."),
+    "target_read_saved": ToolDecision("keep", "Reads one target record from storage. Writes nothing."),
     "docs_get": ToolDecision("keep", "Reads documentation."),
     "ui_run_tests": ToolDecision("keep", "Developer check."),
     "ui_diagnose_code": ToolDecision("keep", "Developer check."),

@@ -70,7 +70,11 @@ inject. Everything else is internal.
 
   Their structure differs in exceptions, driver interfaces, duplicated models, leftover packages,
   and file naming. Section 6 sets shared conventions and lists each difference.
-- **Six confirmed bugs** turned up during the review. See Appendix A.
+- **Errors and logs have no shared design.** The code returns error replies in 137 places
+  instead of raising. About 400 broad `except Exception` handlers mostly log one line and carry on.
+  Each program and some library modules set up logging their own way. Section 7 defines one model
+  for both.
+- **Eight confirmed bugs** turned up during the review. See Appendix A.
 
 ## 3. Rules for growing the library API
 
@@ -155,7 +159,7 @@ sections of the reply, such as live hardware readings and saved models.
 
 | Attribute | What it covers | Public members after this plan | Folded in from today's `ObservatoryControl` |
 |---|---|---|---|
-| `control` | Driver injection | `driver`, `mount_driver`, `focuser_driver`, `filter_wheel_driver`, `camera_driver`, `guide_camera_driver`, `enclosure_driver`, `switch_driver`, `weather_driver`, `remote_transfer_driver` | `guiding_service` and `sync_service` go away (section 7.1) |
+| `control` | Driver injection | `driver`, `mount_driver`, `focuser_driver`, `filter_wheel_driver`, `camera_driver`, `guide_camera_driver`, `enclosure_driver`, `switch_driver`, `weather_driver`, `remote_transfer_driver` | `guiding_service` and `sync_service` go away (section 8.1) |
 | `control.mount` | Pointing and tracking | `status`, `slew_to_target`, `slew_to_coordinates(ra_deg, dec_deg, center=False, tolerance_arcsec=..., max_iterations=...)`, `sync_coordinates`, `park`, `unpark`, `set_tracking`, `manual_move`, `abort_motion`, `set_slew_rate`, `compute_pointing_correction`, `run_polar_alignment_assist` | `get_telescope_status`, plus the INDI mount decoding in `backend/mcp/tool_registry.py` (pier side, park, tracking) |
 | `control.imaging` | Main camera, filter wheel, focuser | `status`, `capture_image(exposure_seconds, count=1, filter_name=None, dither=False)`, `set_filter`, `focus_move`, `compute_focus_correction`, `save_focus_model` | `get_filter_names`, `get_focuser_position`, `active_focus_model` |
 | `control.guiding` | Guide camera, guide pulses, guider models | `status`, `pulse_guide`, `guide_expose`, `get_guide_image`, `drain_external_pulses`, `compute_guiding_correction`, `run_guider_calibration`, `run_backlash_calibration`, `run_guide_exposure_test`, `refit_guiding_spectrum`, `save_guider_calibration`, `save_guiding_spectrum_analysis`, `save_guiding_run` | `active_guider_calibration`, `active_guiding_spectrum_analysis`, `guider_plate_scale_arcsec_per_px` |
@@ -256,8 +260,8 @@ follow-ups apply:
 ### 6.1 Shared API conventions
 
 Both libraries follow the conventions below. The counts come from parsing every public method on
-the API classes: 95 in astrometricslib and 150 in wayfindinglib. Section 10 lists the two
-conventions that still need a decision.
+the API classes: 95 in astrometricslib and 150 in wayfindinglib. Section 7 covers errors and
+logging in detail.
 
 | Convention | astrometricslib changes | wayfindinglib changes |
 |---|---|---|
@@ -265,16 +269,16 @@ conventions that still need a decision.
 | **Nesting.** Root object, then sub-APIs, then children: at most two levels. A sub-API gets children named by topic when it would pass about 25 public members. Each child is built once and shared. | Keep `processing.calibration` and `processing.diagnostics`. `TargetCatalog` uses `processing.calibration` instead of building a second `CalibrationCatalog`. | `control` gains seven children (section 4.2). |
 | **Constructors.** Every sub-API takes `(config: AppConfiguration, storage, *, drivers...)` with real types. Children receive a shared context object, not a reference to their parent. | `Visualization` takes the whole `Astrometrics` object, typed `Any`. `Jobs` types `config` as `Any`. `MovingObjectRecovery` takes no configuration. `TargetCatalog` types `catalog_access` as `object`. | `ObservationPlanning` and `ObservationExecution` gain `config`. Remove the `astrometrics=` argument. |
 | **Thin API layer.** API methods check arguments and hand off. The work happens in `pipelines/` (astrometricslib) or `tasks/` (wayfindinglib). | Move `api/target_overview.py`, `api/star_analysis.py`, `api/stellar_operations.py`, and `api/batch.py` out of `api/`. Move the long bodies of `frame_quality`, `spectral_frame_check`, `Astrometrics.stack`, `StellarCatalog.query`, and `find_or_create_by_position` too. | Move `_derive_performance_envelope` and the night analysis helpers into `tasks/`. |
-| **Errors.** Pending decision 7. The recommendation: a bad argument raises `ValueError` or the library's own error type, a missing item makes `get` return `None`, and the MCP and RPC adapters turn exceptions into error replies. | 31 `return {"error": ...}` sites. | 4 `return {"error": ...}` sites. |
+| **Errors.** Library code raises a category from section 7.2 and never returns an error reply. `get` returns `None` for a missing item. The MCP and RPC adapters turn exceptions into error replies (section 7.4). | 48 `{"error": ...}` returns, 31 of them in `api/`. | 17 `{"error": ...}` returns. |
 | **Results.** Pydantic models, one per `kind`. | 26 methods return `dict`. | 22 methods return `dict`. |
-| **Naming the subject.** Pending decision 8. The recommendation: `target: str \| Target` everywhere, and `<noun>_id` for every other identifier. | `camera` and `camera_name` become `camera_id`. | `target_name` becomes `target`. |
+| **Naming the subject.** `target: str \| Target` everywhere (decided, section 11). A string that names no target raises `NotFoundError`. Every other identifier is `<noun>_id`. | Methods that take `target: Target` or `target_id: str` accept `str \| Target`. `camera` and `camera_name` become `camera_id`. | `target_name` and `target_id` arguments become `target: str \| Target`. |
 | **Units in names.** `ra_deg`, `dec_deg`, `radius_deg`, `tolerance_arcsec`, `exposure_seconds`. | `ra`, `dec`, and `radius` on `TargetCatalog.query`, `StellarCatalog.query`, and the region methods. | `ra` and `dec` on `slew_to_coordinates` and `sync_coordinates`. |
 | **Time.** `since`, `until`, and `time` accept `str \| datetime \| Time \| None`. An observing night is `night_id: str`. | `since` and `until` accept only ISO strings today. | `time_input: Any` becomes `time`. `night_date: date` and `session_id` used to name a night become `night_id`. |
 | **Choosing a variant.** `kind=` picks one variant. `include=` adds optional sections. `detail=` sets how much each record says. The libraries use no `mode=` argument and no boolean that switches variants. | `frame_quality(mode=...)` becomes `kind=`. `spectral: bool` on `stack_summary`, `compare_with_previous_stack`, `discard_previous_stack`, and `swap_with_previous_stack` becomes `kind=`. `include_fwhm` and `include_spectra` become `include=`. | `frame_guiding(include_quality=...)` becomes `include=`. |
 | **Background jobs.** Long-running methods use `@background_job` and take `register_job: bool = True`. | 14 decorated methods; `register_job` appears on 4. | 4 decorated methods; `register_job` appears on 1. |
 | **Exports.** The package root exports the root object, the sub-APIs, the models, the exceptions, and the driver base classes. A test pins the list. | Remove about 35 internal names, among them `AstrometryPipeline`, `StarIdentifier`, `FrameSelection`, `select_library_frames`, `close_interrupted_jobs`, `resolve_worker_counts`, `run_parallel_batch`, `DbLogHandler`, `LoggerInterface`, `run_siril_stack`, `stack_frames`, `ImageProcessing`, `SATURATED_FRAME_FRACTION`, and `SATURATED_BLOB_MINIMUM_PIXELS`. Stop importing `background_job` into the package root, where wayfindinglib picks it up. | Add the models and exceptions. Add a public-surface test like `astrometricslib/test/test_public_surface.py`. |
 | **`api/__init__.py`.** One lazy-export lookup table and one statement of how to import. | Its docstring says not to import from `api`. Align the guidance. | Replace the `if` chain with the lookup table. |
-| **Docstrings.** numpydoc, with no architecture section numbers and no mention of MCP or agents. | 13 mentions of MCP or agents, for example "Called through the MCP server, this runs as a background job". | 26 `§` citations, some to sections that do not exist, and 7 mentions of MCP or agents. |
+| **Docstrings.** numpydoc, with no architecture section numbers and no mention of MCP or agents. | 13 mentions of MCP or agents, for example "Called through the MCP server, this runs as a background job". | 26 `` citations, some to sections that do not exist, and 7 mentions of MCP or agents. |
 
 ### 6.2 Library consistency work
 
@@ -283,17 +287,180 @@ conventions that still need a decision.
 | 1 | Duplicate models and a second storage path in wayfindinglib: two `ObservationSession` classes, two `EquipmentConfiguration` classes, a copy of `AbstractButler`, and `drivers/local_database.save_model`/`load_models` | Keep one model in `models/`. Use `datastore.AbstractButler`. Send all storage through `DiskButler`, matching astrometricslib's single path through `CatalogAccess`. |
 | 2 | Leftover packages: `wayfindinglib/sky.py`, `observation.py`, `observationlib/`, `observatorylib/` | Move logic into `tasks/planning_tasks`, models into `models/`, and configuration reads into `data_access/`, then delete the packages. |
 | 3 | wayfindinglib builds a fresh `Astrometrics` at about 18 sites, and some ignore the configuration they were given | `Wayfinder` holds one injected handle and passes it down. |
-| 4 | Exceptions: `astrometricslib/utilities/exceptions.py` `AstroLibError` versus `wayfindinglib/exceptions.py` `AstrometryHardwareError`, with stray `RuntimeError` and `ValueError` subclasses | Each library gets a top-level `exceptions.py` with one base class (`AstrometricsError`, `WayfindingError`). Every library error derives from it. The old names stay as aliases for one release. |
+| 4 | Exceptions: `AstroLibError`, `AstrometryHardwareError`, `StorageNotMountedError(RuntimeError)`, `DelegationPolicyValidationError(ValueError)`, and `backend/exceptions.py` are unrelated | Replace them with the shared error model in section 7.2. The old names stay as aliases for one release. |
 | 5 | Driver interfaces: astrometricslib mixes a typing `Protocol`, an `Abstract*` class, and concrete-only classes | Use wayfindinglib's style, `abc.ABC` base classes named `*Driver`, for the Siril, plate-solve, and SIMBAD interfaces. Rename `wayfindinglib/drivers/protocols/`, because it holds abstract classes, not typing Protocols. |
-| 6 | Shared infrastructure owned by astrometricslib: the MCP registry and reflection, `job_logging`, and the configuration loader | Move them to a neutral package next to `datastore/`, so wayfindinglib stops importing astrometricslib internals. |
+| 6 | Shared infrastructure owned by astrometricslib: the MCP registry and reflection, `job_logging`, and the configuration loader | Move the job framework and the configuration loader into `corelib` (section 7), next to the new error and logging code. Move the MCP registry and reflection into the MCP package (section 8.2). wayfindinglib then stops importing astrometricslib internals. |
 | 7 | File names: `wayfindinglib/api/*_registry.py` hold ordinary classes, not registries | Rename the files to `control.py`, `planning.py`, `execution.py`. Put the `control` children in a `control/` package with one module per child. |
 | 8 | Scripts: 16 of 23 astrometricslib scripts and `wayfindinglib/scripts/build_deep_star_catalog.py` import internals | Scripts use the public API only, or the scripts README states the exemption. |
 | 9 | Alignment logs live in `astrometricslib/drivers/logger_interface.py`, but mount alignment is a wayfindinglib concern | Decide which library owns alignment records before building `control.history.night_history(kind="alignment")`. |
 | 10 | Documentation drift: garbled "astrometrics" wording in wayfindinglib docstrings, citations to architecture sections that do not exist, 353 `ruff: ignore` suppressions in wayfindinglib | Fix these as each file is touched, per CLAUDE.md. `Wayfinding_Library_Architecture.md` gains the `control` children. |
 
-## 7. Backend and MCP structure
+## 7. Errors and logging
 
-### 7.1 Backend
+This section defines one way to report errors and one way to write logs, for both libraries, the
+backend, the MCP servers, and the scripts. A neutral shared package next to `datastore/` holds the
+code. Its name is open (section 11, decision 8). This section calls it `corelib`.
+
+### 7.1 Current state
+
+| Area | What the code does today |
+|---|---|
+| Exception classes | Eleven classes, unrelated to each other: `AstroLibError` (raised in 2 places), `StorageNotMountedError(RuntimeError)`, `DelegationPolicyValidationError(ValueError)`, `AstrometryHardwareError`, `datastore.DeviceInUseError`, and six classes in `backend/exceptions.py`. Only `telescope_service.py` and `imaging_service.py` use the backend classes. |
+| What code raises | Mostly built-in types: about 155 `ValueError`, 41 `RuntimeError`, 13 `FileNotFoundError`, and 8 `TimeoutError` across the libraries and the backend. |
+| Error replies instead of exceptions | 48 `{"error": ...}` returns in astrometricslib, 17 in wayfindinglib, and 72 `{"status": "error"}`-style returns in the backend. These travel inside a *success* reply, so 77 places in the UI check for them by hand. |
+| Broad `except Exception` | About 400 handlers outside tests and scripts: 209 in astrometricslib, 58 in wayfindinglib, 138 in the backend. About 25 re-raise. Most of the others log one line without the traceback and carry on, which hides the cause of failures. |
+| RPC error mapping (`backend/routers/rpc_router.py` `handle_rpc`) | Any `KeyError` from inside a service becomes "Method not found" with HTTP 404. Any `ValueError` becomes "Invalid params" with HTTP 400. Everything else becomes "Internal error" with HTTP 500. The UI keeps only the message text and drops the error code. |
+| MCP error mapping (`astrometricslib/mcp/tool_registry.py`) | A failed tool returns ordinary text that starts "Error during tool execution", not an MCP error result. The exception is not logged. An `{"error": ...}` reply from the library looks like success. If the path sandbox check itself raises an unexpected exception, the server logs it at debug level and runs the tool anyway. |
+| Logging setup | `backend/main_backend.py` calls `logging.basicConfig` at DEBUG level with a log file that never rotates. Each MCP server and most scripts call their own `basicConfig`. Library code also changes logging setup: `drivers/job_logging.py` sets the package logger level, and `base_service.py` and `drivers/siril_interface.py` attach their own file handlers to loggers named per target or per run. |
+| Logger names | 159 modules use `getLogger(__name__)`. A few use ad-hoc names such as `job_{id}` and `siril_{id}`. |
+| `print` | 344 calls in astrometricslib and 56 in wayfindinglib, mostly in scripts. Seven library modules outside `scripts/` also print. |
+| Job logs | `job_logging.capture_job_logs` attaches handlers to one library's package logger for the length of a job. A job therefore records messages from one library only. |
+| The logs database | `drivers/logger_interface.py` (1,646 lines) stores job records and job log lines, but also alignment attempts, guiding samples, polar-alignment runs, session telemetry, AI interactions, and a knowledge table. |
+
+### 7.2 Error model
+
+`corelib.errors` defines one base class and a small set of categories. Every error the libraries
+or the backend raise on purpose belongs to one category.
+
+| Class | `code` | Meaning | Examples today |
+|---|---|---|---|
+| `AstrometricsError` | (base) | Base of every expected error. It carries `code`, `message` (one plain sentence a user can read), `details` (a dictionary of JSON-safe values), and `retryable` (whether the same call may succeed later). | `AstroLibError` |
+| `InvalidArgumentError` | `invalid_argument` | The caller passed a bad value. Also subclasses `ValueError`, so existing `except ValueError` code keeps working. | `{"error": "detail must be one of: ..."}`, backend `InvalidArgumentError` |
+| `NotFoundError` | `not_found` | A named target, star, job, session, or file does not exist. Subclasses `LookupError`, not `KeyError`. | backend `TargetNotFoundError`, `FilterNotFoundError`, `ToolNotFoundError` |
+| `ConflictError` | `conflict` | The request is valid, but the current state forbids it: a device is in use, a job is already running, the mount is parked. | `datastore.DeviceInUseError` |
+| `PermissionDeniedError` | `permission_denied` | A policy forbids the action: the delegation policy, a read-only profile, a path outside the allowed folders. | MCP sandbox check |
+| `ConfigurationError` | `configuration` | The configuration is missing or invalid. | `DelegationPolicyValidationError` |
+| `StorageError` | `storage` | Disk or database trouble: storage not mounted, a file cannot be read, the database is locked. | `StorageNotMountedError` |
+| `HardwareError` | `hardware` | A device command failed or timed out. Usually `retryable`. | `AstrometryHardwareError`, backend `HardwareCommandError` |
+| `ExternalServiceError` | `external_service` | Another program or service failed: Siril, the plate solver, SIMBAD, or the observatory computer over the network. Usually `retryable`. | `TimeoutError` and `ConnectionError` from drivers |
+| `ProcessingError` | `processing` | The input was valid, but a pipeline could not produce a result from it, for example a plate solve that found too few stars. | `RuntimeError` raised by pipelines |
+
+Any other exception means a bug and has the code `internal`.
+
+Each library adds specific subclasses where callers need to tell cases apart, for example
+`PlateSolveFailedError(ProcessingError)` or `MountParkedError(ConflictError)`. Each library exports
+the shared classes and its own subclasses from its package root. The old class names remain as
+aliases for one release.
+
+`corelib.errors.ErrorInfo` is the serializable form of an error, a Pydantic model with fields
+`code`, `message`, `details`, `retryable`, and `request_id`. Every adapter sends this shape, and
+batch results use it to list failed items.
+
+### 7.3 Error rules
+
+1. **Library and service code raises.** It never returns `{"error": ...}` or
+   `{"status": "error"}`. The 137 error-reply sites in section 7.1 become raises.
+2. **Translate at the edge of the library.** Each driver turns third-party exceptions into a category
+   with `raise HardwareError(...) from exc`. Third-party exceptions include those from `sqlite3`,
+   `subprocess`, PyIndi, `astropy`, and the network clients. Keeping the cause with `from` keeps
+   the original traceback.
+3. **Catch `Exception` only at a boundary.** A boundary is one of:
+   - an adapter (RPC router, MCP registry);
+   - the job runner;
+   - a loop over independent items, where one failed item must not stop the rest. Such a loop
+     records the failure as an `ErrorInfo` in its result and logs it once with the traceback.
+   
+   Anywhere else, catch the specific exception, or don't catch at all.
+4. **A missing item is not always an error.** `get` returns `None` when the item does not exist.
+   Every other method that needs an existing item raises `NotFoundError`. The decision on naming targets makes this
+   concrete: a method that takes `target: str | Target` raises `NotFoundError` when the string
+   names no target.
+5. **Degraded results are not errors.** When a method produces a result of reduced quality, it
+   reports that in the result's quality fields and logs a warning. It raises only when it cannot
+   produce a result at all.
+6. **Log an error once, where it is handled, with the traceback** (`logger.exception`). Code that
+   raises or re-raises does not also log.
+
+### 7.4 How each adapter reports errors
+
+`corelib.errors.to_error_info(exc)` converts any exception to an `ErrorInfo`, and one table maps
+each category to its transport codes.
+
+| `code` | JSON-RPC code | HTTP status | MCP |
+|---|---|---|---|
+| `invalid_argument` | -32602 | 400 | `isError: true` |
+| `not_found` | -32001 | 404 | `isError: true` |
+| `conflict` | -32002 | 409 | `isError: true` |
+| `permission_denied` | -32003 | 403 | `isError: true` |
+| `configuration` | -32004 | 500 | `isError: true` |
+| `storage` | -32005 | 503 | `isError: true` |
+| `hardware` | -32010 | 502 | `isError: true` |
+| `external_service` | -32011 | 502 | `isError: true` |
+| `processing` | -32012 | 422 | `isError: true` |
+| `internal` | -32603 | 500 | `isError: true` |
+
+- **RPC router.** `handle_rpc` catches `KeyError` only around the method lookup, not around the
+  call. It sends `ErrorInfo` in the JSON-RPC `error.data` field. For `internal` errors it sends a
+  generic message plus the `request_id`, and keeps the traceback in the log.
+- **MCP servers.** They return an MCP result with `isError: true`, with `code: message` as the text
+  and `details` as JSON. They log the exception. A failure inside the path sandbox check refuses
+  the call instead of letting it through.
+- **UI.** `callBackend` throws a `BackendError` that keeps `code`, `details`, `retryable`, and
+  `requestId`. One place in the UI decides how each code is shown: an inline field message for
+  `invalid_argument`, a "Try again" button when `retryable`, and the `request_id` in the toast for
+  `internal`. The 77 per-call checks for `status === 'error'` go away.
+- **Background jobs.** A failed job stores its `ErrorInfo` on the job record. `Jobs.query` returns
+  it, so the UI and agents read a job failure in the same shape as a call failure.
+- **Scripts.** A script's entry point catches `AstrometricsError`, prints the message, and exits with
+  a non-zero code. Any other exception prints its traceback.
+
+`backend/exceptions.py` goes away. Its classes map to `InvalidArgumentError`, `NotFoundError`, and
+`HardwareError`.
+
+### 7.5 Logging model
+
+1. **Two kinds of "log" become separate.**
+   - *Diagnostic logs* are Python `logging` messages for developers.
+   - *Operational records* are data the app shows and analyzes: job records, job log lines,
+     alignment attempts, guiding samples, session telemetry.
+   
+   `LoggerInterface` holds both kinds today. Job records and job log lines move to a
+   `corelib.jobs` store. Alignment, guiding, and telemetry records move to the library that owns
+   them (decision 4), behind its normal storage class. AI interactions and the knowledge table
+   move to the backend.
+2. **One logger per module.** Every module uses `logger = logging.getLogger(__name__)`. The
+   `job_{id}`, `siril_{id}`, and per-target worker loggers go away. Job and run identity travel in
+   the log context (item 5).
+3. **Libraries never configure logging.** Library and service modules never call `basicConfig`,
+   `addHandler`, `setLevel`, or set `propagate`. Each package root adds a `NullHandler`, which
+   silences the "no handler" message when no program has set up logging. Library modules do not
+   call `print`.
+4. **One setup function per program.** Each program calls
+   `corelib.logging.configure_logging(program, level, log_dir)` once at startup. The programs are
+   the backend, each MCP server, and each script. The function installs:
+   - a rotating log file in JSON Lines format, one JSON object per line, so tools and agents can
+     filter it (for example 10 MB per file, 5 files kept);
+   - a readable console handler: stderr for MCP servers, whose stdout carries the protocol;
+   - the context filter from item 5;
+   - the job router from item 6;
+   - quieter levels for noisy third-party loggers (`httpx`, `uvicorn`, `astropy`, `matplotlib`).
+   
+   This replaces the setup code in `main_backend.py`, the three MCP `__main__.py` files, and the
+   scripts.
+5. **Context on every record.** A `contextvars` log context carries `request_id`, `job_id`,
+   `target_id`, `session_id`, and the RPC method or MCP tool name. A context variable is a value
+   that follows the current thread or async task. `job_logging` already keeps the current job this
+   way, and this generalizes it. The RPC router and the MCP registry start a context for each
+   call. The job runner starts one for each job. The setup filter copies the context onto each
+   record, so every line in the file says which call or job wrote it. Error replies include the
+   same `request_id`, so a user or agent can quote it and a developer can find the matching lines.
+6. **Job logs by context, not by attaching handlers.** `configure_logging` installs one permanent
+   handler. It sends each record that carries a `job_id` to that job's log file and log rows. This
+   replaces the attach-and-detach logic in `capture_job_logs`. Job logs then include messages
+   from both libraries, and no handler can leak.
+7. **Level policy.**
+   - `DEBUG`: internal detail.
+   - `INFO`: the start and end of jobs, and every hardware command.
+   - `WARNING`: a degraded result, a retry, or a fallback.
+   - `ERROR`: an operation failed, logged once by the boundary that handled it (rule 6 in
+     section 7.3).
+   
+   Messages use `%`-style arguments rather than f-strings, so a message that is filtered out costs
+   nothing to build.
+
+## 8. Backend and MCP structure
+
+### 8.1 Backend
 
 - **Router logic.** Move the router logic in `backend/routers/rpc_router.py` into services:
   - `_save_config` calls the private `indi_driver._sync_config()`.
@@ -314,10 +481,10 @@ conventions that still need a decision.
   - the `unittest.mock.Mock` branches in `analysis_orchestrator.py` and `stellar_service.py`;
   - the dummy `alignment_latest.fits` writer in `imaging_service.py`.
 
-### 7.2 MCP servers
+### 8.2 MCP servers
 
 - Move the MCP packages out of the libraries into one top-level package beside `backend/` and
-  `ui/`. The package name is open (section 9). It must not be `mcp/`, which would hide the `mcp`
+  `ui/`. The package name is open (section 11, decision 1). It must not be `mcp/`, which would hide the `mcp`
   SDK on `sys.path`. Suggested layout:
   - `common/`: registry, reflection, profiles, serialization;
   - `astrometrics_core/` and `wayfinding_core/`: reflection only;
@@ -337,7 +504,7 @@ conventions that still need a decision.
 - After section 4 is done, trim `tool_dispositions.py` to a tool-class table. The library API itself
   then carries the consolidation that `PROPOSED_TOOLS` records today.
 
-## 8. Enforcement
+## 9. Enforcement
 
 | Check | Purpose |
 |---|---|
@@ -346,60 +513,78 @@ conventions that still need a decision.
 | Public-surface tests for both libraries | Keeps the export lists from growing or leaking again |
 | A test that the generated MCP tool list equals the public API minus the dispositions table | Makes every new public method a deliberate choice of AI tool |
 | A CI check that `ui/common/types/backendTypes.ts` matches a fresh code generation run | Keeps UI types in step with the Pydantic models |
+| Ruff rules `BLE` (blind `except Exception`), `TRY` (exception style, including `logger.exception` in handlers), `LOG` and `G` (logging calls), and `T20` (`print`, with scripts exempt). Like the import rules, they start with an allow-list of today's sites. | Holds the error and logging rules in section 7 |
+| `TID251` bans `logging.basicConfig` everywhere except `corelib.logging` and program entry points | Keeps logging setup in one place |
+| A test that every `AstrometricsError` subclass maps to a row of the section 7.4 table | Keeps the adapters complete when a library adds an error class |
 | `serialize_rpc_result` converts NumPy values with `.item()` and `.tolist()`, and fails or warns on unknown types instead of calling `str()` | Makes violations of the CLAUDE.md serialization rule visible |
 
-## 9. Order of work
+## 10. Order of work
 
 Each phase ends with `ruff check`, the affected `pytest` suites, and, for `ui/` changes,
 `npm run type-check` and `npm test`.
 
 1. **Fix the confirmed bugs** in Appendix A.
    Done when: each bug has a test or a manual check that shows the fix.
-2. **Add guardrails.** Add the `TID251` entries and the import-linter contracts, with an explicit
+2. **Add guardrails.** Add the `TID251` entries, the import-linter contracts, and the error and
+   logging lint rules from section 9, with an explicit
    allow-list of today's violations so CI stays green.
-   Done when: CI runs both checks, and the allow-list is the to-do list for phases 3 to 5.
-3. **Delete the copies in section 5.1.**
+   Done when: CI runs both checks, and the allow-list is the to-do list for phases 4 to 6.
+3. **Build the shared error and logging code (section 7).** Create `corelib` with the error
+   classes, `ErrorInfo`, `to_error_info`, `configure_logging`, the log context, and the job log
+   router. Switch the RPC router, the MCP registries, the UI's `callBackend`, and every program
+   entry point to them. Library code keeps raising its current types for now, and the adapters map
+   `ValueError` to `invalid_argument` until phase 5 finishes.
+   Done when: every RPC and MCP error reply carries an `ErrorInfo` with a `request_id`, and every
+   program sets up logging through `configure_logging`.
+4. **Delete the copies in section 5.1.**
    Done when: those backend functions are gone, and the RPC methods call the library functions.
-4. **Consolidate the library API (section 4) and apply the conventions in section 6.1.** Add
+5. **Consolidate the library API (section 4) and apply the conventions in section 6.1.** Add
    arguments and new general methods. Split `control` into its children. Turn the narrow methods
-   into private helpers with deprecated aliases. Return typed models.
+   into private helpers with deprecated aliases. Return typed models. Replace error replies with
+   raises, and narrow the broad `except Exception` handlers (section 7.3).
    Done when: both public-surface tests pin the section 4 list, and the MCP tool list matches it.
-5. **Move the logic in section 5.2.**
+6. **Move the logic in section 5.2.**
    Done when: the allow-lists from phase 2 are empty.
-6. **Restructure the MCP servers (section 7.2) and the backend (section 7.1).**
+7. **Restructure the MCP servers (section 8.2) and the backend (section 8.1).**
    Done when: the domain libraries contain no `mcp/` package, and `main_backend.py` holds only app
    setup.
-7. **Finish the library consistency work (section 6.2).**
-   Done when: each library has one exception base, one model per concept, and no leftover packages.
-8. **Remove the deprecated aliases** after one release.
+8. **Finish the library consistency work (section 6.2).** This includes splitting
+   `LoggerInterface` (section 7.5, item 1).
+   Done when: no library defines its own unrelated exception classes, each concept has one model,
+   and no leftover packages remain.
+9. **Remove the deprecated aliases** after one release.
 
-Phases 3 and 4 can overlap. Phase 5 depends on phase 4, because the moved logic lands in the
+Phases 4 and 5 can overlap. Phase 5 depends on phase 3, because the raises it adds need the
+adapters to report them. Phase 6 depends on phase 5, because the moved logic lands in the
 consolidated methods.
 
-## 10. Decisions for the owner
+## 11. Decisions for the owner
 
 Decided:
 
 - **wayfindinglib grouping (2026-10-04).** `Wayfinder` keeps `control`, `planning`, and
   `execution`. `control` gains children named by topic (section 4.2). Two levels of nesting is the
   rule for both libraries (section 6.1).
+- **Naming a target (2026-10-04).** Every method that acts on a target takes
+  `target: str | Target` (section 6.1).
 
 Open:
 
 1. The name and location of the top-level MCP package (for example `agent_servers/`).
 2. How long deprecated aliases stay: one release, or until no caller in the repository uses them.
 3. Whether maintenance scripts may import library internals.
-4. Which library owns alignment records (section 6.2, item 9).
+4. Which library owns alignment records (section 6.2, item 9). This also decides where those
+   records go when `LoggerInterface` is split (section 7.5, item 1).
 5. Whether `control.mount.slew_to_target` folds into `slew_to_coordinates` through
    `target: str | Target`.
 6. The exact list of non-RPC routes the UI may use (WebSockets, static images, handoff), to record
    in CLAUDE.md.
-7. How the libraries report a bad argument. The recommendation is to raise an exception and let
-   the MCP and RPC adapters turn it into an error reply. The alternative keeps the
-   `{"error": ...}` replies that astrometricslib returns today, in both libraries.
-8. How callers name a target. The recommendation is `target: str | Target` everywhere. The
-   alternative is `target_id: str` everywhere, with `TargetCatalog.get` as the only way to obtain
-   a `Target`.
+7. Approval of the error and logging design in section 7, in particular:
+   - the category list in section 7.2;
+   - the JSON-RPC codes and HTTP statuses in section 7.4;
+   - JSON Lines as the log file format.
+8. The name of the shared package that holds errors, logging, jobs, and configuration (section 7
+   calls it `corelib`).
 
 ## Appendix A. Confirmed bugs
 
@@ -420,6 +605,12 @@ Each of these was checked against the code during the review.
    Dec with `formatRaDecString`, so RA in hours appears with degree symbols.
 6. `backend/services/rpc_protocol.py` `serialize_rpc_result` falls back to `str(obj)`, so NumPy
    integers, booleans, and arrays reach the UI as strings.
+7. `backend/routers/rpc_router.py` `handle_rpc` wraps the whole call, including the service method,
+   in `except KeyError`. A `KeyError` raised inside any service is therefore reported as
+   "Method not found" with HTTP 404.
+8. `astrometricslib/mcp/tool_registry.py` logs an unexpected exception from the path sandbox check
+   at debug level and then runs the tool. The check fails open: an argument it cannot check is
+   allowed through.
 
 Other issues the review reported but did not re-check:
 

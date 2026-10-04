@@ -8,6 +8,8 @@ the moment the session moves on.
 Times are seconds since the Unix epoch. Errors are arcseconds on the sky.
 """
 
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -198,6 +200,9 @@ class LiveSessionStatus(BaseModel):
     unavailable : `list` [`str`]
         Things the app cannot report from these logs, so a client does not
         have to guess.
+    details : `dict` [`str`, `Any`]
+        The Ekos record sections the caller asked for (autofocus runs,
+        aborted captures, state events and so on), empty if none were.
     recent_guiding : `GuidingWindowSummary`
         Guiding accuracy over the requested window.
     exposures : `list` [`ExposureSummary`]
@@ -229,6 +234,7 @@ class LiveSessionStatus(BaseModel):
     captures_aborted: int = 0
     dither_settings: DitherSettings = Field(default_factory=DitherSettings)
     unavailable: list[str] = Field(default_factory=list)
+    details: dict[str, Any] = Field(default_factory=dict)
     recent_guiding: GuidingWindowSummary
     exposures: list[ExposureSummary] = Field(default_factory=list)
     excursions: list[GuidingExcursion] = Field(default_factory=list)

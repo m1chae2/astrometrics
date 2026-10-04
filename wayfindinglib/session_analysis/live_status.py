@@ -375,6 +375,12 @@ def summarize_exposures(
     return summaries
 
 
+MOUNT_POSITION_UNAVAILABLE = (
+    "The mount's right ascension, and the plate-solved position of the latest frame: the Ekos log "
+    "records only declination, altitude, azimuth and pier side for the mount."
+)
+"""What the live status cannot say about where the mount points."""
+
 GUIDE_SETTINGS_UNAVAILABLE = (
     "Guide algorithm and its settings (aggression, hysteresis): the PHD2 guide log that Ekos keeps does "
     "not record them, so they cannot be compared between nights."
@@ -497,7 +503,7 @@ def summarize_live_session(
         captures_completed=len(context.captures),
         captures_aborted=len(context.aborted_captures),
         dither_settings=summarize_dither_settings(dithers, len(context.captures)),
-        unavailable=[GUIDE_SETTINGS_UNAVAILABLE],
+        unavailable=[GUIDE_SETTINGS_UNAVAILABLE, MOUNT_POSITION_UNAVAILABLE],
         recent_guiding=summarize_guiding_window(guide_stats, as_of, window_seconds),
         exposures=exposures,
         excursions=excursions,

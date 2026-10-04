@@ -197,6 +197,35 @@ class DeviceDiscovery:
             return candidates[0]
         return None
 
+    @staticmethod
+    def _sensor_pixel_count(camera_device) -> int:  # ruff: ignore[missing-type-function-argument]
+        """Return a camera's sensor size in pixels, or 0 if it is unknown.
+
+        Reads the INDI ``CCD_INFO`` property (``CCD_MAX_X`` times
+        ``CCD_MAX_Y``). Used to tell the imaging camera from a small guide
+        camera whose name does not say "guide" (for example an ASI120).
+
+        Parameters
+        ----------
+        camera_device : `PyIndi.BaseDevice`
+            A camera device that has a ``CCD_EXPOSURE`` property.
+
+        Returns
+        -------
+        pixel_count : `int`
+            Width times height in pixels, or 0 when the camera does not
+            report its size.
+        """
+        try:
+            ccd_info = camera_device.getNumber("CCD_INFO")
+            if not ccd_info:
+                return 0
+            sizes = {element.name: element.value for element in ccd_info}
+            return int(sizes.get("CCD_MAX_X", 0) * sizes.get("CCD_MAX_Y", 0))
+        except Exception as info_error:
+            logger.debug(f"Failed to read CCD_INFO: {info_error}")
+            return 0
+
     def find_guide_camera(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Heuristic to find guide camera.
 
@@ -222,7 +251,8 @@ class DeviceDiscovery:
         for candidate_device in candidates:
             if "guide" in candidate_device.getDeviceName().lower():
                 return candidate_device
-        return candidates[0]
+        # No camera is named "guide": the smallest sensor is the guide camera.
+        return min(candidates, key=self._sensor_pixel_count)
 
     def find_enclosure(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Heuristic to find the roll-off-roof/dome device.
@@ -251,8 +281,9 @@ class DeviceDiscovery:
     def find_main_camera(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Heuristic to find the main imaging camera.
 
-        1. Look for device with CCD_EXPOSURE. 2. Prefer device WITHOUT
-        'Guide' in name.
+        1. Look for device with CCD_EXPOSURE. 2. Prefer devices WITHOUT
+        'Guide' in the name. 3. Among those, pick the largest sensor, so a
+        small guide camera that is not named "guide" is not chosen.
 
         Returns
         -------
@@ -277,6 +308,4 @@ class DeviceDiscovery:
             for candidate_device in candidates
             if "guide" not in candidate_device.getDeviceName().lower()
         ]
-        if main_candidates:
-            return main_candidates[0]
-        return candidates[0]
+        return max(main_candidates or candidates, key=self._sensor_pixel_count)

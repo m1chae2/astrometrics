@@ -137,6 +137,58 @@ def _intervals_where_positive(times: np.ndarray, margin: np.ndarray) -> list[tup
     return spans
 
 
+SUN_ALTITUDE_EVENTS = (
+    (-0.833, "sunset or sunrise"),
+    (-6.0, "civil twilight"),
+    (-12.0, "nautical twilight"),
+    (-18.0, "astronomical twilight"),
+)
+"""The Sun altitudes, in degrees, at which each twilight stage begins or
+ends. The first is the usual rim-on-the-horizon value that allows for
+refraction."""
+
+
+def _sun_events(epochs: np.ndarray, sun_altitude: np.ndarray, offset_hours: float) -> list[dict[str, Any]]:
+    """List when the Sun crosses each twilight altitude in the window.
+
+    The crossing time is interpolated between the two time steps either
+    side of it, so it is better than the step size.
+
+    Parameters
+    ----------
+    epochs : `numpy.ndarray`
+        The time steps, in Unix seconds.
+    sun_altitude : `numpy.ndarray`
+        The Sun's altitude at each step, in degrees.
+    offset_hours : `float`
+        The UTC offset to write times in.
+
+    Returns
+    -------
+    events : `list` [`dict`]
+        Each crossing with its ``time``, ``event`` and whether the Sun was
+        ``going`` ``down`` or ``up``, in time order.
+    """
+    events = []
+    for threshold, label in SUN_ALTITUDE_EVENTS:
+        above = sun_altitude - threshold
+        for index in range(len(above) - 1):
+            if above[index] == 0 or above[index] * above[index + 1] >= 0:
+                continue
+            fraction = above[index] / (above[index] - above[index + 1])
+            moment = float(epochs[index] + fraction * (epochs[index + 1] - epochs[index]))
+            events.append({
+                "epoch": moment,
+                "time": _format_time(moment, offset_hours),
+                "event": f"Sun reaches {threshold:g} deg ({label})",
+                "going": "down" if above[index + 1] < above[index] else "up",
+            })
+    events.sort(key=lambda event: event["epoch"])
+    for event in events:
+        del event["epoch"]
+    return events
+
+
 def _span_texts(spans: list[tuple[float, float]], offset_hours: float) -> list[dict[str, Any]]:
     """Write spans as start, end and length.
 
@@ -246,6 +298,7 @@ def build_visibility_over_time(
             "time_zone_offset_hours": timezone_offset_hours,
         },
         "horizon": {"minimum_altitude_deg": minimum_altitude_deg, "blocked_ranges": zones},
+        "sun_events": _sun_events(epochs, sun_altitude, timezone_offset_hours),
         "astronomical_night": _span_texts(
             _intervals_where_positive(epochs, dark_margin), timezone_offset_hours
         ),

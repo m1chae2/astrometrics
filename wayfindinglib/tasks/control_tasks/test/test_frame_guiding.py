@@ -134,3 +134,40 @@ def test_an_unknown_target_is_an_error() -> None:
     with patch("astrometricslib.Astrometrics", return_value=library):
         report = link_frames_to_guiding(_control([]), "Nope", FrameSelection(), 10)
     assert "No target" in report["error"]
+
+
+def test_image_quality_is_put_on_the_same_row_as_the_guide_error() -> None:
+    """Each frame's measured stars join its guiding numbers by file name."""
+    frames = [_frame(1, 1000.0), _frame(2, 1060.0)]
+    target = Target(id="T 1", frames=frames)
+    asked: dict[str, object] = {}
+
+    def frame_quality(**arguments: object) -> dict:
+        """Answer like the raw frame check, with one row per frame.
+
+        Returns
+        -------
+        report : `dict`
+            Rows for both frames, the second one flagged.
+        """
+        asked.update(arguments)
+        return {
+            "frames": [
+                {"path": "/x/T_1_001.fits", "star_count": 900, "fwhm_px": 3.1, "flags": []},
+                {"path": "/x/T_1_002.fits", "star_count": 400, "fwhm_px": 4.5, "flags": ["soft"]},
+            ]
+        }
+
+    diagnostics = SimpleNamespace(frame_quality=frame_quality)
+    library = SimpleNamespace(
+        targets=SimpleNamespace(get=lambda _id: target), processing=SimpleNamespace(diagnostics=diagnostics)
+    )
+    rows = _samples(1000.0, 20, 1.0) + _samples(1060.0, 20, 4.0)
+    with patch("astrometricslib.Astrometrics", return_value=library):
+        report = link_frames_to_guiding(_control(rows), "T 1", FrameSelection(), 50, include_quality=True)
+    first, second = report["frames"]
+    assert (asked["first_file"], asked["last_file"]) == ("T_1_001.fits", "T_1_002.fits")
+    assert first["star_count"] == 900
+    assert second["quality_flags"] == ["soft"]
+    assert second["rms_ra_arcsec"] == pytest.approx(4.0)
+    assert "2 frame(s)" in report["image_quality"]

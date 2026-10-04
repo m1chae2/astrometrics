@@ -15,6 +15,7 @@ from wayfindinglib.drivers.ekos.analyze_log_parser import parse_ekos_analyze_log
 from wayfindinglib.drivers.ekos.kstars_log_parser import parse_dither_events
 from wayfindinglib.models.session.live_session_status import LiveSessionStatus
 from wayfindinglib.session_analysis.live_status import summarize_live_session
+from wayfindinglib.tasks.control_tasks.night_history import EKOS_SECTIONS, MAXIMUM_LIMIT, ekos_sections
 
 logger = logging.getLogger(__name__)
 
@@ -63,8 +64,13 @@ def _newest_kstars_log(directory: str) -> str | None:
 
 
 def get_live_session_status(
-    observatory: Any, destination_dir: str, window_minutes: float = 10.0, refresh: bool = True
-) -> LiveSessionStatus | None:
+    observatory: Any,
+    destination_dir: str,
+    window_minutes: float = 10.0,
+    refresh: bool = True,
+    include: list[str] | None = None,
+    limit: int = 10,
+) -> LiveSessionStatus | dict[str, str] | None:
     """Read the live Ekos files and judge the current session.
 
     Parameters
@@ -78,12 +84,21 @@ def get_live_session_status(
     refresh : `bool`, optional
         Whether to download the latest logs first. `False` reads what is
         already in `destination_dir`.
+    include : `list` [`str`], optional
+        Sections of the Ekos record to attach under ``details`` (see
+        `night_history.EKOS_SECTIONS`), such as ``autofocus_runs``.
+    limit : `int`, optional
+        Most items kept per section; a longer list is sampled evenly.
 
     Returns
     -------
-    status : `LiveSessionStatus` or `None`
-        The session's status, or `None` if no readable analyze log exists.
+    status : `LiveSessionStatus`, `dict` or `None`
+        The session's status; ``{"error": ...}`` if `include` names an
+        unknown section; `None` if no readable analyze log exists.
     """
+    unknown = [name for name in (include or []) if name not in EKOS_SECTIONS]
+    if unknown:
+        return {"error": f"Unknown section(s) {unknown}. Choose from: {', '.join(EKOS_SECTIONS)}."}
     if refresh:
         driver = observatory.remote_transfer_driver
         for method_name in ("download_ekos_analyze_logs", "download_kstars_logs"):
@@ -103,7 +118,7 @@ def get_live_session_status(
 
     kstars_path = _newest_kstars_log(destination_dir)
     dithers = parse_dither_events(kstars_path) if kstars_path else []
-    return summarize_live_session(
+    status = summarize_live_session(
         context,
         guide_stats,
         dithers,
@@ -111,3 +126,8 @@ def get_live_session_status(
         kstars_log_file=os.path.basename(kstars_path) if kstars_path else None,
         window_seconds=window_minutes * 60.0,
     )
+    if include:
+        sections = ekos_sections(context, include, max(1, min(int(limit), MAXIMUM_LIMIT)))
+        sections.pop("overview", None)
+        status.details = sections
+    return status

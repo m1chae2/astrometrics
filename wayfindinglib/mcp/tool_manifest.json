@@ -303,6 +303,13 @@
       "merge_into": "",
       "interim_block": ""
     },
+    "observatory_frame_status": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "merge_into": "",
+      "interim_block": ""
+    },
     "observatory_get_commissioning_runs": {
       "tool_class": "observe",
       "category": "observatory-status",
@@ -322,7 +329,7 @@
       "category": "observatory-status",
       "disposition": "merge",
       "merge_into": "observatory_hardware_status",
-      "interim_block": ""
+      "interim_block": "Returned unknown because the MCP process has no hardware connection. Use app_status with the telescope section."
     },
     "observatory_get_equipment_configuration": {
       "tool_class": "observe",
@@ -336,14 +343,14 @@
       "category": "observatory-status",
       "disposition": "merge",
       "merge_into": "observatory_hardware_status",
-      "interim_block": ""
+      "interim_block": "Returned an empty list because the MCP process has no hardware connection. Use app_status with the telescope section for the current filter."
     },
     "observatory_get_focuser_position": {
       "tool_class": "observe",
       "category": "observatory-status",
       "disposition": "merge",
       "merge_into": "observatory_hardware_status",
-      "interim_block": ""
+      "interim_block": "Returned 0 because the MCP process has no hardware connection. Use app_status with the telescope section (focuser position, filter, pier side, tracking)."
     },
     "observatory_get_guide_image": {
       "tool_class": "observe",
@@ -800,6 +807,13 @@
       "merge_into": "planning_deep_catalog",
       "interim_block": ""
     },
+    "planning_find_sources": {
+      "tool_class": "observe",
+      "category": "planning-sessions",
+      "disposition": "keep",
+      "merge_into": "",
+      "interim_block": ""
+    },
     "planning_generate_mosaic_packages": {
       "tool_class": "change-data",
       "category": "planning-sessions",
@@ -830,9 +844,9 @@
     },
     "planning_get_imaged_field_centers": {
       "tool_class": "observe",
-      "category": "targets",
-      "disposition": "merge",
-      "merge_into": "target_query",
+      "category": "planning-sessions",
+      "disposition": "withhold",
+      "merge_into": "",
       "interim_block": ""
     },
     "planning_get_library_star_summaries": {
@@ -840,7 +854,7 @@
       "category": "planning-sessions",
       "disposition": "keep",
       "merge_into": "",
-      "interim_block": ""
+      "interim_block": "Returns every star in the circle, which can overflow the 40,000 character reply. Use planning_find_sources, which caps the list, brightest first."
     },
     "planning_get_meridian_status": {
       "tool_class": "observe",
@@ -861,7 +875,7 @@
       "category": "planning-sessions",
       "disposition": "keep",
       "merge_into": "",
-      "interim_block": ""
+      "interim_block": "Returns whole target records and every star, which overflows the 40,000 character reply. Use planning_find_sources, which caps the list, brightest first."
     },
     "planning_get_target_quality_advisory": {
       "tool_class": "observe",
@@ -891,6 +905,13 @@
       "merge_into": "",
       "interim_block": ""
     },
+    "planning_lookup_coordinates": {
+      "tool_class": "observe",
+      "category": "planning-sessions",
+      "disposition": "keep",
+      "merge_into": "",
+      "interim_block": ""
+    },
     "planning_plan_observation_session": {
       "tool_class": "change-data",
       "category": "planning-sessions",
@@ -910,7 +931,7 @@
       "category": "planning-sessions",
       "disposition": "keep",
       "merge_into": "",
-      "interim_block": ""
+      "interim_block": "Returns the whole target record, frames and all, which overflows the reply. Use planning_lookup_coordinates, which returns the position."
     }
   }
 }

@@ -89,3 +89,68 @@ def test_refresh_device_map_skips_empty_names_and_cleans_legacy_keys() -> None:
     assert "" not in mock_client.deviceMap
     assert "ZWO EFW" in mock_client.deviceMap
     assert mock_client.deviceMap["ZWO EFW"] is dev2
+
+
+class _FakeCamera(_FakeDevice):
+    """Fake camera with an exposure property and a reported sensor size."""
+
+    def __init__(self, name: str, width: int, height: int) -> None:
+        """Initialize the fake camera.
+
+        Parameters
+        ----------
+        name : `str`
+            The INDI device name.
+        width : `int`
+            Sensor width in pixels.
+        height : `int`
+            Sensor height in pixels.
+        """
+        super().__init__(name)
+        self._info = [
+            MagicMock(value=width, **{"name": "CCD_MAX_X"}),
+            MagicMock(value=height, **{"name": "CCD_MAX_Y"}),
+        ]
+        for element, key in zip(self._info, ("CCD_MAX_X", "CCD_MAX_Y"), strict=True):
+            element.name = key
+
+    def getNumber(self, property_name: str) -> Any:  # ruff: ignore[invalid-function-name]
+        """Return the fake property for CCD_EXPOSURE or CCD_INFO.
+
+        Parameters
+        ----------
+        property_name : `str`
+            INDI property name.
+
+        Returns
+        -------
+        property : `Any`
+            A truthy property, or `None` for other names.
+        """
+        if property_name == "CCD_INFO":
+            return self._info
+        return [object()] if property_name == "CCD_EXPOSURE" else None
+
+
+def _discovery_with_cameras(*cameras: _FakeCamera) -> DeviceDiscovery:
+    """Build a `DeviceDiscovery` over a client holding the given cameras.
+
+    Returns
+    -------
+    discovery : `DeviceDiscovery`
+        Discovery object bound to a fake connected client.
+    """
+    client = MagicMock()
+    client.isServerConnected.return_value = True
+    client.deviceMap = {camera.getDeviceName(): camera for camera in cameras}
+    return DeviceDiscovery(client)
+
+
+def test_main_camera_is_largest_sensor_when_guide_not_named() -> None:
+    """The ASI533 is the main camera even if the ASI120 is listed first."""
+    guide = _FakeCamera("ZWO CCD ASI120MC-S", 1280, 960)
+    main = _FakeCamera("ZWO CCD ASI533MM Pro", 3008, 3008)
+    discovery = _discovery_with_cameras(guide, main)
+
+    assert discovery.find_main_camera() is main
+    assert discovery.find_guide_camera() is guide

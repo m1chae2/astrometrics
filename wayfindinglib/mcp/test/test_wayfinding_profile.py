@@ -33,7 +33,7 @@ def test_investigator_profile_offers_no_device_command_or_writer() -> None:
     assert copy.tools
     for name in copy.tools:
         entry = manifest["tools"][name]
-        assert entry["tool_class"] in ("observe", "compute", "ingest"), name
+        assert entry["tool_class"] in ("observe", "compute", "ingest", "process"), name
         assert entry["category"] != "observatory-control", name
     for name in ("observatory_slew_to_target", "observatory_park", "observatory_capture_image"):
         assert name not in copy.tools

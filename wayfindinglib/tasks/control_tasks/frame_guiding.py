@@ -32,6 +32,20 @@ about 1.5 times the median and frames hit by a dither or drift were above 3."""
 MAXIMUM_FRAMES = 200
 """Most frames one answer covers."""
 
+MAXIMUM_QUALITY_FRAMES = 60
+"""Most frames whose image quality is measured in one answer. A frame takes
+about a second to measure, so a longer table would make the call slow."""
+
+QUALITY_COLUMNS = (
+    "star_count",
+    "fwhm_px",
+    "roundness",
+    "longest_trail_px",
+    "sky_median_adu",
+    "saturated_pixels",
+)
+"""The per-frame image measurements joined onto each guiding row."""
+
 
 def _iso(seconds: float) -> str:
     """Write a Unix time as an ISO 8601 UTC string.
@@ -83,11 +97,60 @@ def _window_statistics(samples: list[dict[str, Any]], exposure_seconds: float) -
     }
 
 
+def _add_image_quality(
+    astrometrics: Any, target: Any, selection: FrameSelection, frames: list[dict[str, Any]]
+) -> str:
+    """Measure the frames' images and put the numbers on the guiding rows.
+
+    Parameters
+    ----------
+    astrometrics : `Astrometrics`
+        The library, for the frame quality check.
+    target : `Target`
+        The target the frames belong to.
+    selection : `FrameSelection`
+        The same selection used for the guiding rows.
+    frames : `list` [`dict`]
+        The guiding rows, changed in place.
+
+    Returns
+    -------
+    note : `str`
+        What was done, including any frames left unmeasured.
+    """
+    wanted = [row["file"] for row in frames][:MAXIMUM_QUALITY_FRAMES]
+    report = astrometrics.processing.diagnostics.frame_quality(
+        target=target,
+        mode="raw_check",
+        filter_name=selection.filter_name,
+        first_file=wanted[0],
+        last_file=wanted[-1],
+        include_spectra=selection.include_spectra,
+        limit=len(wanted),
+    )
+    if "error" in report:
+        return f"Image quality could not be measured: {report['error']}"
+    by_file = {os.path.basename(row["path"]): row for row in report.get("frames", [])}
+    for row in frames:
+        measured = by_file.get(row["file"])
+        if measured is None:
+            continue
+        for column in QUALITY_COLUMNS:
+            row[column] = measured.get(column)
+        row["quality_flags"] = measured.get("flags", [])
+    unmeasured = len(frames) - sum(1 for row in frames if "star_count" in row)
+    note = f"Image quality measured for {len(frames) - unmeasured} frame(s)."
+    if unmeasured:
+        note += f" {unmeasured} frame(s) have no image measurement (limit {MAXIMUM_QUALITY_FRAMES} frames)."
+    return note
+
+
 def link_frames_to_guiding(
     control: Any,
     target_id: str,
     selection: FrameSelection,
     limit: int,
+    include_quality: bool = False,
 ) -> dict[str, Any]:
     """Report the guide error during each selected frame's exposure.
 
@@ -102,6 +165,11 @@ def link_frames_to_guiding(
     limit : `int`
         How many frames to cover, from 1 to `MAXIMUM_FRAMES`. With a range
         or time bound these are the first frames in it, otherwise the newest.
+    include_quality : `bool`, optional
+        Also measure each frame's image (star count, star width, roundness,
+        longest trail, sky level, saturated pixels, and the quality flags)
+        and put it on the same row. Slow: about a second a frame, so at
+        most `MAXIMUM_QUALITY_FRAMES` of the chosen frames.
 
     Returns
     -------
@@ -152,6 +220,10 @@ def link_frames_to_guiding(
             **_window_statistics(inside, exposure_seconds),
         })
 
+    quality_note = None
+    if include_quality:
+        quality_note = _add_image_quality(Astrometrics(control._config), target, selection, frames)
+
     measured = [row["rms_total_arcsec"] for row in frames if row.get("rms_total_arcsec") is not None]
     median_error = statistics.median(measured) if measured else None
     worse = []
@@ -171,5 +243,6 @@ def link_frames_to_guiding(
             "A frame's window runs from its recorded start time for its exposure length. Only guide-log "
             "samples count. Frames outside the ingested guide logs show guide_samples of 0."
         ),
+        "image_quality": quality_note,
         "frames": frames,
     }

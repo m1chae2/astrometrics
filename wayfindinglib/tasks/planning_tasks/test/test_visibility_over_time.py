@@ -172,3 +172,22 @@ def test_one_moment_gives_the_single_time_answer() -> None:
     assert now["hour_angle_hours"] == pytest.approx(-2.0, abs=0.01)
     assert now["flip_required"] is False
     assert now["time_to_flip_seconds"] == pytest.approx(7200.0, abs=60.0)
+
+
+def test_twilight_stages_come_in_order_and_end_where_the_dark_span_starts() -> None:
+    """Sunset, then civil, nautical and astronomical twilight, going down."""
+    sky = _sky()
+    table = _table(sky, _object_crossing_after(sky, 6.0))
+    events = table["sun_events"]
+    going_down = [event for event in events if event["going"] == "down"]
+    assert [event["event"].split("(")[1] for event in going_down] == [
+        "sunset or sunrise)",
+        "civil twilight)",
+        "nautical twilight)",
+        "astronomical twilight)",
+    ]
+    times = [event["time"] for event in going_down]
+    assert times == sorted(times)
+    last = datetime.fromisoformat(going_down[-1]["time"])
+    night_start = datetime.fromisoformat(table["astronomical_night"][0]["from"])
+    assert abs((last - night_start).total_seconds()) < 30 * 60

@@ -16,6 +16,10 @@ already uses elsewhere.
 """
 
 import os
+import threading
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any, Literal
 
 # Matches the private `_CalibrationKind` literal that
@@ -403,6 +407,80 @@ def plan_target_download(observatory, target_id: str) -> dict[str, Any]:  # ruff
     }
 
 
+PROGRESS_POLL_SECONDS = 3.0
+"""How often a running sync counts the files that have arrived."""
+
+
+@contextmanager
+def report_download_progress(folder: str, expected: int) -> Iterator[None]:
+    """Report a download's progress to the running job while it transfers.
+
+    A frame sync can take minutes, and rsync itself reports nothing to the
+    job. This counts the FITS files that appear in `folder` after the
+    transfer began and updates the job's progress and message every few
+    seconds. When the code is not running as a background job there is no
+    job to update and nothing happens.
+
+    Parameters
+    ----------
+    folder : `str`
+        The local folder the files arrive in.
+    expected : `int`
+        How many files the transfer should bring.
+
+    Yields
+    ------
+    None
+        Control, while the progress thread runs.
+    """
+    from astrometricslib import get_current_job
+
+    job = get_current_job()
+    if job is None or expected <= 0:
+        yield
+        return
+    started = time.time()
+    stop = threading.Event()
+
+    def count_arrived() -> int:
+        """Count the FITS files in the folder newer than the transfer start.
+
+        Returns
+        -------
+        count : `int`
+            How many have arrived so far.
+        """
+        arrived = 0
+        for root, _, files in os.walk(folder):
+            for name in files:
+                if name.lower().endswith((".fits", ".fit")):
+                    try:
+                        if os.path.getmtime(os.path.join(root, name)) >= started:
+                            arrived += 1
+                    except OSError:
+                        continue
+        return arrived
+
+    def watch() -> None:
+        """Update the job until told to stop."""
+        while not stop.wait(PROGRESS_POLL_SECONDS):
+            arrived = min(count_arrived(), expected)
+            job.mark(
+                "running",
+                arrived,
+                progress_total=expected,
+                message=f"{arrived} of {expected} frames transferred",
+            )
+
+    thread = threading.Thread(target=watch, daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        thread.join(timeout=PROGRESS_POLL_SECONDS + 1.0)
+
+
 def sync_target_frames(observatory, target_id: str, dry_run: bool = True) -> dict[str, Any]:  # ruff: ignore[missing-type-function-argument]
     """Bring one target's new frames into the library.
 
@@ -442,7 +520,22 @@ def sync_target_frames(observatory, target_id: str, dry_run: bool = True) -> dic
         require_mounted_storage(os.path.join(str(get_configuration().get_frames_path()), "lights"))
     except StorageNotMountedError as error:
         return {**result, "success": False, "transferred": 0, "error": str(error)}
-    success = download_remote_targets(observatory, target_id, incremental=True, prune_missing=False)
+    from astrometricslib import get_current_job
+
+    job = get_current_job()
+    if job is not None:
+        job.info(f"Transferring {plan['to_transfer']} of {plan['remote_files']} frame(s) of {target_id}.")
+    folder = os.path.join(str(get_configuration().get_frames_path()), "lights", plan["remote_folder"])
+    with report_download_progress(folder, plan["to_transfer"]):
+        success = download_remote_targets(
+            observatory,
+            target_id,
+            incremental=True,
+            prune_missing=False,
+            log_callback=job.info if job is not None else None,
+        )
+    if job is not None:
+        job.info("Transfer finished." if success else "Transfer failed.")
     return {**result, "success": bool(success), "transferred": plan["to_transfer"] if success else 0}
 
 

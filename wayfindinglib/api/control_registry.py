@@ -1329,6 +1329,7 @@ class ObservatoryControl:
         """
         return self._butler.get("ekos_session_context", {"id": session_file_id})
 
+    @background_job("diagnostics", grace_period_seconds=20.0)
     def night_history(
         self,
         kind: str,
@@ -1389,6 +1390,7 @@ class ObservatoryControl:
         since: str | None = None,
         until: str | None = None,
         limit: int = 60,
+        include_quality: bool = False,
     ) -> dict[str, Any]:
         """Report the guide error during each light frame's exposure.
 
@@ -1419,6 +1421,12 @@ class ObservatoryControl:
         limit : `int`, optional
             How many frames to cover, from 1 to 200. With a range or time
             these are the first frames inside it; otherwise the newest.
+        include_quality : `bool`, optional
+            Also put each frame's image measurements on its row: star
+            count, star width (``fwhm_px``), roundness, longest trail, sky
+            level, saturated pixels and quality flags. This gives one
+            table of image quality and guide error per frame. Slow (about
+            a second a frame), so at most 60 frames are measured.
 
         Returns
         -------
@@ -1439,7 +1447,7 @@ class ObservatoryControl:
             )
         except ValueError as error:
             return {"error": f"since and until must be ISO 8601 times: {error}"}
-        return frame_guiding.link_frames_to_guiding(self, target_id, selection, limit)
+        return frame_guiding.link_frames_to_guiding(self, target_id, selection, limit, include_quality)
 
     def list_ekos_session_summaries(self) -> list[dict[str, Any]]:
         """Summarise every recorded Ekos session, without their full detail.
@@ -1471,7 +1479,12 @@ class ObservatoryControl:
         ]
 
     def get_live_session_status(
-        self, window_minutes: float = 10.0, refresh: bool = True, destination_dir: str | None = None
+        self,
+        window_minutes: float = 10.0,
+        refresh: bool = True,
+        destination_dir: str | None = None,
+        include: list[str] | None = None,
+        limit: int = 10,
     ) -> dict[str, Any]:
         """Report how the current observing session is going, right now.
 
@@ -1497,6 +1510,18 @@ class ObservatoryControl:
         destination_dir : `str` or `None`, optional
             Local folder for the logs. Defaults to ``ekos_logs`` inside
             this library's own data folder.
+        include : `list` [`str`], optional
+            Sections of tonight's Ekos record to add under ``details``, so
+            the reason behind a flag can be read: ``captures``,
+            ``aborted_captures``, ``autofocus_runs`` (with each run's
+            focus curve and whether it succeeded), ``align_events``,
+            ``guide_state_events``, ``mount_state_events``,
+            ``temperatures`` and ``mount_positions`` (declination,
+            altitude, azimuth and pier side over time). Times are Unix
+            seconds.
+        limit : `int`, optional
+            Most items per section, from 1 to 50. A longer list is sampled
+            evenly, keeping the first and last. Defaults to 10.
 
         Returns
         -------
@@ -1510,11 +1535,20 @@ class ObservatoryControl:
         if destination_dir is None:
             destination_dir = str(local_database._wayfinding_library_path(self._config) / "ekos_logs")
         status = live_session_status_task.get_live_session_status(
-            self, destination_dir, window_minutes=window_minutes, refresh=refresh
+            self,
+            destination_dir,
+            window_minutes=window_minutes,
+            refresh=refresh,
+            include=include,
+            limit=limit,
         )
         if status is None:
             return {"error": f"No readable Ekos analyze log found in {destination_dir}."}
-        return status.model_dump(mode="json")
+        if isinstance(status, dict):
+            return status
+        from wayfindinglib.tasks.control_tasks.night_history import fit_to_budget
+
+        return fit_to_budget(status.model_dump(mode="json"))
 
     def ingest_ekos_session_logs(
         self, destination_dir: str | None = None, download: bool = True
@@ -2632,6 +2666,28 @@ class ObservatoryControl:
 
         astrometrics = Astrometrics(self._config)
         return remote_transfer_tasks.discover_unassociated_remote_targets(self, astrometrics.targets)
+
+    def frame_status(self, target_id: str) -> dict[str, Any]:
+        """Show where a target's frames are: telescope, drive, library.
+
+        One call gives the count in each place and the frames that are in
+        one place but not the next, so a missing frame can be traced to the
+        step that lost it. It reads only. If the telescope computer cannot
+        be reached, the drive and library parts are still given.
+
+        Parameters
+        ----------
+        target_id : `str`
+            The target, such as ``"M 57"``.
+
+        Returns
+        -------
+        status : `dict` [`str`, `Any`]
+            The counts and the differences, with a few file names each.
+        """
+        from wayfindinglib.tasks.control_tasks import frame_status
+
+        return frame_status.build_frame_status(self, target_id)
 
     @background_job("remote_sync", grace_period_seconds=8.0)
     def sync_remote_frames(self, target_id: str, dry_run: bool = True) -> dict[str, Any]:

@@ -7,8 +7,11 @@ a real SSH-reachable host.
 """
 
 import os
+import time
 from pathlib import Path
 from unittest.mock import ANY, Mock, patch
+
+import pytest
 
 from wayfindinglib.tasks.control_tasks import remote_transfer_tasks as remote_operations
 
@@ -790,3 +793,38 @@ def test_log_sync_refuses_when_the_telescope_computer_is_unreachable(tmp_path: P
         result = remote_operations.sync_remote_logs(observatory, dry_run=False)
     assert "cannot be reached" in result["error"]
     assert observatory.ingested == []
+
+
+def test_download_progress_is_reported_to_the_running_job(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """New files in the folder show up as the job's progress and message."""
+    marks: list[tuple[str, int, int | None, str | None]] = []
+
+    class FakeJob:
+        """A job that records the progress it is given."""
+
+        def mark(
+            self, status: str, progress: int, *, progress_total: int | None = None, message: str | None = None
+        ) -> None:
+            """Record one progress report."""
+            marks.append((status, progress, progress_total, message))
+
+    monkeypatch.setattr("astrometricslib.get_current_job", lambda: FakeJob())
+    monkeypatch.setattr(remote_operations, "PROGRESS_POLL_SECONDS", 0.05)
+    with remote_operations.report_download_progress(str(tmp_path), expected=3):
+        (tmp_path / "a.fits").write_bytes(b"x")
+        (tmp_path / "b.fits").write_bytes(b"x")
+        time.sleep(0.3)
+    assert marks
+    assert marks[-1][1:3] == (2, 3)
+    assert marks[-1][3] == "2 of 3 frames transferred"
+
+
+def test_download_progress_does_nothing_outside_a_job(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With no running job the block just runs."""
+    monkeypatch.setattr("astrometricslib.get_current_job", lambda: None)
+    with remote_operations.report_download_progress(str(tmp_path), expected=3):
+        pass

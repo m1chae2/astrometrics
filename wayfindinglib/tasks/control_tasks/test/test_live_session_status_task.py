@@ -108,3 +108,22 @@ def test_no_analyze_log_gives_no_status(tmp_path: Path) -> None:
     """An empty or missing folder returns `None`, not an error."""
     assert task.get_live_session_status(None, str(tmp_path), refresh=False) is None
     assert task.get_live_session_status(None, os.path.join(str(tmp_path), "absent"), refresh=False) is None
+
+
+def test_asked_sections_of_the_record_come_back_under_details(tmp_path: Path) -> None:
+    """The mount positions are attached, and nothing else is."""
+    _populate(tmp_path)
+
+    status = task.get_live_session_status(None, str(tmp_path), refresh=False, include=["mount_positions"])
+
+    assert status is not None
+    assert set(status.details) == {"mount_positions"}
+    assert status.details["mount_positions"]["total"] == 1
+
+
+def test_an_unknown_section_is_refused_before_any_file_is_read(tmp_path: Path) -> None:
+    """A made-up section name gives an error that lists the real ones."""
+    answer = task.get_live_session_status(None, str(tmp_path), refresh=False, include=["bogus"])
+
+    assert isinstance(answer, dict)
+    assert "autofocus_runs" in answer["error"]

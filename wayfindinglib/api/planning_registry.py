@@ -15,6 +15,7 @@ import uuid
 from datetime import UTC, date, datetime
 from typing import Any
 
+from astrometricslib import background_job
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.models.equipment_and_site.calibration import CalibrationAdvisory
 from wayfindinglib.models.equipment_and_site.equipment import EquipmentConfiguration, Telescope
@@ -41,6 +42,10 @@ from wayfindinglib.models.session.observation_session import (
 __all__ = [
     "ObservationPlanning",
 ]
+
+
+MAXIMUM_SOURCES = 300
+"""Most stars one `ObservationPlanning.find_sources` answer lists."""
 
 
 class ObservationPlanning:
@@ -129,6 +134,126 @@ class ObservationPlanning:
             The resolved target or stellar object.
         """
         return self._sky_engine.resolve_target_coordinates(target_name)
+
+    def lookup_coordinates(self, target_name: str) -> dict[str, Any]:
+        """Find where a named object is, from the library or SIMBAD.
+
+        Gives a short answer. `resolve_target_coordinates` returns the
+        whole target record, frames and all, which is far more than a
+        position needs.
+
+        Parameters
+        ----------
+        target_name : `str`
+            A target id, a common name, or a star name.
+
+        Returns
+        -------
+        position : `dict` [`str`, `Any`]
+            ``id``, ``name``, ``kind`` (``"target"`` or ``"star"``), and
+            the position in degrees (``ra_deg``, ``dec_deg``) and as text.
+            A name that cannot be resolved comes back under ``error``.
+        """
+        from astrometricslib import parse_coordinate_string
+
+        try:
+            found = self._sky_engine.resolve_target_coordinates(target_name)
+        except Exception as error:
+            return {"error": str(error)}
+        if hasattr(found, "right_ascension"):
+            return {
+                "id": found.id,
+                "name": found.name,
+                "kind": "star",
+                "ra_deg": round(float(found.right_ascension), 6),
+                "dec_deg": round(float(found.declination), 6),
+                "magnitude": found.magnitude,
+                "spectral_type": found.spectral_type,
+            }
+        return {
+            "id": found.id,
+            "name": found.common_name or None,
+            "kind": "target",
+            "ra_deg": round(parse_coordinate_string(found.ra, True), 6),
+            "dec_deg": round(parse_coordinate_string(found.dec, False), 6),
+            "ra": found.ra,
+            "dec": found.dec,
+        }
+
+    def find_sources(
+        self,
+        ra_deg: float,
+        dec_deg: float,
+        radius_deg: float,
+        magnitude_min: float | None = None,
+        magnitude_max: float | None = None,
+        include_targets: bool = True,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        """List the library's targets and stars near a point, capped.
+
+        Replaces `get_sources` and `get_library_star_summaries` for a client
+        that cannot take a long list. Stars come brightest first and the
+        list is cut at ``limit``, with the total reported so the cut is
+        never silent.
+
+        Parameters
+        ----------
+        ra_deg : `float`
+            Right ascension of the centre, in degrees.
+        dec_deg : `float`
+            Declination of the centre, in degrees.
+        radius_deg : `float`
+            Search radius, in degrees.
+        magnitude_min : `float`, optional
+            Keep stars at least this magnitude (numerically).
+        magnitude_max : `float`, optional
+            Keep stars no fainter than this magnitude.
+        include_targets : `bool`, optional
+            Also list the library targets in the circle.
+        limit : `int`, optional
+            Most stars to list, from 1 to 300. Defaults to 100.
+
+        Returns
+        -------
+        answer : `dict` [`str`, `Any`]
+            ``targets`` (id, name, position), ``stars`` (the summary rows),
+            ``stars_total`` and whether the star list was cut.
+        """
+        from astrometricslib import parse_coordinate_string
+
+        limit = max(1, min(int(limit), MAXIMUM_SOURCES))
+        magnitude_range = None
+        if magnitude_min is not None or magnitude_max is not None:
+            magnitude_range = (
+                magnitude_min if magnitude_min is not None else -30.0,
+                magnitude_max if magnitude_max is not None else 60.0,
+            )
+        stars = list(
+            self._sky_engine.get_library_star_summaries(ra_deg, dec_deg, radius_deg, magnitude_range)
+        )
+        stars.sort(key=lambda row: (row.get("magnitude") is None, row.get("magnitude") or 0.0))
+        answer: dict[str, Any] = {
+            "stars_total": len(stars),
+            "stars_truncated": len(stars) > limit,
+            "stars": stars[:limit],
+        }
+        if include_targets:
+            targets = []
+            for target in self._sky_engine.get_sources(ra_deg, dec_deg, radius_deg, False, False):
+                try:
+                    ra = parse_coordinate_string(target.ra, True)
+                    dec = parse_coordinate_string(target.dec, False)
+                except TypeError, ValueError:
+                    ra = dec = None
+                targets.append({
+                    "id": target.id,
+                    "name": getattr(target, "common_name", None) or None,
+                    "ra_deg": ra,
+                    "dec_deg": dec,
+                })
+            answer["targets"] = targets
+        return answer
 
     def get_sources(
         self,
@@ -250,6 +375,7 @@ class ObservationPlanning:
 
         return _build_deep_star_catalog(self._butler.config, **kwargs)
 
+    @background_job("planning", grace_period_seconds=20.0)
     def estimate_deep_catalog_size(self, **kwargs: Any) -> dict[str, Any]:
         """Guess how big the finished deep-star catalog will be.
 

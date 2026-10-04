@@ -7,20 +7,27 @@ so two group stacks of the same field are not lined up with each other. On the
 smear every star. This module finds the offset of each group stack against a
 reference group stack and moves it onto the reference.
 
-Only a shift is measured. Frames in one session share a rotation, and a
-shift-only alignment matches what the spectral registration already assumes
-(see `run_siril_stack`). A group whose offset cannot be found is reported, so
-the caller can leave it out rather than blur the stack with it.
+The first measurement is a shift. Frames in one session share a rotation,
+and a shift-only alignment matches what the spectral registration already
+assumes (see `run_siril_stack`). Stacks of different nights are not that
+simple: the camera sits at a slightly different angle and the focus changes
+the scale a little. For imaging stacks the shift is therefore refined by
+matching the stars of the two stacks and fitting a shift, a rotation and a
+scale (see `refine_alignment_with_stars`). A group whose offset cannot be
+found is reported, so the caller can leave it out rather than blur the stack
+with it.
 
 Everything here works on arrays and returns arrays; reading and writing files
 is left to the caller.
 """
 
+import math
 from dataclasses import dataclass
 
 import numpy as np
-from scipy.ndimage import gaussian_filter
+from scipy.ndimage import affine_transform, gaussian_filter, maximum_filter
 from scipy.ndimage import shift as shift_image
+from scipy.spatial import cKDTree
 from skimage.registration import phase_cross_correlation
 
 # Structure wider than this many pixels (background gradients, nebulosity) is
@@ -114,6 +121,70 @@ ZERO_ORDER_CENTROID_FRACTION_OF_PEAK = 0.5
 ZERO_ORDER_RIVAL_SEPARATION_PIXELS = 40
 ZERO_ORDER_MAX_RIVAL_FRACTION = 0.5
 
+# Refining the offset with the stars themselves (imaging stacks only).
+#
+# A shift cannot describe two stacks of different nights. On M 57 (2026-10-03)
+# the 30 s group and the 60 s group differ by -0.040 degrees of rotation and
+# +0.022% of scale. On M 27 the 30 s and 60 s groups differ from the 127.8 s
+# group by 0.053 and -0.004 degrees and by -0.012% and -0.052% of scale. With
+# the best shift alone, stars were still 0.86 px (M 57) and 1.09 px and
+# 0.61 px (M 27) off on average (root mean square), up to 1.9 px toward the
+# edges of the frame. Fitting a shift, a rotation and a scale to the 368 to
+# 375 stars matched in each pair left 0.05 to 0.06 px. The constants below
+# were chosen on those three pairs; no other targets have been checked.
+
+# The brightest this many stars of each stack are matched. On the three pairs
+# above, 368 to 375 of 400 found a partner (92 to 94%).
+REFINEMENT_STAR_COUNT = 400
+
+# A star must rise this many robust sigmas above the smoothed,
+# background-subtracted image. At 12 sigma the M 57 60 s stack had about 7,000
+# candidates, far more than are used, so the faintest of the 400 chosen are
+# still well above the noise.
+REFINEMENT_DETECTION_SIGMAS = 12.0
+
+# Stars above this share of the image's 99.99th percentile are skipped: a
+# saturated star is a flat plateau, and the centre of a plateau is not where
+# the star is once another stack has replaced its core.
+REFINEMENT_SATURATION_FRACTION = 0.9
+
+# Stars closer than this to the frame edge are skipped, so the centroid window
+# stays inside the frame and clear of the zero-filled border a shift leaves.
+REFINEMENT_EDGE_MARGIN_PIXELS = 60
+
+# Half the width of the window in which a star's centre is measured, and the
+# share of the window's peak below which a pixel is ignored. A star with a
+# FWHM of 2 to 3 px has almost all of its light within 4 px.
+REFINEMENT_CENTROID_HALF_WINDOW_PIXELS = 4
+REFINEMENT_CENTROID_FLOOR_FRACTION = 0.2
+
+# A star in one stack matches one in the other when, after the first shift,
+# they lie within this many pixels. The largest miss of the first shift on the
+# three pairs was 1.9 px, and 3 px is far below the spacing of the 400
+# brightest stars (about 150 px).
+REFINEMENT_MATCH_RADIUS_PIXELS = 3.0
+
+# At least this many matched stars are needed. The fit has four unknowns and
+# real pairs gave 368 to 375, so 30 is a wide margin that still refuses a
+# match made from a handful of chance coincidences.
+REFINEMENT_MINIMUM_PAIRS = 30
+
+# The fit is repeated after dropping stars farther than this many robust sigmas
+# from it, up to this many times, so a mismatched pair does not tilt it.
+REFINEMENT_CLIP_SIGMAS = 3.0
+REFINEMENT_CLIP_PASSES = 3
+
+# A rotation or scale outside these limits is not believed and the plain shift
+# is kept. The largest seen was 0.053 degrees and 0.052% (0.0005); the limits
+# are about ten times that, so a real camera change passes and a wrong match
+# (or a different camera setup) does not.
+REFINEMENT_MAX_ROTATION_DEGREES = 0.5
+REFINEMENT_MAX_SCALE_DEVIATION = 0.005
+
+# The fit is believed only if the stars it leaves behind are this close to
+# their partners (root mean square). The three real pairs left 0.05 to 0.06 px.
+REFINEMENT_MAX_RESIDUAL_PIXELS = 0.5
+
 
 @dataclass
 class AlignmentResult:
@@ -135,12 +206,44 @@ class AlignmentResult:
         than the result of correlating the images. Such an offset is trusted
         without the correlation test, since the images may look very
         different (a saturated long exposure against a faint short one).
+    rotation_degrees : `float`
+        How far the image must turn about its centre, in degrees, to line up
+        with the reference. Positive turns from the +column axis toward the
+        +row axis. Zero unless `refine_alignment_with_stars` found a rotation.
+    scale : `float`
+        The factor by which the image must be enlarged about its centre to
+        line up with the reference. One unless the refinement found a scale.
+    star_pairs : `int`
+        How many matched stars the refinement used. Zero without refinement.
+    residual_pixels : `float` or `None`
+        How far the matched stars still lie from their partners after the
+        move (root mean square), when the refinement ran.
+
+    Notes
+    -----
+    With a rotation or a scale, the shifts are those of the image centre, and
+    the rotation and scale are applied about that centre.
     """
 
     shift_rows_pixels: float
     shift_columns_pixels: float
     correlation: float
     is_star_based: bool = False
+    rotation_degrees: float = 0.0
+    scale: float = 1.0
+    star_pairs: int = 0
+    residual_pixels: float | None = None
+
+    @property
+    def has_rotation_or_scale(self) -> bool:
+        """Whether the move is more than a shift.
+
+        Returns
+        -------
+        has_rotation_or_scale : `bool`
+            `True` when the refinement found a rotation or a scale.
+        """
+        return not (math.isclose(self.rotation_degrees, 0.0, abs_tol=1e-12) and math.isclose(self.scale, 1.0))
 
     @property
     def trusted(self) -> bool:
@@ -249,6 +352,216 @@ def find_zero_order_position(plane: np.ndarray) -> tuple[float, float] | None:
     return (
         float((weights * window_rows).sum() / total),
         float((weights * window_columns).sum() / total),
+    )
+
+
+def detect_star_centroids(plane: np.ndarray, count: int = REFINEMENT_STAR_COUNT) -> np.ndarray:
+    """Find the centres of the brightest isolated stars in a stacked image.
+
+    Parameters
+    ----------
+    plane : `numpy.ndarray`
+        A 2-D stacked image.
+    count : `int`, optional
+        How many of the brightest stars to return.
+
+    Returns
+    -------
+    centroids : `numpy.ndarray`
+        An array of shape ``(n, 2)`` with each star's (row, column), brightest
+        first. Saturated stars, and stars near the frame edge, are left out
+        (see `REFINEMENT_SATURATION_FRACTION` and
+        `REFINEMENT_EDGE_MARGIN_PIXELS`). Empty when no star is found.
+    """
+    image = np.nan_to_num(np.asarray(plane, dtype=np.float64))
+    flat = image - gaussian_filter(image, 20)
+    smooth = gaussian_filter(flat, 1.5)
+    sigma = 1.4826 * float(np.median(np.abs(smooth - np.median(smooth))))
+    if sigma <= 0:
+        return np.empty((0, 2))
+    top = float(np.percentile(image, 99.99))
+    is_peak = (
+        (maximum_filter(smooth, size=15) == smooth)
+        & (smooth > REFINEMENT_DETECTION_SIGMAS * sigma)
+        & (image < REFINEMENT_SATURATION_FRACTION * top)
+    )
+    rows, columns = np.nonzero(is_peak)
+    margin = REFINEMENT_EDGE_MARGIN_PIXELS
+    inside = (
+        (rows > margin)
+        & (rows < image.shape[0] - margin)
+        & (columns > margin)
+        & (columns < image.shape[1] - margin)
+    )
+    rows, columns = rows[inside], columns[inside]
+    brightest_first = np.argsort(smooth[rows, columns])[::-1][:count]
+    half = REFINEMENT_CENTROID_HALF_WINDOW_PIXELS
+    centroids = []
+    for row, column in zip(rows[brightest_first], columns[brightest_first], strict=True):
+        window = flat[row - half : row + half + 1, column - half : column + half + 1]
+        weights = np.clip(window - REFINEMENT_CENTROID_FLOOR_FRACTION * window.max(), 0.0, None)
+        total = float(weights.sum())
+        if total <= 0:
+            continue
+        window_rows, window_columns = np.mgrid[row - half : row + half + 1, column - half : column + half + 1]
+        centroids.append((
+            float((weights * window_rows).sum() / total),
+            float((weights * window_columns).sum() / total),
+        ))
+    return np.array(centroids).reshape(-1, 2)
+
+
+def _match_stars(
+    reference_stars: np.ndarray,
+    image_stars: np.ndarray,
+    shift_rows_pixels: float,
+    shift_columns_pixels: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Pair each star of the image with the nearest star of the reference.
+
+    The image's stars are first moved by the given shift. A pair is kept when
+    the two lie within `REFINEMENT_MATCH_RADIUS_PIXELS`, and each reference
+    star is used once (by the closest of the image stars that claim it).
+
+    Returns
+    -------
+    reference_points, image_points : `numpy.ndarray`
+        The matched (row, column) positions, one row per pair, the image's
+        positions as they were before the shift.
+    """
+    if len(reference_stars) == 0 or len(image_stars) == 0:
+        return np.empty((0, 2)), np.empty((0, 2))
+    predicted = image_stars + np.array([shift_rows_pixels, shift_columns_pixels])
+    distances, nearest = cKDTree(reference_stars).query(
+        predicted, distance_upper_bound=REFINEMENT_MATCH_RADIUS_PIXELS
+    )
+    claimed: dict[int, tuple[float, int]] = {}
+    for image_index, (distance, reference_index) in enumerate(zip(distances, nearest, strict=True)):
+        if not np.isfinite(distance):
+            continue
+        if reference_index not in claimed or distance < claimed[reference_index][0]:
+            claimed[int(reference_index)] = (float(distance), image_index)
+    reference_indices = np.array(list(claimed.keys()), dtype=int)
+    image_indices = np.array([claimed[index][1] for index in reference_indices], dtype=int)
+    return reference_stars[reference_indices], image_stars[image_indices]
+
+
+def _fit_similarity(
+    reference_points: np.ndarray, image_points: np.ndarray
+) -> tuple[complex, complex, np.ndarray] | None:
+    """Fit ``reference = a * image + b`` to matched star positions.
+
+    Positions are written as complex numbers ``column + 1j * row``, so that
+    multiplying by ``a`` turns by ``angle(a)`` and enlarges by ``abs(a)``. The
+    fit is repeated after dropping stars far from it (see
+    `REFINEMENT_CLIP_SIGMAS`).
+
+    Returns
+    -------
+    fit : `tuple` or `None`
+        ``(a, b, kept)``: the two complex numbers and a boolean mask of the
+        pairs the final fit used. `None` when fewer than
+        `REFINEMENT_MINIMUM_PAIRS` pairs remain.
+    """
+    image_complex = image_points[:, 1] + 1j * image_points[:, 0]
+    reference_complex = reference_points[:, 1] + 1j * reference_points[:, 0]
+    kept = np.ones(len(image_complex), dtype=bool)
+    a = b = 0j
+    for _ in range(REFINEMENT_CLIP_PASSES):
+        if kept.sum() < REFINEMENT_MINIMUM_PAIRS:
+            return None
+        design = np.vstack([image_complex[kept], np.ones(int(kept.sum()), dtype=complex)]).T
+        (a, b), *_ = np.linalg.lstsq(design, reference_complex[kept], rcond=None)
+        residual = np.abs(reference_complex - (a * image_complex + b))
+        spread = 1.4826 * float(np.median(residual[kept]))
+        limit = max(REFINEMENT_CLIP_SIGMAS * spread, 1e-6)
+        new_kept = residual <= limit
+        if np.array_equal(new_kept, kept):
+            break
+        kept = new_kept
+    if kept.sum() < REFINEMENT_MINIMUM_PAIRS:
+        return None
+    return complex(a), complex(b), kept
+
+
+def refine_alignment_with_stars(
+    reference: np.ndarray,
+    image: np.ndarray,
+    initial: AlignmentResult,
+    reference_stars: np.ndarray | None = None,
+) -> AlignmentResult:
+    """Improve a shift by fitting the stars' shift, rotation and scale.
+
+    The stars of both images are found, paired using the initial shift, and a
+    shift, a rotation and a scale (a similarity transform) are fitted to the
+    pairs. The fit replaces the initial result only when it is believable and
+    leaves the stars closer together than the initial shift did: at least
+    `REFINEMENT_MINIMUM_PAIRS` pairs, a rotation and scale within the limits,
+    and a leftover under `REFINEMENT_MAX_RESIDUAL_PIXELS`. Otherwise the
+    initial result is returned unchanged.
+
+    Parameters
+    ----------
+    reference : `numpy.ndarray`
+        The stack to line up with, 2-D or colour (channels first).
+    image : `numpy.ndarray`
+        The stack to move, the same shape as `reference`.
+    initial : `AlignmentResult`
+        The shift measured by `measure_alignment`. It must be accurate to
+        within `REFINEMENT_MATCH_RADIUS_PIXELS` for the stars to pair up.
+    reference_stars : `numpy.ndarray`, optional
+        The reference's star centres from `detect_star_centroids`, when the
+        caller has them already (one reference serves many images).
+
+    Returns
+    -------
+    result : `AlignmentResult`
+        The refined result, with the shifts given for the image centre and the
+        rotation, scale, pair count and leftover filled in, or `initial`.
+    """
+    if reference_stars is None:
+        reference_stars = detect_star_centroids(_to_plane(reference))
+    image_stars = detect_star_centroids(_to_plane(image))
+    reference_points, image_points = _match_stars(
+        reference_stars, image_stars, initial.shift_rows_pixels, initial.shift_columns_pixels
+    )
+    if len(reference_points) < REFINEMENT_MINIMUM_PAIRS:
+        return initial
+    fit = _fit_similarity(reference_points, image_points)
+    if fit is None:
+        return initial
+    a, b, kept = fit
+    rotation_degrees = float(np.degrees(np.angle(a)))
+    if (
+        abs(rotation_degrees) > REFINEMENT_MAX_ROTATION_DEGREES
+        or abs(abs(a) - 1.0) > REFINEMENT_MAX_SCALE_DEVIATION
+    ):
+        return initial
+    image_complex = image_points[:, 1] + 1j * image_points[:, 0]
+    reference_complex = reference_points[:, 1] + 1j * reference_points[:, 0]
+    fitted_residual = float(
+        np.sqrt(np.mean(np.abs(reference_complex[kept] - (a * image_complex[kept] + b)) ** 2))
+    )
+    shift_only = reference_points[kept] - (
+        image_points[kept] + [initial.shift_rows_pixels, initial.shift_columns_pixels]
+    )
+    shift_only_residual = float(np.sqrt(np.mean((shift_only**2).sum(axis=1))))
+    if fitted_residual > REFINEMENT_MAX_RESIDUAL_PIXELS or fitted_residual >= shift_only_residual:
+        return initial
+    # Express the move about the image centre: the centre goes to
+    # a * centre + b, so it is displaced by that minus where it started.
+    plane_shape = np.shape(image)[-2:]
+    centre = (plane_shape[1] - 1) / 2.0 + 1j * (plane_shape[0] - 1) / 2.0
+    centre_shift = a * centre + b - centre
+    return AlignmentResult(
+        shift_rows_pixels=float(centre_shift.imag),
+        shift_columns_pixels=float(centre_shift.real),
+        correlation=initial.correlation,
+        is_star_based=initial.is_star_based,
+        rotation_degrees=rotation_degrees,
+        scale=float(abs(a)),
+        star_pairs=int(kept.sum()),
+        residual_pixels=fitted_residual,
     )
 
 
@@ -372,11 +685,65 @@ def apply_shift(
     return shifted, covered
 
 
+def apply_alignment(
+    image: np.ndarray, result: AlignmentResult, order: int = 3
+) -> tuple[np.ndarray, np.ndarray]:
+    """Move an image onto the reference by the shift, rotation and scale found.
+
+    With no rotation or scale this is `apply_shift`. Otherwise the image is
+    turned and enlarged about its centre, then moved by the centre's shift.
+
+    Parameters
+    ----------
+    image : `numpy.ndarray`
+        The image, 2-D or colour (channels first).
+    result : `AlignmentResult`
+        The move to apply.
+    order : `int`, optional
+        The spline order of the resampling: 3 (cubic) for an image, 1 for a
+        map of counts that must not overshoot.
+
+    Returns
+    -------
+    moved : `numpy.ndarray`
+        The moved image (`float32`), zero where the move brought in nothing.
+    covered : `numpy.ndarray`
+        A 2-D boolean mask, `True` where `moved` holds real data.
+    """
+    if not result.has_rotation_or_scale:
+        return apply_shift(image, result.shift_rows_pixels, result.shift_columns_pixels, order=order)
+    array = np.asarray(image, dtype=np.float32)
+    plane_shape = array.shape[-2:]
+    # The move maps a position z in the image to a * (z - c) + c + t in the
+    # reference, where z = column + 1j * row, c is the centre and t its shift.
+    # `affine_transform` wants the inverse: for each position in the output,
+    # where to read the input, as a matrix and an offset in (row, column).
+    a = result.scale * np.exp(1j * np.radians(result.rotation_degrees))
+    inverse = 1.0 / a
+    matrix = np.array([[inverse.real, inverse.imag], [-inverse.imag, inverse.real]])
+    centre = np.array([(plane_shape[0] - 1) / 2.0, (plane_shape[1] - 1) / 2.0])
+    shift = np.array([result.shift_rows_pixels, result.shift_columns_pixels])
+    offset = centre - matrix @ (centre + shift)
+    planes = array[np.newaxis] if array.ndim == 2 else array
+    moved = np.stack([
+        affine_transform(plane, matrix, offset=offset, order=order, mode="constant", cval=0.0)
+        for plane in planes
+    ]).astype(np.float32)
+    covered = (
+        affine_transform(
+            np.ones(plane_shape, dtype=np.float32), matrix, offset=offset, order=1, mode="constant", cval=0.0
+        )
+        > COVERED_PIXEL_THRESHOLD
+    )
+    return (moved[0] if array.ndim == 2 else moved), covered
+
+
 def align_images_to_reference(
     images: list[np.ndarray],
     reference_index: int,
     crop_fraction: float | None = None,
     prefer_star_position: bool = False,
+    refine_with_stars: bool = False,
 ) -> tuple[list[np.ndarray | None], list[np.ndarray | None], list[AlignmentResult | None]]:
     """Line up every image with the reference image.
 
@@ -392,6 +759,10 @@ def align_images_to_reference(
         offset between them.
     prefer_star_position : `bool`, optional
         Passed to `measure_alignment` for every pair; see there.
+    refine_with_stars : `bool`, optional
+        When `True`, each trusted shift is refined by fitting the stars'
+        shift, rotation and scale (see `refine_alignment_with_stars`). Meant
+        for imaging stacks; spectral stacks keep the plain shift.
 
     Returns
     -------
@@ -407,6 +778,7 @@ def align_images_to_reference(
     aligned: list[np.ndarray | None] = []
     covered_masks: list[np.ndarray | None] = []
     results: list[AlignmentResult | None] = []
+    reference_stars: np.ndarray | None = None
     for index, image in enumerate(images):
         if index == reference_index:
             aligned.append(np.asarray(image, dtype=np.float32))
@@ -430,12 +802,18 @@ def align_images_to_reference(
             covered_masks.append(None)
             results.append(AlignmentResult(shift_rows_pixels=0.0, shift_columns_pixels=0.0, correlation=0.0))
             continue
+        if refine_with_stars and result.trusted:
+            if reference_stars is None:
+                reference_stars = detect_star_centroids(_to_plane(images[reference_index]))
+            result = refine_alignment_with_stars(
+                images[reference_index], image, result, reference_stars=reference_stars
+            )
         results.append(result)
         if not result.trusted:
             aligned.append(None)
             covered_masks.append(None)
             continue
-        shifted, covered = apply_shift(image, result.shift_rows_pixels, result.shift_columns_pixels)
+        shifted, covered = apply_alignment(image, result)
         aligned.append(shifted)
         covered_masks.append(covered)
     return aligned, covered_masks, results

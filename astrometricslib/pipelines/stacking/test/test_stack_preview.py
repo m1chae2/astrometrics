@@ -354,6 +354,50 @@ def test_the_star_toning_alone_takes_a_separate_stretch(
     assert 'load "toned.fits"' in programs.siril_calls[1][1]
 
 
+def test_the_log_lists_every_step_that_ran(
+    stack: Path,
+    scratch_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify that each step that ran is named in the log."""
+    _configure(monkeypatch, "siril-cli", "graxpert-gpu", "/opt/cc/denoise", star_tone=True)
+    _Programs().install(monkeypatch)
+
+    with caplog.at_level("INFO", logger=stack_preview.logger.name):
+        assert write_stack_preview(str(stack)) is not None
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert "GraXpert finished; the preview uses its result." in messages
+    assert "Cosmic Clarity finished; the preview uses its result." in messages
+    assert "Star toning finished; the preview uses its result." in messages
+    summary = next(message for message in messages if message.startswith("Preview steps:"))
+    assert summary == (
+        "Preview steps: GraXpert done; Siril stretch done; Cosmic Clarity done; Star toning done."
+    )
+
+
+def test_the_log_summary_names_a_step_that_failed(
+    stack: Path,
+    scratch_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify that a failed Cosmic Clarity run is named as skipped."""
+    _configure(monkeypatch, "siril-cli", "graxpert-gpu", "/opt/cc/denoise", star_tone=True)
+    programs = _Programs(denoise_result=False)
+    programs.install(monkeypatch)
+
+    with caplog.at_level("INFO", logger=stack_preview.logger.name):
+        assert write_stack_preview(str(stack)) is not None
+
+    summary = next(
+        record.getMessage() for record in caplog.records if record.getMessage().startswith("Preview steps:")
+    )
+    assert "Cosmic Clarity skipped after a failure" in summary
+    assert "Star toning done" in summary
+
+
 def test_a_failed_star_toning_keeps_the_picture_before_it(
     stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -33,6 +33,7 @@ from astrometricslib.pipelines.stacking.processing.exposure_groups import (
     measure_group_frames,
     merge_registration_sequences,
     merge_rejection_maps,
+    saturated_pixel_mask,
     split_frames_by_exposure,
     split_groups_by_night,
     stack_data_fraction,
@@ -693,3 +694,36 @@ def test_each_exposure_is_split_by_night_on_its_own() -> None:
         (5.0, "2026-01-10"),
         (5.0, "2026-01-20"),
     ]
+
+
+def test_the_saturated_mask_marks_pixels_where_any_group_clips() -> None:
+    """A pixel at the top of the range in either group is marked."""
+    first = np.full((40, 40), 0.2, dtype=np.float32)
+    second = np.full((40, 40), 0.2, dtype=np.float32)
+    first[5:9, 5:9] = 1.0
+    second[30:34, 20:24] = 1.0
+
+    mask = saturated_pixel_mask([first, second])
+
+    assert mask[6, 6]
+    assert mask[31, 21]
+    assert not mask[20, 20]
+    assert mask.dtype == bool
+
+
+def test_the_saturated_mask_of_a_colour_stack_is_two_dimensional() -> None:
+    """A pixel clipped in any colour channel is marked, in one 2-D mask."""
+    colour = np.full((3, 30, 30), 0.2, dtype=np.float32)
+    colour[1, 10:13, 10:13] = 1.0
+
+    mask = saturated_pixel_mask([colour])
+
+    assert mask.shape == (30, 30)
+    assert mask[11, 11]
+    assert not mask[0, 0]
+
+
+def test_the_saturated_mask_needs_an_image() -> None:
+    """With no images there is nothing to mark."""
+    with pytest.raises(ValueError, match="At least one image"):
+        saturated_pixel_mask([])

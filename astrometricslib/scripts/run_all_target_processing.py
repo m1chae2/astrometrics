@@ -218,6 +218,15 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         help="Print which targets each camera pass would process, then exit without processing.",
     )
     parser.add_argument(
+        "--force-restack",
+        action="store_true",
+        help=(
+            "Rebuild every stack, even those whose frames, calibration frames and settings are the "
+            "same as when the stack on disk was made. Without this, an unchanged stack is skipped "
+            "(setting skip_unchanged_stacks_enabled)."
+        ),
+    )
+    parser.add_argument(
         "--skip-reindex",
         action="store_true",
         help=(
@@ -294,6 +303,14 @@ def run_full_processing(argv: list[str] | None = None) -> None:
     the earlier pass's results intact.
     """
     arguments = _build_argument_parser().parse_args(argv)
+    if arguments.force_restack:
+        # An environment variable, because each target runs in a worker
+        # process that starts from this process's environment.
+        from astrometricslib.pipelines.stacking.pre_processing.stack_inputs import (
+            FORCE_RESTACK_ENVIRONMENT_VARIABLE,
+        )
+
+        os.environ[FORCE_RESTACK_ENVIRONMENT_VARIABLE] = "1"
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s", stream=sys.stdout
     )

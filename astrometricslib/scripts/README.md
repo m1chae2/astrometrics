@@ -4,7 +4,7 @@ This folder holds standalone command-line scripts: batch processing over the who
 
 ## Batch processing
 
-- `run_all_target_processing.py` — runs the full pipeline (stacking, astrometry, photometry, spectroscopy, asteroid detection) on every target in the catalog.
+- `run_all_target_processing.py` — runs the full pipeline (stacking, astrometry, photometry, spectroscopy, asteroid detection) on every target in the catalog. A stack whose frames, calibration frames and settings are unchanged since it was made is skipped; `--force-restack` rebuilds every stack.
 - `reindex_all_targets.py` — cycles through every target and re-scans its frames from disk.
 - `rebuild_stacks.py` — finds stacks that should be rebuilt (for example, after a calibration change) and rebuilds them only when asked.
 

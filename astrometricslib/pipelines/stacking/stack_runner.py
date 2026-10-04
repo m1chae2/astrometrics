@@ -583,7 +583,10 @@ def _stack_exposure_groups(
     # Line the group stacks up with the group that carries the most weight
     # (the one `combine_exposure_group_images` also uses as its brightness
     # reference), so the combined image is not smeared by the offsets Siril
-    # leaves between groups.
+    # leaves between groups. Imaging stacks are lined up by their stars,
+    # which also finds the small rotation and scale between nights (see
+    # `group_alignment.refine_alignment_with_stars`); spectral stacks keep
+    # the plain shift.
     weights = [
         count * exposure**2 / noise**2
         for count, exposure, noise in zip(counts, exposures, frame_noises, strict=True)
@@ -591,8 +594,26 @@ def _stack_exposure_groups(
     reference_index = int(np.argmax(weights))
     crop_fraction = SPECTRAL_ALIGNMENT_CENTER_CROP_FRACTION if is_spectral else None
     aligned_images, covered_masks, alignments = align_images_to_reference(
-        images, reference_index, crop_fraction=crop_fraction, prefer_star_position=is_spectral
+        images,
+        reference_index,
+        crop_fraction=crop_fraction,
+        prefer_star_position=is_spectral,
+        refine_with_stars=not is_spectral,
     )
+    for index, alignment in enumerate(alignments):
+        if alignment is not None and alignment.star_pairs:
+            logger.info(
+                "The %g s exposure group of '%s' was lined up with %d stars: shift (%.2f, %.2f) px, "
+                "rotation %.4f degrees, scale %.5f, stars left %.2f px from their partners.",
+                exposures[index],
+                target_id,
+                alignment.star_pairs,
+                alignment.shift_rows_pixels,
+                alignment.shift_columns_pixels,
+                alignment.rotation_degrees,
+                alignment.scale,
+                alignment.residual_pixels,
+            )
     left_out_reasons: dict[int, str] = {}
     for index, aligned in enumerate(aligned_images):
         if aligned is None:
@@ -613,6 +634,10 @@ def _stack_exposure_groups(
         frame_zero_fractions=[frame_zero_fractions[index] for index in used],
         covered_masks=[covered_masks[index] for index in used],
     )
+
+    stacked_fwhm = None
+    if not is_spectral:
+        stacked_fwhm = _measure_combined_fwhm(combined, [aligned_images[index] for index in used])
 
     directory = os.path.dirname(results[0][1])
     final_path = os.path.join(directory, output_file)
@@ -684,6 +709,10 @@ def _stack_exposure_groups(
             "frame_noise_counts": frame_noises[index],
             "frame_zero_fraction": frame_zero_fractions[index],
             "alignment_correlation": None if alignment is None else alignment.correlation,
+            "alignment_rotation_degrees": None if alignment is None else alignment.rotation_degrees,
+            "alignment_scale": None if alignment is None else alignment.scale,
+            "alignment_star_pairs": None if alignment is None else alignment.star_pairs,
+            "alignment_residual_pixels": None if alignment is None else alignment.residual_pixels,
         })
     for group, diagnostics in failed_groups:
         summaries.append(
@@ -701,10 +730,50 @@ def _stack_exposure_groups(
     merged_diagnostics = _merge_diagnostics([results[index] for index in used])
     merged_diagnostics["clipped_exposure_groups"] = clipped_groups
     merged_diagnostics["exposure_group_summaries"] = summaries
+    if stacked_fwhm is not None:
+        merged_diagnostics["stacked_fwhm_px"] = stacked_fwhm
     merged_diagnostics["recommended_exposure_seconds"] = recommended_exposure_for_groups(
         saturation_exposures, saturation_by_group
     )
     return final_path, merged_diagnostics
+
+
+def _measure_combined_fwhm(combined: Any, used_images: list[Any]) -> float | None:
+    """Measure the star width of a combined stack, away from patched cores.
+
+    Where a group's stack is saturated, the combined image takes another
+    group's data, so a bright star's core is patched and the combined image has
+    no saturated plateau left for the usual check to skip. Measured as it
+    stands, the brightest stars are those patched cores and read too wide (3.40
+    px against 2.38 px for the rest, on M 57). This measures with those stars
+    left out (see `measure_fwhm_from_data`).
+
+    Parameters
+    ----------
+    combined : `numpy.ndarray`
+        The combined image.
+    used_images : `list` [`numpy.ndarray`]
+        The group stacks that went into it, as they were given to the combine.
+
+    Returns
+    -------
+    fwhm : `float` or `None`
+        The median star width in pixels, or `None` if it could not be
+        measured. A failed measurement never costs the stack.
+    """
+    import numpy as np
+
+    from astrometricslib.drivers.fits_access import collapse_to_2d
+    from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_fwhm_from_data
+    from astrometricslib.pipelines.stacking.processing.exposure_groups import saturated_pixel_mask
+
+    try:
+        plane = collapse_to_2d(np.asarray(combined, dtype=float))
+        fwhm = measure_fwhm_from_data(plane, excluded_mask=saturated_pixel_mask(used_images))
+    except Exception as measurement_error:
+        logger.warning("Could not measure the star width of the combined stack: %s", measurement_error)
+        return None
+    return None if fwhm is None else float(fwhm)
 
 
 def _merge_diagnostics(results: list[tuple[Any, str, dict[str, Any]]]) -> dict[str, Any]:

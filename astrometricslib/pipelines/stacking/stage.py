@@ -5,6 +5,7 @@ and checking the quality of the final stacked images.
 """
 
 import logging
+import os
 from typing import Any
 
 from astrometricslib.drivers.camera_profile_store import camera_identity
@@ -25,6 +26,7 @@ def stack_frames(
     generate_rejmap: bool | None = None,
     output_file: str | None = None,
     job_id: str | None = None,
+    force: bool = False,
 ) -> str | None:
     """Run the main stacking process using the ImageProcessing driver.
 
@@ -61,11 +63,19 @@ def stack_frames(
     job_id : `str` or `None`, optional
         The tracked job this stack is running under, if any -- recorded
         as this run's IVOA provenance Activity when given.
+    force : `bool`, optional
+        Rebuild the stack even when its frames, calibration frames and
+        settings are the same as when the stack on disk was made. Without
+        it (and with the setting ``skip_unchanged_stacks_enabled`` on), an
+        unchanged stack is kept and its path returned (see
+        `stack_inputs.py`).
 
     Returns
     -------
     stacked_path : `str` or `None`
-        The location of the new stacked image, or None if it failed.
+        The location of the new stacked image, or None if it failed. For a
+        stack that was skipped as unchanged, the location of the stack that
+        is already there.
 
     Raises
     ------
@@ -271,6 +281,55 @@ def stack_frames(
     from astrometricslib.pipelines.stacking.stack_runner import run_stack
 
     engine = SirilStackingEngine()
+    from astrometricslib.pipelines.stacking.pre_processing.exposure_weighting import choose_stack_weight
+
+    stack_weight = choose_stack_weight(
+        [float(frame.exposure) for frame in target_frames if frame.exposure],
+        stack_weight if stack_weight is not None else get_configuration().get_stack_weight(),
+        is_spectral=has_spectral,
+    )
+
+    # Skip a stack that would come out the same: the same frames, the same
+    # calibration frames, the same settings and the same stacking code as when
+    # the stack on disk was made (see `stack_inputs.py`). Adding frames to one
+    # filter then leaves the target's other stacks alone.
+    from astrometricslib.pipelines.stacking.pre_processing.stack_inputs import (
+        build_stack_inputs_record,
+        decide_whether_to_restack,
+        write_stack_inputs,
+    )
+
+    expected_path = _expected_stack_path(target.id, output_file)
+    inputs_record = build_stack_inputs_record(
+        target_frames,
+        get_configuration(),
+        {
+            "rejection_sigma": rejection_sigma,
+            "filter_wfwhm": filter_wfwhm,
+            "filter_round": filter_round,
+            "stack_weight": stack_weight,
+            "generate_rejmap": generate_rejmap,
+            "is_spectral": has_spectral,
+        },
+    )
+    decision = decide_whether_to_restack(
+        expected_path,
+        inputs_record,
+        force=force,
+        enabled=get_configuration().get_skip_unchanged_stacks_enabled(),
+    )
+    if decision.skip:
+        logger.info(
+            "Skipping the stack of '%s' at %s: its frames, calibration frames, settings and the "
+            "stacking code are the same as when it was made. Pass force=True to rebuild it.",
+            target.id,
+            expected_path,
+        )
+        _record_unchanged_stack(target, target_frames, expected_path, has_spectral)
+        return expected_path
+    if os.path.isfile(expected_path):
+        logger.info("Rebuilding the stack of '%s': %s.", target.id, "; ".join(decision.reasons))
+
     # `run_stack` adds two safeguards for spectroscopy: frames of
     # different exposure lengths are stacked one length at a time and then
     # combined, and a registration that loses too many frames is retried with
@@ -279,13 +338,6 @@ def stack_frames(
     # in a staging folder until the new stack exists; if the restack fails,
     # they go back where they were.
     staging = _archive_stack_before_restack(target.id, output_file)
-    from astrometricslib.pipelines.stacking.pre_processing.exposure_weighting import choose_stack_weight
-
-    stack_weight = choose_stack_weight(
-        [float(frame.exposure) for frame in target_frames if frame.exposure],
-        stack_weight if stack_weight is not None else get_configuration().get_stack_weight(),
-        is_spectral=has_spectral,
-    )
     try:
         stacked_path, diagnostics = run_stack(
             engine,
@@ -366,8 +418,39 @@ def stack_frames(
         preview_path = write_stack_preview(stacked_path)
         if preview_path:
             record_preview_as_processed_image(target, has_spectral, stacked_path, preview_path)
+        # Saved last, once the stack, its quality summary and its picture are
+        # done: a stack with a record is one the next run may skip, so a run
+        # that stopped before this point leaves a stack that is built again.
+        if inputs_record is not None:
+            write_stack_inputs(stacked_path, inputs_record)
 
     return stacked_path
+
+
+def _record_unchanged_stack(
+    target: Any, target_frames: list[Any], stacked_path: str, is_spectral: bool
+) -> None:
+    """Make sure the target points at a stack that was kept as it was.
+
+    A skipped stack keeps its quality summary and its picture from the run
+    that made it. Only the pointer to the file is set again, in case the
+    target's record of it was lost.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target whose stack was skipped.
+    target_frames : `list`
+        The frames the stack was made from.
+    stacked_path : `str`
+        Where the stack is.
+    is_spectral : `bool`
+        `True` for the target's spectral stack.
+    """
+    if is_spectral:
+        target.spectral_stacking.stacked_image = stacked_path
+    elif _record_configuration_stack(target, target_frames, stacked_path):
+        target.stacking.stacked_image = stacked_path
 
 
 def _expected_stack_path(target_id: str, output_file: str) -> str:
@@ -798,7 +881,9 @@ def _update_frame_registration_results(
             frame.measurements.registration_dy_px = registration_facts["dy"]
 
 
-def _measure_fwhm_degradation(summary, stacked_path: str, target_frames: list[Any]) -> None:  # ruff: ignore[missing-type-function-argument]
+def _measure_fwhm_degradation(
+    summary: Any, stacked_path: str, target_frames: list[Any], stacked_fwhm: float | None = None
+) -> None:
     """Compare the stacked image's sharpness against its input frames.
 
     Measured with the same `measure_image_fwhm` function on both sides. The
@@ -806,6 +891,12 @@ def _measure_fwhm_degradation(summary, stacked_path: str, target_frames: list[An
     nights is judged against all of them and not only the first night. The
     stack is compared with the width its inputs predict (see
     `expected_stack_fwhm`), not with their median.
+
+    A stack combined from exposure groups arrives with its width already
+    measured, away from the cores that the combine patched (see
+    `stack_runner._measure_combined_fwhm`); that value is used instead of
+    measuring the file, which would pick those patched cores as its
+    brightest stars.
 
     Sets `summary.stacking_metrics`' FWHM fields and the degradation
     flag in place.
@@ -840,7 +931,8 @@ def _measure_fwhm_degradation(summary, stacked_path: str, target_frames: list[An
         summary.stacking_metrics.median_input_fwhm_px = _statistics.median(input_fwhms)
         summary.stacking_metrics.expected_stack_fwhm_px = expected
 
-    stacked_fwhm = measure_image_fwhm(stacked_path)
+    if stacked_fwhm is None:
+        stacked_fwhm = measure_image_fwhm(stacked_path)
     if stacked_fwhm is not None:
         summary.stacking_metrics.stacked_fwhm_px = stacked_fwhm
         if expected is not None:
@@ -1025,7 +1117,9 @@ def _build_stack_quality_summary(  # ruff: ignore[missing-return-type-private-fu
 
         if not is_spectral and summary.quality_processing_applied:
             _update_frame_registration_results(summary, stacked_path, target_frames, diagnostics)
-            _measure_fwhm_degradation(summary, stacked_path, target_frames)
+            _measure_fwhm_degradation(
+                summary, stacked_path, target_frames, stacked_fwhm=diagnostics.get("stacked_fwhm_px")
+            )
 
         if is_spectral and summary.quality_processing_applied:
             _check_spectral_registration_quality(summary, stacked_path, diagnostics)

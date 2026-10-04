@@ -249,3 +249,16 @@ def test_trimming_noisy_stack_edges_can_be_turned_off(tmp_path: Path) -> None:
     config = _make_isolated_config(tmp_path)
     config.app_config.set("Processing.Siril", "trim_noisy_stack_edges_enabled", "false")
     assert config.get_trim_noisy_stack_edges_enabled() is False
+
+
+def test_unchanged_stacks_are_skipped_by_default(tmp_path: Path) -> None:
+    """A stack whose inputs have not changed is skipped unless told not to."""
+    config = _make_isolated_config(tmp_path)
+    assert config.get_skip_unchanged_stacks_enabled() is True
+
+
+def test_skipping_unchanged_stacks_can_be_turned_off(tmp_path: Path) -> None:
+    """The ``skip_unchanged_stacks_enabled`` setting switches the skip off."""
+    config = _make_isolated_config(tmp_path)
+    config.app_config.set("Processing.Siril", "skip_unchanged_stacks_enabled", "false")
+    assert config.get_skip_unchanged_stacks_enabled() is False

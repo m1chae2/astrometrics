@@ -98,6 +98,9 @@ class ProcessingConfig(BaseModel):
     preview_star_tone_enabled : `bool`
         Whether the stack preview dims stars in proportion to their
         brightness and softens the brightest values, by default `True`.
+    skip_unchanged_stacks_enabled : `bool`
+        Whether stacking skips a stack whose frames, calibration frames and
+        settings are the same as when it was last made, by default `True`.
     """
 
     siril_executable: str | None = None
@@ -115,6 +118,7 @@ class ProcessingConfig(BaseModel):
     preview_star_tone_enabled: bool = True
     keep_previous_stack_enabled: bool = True
     trim_noisy_stack_edges_enabled: bool = True
+    skip_unchanged_stacks_enabled: bool = True
 
 
 class ParallelismConfig(BaseModel):

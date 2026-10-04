@@ -116,8 +116,19 @@ FWHM_MEASUREMENT_MAX_ELONGATION = 1.5
 # inside this ratio, so this does not thin out a normal image.
 FWHM_MEASUREMENT_MIN_RELATIVE_FLUX = 0.05
 
+# A star is skipped when the exclusion mask (see `measure_fwhm_from_data`) is
+# set within this many pixels of its centre. A star that clips in a long
+# exposure has a saturated core several pixels across, and the detected
+# centre lies within a pixel or two of the middle of that core. On the M 57
+# stack of 2026-10-03 all 15 stars the check measured sat on such a core (peak
+# 1.35 to 1.45 in the combined image, saturated at 1.00 in the 60 s group) and
+# read a median of 3.40 px, while 5,000 stars off those cores read 2.38 px.
+FWHM_EXCLUDED_CORE_RADIUS_PX = 3
 
-def measure_image_fwhm(path: str, n_stars: int = FWHM_MEASUREMENT_STAR_COUNT) -> float | None:
+
+def measure_image_fwhm(
+    path: str, n_stars: int = FWHM_MEASUREMENT_STAR_COUNT, excluded_mask: np.ndarray | None = None
+) -> float | None:
     """Measure the average blurriness (FWHM) of stars in an image file.
 
     Parameters
@@ -126,6 +137,8 @@ def measure_image_fwhm(path: str, n_stars: int = FWHM_MEASUREMENT_STAR_COUNT) ->
         The file path to the image.
     n_stars : `int`, optional
         How many stars to measure. Defaults to 15.
+    excluded_mask : `numpy.ndarray`, optional
+        A boolean mask of the image's pixels; see `measure_fwhm_from_data`.
 
     Returns
     -------
@@ -140,10 +153,12 @@ def measure_image_fwhm(path: str, n_stars: int = FWHM_MEASUREMENT_STAR_COUNT) ->
     data = np.asarray(data, dtype=float)
     data = collapse_to_2d(data)
 
-    return measure_fwhm_from_data(data, n_stars)
+    return measure_fwhm_from_data(data, n_stars, excluded_mask=excluded_mask)
 
 
-def measure_fwhm_from_data(data: np.ndarray, n_stars: int = FWHM_MEASUREMENT_STAR_COUNT) -> float | None:
+def measure_fwhm_from_data(
+    data: np.ndarray, n_stars: int = FWHM_MEASUREMENT_STAR_COUNT, excluded_mask: np.ndarray | None = None
+) -> float | None:
     """Measure the average blurriness (FWHM) of stars from a loaded image.
 
     This does the actual math for `measure_image_fwhm` so the file doesn't
@@ -155,6 +170,13 @@ def measure_fwhm_from_data(data: np.ndarray, n_stars: int = FWHM_MEASUREMENT_STA
         The image data array.
     n_stars : `int`, optional
         How many stars to measure. Defaults to 15.
+    excluded_mask : `numpy.ndarray`, optional
+        A boolean mask the shape of `data`. A star with a masked pixel within
+        `FWHM_EXCLUDED_CORE_RADIUS_PX` of its centre is skipped. Use it for a
+        combined stack whose bright cores were taken from a shorter exposure
+        (see `saturated_pixel_mask`): such a stack has no saturated plateau
+        for the check below to see, so those patched stars would otherwise be
+        measured as the brightest stars and read too wide.
 
     Returns
     -------
@@ -181,11 +203,27 @@ def measure_fwhm_from_data(data: np.ndarray, n_stars: int = FWHM_MEASUREMENT_STA
         y = source.get("y_centroid", source.get("ycentroid"))
         if x is None or y is None:
             continue
+        if excluded_mask is not None and _touches_mask(excluded_mask, round(x), round(y)):
+            continue
         fwhm = _fit_star_fwhm(data, round(x), round(y), saturation_level)
         if fwhm is not None:
             fwhms.append(fwhm)
 
     return float(np.median(fwhms)) if fwhms else None
+
+
+def _touches_mask(mask: np.ndarray, x: int, y: int) -> bool:
+    """Say whether any masked pixel lies near a star's centre.
+
+    Returns
+    -------
+    touches : `bool`
+        `True` if the mask is set anywhere within
+        `FWHM_EXCLUDED_CORE_RADIUS_PX` of (x, y).
+    """
+    radius = FWHM_EXCLUDED_CORE_RADIUS_PX
+    window = mask[max(y - radius, 0) : y + radius + 1, max(x - radius, 0) : x + radius + 1]
+    return bool(window.any())
 
 
 def _cutout(data: np.ndarray, x: int, y: int, radius: int) -> np.ndarray | None:

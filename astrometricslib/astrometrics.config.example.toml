@@ -295,6 +295,13 @@ keep_previous_stack_enabled = "true"
 # frames and are noisier. A stack with clean edges is not changed. The
 # rejection map is trimmed the same way. Set "false" to keep every edge.
 trim_noisy_stack_edges_enabled = "true"
+# "true" (the default): skip stacking a stack that would come out the same.
+# A stack is skipped when its frames, the calibration frames chosen for them,
+# the settings above and the stacking code are all unchanged since the stack on
+# disk was made. Adding frames to one filter no longer rebuilds the other
+# stacks of the target. To rebuild anyway, pass --force-restack to the batch
+# script or force=True to run_stacking. Set "false" to rebuild every time.
+skip_unchanged_stacks_enabled = "true"
 
 ["Processing.Parallelism"]
 target_workers = "auto"

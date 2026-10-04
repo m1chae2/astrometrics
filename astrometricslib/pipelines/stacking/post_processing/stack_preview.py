@@ -534,6 +534,7 @@ def _next_source(
     if check_result and not _is_usable_image(result_path):
         logger.warning("%s wrote an image with invalid pixels; the preview skips that step.", step_name)
         return current_name
+    logger.info("%s finished; the preview uses its result.", step_name)
     return new_name
 
 
@@ -572,6 +573,7 @@ def _picture_script(scratch: str, siril_executable: str) -> list[str] | None:
             100 * bright_object.white_fraction,
         )
         return build_bright_object_script(name, "preview", bright_object)
+    steps: list[str] = []
     graxpert_executable = configuration.get_graxpert_executable()
     if graxpert_executable:
 
@@ -585,19 +587,32 @@ def _picture_script(scratch: str, siril_executable: str) -> list[str] | None:
             """
             return flatten_background(graxpert_executable, input_path, os.path.splitext(output_path)[0])
 
-        name = _next_source("GraXpert", name, "flat.fits", scratch, flatten, check_result=True)
+        flattened_name = _next_source("GraXpert", name, "flat.fits", scratch, flatten, check_result=True)
+        steps.append("GraXpert " + ("done" if flattened_name != name else "skipped after a failure"))
+        name = flattened_name
+    else:
+        steps.append("GraXpert not configured")
     choice = choose_sky_level_for_file(os.path.join(scratch, name))
     logger.info("Preview sky level %.2f: %s.", choice.sky_level, choice.reason)
     denoise_executable = configuration.get_cosmic_clarity_denoise_executable()
     tone_stars = configuration.get_preview_star_tone_enabled()
     if not denoise_executable and not tone_stars:
+        steps.extend([
+            "Siril stretch done in the final script",
+            "Cosmic Clarity not configured",
+            "Star toning off",
+        ])
+        logger.info("Preview steps: %s.", "; ".join(steps))
         return build_preview_script(name, "preview", choice.sky_level)
     stretched = run_preview_script(
         scratch, build_stretch_script(name, "stretched", choice.sky_level), siril_executable
     )
     if not stretched or not os.path.isfile(os.path.join(scratch, "stretched.fits")):
+        steps.append("Siril stretch failed")
+        logger.info("Preview steps: %s.", "; ".join(steps))
         return None
     name = "stretched.fits"
+    steps.append("Siril stretch done")
     if denoise_executable:
         strength = configuration.get_cosmic_clarity_denoise_strength()
 
@@ -611,9 +626,18 @@ def _picture_script(scratch: str, siril_executable: str) -> list[str] | None:
             """
             return denoise_with_cosmic_clarity(denoise_executable, input_path, output_path, strength)
 
-        name = _next_source("Cosmic Clarity", name, "denoised.fits", scratch, denoise)
+        denoised_name = _next_source("Cosmic Clarity", name, "denoised.fits", scratch, denoise)
+        steps.append("Cosmic Clarity " + ("done" if denoised_name != name else "skipped after a failure"))
+        name = denoised_name
+    else:
+        steps.append("Cosmic Clarity not configured")
     if tone_stars:
-        name = _next_source("Star toning", name, "toned.fits", scratch, tone_stars_in_file)
+        toned_name = _next_source("Star toning", name, "toned.fits", scratch, tone_stars_in_file)
+        steps.append("Star toning " + ("done" if toned_name != name else "skipped after a failure"))
+        name = toned_name
+    else:
+        steps.append("Star toning off")
+    logger.info("Preview steps: %s.", "; ".join(steps))
     return build_picture_script(name, "preview")
 
 

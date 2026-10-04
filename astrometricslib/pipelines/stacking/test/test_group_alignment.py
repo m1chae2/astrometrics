@@ -5,7 +5,10 @@ so the group stacks of one session were found 6-7 pixels apart in real data.
 These tests check that a known shift of a synthetic star field is recovered to
 a fraction of a pixel, that two unrelated fields are refused instead of being
 "aligned", that colour images move as one, and that the pixels a shift fills
-in are reported.
+in are reported. Further tests check the star-based refinement: that a known
+rotation and scale between two stacks are recovered, that stars land closer
+together than a shift alone puts them, and that a fit that is not believable is
+refused so the plain shift is kept.
 """
 
 import numpy as np
@@ -14,10 +17,15 @@ import pytest
 from astrometricslib.pipelines.stacking.processing.group_alignment import (
     MINIMUM_ALIGNMENT_CORRELATION,
     NEGLIGIBLE_SHIFT_PIXELS,
+    REFINEMENT_MAX_ROTATION_DEGREES,
+    AlignmentResult,
     align_images_to_reference,
+    apply_alignment,
     apply_shift,
+    detect_star_centroids,
     find_zero_order_position,
     measure_alignment,
+    refine_alignment_with_stars,
 )
 
 
@@ -336,3 +344,197 @@ def test_align_images_can_use_the_star_position_for_every_group() -> None:
     row, column = find_zero_order_position(aligned[1])
     assert row == pytest.approx(500.0, abs=0.6)
     assert column == pytest.approx(500.0, abs=0.6)
+
+
+REFINEMENT_SIZE = 640
+
+
+def render_stars(positions: np.ndarray, amplitudes: np.ndarray, seed: int, noise: float = 0.01) -> np.ndarray:
+    """Draw Gaussian stars at the given (row, column) positions, with noise.
+
+    Returns
+    -------
+    image : `numpy.ndarray`
+        A ``REFINEMENT_SIZE`` square float32 image.
+    """
+    image = np.full((REFINEMENT_SIZE, REFINEMENT_SIZE), 0.05, dtype=np.float64)
+    offsets = np.arange(-6, 7)
+    for (row, column), amplitude in zip(positions, amplitudes, strict=True):
+        row_index = round(row) + offsets
+        column_index = round(column) + offsets
+        if (
+            row_index.min() < 0
+            or column_index.min() < 0
+            or row_index.max() >= REFINEMENT_SIZE
+            or column_index.max() >= REFINEMENT_SIZE
+        ):
+            continue
+        patch = np.exp(
+            -((row_index[:, None] - row) ** 2 + (column_index[None, :] - column) ** 2) / (2 * 1.3**2)
+        )
+        image[np.ix_(row_index, column_index)] += amplitude * patch
+    image += np.random.default_rng(seed).normal(0, noise, image.shape)
+    return image.astype(np.float32)
+
+
+def make_moved_pair(
+    rotation_degrees: float, scale: float, shift_rows: float, shift_columns: float, seed: int = 11
+) -> tuple[np.ndarray, np.ndarray, complex, complex]:
+    """Draw one star field twice, the second moved by a known similarity.
+
+    The reference shows the stars at ``a * z + b`` where ``z`` is a star's
+    position in the moving image (``z = column + 1j * row``).
+
+    Returns
+    -------
+    reference, moving : `numpy.ndarray`
+        The two images.
+    a, b : `complex`
+        The transform from moving to reference.
+    """
+    rng = np.random.default_rng(seed)
+    stars = 220
+    moving_positions = rng.uniform(40, REFINEMENT_SIZE - 40, (stars, 2))
+    amplitudes = rng.uniform(0.3, 1.0, stars)
+    a = scale * np.exp(1j * np.radians(rotation_degrees))
+    b = shift_columns + 1j * shift_rows
+    moving_complex = moving_positions[:, 1] + 1j * moving_positions[:, 0]
+    reference_complex = a * moving_complex + b
+    reference_positions = np.column_stack([reference_complex.imag, reference_complex.real])
+    reference = render_stars(reference_positions, amplitudes, seed=1)
+    moving = render_stars(moving_positions, amplitudes, seed=2)
+    return reference, moving, complex(a), complex(b)
+
+
+def star_offsets_after(reference: np.ndarray, moved: np.ndarray) -> np.ndarray:
+    """Measure how far each star of `moved` is from its partner in `reference`.
+
+    Returns
+    -------
+    distances : `numpy.ndarray`
+        One distance in pixels per matched star pair.
+    """
+    reference_stars = detect_star_centroids(reference)
+    moved_stars = detect_star_centroids(moved)
+    distances = []
+    for star in moved_stars:
+        nearest = np.hypot(*(reference_stars - star).T).min()
+        if nearest < 3.0:
+            distances.append(nearest)
+    return np.array(distances)
+
+
+def test_a_known_rotation_and_scale_are_recovered_from_the_stars() -> None:
+    """A -0.04 degree turn and a 0.05% scale, as between nights, are found."""
+    reference, moving, a, b = make_moved_pair(-0.04, 1.0005, 12.4, -7.3)
+    initial = measure_alignment(reference, moving)
+
+    refined = refine_alignment_with_stars(reference, moving, initial)
+
+    centre = (REFINEMENT_SIZE - 1) / 2.0 * (1 + 1j)
+    expected_centre_shift = a * centre + b - centre
+    assert refined.star_pairs >= 100
+    assert refined.rotation_degrees == pytest.approx(-0.04, abs=0.01)
+    assert refined.scale == pytest.approx(1.0005, abs=0.0002)
+    assert refined.shift_rows_pixels == pytest.approx(expected_centre_shift.imag, abs=0.1)
+    assert refined.shift_columns_pixels == pytest.approx(expected_centre_shift.real, abs=0.1)
+    assert refined.residual_pixels is not None
+    assert refined.residual_pixels < 0.15
+    assert refined.has_rotation_or_scale
+
+
+def test_stars_land_closer_together_than_a_shift_alone_puts_them() -> None:
+    """After the move, stars sit well within a pixel of their partners."""
+    reference, moving, _, _ = make_moved_pair(0.1, 0.9990, -6.0, 9.5)
+    initial = measure_alignment(reference, moving)
+    refined = refine_alignment_with_stars(reference, moving, initial)
+
+    shift_only, _ = apply_shift(moving, initial.shift_rows_pixels, initial.shift_columns_pixels)
+    refined_image, covered = apply_alignment(moving, refined)
+
+    shift_only_offsets = star_offsets_after(reference, shift_only)
+    refined_offsets = star_offsets_after(reference, refined_image)
+    assert np.sqrt(np.mean(refined_offsets**2)) < 0.2
+    assert np.sqrt(np.mean(refined_offsets**2)) < 0.5 * np.sqrt(np.mean(shift_only_offsets**2))
+    assert covered.mean() > 0.9
+
+
+def test_a_pure_shift_is_not_given_a_rotation() -> None:
+    """With no rotation or scale, the refinement keeps the plain shift."""
+    reference, moving, _, _ = make_moved_pair(0.0, 1.0, 5.0, -4.0)
+    initial = measure_alignment(reference, moving)
+
+    refined = refine_alignment_with_stars(reference, moving, initial)
+
+    assert abs(refined.rotation_degrees) < 0.01
+    assert refined.scale == pytest.approx(1.0, abs=0.0003)
+
+
+def test_too_few_stars_keep_the_initial_result() -> None:
+    """A field with a handful of stars cannot support a fit."""
+    rng = np.random.default_rng(5)
+    positions = rng.uniform(100, 500, (8, 2))
+    amplitudes = np.full(8, 0.8)
+    reference = render_stars(positions + np.array([3.0, 2.0]), amplitudes, seed=1)
+    moving = render_stars(positions, amplitudes, seed=2)
+    initial = AlignmentResult(3.0, 2.0, 0.9)
+
+    assert refine_alignment_with_stars(reference, moving, initial) is initial
+
+
+def test_a_rotation_beyond_the_limit_is_refused() -> None:
+    """A 1 degree turn is more than two stacks of one field differ by."""
+    assert 1.0 > REFINEMENT_MAX_ROTATION_DEGREES
+    reference, moving, _, _ = make_moved_pair(1.0, 1.0, 3.0, 2.0)
+    initial = measure_alignment(reference, moving)
+
+    refined = refine_alignment_with_stars(reference, moving, initial)
+
+    assert refined is initial
+    assert not refined.has_rotation_or_scale
+
+
+def test_aligning_with_stars_gives_a_closer_match_than_without() -> None:
+    """Aligning with stars records the rotation and lines the stars up."""
+    reference, moving, _, _ = make_moved_pair(0.08, 1.0006, 7.0, -3.0)
+
+    plain_images, _, plain_results = align_images_to_reference([reference, moving], 0)
+    refined_images, covered, refined_results = align_images_to_reference(
+        [reference, moving], 0, refine_with_stars=True
+    )
+
+    assert plain_results[1] is not None
+    assert not plain_results[1].has_rotation_or_scale
+    assert refined_results[1] is not None
+    assert refined_results[1].rotation_degrees == pytest.approx(0.08, abs=0.02)
+    assert refined_results[1].star_pairs > 50
+    plain_offsets = star_offsets_after(reference, plain_images[1])
+    refined_offsets = star_offsets_after(reference, refined_images[1])
+    assert np.sqrt(np.mean(refined_offsets**2)) < np.sqrt(np.mean(plain_offsets**2))
+    assert covered[1] is not None
+
+
+def test_a_colour_image_is_turned_and_scaled_as_one() -> None:
+    """Every channel moves by the same transform."""
+    reference, moving, _, _ = make_moved_pair(0.1, 1.0004, 4.0, 3.0)
+    initial = measure_alignment(reference, moving)
+    refined = refine_alignment_with_stars(reference, moving, initial)
+    colour = np.stack([moving, moving * 0.5, moving * 2.0])
+
+    moved, covered = apply_alignment(colour, refined)
+
+    assert moved.shape == colour.shape
+    assert covered.shape == moving.shape
+    assert np.allclose(moved[1] * 2.0, moved[0], atol=1e-3)
+    assert np.allclose(moved[2] * 0.5, moved[0], atol=1e-3)
+
+
+def test_apply_alignment_without_rotation_is_the_plain_shift() -> None:
+    """With no rotation or scale, `apply_alignment` matches `apply_shift`."""
+    field = make_star_field(4)
+    plain, plain_covered = apply_shift(field, 2.5, -1.5)
+
+    result, covered = apply_alignment(field, AlignmentResult(2.5, -1.5, 0.9))
+
+    assert np.array_equal(result, plain)
+    assert np.array_equal(covered, plain_covered)

@@ -18,15 +18,24 @@ Both stacks are measured the same way, so the numbers can be compared with
 each other. They are not comparable with numbers from another tool.
 """
 
+import json
 import logging
+import os
 
 import numpy as np
+from skimage.registration import phase_cross_correlation
 
 from astrometricslib.drivers.fits_access import collapse_to_2d, read_data
 from astrometricslib.models.stack_comparison import StackComparison, StackMeasurements
 from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_fwhm_from_data
 
 logger = logging.getLogger(__name__)
+
+# The window, in pixels, matched to find how far a stack was trimmed
+# (see `_crop_offset`), and the smallest window worth matching. A star field
+# this size holds hundreds of stars, enough to fix a whole-pixel offset.
+_CROP_MATCH_WINDOW_PIXELS = 1024
+_CROP_MATCH_MINIMUM_PIXELS = 128
 
 # The flatness is measured on blocks of this many pixels on a side. A star is
 # a few pixels wide and is ignored by the median of such a block, while
@@ -57,6 +66,123 @@ _MAD_TO_SIGMA = 1.4826
 # estimate repeated on the Bubble Nebula and M 27 stacks differed by under
 # 1%), so a smaller change is not a real one.
 UNCHANGED_FRACTION = 0.02
+
+
+def _crop_offset(reference: np.ndarray, combined: np.ndarray) -> tuple[int, int] | None:
+    """Find where a cropped image sits inside the larger one it came from.
+
+    The stacking stage trims the noisy edges off the combined stack after it
+    is made, and does not record how much it trimmed from each side. The
+    offset is a whole number of pixels, so matching a window of the two
+    images (phase correlation) recovers it.
+
+    Parameters
+    ----------
+    reference : `numpy.ndarray`
+        The larger 2-D image.
+    combined : `numpy.ndarray`
+        The smaller 2-D image, a crop of `reference` (up to the changes
+        from combining).
+
+    Returns
+    -------
+    offset : `tuple` [`int`, `int`] or `None`
+        The row and column of `combined`'s first pixel in `reference`, or
+        `None` if the images do not fit that way.
+    """
+    extra_rows = reference.shape[0] - combined.shape[0]
+    extra_columns = reference.shape[1] - combined.shape[1]
+    window = min(_CROP_MATCH_WINDOW_PIXELS, *combined.shape)
+    if extra_rows < 0 or extra_columns < 0 or window < _CROP_MATCH_MINIMUM_PIXELS:
+        return None
+    row = (combined.shape[0] - window) // 2
+    column = (combined.shape[1] - window) // 2
+    shift, _, _ = phase_cross_correlation(
+        reference[row : row + window, column : column + window],
+        combined[row : row + window, column : column + window],
+        normalization=None,
+    )
+    offset = (round(shift[0]), round(shift[1]))
+    if not (0 <= offset[0] <= extra_rows and 0 <= offset[1] <= extra_columns):
+        return None
+    return offset
+
+
+def combined_stack_excluded_mask(path: str, shape: tuple[int, int]) -> np.ndarray | None:
+    """Find the pixels of a combined stack that came from a shorter exposure.
+
+    A stack built from several exposure groups keeps each group's own stack
+    in a ``groups`` folder beside it, with a manifest naming them. Where the
+    group the stack is built around (the heaviest one) clips, the combined
+    image holds another group's data, so a bright star's core is patched and
+    reads too wide. The stacking stage leaves those stars out of its star
+    width (see `measure_fwhm_from_data`). This rebuilds that mask from the
+    files, so a check run later on the combined file gives the stage's
+    number. Only the heaviest group's clipped pixels are used, which are the
+    pixels that were patched.
+
+    Parameters
+    ----------
+    path : `str`
+        Path of the combined stack's FITS file.
+    shape : `tuple` [`int`, `int`]
+        The shape of the combined image, rows then columns.
+
+    Returns
+    -------
+    mask : `numpy.ndarray` or `None`
+        `True` where that group is saturated, in the combined image's frame.
+        `None` when the stack has no manifest, the group stack is missing, or
+        it cannot be matched to the combined image, so the caller measures
+        the whole image.
+    """
+    from astrometricslib.pipelines.stacking.post_processing.exposure_group_report import GROUPS_FOLDER_NAME
+    from astrometricslib.pipelines.stacking.processing.exposure_groups import saturated_pixel_mask
+
+    directory = os.path.join(os.path.dirname(path), GROUPS_FOLDER_NAME)
+    stem = os.path.splitext(os.path.basename(path))[0]
+    manifest_path = os.path.join(directory, f"{stem}_manifest.json")
+    try:
+        with open(manifest_path) as manifest_file:
+            groups = [group for group in json.load(manifest_file)["groups"] if group.get("stack_path")]
+        if not groups:
+            return None
+        heaviest = max(groups, key=lambda group: group.get("weight") or 0.0)
+        group_path = heaviest["stack_path"]
+        group_path = group_path if os.path.isabs(group_path) else os.path.join(directory, group_path)
+        group_image = np.asarray(read_data(group_path), dtype=np.float64)
+        mask = saturated_pixel_mask([group_image])
+        if mask.shape == shape:
+            return mask
+        offset = _crop_offset(
+            np.asarray(collapse_to_2d(group_image)),
+            np.asarray(collapse_to_2d(read_data(path).astype(np.float64))),
+        )
+        if offset is None:
+            return None
+        row, column = offset
+        return mask[row : row + shape[0], column : column + shape[1]]
+    except OSError, ValueError, KeyError, TypeError:
+        return None
+
+
+def measure_stack_fwhm(path: str) -> float | None:
+    """Measure a stack's star width the way the stacking stage does.
+
+    Parameters
+    ----------
+    path : `str`
+        Path of the stack's FITS file.
+
+    Returns
+    -------
+    fwhm : `float` or `None`
+        The median star width in pixels, leaving out stars on patched cores
+        when the stack has exposure groups. `None` if it could not be
+        measured.
+    """
+    image = np.asarray(collapse_to_2d(np.asarray(read_data(path), dtype=np.float64)))
+    return measure_fwhm_from_data(image, excluded_mask=combined_stack_excluded_mask(path, image.shape))
 
 
 def measure_stack_array(data: np.ndarray, path: str = "") -> StackMeasurements:
@@ -109,7 +235,9 @@ def measure_stack_array(data: np.ndarray, path: str = "") -> StackMeasurements:
         noise_fraction=noise / sky,
         flatness_rms=float(np.std(kept) / centre),
         flatness_peak_to_peak=float((kept.max() - kept.min()) / centre),
-        fwhm_px=measure_fwhm_from_data(image),
+        fwhm_px=measure_fwhm_from_data(
+            image, excluded_mask=combined_stack_excluded_mask(path, image.shape) if path else None
+        ),
         zero_fraction=float(np.mean(image == 0.0)),  # ruff: ignore[float-equality-comparison] -- counting pixels that are exactly zero
     )
 

@@ -271,6 +271,7 @@ class AppConfiguration:
                 "preview_star_tone_enabled": "true",
                 "keep_previous_stack_enabled": "true",
                 "trim_noisy_stack_edges_enabled": "true",
+                "skip_unchanged_stacks_enabled": "true",
                 "auto_open_gui": "false",
             },
             # Blank: no gradient removal. Stack previews are then stretched
@@ -509,6 +510,24 @@ class AppConfiguration:
             `True` if the trim should run.
         """
         val = self.get_value("Processing.Siril", "trim_noisy_stack_edges_enabled", fallback="true")
+        return str(val).lower() == "true"
+
+    def get_skip_unchanged_stacks_enabled(self) -> bool:
+        """Return whether stacking skips a stack that would come out the same.
+
+        When on, a stack is not rebuilt if the frames to stack, the
+        calibration frames chosen for them, the stacking settings and the
+        stacking code are all the same as when the stack on disk was made (see
+        `pipelines/stacking/pre_processing/stack_inputs.py`). A restack can
+        always be forced, with ``force=True`` in the API or
+        ``--force-restack`` in the batch script.
+
+        Returns
+        -------
+        enabled : `bool`
+            `True` if an unchanged stack should be skipped.
+        """
+        val = self.get_value("Processing.Siril", "skip_unchanged_stacks_enabled", fallback="true")
         return str(val).lower() == "true"
 
     def get_keep_previous_stack_enabled(self) -> bool:

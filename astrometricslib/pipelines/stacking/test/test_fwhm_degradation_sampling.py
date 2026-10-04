@@ -79,3 +79,38 @@ def test_a_stack_much_wider_than_its_inputs_is_flagged() -> None:
         stage._measure_fwhm_degradation(summary, "stack.fits", frames)
 
     assert summary.stacking_metrics.fwhm_degraded is True
+
+
+def test_a_width_measured_by_the_combine_is_used_instead_of_measuring_the_file() -> None:
+    """A stack combined from exposure groups brings its own width."""
+    frames = [SimpleNamespace(path=str(index)) for index in range(4)]
+    measured: list[str] = []
+
+    def fake_measure(path: str) -> float:
+        """Record the path and give a fixed width.
+
+        Returns
+        -------
+        width : `float`
+            A width of 2 pixels, as for a frame.
+        """
+        measured.append(path)
+        return 2.0
+
+    summary = make_summary()
+    with patch(MEASURE, side_effect=fake_measure):
+        stage._measure_fwhm_degradation(summary, "stack.fits", frames, stacked_fwhm=2.3)
+
+    assert "stack.fits" not in measured
+    assert summary.stacking_metrics.stacked_fwhm_px == pytest.approx(2.3)
+    assert not summary.stacking_metrics.fwhm_degraded
+
+
+def test_a_width_far_above_the_inputs_still_flags_the_stack() -> None:
+    """A width given by the combine is checked the same way."""
+    frames = [SimpleNamespace(path=str(index)) for index in range(4)]
+    summary = make_summary()
+    with patch(MEASURE, return_value=2.0):
+        stage._measure_fwhm_degradation(summary, "stack.fits", frames, stacked_fwhm=3.4)
+
+    assert summary.stacking_metrics.fwhm_degraded

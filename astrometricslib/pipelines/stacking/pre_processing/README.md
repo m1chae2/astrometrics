@@ -8,7 +8,8 @@ This step checks the frames and calibration data before any pixels are combined.
 2. **Frame-quality check** (`frame_quarantine.py`). Measures each light frame's stars and moves a frame with clouds or trailed stars into an `_excluded` folder beside it. Spectral frames are skipped. See below.
 3. **Background check** (`background_homogeneity.py`). Each frame's sky background is compared with the others of the same exposure length. A frame taken through cloud or twilight is set aside. The sky is measured by `shared/quality/background_measurement.py`.
 4. **Flat check** (`flat_calibration.py`). Measures how many flats there are, how bright, and how noisy the master flat would be. A noisy master gets a blur width, which Siril applies. A colour sensor's flat is measured but not blurred.
-5. **Input judgement** (`assess_input_quality.py`). Collects the results into a `StackingInputQuality` (`models/stacking_quality.py`).
+5. **Unchanged-stack check** (`stack_inputs.py`). Builds a record of the frames, the calibration frames the library picks for them, the settings that change a stack's pixels and the stacking-code version, and compares its hash with the one saved next to the stack on disk. When they match, the stack is not rebuilt. See the stacking README for the rules and for how to force a rebuild. A test scans the stacking code for every configuration setting it reads, so a new setting has to be classified in `stack_inputs.py` (changes the stack, or does not) before the tests pass.
+6. **Input judgement** (`assess_input_quality.py`). Collects the results into a `StackingInputQuality` (`models/stacking_quality.py`).
 
 ## The frame-quality check
 

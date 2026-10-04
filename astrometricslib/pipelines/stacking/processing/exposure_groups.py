@@ -434,6 +434,48 @@ def estimate_saturation_mask_level(
     return min(fallback_level, ceiling * SATURATION_MASK_FRACTION_OF_CEILING)
 
 
+def saturated_pixel_mask(
+    images: list[np.ndarray], saturation_level: float = SATURATION_FRACTION_OF_FULL_SCALE
+) -> np.ndarray:
+    """Mark the pixels where at least one group is left out as saturated.
+
+    `combine_exposure_group_images` leaves a group out at a pixel where that
+    group's stack is saturated, so there the combined image holds another
+    group's data. This function applies the same test to the same images, so a
+    caller can tell which pixels of the combined image were replaced (a star's
+    core, where its longest group clips).
+
+    Parameters
+    ----------
+    images : `list` [`numpy.ndarray`]
+        The group stacks as they are given to `combine_exposure_group_images`,
+        all the same shape.
+    saturation_level : `float`, optional
+        Passed to `estimate_saturation_mask_level` for every group.
+
+    Returns
+    -------
+    mask : `numpy.ndarray`
+        A 2-D boolean array, `True` where any group is saturated (in any
+        colour channel, for a colour stack).
+
+    Raises
+    ------
+    ValueError
+        If `images` is empty.
+    """
+    mask = None
+    for image in images:
+        raw = np.asarray(image)
+        saturated = raw >= estimate_saturation_mask_level(raw, saturation_level)
+        if saturated.ndim > 2:
+            saturated = saturated.any(axis=tuple(range(saturated.ndim - 2)))
+        mask = saturated if mask is None else (mask | saturated)
+    if mask is None:
+        raise ValueError("At least one image is needed.")
+    return mask
+
+
 def estimate_group_gains(
     per_second_images: list[np.ndarray], usable_masks: list[np.ndarray], reference_index: int
 ) -> list[float]:

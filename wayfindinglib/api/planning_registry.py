@@ -12,7 +12,7 @@ directly.
 
 import threading
 import uuid
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 from wayfindinglib.drivers.butler import DiskButler
@@ -319,6 +319,87 @@ class ObservationPlanning:
             Altitude/azimuth/rise/set/transit fields for each object.
         """
         return self._sky_engine.get_visibility(objects, time_input)
+
+    def get_visibility_over_time(
+        self,
+        objects: list[Any],
+        start: str | None = None,
+        end: str | None = None,
+        step_minutes: float = 30.0,
+        minimum_altitude_deg: float = 0.0,
+        horizon_zones: list[dict[str, Any]] | None = None,
+        timezone_offset_hours: float = 0.0,
+        include_samples: bool = True,
+    ) -> dict[str, Any]:
+        """Plan a night: altitude, clearance, meridian, Sun and Moon by time.
+
+        For each object gives its highest altitude, when it crosses the
+        meridian and when a flip is due, when it is clear of the horizon
+        limit, and when it is *usable* (clear while the Sun is below -18
+        degrees). Also gives the span of astronomical night, when the Moon
+        is up and how bright it is, and the Moon's distance from each
+        object. Nothing is stored.
+
+        For one moment, give only ``start`` and set ``end`` equal to it: one
+        row per object. Every object also has ``at_start``: its altitude and
+        azimuth, hour angle, whether a flip is due, and rise, set and
+        transit as UTC times of day, all at ``start``.
+
+        Parameters
+        ----------
+        objects : `list`
+            Names or ids (library, then SIMBAD) or dictionaries
+            ``{"id", "ra_deg", "dec_deg"}``. At most 30.
+        start : `str`, optional
+            Start of the span: ISO 8601 or ``"now"``. A time with no offset
+            means UTC. Defaults to now.
+        end : `str`, optional
+            End of the span. Defaults to 12 hours after the start. Equal to
+            ``start`` for a single moment.
+        step_minutes : `float`, optional
+            Time between rows, at least 1. A span may have at most 150
+            rows. Defaults to 30.
+        minimum_altitude_deg : `float`, optional
+            The lowest altitude that counts as clear. Defaults to 0.
+        horizon_zones : `list` [`dict`], optional
+            Blocked parts of the sky, such as trees. Each has
+            ``azimuth_start_deg``, ``azimuth_end_deg`` (a range may wrap
+            past north) and ``min_clear_altitude_deg``.
+        timezone_offset_hours : `float`, optional
+            Write times in this UTC offset, such as -6 for Montana in
+            summer. Defaults to 0 (UTC).
+        include_samples : `bool`, optional
+            Include the row-by-row table for each object. Defaults to `True`.
+
+        Returns
+        -------
+        table : `dict`
+            The site, window, Sun and Moon, and one entry per object, or
+            ``{"error": ...}``.
+        """
+        from astrometricslib import parse_iso_time
+        from wayfindinglib.tasks.planning_tasks import visibility_over_time
+
+        try:
+            start_epoch = (
+                datetime.now(UTC).timestamp()
+                if start is None or start.strip().lower() == "now"
+                else parse_iso_time(start)
+            )
+            end_epoch = parse_iso_time(end)
+        except ValueError as error:
+            return {"error": f"start and end must be ISO 8601 times: {error}"}
+        return visibility_over_time.build_visibility_over_time(
+            self._sky_engine,
+            objects,
+            start_epoch,
+            end_epoch,
+            step_minutes,
+            minimum_altitude_deg,
+            horizon_zones,
+            timezone_offset_hours,
+            include_samples,
+        )
 
     # -- Mosaic & sequence planning (legacy dict-based) ---------------------
 

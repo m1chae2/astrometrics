@@ -7,6 +7,7 @@ images and manage calibration frames (darks, biases, and flats) which are
 used to remove noise from raw telescope images.
 """
 
+import os
 from contextlib import AbstractContextManager
 from typing import Any, Literal
 
@@ -108,6 +109,201 @@ class QualityDiagnostics:
         from astrometricslib.pipelines.shared.quality.raw_frame_check import check_raw_frames
 
         return check_raw_frames(folder=folder_path, last_count=last_count)
+
+    def frame_quality(
+        self,
+        target: Target | None = None,
+        folder_path: str | None = None,
+        mode: str = "input_quality",
+        include_fwhm: bool = False,
+        remeasure: bool = False,
+        camera_name: str | None = None,
+        limit: int = 50,
+        filter_name: str | None = None,
+        first_file: str | None = None,
+        last_file: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        include_spectra: bool = False,
+    ) -> dict[str, Any]:
+        """Measure raw frames, or preview what the stacker would set aside.
+
+        Nothing is saved. The frames and the target are only read. For a
+        target the measurements are made on a copy, so they never reach the
+        saved catalog.
+
+        Parameters
+        ----------
+        target : `Target`, optional
+            The target whose light frames to measure. Needed for
+            ``input_quality`` and ``quarantine_preview``.
+        folder_path : `str`, optional
+            A folder of ``*.fits`` frames, for ``raw_check``. It need not be
+            in the library, such as a staging folder from tonight.
+        mode : `str`, optional
+            ``"input_quality"`` (default): sky background, saturated pixels
+            and optionally star width for the newest frames of a target,
+            with a summary (count, minimum, median, maximum) per number.
+            ``"raw_check"``: the batch check of a folder (or of a target's
+            frames when no folder is given), flagging frames
+            with few stars, trailing, soft or elongated stars, or a large
+            jump. ``"quarantine_preview"``: which frames the stacker would
+            set aside, without moving any.
+        include_fwhm : `bool`, optional
+            For ``input_quality``, also measure star width. This is about
+            50 times slower per frame.
+        remeasure : `bool`, optional
+            For ``input_quality``, measure again frames that already have
+            stored values.
+        camera_name : `str`, optional
+            For ``input_quality``, only frames from this camera (matched
+            case-insensitively as a substring).
+        limit : `int`, optional
+            How many frames to measure and list, from 1 to 300. Defaults
+            to 50. A frame takes about a second to measure. With no range
+            or time given these are the newest frames; with a range or a
+            time bound they are the first ones inside it.
+        filter_name : `str`, optional
+            Only frames whose filter matches this text, ignoring case, such
+            as ``"L"``. Spectroscopy frames are left out unless
+            ``include_spectra`` is set or this names one.
+        first_file : `str`, optional
+            Only frames from this file onward, by file name. A bare number
+            such as ``"013"`` means frame 013 of the night.
+        last_file : `str`, optional
+            Only frames up to and including this file, by file name or
+            number.
+        since : `str`, optional
+            Only frames taken at or after this ISO 8601 time. No offset
+            means UTC.
+        until : `str`, optional
+            Only frames taken at or before this ISO 8601 time.
+        include_spectra : `bool`, optional
+            Also measure spectroscopy frames. Defaults to `False`; their
+            smeared stars are flagged as trailing, which is not a fault.
+
+        Returns
+        -------
+        report : `dict` [`str`, `Any`]
+            The mode and the results. A problem comes back under ``"error"``.
+        """
+        from astrometricslib.pipelines.shared.quality import frame_selection, frame_statistics
+
+        limit = max(1, min(int(limit), 300))
+        try:
+            selection = frame_selection.FrameSelection(
+                filter_name=filter_name,
+                first_file=first_file,
+                last_file=last_file,
+                since=frame_selection.parse_iso_time(since),
+                until=frame_selection.parse_iso_time(until),
+                include_spectra=include_spectra,
+            )
+        except ValueError as error:
+            return {"error": f"since and until must be ISO 8601 times: {error}"}
+        if mode == "raw_check":
+            if folder_path:
+                paths = frame_selection.select_folder_paths(folder_path, selection)
+            elif target is not None:
+                paths = [
+                    frame.path
+                    for frame in frame_selection.select_library_frames(
+                        [frame for frame in target.frames if str(frame.role).upper() == "LIGHT"],
+                        selection,
+                    )
+                ]
+            else:
+                return {"error": "mode='raw_check' needs a folder_path or a target."}
+            matching = len(paths)
+            paths = paths[:limit] if selection.has_bounds else paths[-limit:]
+            if not paths:
+                return {"mode": mode, "frames_matching": 0, "frames": [], "batch": {"frame_count": 0}}
+            from astrometricslib.pipelines.shared.quality.raw_frame_check import check_raw_frames
+
+            report = check_raw_frames(paths=paths)
+            return {
+                "mode": mode,
+                "folder_path": folder_path,
+                "frames_matching": matching,
+                "frames_checked": len(paths),
+                **report,
+            }
+        if mode not in ("input_quality", "quarantine_preview"):
+            return {"error": "mode must be one of: input_quality, raw_check, quarantine_preview."}
+        if target is None:
+            return {"error": f"mode={mode!r} needs a target."}
+
+        lights = [
+            frame
+            for frame in target.frames
+            if str(frame.role).upper() == "LIGHT" and not frame_is_spectral(frame)
+        ]
+        if mode == "quarantine_preview":
+            from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
+                decision_to_set_aside_frame,
+                find_frames_to_quarantine,
+            )
+
+            report = find_frames_to_quarantine(lights)
+            preview = QuarantinePreview(
+                target_id=target.id,
+                frames_checked=len(lights),
+                would_move=[decision_to_set_aside_frame(decision) for decision in report.moved],
+                notes=report.notes,
+                unreadable=report.unreadable,
+            )
+            answer = preview.model_dump(mode="json")
+            answer["would_move_total"] = len(answer["would_move"])
+            answer["would_move"] = answer["would_move"][:limit]
+            return {"mode": mode, **answer}
+
+        wanted = (camera_name or "").lower()
+        every_light = [frame for frame in target.frames if str(frame.role).upper() == "LIGHT"]
+        chosen = [
+            frame
+            for frame in frame_selection.select_library_frames(every_light, selection)
+            if wanted in (frame.camera or "").lower()
+        ]
+        frames_matching = len(chosen)
+        chosen = chosen[:limit] if selection.has_bounds else chosen[-limit:]
+        working = target.model_copy(deep=True)
+        working.frames = [frame.model_copy(deep=True) for frame in chosen]
+        counts = frame_statistics.measure_frame_input_quality(working, include_fwhm, remeasure, None)
+        metrics = ("background_level", "saturated_pixel_fraction", "measured_fwhm_px")
+        rows = [
+            {
+                "file": os.path.basename(frame.path),
+                "camera": frame.camera,
+                "exposure": frame.exposure,
+                "filter": str(frame.filter),
+                **{name: getattr(frame.measurements, name) for name in metrics},
+            }
+            for frame in working.frames
+        ]
+        summary = {}
+        for name in metrics:
+            values = sorted(row[name] for row in rows if row[name] is not None)
+            summary[name] = (
+                {
+                    "frames": len(values),
+                    "minimum": values[0],
+                    "median": values[len(values) // 2],
+                    "maximum": values[-1],
+                }
+                if values
+                else {"frames": 0}
+            )
+        return {
+            "mode": mode,
+            "target_id": target.id,
+            "light_frames_in_target": len(lights),
+            "frames_matching": frames_matching,
+            "frames_measured": len(rows),
+            "counts": counts,
+            "summary": summary,
+            "frames": rows,
+            "note": "Nothing was saved. Frames that were already measured keep their stored values.",
+        }
 
     def compare_stacks(self, before_path: str, after_path: str) -> StackComparison:
         """Measure two stacks and say how they differ.

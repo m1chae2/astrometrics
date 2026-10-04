@@ -224,3 +224,7 @@ siril.log
 backend/tests/*.fit
 backend/notifications.json
 library/targets/TEST_TARGET.json
+
+# Gemini CLI settings: absolute paths, per-clone. Written by
+# build/mcp/generate_client_configs.py.
+.gemini/settings.json

@@ -89,6 +89,9 @@ class ProcessingConfig(BaseModel):
     quarantine_bad_frames_enabled : `bool`
         Whether stacking moves frames with clouds or trailed stars into an
         ``_excluded`` folder before it runs, by default `True`.
+    trim_noisy_stack_edges_enabled : `bool`
+        Whether a finished imaging stack is trimmed back to where its edges
+        are no noisier than its middle, by default `True`.
     keep_previous_stack_enabled : `bool`
         Whether a restack first moves the old stack and its pictures into a
         ``_previous`` folder, so the two can be compared, by default `True`.
@@ -111,6 +114,7 @@ class ProcessingConfig(BaseModel):
     quarantine_bad_frames_enabled: bool = True
     preview_star_tone_enabled: bool = True
     keep_previous_stack_enabled: bool = True
+    trim_noisy_stack_edges_enabled: bool = True
 
 
 class ParallelismConfig(BaseModel):

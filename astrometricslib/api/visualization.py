@@ -5,6 +5,7 @@ so that users do not have to interact with the complex, lower-level
 visualization and data conversion code directly.
 """
 
+from dataclasses import dataclass
 from typing import Any
 
 from matplotlib.figure import Figure
@@ -12,7 +13,24 @@ from matplotlib.figure import Figure
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import Target
 
-__all__ = ["Visualization"]
+__all__ = ["ViewableImage", "Visualization"]
+
+
+@dataclass
+class ViewableImage:
+    """A picture a client should show as an image, not as text.
+
+    Attributes
+    ----------
+    png_bytes : `bytes`
+        The PNG file.
+    description : `dict` [`str`, `Any`]
+        What the picture shows: the file, the brightness range, the size,
+        and the crop. A client reads it beside the picture.
+    """
+
+    png_bytes: bytes
+    description: dict[str, Any]
 
 
 class Visualization:
@@ -37,6 +55,162 @@ class Visualization:
             (`Astrometrics.stars`) for rendering.
         """
         self._astrometrics = astrometrics
+
+    def render_fits(
+        self,
+        path: str | None = None,
+        target: Target | None = None,
+        file_name: str | None = None,
+        max_dimensions: int = 1200,
+        stretch: bool = True,
+        center: float | None = None,
+        width: float | None = None,
+        crop_center_x: int | None = None,
+        crop_center_y: int | None = None,
+        crop_size: int | None = None,
+    ) -> ViewableImage:
+        """Draw a FITS frame or stack as a picture a client can look at.
+
+        The result is an image, not text. Use it to judge a frame by eye:
+        star trailing, clouds, gradients or a bad stack. Nothing is saved.
+
+        Parameters
+        ----------
+        path : `str`, optional
+            Path to the FITS file. Give this, or ``target`` and
+            ``file_name``.
+        target : `Target`, optional
+            The target whose frame to draw, used with ``file_name``.
+        file_name : `str`, optional
+            Which of the target's frames: its file name, or the number at
+            the end of the name, such as ``"013"``. It must match one frame.
+        max_dimensions : `int`, optional
+            Longest side of the picture in pixels, from 100 to 2000.
+            Defaults to 1200. Smaller pictures cost the client less.
+        stretch : `bool`, optional
+            Brighten faint detail automatically. Defaults to `True`.
+        center : `float`, optional
+            Middle of a manual brightness range, in pixel values. Needs
+            ``width``.
+        width : `float`, optional
+            Width of a manual brightness range, in pixel values. Needs
+            ``center``.
+        crop_center_x : `int`, optional
+            Column of the centre of a zoomed piece, in full-frame pixels.
+            Use it with ``crop_center_y`` and ``crop_size`` to inspect stars.
+        crop_center_y : `int`, optional
+            Row of the centre of the zoomed piece, in full-frame pixels.
+        crop_size : `int`, optional
+            Side of the zoomed square in pixels. The piece is not shrunk
+            below its own size.
+
+        Returns
+        -------
+        picture : `ViewableImage`
+            The PNG and a description of the brightness range and crop.
+
+        Raises
+        ------
+        ValueError
+            If only one of ``center`` and ``width`` is given, only some of
+            the crop values are given, or the frame cannot be found.
+        """
+        from io import BytesIO
+
+        from PIL import Image
+
+        from astrometricslib.drivers.image import AstrometricsImage
+        from astrometricslib.pipelines.shared.image_scaling import ImageScaler
+
+        if path is None:
+            path = self._find_target_frame_path(target, file_name)
+        if (center is None) != (width is None):
+            raise ValueError("Give both center and width for a manual brightness range, or neither.")
+        crop_values = (crop_center_x, crop_center_y, crop_size)
+        if any(value is not None for value in crop_values) and any(value is None for value in crop_values):
+            raise ValueError("Give crop_center_x, crop_center_y and crop_size together, or none of them.")
+        max_dimensions = max(100, min(int(max_dimensions), 2000))
+
+        data = AstrometricsImage(path).data
+        full_height, full_width = data.shape[-2:]
+        crop = None
+        if crop_size is not None:
+            half = max(8, int(crop_size)) // 2
+            left = max(0, min(int(crop_center_x) - half, full_width - 2 * half))
+            top = max(0, min(int(crop_center_y) - half, full_height - 2 * half))
+            data = data[..., top : top + 2 * half, left : left + 2 * half]
+            crop = {"left": left, "top": top, "width": 2 * half, "height": 2 * half}
+
+        vmin = (center - width / 2.0) if center is not None else None
+        vmax = (center + width / 2.0) if center is not None else None
+        img8, vmin, vmax = ImageScaler.scale_to_uint8(
+            data, vmin=vmin, vmax=vmax, stretch=stretch, sample_sky=True
+        )
+        picture = Image.fromarray(img8)
+        if picture.mode != "L":
+            picture = picture.convert("L")
+        longest_side = max(picture.size)
+        target_side = max_dimensions if crop is None else max_dimensions // 2
+        # A big frame is shrunk to fit. A small zoomed piece is enlarged so
+        # single stars are easy to see.
+        if longest_side > target_side or (crop is not None and longest_side < target_side):
+            scale = target_side / longest_side
+            picture = picture.resize(
+                (round(picture.size[0] * scale), round(picture.size[1] * scale)),
+                Image.NEAREST if scale > 1.0 else Image.LANCZOS,
+            )
+        buffer = BytesIO()
+        picture.save(buffer, format="PNG", compress_level=1)
+        return ViewableImage(
+            png_bytes=buffer.getvalue(),
+            description={
+                "path": path,
+                "full_frame_size": {"width": int(full_width), "height": int(full_height)},
+                "crop": crop,
+                "picture_size": {"width": picture.size[0], "height": picture.size[1]},
+                "brightness_range_shown": {"minimum": float(vmin), "maximum": float(vmax)},
+                "stretched": bool(stretch),
+            },
+        )
+
+    @staticmethod
+    def _find_target_frame_path(target: Target | None, file_name: str | None) -> str:
+        """Find the one frame of a target that a file name or number names.
+
+        Parameters
+        ----------
+        target : `Target` or `None`
+            The target to search.
+        file_name : `str` or `None`
+            A file name, or the number at the end of one.
+
+        Returns
+        -------
+        path : `str`
+            The frame's path.
+
+        Raises
+        ------
+        ValueError
+            If a target and file name are missing, or no frame or several
+            frames match.
+        """
+        import os
+
+        from astrometricslib.pipelines.shared.quality.frame_selection import file_in_range
+
+        if target is None or not file_name:
+            raise ValueError("Give a path, or a target and a file_name.")
+        matches = [
+            frame.path
+            for frame in target.frames
+            if file_in_range(os.path.basename(frame.path), file_name, file_name)
+        ]
+        if len(matches) != 1:
+            raise ValueError(
+                f"{file_name!r} matches {len(matches)} frames of {target.id}; give the full file name."
+            )
+        return matches[0]
 
     def convert_fits_to_png(
         self, path: str, max_dimensions: int = 2000, stretch: bool = True

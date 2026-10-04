@@ -40,6 +40,18 @@ class _FakeTargets:
     def __init__(self) -> None:
         """Create the catalog with one target."""
         self._by_id = {"M 52": types.SimpleNamespace(id="M 52")}
+        self.reload_count = 0
+
+    def list(self) -> list[object]:
+        """Re-read the catalog, as the real one does from disk.
+
+        Returns
+        -------
+        targets : `list` [`object`]
+            Every stored target.
+        """
+        self.reload_count += 1
+        return list(self._by_id.values())
 
     def get(self, target_id: str) -> object | None:
         """Return the target with this id, or `None`.
@@ -183,3 +195,12 @@ async def test_visibility_accepts_coordinates_and_an_offset_time() -> None:
     )
     assert "M 52" in result[0].text
     assert "altitude" in result[0].text.lower() or "alt" in result[0].text.lower()
+
+
+def test_a_target_id_reads_the_catalog_fresh_each_time(hooks: Hooks) -> None:
+    """Resolving a target re-reads the catalog, so a frame sync is seen."""
+    resolvers, injected = hooks
+    catalog = injected["astrometrics"]().targets
+    resolvers["target"]("M 52")
+    resolvers["target"]("M 52")
+    assert catalog.reload_count == 2

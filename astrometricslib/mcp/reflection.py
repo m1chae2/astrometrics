@@ -388,6 +388,13 @@ def register_astrometrics_tools(
                             if Target in type_args and isinstance(param_v, str):
                                 targets_api = getattr(astrometrics_instance, "targets", None)
                                 if targets_api and hasattr(targets_api, "get"):
+                                    # Another program (a frame sync, the
+                                    # app) may have changed the catalog
+                                    # since this server loaded it. A fresh
+                                    # read takes about 0.1 s and keeps a
+                                    # tool from reporting a stale frame list.
+                                    if hasattr(targets_api, "list"):
+                                        await asyncio.to_thread(targets_api.list)
                                     resolved = targets_api.get(param_v)
                                     if not resolved:
                                         raise ValueError(f"No target with id {param_v!r} in the library.")

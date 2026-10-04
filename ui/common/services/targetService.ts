@@ -4,7 +4,7 @@
  * Aligns with the Google TypeScript Style Guide.
  */
 
-import { callBackend } from './backendApi';
+import { callBackend, TargetCameraIndex } from './backendApi';
 import { reportError } from '../utils/reportError';
 import { emitToast } from '../utils/emitToast';
 import { TargetObject, TargetFilesResponse, GroupedFrameStat, FitsHeaderEntry } from '../types/backendTypes';
@@ -304,5 +304,18 @@ export async function refreshTarget(targetId: string, pruneMissing: boolean = fa
         const txt = `Error reindexing target ${targetId}`;
         reportError(err instanceof Error ? err : new Error(txt), 'backend');
         throw err;
+    }
+}
+
+/**
+ * Fetches which configured camera took each target's light frames, and when.
+ * @return The camera index, or an empty one if the request fails.
+ */
+export async function fetchTargetCameraIndex(): Promise<TargetCameraIndex> {
+    try {
+        return await callBackend("target:get_camera_index", {});
+    } catch (err: unknown) {
+        reportError(err instanceof Error ? err : new Error(String(err)), 'backend');
+        return { cameras: [], targets: {} };
     }
 }

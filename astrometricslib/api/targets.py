@@ -8,6 +8,7 @@ work.
 """
 
 import builtins
+from typing import Any
 
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
@@ -360,6 +361,27 @@ class TargetCatalog:
         from astrometricslib.pipelines.shared.quality import frame_statistics
 
         return frame_statistics.list_camera_names(self.list())
+
+    def camera_index(self, camera_names: builtins.list[str]) -> dict[str, Any]:
+        """Summarize each target's light frames per configured camera.
+
+        Used by the target list to filter by camera and sort by the most
+        recent image without sending every frame to the browser.
+
+        Parameters
+        ----------
+        camera_names : `list` [`str`]
+            The configured camera names to report on.
+
+        Returns
+        -------
+        index : `dict`
+            See `build_target_camera_index`.
+        """
+        from astrometricslib.drivers.camera_profile_store import camera_identity
+        from astrometricslib.pipelines.shared.target_camera_index import build_target_camera_index
+
+        return build_target_camera_index(self.list(), camera_names, camera_identity)
 
     def get_calibration_frame_statistics(
         self,

@@ -182,6 +182,7 @@ def download_remote_targets(
     log_callback: Any | None = None,
     local_path: str | None = None,
     incremental: bool = True,
+    prune_missing: bool = True,
 ) -> bool:
     """Download target files into the light frames directory and reindex.
 
@@ -214,6 +215,9 @@ def download_remote_targets(
         ``<telescope>/<camera>`` layout, so the directory rsync
         compares against is empty on the next run and every file
         looks missing. Pass `False` to force a full-folder transfer.
+    prune_missing : `bool`, optional
+        If `True` (default), the reindex also drops frame records whose
+        file is gone from disk. Pass `False` to only add records.
 
     Returns
     -------
@@ -328,10 +332,200 @@ def download_remote_targets(
 
     if success:
         classify_and_sort_fits_files(scan_list, target_id, config, telescope_name)
-        astrometrics.targets.reindex_frames(target, prune_missing=True)
+        astrometrics.targets.reindex_frames(target, prune_missing=prune_missing)
         astrometrics.targets.save()
         return True
     return success
+
+
+EXAMPLE_FILE_COUNT = 10
+"""How many file names a plan shows as examples."""
+
+
+def plan_target_download(observatory, target_id: str) -> dict[str, Any]:  # ruff: ignore[missing-type-function-argument]
+    """Work out what a download of one target would transfer. Writes nothing.
+
+    Uses the same rule as `download_remote_targets`: a remote file counts as
+    already held when a local FITS file has the same name and size.
+
+    Parameters
+    ----------
+    observatory : `wayfindinglib.api.control_registry.ObservatoryControl`
+        Provides the cached `remote_transfer_driver`.
+    target_id : `str`
+        The target to look up. It must match a remote target folder, so a
+        made-up name cannot reach the remote shell or create a target.
+
+    Returns
+    -------
+    plan : `dict` [`str`, `Any`]
+        ``target_id``, the ``remote_folder`` it resolves to, how many
+        ``remote_files`` there are, how many are ``already_held``, how many
+        would transfer (``to_transfer``), and the first few names
+        (``examples``).
+
+    Raises
+    ------
+    ValueError
+        If no remote target folder matches `target_id`.
+    """
+    from astrometricslib import get_configuration
+
+    driver = observatory.remote_transfer_driver
+    folders = list_remote_target_folders(observatory)
+    resolved = driver.resolve_remote_folder_name(target_id)
+    matching = next((name for name in folders if name.lower() == str(resolved).lower()), None)
+    if matching is None:
+        shown = ", ".join(sorted(folders)[:15]) or "none found (is the telescope computer reachable?)"
+        raise ValueError(f"No remote target folder matches {target_id!r}. Remote target folders: {shown}.")
+
+    config = get_configuration()
+    frames_path = str(config.get_frames_path())
+    lights_root = os.path.join(frames_path, "lights")
+    remote_files = list(driver.list_remote_files_with_sizes(matching))
+    already_held = local_fits_fingerprints(
+        list({
+            os.path.join(lights_root, matching),
+            os.path.join(lights_root, target_id),
+            os.path.join(frames_path, "darks"),
+            os.path.join(frames_path, "biases"),
+            os.path.join(frames_path, "flats"),
+        })
+    )
+    new_files = [name for name, size in remote_files if (os.path.basename(name), size) not in already_held]
+    return {
+        "target_id": target_id,
+        "remote_folder": matching,
+        "remote_files": len(remote_files),
+        "already_held": len(remote_files) - len(new_files),
+        "to_transfer": len(new_files),
+        "examples": new_files[:EXAMPLE_FILE_COUNT],
+    }
+
+
+def sync_target_frames(observatory, target_id: str, dry_run: bool = True) -> dict[str, Any]:  # ruff: ignore[missing-type-function-argument]
+    """Bring one target's new frames into the library.
+
+    A dry run only reports the plan. A real run transfers the files that are
+    not already held, sorts them into the library, adds the frame records and
+    saves the target. It never deletes a file or a frame record, and it
+    refuses to start if the frames drive is not mounted.
+
+    Parameters
+    ----------
+    observatory : `wayfindinglib.api.control_registry.ObservatoryControl`
+        Provides the cached `remote_transfer_driver`.
+    target_id : `str`
+        The target to sync. It must match a remote target folder.
+    dry_run : `bool`, optional
+        `True` (default) only reports what would transfer.
+
+    Returns
+    -------
+    result : `dict` [`str`, `Any`]
+        The plan from `plan_target_download` plus ``dry_run``, and for a
+        real run ``success`` and ``transferred``. A problem comes back
+        under ``error``.
+    """
+    from astrometricslib import StorageNotMountedError, get_configuration, require_mounted_storage
+
+    try:
+        plan = plan_target_download(observatory, target_id)
+    except ValueError as error:
+        return {"error": str(error)}
+    result: dict[str, Any] = {"dry_run": dry_run, **plan}
+    if dry_run:
+        return result
+    if plan["to_transfer"] == 0:
+        return {**result, "success": True, "transferred": 0, "message": "Nothing new to transfer."}
+    try:
+        require_mounted_storage(os.path.join(str(get_configuration().get_frames_path()), "lights"))
+    except StorageNotMountedError as error:
+        return {**result, "success": False, "transferred": 0, "error": str(error)}
+    success = download_remote_targets(observatory, target_id, incremental=True, prune_missing=False)
+    return {**result, "success": bool(success), "transferred": plan["to_transfer"] if success else 0}
+
+
+def plan_log_sync(observatory, destination_dir: str) -> dict[str, Any]:  # ruff: ignore[missing-type-function-argument]
+    """Find which guide and Ekos logs on the telescope computer are new.
+
+    A log counts as already held when a local file with the same name and
+    size is in `destination_dir`. A log that is still being written grows,
+    so it counts as new again and is fetched again.
+
+    Parameters
+    ----------
+    observatory : `wayfindinglib.api.control_registry.ObservatoryControl`
+        Provides the cached `remote_transfer_driver`.
+    destination_dir : `str`
+        The local folder the logs are downloaded into.
+
+    Returns
+    -------
+    plan : `dict` [`str`, `Any`]
+        ``destination_dir`` and, for ``guide_logs`` and ``ekos_analyze_logs``,
+        how many ``remote_files`` there are, how many ``to_download``, and a
+        few ``examples``. A kind the driver cannot list shows
+        ``supported: False``.
+    """
+    driver = observatory.remote_transfer_driver
+    plan: dict[str, Any] = {"destination_dir": destination_dir}
+    for label, method_name in (
+        ("guide_logs", "_remote_guide_log_sizes"),
+        ("ekos_analyze_logs", "_remote_ekos_analyze_log_sizes"),
+    ):
+        list_sizes = getattr(driver, method_name, None)
+        if list_sizes is None:
+            plan[label] = {"supported": False}
+            continue
+        remote = list_sizes()
+        new_names = []
+        for remote_path, remote_size in sorted(remote.items()):
+            local_path = os.path.join(destination_dir, os.path.basename(remote_path))
+            held = os.path.isfile(local_path) and os.path.getsize(local_path) == remote_size
+            if not held:
+                new_names.append(os.path.basename(remote_path))
+        plan[label] = {
+            "supported": True,
+            "remote_files": len(remote),
+            "to_download": len(new_names),
+            "examples": new_names[-EXAMPLE_FILE_COUNT:],
+        }
+    return plan
+
+
+def sync_remote_logs(observatory, dry_run: bool = True) -> dict[str, Any]:  # ruff: ignore[missing-type-function-argument]
+    """Bring the guide and Ekos logs into the library's own database.
+
+    A dry run only reports which logs are new. A real run downloads the new
+    logs, then stores the guiding samples and one session record per Ekos
+    analyze file. It is safe to repeat: a second run leaves the same data.
+    It adds or updates records and never deletes a file or a record.
+
+    Parameters
+    ----------
+    observatory : `wayfindinglib.api.control_registry.ObservatoryControl`
+        Provides the remote driver and the ingestion.
+    dry_run : `bool`, optional
+        `True` (default) only reports what is new.
+
+    Returns
+    -------
+    result : `dict` [`str`, `Any`]
+        The plan from `plan_log_sync` plus ``dry_run`` and, for a real run,
+        ``ingested`` (what was read and stored). A problem comes back
+        under ``error``.
+    """
+    from wayfindinglib.drivers import local_database
+
+    destination_dir = str(local_database._wayfinding_library_path(observatory._config) / "ekos_logs")
+    if not observatory.check_remote_connection():
+        return {"error": "The telescope computer cannot be reached, so no logs can be listed or fetched."}
+    result: dict[str, Any] = {"dry_run": dry_run, **plan_log_sync(observatory, destination_dir)}
+    if dry_run:
+        return result
+    summary = observatory.ingest_ekos_session_logs(destination_dir, download=True)
+    return {**result, "ingested": summary}
 
 
 def discover_unassociated_remote_targets(control, targets) -> list[str]:  # ruff: ignore[missing-type-function-argument]

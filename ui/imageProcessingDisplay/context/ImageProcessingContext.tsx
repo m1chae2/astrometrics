@@ -8,6 +8,7 @@ import React, { createContext, useContext, ReactNode } from 'react';
 import { useImageProcessing, UseImageProcessingResult } from '../hooks/useImageProcessing';
 import { useTargetContext } from '../../common/context/TargetContext';
 import { SelectableItem } from '../../common/components/SelectableList';
+import type { TargetListFilterPanelProps } from '../../common/radioList/TargetListFilterPanel';
 import { useTargetFilesLogic } from '../hooks/useTargetFilesLogic';
 import { useIngestionManager, IngestionState } from '../../common/hooks/useIngestionManager';
 
@@ -18,9 +19,7 @@ export interface ImageProcessingContextValue extends UseImageProcessingResult {
     isLocalTarget: boolean;
     items: SelectableItem[];
     isLoading: boolean;
-    filterOptions: string[];
-    selectedFilterOption: string;
-    setFilterOption: (option: string) => void;
+    filterPanel: TargetListFilterPanelProps;
     filterText: string;
     setFilterText: (text: string) => void;
     // Files Logic
@@ -36,9 +35,7 @@ interface ImageProcessingProviderProps {
     isLocalTarget: boolean;
     items: SelectableItem[];
     isLoading: boolean;
-    filterOptions: string[];
-    selectedFilterOption: string;
-    setFilterOption: (option: string) => void;
+    filterPanel: TargetListFilterPanelProps;
     filterText: string;
     setFilterText: (text: string) => void;
 }
@@ -52,9 +49,7 @@ export const ImageProcessingProvider: React.FC<ImageProcessingProviderProps> = (
     isLocalTarget,
     items,
     isLoading,
-    filterOptions,
-    selectedFilterOption,
-    setFilterOption,
+    filterPanel,
     filterText,
     setFilterText
 }) => {
@@ -68,9 +63,7 @@ export const ImageProcessingProvider: React.FC<ImageProcessingProviderProps> = (
         isLocalTarget,
         items,
         isLoading,
-        filterOptions,
-        selectedFilterOption,
-        setFilterOption,
+        filterPanel,
         filterText,
         setFilterText,
         files,

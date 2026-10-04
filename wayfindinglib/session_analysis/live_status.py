@@ -22,6 +22,7 @@ import numpy as np
 from wayfindinglib.models.session.ekos_session import EkosCapture, EkosGuideStat, EkosSessionContext
 from wayfindinglib.models.session.live_session_status import (
     DitherEvent,
+    DitherSettings,
     ExposureSummary,
     GuidingExcursion,
     GuidingWindowSummary,
@@ -374,6 +375,40 @@ def summarize_exposures(
     return summaries
 
 
+GUIDE_SETTINGS_UNAVAILABLE = (
+    "Guide algorithm and its settings (aggression, hysteresis): the PHD2 guide log that Ekos keeps does "
+    "not record them, so they cannot be compared between nights."
+)
+"""Said in every status, because the logs never hold these values."""
+
+
+def summarize_dither_settings(dithers: Sequence[DitherEvent], captures_completed: int) -> DitherSettings:
+    """Describe how the session has been dithering.
+
+    Parameters
+    ----------
+    dithers : `Sequence` [`DitherEvent`]
+        Dithers read from the KStars log.
+    captures_completed : `int`
+        Finished exposures in the session.
+
+    Returns
+    -------
+    settings : `DitherSettings`
+        The count, failures, typical move and frames per dither.
+    """
+    if not dithers:
+        return DitherSettings()
+    amplitudes = [dither.amplitude_px for dither in dithers]
+    return DitherSettings(
+        dither_count=len(dithers),
+        failed_count=sum(1 for dither in dithers if dither.succeeded is False),
+        last_amplitude_px=amplitudes[-1],
+        median_amplitude_px=statistics.median(amplitudes),
+        exposures_per_dither=round(captures_completed / len(dithers), 1),
+    )
+
+
 def summarize_live_session(
     context: EkosSessionContext,
     guide_stats: Sequence[EkosGuideStat],
@@ -458,6 +493,11 @@ def summarize_live_session(
         guider_state_since=last_guide_state.timestamp if last_guide_state else None,
         declination_degrees=declination,
         temperature_c=context.temperatures[-1].temperature_c if context.temperatures else None,
+        pier_side=context.mount_positions[-1].pier_side if context.mount_positions else None,
+        captures_completed=len(context.captures),
+        captures_aborted=len(context.aborted_captures),
+        dither_settings=summarize_dither_settings(dithers, len(context.captures)),
+        unavailable=[GUIDE_SETTINGS_UNAVAILABLE],
         recent_guiding=summarize_guiding_window(guide_stats, as_of, window_seconds),
         exposures=exposures,
         excursions=excursions,

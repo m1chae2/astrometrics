@@ -143,6 +143,29 @@ class ExposureSummary(BaseModel):
     flags: list[str] = Field(default_factory=list)
 
 
+class DitherSettings(BaseModel):
+    """How a session has been dithering, as seen in the KStars log.
+
+    Attributes
+    ----------
+    dither_count, failed_count : `int`
+        Dithers started, and how many gave up.
+    last_amplitude_px, median_amplitude_px : `float` or `None`
+        The latest and the typical requested move, in guide-camera pixels.
+    exposures_per_dither : `float` or `None`
+        Finished exposures divided by dithers: roughly how many frames
+        between dithers. `None` with no dithers.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    dither_count: int = 0
+    failed_count: int = 0
+    last_amplitude_px: float | None = None
+    median_amplitude_px: float | None = None
+    exposures_per_dither: float | None = None
+
+
 class LiveSessionStatus(BaseModel):
     """The state of the current observing session.
 
@@ -162,7 +185,19 @@ class LiveSessionStatus(BaseModel):
     declination_degrees : `float` or `None`
         The mount's latest declination.
     temperature_c : `float` or `None`
-        The latest temperature reading.
+        The latest camera sensor temperature Ekos logged, in degrees C.
+    pier_side : `str` or `None`
+        The side of the pier the mount was on at the latest position
+        record: ``"East"`` or ``"West"``.
+    captures_completed, captures_aborted : `int`
+        Exposures that finished and exposures that were cancelled, in the
+        session this analyze file records.
+    dither_settings : `DitherSettings`
+        How the session has been dithering, worked out from the dithers
+        in the KStars log. These are observed values, not the Ekos setting.
+    unavailable : `list` [`str`]
+        Things the app cannot report from these logs, so a client does not
+        have to guess.
     recent_guiding : `GuidingWindowSummary`
         Guiding accuracy over the requested window.
     exposures : `list` [`ExposureSummary`]
@@ -189,6 +224,11 @@ class LiveSessionStatus(BaseModel):
     guider_state_since: float | None = None
     declination_degrees: float | None = None
     temperature_c: float | None = None
+    pier_side: str | None = None
+    captures_completed: int = 0
+    captures_aborted: int = 0
+    dither_settings: DitherSettings = Field(default_factory=DitherSettings)
+    unavailable: list[str] = Field(default_factory=list)
     recent_guiding: GuidingWindowSummary
     exposures: list[ExposureSummary] = Field(default_factory=list)
     excursions: list[GuidingExcursion] = Field(default_factory=list)

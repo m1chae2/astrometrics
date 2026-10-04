@@ -7,6 +7,7 @@ import { useRemoteStatusContext } from '../common/context/RemoteStatusContext';
 import { useViewerState } from './hooks/useViewerState';
 import { ImageProcessingLayout } from './ImageProcessingLayout';
 import { RadioListManager } from '../common/radioList/RadioListManager';
+import { TargetListFilterPanel } from '../common/radioList/TargetListFilterPanel';
 import { ListActions } from '../common/components/ListActions';
 import { FitsRendererHandle } from '../common/fitsViewer/FitsViewerManager';
 import { ViewerPanelContainer } from './components/ViewerPanelContainer';
@@ -61,7 +62,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
   } = useTargetContext();
 
   const {
-    items, isLoading: isTargetListLoading, filterOptions, selectedFilterOption, setFilterOption,
+    items, isLoading: isTargetListLoading, filterPanel,
     filterText, setFilterText,
     isLocalTarget,
     lightFrames, isLoadingFrames, isProcessing, startProcessing, cancelProcessingJob,
@@ -412,9 +413,8 @@ const ImageProcessingDisplayInner: React.FC = () => {
       selectedId={selectedTarget}
       pendingId={pendingTarget}
       onSelect={handleTargetSelect}
-      filterOptions={filterOptions}
-      selectedFilterOption={selectedFilterOption}
-      onFilterOptionChange={setFilterOption}
+      topPanel={<TargetListFilterPanel {...filterPanel} />}
+      topPanelTitle="Filter Targets"
       filterText={filterText}
       onFilterTextChange={setFilterText}
       highlightedIds={remoteTargets}

@@ -21,6 +21,7 @@ that otherwise succeeded into a failure. This mirrors
 import logging
 import sqlite3
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from astrometricslib.models.provenance import (
@@ -105,7 +106,7 @@ class ProvenanceStore:
         repository.
     """
 
-    def __init__(self, db_path: str):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, db_path: str, read_only: bool = False):  # ruff: ignore[missing-return-type-special-method]
         """Initialize the repository and ensure its tables exist.
 
         Parameters
@@ -113,9 +114,14 @@ class ProvenanceStore:
         db_path : `str`
             Filesystem path to the astrometrics_log.db SQLite database
             (see `AppConfiguration.get_logs_db_path()`).
+        read_only : `bool`, optional
+            Open the database read-only and do not create or fill tables.
+            The file must already exist. Defaults to `False`.
         """
         self.db_path = db_path
-        self._init_db()
+        self.read_only = read_only
+        if not read_only:
+            self._init_db()
 
     def _connect(self, timeout: float = 30.0) -> sqlite3.Connection:
         """Open a connection to astrometrics_log.db with WAL mode.
@@ -131,6 +137,13 @@ class ProvenanceStore:
             Open connection with WAL mode, normal synchronous mode, a
             30-second busy timeout, and row access by column name.
         """
+        if self.read_only:
+            conn = sqlite3.connect(
+                f"{Path(self.db_path).resolve().as_uri()}?mode=ro", uri=True, timeout=timeout
+            )
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA busy_timeout=30000;")
+            return conn
         conn = sqlite3.connect(self.db_path, timeout=timeout)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL;")

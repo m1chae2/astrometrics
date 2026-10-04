@@ -32,6 +32,17 @@ logger = logging.getLogger(__name__)
 # the summary path documented for UI catalog-browsing callers.
 DEFAULT_UNFILTERED_SUMMARY_LIMIT = 5000
 
+QUERY_LIMITS = {"ids": 2000, "summary": 500, "full": 10}
+"""Most stars one `StellarCatalog.query` answer holds, by detail level.
+A full star record can carry a spectrum and a light curve, so few fit."""
+
+QUERY_MAXIMUM_RADIUS_DEGREES = 5.0
+"""Widest region `StellarCatalog.query` searches. A wider circle on a
+274,000-star library returns more than a client can use."""
+
+QUERY_DETAILS = ("exists", "ids", "summary", "full", "stats")
+"""The detail levels `StellarCatalog.query` accepts."""
+
 
 class StellarCatalog:
     """A catalog for tracking and analyzing individual stars.
@@ -685,6 +696,241 @@ class StellarCatalog:
             "stellar_catalog", [new_obj], lambda current, updated: current if current is not None else updated
         )
         return new_obj
+
+    def query(
+        self,
+        ids: list[str] | None = None,
+        name: str | None = None,
+        target_id: str | None = None,
+        ra: float | None = None,
+        dec: float | None = None,
+        radius_deg: float | None = None,
+        tolerance_arcsec: float | None = None,
+        magnitude_min: float | None = None,
+        magnitude_max: float | None = None,
+        has_spectra: bool | None = None,
+        detail: str = "summary",
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """Look up stars in the library, with a hard cap on the answer.
+
+        One front door for reading stars. Give at most one selector:
+        ``ids``, ``name``, ``target_id``, a region (``ra``, ``dec`` and
+        ``radius_deg``) or a position (``ra``, ``dec`` and
+        ``tolerance_arcsec``). With none, it browses the whole library in id
+        order. It reads only; nothing is changed.
+
+        Parameters
+        ----------
+        ids : `list` [`str`], optional
+            Star ids to look up.
+        name : `str`, optional
+            A star id or name, matched loosely.
+        target_id : `str`, optional
+            Stars that belong to this target.
+        ra : `float`, optional
+            Right ascension of the centre, in degrees.
+        dec : `float`, optional
+            Declination of the centre, in degrees.
+        radius_deg : `float`, optional
+            Radius of a region search, in degrees, up to 5.
+        tolerance_arcsec : `float`, optional
+            Match radius of a position search, in arcseconds. The nearest
+            star within it is returned.
+        magnitude_min : `float`, optional
+            Keep stars at least this magnitude (numerically). Stars with no
+            magnitude are dropped when a magnitude bound is given.
+        magnitude_max : `float`, optional
+            Keep stars no fainter than this magnitude.
+        has_spectra : `bool`, optional
+            Keep only stars that do (or do not) have a recorded spectrum.
+        detail : `str`, optional
+            ``"summary"`` (default): id, name, position, magnitude, spectral
+            type, targets and data flags. ``"ids"``: only ids. ``"exists"``:
+            which of ``ids`` are in the library. ``"full"``: whole records,
+            at most 10. ``"stats"``: counts and coverage for the whole
+            library (no selector).
+        limit : `int`, optional
+            How many stars to return. At most 2000 for ids, 500 for
+            summaries and 10 for full records. Defaults to 50.
+        offset : `int`, optional
+            How many stars to skip, for paging. Stars are in id order.
+
+        Returns
+        -------
+        answer : `dict` [`str`, `Any`]
+            ``stars`` (or ``ids``, ``found``, ``stats``), ``total_matching``,
+            and whether the answer was cut by the limit; or ``{"error": ...}``.
+        """
+        if detail not in QUERY_DETAILS:
+            return {"error": f"detail must be one of: {', '.join(QUERY_DETAILS)}."}
+        region_given = radius_deg is not None
+        position_given = tolerance_arcsec is not None
+        if region_given and position_given:
+            return {"error": "Give radius_deg (a region) or tolerance_arcsec (one position), not both."}
+        if (region_given or position_given) and (ra is None or dec is None):
+            return {"error": "A region or position search needs ra and dec."}
+        selectors = [
+            label
+            for label, given in (
+                ("ids", ids is not None),
+                ("name", name is not None),
+                ("target_id", target_id is not None),
+                ("region", region_given),
+                ("position", position_given),
+            )
+            if given
+        ]
+        if len(selectors) > 1:
+            return {"error": f"Give one selector, not several: {', '.join(selectors)}."}
+        if detail == "stats":
+            return {"stats": self.get_audit()}
+        if detail == "exists":
+            if ids is None:
+                return {"error": "detail='exists' needs ids."}
+            if len(ids) > QUERY_LIMITS["ids"]:
+                return {"error": f"At most {QUERY_LIMITS['ids']} ids per call."}
+            return {"found": sorted(self.existing_ids(ids))}
+        if region_given and not 0 < radius_deg <= QUERY_MAXIMUM_RADIUS_DEGREES:
+            return {"error": f"radius_deg must be above 0 and at most {QUERY_MAXIMUM_RADIUS_DEGREES}."}
+
+        limit = max(1, min(int(limit), QUERY_LIMITS["ids" if detail == "ids" else detail]))
+        offset = max(0, int(offset))
+        magnitude_range = None
+        if magnitude_min is not None or magnitude_max is not None:
+            magnitude_range = (
+                magnitude_min if magnitude_min is not None else -30.0,
+                magnitude_max if magnitude_max is not None else 60.0,
+            )
+
+        summaries = self._query_summaries(
+            selectors[0] if selectors else None,
+            ids,
+            name,
+            target_id,
+            ra,
+            dec,
+            radius_deg,
+            tolerance_arcsec,
+            magnitude_range,
+        )
+        if summaries is None:
+            return {"stars": [], "total_matching": 0, "truncated": False}
+        if has_spectra is not None:
+            summaries = [item for item in summaries if bool(item["hasSpectra"]) is has_spectra]
+        summaries.sort(key=lambda item: item["id"])
+        total = len(summaries)
+        page = summaries[offset : offset + limit]
+        answer: dict[str, Any] = {
+            "total_matching": total,
+            "offset": offset,
+            "truncated": offset + limit < total,
+        }
+        if detail == "ids":
+            answer["ids"] = [item["id"] for item in page]
+        elif detail == "summary":
+            answer["stars"] = page
+        else:
+            answer["stars"] = self.list_objects_by_ids([item["id"] for item in page])
+        return answer
+
+    def _query_summaries(
+        self,
+        selector: str | None,
+        ids: list[str] | None,
+        name: str | None,
+        target_id: str | None,
+        ra: float | None,
+        dec: float | None,
+        radius_deg: float | None,
+        tolerance_arcsec: float | None,
+        magnitude_range: tuple[float, float] | None,
+    ) -> list[dict[str, Any]] | None:
+        """Find the stars a selector names, as summary rows.
+
+        Parameters
+        ----------
+        selector : `str` or `None`
+            Which selector was given, or `None` to browse.
+        ids, name, target_id, ra, dec, radius_deg, tolerance_arcsec : optional
+            The selector values, as for `query`.
+        magnitude_range : `tuple` [`float`, `float`] or `None`
+            Magnitude bounds, applied to every selector.
+
+        Returns
+        -------
+        summaries : `list` [`dict`] or `None`
+            One row per star, or `None` when a position search finds nothing.
+        """
+        if selector == "region":
+            rows = self.list_object_summaries_in_region(ra, dec, radius_deg, magnitude_range)
+            return rows
+        if selector == "ids":
+            stars = self.list_objects_by_ids(list(ids)[: QUERY_LIMITS["summary"]])
+        elif selector == "name":
+            stars = self.find_all_by_id_or_name(name)
+        elif selector == "position":
+            star = self.find_by_position(ra, dec, tolerance_arcsec)
+            stars = [star] if star is not None else []
+        elif selector == "target_id":
+            rows = self.list_object_summaries(target_id=target_id)
+            return self._within_magnitudes(rows, magnitude_range)
+        else:
+            rows = self.list_object_summaries(apply_default_limit=False)
+            return self._within_magnitudes(rows, magnitude_range)
+        rows = [self._summary_row(star) for star in stars]
+        return self._within_magnitudes(rows, magnitude_range)
+
+    @staticmethod
+    def _within_magnitudes(
+        rows: list[dict[str, Any]], magnitude_range: tuple[float, float] | None
+    ) -> list[dict[str, Any]]:
+        """Keep the rows inside a magnitude range.
+
+        Parameters
+        ----------
+        rows : `list` [`dict`]
+            Summary rows.
+        magnitude_range : `tuple` [`float`, `float`] or `None`
+            Lowest and highest magnitude, or `None` to keep every row.
+
+        Returns
+        -------
+        rows : `list` [`dict`]
+            The rows in range. A row with no magnitude is dropped when a
+            range is given.
+        """
+        if magnitude_range is None:
+            return rows
+        low, high = magnitude_range
+        return [row for row in rows if row["magnitude"] is not None and low <= row["magnitude"] <= high]
+
+    @staticmethod
+    def _summary_row(star: StellarObject) -> dict[str, Any]:
+        """Describe one star as a summary row.
+
+        Parameters
+        ----------
+        star : `StellarObject`
+            The star.
+
+        Returns
+        -------
+        row : `dict` [`str`, `Any`]
+            The same keys `list_object_summaries` gives.
+        """
+        return {
+            "id": star.id,
+            "name": star.name,
+            "ra": star.right_ascension,
+            "dec": star.declination,
+            "targetIds": star.target_ids,
+            "hasSpectra": star.has_spectra,
+            "hasPhotometry": star.has_photometry,
+            "magnitude": star.magnitude,
+            "spectralType": star.spectral_type,
+        }
 
     def get_audit(self) -> dict[str, Any]:
         """Get a summary of how much data is in the stellar catalog.

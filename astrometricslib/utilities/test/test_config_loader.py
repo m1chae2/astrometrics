@@ -236,3 +236,16 @@ def test_keeping_the_previous_stack_can_be_turned_off(tmp_path: Path) -> None:
     config = _make_isolated_config(tmp_path)
     config.app_config.set("Processing.Siril", "keep_previous_stack_enabled", "false")
     assert config.get_keep_previous_stack_enabled() is False
+
+
+def test_trimming_noisy_stack_edges_is_on_by_default(tmp_path: Path) -> None:
+    """A finished stack has its noisy edges trimmed unless told not to."""
+    config = _make_isolated_config(tmp_path)
+    assert config.get_trim_noisy_stack_edges_enabled() is True
+
+
+def test_trimming_noisy_stack_edges_can_be_turned_off(tmp_path: Path) -> None:
+    """The ``trim_noisy_stack_edges_enabled`` setting switches the trim off."""
+    config = _make_isolated_config(tmp_path)
+    config.app_config.set("Processing.Siril", "trim_noisy_stack_edges_enabled", "false")
+    assert config.get_trim_noisy_stack_edges_enabled() is False

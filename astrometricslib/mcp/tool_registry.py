@@ -4,13 +4,17 @@ Provides static registration and automatic type-hint parsing for
 offline astrometrics tools.
 """
 
+import base64
 import inspect
 import json
 import logging
 import os
+from pathlib import Path
 from typing import Any
 
-from mcp.types import TextContent, Tool
+from mcp.types import ImageContent, TextContent, Tool
+
+from astrometricslib.mcp.profile import current_profile, find_withheld_tools, load_manifest, refusal_message
 
 logger = logging.getLogger(__name__)
 
@@ -24,11 +28,16 @@ class ToolRegistry:
         Mapping of registered tool name to a dict with keys
         ``"func"`` (the registered callable) and ``"tool_def"`` (the
         `mcp.types.Tool` definition).
+    withheld : `dict`
+        Tools that `apply_profile` removed from ``tools``, in the same
+        form. Empty until a profile is applied.
     """
 
     def __init__(self):  # ruff: ignore[missing-return-type-special-method]
-        """Initialize the empty dictionary of registered tools."""
+        """Start with no registered or withheld tools."""
         self.tools = {}
+        self.withheld = {}
+        self.withheld_reasons = {}
 
     def register(self, name: str, description: str, input_schema: dict[str, Any] | None = None):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Build a decorator that registers a tool under `name`.
@@ -62,6 +71,37 @@ class ToolRegistry:
 
         return decorator
 
+    def apply_profile(self, manifest_path: Path, profile: str | None = None) -> dict[str, str]:
+        """Remove the tools a profile may not use.
+
+        A removed tool is no longer listed, and a call to it gets the
+        "Unknown tool" error. A tool that is missing from the manifest is
+        removed, so a new tool stays hidden until it is reviewed.
+
+        Parameters
+        ----------
+        manifest_path : `pathlib.Path`
+            The server's ``tool_manifest.json``.
+        profile : `str`, optional
+            The profile name. Defaults to the one chosen by the
+            ``ASTROMETRICS_MCP_PROFILE`` environment variable, or
+            ``"investigator"``.
+
+        Returns
+        -------
+        withheld : `dict` [`str`, `str`]
+            Tool name -> why it was removed.
+        """
+        profile = profile or current_profile()
+        reasons = find_withheld_tools(list(self.tools), load_manifest(manifest_path), profile)
+        for name in reasons:
+            self.withheld[name] = self.tools.pop(name)
+        self.withheld_reasons.update(reasons)
+        logger.info(
+            "MCP profile %r: serving %d tools, withholding %d.", profile, len(self.tools), len(reasons)
+        )
+        return reasons
+
     def get_tool_definitions(self) -> list[Tool]:
         """Return the list of all Tool definitions currently registered.
 
@@ -94,7 +134,7 @@ class ToolRegistry:
         # is raised and caught within this same function (the path
         # sandboxing block below); it never propagates to the caller.
         if name not in self.tools:
-            return [TextContent(type="text", text=f"Error: Unknown tool {name}")]
+            return [TextContent(type="text", text=refusal_message(name, self.withheld_reasons.get(name)))]
 
         if not isinstance(arguments, dict):
             arguments = {}
@@ -126,7 +166,7 @@ class ToolRegistry:
             stk_path = os.path.realpath(str(config.get_stacks_path()))
 
             for key, val in list(arguments.items()):
-                if "path" in key.lower() and isinstance(val, str):
+                if ("path" in key.lower() or key.lower().endswith("_dir")) and isinstance(val, str):
                     check_val = val
                     if not os.path.exists(check_val):
                         if check_val.startswith("/run/media/"):
@@ -161,6 +201,17 @@ class ToolRegistry:
 
             if isinstance(result, list) and len(result) > 0 and isinstance(result[0], TextContent):
                 return result
+
+            if hasattr(result, "png_bytes") and hasattr(result, "description"):
+                # A picture goes back as a real image, not as base64 text.
+                return [
+                    ImageContent(
+                        type="image",
+                        data=base64.b64encode(result.png_bytes).decode("ascii"),
+                        mimeType="image/png",
+                    ),
+                    TextContent(type="text", text=json.dumps(result.description, indent=2, default=str)),
+                ]
 
             serialized = _serialize_result(result)
             result_str = json.dumps(serialized, indent=2, default=str)
@@ -239,6 +290,7 @@ def register_astrometrics_reflected_tools():  # ruff: ignore[missing-return-type
         "processing.diagnostics": "diagnostics",
         "processing.calibration": "calibration",
         "visualization": "visualization",
+        "jobs": "jobs",
     }
     register_astrometrics_tools(registry, astrometrics, branch_mapping)
 

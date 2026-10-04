@@ -251,3 +251,29 @@ def test_a_clean_session_has_no_flags() -> None:
     )
 
     assert status.flags == []
+
+
+def test_status_reports_pier_side_capture_counts_and_dither_settings() -> None:
+    """The status gives pier side, exposure counts and observed dithering."""
+    captures = [_capture(130.0 + 120.0 * index, name=f"frame_{index:03d}") for index in range(9)]
+    context = _context(captures)
+    context.mount_positions[0].pier_side = "East"
+    dithers = [
+        DitherEvent(timestamp=_START + 50.0, amplitude_px=1.5, succeeded=True),
+        DitherEvent(timestamp=_START + 500.0, amplitude_px=3.0, succeeded=False),
+    ]
+    status = live_status.summarize_live_session(
+        context,
+        _guide_stats(with_jump=False, with_drift=False),
+        dithers,
+        analyze_file="a.analyze",
+        wall_clock_now=_START + 1200.0,
+    )
+
+    assert status.pier_side == "East"
+    assert (status.captures_completed, status.captures_aborted) == (9, 0)
+    settings = status.dither_settings
+    assert (settings.dither_count, settings.failed_count) == (2, 1)
+    assert (settings.last_amplitude_px, settings.median_amplitude_px) == (3.0, 2.25)
+    assert settings.exposures_per_dither == pytest.approx(4.5)
+    assert "guide algorithm" in status.unavailable[0].lower()

@@ -30,7 +30,7 @@ Maintain clean unidirectional dependency boundaries across layers:
 - ❌ NEVER contain business logic or import directly from `astrometrics/`.
 
 ### `backend/mcp/` & Running API Layer
-- Exposes direct live backend diagnostics (`backend_call_rpc`, `backend_health_check`) and desktop/pipeline automation controls (`electron_run_python`, `ui_show_notification`, etc.).
+- Hosts the backend MCP server, the capability gap server, and the tool manifests that limit what an AI client may use (see section 5).
 - ❌ NEVER recreate synthetic or duplicate domain library reflection wrappers (`backend_targets_*`). Domain math belongs in `astrometricslib-core` and `wayfindinglib-core`.
 
 ## 3. Data & Resource Safety
@@ -46,45 +46,33 @@ ALWAYS prefer executing pre-existing lifecycle scripts under `build/linux/` inst
 - **Environment Setup**: `build/linux/setup_venv.sh`
 
 ## 5. MCP Tool Usage Guidelines (MANDATORY)
-Domain queries and operations MUST use the reflected MCP tools first. Do NOT fall back to ad-hoc `curl`, exploratory python snippets, or filesystem inspection unless the MCP call fails or returns an explicit connection error.
+The MCP servers give an AI tools that look things up, calculate and measure. An AI never changes configuration, commands a device (mount, cameras, focuser, filter wheel, enclosure), or runs code through MCP. It has two writes: `observatory_sync_remote_frames` brings a target's new frames, and `observatory_sync_remote_logs` brings the guide and Ekos logs, from the telescope computer into the library. Those tools add files and records and never delete. Use it with `dry_run` true first, then false, and follow the job with `jobs_query`. Measure the frames with `diagnostics_frame_quality`, look at one with `visualization_render_fits`, and check whether guiding spoiled a frame with `observatory_frame_guiding`. Plan a night with `planning_get_visibility_over_time`. Each server starts with a profile (the `ASTROMETRICS_MCP_PROFILE` environment variable). The default, `investigator`, offers tools that look things up, calculate or measure, plus the frame ingest tool. The `developer` profile adds the tools that run the project's own tests and builds. A tool that is not in a server's `tool_manifest.json` is not offered.
+
+### When your tools cannot do something
+Stop. Do not look for a workaround: do not chain tools to imitate a missing one, do not use `curl`, `sqlite3` or `python -c` against the live backend or databases, and do not write a script that touches the live databases or the telescope. Call `report_capability_gap` on the `astrometrics-gaps` server (call `list_capability_gaps` first so you do not report the same gap twice). Say what you tried and what tool would help. Then tell the person you cannot do it with the current tools. The person decides what to build, and reviews the reports with `.venv/bin/python -m backend.mcp.gaps.review list`.
+
+### Two ways to run
+- **Companion**: `build/linux/run_ai_companion.sh` starts Claude as the `investigator` agent. It has only MCP tools, no shell and no file access. For Gemini, `.gemini/settings.json` lists the same tools in `includeTools`.
+- **Developer**: a normal session that edits the repo. It uses `.mcp.json`. It still cannot write data or command devices through MCP. Test code against a scratch configuration (`ASTROMETRICS_CONFIG_PATH`), never the live library.
+
+Run `.venv/bin/python build/mcp/generate_client_configs.py` after a tool manifest changes. It writes `.mcp.json`, `.claude/companion.mcp.json`, `.claude/agents/investigator.md` and `.gemini/settings.json`. Do not edit those files by hand. `.venv/bin/python -m backend.mcp.tool_inventory --write-runtime-manifests` writes the manifests from the reviewed decisions.
 
 ### Server Selection Hierarchy
-- `astrometricslib-core`: Domain library functions (catalog targets, image processing, stacking, astrometry, photometry, spectroscopy, and star catalogs).
-- `wayfindinglib-core`: Observatory control, telescope status, tracking, slewing, focusing, guiding, and observation planning.
-- `astrometrics-backend`: Backend session/persistence operations, direct `/api/rpc` probing via `backend_call_rpc`, health checks via `backend_health_check`, and desktop pipeline controls.
-- `astrometrics-ui`: UI diagnostic, build, test, and accessibility verification suites.
+- `astrometricslib-core`: Read-only lookups and calculations on targets, stars, calibration, stacks and frames.
+- `wayfindinglib-core`: Read-only observatory status, equipment state, past-night analysis, remote listings and observation planning. No device commands.
+- `astrometrics-backend`: Backend health, documentation, and changing the app's view or showing a notification.
+- `astrometrics-gaps`: Reporting what the tools cannot do.
+- `astrometrics-ui` (developer profile only): UI tests, type check, build and accessibility checks.
 
 ### Common Invocations Cheat Sheet
-- **List targets in catalog**:
-  `call_mcp_tool(ServerName="astrometricslib-core", ToolName="target_list", Arguments={})`
-- **Get specific target**:
-  `call_mcp_tool(ServerName="astrometricslib-core", ToolName="target_get", Arguments={"target_name": "<name>"})`
-- **Probe backend RPC method**:
-  `call_mcp_tool(ServerName="astrometrics-backend", ToolName="backend_call_rpc", Arguments={"method": "astronomy:visible", "params": {}})`
-- **Check backend API health**:
-  `call_mcp_tool(ServerName="astrometrics-backend", ToolName="backend_health_check", Arguments={})`
-- **Add target frame**:
-  `call_mcp_tool(ServerName="astrometricslib-core", ToolName="target_add_frame", Arguments={"target_name": "<name>", "frame_path": "<path>"})`
-- **Run astrometry / plate-solving**:
-  `call_mcp_tool(ServerName="astrometricslib-core", ToolName="processing_run_astrometry", Arguments={"target_name": "<name>"})`
-- **Run stacking**:
-  `call_mcp_tool(ServerName="astrometricslib-core", ToolName="processing_run_stacking", Arguments={"target_name": "<name>"})`
-- **Run spectroscopy**:
-  `call_mcp_tool(ServerName="astrometricslib-core", ToolName="processing_run_spectroscopy", Arguments={"target_name": "<name>"})`
-- **Check telescope status**:
-  `call_mcp_tool(ServerName="wayfindinglib-core", ToolName="observatory_get_telescope_status", Arguments={})`
-- **Slew to target**:
-  `call_mcp_tool(ServerName="wayfindinglib-core", ToolName="observatory_slew_to_target", Arguments={"target_name": "<name>"})`
-- **Run UI tests**:
-  `call_mcp_tool(ServerName="astrometrics-ui", ToolName="ui_run_tests", Arguments={})`
+Tool names change as the proposed merged tools are built. The manifests are the source of truth.
+- **List targets**: `call_mcp_tool(ServerName="astrometricslib-core", ToolName="target_list", Arguments={})`
+- **Get a target**: `call_mcp_tool(ServerName="astrometricslib-core", ToolName="target_get", Arguments={"target_id": "<id>"})`
+- **Check backend health**: `call_mcp_tool(ServerName="astrometrics-backend", ToolName="backend_health_check", Arguments={})`
+- **Report a gap**: `call_mcp_tool(ServerName="astrometrics-gaps", ToolName="report_capability_gap", Arguments={...})`
+- **Run UI tests (developer profile)**: `call_mcp_tool(ServerName="astrometrics-ui", ToolName="ui_run_tests", Arguments={})`
 
-## 6. Supervised Python Scripting & Terminal Environment (MANDATORY)
-When executing custom calculations, testing algorithms, exploring datasets, or interacting with `astrometricslib` and `wayfindinglib` public APIs directly:
-- **ALWAYS** route execution through the supervised terminal engine using the `electron_run_python` MCP tool (or UI terminal execution).
-- **NEVER** spawn ad-hoc bash subprocesses (`python -c "..."` or shell scripts) to interact with the domain libraries.
-- The supervised environment provides:
-  - **Live Shared State**: Direct access to `astrometrics` and `wayfinder` instances connected to active telescope hardware and catalogs.
-  - **Resource & Power Guardian**: Enforces thread quotas (75% cores) and automatically freezes background compute (`SIGSTOP`) on battery/screen lock.
-  - **MATLAB-style Workspace**: Inspect active variables and array dimensions using `terminal_get_workspace`.
-  - **Introspection**: Query signatures and parameter docs using `terminal_inspect_api` or `inspect_api(...)`.
-  - **Visual Feedback**: Automatically intercepts Matplotlib figures into saved PNG artifacts returned in the result envelope.
+## 6. Scripts and Analysis
+- **NEVER** spawn ad-hoc scripts (`python -c "..."`, shell scripts, SQL) against the live databases, the live backend or the telescope. `electron_run_python` and `backend_call_rpc` are not offered to an AI.
+- When an analysis needs something the tools do not offer, file a gap report and discuss the tool with the person. Do not write a one-off script to get the number.
+- Tests and scripts that you write while changing code must use a scratch library and configuration, as the test suite does.

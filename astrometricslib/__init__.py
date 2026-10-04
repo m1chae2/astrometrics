@@ -107,6 +107,7 @@ from astrometricslib.utilities.pipeline_models import ProcessingJob
 from astrometricslib.utilities.storage_mount import StorageNotMountedError, require_mounted_storage
 
 if TYPE_CHECKING:
+    from astrometricslib.api.jobs import Jobs
     from astrometricslib.api.moving_objects import MovingObjectRecovery
     from astrometricslib.api.processing import CalibrationCatalog, ProcessingPipelines, QualityDiagnostics
     from astrometricslib.api.stars import StellarCatalog
@@ -117,6 +118,11 @@ if TYPE_CHECKING:
     from astrometricslib.pipelines.astrometry.utilities.catalog_seeding import (
         derive_field_centers,
     )
+    from astrometricslib.pipelines.shared.quality.frame_selection import (
+        FrameSelection,
+        parse_iso_time,
+        select_library_frames,
+    )
 
 _DEFERRED_EXPORTS = {
     "AstrometryPipeline": "astrometricslib.pipelines.astrometry.pipeline",
@@ -125,6 +131,10 @@ _DEFERRED_EXPORTS = {
     "CalibrationCatalog": "astrometricslib.api.processing",
     "ProcessingPipelines": "astrometricslib.api.processing",
     "QualityDiagnostics": "astrometricslib.api.processing",
+    "Jobs": "astrometricslib.api.jobs",
+    "FrameSelection": "astrometricslib.pipelines.shared.quality.frame_selection",
+    "parse_iso_time": "astrometricslib.pipelines.shared.quality.frame_selection",
+    "select_library_frames": "astrometricslib.pipelines.shared.quality.frame_selection",
     "MovingObjectRecovery": "astrometricslib.api.moving_objects",
     "StellarCatalog": "astrometricslib.api.stars",
     "TargetCatalog": "astrometricslib.api.targets",
@@ -187,6 +197,7 @@ class Astrometrics:
             The database tool used to save and load data. If not provided,
             it will create a default one.
         """
+        from astrometricslib.api.jobs import Jobs
         from astrometricslib.api.moving_objects import MovingObjectRecovery
         from astrometricslib.api.processing import ProcessingPipelines
         from astrometricslib.api.stars import StellarCatalog
@@ -208,6 +219,7 @@ class Astrometrics:
         self.moving_objects = MovingObjectRecovery()
         self.processing = ProcessingPipelines(self.config)
         self.visualization = Visualization(self)
+        self.jobs = Jobs(self.config)
 
     @background_job("batch_processing", grace_period_seconds=8.0)
     def process_all_targets(
@@ -291,10 +303,12 @@ __all__ = [
     "FilterType",
     "FitsHeaderEntry",
     "FrameRecord",
+    "FrameSelection",
     "GenerationDescription",
     "GroupedFrameStat",
     "ImageProcessing",
     "JobHandle",
+    "Jobs",
     "LoggerInterface",
     "MovingObjectConfig",
     "MovingObjectRecovery",
@@ -335,10 +349,12 @@ __all__ = [
     "get_configuration",
     "observing_night_id",
     "parse_coordinate_string",
+    "parse_iso_time",
     "registered_job",
     "require_mounted_storage",
     "resolve_camera_profile",
     "resolve_worker_counts",
     "run_parallel_batch",
     "run_siril_stack",
+    "select_library_frames",
 ]

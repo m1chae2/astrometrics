@@ -49,6 +49,18 @@ focal_ratio = "5.4"
 indi_port = "7624"
 remote_pictures_path = "/home/stellarmate/Pictures"
 
+["Observatory.Location"]
+# Where the observatory is. It decides which stars are up and when they rise
+# and set. Without it, the planning tools use a default site (Denver) and log
+# a warning, so every altitude, rise time and set time is wrong for any other
+# place. Remove the leading # from the three lines and put in your own values.
+#   latitude  = degrees, north is positive
+#   longitude = degrees, east is positive (west is negative)
+#   elevation = metres above sea level, or 0 if you do not know it
+# latitude = "45.0"
+# longitude = "-110.0"
+# elevation = "0"
+
 ["Observatory.Optics"]
 # Every telescope or camera lens you use, by name. The name is stored as the
 # "telescope" of each frame, so it decides which flat frames are used and
@@ -277,6 +289,12 @@ preview_star_tone_enabled = "true"
 # Nothing deletes it until you call discard_previous_stack. Set "false" to
 # overwrite stacks in place.
 keep_previous_stack_enabled = "true"
+# "true" (the default): after an imaging stack is made, trim its edges back to
+# where the pixel noise is within 15% of the middle's. Frames shift between
+# nights, so the edges of a stack of several nights are covered by fewer
+# frames and are noisier. A stack with clean edges is not changed. The
+# rejection map is trimmed the same way. Set "false" to keep every edge.
+trim_noisy_stack_edges_enabled = "true"
 
 ["Processing.Parallelism"]
 target_workers = "auto"

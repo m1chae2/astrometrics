@@ -1,0 +1,28 @@
+/* Top panel of the shared target list: catalog / camera tabs, the option
+   list for the active tab, and a summary + sort row. */
+
+.target-list-filter-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+/* Only a handful of options, so the list takes its own height instead of
+   filling the panel. */
+.target-list-filter-panel__options {
+    max-height: 144px;
+}
+
+.target-list-filter-panel__summary {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.target-list-filter-panel__chips {
+    font-size: 0.75rem;
+    color: var(--text-dim, #9aa5b5);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}

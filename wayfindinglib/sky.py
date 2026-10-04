@@ -14,6 +14,7 @@ from astropy.coordinates import EarthLocation
 from astropy.time import Time
 
 from astrometricslib import StellarObject, Target
+from wayfindinglib.observatorylib.site_location import configured_observer_location
 from wayfindinglib.tasks.planning_tasks.catalog_operations import build_catalog_driver_registry
 from wayfindinglib.tasks.planning_tasks.constellation_operations import ConstellationLineLibrary
 
@@ -58,21 +59,17 @@ class Sky:
 
         # Read from config if available and args are None
         if config is not None and hasattr(config, "app_config"):
-            if config.app_config.get("Observatory.Location", "latitude", fallback=None) is None:
+            site = configured_observer_location(config)
+            if site is None:
                 logger.warning(
                     "No Observatory.Location latitude/longitude in the configuration; using the "
                     "default site (Denver). Altitudes, rise and set times will be wrong for "
                     "any other observatory."
                 )
-            self.latitude = latitude or float(
-                config.app_config.get("Observatory.Location", "latitude", fallback="39.7392")
-            )
-            self.longitude = longitude or float(
-                config.app_config.get("Observatory.Location", "longitude", fallback="-104.9903")
-            )
-            self.elevation = elevation or float(
-                config.app_config.get("Observatory.Location", "elevation", fallback="1600.0")
-            )
+                site = {"latitude": 39.7392, "longitude": -104.9903, "elevation": 1600.0}
+            self.latitude = latitude or site["latitude"]
+            self.longitude = longitude or site["longitude"]
+            self.elevation = elevation or site["elevation"]
             self.meridian_flip_delay_min = float(
                 config.app_config.get("Observatory.Telescope", "meridian_flip_delay_min", fallback="5.0")
             )

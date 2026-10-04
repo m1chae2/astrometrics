@@ -17,6 +17,7 @@ import logging
 from typing import Any
 
 from wayfindinglib.models.policy.delegation import ObservatoryCapability
+from wayfindinglib.observatorylib.site_location import configured_observer_location
 
 logger = logging.getLogger(__name__)
 
@@ -643,34 +644,6 @@ def get_observer_location(manager) -> dict[str, float] | None:  # ruff: ignore[m
     if mount_location:
         return mount_location
     return configured_observer_location(getattr(manager, "_config", None))
-
-
-def configured_observer_location(config) -> dict[str, float] | None:  # ruff: ignore[missing-type-function-argument]
-    """Read the observatory site from the ``Observatory.Location`` settings.
-
-    Used when the telescope is not connected, so a location tool still
-    answers instead of returning nothing.
-
-    Parameters
-    ----------
-    config : `AppConfiguration` or `None`
-        The application configuration.
-
-    Returns
-    -------
-    location : `dict` [`str`, `float`] or `None`
-        The ``"latitude"``, ``"longitude"`` and ``"elevation"`` (metres,
-        0.0 if unset), or `None` if latitude or longitude is not set.
-    """
-    app_config = getattr(config, "app_config", None)
-    if app_config is None:
-        return None
-    latitude = app_config.get("Observatory.Location", "latitude", fallback=None)
-    longitude = app_config.get("Observatory.Location", "longitude", fallback=None)
-    if latitude is None or longitude is None:
-        return None
-    elevation = app_config.get("Observatory.Location", "elevation", fallback=0.0)
-    return {"latitude": float(latitude), "longitude": float(longitude), "elevation": float(elevation)}
 
 
 def refresh_safety_assessment(observatory):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]

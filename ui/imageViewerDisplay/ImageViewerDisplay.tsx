@@ -1,5 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import { RadioListManager } from '../common/radioList/RadioListManager';
+import { TargetListFilterPanel } from '../common/radioList/TargetListFilterPanel';
 import { useTargetListLogic } from '../common/hooks/useTargetListLogic';
 import { ListActions } from '../common/components/ListActions';
 import { ConfirmDialog } from '../common/components/ConfirmDialog';
@@ -42,9 +43,7 @@ export const ImageViewerDisplay: React.FC = () => {
   const { remoteTargets } = useRemoteStatusContext();
   const {
     items,
-    filterOptions,
-    selectedFilterOption,
-    setFilterOption,
+    filterPanel,
     filterText,
     setFilterText,
     highlightedIds,
@@ -94,9 +93,8 @@ export const ImageViewerDisplay: React.FC = () => {
       selectedId={selectedTarget}
       pendingId={pendingTarget}
       onSelect={handleTargetSelect}
-      filterOptions={filterOptions}
-      selectedFilterOption={selectedFilterOption}
-      onFilterOptionChange={setFilterOption}
+      topPanel={<TargetListFilterPanel {...filterPanel} />}
+      topPanelTitle="Filter Targets"
       // REQ: TGT-1.2: The display SHALL allow filtering of the target list by text search.
       filterText={filterText}
       onFilterTextChange={setFilterText}

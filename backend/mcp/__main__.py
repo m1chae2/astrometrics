@@ -16,13 +16,18 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from astrometricslib.mcp.profile import GAP_REPORT_GUIDANCE
 from backend.mcp.tool_registry import get_astrometrics, registry
 
 # Configure logging to stderr to avoid corrupting stdio MCP protocol
 logging.basicConfig(level=logging.INFO, stream=sys.stderr)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
-app = Server("astrometrics-backend")
+app = Server("astrometrics-backend", instructions=GAP_REPORT_GUIDANCE)
+
+# Offer only the tools the manifest allows for the chosen profile
+# (see astrometricslib.mcp.profile).
+registry.apply_profile(Path(__file__).resolve().parent / "tool_manifest.json")
 
 
 @app.list_tools()

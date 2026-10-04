@@ -8,6 +8,7 @@
       ],
       "cwd": "/path/to/astrometrics",
       "env": {
+        "ASTROMETRICS_MCP_PROFILE": "developer",
         "PYTHONPATH": "/path/to/astrometrics"
       }
     },
@@ -19,6 +20,7 @@
       ],
       "cwd": "/path/to/astrometrics",
       "env": {
+        "ASTROMETRICS_MCP_PROFILE": "investigator",
         "PYTHONPATH": "/path/to/astrometrics"
       }
     },
@@ -31,8 +33,20 @@
       "cwd": "/path/to/astrometrics",
       "env": {
         "ASTROMETRICS_API_BASE": "http://127.0.0.1:5000",
-        "PYTHONPATH": "/path/to/astrometrics",
-        "MPLCONFIGDIR": "/tmp/matplotlib"
+        "ASTROMETRICS_MCP_PROFILE": "investigator",
+        "MPLCONFIGDIR": "/tmp/matplotlib",
+        "PYTHONPATH": "/path/to/astrometrics"
+      }
+    },
+    "astrometrics-gaps": {
+      "command": "/path/to/astrometrics/.venv/bin/python",
+      "args": [
+        "-m",
+        "backend.mcp.gaps"
+      ],
+      "cwd": "/path/to/astrometrics",
+      "env": {
+        "PYTHONPATH": "/path/to/astrometrics"
       }
     },
     "astrometrics-ui": {
@@ -41,7 +55,9 @@
         "/path/to/astrometrics/ui/mcp/dist/index.js"
       ],
       "cwd": "/path/to/astrometrics",
-      "env": {}
+      "env": {
+        "ASTROMETRICS_MCP_PROFILE": "developer"
+      }
     }
   }
 }

@@ -28,6 +28,7 @@ import statistics
 from datetime import UTC, datetime
 from typing import Any
 
+from astrometricslib import background_job
 from wayfindinglib.data_access.delegation_policy_reader import get_delegation_policy
 from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
 from wayfindinglib.data_access.safety_policy_reader import (
@@ -1328,6 +1329,118 @@ class ObservatoryControl:
         """
         return self._butler.get("ekos_session_context", {"id": session_file_id})
 
+    def night_history(
+        self,
+        kind: str,
+        session_id: str | None = None,
+        ekos_file_id: str | None = None,
+        include: list[str] | None = None,
+        limit: int = 10,
+    ) -> dict[str, Any]:
+        """Analyse or list past observing nights, in replies of bounded size.
+
+        One front door for the history of the observatory: the capture and
+        guiding analyses, the sky coverage, findings that recur across
+        nights, Ekos session records, guiding runs, and the pointing model.
+        It only reads. The reply is measured and shrunk if needed, so it
+        never exceeds the MCP reply limit.
+
+        Parameters
+        ----------
+        kind : `str`
+            ``"capture"`` or ``"guiding"`` (a night's analysis with
+            ``session_id``, otherwise one summary row per recent night),
+            ``"sky_coverage"`` (all nights; slow), ``"recurring_issues"``,
+            ``"ekos_sessions"`` (a list, or one session with
+            ``ekos_file_id``), ``"guiding_runs"`` or ``"pointing_model"``
+            (needs ``session_id``).
+        session_id : `str`, optional
+            An observing night, named for the local date on which it began,
+            for example ``"2026-09-24"``.
+        ekos_file_id : `str`, optional
+            One Ekos session's id, for ``kind="ekos_sessions"``.
+        include : `list` [`str`], optional
+            Sections of that Ekos session to return: ``captures``,
+            ``aborted_captures``, ``autofocus_runs``, ``align_events``,
+            ``guide_state_events``, ``mount_state_events``,
+            ``temperatures``, ``mount_positions``, ``equipment``. Without
+            this, only an overview comes back.
+        limit : `int`, optional
+            How many of the most recent nights, runs or sessions to cover,
+            and how many items of each Ekos section. From 1 to 50.
+            Defaults to 10.
+
+        Returns
+        -------
+        reply : `dict` [`str`, `Any`]
+            The answer, or ``{"error": ...}``. If it had to be cut to fit,
+            ``truncated`` is true.
+        """
+        from wayfindinglib.tasks.control_tasks import night_history
+
+        return night_history.build_night_history(self, kind, session_id, ekos_file_id, include, limit)
+
+    def frame_guiding(
+        self,
+        target_id: str,
+        filter_name: str | None = None,
+        first_file: str | None = None,
+        last_file: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        limit: int = 60,
+    ) -> dict[str, Any]:
+        """Report the guide error during each light frame's exposure.
+
+        Cuts the stored guide-log samples to the window of each frame, from
+        its start time for its exposure length, and gives the sample count,
+        how much of the window the samples cover, and the RMS and peak
+        error in arcseconds. Use it to tell whether wind, a dither or a
+        drift spoiled a particular frame. Frames that fall outside the
+        ingested guide logs show no samples. Nothing is stored.
+
+        Parameters
+        ----------
+        target_id : `str`
+            The library target whose light frames to match.
+        filter_name : `str`, optional
+            Only frames of this filter, such as ``"L"`` or ``"Luminance"``.
+            Spectroscopy frames are left out.
+        first_file : `str`, optional
+            Only frames from this file onward. A bare number such as
+            ``"013"`` means the frame numbered 013.
+        last_file : `str`, optional
+            Only frames up to this file or number.
+        since : `str`, optional
+            Only frames taken at or after this ISO 8601 time. No offset
+            means UTC.
+        until : `str`, optional
+            Only frames taken at or before this ISO 8601 time.
+        limit : `int`, optional
+            How many frames to cover, from 1 to 200. With a range or time
+            these are the first frames inside it; otherwise the newest.
+
+        Returns
+        -------
+        report : `dict`
+            ``frames`` (one row per frame) and ``group`` (the median error
+            and the frames well above it), or ``{"error": ...}``.
+        """
+        from astrometricslib import FrameSelection, parse_iso_time
+        from wayfindinglib.tasks.control_tasks import frame_guiding
+
+        try:
+            selection = FrameSelection(
+                filter_name=filter_name,
+                first_file=first_file,
+                last_file=last_file,
+                since=parse_iso_time(since),
+                until=parse_iso_time(until),
+            )
+        except ValueError as error:
+            return {"error": f"since and until must be ISO 8601 times: {error}"}
+        return frame_guiding.link_frames_to_guiding(self, target_id, selection, limit)
+
     def list_ekos_session_summaries(self) -> list[dict[str, Any]]:
         """Summarise every recorded Ekos session, without their full detail.
 
@@ -1366,8 +1479,13 @@ class ObservatoryControl:
         text log, and reports the guiding accuracy over the last few
         minutes, the latest exposures with any that look ruined (too few
         stars, or a guiding excursion during them), each dither and whether
-        it worked, and guiding excursions with their drift rate. Nothing is
-        stored; the answer is recomputed on every call.
+        it worked, and guiding excursions with their drift rate. It also
+        gives the pier side, the camera temperature, how many exposures
+        finished and were cancelled, and how the session has been
+        dithering. The guide algorithm and its settings are not in the
+        logs; the reply says so under ``unavailable``. Nothing is stored
+        in the library; the answer is recomputed on every call, and
+        ``refresh`` only copies the newest logs into a local folder.
 
         Parameters
         ----------
@@ -1740,8 +1858,15 @@ class ObservatoryControl:
             {},
         )
 
-    def summarize_guiding_sessions(self) -> list[dict[str, Any]]:
+    def summarize_guiding_sessions(self, latest_nights: int | None = None) -> list[dict[str, Any]]:
         """Summarise the guiding analysis of every recorded night.
+
+        Parameters
+        ----------
+        latest_nights : `int` or `None`, optional
+            Cover only the most recent nights. Each night is analysed
+            against the nights before it, so the cost grows with the
+            number of nights; this bounds it.
 
         Returns
         -------
@@ -1754,7 +1879,7 @@ class ObservatoryControl:
         runs = self._butler.get_all("guiding_run")
         library_cache: dict[tuple[str, str, str], Any] = {}
         rows = []
-        for night in sorted({run.session_id for run in runs}):
+        for night in sorted({run.session_id for run in runs})[-latest_nights if latest_nights else None :]:
             analysis = self._analyze_guiding_night(night, contexts, runs, library_cache)
             if analysis is None:
                 continue
@@ -1851,8 +1976,13 @@ class ObservatoryControl:
             {},
         )
 
-    def summarize_capture_sessions(self) -> list[dict[str, Any]]:
+    def summarize_capture_sessions(self, latest_nights: int | None = None) -> list[dict[str, Any]]:
         """Summarise the capture analysis of every recorded night.
+
+        Parameters
+        ----------
+        latest_nights : `int` or `None`, optional
+            Cover only the most recent nights, to bound the cost.
 
         Returns
         -------
@@ -1876,7 +2006,7 @@ class ObservatoryControl:
             context.session_id for context in contexts if context.captures
         }
         rows = []
-        for night in sorted(nights):
+        for night in sorted(nights)[-latest_nights if latest_nights else None :]:
             analysis = self._analyze_capture_night(night, contexts, runs, library_cache)
             if analysis is None:
                 continue
@@ -1948,8 +2078,14 @@ class ObservatoryControl:
         )
         return analyze_sky_request(request)
 
-    def summarize_recurring_issues(self) -> list[RecurringIssue]:
+    def summarize_recurring_issues(self, latest_nights: int | None = None) -> list[RecurringIssue]:
         """List the findings that repeat across nights.
+
+        Parameters
+        ----------
+        latest_nights : `int` or `None`, optional
+            Look only at the most recent nights of each kind (guiding and
+            capture), to bound the cost.
 
         Runs the guiding and capture analyses on every night and reports each
         finding of advice or warning level that appears on at least two. A
@@ -1975,11 +2111,12 @@ class ObservatoryControl:
             frames, _ = self._capture_library(telescope.name, camera.name, library_cache)
             capture_nights |= set(capture_analysis_tasks.frames_by_night(frames))
         per_night: list[tuple[str, str, list[Any]]] = []
-        for night in sorted({run.session_id for run in runs}):
+        recent = slice(-latest_nights if latest_nights else None, None)
+        for night in sorted({run.session_id for run in runs})[recent]:
             guiding = self._analyze_guiding_night(night, contexts, runs, library_cache)
             if guiding is not None:
                 per_night.append(("guiding", night, guiding.recommendations))
-        for night in sorted(capture_nights):
+        for night in sorted(capture_nights)[recent]:
             capture = self._analyze_capture_night(night, contexts, runs, library_cache)
             if capture is not None:
                 per_night.append(("capture", night, capture.recommendations))
@@ -2495,6 +2632,65 @@ class ObservatoryControl:
 
         astrometrics = Astrometrics(self._config)
         return remote_transfer_tasks.discover_unassociated_remote_targets(self, astrometrics.targets)
+
+    @background_job("remote_sync", grace_period_seconds=8.0)
+    def sync_remote_frames(self, target_id: str, dry_run: bool = True) -> dict[str, Any]:
+        """Bring one target's new frames into the library.
+
+        With ``dry_run=True`` (the default) it only says what would transfer.
+        A real run transfers the files not already held, sorts them into the
+        library, adds the frame records and saves the target. It never
+        deletes a file or a frame record. It refuses to run if the frames
+        drive is not mounted, and the target must match a folder on the
+        telescope computer. Through the MCP server a slow run returns a job
+        id; follow it with ``jobs_query``.
+
+        Parameters
+        ----------
+        target_id : `str`
+            The target to sync, such as ``"M 13"``. It must match a target
+            folder on the telescope computer.
+        dry_run : `bool`, optional
+            `True` (default) only reports the plan. `False` transfers.
+
+        Returns
+        -------
+        result : `dict` [`str`, `Any`]
+            The remote folder, how many files exist, are already held and
+            would transfer, a few example names, and for a real run
+            ``success`` and ``transferred``. A problem comes back under
+            ``error``.
+        """
+        from wayfindinglib.tasks.control_tasks import remote_transfer_tasks
+
+        return remote_transfer_tasks.sync_target_frames(self, target_id, dry_run)
+
+    @background_job("remote_sync", grace_period_seconds=8.0)
+    def sync_remote_logs(self, dry_run: bool = True) -> dict[str, Any]:
+        """Bring the guide and Ekos logs into the library's database.
+
+        With ``dry_run=True`` (the default) it only says which logs on the
+        telescope computer are new. A real run downloads the new guide logs
+        and Ekos analyze logs, then stores the guiding samples and one
+        session record per analyze file. It is safe to repeat and never
+        deletes. Through the MCP server a slow run returns a job id; follow
+        it with ``jobs_query``.
+
+        Parameters
+        ----------
+        dry_run : `bool`, optional
+            `True` (default) only reports what is new. `False` ingests.
+
+        Returns
+        -------
+        result : `dict` [`str`, `Any`]
+            How many guide logs and Ekos analyze logs exist and are new,
+            and for a real run what was stored. A problem comes back under
+            ``error``.
+        """
+        from wayfindinglib.tasks.control_tasks import remote_transfer_tasks
+
+        return remote_transfer_tasks.sync_remote_logs(self, dry_run)
 
     def download_remote_targets(
         self,

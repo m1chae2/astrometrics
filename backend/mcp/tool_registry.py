@@ -6,19 +6,69 @@ external MCP server process. REQ: AGENT-1.1, AGENT-3.1
 
 import inspect
 import json
+import logging
+from pathlib import Path
 from typing import Any
 
 from mcp.types import TextContent, Tool
 
+from astrometricslib.mcp.profile import current_profile, find_withheld_tools, load_manifest, refusal_message
 from backend.services.infrastructure.agent_code_policy import check_agent_code
 from backend.services.infrastructure.destructive_guard import destructive_rpc_reason
 
+logger = logging.getLogger(__name__)
+
 
 class ToolRegistry:
-    """Centralized model context protocol tool registration and dispatching."""
+    """Centralized model context protocol tool registration and dispatching.
+
+    Attributes
+    ----------
+    tools : `dict`
+        Tool name -> a dict with the callable and its `Tool` definition.
+    withheld : `dict`
+        Tools that `apply_profile` removed from ``tools``. Empty until a
+        profile is applied.
+    withheld_reasons : `dict`
+        Tool name -> why `apply_profile` removed it. Used in the error a
+        client gets when it calls the tool.
+    """
 
     def __init__(self):  # ruff: ignore[missing-return-type-special-method]
         self.tools = {}
+        self.withheld = {}
+        self.withheld_reasons = {}
+
+    def apply_profile(self, manifest_path: Path, profile: str | None = None) -> dict[str, str]:
+        """Remove the tools a profile may not use.
+
+        This is the same rule the library servers use (see
+        `astrometricslib.mcp.profile`). A removed tool is not listed, and
+        a call to it gets the "Unknown tool" error. The in-app agent uses
+        the full registry, so only the MCP server entry point calls this.
+
+        Parameters
+        ----------
+        manifest_path : `pathlib.Path`
+            The server's ``tool_manifest.json``.
+        profile : `str`, optional
+            The profile name. Defaults to the one the
+            ``ASTROMETRICS_MCP_PROFILE`` environment variable chooses.
+
+        Returns
+        -------
+        withheld : `dict` [`str`, `str`]
+            Tool name -> why it was removed.
+        """
+        profile = profile or current_profile()
+        reasons = find_withheld_tools(list(self.tools), load_manifest(manifest_path), profile)
+        for name in reasons:
+            self.withheld[name] = self.tools.pop(name)
+        self.withheld_reasons.update(reasons)
+        logger.info(
+            "MCP profile %r: serving %d tools, withholding %d.", profile, len(self.tools), len(reasons)
+        )
+        return reasons
 
     def register(self, name: str, description: str, input_schema: dict[str, Any] | None = None):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Build a decorator that registers a tool under `name`.
@@ -82,7 +132,7 @@ class ToolRegistry:
             single `TextContent` describing an error.
         """
         if name not in self.tools:
-            return [TextContent(type="text", text=f"Error: Unknown tool {name}")]
+            return [TextContent(type="text", text=refusal_message(name, self.withheld_reasons.get(name)))]
 
         # REQ: SEC-1.5: Audit logging of all MCP tool invocations.
         import logging
@@ -761,3 +811,166 @@ async def tool_ui_editor_sync(code: str | None = None) -> dict[str, Any]:
     if res.get("status") == "success" and "data" in res:
         return res["data"]
     return res
+
+
+# ---------------------------------------------------------------------------
+# What the person sees in the app: status and the two allowed controls
+# ---------------------------------------------------------------------------
+
+APP_STATUS_SECTIONS = ("health", "connections", "system", "active_jobs", "view")
+"""The parts of the app's state `tool_app_status` can report."""
+
+APP_CONTROL_ACTIONS = ("navigate", "notify")
+"""What an AI may do in the app. Pausing and resuming pipelines freeze or
+thaw Siril and the plate solver, so they are not offered."""
+
+
+@registry.register(
+    "app_status",
+    (
+        "Report the app's state: backend health, device connections, system resources, and the jobs "
+        "that are running. Reads only."
+    ),
+    {
+        "type": "object",
+        "properties": {
+            "include": {
+                "type": "array",
+                "items": {"type": "string", "enum": list(APP_STATUS_SECTIONS)},
+                "description": "Which parts to report. Defaults to all of them.",
+            },
+        },
+    },
+)
+async def tool_app_status(include: list[str] | None = None) -> dict[str, Any]:
+    """Report the running app's health, connections, resources and jobs.
+
+    Parameters
+    ----------
+    include : `list` [`str`], optional
+        Sections to report, from `APP_STATUS_SECTIONS`. All when omitted.
+
+    Returns
+    -------
+    status : `dict` [`str`, `Any`]
+        One key per section asked for, ``unavailable`` for what the app
+        cannot say, or ``{"error": ...}`` for an unknown section.
+    """
+    sections = list(include) if include else list(APP_STATUS_SECTIONS)
+    unknown = [name for name in sections if name not in APP_STATUS_SECTIONS]
+    if unknown:
+        return {"error": f"Unknown section(s) {unknown}. Choose from {list(APP_STATUS_SECTIONS)}."}
+
+    answer: dict[str, Any] = {}
+    unavailable: list[str] = []
+    if "health" in sections:
+        answer["health"] = await tool_backend_health_check()
+    if "connections" in sections or "system" in sections:
+        health = await execute_rpc("system:health", {})
+        data = (health.get("data") or {}).get("data") if health.get("status") == "success" else None
+        if data is None:
+            note = health.get("message", "the backend did not answer")
+            for section in ("connections", "system"):
+                if section in sections:
+                    answer[section] = {"error": note}
+        else:
+            if "connections" in sections:
+                answer["connections"] = {"indi": data.get("indi")}
+            if "system" in sections:
+                answer["system"] = data.get("resources")
+    if "active_jobs" in sections:
+        answer["active_jobs"] = await _active_jobs()
+    if "view" in sections:
+        unavailable.append(
+            "view: the backend does not keep track of which view the window shows, so the current view "
+            "cannot be reported."
+        )
+    if unavailable:
+        answer["unavailable"] = unavailable
+    return answer
+
+
+async def _active_jobs() -> dict[str, Any]:
+    """List the jobs recorded as running, from the job history.
+
+    Returns
+    -------
+    jobs : `dict` [`str`, `Any`]
+        The result of the job history query for active jobs, or an error.
+    """
+    import asyncio
+
+    astrometrics = get_astrometrics()
+    if astrometrics is None:
+        return {"error": "astrometricslib is not available."}
+    return await asyncio.to_thread(astrometrics.jobs.query, active_only=True, limit=20)
+
+
+@registry.register(
+    "app_controls",
+    "Do what the person can do in the app: switch the view, or show a notification.",
+    {
+        "type": "object",
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": list(APP_CONTROL_ACTIONS),
+                "description": "navigate: switch to a view (and select a target). notify: show a toast.",
+            },
+            "mode": {
+                "type": "string",
+                "enum": [
+                    "Planetarium",
+                    "Observatory",
+                    "Image Processing",
+                    "Observation Manager",
+                    "Command Console",
+                ],
+                "description": "For navigate: the view to show.",
+            },
+            "target": {"type": "string", "description": "For navigate: a target to select."},
+            "title": {"type": "string", "description": "For notify: the headline."},
+            "body": {"type": "string", "description": "For notify: the details."},
+            "urgency": {"type": "string", "enum": ["low", "normal", "critical"], "default": "normal"},
+        },
+        "required": ["action"],
+    },
+)
+async def tool_app_controls(
+    action: str,
+    mode: str | None = None,
+    target: str | None = None,
+    title: str | None = None,
+    body: str | None = None,
+    urgency: str = "normal",
+) -> dict[str, Any]:
+    """Switch the app's view or show a notification.
+
+    Parameters
+    ----------
+    action : `str`
+        ``"navigate"`` or ``"notify"``.
+    mode : `str`, optional
+        The view, for ``navigate``.
+    target : `str`, optional
+        A target to select, for ``navigate``.
+    title, body : `str`, optional
+        The notification text, for ``notify``.
+    urgency : `str`, optional
+        The notification urgency.
+
+    Returns
+    -------
+    result : `dict` [`str`, `Any`]
+        What was dispatched, or ``{"error": ...}`` when the action is not
+        one of `APP_CONTROL_ACTIONS` or a needed argument is missing.
+    """
+    if action == "navigate":
+        if not mode:
+            return {"error": "action='navigate' needs mode."}
+        return await tool_ui_navigate_mode(mode, target)
+    if action == "notify":
+        if not title or not body:
+            return {"error": "action='notify' needs title and body."}
+        return await tool_ui_show_notification(title, body, urgency)
+    return {"error": f"action must be one of {list(APP_CONTROL_ACTIONS)}. Pausing jobs is not offered."}

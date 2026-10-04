@@ -13,6 +13,7 @@ import logging
 import sqlite3
 from collections.abc import Iterable
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from astrometricslib.utilities.observing_night import observing_night_id
@@ -31,7 +32,7 @@ class LoggerInterface:
         repository.
     """
 
-    def __init__(self, db_path: str):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, db_path: str, read_only: bool = False):  # ruff: ignore[missing-return-type-special-method]
         """Initialize the repository and ensure its tables exist.
 
         Parameters
@@ -39,9 +40,16 @@ class LoggerInterface:
         db_path : `str`
             Filesystem path to the high-level interface_log.db SQLite
             database.
+        read_only : `bool`, optional
+            Open the database read-only and do not create tables. Use it
+            for code that only looks at the records, so it can never
+            change the database. The file must already exist. Defaults to
+            `False`.
         """
         self.db_path = db_path
-        self._init_db()
+        self.read_only = read_only
+        if not read_only:
+            self._init_db()
 
     def _connect(self, timeout: float = 30.0) -> sqlite3.Connection:
         """Open a connection to astrometrics_log.db with WAL mode.
@@ -59,6 +67,12 @@ class LoggerInterface:
             Open connection with WAL mode, normal synchronous mode,
             and a 30-second busy timeout configured.
         """
+        if self.read_only:
+            conn = sqlite3.connect(
+                f"{Path(self.db_path).resolve().as_uri()}?mode=ro", uri=True, timeout=timeout
+            )
+            conn.execute("PRAGMA busy_timeout=30000;")
+            return conn
         conn = sqlite3.connect(self.db_path, timeout=timeout)
         conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute("PRAGMA synchronous=NORMAL;")
@@ -694,6 +708,80 @@ class LoggerInterface:
         except Exception as e:
             logger.error(f"Error retrieving log entries for job {job_id}: {e}")
             return []
+
+    def query_jobs(
+        self,
+        target_id: str | None = None,
+        job_type: str | None = None,
+        status: str | None = None,
+        active_only: bool = False,
+        limit: int = 50,
+    ) -> list[ProcessingJob]:
+        """Find jobs by target, type and status, newest first.
+
+        Parameters
+        ----------
+        target_id : `str`, optional
+            Only jobs for this target.
+        job_type : `str`, optional
+            Only jobs of this type, such as ``"stacking"``.
+        status : `str`, optional
+            Only jobs with this status.
+        active_only : `bool`, optional
+            Only jobs that are still running (status ``started`` or
+            ``running``). Defaults to `False`.
+        limit : `int`, optional
+            Most jobs to return. Defaults to 50.
+
+        Returns
+        -------
+        jobs : `list` of `ProcessingJob`
+            Matching jobs, newest first. Empty if the query fails.
+        """
+        try:
+            conn = self._connect()
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM processing_jobs WHERE (? IS NULL OR target_id = ?) "
+                "AND (? IS NULL OR job_type = ?) AND (? IS NULL OR status = ?) "
+                "AND (? = 0 OR status IN ('started', 'running')) ORDER BY created_at DESC LIMIT ?",
+                (target_id, target_id, job_type, job_type, status, status, int(active_only), limit),
+            ).fetchall()
+            conn.close()
+            return [self._row_to_job(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Error querying jobs: {e}")
+            return []
+
+    def get_recent_log_entries_for_job(self, job_id: str, limit: int = 50) -> tuple[list[dict], int]:
+        """Read the last few log entries of a job without loading them all.
+
+        Parameters
+        ----------
+        job_id : `str`
+            Identifier of the job.
+        limit : `int`, optional
+            Most entries to return. Defaults to 50.
+
+        Returns
+        -------
+        entries : `list` of `dict`
+            The last ``limit`` entries, oldest first.
+        total : `int`
+            How many entries the job has in all.
+        """
+        try:
+            conn = self._connect()
+            conn.row_factory = sqlite3.Row
+            total = conn.execute("SELECT COUNT(*) FROM log_entries WHERE job_id = ?", (job_id,)).fetchone()[0]
+            rows = conn.execute(
+                "SELECT * FROM log_entries WHERE job_id = ? ORDER BY id DESC LIMIT ?", (job_id, limit)
+            ).fetchall()
+            conn.close()
+            return [dict(row) for row in reversed(rows)], total
+        except Exception as e:
+            logger.error(f"Error reading recent log entries for job {job_id}: {e}")
+            return [], 0
 
     def get_relevant_knowledge(self, limit: int = 5) -> list[dict]:
         """Retrieve high-importance or recently added knowledge.

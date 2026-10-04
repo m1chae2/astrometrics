@@ -138,6 +138,7 @@ class _FakeAstrometrics:
         self._existing = {t.id: t for t in (existing or [])}
         self.created = []
         self.saved = False
+        self.prune_flags = []
         self.targets = self
 
     def get(self, target_id):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
@@ -151,6 +152,7 @@ class _FakeAstrometrics:
 
     def reindex_frames(self, target, prune_missing=True):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
         target.reindexed = True
+        self.prune_flags.append(prune_missing)
 
     def save(self):  # ruff: ignore[missing-return-type-private-function]
         self.saved = True
@@ -583,3 +585,208 @@ def test_sync_calibration_folder_summarises_what_was_added(tmp_path, monkeypatch
         "transferred_count": 2,
         "added_by_folder": {os.path.join("darks", "Cam", "0.0", "60.0"): 2},
     }
+
+
+def _sync_observatory(remote_folders, resolved, remote_files) -> tuple[_FakeObservatory, Mock]:  # ruff: ignore[missing-type-function-argument]
+    """Build a fake observatory with a listed telescope computer.
+
+    Returns
+    -------
+    observatory, driver : `tuple`
+        The fake observatory and its mock driver.
+    """
+    driver = Mock()
+    driver.list_remote_targets.return_value = remote_folders
+    driver.resolve_remote_folder_name.return_value = resolved
+    driver.list_remote_files_with_sizes.return_value = remote_files
+    driver.download_target_folder.return_value = True
+    return _FakeObservatory(driver), driver
+
+
+def test_plan_target_download_counts_new_and_held_files(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """A plan separates held files (same name and size) from new ones."""
+    held = tmp_path / "lights" / "M 13"
+    held.mkdir(parents=True)
+    (held / "a.fits").write_bytes(b"x" * 10)
+    observatory, _ = _sync_observatory(
+        ["M_13", "Bias"], "M_13", [("Light/a.fits", 10), ("Light/b.fits", 20), ("Light/c.fits", 30)]
+    )
+    with patch("astrometricslib.get_configuration", return_value=_patched_config(frames_path=str(tmp_path))):
+        plan = remote_operations.plan_target_download(observatory, "M 13")
+    assert plan["remote_folder"] == "M_13"
+    assert (plan["remote_files"], plan["already_held"], plan["to_transfer"]) == (3, 1, 2)
+    assert plan["examples"] == ["Light/b.fits", "Light/c.fits"]
+
+
+def test_plan_refuses_a_name_that_is_not_a_remote_target_folder():  # ruff: ignore[missing-return-type-undocumented-public-function]
+    """A made-up name cannot reach the shell or create a target."""
+    observatory, driver = _sync_observatory(["M_13", "Bias"], "x; rm -rf /", [])
+    with patch("astrometricslib.get_configuration", return_value=_patched_config()):
+        result = remote_operations.sync_target_frames(observatory, "x; rm -rf /", dry_run=False)
+    assert "No remote target folder matches" in result["error"]
+    driver.list_remote_files_with_sizes.assert_not_called()
+    driver.download_target_folder.assert_not_called()
+
+
+def test_dry_run_writes_nothing(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """A dry run reports the plan and never downloads or indexes."""
+    observatory, driver = _sync_observatory(["M_13"], "M_13", [("Light/b.fits", 20)])
+    with (
+        patch("astrometricslib.get_configuration", return_value=_patched_config(frames_path=str(tmp_path))),
+        patch("astrometricslib.Astrometrics") as astrometrics,
+    ):
+        result = remote_operations.sync_target_frames(observatory, "M 13")
+    assert result["dry_run"] is True
+    assert result["to_transfer"] == 1
+    driver.download_target_folder.assert_not_called()
+    astrometrics.assert_not_called()
+
+
+def test_real_run_downloads_without_pruning(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """A real run transfers, sorts and indexes, and never prunes."""
+    observatory, driver = _sync_observatory(["M_13"], "M_13", [("Light/b.fits", 20)])
+    fake_astrometrics = _FakeAstrometrics(existing=[_FakeTargetRecord("M 13")])
+    with (
+        patch("astrometricslib.get_configuration", return_value=_patched_config(frames_path=str(tmp_path))),
+        patch("astrometricslib.Astrometrics", return_value=fake_astrometrics),
+        patch("astrometricslib.classify_and_sort_fits_files"),
+        patch("astrometricslib.require_mounted_storage"),
+    ):
+        result = remote_operations.sync_target_frames(observatory, "M 13", dry_run=False)
+    assert (result["success"], result["transferred"]) == (True, 1)
+    driver.download_target_folder.assert_called_once()
+    assert fake_astrometrics.saved is True
+    assert fake_astrometrics.prune_flags == [False]
+
+
+def test_real_run_with_nothing_new_does_nothing(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """When every file is held, nothing is transferred."""
+    held = tmp_path / "lights" / "M 13"
+    held.mkdir(parents=True)
+    (held / "a.fits").write_bytes(b"x" * 10)
+    observatory, driver = _sync_observatory(["M_13"], "M_13", [("Light/a.fits", 10)])
+    with patch("astrometricslib.get_configuration", return_value=_patched_config(frames_path=str(tmp_path))):
+        result = remote_operations.sync_target_frames(observatory, "M 13", dry_run=False)
+    assert (result["success"], result["transferred"]) == (True, 0)
+    driver.download_target_folder.assert_not_called()
+
+
+def test_real_run_refuses_when_the_drive_is_not_mounted(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """With the frames drive missing, nothing is written."""
+    from astrometricslib import StorageNotMountedError
+
+    observatory, driver = _sync_observatory(["M_13"], "M_13", [("Light/b.fits", 20)])
+    with (
+        patch("astrometricslib.get_configuration", return_value=_patched_config(frames_path=str(tmp_path))),
+        patch(
+            "astrometricslib.require_mounted_storage", side_effect=StorageNotMountedError("Mount /mnt/nas")
+        ),
+    ):
+        result = remote_operations.sync_target_frames(observatory, "M 13", dry_run=False)
+    assert result["success"] is False
+    assert "Mount /mnt/nas" in result["error"]
+    driver.download_target_folder.assert_not_called()
+
+
+class _LogObservatory:
+    """A fake observatory that lists remote logs and records ingestion."""
+
+    def __init__(self, tmp_path: Path, reachable: bool = True) -> None:
+        """Set up a driver with two guide logs and two Ekos logs."""
+        self.reachable = reachable
+        self._config = object()
+        self.ingested: list[tuple[str, bool]] = []
+        self.driver = Mock()
+        self.driver._remote_guide_log_sizes.return_value = {
+            "/r/guide_log-a.txt": 10,
+            "/r/guide_log-b.txt": 20,
+        }
+        self.driver._remote_ekos_analyze_log_sizes.return_value = {
+            "/r/ekos-a.analyze": 5,
+            "/r/ekos-b.analyze": 6,
+        }
+        self.remote_transfer_driver = self.driver
+        self.library = tmp_path
+
+    def check_remote_connection(self) -> bool:
+        """Report whether the telescope computer answers.
+
+        Returns
+        -------
+        reachable : `bool`
+            The value the test set.
+        """
+        return self.reachable
+
+    def ingest_ekos_session_logs(self, destination_dir: str, download: bool = True) -> dict[str, int]:
+        """Record the call and return a summary.
+
+        Returns
+        -------
+        summary : `dict` [`str`, `int`]
+            A fixed summary.
+        """
+        self.ingested.append((destination_dir, download))
+        return {"session_contexts_stored": 2}
+
+
+def _log_patches(tmp_path: Path):  # ruff: ignore[missing-return-type-private-function]
+    """Point the library data folder at a temporary folder.
+
+    Returns
+    -------
+    patcher : `unittest.mock._patch`
+        A patch for the wayfinding library path helper.
+    """
+    return patch("wayfindinglib.drivers.local_database._wayfinding_library_path", return_value=tmp_path)
+
+
+def test_plan_log_sync_compares_names_and_sizes(tmp_path: Path) -> None:
+    """A log is new unless a local file has the same name and size."""
+    (tmp_path / "guide_log-a.txt").write_bytes(b"x" * 10)
+    (tmp_path / "ekos-a.analyze").write_bytes(b"x" * 999)
+    plan = remote_operations.plan_log_sync(_LogObservatory(tmp_path), str(tmp_path))
+    assert plan["guide_logs"]["to_download"] == 1
+    assert plan["guide_logs"]["examples"] == ["guide_log-b.txt"]
+    assert plan["ekos_analyze_logs"]["to_download"] == 2
+    assert plan["ekos_analyze_logs"]["remote_files"] == 2
+
+
+def test_plan_log_sync_marks_an_unsupported_driver(tmp_path: Path) -> None:
+    """A driver that cannot list a kind of log is reported, not an error."""
+    observatory = _LogObservatory(tmp_path)
+    observatory.remote_transfer_driver = SimpleNamespaceDriver()
+    plan = remote_operations.plan_log_sync(observatory, str(tmp_path))
+    assert plan["guide_logs"] == {"supported": False}
+
+
+class SimpleNamespaceDriver:
+    """A driver with no log listing methods."""
+
+
+def test_log_sync_dry_run_ingests_nothing(tmp_path: Path) -> None:
+    """A dry run reports the plan and never calls the ingestion."""
+    observatory = _LogObservatory(tmp_path)
+    with _log_patches(tmp_path):
+        result = remote_operations.sync_remote_logs(observatory)
+    assert result["dry_run"] is True
+    assert observatory.ingested == []
+    assert result["guide_logs"]["to_download"] == 2
+
+
+def test_log_sync_real_run_ingests_with_download(tmp_path: Path) -> None:
+    """A real run calls the repeat-safe ingestion with downloading on."""
+    observatory = _LogObservatory(tmp_path)
+    with _log_patches(tmp_path):
+        result = remote_operations.sync_remote_logs(observatory, dry_run=False)
+    assert observatory.ingested == [(str(tmp_path / "ekos_logs"), True)]
+    assert result["ingested"] == {"session_contexts_stored": 2}
+
+
+def test_log_sync_refuses_when_the_telescope_computer_is_unreachable(tmp_path: Path) -> None:
+    """With no connection, the tool reports it and does nothing."""
+    observatory = _LogObservatory(tmp_path, reachable=False)
+    with _log_patches(tmp_path):
+        result = remote_operations.sync_remote_logs(observatory, dry_run=False)
+    assert "cannot be reached" in result["error"]
+    assert observatory.ingested == []

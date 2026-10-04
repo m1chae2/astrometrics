@@ -270,6 +270,7 @@ class AppConfiguration:
                 "quarantine_bad_frames_enabled": "true",
                 "preview_star_tone_enabled": "true",
                 "keep_previous_stack_enabled": "true",
+                "trim_noisy_stack_edges_enabled": "true",
                 "auto_open_gui": "false",
             },
             # Blank: no gradient removal. Stack previews are then stretched
@@ -492,6 +493,22 @@ class AppConfiguration:
             `True` if the quarantine step should run.
         """
         val = self.get_value("Processing.Siril", "quarantine_bad_frames_enabled", fallback="true")
+        return str(val).lower() == "true"
+
+    def get_trim_noisy_stack_edges_enabled(self) -> bool:
+        """Return whether a finished imaging stack has its noisy edges trimmed.
+
+        When on, each imaging stack (and its rejection map) is cut back to
+        where the edge noise falls within 15% of the interior's (see
+        `pipelines/stacking/post_processing/stack_crop.py`). A stack with
+        clean edges is not changed.
+
+        Returns
+        -------
+        enabled : `bool`
+            `True` if the trim should run.
+        """
+        val = self.get_value("Processing.Siril", "trim_noisy_stack_edges_enabled", fallback="true")
         return str(val).lower() == "true"
 
     def get_keep_previous_stack_enabled(self) -> bool:

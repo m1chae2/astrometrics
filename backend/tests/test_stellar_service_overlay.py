@@ -206,7 +206,9 @@ def _service_with_counting_overlay(library_path: Path) -> tuple[StellarService, 
     service._overlay_cache = OrderedDict()
     service.astrometrics = SimpleNamespace(
         targets=SimpleNamespace(
-            get=lambda target_id: SimpleNamespace(stacked_image=None, processed_image=None)
+            get=lambda target_id: SimpleNamespace(
+                stacking=SimpleNamespace(stacked_image=None, processed_image=None)
+            )
         )
     )
     calls: list[str] = []
@@ -243,3 +245,36 @@ def test_the_overlay_is_reused_until_the_database_changes(tmp_path: Path) -> Non
     os.utime(database, ns=(1, 1))
     service.get_astrometry_overlay_stars("M 51")
     assert calls == ["M 51", "M 51"]
+
+
+def test_overlay_stars_carry_the_size_of_the_target_stack(tmp_path: Path) -> None:
+    """The reference size comes from the stack named on ``target.stacking``.
+
+    Without it the viewer cannot scale the star positions to the image it
+    draws, and the overlay floats away from the stars underneath.
+    """
+    import numpy as np
+    from astropy.io import fits
+
+    stack_path = tmp_path / "stack.fits"
+    fits.PrimaryHDU(np.zeros((40, 60), dtype=np.float32)).writeto(stack_path)
+
+    star = StellarObject(
+        id="HD_1",
+        name="HD 1",
+        target_ids=["M 13"],
+        stellar_spectral_type="K2",
+        is_catalog_identified=True,
+        star_data={"xcentroid": 10.0, "ycentroid": 20.0},
+    )
+    mock_astrometrics = MagicMock()
+    mock_astrometrics.stars.list_objects.return_value = [star]
+    mock_astrometrics.targets.get.return_value = SimpleNamespace(
+        stacking=SimpleNamespace(stacked_image=str(stack_path), processed_image="")
+    )
+    service = StellarService(config=MagicMock(), astrometrics=mock_astrometrics, wayfinder=MagicMock())
+
+    results = service._compute_astrometry_overlay_stars(target_id="M 13")
+
+    assert results[0]["referenceWidth"] == 60
+    assert results[0]["referenceHeight"] == 40

@@ -85,8 +85,8 @@ def test_a_stronger_glow_never_lightens_the_sky() -> None:
 
 
 def test_a_middle_glow_gets_a_middle_sky() -> None:
-    """Verify a glow of a few noise units lands between the two limits."""
-    level = choose_sky_level(_image(glow_sigma=4.0)).sky_level
+    """Verify a glow of several noise units lands between the two limits."""
+    level = choose_sky_level(_image(glow_sigma=8.0)).sky_level
 
     assert DARKEST_SKY_LEVEL < level < LIGHTEST_SKY_LEVEL
 

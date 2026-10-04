@@ -1,5 +1,6 @@
 import React from 'react';
 import { RadioListManager } from '../common/radioList/RadioListManager';
+import { TargetListFilterPanel } from '../common/radioList/TargetListFilterPanel';
 import { useTargetListLogic } from '../common/hooks/useTargetListLogic';
 import { ListActions } from '../common/components/ListActions';
 import { ControlPanel } from './ControlPanel';
@@ -38,9 +39,7 @@ export const ObservatoryManager: React.FC = () => {
     const { remoteTargets } = useRemoteStatusContext();
     const {
         items,
-        filterOptions,
-        selectedFilterOption,
-        setFilterOption,
+        filterPanel,
         filterText,
         setFilterText,
         isLoading,
@@ -80,9 +79,8 @@ export const ObservatoryManager: React.FC = () => {
             pendingId={pendingTarget}
             onSelect={setPendingTarget}
             // REQ: OBS-3.2: The display SHALL allow filtering of the target list by name or type.
-            filterOptions={filterOptions}
-            selectedFilterOption={selectedFilterOption}
-            onFilterOptionChange={setFilterOption}
+            topPanel={<TargetListFilterPanel {...filterPanel} />}
+            topPanelTitle="Filter Targets"
             filterText={filterText}
             onFilterTextChange={setFilterText}
             isLoading={isLoading}

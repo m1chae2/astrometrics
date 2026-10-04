@@ -96,6 +96,19 @@ class TargetService:
             return self.astrometrics.targets.get(target_id)
         return self.astrometrics.targets.list()
 
+    def get_camera_index(self) -> dict[str, Any]:
+        """Summarize which camera took each target's frames, and when.
+
+        Returns
+        -------
+        index : `dict`
+            The configured cameras with how many targets each imaged, and
+            per target the newest light-frame time and per-camera frame
+            counts. See `build_target_camera_index`.
+        """
+        camera_names = list(self.config.get_available_cameras())
+        return self.astrometrics.targets.camera_index(camera_names)
+
     def get_target(self, target_id: str) -> Target | None:
         """Query a specific target by identifier.
 

@@ -1,0 +1,34 @@
+{
+  "server": "astrometrics-ui",
+  "generated_by": "backend/mcp/tool_inventory.py --write-runtime-manifests",
+  "tools": {
+    "ui_audit_accessibility": {
+      "tool_class": "develop",
+      "category": "developer",
+      "disposition": "keep",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "ui_build_check": {
+      "tool_class": "develop",
+      "category": "developer",
+      "disposition": "keep",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "ui_diagnose_code": {
+      "tool_class": "develop",
+      "category": "developer",
+      "disposition": "keep",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "ui_run_tests": {
+      "tool_class": "develop",
+      "category": "developer",
+      "disposition": "keep",
+      "merge_into": "",
+      "interim_block": ""
+    }
+  }
+}

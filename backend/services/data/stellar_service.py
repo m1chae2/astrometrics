@@ -253,6 +253,29 @@ def _serialize_target_for_planetarium(target, local_target_ids: set | None = Non
     }
 
 
+def _overlay_reference_image_path(target: Any) -> str | None:
+    """Find the image whose pixel grid the overlay star positions use.
+
+    The stars are placed on the target's stacked image, so that is the
+    image the overlay must be sized and projected against. The paths live
+    on the target's ``stacking`` result, not on the target itself.
+
+    Parameters
+    ----------
+    target : `Any`
+        The target record, or `None` when the target is unknown.
+
+    Returns
+    -------
+    path : `str` or `None`
+        The stacked image path, else the processed image path, or `None`
+        when the target has neither.
+    """
+    stacking = getattr(target, "stacking", None)
+    path = getattr(stacking, "stacked_image", None) or getattr(stacking, "processed_image", None)
+    return str(path) if path else None
+
+
 def _stored_star_radius_px(astrometrics: Any, star_id: str) -> float | None:
     """Look up the detected radius saved on a star's record.
 
@@ -470,9 +493,7 @@ class StellarService:
         """
         try:
             target_entity = self.astrometrics.targets.get(target_id) if target_id else None
-            image_path = getattr(target_entity, "stacked_image", None) or getattr(
-                target_entity, "processed_image", None
-            )
+            image_path = _overlay_reference_image_path(target_entity)
             image_time = Path(image_path).stat().st_mtime_ns if image_path else 0
             key = (target_id, limit, str(image_path), image_time, self._catalog_version())
         except Exception:
@@ -545,11 +566,7 @@ class StellarService:
                 except Exception as err:
                     logger.debug("Failed to get target entity for %s: %s", tid, err)
 
-        img_path = None
-        if target_entity:
-            img_path = getattr(target_entity, "stacked_image", None) or getattr(
-                target_entity, "processed_image", None
-            )
+        img_path = _overlay_reference_image_path(target_entity) if target_entity else None
 
         if img_path and str(img_path).endswith(".fits"):
             try:

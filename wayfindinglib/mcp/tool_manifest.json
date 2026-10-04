@@ -1,0 +1,916 @@
+{
+  "server": "wayfindinglib-core",
+  "generated_by": "backend/mcp/tool_inventory.py --write-runtime-manifests",
+  "tools": {
+    "execution_abort_session": {
+      "tool_class": "change-data",
+      "category": "planning-sessions",
+      "disposition": "merge",
+      "merge_into": "execution_session",
+      "interim_block": ""
+    },
+    "execution_advance_session": {
+      "tool_class": "actuate",
+      "category": "planning-sessions",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "execution_create_recorder": {
+      "tool_class": "change-data",
+      "category": "planning-sessions",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "execution_execute_meridian_flip": {
+      "tool_class": "actuate",
+      "category": "planning-sessions",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "execution_reconcile_session": {
+      "tool_class": "change-data",
+      "category": "planning-sessions",
+      "disposition": "merge",
+      "merge_into": "execution_session",
+      "interim_block": ""
+    },
+    "execution_record_divergence": {
+      "tool_class": "compute",
+      "category": "planning-sessions",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "execution_recover_fault": {
+      "tool_class": "actuate",
+      "category": "planning-sessions",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "execution_recover_guide_star_loss": {
+      "tool_class": "actuate",
+      "category": "planning-sessions",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_abort_motion": {
+      "tool_class": "safe-stop",
+      "category": "observatory-control",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_active_camera": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "merge",
+      "merge_into": "observatory_equipment_state",
+      "interim_block": ""
+    },
+    "observatory_active_enclosure": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "merge",
+      "merge_into": "observatory_equipment_state",
+      "interim_block": ""
+    },
+    "observatory_active_focus_model": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "merge",
+      "merge_into": "observatory_equipment_state",
+      "interim_block": ""
+    },
+    "observatory_active_guide_camera": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "merge",
+      "merge_into": "observatory_equipment_state",
+      "interim_block": ""
+    },
+    "observatory_active_guide_scope": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "merge",
+      "merge_into": "observatory_equipment_state",
+      "interim_block": ""
+    },
+    "observatory_active_guider_calibration": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "merge",
+      "merge_into": "observatory_equipment_state",
+      "interim_block": ""
+    },
+    "observatory_active_guiding_spectrum_analysis": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "merge",
+      "merge_into": "observatory_equipment_state",
+      "interim_block": ""
+    },
+    "observatory_active_telescope": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "merge",
+      "merge_into": "observatory_equipment_state",
+      "interim_block": ""
+    },
+    "observatory_analyze_capture_session": {
+      "tool_class": "compute",
+      "category": "observatory-status",
+      "disposition": "merged",
+      "merge_into": "observatory_night_history",
+      "interim_block": ""
+    },
+    "observatory_analyze_guiding_session": {
+      "tool_class": "compute",
+      "category": "observatory-status",
+      "disposition": "merged",
+      "merge_into": "observatory_night_history",
+      "interim_block": ""
+    },
+    "observatory_analyze_sky_coverage": {
+      "tool_class": "compute",
+      "category": "observatory-status",
+      "disposition": "merged",
+      "merge_into": "observatory_night_history",
+      "interim_block": ""
+    },
+    "observatory_apply_promotion_decision": {
+      "tool_class": "change-data",
+      "category": "observatory-config",
+      "disposition": "withhold",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_assess_safety": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_capture_image": {
+      "tool_class": "actuate",
+      "category": "observatory-control",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_check_for_new_remote_images": {
+      "tool_class": "observe",
+      "category": "observatory-sync",
+      "disposition": "merged",
+      "merge_into": "observatory_sync_remote_frames",
+      "interim_block": ""
+    },
+    "observatory_check_remote_connection": {
+      "tool_class": "observe",
+      "category": "observatory-sync",
+      "disposition": "keep",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_close_enclosure": {
+      "tool_class": "actuate",
+      "category": "observatory-control",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_compute_focus_correction": {
+      "tool_class": "compute",
+      "category": "observatory-status",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_compute_guiding_correction": {
+      "tool_class": "compute",
+      "category": "observatory-status",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_compute_pointing_correction": {
+      "tool_class": "compute",
+      "category": "observatory-status",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_connect": {
+      "tool_class": "actuate",
+      "category": "observatory-control",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_cooling_ramp_rate": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_delegation_policy": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "merge",
+      "merge_into": "observatory_equipment_state",
+      "interim_block": ""
+    },
+    "observatory_disconnect": {
+      "tool_class": "actuate",
+      "category": "observatory-control",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_discover_unassociated_remote_targets": {
+      "tool_class": "observe",
+      "category": "observatory-sync",
+      "disposition": "merge",
+      "merge_into": "observatory_remote_listing",
+      "interim_block": ""
+    },
+    "observatory_download_remote_frames": {
+      "tool_class": "change-data",
+      "category": "observatory-sync",
+      "disposition": "merged",
+      "merge_into": "observatory_sync_remote_frames",
+      "interim_block": ""
+    },
+    "observatory_download_remote_targets": {
+      "tool_class": "change-data",
+      "category": "observatory-sync",
+      "disposition": "merged",
+      "merge_into": "observatory_sync_remote_frames",
+      "interim_block": ""
+    },
+    "observatory_drain_external_pulses": {
+      "tool_class": "change-data",
+      "category": "observatory-status",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_enter_controller_mode": {
+      "tool_class": "change-data",
+      "category": "observatory-config",
+      "disposition": "withhold",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_enter_monitoring_mode": {
+      "tool_class": "change-data",
+      "category": "observatory-config",
+      "disposition": "withhold",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_execute_safe_state": {
+      "tool_class": "safe-stop",
+      "category": "observatory-control",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_fetch_and_ingest_new_guide_logs": {
+      "tool_class": "change-data",
+      "category": "observatory-sync",
+      "disposition": "merged",
+      "merge_into": "observatory_sync_remote_logs",
+      "interim_block": ""
+    },
+    "observatory_focus_move": {
+      "tool_class": "actuate",
+      "category": "observatory-control",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_frame_guiding": {
+      "tool_class": "compute",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_get_commissioning_runs": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_get_ekos_session_context": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "merged",
+      "merge_into": "observatory_night_history",
+      "interim_block": ""
+    },
+    "observatory_get_enclosure_state": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "merge",
+      "merge_into": "observatory_hardware_status",
+      "interim_block": ""
+    },
+    "observatory_get_equipment_configuration": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "merge",
+      "merge_into": "observatory_equipment_state",
+      "interim_block": ""
+    },
+    "observatory_get_filter_names": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "merge",
+      "merge_into": "observatory_hardware_status",
+      "interim_block": ""
+    },
+    "observatory_get_focuser_position": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "merge",
+      "merge_into": "observatory_hardware_status",
+      "interim_block": ""
+    },
+    "observatory_get_guide_image": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_get_live_session_status": {
+      "tool_class": "ingest",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_get_observer_location": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "merge",
+      "merge_into": "observatory_equipment_state",
+      "interim_block": ""
+    },
+    "observatory_get_performance_envelope": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_get_pointing_model": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "merged",
+      "merge_into": "observatory_night_history",
+      "interim_block": ""
+    },
+    "observatory_get_safety_rule_set": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "merge",
+      "merge_into": "observatory_equipment_state",
+      "interim_block": ""
+    },
+    "observatory_get_telescope_status": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "merge",
+      "merge_into": "observatory_hardware_status",
+      "interim_block": "Connects through connect_to_telescope, which sends CONNECTION=ON to every INDI device that is off. Blocked until observatory_hardware_status uses the connect-only path."
+    },
+    "observatory_guide_expose": {
+      "tool_class": "actuate",
+      "category": "observatory-control",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_guider_plate_scale_arcsec_per_px": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "merge",
+      "merge_into": "observatory_equipment_state",
+      "interim_block": ""
+    },
+    "observatory_ingest_ekos_session_logs": {
+      "tool_class": "change-data",
+      "category": "observatory-sync",
+      "disposition": "merged",
+      "merge_into": "observatory_sync_remote_logs",
+      "interim_block": ""
+    },
+    "observatory_ingest_guiding_log_file": {
+      "tool_class": "change-data",
+      "category": "observatory-sync",
+      "disposition": "merged",
+      "merge_into": "observatory_sync_remote_logs",
+      "interim_block": ""
+    },
+    "observatory_is_syncing": {
+      "tool_class": "observe",
+      "category": "observatory-sync",
+      "disposition": "merged",
+      "merge_into": "observatory_sync_remote_frames",
+      "interim_block": ""
+    },
+    "observatory_list_camera_profiles": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "merge",
+      "merge_into": "observatory_equipment_state",
+      "interim_block": ""
+    },
+    "observatory_list_ekos_session_summaries": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "merged",
+      "merge_into": "observatory_night_history",
+      "interim_block": ""
+    },
+    "observatory_list_guiding_runs": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "merged",
+      "merge_into": "observatory_night_history",
+      "interim_block": ""
+    },
+    "observatory_list_remote_calibration_folders": {
+      "tool_class": "observe",
+      "category": "observatory-sync",
+      "disposition": "merge",
+      "merge_into": "observatory_remote_listing",
+      "interim_block": ""
+    },
+    "observatory_list_remote_files": {
+      "tool_class": "observe",
+      "category": "observatory-sync",
+      "disposition": "merge",
+      "merge_into": "observatory_remote_listing",
+      "interim_block": "Puts folder_name into an ssh command without quoting (not tested). Blocked until the name is checked against the listed folders."
+    },
+    "observatory_list_remote_files_with_sizes": {
+      "tool_class": "observe",
+      "category": "observatory-sync",
+      "disposition": "merge",
+      "merge_into": "observatory_remote_listing",
+      "interim_block": "Puts folder_name into an ssh command without quoting (not tested). Blocked until the name is checked against the listed folders."
+    },
+    "observatory_list_remote_target_folders": {
+      "tool_class": "observe",
+      "category": "observatory-sync",
+      "disposition": "merge",
+      "merge_into": "observatory_remote_listing",
+      "interim_block": ""
+    },
+    "observatory_list_remote_targets": {
+      "tool_class": "observe",
+      "category": "observatory-sync",
+      "disposition": "merge",
+      "merge_into": "observatory_remote_listing",
+      "interim_block": ""
+    },
+    "observatory_manual_move": {
+      "tool_class": "actuate",
+      "category": "observatory-control",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_night_history": {
+      "tool_class": "compute",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_open_enclosure": {
+      "tool_class": "actuate",
+      "category": "observatory-control",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_park": {
+      "tool_class": "actuate",
+      "category": "observatory-control",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_pulse_guide": {
+      "tool_class": "actuate",
+      "category": "observatory-control",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_refit_guiding_spectrum": {
+      "tool_class": "change-data",
+      "category": "observatory-status",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_refresh_safety_assessment": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "merge",
+      "merge_into": "observatory_hardware_status",
+      "interim_block": "Connects through connect_to_telescope, which sends CONNECTION=ON to every INDI device that is off. Blocked until observatory_hardware_status uses the connect-only path."
+    },
+    "observatory_run_backlash_calibration": {
+      "tool_class": "actuate",
+      "category": "observatory-control",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_run_guide_exposure_test": {
+      "tool_class": "actuate",
+      "category": "observatory-control",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_run_guider_calibration": {
+      "tool_class": "actuate",
+      "category": "observatory-control",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_run_polar_alignment_assist": {
+      "tool_class": "compute",
+      "category": "observatory-status",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_save_commissioning_run": {
+      "tool_class": "change-data",
+      "category": "observatory-config",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_save_ekos_session_context": {
+      "tool_class": "change-data",
+      "category": "observatory-config",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_save_focus_model": {
+      "tool_class": "change-data",
+      "category": "observatory-config",
+      "disposition": "withhold",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_save_guider_calibration": {
+      "tool_class": "change-data",
+      "category": "observatory-config",
+      "disposition": "withhold",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_save_guiding_run": {
+      "tool_class": "change-data",
+      "category": "observatory-config",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_save_guiding_spectrum_analysis": {
+      "tool_class": "change-data",
+      "category": "observatory-config",
+      "disposition": "withhold",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_save_safety_rule_set": {
+      "tool_class": "change-data",
+      "category": "observatory-config",
+      "disposition": "withhold",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_set_active_camera": {
+      "tool_class": "change-data",
+      "category": "observatory-config",
+      "disposition": "withhold",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_set_active_telescope": {
+      "tool_class": "change-data",
+      "category": "observatory-config",
+      "disposition": "withhold",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_set_filter": {
+      "tool_class": "actuate",
+      "category": "observatory-control",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_set_slew_rate": {
+      "tool_class": "actuate",
+      "category": "observatory-control",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_set_tracking": {
+      "tool_class": "actuate",
+      "category": "observatory-control",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_slew_to_coordinates": {
+      "tool_class": "actuate",
+      "category": "observatory-control",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_slew_to_target": {
+      "tool_class": "actuate",
+      "category": "observatory-control",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_summarize_capture_sessions": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "merged",
+      "merge_into": "observatory_night_history",
+      "interim_block": ""
+    },
+    "observatory_summarize_device": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_summarize_divergence_evidence": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_summarize_guiding_sessions": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "merged",
+      "merge_into": "observatory_night_history",
+      "interim_block": ""
+    },
+    "observatory_summarize_recurring_issues": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "merged",
+      "merge_into": "observatory_night_history",
+      "interim_block": ""
+    },
+    "observatory_sync": {
+      "tool_class": "change-data",
+      "category": "observatory-sync",
+      "disposition": "merged",
+      "merge_into": "observatory_sync_remote_frames",
+      "interim_block": ""
+    },
+    "observatory_sync_all_remote_folders": {
+      "tool_class": "change-data",
+      "category": "observatory-sync",
+      "disposition": "withhold",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_sync_calibration_folder": {
+      "tool_class": "change-data",
+      "category": "observatory-sync",
+      "disposition": "withhold",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_sync_coordinates": {
+      "tool_class": "actuate",
+      "category": "observatory-control",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_sync_remote_frames": {
+      "tool_class": "ingest",
+      "category": "observatory-sync",
+      "disposition": "keep",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_sync_remote_logs": {
+      "tool_class": "ingest",
+      "category": "observatory-sync",
+      "disposition": "keep",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "observatory_unpark": {
+      "tool_class": "actuate",
+      "category": "observatory-control",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "planning_add_to_queue": {
+      "tool_class": "change-data",
+      "category": "planning-sessions",
+      "disposition": "merge",
+      "merge_into": "planning_manage_plan",
+      "interim_block": ""
+    },
+    "planning_build_deep_star_catalog": {
+      "tool_class": "change-data",
+      "category": "planning-sessions",
+      "disposition": "merge",
+      "merge_into": "planning_deep_catalog",
+      "interim_block": ""
+    },
+    "planning_calculate_panels": {
+      "tool_class": "compute",
+      "category": "planning-sessions",
+      "disposition": "merge",
+      "merge_into": "planning_plan_mosaic",
+      "interim_block": ""
+    },
+    "planning_create_empty_session": {
+      "tool_class": "change-data",
+      "category": "planning-sessions",
+      "disposition": "merge",
+      "merge_into": "planning_manage_plan",
+      "interim_block": ""
+    },
+    "planning_create_mosaic_targets": {
+      "tool_class": "change-data",
+      "category": "planning-sessions",
+      "disposition": "merge",
+      "merge_into": "planning_plan_mosaic",
+      "interim_block": ""
+    },
+    "planning_create_observation_package": {
+      "tool_class": "change-data",
+      "category": "planning-sessions",
+      "disposition": "merge",
+      "merge_into": "planning_manage_plan",
+      "interim_block": ""
+    },
+    "planning_create_sequence_plan": {
+      "tool_class": "compute",
+      "category": "planning-sessions",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "planning_estimate_deep_catalog_size": {
+      "tool_class": "compute",
+      "category": "planning-sessions",
+      "disposition": "merge",
+      "merge_into": "planning_deep_catalog",
+      "interim_block": ""
+    },
+    "planning_generate_mosaic_packages": {
+      "tool_class": "change-data",
+      "category": "planning-sessions",
+      "disposition": "merge",
+      "merge_into": "planning_plan_mosaic",
+      "interim_block": ""
+    },
+    "planning_get_calibration_advisory": {
+      "tool_class": "observe",
+      "category": "planning-sessions",
+      "disposition": "merge",
+      "merge_into": "planning_get_advisory",
+      "interim_block": ""
+    },
+    "planning_get_constellation_lines": {
+      "tool_class": "observe",
+      "category": "planning-sessions",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "planning_get_deep_catalog_status": {
+      "tool_class": "observe",
+      "category": "planning-sessions",
+      "disposition": "merge",
+      "merge_into": "planning_deep_catalog",
+      "interim_block": ""
+    },
+    "planning_get_imaged_field_centers": {
+      "tool_class": "observe",
+      "category": "targets",
+      "disposition": "merge",
+      "merge_into": "target_query",
+      "interim_block": ""
+    },
+    "planning_get_library_star_summaries": {
+      "tool_class": "observe",
+      "category": "planning-sessions",
+      "disposition": "keep",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "planning_get_meridian_status": {
+      "tool_class": "observe",
+      "category": "planning-sessions",
+      "disposition": "merged",
+      "merge_into": "planning_get_visibility_over_time",
+      "interim_block": ""
+    },
+    "planning_get_online_catalog_sources": {
+      "tool_class": "observe",
+      "category": "planning-sessions",
+      "disposition": "keep",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "planning_get_sources": {
+      "tool_class": "observe",
+      "category": "planning-sessions",
+      "disposition": "keep",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "planning_get_target_quality_advisory": {
+      "tool_class": "observe",
+      "category": "planning-sessions",
+      "disposition": "merge",
+      "merge_into": "planning_get_advisory",
+      "interim_block": ""
+    },
+    "planning_get_visibility": {
+      "tool_class": "observe",
+      "category": "planning-sessions",
+      "disposition": "merged",
+      "merge_into": "planning_get_visibility_over_time",
+      "interim_block": ""
+    },
+    "planning_get_visibility_over_time": {
+      "tool_class": "observe",
+      "category": "planning-sessions",
+      "disposition": "keep",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "planning_list_catalog_driver_metadata": {
+      "tool_class": "observe",
+      "category": "planning-sessions",
+      "disposition": "keep",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "planning_plan_observation_session": {
+      "tool_class": "change-data",
+      "category": "planning-sessions",
+      "disposition": "merge",
+      "merge_into": "planning_manage_plan",
+      "interim_block": ""
+    },
+    "planning_reorder_queue": {
+      "tool_class": "change-data",
+      "category": "planning-sessions",
+      "disposition": "merge",
+      "merge_into": "planning_manage_plan",
+      "interim_block": ""
+    },
+    "planning_resolve_target_coordinates": {
+      "tool_class": "compute",
+      "category": "planning-sessions",
+      "disposition": "keep",
+      "merge_into": "",
+      "interim_block": ""
+    }
+  }
+}

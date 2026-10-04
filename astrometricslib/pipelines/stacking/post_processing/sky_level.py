@@ -43,11 +43,16 @@ from astrometricslib.pipelines.shared.image_scaling import (
 
 logger = logging.getLogger(__name__)
 
-LIGHTEST_SKY_LEVEL = 0.25
+LIGHTEST_SKY_LEVEL = 0.20
 """The brightest sky the rule gives, as a fraction of full brightness.
 
-This is the sky level of Siril's own Autostretch, which is meant for
-inspecting an image and so lifts the sky on purpose. Faint targets get it.
+A lighter sky shows fainter structure, but it also lifts the grain of the
+stack into view. On the M 27 stack (82 frames over three nights), a sky level
+of 0.234 gave a visibly grainier and greyer picture than 0.19, and weakening
+the denoise made the grain worse, not better. 0.20 sits close to the 0.18 that
+was judged best on M 81 and to the 0.193 chosen on the Bubble Nebula. Siril's
+own Autostretch uses 0.25. Faint targets that the rule would lift past 0.20
+get 0.20.
 """
 
 DARKEST_SKY_LEVEL = 0.11

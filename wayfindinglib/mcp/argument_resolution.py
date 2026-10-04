@@ -77,7 +77,11 @@ def build_argument_hooks(
         """
         if not isinstance(value, str):
             return value
-        target = get_astrometrics().targets.get(value)
+        library = get_astrometrics().targets
+        # Another program (a frame sync, the app) may have changed the
+        # catalog since this server loaded it. A fresh read takes about 0.1 s.
+        library.list()
+        target = library.get(value)
         if target is None:
             raise ValueError(
                 f"No target {value!r} in the library. Create it first with target_create, "

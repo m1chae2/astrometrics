@@ -91,6 +91,27 @@ export interface BulkDelegationOutcome {
     rejected: Record<string, string>;
 }
 
+/** One configured camera and how many targets have light frames from it. */
+export interface TargetCameraSummary {
+    name: string;
+    targetCount: number;
+}
+
+/** A target's light-frame count and newest frame time for one camera. */
+export interface TargetCameraFrames {
+    frameCount: number;
+    lastFrameTime: number | null;
+}
+
+/** Response of target:get_camera_index: what the target list filters and sorts on. */
+export interface TargetCameraIndex {
+    cameras: TargetCameraSummary[];
+    targets: Record<string, {
+        lastFrameTime: number | null;
+        cameras: Record<string, TargetCameraFrames>;
+    }>;
+}
+
 export interface ActionRegistry {
     // Targets
     "target:list": { payload: Record<string, never>; response: TargetObject[] };
@@ -100,6 +121,7 @@ export interface ActionRegistry {
     "target:update": { payload: { target_id: string; updates: Partial<TargetObject> }; response: TargetObject | null };
     "target:delete": { payload: { target_id: string }; response: boolean };
     "target:get_files": { payload: { target_id: string }; response: TargetFilesResponse };
+    "target:get_camera_index": { payload: Record<string, never>; response: TargetCameraIndex };
     "target:get_frames": { payload: { target_id: string }; response: FrameRecord[] };
     "target:get_frames_grouped": { payload: { target_id: string; camera?: string }; response: GroupedFrameStat[] };
     "target:add_data": { payload: { target_id: string; image_file: string }; response: boolean };
@@ -432,6 +454,7 @@ const IDEMPOTENT_READ_ACTIONS: ReadonlySet<string> = new Set([
     'targets:list',
     'target:get',
     'target:get_targets',
+    'target:get_camera_index',
     'target:get_frames',
     'target:get_frames_grouped',
     'target:get_header',

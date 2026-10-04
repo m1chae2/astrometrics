@@ -279,6 +279,13 @@ def stack_frames(
     # in a staging folder until the new stack exists; if the restack fails,
     # they go back where they were.
     staging = _archive_stack_before_restack(target.id, output_file)
+    from astrometricslib.pipelines.stacking.pre_processing.exposure_weighting import choose_stack_weight
+
+    stack_weight = choose_stack_weight(
+        [float(frame.exposure) for frame in target_frames if frame.exposure],
+        stack_weight if stack_weight is not None else get_configuration().get_stack_weight(),
+        is_spectral=has_spectral,
+    )
     try:
         stacked_path, diagnostics = run_stack(
             engine,
@@ -297,6 +304,15 @@ def stack_frames(
         _finish_stack_archive(staging, output_file, target.id, kept=False)
         raise
     _finish_stack_archive(staging, output_file, target.id, kept=bool(stacked_path))
+
+    # Frames shift between nights, so the edges of a stack of several nights
+    # are covered by fewer frames and are noisier. Trim them off. The check
+    # leaves a stack with clean edges as it is. It runs before the stack is
+    # measured and pictured, so both describe the trimmed stack.
+    if stacked_path and not has_spectral and get_configuration().get_trim_noisy_stack_edges_enabled():
+        from astrometricslib.pipelines.stacking.post_processing.stack_crop import crop_stack_edges
+
+        crop_stack_edges(stacked_path)
     excluded_frames.extend(
         ExcludedFrame(path=path, reason="corrupt or unreadable FITS file")
         for path in diagnostics.get("corrupt_frames_skipped", [])

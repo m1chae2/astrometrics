@@ -66,7 +66,7 @@ def test_commit_replaces_the_older_previous_stack(tmp_path: Path) -> None:
     assert kept is not None
     assert Path(kept).read_text() == "second"
     assert stack.read_text() == "third"
-    assert not (tmp_path / "_previous.staging").exists()
+    assert not list(tmp_path.glob("_previous.staging*"))
 
 
 def test_rollback_restores_the_stack_and_keeps_the_older_previous(tmp_path: Path) -> None:
@@ -120,3 +120,27 @@ def test_swap_without_a_previous_stack_moves_nothing(tmp_path: Path) -> None:
 
     assert previous_stack.swap_with_previous_stack(str(stack)) == []
     assert stack.read_text() == "only"
+
+
+def test_two_stacks_in_one_folder_each_keep_their_own_previous_version(tmp_path: Path) -> None:
+    """Restacking one stack leaves the other stack's kept version alone."""
+    luminance = write_stack(tmp_path, "lum old", name="M_27_L_Stacked.fits")
+    spectral = write_stack(tmp_path, "spec old", name="M_27_SPEC_Stacked.fits")
+    for stack in (luminance, spectral):
+        new_label = stack.read_text().replace("old", "new")
+        previous_stack.commit_archive(str(stack), previous_stack.archive_current_stack(str(stack)))
+        write_stack(tmp_path, new_label, name=stack.name)
+
+    assert Path(previous_stack.previous_stack_path(str(luminance))).read_text() == "lum old"
+    assert Path(previous_stack.previous_stack_path(str(spectral))).read_text() == "spec old"
+
+    previous_stack.discard_previous_stack(str(luminance))
+
+    assert previous_stack.previous_stack_path(str(luminance)) is None
+    assert Path(previous_stack.previous_stack_path(str(spectral))).read_text() == "spec old"
+
+    previous_stack.swap_with_previous_stack(str(spectral))
+
+    assert spectral.read_text() == "spec old"
+    assert luminance.read_text() == "lum new"
+    assert previous_stack.previous_stack_path(str(luminance)) is None

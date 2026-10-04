@@ -279,6 +279,7 @@ class RPCHandlerRegistry:
         self.register("target:add_data", ("target_service", "add_target_data"))
         self.register("target:refresh", ("target_service", "refresh_target_images_by_id"))
         self.register("target:get_files", ("target_service", "get_file_list"))
+        self.register("target:get_camera_index", ("target_service", "get_camera_index"))
         self.register("target:get_frames", ("target_service", "get_frame_stats"))
         self.register("target:get_frames_grouped", ("target_service", "get_frame_stats_grouped"))
         self.register("target:get_header", ("target_service", "get_frame_header"))

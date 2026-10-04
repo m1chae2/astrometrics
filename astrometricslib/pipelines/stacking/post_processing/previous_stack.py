@@ -19,6 +19,11 @@ itself except by replacing it with a newer one.
 
 Companion files are the pictures and tables made with a stack: the rejection
 map, the registration table, the preview and the stretched FITS.
+
+A target's folder can hold several stacks (luminance, spectral, one per
+camera). Each keeps its own previous version in the shared `_previous`
+folder, told apart by file name. Every call here touches only the files of the
+stack it is given.
 """
 
 import logging
@@ -46,8 +51,44 @@ __all__ = [
 # another stack and is never moved.
 STACK_COMPANION_SUFFIXES = ("_RejMap.fits", "_Registration.seq", "_preview.jpg", "_processed.fits")
 
-# Where a restack's old files wait until the new stack is known to be good.
-_STAGING_FOLDER_NAME = "_previous.staging"
+# The start of the folder where a restack's old files wait until the new stack
+# is known to be good. The stack's own file name is added, so two stacks of one
+# target never share a staging folder.
+_STAGING_FOLDER_PREFIX = "_previous.staging."
+
+
+def _staging_for(stack_path: str) -> str:
+    """Name the staging folder of one stack.
+
+    Returns
+    -------
+    staging : `str`
+        A folder in the stack's own folder, named for the stack.
+    """
+    stem, _ = os.path.splitext(os.path.basename(stack_path))
+    return os.path.join(os.path.dirname(stack_path), _STAGING_FOLDER_PREFIX + stem)
+
+
+def _previous_files(stack_path: str) -> list[str]:
+    """List the previous version's files for one stack.
+
+    Returns
+    -------
+    files : `list` [`str`]
+        The files in `_previous` that belong to this stack, and no others.
+    """
+    previous = previous_directory_for(stack_path)
+    if not os.path.isdir(previous):
+        return []
+    stem, _ = os.path.splitext(os.path.basename(stack_path))
+    names = [os.path.basename(stack_path)] + [stem + suffix for suffix in STACK_COMPANION_SUFFIXES]
+    return [os.path.join(previous, name) for name in names if os.path.isfile(os.path.join(previous, name))]
+
+
+def _remove_directory_if_empty(directory: str) -> None:
+    """Remove a folder when nothing is left in it."""
+    if os.path.isdir(directory) and not os.listdir(directory):
+        os.rmdir(directory)
 
 
 def stack_files(stack_path: str) -> list[str]:
@@ -102,7 +143,7 @@ def archive_current_stack(stack_path: str) -> str | None:
     files = stack_files(stack_path)
     if not files or not os.path.isfile(stack_path):
         return None
-    staging = os.path.join(os.path.dirname(stack_path), _STAGING_FOLDER_NAME)
+    staging = _staging_for(stack_path)
     shutil.rmtree(staging, ignore_errors=True)
     _move_all(files, staging)
     return staging
@@ -119,8 +160,12 @@ def commit_archive(stack_path: str, staging: str) -> None:
         The folder `archive_current_stack` returned.
     """
     previous = previous_directory_for(stack_path)
-    shutil.rmtree(previous, ignore_errors=True)
-    os.replace(staging, previous)
+    os.makedirs(previous, exist_ok=True)
+    for path in _previous_files(stack_path):
+        os.remove(path)
+    for name in os.listdir(staging):
+        os.replace(os.path.join(staging, name), os.path.join(previous, name))
+    shutil.rmtree(staging, ignore_errors=True)
 
 
 def rollback_archive(stack_path: str, staging: str) -> None:
@@ -172,11 +217,10 @@ def discard_previous_stack(stack_path: str) -> list[str]:
     removed : `list` [`str`]
         The files deleted. Empty if no previous version was kept.
     """
-    previous = previous_directory_for(stack_path)
-    if not os.path.isdir(previous):
-        return []
-    removed = [os.path.join(previous, name) for name in sorted(os.listdir(previous))]
-    shutil.rmtree(previous)
+    removed = _previous_files(stack_path)
+    for path in removed:
+        os.remove(path)
+    _remove_directory_if_empty(previous_directory_for(stack_path))
     return removed
 
 
@@ -184,7 +228,8 @@ def swap_with_previous_stack(stack_path: str) -> list[str]:
     """Put the previous stack back as the current one.
 
     The current stack and its companions move into `_previous` in the same
-    step, so calling this again undoes it.
+    step, so calling this again undoes it. Other stacks of the target are not
+    touched.
 
     Parameters
     ----------
@@ -197,16 +242,11 @@ def swap_with_previous_stack(stack_path: str) -> list[str]:
         The files now in the stack's folder that came from `_previous`. Empty
         if no previous version was kept, in which case nothing moves.
     """
-    previous = previous_directory_for(stack_path)
-    previous_files = (
-        [os.path.join(previous, name) for name in sorted(os.listdir(previous))]
-        if os.path.isdir(previous)
-        else []
-    )
+    previous_files = _previous_files(stack_path)
     if not previous_files:
         return []
     directory = os.path.dirname(stack_path)
-    exchange = os.path.join(directory, "_previous.exchange")
+    exchange = _staging_for(stack_path) + ".exchange"
     shutil.rmtree(exchange, ignore_errors=True)
     _move_all(stack_files(stack_path), exchange)
     restored = []
@@ -214,6 +254,8 @@ def swap_with_previous_stack(stack_path: str) -> list[str]:
         target = os.path.join(directory, os.path.basename(path))
         os.replace(path, target)
         restored.append(target)
-    shutil.rmtree(previous, ignore_errors=True)
-    os.replace(exchange, previous)
+    previous = previous_directory_for(stack_path)
+    for name in os.listdir(exchange):
+        os.replace(os.path.join(exchange, name), os.path.join(previous, name))
+    shutil.rmtree(exchange, ignore_errors=True)
     return restored

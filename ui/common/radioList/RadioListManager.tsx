@@ -22,6 +22,10 @@ export interface RadioListManagerProps {
     // Actions
     actions?: React.ReactNode;
 
+    /** Optional panel shown above the list, such as the target list's catalog/camera filters. */
+    topPanel?: React.ReactNode;
+    topPanelTitle?: string;
+
     // Customization
     className?: string;
 
@@ -48,6 +52,8 @@ export interface RadioListManagerProps {
     emptyMessage?: React.ReactNode;
 }
 
+const noopOptionChange = (): void => {};
+
 /**
  * Generic Manager component that orchestrates filtering, list display, and actions.
  * Replaces TargetListManager and AstronomyListManager.
@@ -64,6 +70,8 @@ export const RadioListManager: React.FC<RadioListManagerProps> = ({
     onFilterTextChange,
     filterPlaceholder,
     actions,
+    topPanel,
+    topPanelTitle = 'Filter',
     className = '',
     page = 1,
     onPageChange,
@@ -83,11 +91,11 @@ export const RadioListManager: React.FC<RadioListManagerProps> = ({
     const content = (
         <>
             {/* Filtering Section - Only render if handlers are provided */}
-            {onFilterOptionChange && onFilterTextChange && (
+            {onFilterTextChange && (
                 <RadioListFiltering
                     options={filterOptions}
                     selectedOption={selectedFilterOption}
-                    onOptionChange={onFilterOptionChange}
+                    onOptionChange={onFilterOptionChange ?? noopOptionChange}
                     filterText={filterText}
                     onFilterTextChange={onFilterTextChange}
                     placeholder={filterPlaceholder}
@@ -153,6 +161,12 @@ export const RadioListManager: React.FC<RadioListManagerProps> = ({
 
     return (
         <div className={`manager panel-group ${className}`}>
+            {topPanel && (
+                <SectionPanel title={topPanelTitle} className="flex-auto manager__top-panel">
+                    {topPanel}
+                </SectionPanel>
+            )}
+
             <SectionPanel title={title} className="flex-fill flex-col manager__list-panel">
                 {content}
             </SectionPanel>

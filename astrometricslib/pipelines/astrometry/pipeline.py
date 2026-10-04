@@ -48,6 +48,7 @@ class AstrometryPipeline:
         attempt_plate_solving: bool = True,
         target_ra: float | None = None,
         target_dec: float | None = None,
+        target_name: str | None = None,
     ) -> AnalysisContext:
         """Old name for the 'process' function (kept so old code still works).
 
@@ -62,13 +63,15 @@ class AstrometryPipeline:
             A hint for the horizontal coordinate (Right Ascension).
         target_dec : `float`, optional
             A hint for the vertical coordinate (Declination).
+        target_name : `str`, optional
+            The name of the target being imaged (see `process`).
 
         Returns
         -------
         analysis_context : `AnalysisContext`
             The results of running the pipeline on this image.
         """
-        return self.process(image_or_path, attempt_plate_solving, target_ra, target_dec)
+        return self.process(image_or_path, attempt_plate_solving, target_ra, target_dec, target_name)
 
     def process(
         self,
@@ -76,6 +79,7 @@ class AstrometryPipeline:
         attempt_plate_solving: bool = True,
         target_ra: float | None = None,
         target_dec: float | None = None,
+        target_name: str | None = None,
     ) -> AnalysisContext:
         """Run the whole pipeline on an image.
 
@@ -90,6 +94,11 @@ class AstrometryPipeline:
             A hint for where the telescope was pointing horizontally.
         target_dec : `float`, optional
             A hint for where the telescope was pointing vertically.
+        target_name : `str`, optional
+            The name of the target being imaged. When the field is not
+            solved, it names the star at the frame centre, and a planet or
+            the Moon is left without a star's name (see
+            `StarIdentifier._identify_stars_with_simbad`).
 
         Returns
         -------
@@ -103,7 +112,11 @@ class AstrometryPipeline:
         ra_hint, dec_hint = self._resolve_coordinate_hint(image, target_ra, target_dec)
 
         stellar_objects, wcs = self.star_identifier.process_image(
-            image, attempt_plate_solving=attempt_plate_solving, center_ra=ra_hint, center_dec=dec_hint
+            image,
+            attempt_plate_solving=attempt_plate_solving,
+            center_ra=ra_hint,
+            center_dec=dec_hint,
+            target_name=target_name,
         )
         wcs = self._fallback_to_header_wcs(image, wcs)
 

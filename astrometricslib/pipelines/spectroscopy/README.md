@@ -26,7 +26,11 @@ behind it.
 - **One image at a time**: the pipeline matches a single spectral image
   against a normal image of the same field to work out which star is which,
   then extracts every star's spectrum and carries it through all three
-  stages.
+  stages. When the target has no normal image of its own, the pipeline names
+  only the star at the frame centre: it uses the target's name first, then
+  the brightest catalog star near the mount's reported position (see
+  `astrometry/processing/README.md`). A planet, the Moon or the Sun gets no
+  star name, so its spectrum is not saved to the star catalog.
 - **A whole observing session at a time**: the pipeline runs the same three
   stages once per frame in the session, in parallel, using star positions
   it works out from one reference frame in that session.

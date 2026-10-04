@@ -358,8 +358,15 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
         # centre of this target's plate-solved stack when there is one.
         hint_ra, hint_dec = resolve_solved_stack_center_hint(target, request.path)
         astrometry = AstrometryPipeline()
+        # The target's name picks the star at the frame centre when the
+        # mount's position is minutes of arc off, and keeps a planet from
+        # being named after a background star.
         context = astrometry.process(
-            request.path, attempt_plate_solving=False, target_ra=hint_ra, target_dec=hint_dec
+            request.path,
+            attempt_plate_solving=False,
+            target_ra=hint_ra,
+            target_dec=hint_dec,
+            target_name=target.id,
         )
 
         # The spectral stack has no WCS of its own (see the module

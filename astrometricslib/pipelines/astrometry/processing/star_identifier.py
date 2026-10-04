@@ -34,6 +34,7 @@ from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.astrometry.post_processing.assess_match_quality import assess_match_quality
 from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_blob_width_from_data
 from astrometricslib.pipelines.astrometry.pre_processing.source_detection import SourceDetector
+from astrometricslib.pipelines.shared.solar_system_targets import is_solar_system_target
 from astrometricslib.utilities.config_loader import AppConfiguration
 from astrometricslib.utilities.exceptions import AstroLibError
 
@@ -46,6 +47,37 @@ logger = logging.getLogger(__name__)
 # centre, and the wrong one (TYC 3105-827-1) was 145 arcsec from the mount's
 # reported position, so 30 lies between the two cases seen.
 HINT_MATCH_WARNING_ARCSEC = 30.0
+
+# How far from the position hint the star at the frame centre may really be,
+# when the star is picked by name or by brightness instead of by distance. The
+# hint is the mount's report, so it is only as good as the mount's pointing.
+# Measured on the 2026-10-04 spectral stacks: Aldebaran 24, Sirius 24, Mars
+# 22 and Alhena 138 arcseconds. The wrong Vega match in an earlier session
+# was 145 arcseconds from the mount's position. 300 arcseconds (5 arcminutes)
+# covers every case seen with about twice the largest error, and stays well
+# inside the 12 arcminute SIMBAD region searched on the hint path.
+POINTING_ERROR_SEARCH_RADIUS_ARCSEC = 300.0
+
+# When the centre star is named by the target's name or by brightness, the
+# name goes to the brightest detection within this fraction of the frame's
+# shorter side from the centre, not to whatever is nearest the centre. The
+# mount's error (5 arcminutes, about 157 pixels at 1.9 arcseconds per pixel,
+# so 5 percent of a 3008 pixel frame) plus a re-centring or drift sets the
+# size: on 2026-10-04 the Sirius zero order sat 151 pixels from the centre.
+# 10 percent (about 300 pixels) covers that with margin.
+CENTRE_STAR_SEARCH_RADIUS_FRACTION = 0.10
+
+# The detection that gets the target's name must reach at least this fraction
+# of the frame's brightest pixel. The target of a spectral frame makes the
+# brightest compact source in it, because the exposure is chosen to fill the
+# zero order. Measured on the 2026-10-04 stacks: the zero orders reached 0.64
+# to 1.0 of the brightest pixel; the noise detections near the centre of the
+# Sirius stack (whose zero order was not detected) reached 0.00003. 10 percent
+# lies between the two cases.
+CENTRE_STAR_MINIMUM_PEAK_FRACTION = 0.10
+
+# SIMBAD columns that may hold a star's V magnitude, tried in order.
+_SIMBAD_V_MAGNITUDE_COLUMNS = ["V", "FLUX_V", "flux_v", "flux(V)"]
 
 # --- Preparing the Image for Star Detection ---------------------------------
 #
@@ -287,6 +319,30 @@ def _rescale_source_centroids(sources: list[dict], factor: int) -> None:
             source["radius_px"] = source["radius_px"] * factor
 
 
+def _brightest_pixel(data: Any) -> float | None:
+    """Find the brightest pixel of an image, if it has a usable one.
+
+    Parameters
+    ----------
+    data : `numpy.ndarray` or `None`
+        The image pixels.
+
+    Returns
+    -------
+    peak : `float` or `None`
+        The largest finite pixel value, or `None` when the image is missing,
+        empty or holds no finite value.
+    """
+    try:
+        with warnings.catch_warnings():
+            # An all-NaN image is expected here and handled below.
+            warnings.simplefilter("ignore", RuntimeWarning)
+            peak = float(np.nanmax(data))
+    except TypeError, ValueError:
+        return None
+    return peak if math.isfinite(peak) else None
+
+
 def _read_catalog_magnitude(match: Any, column_names: list[str]) -> float | None:
     """Read a star's brightness from a catalog row, if the catalog has one.
 
@@ -413,6 +469,9 @@ class StarIdentifier:
         self.stellar_objects: list[StellarObject] = []
         self.sources_detected: int = 0
         self.solve_attempted: bool = False
+        # The brightest pixel of the last image processed, used to tell a real
+        # star from a noise detection (see `_select_target_star`).
+        self.frame_peak: float | None = None
         # The distance between where we calculated a star is and where the
         # database says it should be (measured in arcseconds). We use this
         # to figure out how accurate our image alignment is.
@@ -567,6 +626,7 @@ class StarIdentifier:
         center_ra: float | None = None,
         center_dec: float | None = None,
         maximum_identified_stars: int | None = None,
+        target_name: str | None = None,
     ) -> tuple[list[StellarObject], WCS | None]:
         """Run the full process: find the stars, map the image, and name them.
 
@@ -580,6 +640,11 @@ class StarIdentifier:
             Hints about where the telescope was pointing.
         maximum_identified_stars : `int`, optional
             A cap on how many stars we look up in the database.
+        target_name : `str`, optional
+            The name of the target being imaged. Used only when the field is
+            not solved: it names the star at the frame centre (see
+            `_identify_stars_with_simbad`) and stops a planet from being
+            given a star's name.
 
         Returns
         -------
@@ -608,6 +673,7 @@ class StarIdentifier:
         is_color_frame = data is not None and data.ndim == 3
         if is_color_frame:
             data = collapse_to_2d(data)
+        self.frame_peak = _brightest_pixel(data)
 
         # 2. Detect Stars
         logger.info("Detecting stars...")
@@ -700,7 +766,7 @@ class StarIdentifier:
             if center_ra is not None and center_dec is not None:
                 logger.info("Using RA/Dec hints for center star identification (skipping solve)...")
                 h, w = data.shape
-                self._identify_stars_with_simbad(None, center_ra, center_dec, w, h)
+                self._identify_stars_with_simbad(None, center_ra, center_dec, w, h, target_name=target_name)
 
         return self.stellar_objects, wcs
 
@@ -1472,12 +1538,20 @@ class StarIdentifier:
         center_dec: float | None = None,
         width: int = 1000,
         height: int = 1000,
+        target_name: str | None = None,
     ):
         """Ask SIMBAD for stars in the image area and match them up.
 
         If we successfully mapped the image, we name every star. If the map
         failed, we just try to name the star closest to the center of the image
         using our best guess of where the telescope was pointing.
+
+        That guess is the mount's report and can be minutes of arc off, so the
+        nearest catalog entry is not always the right star. When `target_name`
+        is given, `_choose_center_catalog_entry` picks the entry by the
+        target's name first, and by brightness second. A solar-system target
+        (a planet, the Moon, the Sun) is skipped: it has no catalog entry, and
+        the nearest star would be a chance background star.
         """
         if not self.stellar_objects:
             return
@@ -1488,6 +1562,13 @@ class StarIdentifier:
 
         if center_ra is None or center_dec is None:
             logger.warning("No center coordinates available for SIMBAD query.")
+            return
+
+        if is_solar_system_target(target_name):
+            logger.info(
+                "Target %r is a solar-system body: leaving the frame-centre star without a catalog name.",
+                target_name,
+            )
             return
 
         result_table, simbad_coords = self._query_simbad_region(center_ra, center_dec, None, width, height)
@@ -1514,10 +1595,27 @@ class StarIdentifier:
         center_star_obj = min(self.stellar_objects, key=lambda o: o.star_data.get("center_dist_sq", 999999))
         try:
             hint_coord = SkyCoord(center_ra * u.deg, center_dec * u.deg)
-            idx, d2d, _ = hint_coord.match_to_catalog_sky(simbad_coords)
-            logger.info(f"Nearest stellar SIMBAD entry to hint coordinates is {d2d.to(u.arcsec)} away.")
-            hint_offset_arcsec = float(np.atleast_1d(d2d.to(u.arcsec).value)[0])
-            if hint_offset_arcsec > HINT_MATCH_WARNING_ARCSEC:
+            idx, basis = self._choose_center_catalog_entry(
+                result_table, simbad_coords, hint_coord, target_name
+            )
+            hint_offset_arcsec = float(hint_coord.separation(simbad_coords[idx]).arcsec)
+            logger.info(
+                "Frame-centre star labelled by %s: SIMBAD entry %s, %.0f arcsec from the hint.",
+                basis,
+                result_table[idx]["main_id"] if "main_id" in result_table.colnames else idx,
+                hint_offset_arcsec,
+            )
+            if basis != "nearest":
+                target_star = self._select_target_star(width, height)
+                if target_star is None:
+                    logger.warning(
+                        "No detection near the frame centre is bright enough to be the target, so the "
+                        "catalog entry %s is not applied to any star.",
+                        result_table[idx]["main_id"] if "main_id" in result_table.colnames else idx,
+                    )
+                    return
+                center_star_obj = target_star
+            if basis == "nearest" and hint_offset_arcsec > HINT_MATCH_WARNING_ARCSEC:
                 logger.warning(
                     "The nearest stellar SIMBAD entry is %.0f arcsec from the position hint, so the star at "
                     "the frame centre may be labelled with the wrong catalog star. Check the hint: the FITS "
@@ -1538,6 +1636,197 @@ class StarIdentifier:
             )
         except Exception as e:
             logger.warning(f"Failed to match hint coordinates against SIMBAD results: {e}")
+
+    def _choose_center_catalog_entry(
+        self,
+        result_table: Any,
+        simbad_coords: SkyCoord,
+        hint_coord: SkyCoord,
+        target_name: str | None,
+    ) -> tuple[int, str]:
+        """Pick the SIMBAD entry that names the star at the frame centre.
+
+        The position hint is the mount's report. On the 2026-10-04 spectral
+        stacks it was 2.3 arcminutes from Alhena, and the nearest stellar
+        entry was a magnitude 14 star 90 arcseconds from the hint, so
+        distance alone named Alhena's zero order after the wrong star. The
+        order of choices here avoids that:
+
+        1. With no target name, take the nearest entry (the plain behaviour).
+        2. If SIMBAD knows the target's name, take that entry, provided it is
+           within `POINTING_ERROR_SEARCH_RADIUS_ARCSEC` of the hint. A name
+           that resolves to something that is not a star in the region (a
+           nebula or a cluster) falls back to the nearest entry.
+        3. If SIMBAD does not know the name, take the brightest entry within
+           the same radius. The star at the centre of a spectral frame is the
+           target, which is chosen for being bright, so a faint neighbour is
+           the less likely answer. With no magnitude to compare, take the
+           nearest entry.
+
+        Parameters
+        ----------
+        result_table : `astropy.table.Table`
+            The stellar SIMBAD entries around the hint.
+        simbad_coords : `astropy.coordinates.SkyCoord`
+            The position of each entry in `result_table`.
+        hint_coord : `astropy.coordinates.SkyCoord`
+            The mount's reported position.
+        target_name : `str` or `None`
+            The name of the target being imaged.
+
+        Returns
+        -------
+        index : `int`
+            The row of `result_table` to use.
+        basis : `str`
+            ``"target name"``, ``"brightest"`` or ``"nearest"``: how the row
+            was chosen.
+        """
+        separations_arcsec = np.atleast_1d(hint_coord.separation(simbad_coords).arcsec)
+        nearest_index = int(np.argmin(separations_arcsec))
+        if not target_name:
+            return nearest_index, "nearest"
+
+        status, named_coord = self._resolve_target_position(target_name)
+        if status == "error":
+            return nearest_index, "nearest"
+        if status == "resolved":
+            named_index = self._entry_at_position(named_coord, simbad_coords)
+            if (
+                named_index is not None
+                and separations_arcsec[named_index] <= POINTING_ERROR_SEARCH_RADIUS_ARCSEC
+            ):
+                return named_index, "target name"
+            return nearest_index, "nearest"
+
+        nearby_indices = np.flatnonzero(separations_arcsec <= POINTING_ERROR_SEARCH_RADIUS_ARCSEC)
+        brightest_index = self._brightest_entry_index(result_table, nearby_indices)
+        if brightest_index is not None:
+            return brightest_index, "brightest"
+        return nearest_index, "nearest"
+
+    def _select_target_star(self, width: int, height: int) -> StellarObject | None:
+        """Find the detection that is the target of the frame.
+
+        The brightest detection within `CENTRE_STAR_SEARCH_RADIUS_FRACTION` of
+        the frame centre, provided it reaches
+        `CENTRE_STAR_MINIMUM_PEAK_FRACTION` of the frame's brightest pixel.
+        Used when the catalog entry was picked by name or by brightness. The
+        nearest detection to the centre is not safe then: when the real star
+        is missed (a smeared zero order can fail the roundness test), the
+        nearest detection is a noise blob, and it would be given the star's
+        name.
+
+        Parameters
+        ----------
+        width, height : `int`
+            The size of the image in pixels.
+
+        Returns
+        -------
+        star : `StellarObject` or `None`
+            The detection to name, or `None` when no detection qualifies.
+        """
+        radius_px = CENTRE_STAR_SEARCH_RADIUS_FRACTION * min(width, height)
+        candidates = [
+            star
+            for star in self.stellar_objects
+            if star.star_data.get("center_dist_sq", math.inf) <= radius_px**2
+        ]
+        if not candidates:
+            return None
+        brightest = max(candidates, key=lambda star: star.star_data.get("peak", 0.0))
+        if (
+            self.frame_peak
+            and brightest.star_data.get("peak", 0.0) < CENTRE_STAR_MINIMUM_PEAK_FRACTION * self.frame_peak
+        ):
+            return None
+        return brightest
+
+    @staticmethod
+    def _resolve_target_position(target_name: str) -> tuple[str, SkyCoord | None]:
+        """Look a target's name up in SIMBAD and return where it is.
+
+        Parameters
+        ----------
+        target_name : `str`
+            The target's name, for example ``"Alhena"`` or ``"M 57"``.
+
+        Returns
+        -------
+        status : `str`
+            ``"resolved"`` when SIMBAD knows the name, ``"unresolved"`` when
+            it does not, and ``"error"`` when the lookup failed (no network,
+            for example) so nothing is known either way.
+        position : `astropy.coordinates.SkyCoord` or `None`
+            The object's position when `status` is ``"resolved"``.
+        """
+        try:
+            table = simbad_interface.query_object(target_name.replace("_", " "))
+        except IndexError:
+            # astroquery raises IndexError, not an empty result, for a name
+            # SIMBAD does not know.
+            return "unresolved", None
+        except Exception as lookup_error:
+            logger.warning("SIMBAD name lookup for %r failed: %s", target_name, lookup_error)
+            return "error", None
+        if table is None or len(table) == 0:
+            return "unresolved", None
+        try:
+            return "resolved", SkyCoord(float(table["ra"][0]) * u.deg, float(table["dec"][0]) * u.deg)
+        except Exception as column_error:
+            logger.warning(
+                "SIMBAD name lookup for %r returned no usable position: %s", target_name, column_error
+            )
+            return "error", None
+
+    @staticmethod
+    def _entry_at_position(position: SkyCoord, simbad_coords: SkyCoord) -> int | None:
+        """Find the catalog entry that sits at a given position.
+
+        Parameters
+        ----------
+        position : `astropy.coordinates.SkyCoord`
+            The position to look for.
+        simbad_coords : `astropy.coordinates.SkyCoord`
+            The position of each catalog entry.
+
+        Returns
+        -------
+        index : `int` or `None`
+            The entry within `CATALOG_MATCH_RADIUS_ARCSEC` of `position`, or
+            `None` when there is none.
+        """
+        index, separation, _ = position.match_to_catalog_sky(simbad_coords)
+        if float(np.ravel(separation.arcsec)[0]) <= CATALOG_MATCH_RADIUS_ARCSEC:
+            return int(np.ravel(index)[0])
+        return None
+
+    @staticmethod
+    def _brightest_entry_index(result_table: Any, candidate_indices: np.ndarray) -> int | None:
+        """Find the brightest of some catalog entries.
+
+        Parameters
+        ----------
+        result_table : `astropy.table.Table`
+            The SIMBAD entries.
+        candidate_indices : `numpy.ndarray`
+            The rows to compare.
+
+        Returns
+        -------
+        index : `int` or `None`
+            The row with the smallest V magnitude, or `None` when no
+            candidate has a V magnitude.
+        """
+        brightest_index: int | None = None
+        brightest_magnitude = math.inf
+        for candidate in candidate_indices:
+            magnitude = _read_catalog_magnitude(result_table[int(candidate)], _SIMBAD_V_MAGNITUDE_COLUMNS)
+            if magnitude is not None and magnitude < brightest_magnitude:
+                brightest_index = int(candidate)
+                brightest_magnitude = magnitude
+        return brightest_index
 
     @staticmethod
     def _filter_stellar_rows(result_table):  # ruff: ignore[missing-type-function-argument, missing-return-type-static-method]

@@ -11,6 +11,7 @@ import {
     CATALOG_MESSIER,
     CATALOG_NGC_IC,
     CATALOG_NO_IMAGE,
+    CATALOG_PLANETS,
     CATALOG_STARS,
     SORT_NEWEST,
     TargetListEntry,
@@ -30,7 +31,7 @@ interface Target extends TargetListEntry {
 }
 
 /**
- * Fetches, filters, sorts, and manages selection state for the target/star radio list
+ * Fetches, filters, sorts, and manages selection state for the target radio list
  * shown in the left-hand panel of the Image Processing, Image Viewer, Observatory
  * and Observation displays.
  *
@@ -48,7 +49,6 @@ interface Target extends TargetListEntry {
  * @param {(t: string) => void} [setSelectedTarget] - Optional setter invoked to confirm the selected target.
  * @param {Set<string>} [remoteTargets] - Remote ingestion folder names used to compute highlighted IDs.
  * @param {boolean} [filterProcessedOnly] - When true, restricts the list to targets with a processed/stacked image.
- * @param {boolean} [includeStars] - When true, adds a "Stars" catalog choice and includes the star list.
  * @param {boolean} [disableAutoSelect] - When true, suppresses auto-selecting the first filtered item.
  * @returns {object} List items, raw targets/stars, filter panel props, text filter state, highlighted IDs, and isLocalTarget.
  */
@@ -60,7 +60,6 @@ export const useTargetListLogic = (
     setSelectedTarget?: (t: string) => void,
     remoteTargets: Set<string> = new Set(),
     filterProcessedOnly: boolean = false,
-    includeStars: boolean = false,
     disableAutoSelect: boolean = false
 ) => {
     const { catalog: savedCatalog, camera: savedCamera, sort } = useTargetListFilterState();
@@ -75,11 +74,10 @@ export const useTargetListLogic = (
     const stars = useMemo(() => astronomyListQuery.data ?? [], [astronomyListQuery.data]);
     const cameraIndex = cameraIndexQuery.data;
 
-    const catalogOptions = useMemo(() => {
-        const options = [CATALOG_ALL, CATALOG_MESSIER, CATALOG_NGC_IC, CATALOG_NO_IMAGE];
-        if (includeStars) options.push(CATALOG_STARS);
-        return options;
-    }, [includeStars]);
+    const catalogOptions = useMemo(
+        () => [CATALOG_ALL, CATALOG_MESSIER, CATALOG_NGC_IC, CATALOG_STARS, CATALOG_PLANETS, CATALOG_NO_IMAGE],
+        []
+    );
 
     // A saved choice can name something this screen (or the current
     // equipment config) no longer offers; fall back to "no filter" then.
@@ -145,14 +143,6 @@ export const useTargetListLogic = (
 
     // Memoized Filtered Targets
     const filteredTargets = useMemo(() => {
-        if (catalog === CATALOG_STARS) {
-            if (!filterText || filterText.trim() === '') return stars;
-            const needle = filterText.trim().toLowerCase();
-            return stars.filter((star: any) => {
-                const nameRaw = String(star.name ?? star.id ?? '');
-                return cleanTargetName(nameRaw).toLowerCase().includes(needle);
-            });
-        }
         const matching = targets.filter(
             (t) =>
                 matchesCatalog(t, catalog) &&
@@ -161,7 +151,7 @@ export const useTargetListLogic = (
                 (!filterProcessedOnly || hasProcessedImage(t))
         );
         return sortTargets(matching, sort, camera, cameraIndex);
-    }, [targets, stars, catalog, camera, cameraIndex, sort, applyTextFilter, filterText, filterProcessedOnly]);
+    }, [targets, catalog, camera, cameraIndex, sort, applyTextFilter, filterText, filterProcessedOnly]);
 
     // Auto-selection Logic
     useEffect(() => {
@@ -197,21 +187,18 @@ export const useTargetListLogic = (
                 if (!label) label = 'Unknown Object';
             }
 
-            const isStarRow = catalog === CATALOG_STARS;
             return {
                 id: value,
                 value: value,
                 label: label,
-                isProcessed: isStarRow
-                    ? undefined
-                    : (typeof target === 'string' ? false : hasProcessedImage(target)),
+                isProcessed: typeof target === 'string' ? false : hasProcessedImage(target),
                 // Under "Newest" the date explains the order.
-                subtitle: !isStarRow && sort === SORT_NEWEST && typeof target !== 'string'
+                subtitle: sort === SORT_NEWEST && typeof target !== 'string'
                     ? formatLastImaged(lastImagedTime(target, camera, cameraIndex)) ?? 'No frames'
                     : undefined,
             };
         });
-    }, [filteredTargets, catalog, camera, cameraIndex, sort]);
+    }, [filteredTargets, camera, cameraIndex, sort]);
 
     const filterPanel: TargetListFilterPanelProps = useMemo(
         () => ({
@@ -231,12 +218,12 @@ export const useTargetListLogic = (
         items: filteredItems,
         targets,
         stars,
-        isLoading: catalog === CATALOG_STARS ? astronomyListQuery.isLoading : targetListQuery.isLoading,
+        isLoading: targetListQuery.isLoading,
         filterPanel,
         filterText,
         setFilterText,
         highlightedIds: highlightedIds,
-        isLocalTarget: !!selectedTarget && (catalog === CATALOG_STARS ? stars : targets).some(t => {
+        isLocalTarget: !!selectedTarget && targets.some(t => {
             const val = typeof t === 'string' ? t : targetListId(t);
             const normalize = (s: string) => s.replace(/[_\s]/g, '').toLowerCase();
             return normalize(val) === normalize(selectedTarget);

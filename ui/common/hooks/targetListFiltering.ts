@@ -11,6 +11,7 @@ export const CATALOG_MESSIER = 'Messier Catalog';
 export const CATALOG_NGC_IC = 'NGC IC Catalog';
 export const CATALOG_NO_IMAGE = 'No Image';
 export const CATALOG_STARS = 'Stars';
+export const CATALOG_PLANETS = 'Planets';
 
 /** Shown in the camera tab to mean "do not filter by camera". */
 export const CAMERA_ALL = 'All Cameras';
@@ -57,11 +58,48 @@ export const hasProcessedImage = (target: TargetListEntry): boolean => {
     return typeof imagePath === 'string' && imagePath.trim() !== '';
 };
 
+const SOLAR_SYSTEM_BODIES = new Set([
+    'sun', 'moon', 'mercury', 'venus', 'mars', 'jupiter', 'saturn', 'uranus', 'neptune', 'pluto',
+]);
+
+/** Folders that hold calibration frames, which are never sky targets. */
+const CALIBRATION_NAMES = new Set(['bias', 'dark', 'flat', 'calibration']);
+
+/**
+ * Tells whether a name is a planet, the Sun or the Moon.
+ *
+ * @param {string} name - A cleaned target name.
+ * @return {boolean} True for a solar-system body.
+ */
+const isSolarSystemBody = (name: string): boolean =>
+    SOLAR_SYSTEM_BODIES.has(name.toLowerCase());
+
+/**
+ * Tells whether a name is a Messier, NGC or IC number.
+ *
+ * @param {string} name - A cleaned target name.
+ * @return {boolean} True for a deep-sky catalog designation.
+ */
+const isDeepSkyDesignation = (name: string): boolean =>
+    /^M(?=[\s\d]|$)/i.test(name) || /^(?:NGC|IC)(?=[\s\d]|$)/i.test(name);
+
+/**
+ * Tells whether a name is a comet or asteroid designation such as "C 2022 E3 ZTF".
+ *
+ * @param {string} name - A cleaned target name.
+ * @return {boolean} True for a comet or asteroid designation.
+ */
+const isCometDesignation = (name: string): boolean =>
+    /^[CPDXAI]\s?\/?\s?\d{4}\b/i.test(name);
+
 /**
  * Tells whether a target belongs to the chosen catalog.
  *
  * Targets without a processed image are hidden in every catalog except
- * "No Image", which shows only those.
+ * "No Image", which shows only those. Targets carry no object-type field, so
+ * "Planets" and "Stars" go by name: "Planets" is the planets, Sun and Moon,
+ * and "Stars" is any other target that is not a Messier, NGC or IC number, a
+ * comet designation, or a calibration folder.
  *
  * @param {TargetListEntry} target - The target.
  * @param {string} catalog - One of the CATALOG_* choices.
@@ -72,6 +110,15 @@ export const matchesCatalog = (target: TargetListEntry, catalog: string): boolea
     if (catalog === CATALOG_NO_IMAGE) return !isProcessed;
     if (!isProcessed) return false;
     const name = cleanTargetName(String(target.name ?? target.id ?? ''));
+    if (catalog === CATALOG_PLANETS) return isSolarSystemBody(name);
+    if (catalog === CATALOG_STARS) {
+        return (
+            !isSolarSystemBody(name) &&
+            !isDeepSkyDesignation(name) &&
+            !isCometDesignation(name) &&
+            !CALIBRATION_NAMES.has(name.toLowerCase())
+        );
+    }
     if (catalog === CATALOG_MESSIER) return /^M(?=[\s\d]|$)/i.test(name);
     if (catalog === CATALOG_NGC_IC) {
         return /^NGC(?=[\s\d]|$)/i.test(name) || /^IC(?=[\s\d]|$)/i.test(name);

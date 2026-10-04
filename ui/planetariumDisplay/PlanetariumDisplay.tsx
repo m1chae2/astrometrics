@@ -150,7 +150,6 @@ export const PlanetariumDisplay: React.FC = () => {
     setSelectedTargetId,
     remoteTargets,
     false,
-    true,
     true
   );
 

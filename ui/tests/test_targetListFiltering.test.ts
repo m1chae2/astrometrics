@@ -8,6 +8,8 @@ import {
     CATALOG_MESSIER,
     CATALOG_NGC_IC,
     CATALOG_NO_IMAGE,
+    CATALOG_PLANETS,
+    CATALOG_STARS,
     SORT_ALPHABETICAL,
     SORT_NEWEST,
     formatLastImaged,
@@ -44,6 +46,32 @@ describe('matchesCatalog', () => {
         expect(matchesCatalog({ id: 'M 1' }, CATALOG_ALL)).toBe(false);
         expect(matchesCatalog({ id: 'M 1' }, CATALOG_NO_IMAGE)).toBe(true);
         expect(matchesCatalog({ id: 'M 31', ...processed }, CATALOG_NO_IMAGE)).toBe(false);
+    });
+});
+
+describe('Stars and Planets catalogs', () => {
+    const named = (id: string) => ({ id, ...processed });
+
+    it('lists the planets, Sun and Moon under Planets only', () => {
+        for (const id of ['Jupiter', 'Mars', 'Moon', 'Sun']) {
+            expect(matchesCatalog(named(id), CATALOG_PLANETS)).toBe(true);
+            expect(matchesCatalog(named(id), CATALOG_STARS)).toBe(false);
+        }
+        expect(matchesCatalog(named('Vega'), CATALOG_PLANETS)).toBe(false);
+    });
+
+    it('lists single stars under Stars but not deep-sky, comet or calibration targets', () => {
+        for (const id of ['Vega', 'Altair', 'Alcor']) {
+            expect(matchesCatalog(named(id), CATALOG_STARS)).toBe(true);
+        }
+        for (const id of ['M 31', 'NGC 7000', 'IC 434', 'C 2022 E3 ZTF', 'Bias', 'Dark', 'M 52 - Bubble Nebula']) {
+            expect(matchesCatalog(named(id), CATALOG_STARS)).toBe(false);
+        }
+    });
+
+    it('still hides targets without a processed image', () => {
+        expect(matchesCatalog({ id: 'Sirius' }, CATALOG_STARS)).toBe(false);
+        expect(matchesCatalog({ id: 'Venus' }, CATALOG_PLANETS)).toBe(false);
     });
 });
 

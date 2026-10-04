@@ -10,7 +10,7 @@ This folder holds the list that lets you pick a target (a sky object such as M 3
 
 ## How the filters work
 
-1. The "By catalog" tab picks a catalog: All Targets, Messier Catalog, NGC IC Catalog, or No Image. A screen can also add Stars.
+1. The "By catalog" tab picks a catalog: All Targets, Messier Catalog, NGC IC Catalog, Stars, Planets, or No Image. Targets have no object-type field, so the catalogs go by name. Planets holds the planets, the Sun and the Moon. Stars holds every other target that is not a Messier, NGC or IC number, a comet designation (such as `C 2022 E3 ZTF`), or a calibration folder.
 2. The "By camera" tab picks one of the cameras set up in the observatory config, or All Cameras. Each camera shows how many targets it has imaged.
 3. The two picks apply together. A line under the tabs names the active filters, for example `Messier Catalog · ZWO ASI 533MM Pro`.
 4. The sort switch orders the list by name (A–Z, with numbers sorted as numbers, so M 2 comes before M 10) or by the most recently imaged (Newest). Under Newest, each row shows the date of its latest frame. When a camera is picked, that date is the camera's latest frame. Targets with no frames go last.

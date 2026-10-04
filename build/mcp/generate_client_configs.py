@@ -375,7 +375,7 @@ def render_all(root: Path = PROJECT_ROOT) -> dict[str, str]:
         CLAUDE_OUTPUT_PATHS["local"]: developer,
         CLAUDE_OUTPUT_PATHS["example"]: as_json(build_claude_config(companion=False, root_text=EXAMPLE_ROOT)),
         CLAUDE_OUTPUT_PATHS["companion"]: as_json(build_claude_config(companion=True)),
-        CLAUDE_OUTPUT_PATHS["agent"]: build_agent_markdown(root),
+        CLAUDE_OUTPUT_PATHS["agent"]: build_agent_markdown(root).rstrip("\n") + "\n",
         CLAUDE_OUTPUT_PATHS["gemini"]: as_json(build_gemini_settings(root)),
     }
 

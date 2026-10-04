@@ -21,7 +21,7 @@ from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
 class FrameSelection:
     """The rules a frame must meet to be measured.
 
-    Attributes
+    Parameters
     ----------
     filter_name : `str` or `None`
         Keep frames whose filter matches this text, ignoring case. `None`

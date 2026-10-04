@@ -19,6 +19,29 @@ from astrometricslib.mcp.profile import current_profile, find_withheld_tools, lo
 logger = logging.getLogger(__name__)
 
 
+def _is_inside(root: str, path: str) -> bool:
+    """Say whether a resolved path is `root` or lies below it.
+
+    Parameters
+    ----------
+    root : `str`
+        A resolved directory path.
+    path : `str`
+        A resolved path to test.
+
+    Returns
+    -------
+    inside : `bool`
+        `True` if `path` is `root` or inside it. `False` if it is not, or
+        if the two cannot be compared (for example, paths on different
+        drives).
+    """
+    try:
+        return os.path.commonpath([root, path]) == root
+    except ValueError:
+        return False
+
+
 class ToolRegistry:
     """Centralized MCP tool registration and dispatching.
 
@@ -156,17 +179,27 @@ class ToolRegistry:
                 )
             ]
 
-        # MCP Path Sandboxing validation
-        try:
-            from astrometricslib.utilities.config_loader import get_configuration
+        # MCP Path Sandboxing validation. The check refuses the call if it
+        # cannot decide: a tool that takes a path must never run on a path
+        # the check could not verify.
+        path_arguments = {
+            key: val
+            for key, val in arguments.items()
+            if ("path" in key.lower() or key.lower().endswith("_dir")) and isinstance(val, str)
+        }
+        if path_arguments:
+            try:
+                from astrometricslib.utilities.config_loader import get_configuration
 
-            config = get_configuration()
-            lib_path = os.path.realpath(str(config.get_library_path()))
-            frm_path = os.path.realpath(str(config.get_frames_path()))
-            stk_path = os.path.realpath(str(config.get_stacks_path()))
+                config = get_configuration()
+                sandbox_roots = [
+                    os.path.realpath(str(config.get_library_path())),
+                    os.path.realpath(str(config.get_frames_path())),
+                    # The pipeline's output, which can be on another disk.
+                    os.path.realpath(str(config.get_stacks_path())),
+                ]
 
-            for key, val in list(arguments.items()):
-                if ("path" in key.lower() or key.lower().endswith("_dir")) and isinstance(val, str):
+                for val in path_arguments.values():
                     check_val = val
                     if not os.path.exists(check_val):
                         if check_val.startswith("/run/media/"):
@@ -178,20 +211,25 @@ class ToolRegistry:
                             if os.path.exists(alt):
                                 check_val = alt
                     real_val = os.path.realpath(check_val)
-                    # Allow validation if it starts with one of our valid
-                    # sandbox roots: the library, the frames, or the stacks
-                    # (the pipeline's output, which can be on another disk)
-                    is_under_lib = os.path.commonpath([lib_path, real_val]) == lib_path
-                    is_under_frm = os.path.commonpath([frm_path, real_val]) == frm_path
-                    is_under_stk = os.path.commonpath([stk_path, real_val]) == stk_path
-                    if not (is_under_lib or is_under_frm or is_under_stk):
+                    if not any(_is_inside(root, real_val) for root in sandbox_roots):
                         raise PermissionError(
                             f"Access denied: path '{val}' is outside the allowed sandbox directories."
                         )
-        except PermissionError as pe:
-            return [TextContent(type="text", text=f"Error: Security violation. {pe!s}")]
-        except Exception as exc:
-            logger.debug("Sandbox path validation skipped for an unresolvable argument: %s", exc)
+            except PermissionError as pe:
+                return [TextContent(type="text", text=f"Error: Security violation. {pe!s}")]
+            except Exception as exc:
+                logger.error(
+                    "Sandbox path validation failed for tool %r; refusing the call.", name, exc_info=True
+                )
+                return [
+                    TextContent(
+                        type="text",
+                        text=(
+                            f"Error: Security violation. The path arguments of '{name}' "
+                            f"could not be checked: {exc!s}"
+                        ),
+                    )
+                ]
 
         try:
             if inspect.iscoroutinefunction(func):

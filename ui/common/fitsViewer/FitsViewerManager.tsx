@@ -34,6 +34,8 @@ interface Props {
   disableStretch?: boolean;
   /** Explicit stretch toggle. */
   stretch?: boolean;
+  /** Pixel values drawn black and white when `stretch` is false (default: the file's own range). */
+  displayRange?: readonly [number, number];
   /** Identified star overlay items. */
   overlayStars?: AstrometryOverlayStar[];
   /** Whether astrometry overlay is enabled. */
@@ -58,6 +60,7 @@ export const FitsViewerManager = React.forwardRef<FitsRendererHandle, Props>(({
   autoPanTrigger,
   disableStretch,
   stretch,
+  displayRange,
   overlayStars,
   showOverlay,
   onStarClick,
@@ -82,6 +85,7 @@ export const FitsViewerManager = React.forwardRef<FitsRendererHandle, Props>(({
         selectedTarget={selectedTarget || null}
         disableStretch={disableStretch}
         stretch={stretch}
+        displayRange={displayRange}
         overlayStars={overlayStars}
         showOverlay={showOverlay}
         onStarClick={onStarClick}

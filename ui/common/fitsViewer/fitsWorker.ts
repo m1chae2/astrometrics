@@ -127,7 +127,9 @@ function renderViaWebGL(
  *
  * @param image - The image to draw.
  * @param stretch - True for the auto-stretch, false for a plain linear view.
- * @param parameters - Stretch settings (used when `stretch` is true).
+ * @param parameters - Stretch settings. With `stretch` false they hold the
+ *   linear range (`shadows` is the value drawn black, `shadows + range` the
+ *   value drawn white).
  * @param destinationWidth - Width of the bitmap to return.
  * @param destinationHeight - Height of the bitmap to return.
  * @returns The bitmap, resized to the destination size.
@@ -171,9 +173,9 @@ async function renderViaScalarLoops(
       }
     }
   } else {
-    // Linear scaling
-    const min = image.min;
-    const max = image.max === image.min ? image.min + 1 : image.max;
+    // Linear scaling over the range in `parameters`
+    const min = parameters.shadows;
+    const max = parameters.shadows + parameters.range;
 
     if (channels === 3) {
       const planeSize = w * h;
@@ -241,7 +243,7 @@ self.onmessage = async (ev: MessageEvent) => {
 
   if (cmd === 'render') {
     try {
-      const { dstW, dstH, dpr, stretch = true } = ev.data;
+      const { dstW, dstH, dpr, stretch = true, displayRange } = ev.data;
       const image = storedImages.get(imageId);
       if (!image) {
         throw new Error(`No decoded image filed under id ${imageId}`);
@@ -255,7 +257,12 @@ self.onmessage = async (ev: MessageEvent) => {
         image.stretchParameters ??= computeMtfStretchParameters(image.pixels);
         parameters = image.stretchParameters;
       } else {
-        parameters = computeLinearStretchParameters(image.min, image.max);
+        // A caller that knows the file's scale (a stretched picture runs from
+        // 0 to 1) passes it, so the picture is not rescaled to its own darkest
+        // and brightest pixels. Otherwise the file's own range is used.
+        const rangeMinimum = displayRange ? displayRange[0] : image.min;
+        const rangeMaximum = displayRange ? displayRange[1] : image.max;
+        parameters = computeLinearStretchParameters(rangeMinimum, rangeMaximum);
       }
 
       // GPU path: draw at full source resolution via the shared shader, then

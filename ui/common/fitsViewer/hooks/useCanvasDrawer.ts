@@ -10,6 +10,11 @@ let nextRenderRequestId = 1;
  * Drawing is done by the same worker that decoded the image (`workerRef`, from
  * `useFitsLoader`), because the decoded pixels live there. This hook only asks
  * it to draw the image it already holds.
+ *
+ * `displayRange` is the pair of pixel values drawn black and white when
+ * `stretch` is false. Leave it out to use the file's own darkest and brightest
+ * pixels. Pass a constant, not a new array on every render, or the image is
+ * redrawn each time.
  */
 export const useCanvasDrawer = (
     canvasRef: React.RefObject<HTMLCanvasElement | null>,
@@ -17,7 +22,8 @@ export const useCanvasDrawer = (
     parsedData: ParsedFitsData | null,
     bitmap: ImageBitmap | null,
     setDrawnSize: (size: { w: number, h: number }) => void,
-    stretch: boolean = true
+    stretch: boolean = true,
+    displayRange?: readonly [number, number]
 ) => {
 
     // Initial draw for Bitmaps (Processed Backend Images)
@@ -95,11 +101,12 @@ export const useCanvasDrawer = (
             dstH: logicalH,
             dpr,
             stretch,
+            displayRange,
             channels,
         });
 
         return () => {
             worker.removeEventListener('message', handleMessage);
         };
-    }, [canvasRef, workerRef, parsedData, setDrawnSize, stretch]);
+    }, [canvasRef, workerRef, parsedData, setDrawnSize, stretch, displayRange]);
 };

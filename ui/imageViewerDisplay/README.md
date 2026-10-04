@@ -13,12 +13,16 @@ Center column: `TargetViewerManager` — displays the processed image. The
   The viewer is the same renderer the FITS viewer uses (`FitsRenderer`), so it
   has the same zoom, pan, Fit and 1:1 controls. The stacking pipeline saves the
   processed image as a stretched FITS file (`<stack>_processed.fits`), which the
-  viewer shows as it is, without stretching it again. A JPEG or PNG processed
+  viewer shows as it is, without stretching it again. The file's values run
+  from 0 (black) to 1 (white), and the viewer draws them on that fixed scale,
+  so the sky stays as dark as the pipeline made it. A JPEG or PNG processed
   image is shown the same way.
 
 Right column: `TargetDetailsManager` — shows metadata and actions (analyze,
   stack, download). Actions here generally call backend endpoints and may
-  update the processed image when complete.
+  update the processed image when complete. The Stack action runs the full
+  stacking stage (`stack_frames`), the same one the batch script runs, so it
+  also saves the quality summary and the processed image.
 
 Data flow summary
 

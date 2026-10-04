@@ -139,6 +139,24 @@ describe('useFitsLoader and useCanvasDrawer sharing one worker', () => {
     expect(FakeFitsWorker.instances).toHaveLength(1);
   });
 
+  it('passes the display range to the worker so a stretched picture keeps its 0 to 1 scale', async () => {
+    const canvas = document.createElement('canvas');
+    const blob = buildFitsBlob(8, 6);
+    const stretchedPictureRange = [0, 1] as const;
+    renderHook(() => {
+      const loader = useFitsLoader(null, blob, vi.fn());
+      useCanvasDrawer({ current: canvas }, loader.workerRef, loader.parsedData, loader.bitmap, vi.fn(), false, stretchedPictureRange);
+      return loader;
+    });
+
+    await waitFor(() => expect(FakeFitsWorker.instances[0]?.commandsOf('render')).toHaveLength(1));
+
+    expect(FakeFitsWorker.instances[0].commandsOf('render')[0]).toMatchObject({
+      stretch: false,
+      displayRange: stretchedPictureRange,
+    });
+  });
+
   it('does not decode the same file twice when it is shown again', async () => {
     const first = buildFitsBlob(8, 6);
     const second = buildFitsBlob(10, 4);

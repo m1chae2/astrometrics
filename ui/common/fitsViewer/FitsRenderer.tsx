@@ -97,6 +97,8 @@ export interface FitsRendererProps {
   autoPanTrigger: number;
   disableStretch?: boolean;
   stretch?: boolean;
+  /** Pixel values drawn black and white when `stretch` is false (default: the file's own range). */
+  displayRange?: readonly [number, number];
   overlayStars?: AstrometryOverlayStar[];
   showOverlay?: boolean;
   onStarClick?: (star: AstrometryOverlayStar) => void;
@@ -123,6 +125,7 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
     error: parentError,
     autoPanTrigger,
     disableStretch,
+    displayRange,
     overlayStars,
     showOverlay,
     onStarClick,
@@ -160,7 +163,7 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
   const effectiveStretch = props.stretch ?? !isStacked;
 
   // Automatically draw with AutoStretch (handled in worker for FITS)
-  useCanvasDrawer(canvasRef, workerRef, parsedData, bitmap, handleSetDrawnSize, effectiveStretch);
+  useCanvasDrawer(canvasRef, workerRef, parsedData, bitmap, handleSetDrawnSize, effectiveStretch, displayRange);
 
   // Expose methods via REF
   useImperativeHandle(ref, () => ({
@@ -356,6 +359,7 @@ export const FitsRenderer = React.memo(FitsRendererInternal, (prevProps, nextPro
     prevProps.autoPanTrigger === nextProps.autoPanTrigger &&
     prevProps.disableStretch === nextProps.disableStretch &&
     prevProps.stretch === nextProps.stretch &&
+    prevProps.displayRange === nextProps.displayRange &&
     prevProps.showOverlay === nextProps.showOverlay &&
     prevProps.overlayStars === nextProps.overlayStars &&
     prevProps.selectedStarId === nextProps.selectedStarId

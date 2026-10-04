@@ -24,7 +24,12 @@ The repository has four kinds of code. Each layer may call only the layer below 
 
 1. **Domain libraries** (`astrometricslib/`, `wayfindinglib/`). These hold all astronomy math,
    image processing, catalog rules, planning decisions, and hardware-control sequences. They never
-   import `backend`.
+   import `backend`. The two libraries form two layers of their own:
+   - wayfindinglib builds on astrometricslib and uses only astrometricslib's public API;
+   - astrometricslib never imports wayfindinglib.
+   
+   astrometricslib therefore also holds the infrastructure both libraries share: the error classes,
+   logging setup, the job framework, and the configuration loader (section 7).
 2. **Delivery adapters**, which sit side by side at the same level:
    - `backend/` serves the desktop app over `/api/rpc`. RPC (remote procedure call) means the UI
      names a function and the backend runs it.
@@ -35,9 +40,17 @@ The repository has four kinds of code. Each layer may call only the layer below 
    live INDI connection, job queues, and the event socket, plus orchestration. INDI is the
    hardware-control protocol the observatory uses. Services call the public library API and never
    import `backend.container` or `backend.routers`.
-4. **UI** (`ui/`, `electron/`). The UI only draws data. It reaches the backend only through
-   `callBackend(method, params)`. The exceptions are the event and terminal WebSockets and the
-   static image file routes; CLAUDE.md should list these by name.
+4. **UI** (`ui/`, `electron/`). The UI only draws data. It uses only the backend's public
+   interface, which the backend declares in one place (section 8.1):
+   - the RPC methods, called through `callBackend(method, params)`;
+   - a short list of routes for what RPC cannot carry:
+     - the event and terminal WebSockets;
+     - the static image and FITS file routes;
+     - the Matplotlib figure routes;
+     - the startup routes `/api/ready`, `/api/session-token`, and `/api/pairing-info`.
+   
+   Nothing outside that interface is reachable from the UI. Handoff and the emergency park
+   command become RPC methods. CLAUDE.md records the same list.
 
 "Public API" means the names each library exports from its package root (`astrometricslib.__all__`,
 `wayfindinglib.__all__`): the top-level class (`Astrometrics`, `Wayfinder`), its sub-API classes,
@@ -166,13 +179,14 @@ backend inject drivers. Setting one updates the shared context.
 Names inside a child do not repeat the child's topic, for example `control.guiding.run_calibration`
 rather than `control.guiding.run_guider_calibration`, and `control.remote.list(kind)` rather than
 `control.remote.list_remote(kind)`. Names and arguments also follow section 6.1. The table lists
-the final names. Every child that has readable state gets one `status(include=[...])` read. `include` chooses the
+the final names. `SkyPosition` is a small model with `ra_deg` and `dec_deg`. It turns into JSON
+directly, so RPC and MCP calls can pass it. Every child that has readable state gets one `status(include=[...])` read. `include` chooses the
 sections of the reply, such as live hardware readings and saved models.
 
 | Attribute | What it covers | Public members after this plan | Folded in from today's `ObservatoryControl` |
 |---|---|---|---|
 | `control` | Driver injection | `driver`, `mount_driver`, `focuser_driver`, `filter_wheel_driver`, `camera_driver`, `guide_camera_driver`, `enclosure_driver`, `switch_driver`, `weather_driver`, `remote_transfer_driver` | `guiding_service` and `sync_service` go away (section 8.1) |
-| `control.mount` | Pointing and tracking | `status`, `slew_to_target`, `slew_to_coordinates(ra_deg, dec_deg, center=False, tolerance_arcsec=..., max_iterations=...)`, `sync_coordinates`, `park`, `unpark`, `set_tracking`, `manual_move`, `abort_motion`, `set_slew_rate`, `compute_pointing_correction`, `run_polar_alignment_assist` | `get_telescope_status`, plus the INDI mount decoding in `backend/mcp/tool_registry.py` (pier side, park, tracking) |
+| `control.mount` | Pointing and tracking | `status`, `slew(destination: str \| Target \| SkyPosition, center=False, tolerance_arcsec=..., max_iterations=...)` (was `slew_to_target` and `slew_to_coordinates`), `sync(position: SkyPosition)` (was `sync_coordinates`), `park`, `unpark`, `set_tracking`, `manual_move`, `abort_motion`, `set_slew_rate`, `compute_pointing_correction`, `run_polar_alignment_assist` | `get_telescope_status`, plus the INDI mount decoding in `backend/mcp/tool_registry.py` (pier side, park, tracking) |
 | `control.imaging` | Main camera, filter wheel, focuser | `status`, `capture_image(exposure_seconds, count=1, filter_name=None, dither=False)`, `set_filter`, `focus_move`, `compute_focus_correction`, `save_focus_model` | `get_filter_names`, `get_focuser_position`, `active_focus_model` |
 | `control.guiding` | Guide camera, guide pulses, guider models | `status`, `pulse` (was `pulse_guide`), `expose` (was `guide_expose`), `get_image` (was `get_guide_image`), `drain_external_pulses`, `compute_correction` (was `compute_guiding_correction`), `run_calibration` (was `run_guider_calibration`), `run_backlash_calibration`, `run_exposure_test` (was `run_guide_exposure_test`), `refit_spectrum` (was `refit_guiding_spectrum`), `save_calibration` (was `save_guider_calibration`), `save_spectrum_analysis` (was `save_guiding_spectrum_analysis`), `save_run` (was `save_guiding_run`) | `active_guider_calibration`, `active_guiding_spectrum_analysis`, `guider_plate_scale_arcsec_per_px` |
 | `control.remote` | The observatory computer's files and logs | `list(kind, folder_name=None, sizes=False)`, `check_connection` (was `check_remote_connection`), `frame_status(target)`, `sync_frames(target=None, dry_run=False, ...)` (was `sync_remote_frames`), `sync_logs` (was `sync_remote_logs`) | `list_remote_targets`, `list_remote_target_folders`, `list_remote_calibration_folders`, `discover_unassociated_remote_targets`, `list_remote_files`, `list_remote_files_with_sizes`, `check_for_new_remote_images`, `download_remote_frames`, `download_remote_targets`, `sync`, `sync_calibration_folder`, `sync_all_remote_folders`, `ingest_guiding_log_file`, `fetch_and_ingest_new_guide_logs`, `ingest_ekos_session_logs`. `is_syncing` moves to `Jobs.query`. |
@@ -238,7 +252,7 @@ follow section 4, and no row adds a function beyond those listed there.
 | Current location | What it does | Destination |
 |---|---|---|
 | `backend/services/observatory/guiding_service.py` | Merges guide pulses, converts pulses to arcseconds, computes root-mean-square (RMS) guiding error, and runs a simulated guiding loop | A guiding driver chosen by the `protocol` setting (`phd2`, `internal`, `simulator`), using the same driver registry `mount_driver` uses. RMS goes into `control.history.get_live_session_status`. The backend keeps only thread start and stop. |
-| `backend/services/observatory/alignment_service.py` | Runs the capture, plate-solve, sync, re-slew loop, and reads the solved center from the WCS header. WCS (world coordinate system) is the FITS header block that maps pixels to sky positions. | `control.mount.slew_to_coordinates(center=True)`, using `control.mount.compute_pointing_correction` |
+| `backend/services/observatory/alignment_service.py` | Runs the capture, plate-solve, sync, re-slew loop, and reads the solved center from the WCS header. WCS (world coordinate system) is the FITS header block that maps pixels to sky positions. | `control.mount.slew(destination, center=True)`, using `control.mount.compute_pointing_correction` |
 | `backend/services/infrastructure/sync_service.py` pointing-error extraction | Parses FITS headers for commanded and solved positions and computes the pointing error | A post-download step of `control.remote.sync_frames`. The results are read through `control.history.query(kind="alignment")`. |
 | `backend/services/observatory/target_imaging_executor.py` | Keeps its own observation queue and run loop | `ObservationPlanning.edit_queue` and `ObservationExecution.advance_session` |
 | `backend/services/observatory/imaging_service.py` | Runs a capture loop with filter changes and dithering. Dithering means shifting the pointing slightly between exposures. | `control.imaging.capture_image(count=..., dither=...)` |
@@ -285,7 +299,7 @@ logging in detail.
 | **Errors.** Library code raises a category from section 7.2 and never returns an error reply. `get` returns `None` for a missing item. The MCP and RPC adapters turn exceptions into error replies (section 7.4). | 48 `{"error": ...}` returns, 31 of them in `api/`. | 17 `{"error": ...}` returns. |
 | **Results.** Pydantic models, one per `kind`. | 26 methods return `dict`. | 22 methods return `dict`. |
 | **Naming the subject.** `target: str \| Target` everywhere (decided, section 11). A string that names no target raises `NotFoundError`. Every other identifier is `<noun>_id`. | Methods that take `target: Target` or `target_id: str` accept `str \| Target`. `camera` and `camera_name` become `camera_id`. | `target_name` and `target_id` arguments become `target: str \| Target`. |
-| **Units in names.** `ra_deg`, `dec_deg`, `radius_deg`, `tolerance_arcsec`, `exposure_seconds`. | `ra`, `dec`, and `radius` on `TargetCatalog.query`, `StellarCatalog.query`, and the region methods. | `ra` and `dec` on `slew_to_coordinates` and `sync_coordinates`. |
+| **Units in names.** `ra_deg`, `dec_deg`, `radius_deg`, `tolerance_arcsec`, `exposure_seconds`. | `ra`, `dec`, and `radius` on `TargetCatalog.query`, `StellarCatalog.query`, and the region methods. | `slew_to_coordinates(ra, dec)` and `sync_coordinates(ra, dec)` become `control.mount.slew(destination)` and `control.mount.sync(position)`, which take a `SkyPosition` (section 4.2). |
 | **Time.** `since`, `until`, and `time` accept `str \| datetime \| Time \| None`. An observing night is `night_id: str`. | `since` and `until` accept only ISO strings today. | `time_input: Any` becomes `time`. `night_date: date` and `session_id` used to name a night become `night_id`. |
 | **Choosing a variant.** `kind=` picks one variant. `include=` adds optional sections. `detail=` sets how much each record says. The libraries use no `mode=` argument and no boolean that switches variants. | `frame_quality(mode=...)` becomes `kind=`. `spectral: bool` on `stack_summary`, `compare_with_previous_stack`, `discard_previous_stack`, and `swap_with_previous_stack` becomes `kind=`. `include_fwhm` and `include_spectra` become `include=`. | `frame_guiding(include_quality=...)` becomes `include=`. |
 | **Background jobs.** Long-running methods use `@background_job` and take `register_job: bool = True`. | 14 decorated methods; `register_job` appears on 4. | 4 decorated methods; `register_job` appears on 1. |
@@ -302,11 +316,12 @@ logging in detail.
 | 3 | wayfindinglib builds a fresh `Astrometrics` at about 18 sites, and some ignore the configuration they were given | `Wayfinder` holds one injected handle and passes it down. |
 | 4 | Exceptions: `AstroLibError`, `AstrometryHardwareError`, `StorageNotMountedError(RuntimeError)`, `DelegationPolicyValidationError(ValueError)`, and `backend/exceptions.py` are unrelated | Replace them with the shared error model in section 7.2. |
 | 5 | Driver interfaces: astrometricslib mixes a typing `Protocol`, an `Abstract*` class, and concrete-only classes | Use wayfindinglib's style, `abc.ABC` base classes named `*Driver`, for the Siril, plate-solve, and SIMBAD interfaces. Rename `wayfindinglib/drivers/protocols/`, because it holds abstract classes, not typing Protocols. |
-| 6 | Shared infrastructure owned by astrometricslib: the MCP registry and reflection, `job_logging`, and the configuration loader | Move the job framework and the configuration loader into `corelib` (section 7), next to the new error and logging code. Move the MCP registry and reflection into the MCP package (section 8.2). wayfindinglib then stops importing astrometricslib internals. |
+| 6 | wayfindinglib imports astrometricslib internals for shared infrastructure (`LoggerInterface`, `DbLogHandler`, `capture_job_logs`, `get_current_job`) and for pipeline helpers (`FrameSelection`, `select_library_frames`, `derive_field_centers`, `classify_and_sort_fits_files`, `derive_target_sessions`, `resolve_camera_profile`, `SATURATED_*`, `DEFAULT_DARK_TEMPERATURE_TOLERANCE_C`) | The shared infrastructure becomes documented public API in astrometricslib's `foundation/` subpackage (section 7). Each pipeline helper becomes a proper public method, or the wayfindinglib code that needs it moves into astrometricslib. The MCP registry and reflection move to `mcp_servers/` (section 8.2). |
 | 7 | File names: `wayfindinglib/api/*_registry.py` hold ordinary classes, not registries | Rename the files to `control.py`, `planning.py`, `execution.py`. Put the `control` children in a `control/` package with one module per child. |
 | 8 | Scripts: 16 of 23 astrometricslib scripts and `wayfindinglib/scripts/build_deep_star_catalog.py` import internals | Scripts use the public API only, or the scripts README states the exemption. |
-| 9 | Alignment logs live in `astrometricslib/drivers/logger_interface.py`, but mount alignment is a wayfindinglib concern | Decide which library owns alignment records before building `control.history.query(kind="alignment")`. |
+| 9 | Alignment and guiding records live in `astrometricslib/drivers/logger_interface.py`, but only wayfindinglib and backend services that move into wayfindinglib read or write them | wayfindinglib owns them (decided, section 11). They move into wayfindinglib storage behind `DiskButler`. `control.history.query(kind="alignment")` reads them from there. |
 | 10 | Documentation drift: garbled "astrometrics" wording in wayfindinglib docstrings, citations to architecture sections that do not exist, 353 `ruff: ignore` suppressions in wayfindinglib | Fix these as each file is touched, per CLAUDE.md. `Wayfinding_Library_Architecture.md` gains the `control` children. |
+| 11 | `datastore/` sits below both libraries, and only the two libraries import it. Its `DeviceInUseError` cannot join the error categories without importing astrometricslib, which would create an import cycle. | Move `datastore/` into astrometricslib as a storage driver package. wayfindinglib's `DiskButler` builds on its public base class. |
 
 ### 6.3 Legacy code to remove
 
@@ -343,8 +358,9 @@ stays:
 ## 7. Errors and logging
 
 This section defines one way to report errors and one way to write logs, for both libraries, the
-backend, the MCP servers, and the scripts. A neutral shared package next to `datastore/` holds the
-code. Its name is open (section 11, decision 7). This section calls it `corelib`.
+backend, the MCP servers, and the scripts. The code lives in a `foundation/` subpackage of
+astrometricslib, and astrometricslib exports it from its package root. wayfindinglib, the backend,
+the MCP servers, and the scripts all import it from there (section 1, item 1).
 
 ### 7.1 Current state
 
@@ -364,7 +380,7 @@ code. Its name is open (section 11, decision 7). This section calls it `corelib`
 
 ### 7.2 Error model
 
-`corelib.errors` defines one base class and a small set of categories. Every error the libraries
+`astrometricslib/foundation/errors.py` defines one base class and a small set of categories. Every error the libraries
 or the backend raise on purpose belongs to one category.
 
 | Class | `code` | Meaning | Examples today |
@@ -383,15 +399,16 @@ or the backend raise on purpose belongs to one category.
 Any other exception means a bug and has the code `internal`.
 
 Each library adds specific subclasses where callers need to tell cases apart, for example
-`PlateSolveFailedError(ProcessingError)` or `MountParkedError(ConflictError)`. Each library exports
-the shared classes and its own subclasses from its package root.
+`PlateSolveFailedError(ProcessingError)` or `MountParkedError(ConflictError)`. astrometricslib
+exports the base class, the categories, and its own subclasses from its package root. wayfindinglib
+imports the categories from astrometricslib and exports only its own subclasses.
 
 No category subclasses a built-in exception such as `ValueError` or `KeyError`. Code that catches
 an `AstrometricsError` category therefore never catches an error from Python itself or from a
 third-party library by accident. That accident is the cause of the `KeyError` bug in Appendix A,
 item 7.
 
-`corelib.errors.ErrorInfo` is the serializable form of an error, a Pydantic model with fields
+`ErrorInfo` is the serializable form of an error, a Pydantic model with fields
 `code`, `message`, `details`, `retryable`, and `request_id`. Every adapter sends this shape, and
 batch results use it to list failed items.
 
@@ -422,21 +439,26 @@ batch results use it to list failed items.
 
 ### 7.4 How each adapter reports errors
 
-`corelib.errors.to_error_info(exc)` converts any exception to an `ErrorInfo`, and one table maps
+`to_error_info(exc)` converts any exception to an `ErrorInfo`, and one table maps
 each category to its transport codes.
 
-| `code` | JSON-RPC code | HTTP status | MCP |
-|---|---|---|---|
-| `invalid_argument` | -32602 | 400 | `isError: true` |
-| `not_found` | -32001 | 404 | `isError: true` |
-| `conflict` | -32002 | 409 | `isError: true` |
-| `permission_denied` | -32003 | 403 | `isError: true` |
-| `configuration` | -32004 | 500 | `isError: true` |
-| `storage` | -32005 | 503 | `isError: true` |
-| `hardware` | -32010 | 502 | `isError: true` |
-| `external_service` | -32011 | 502 | `isError: true` |
-| `processing` | -32012 | 422 | `isError: true` |
-| `internal` | -32603 | 500 | `isError: true` |
+| `code` | JSON-RPC code | MCP |
+|---|---|---|
+| `invalid_argument` | -32602 | `isError: true` |
+| `not_found` | -32001 | `isError: true` |
+| `conflict` | -32002 | `isError: true` |
+| `permission_denied` | -32003 | `isError: true` |
+| `configuration` | -32004 | `isError: true` |
+| `storage` | -32005 | `isError: true` |
+| `hardware` | -32010 | `isError: true` |
+| `external_service` | -32011 | `isError: true` |
+| `processing` | -32012 | `isError: true` |
+| `internal` | -32603 | `isError: true` |
+
+Every well-formed JSON-RPC reply uses HTTP status 200, whether it reports success or an error.
+The error code inside the reply tells the client what went wrong. The backend uses other HTTP
+statuses only for problems below the RPC layer: 400 for a request that is not valid JSON-RPC, and
+401 for a missing or wrong session token. The UI therefore has one error path.
 
 - **RPC router.** `handle_rpc` catches `KeyError` only around the method lookup, not around the
   call. It sends `ErrorInfo` in the JSON-RPC `error.data` field. For `internal` errors it sends a
@@ -464,8 +486,8 @@ each category to its transport codes.
      alignment attempts, guiding samples, session telemetry.
    
    `LoggerInterface` holds both kinds today. Job records and job log lines move to a
-   `corelib.jobs` store. Alignment, guiding, and telemetry records move to the library that owns
-   them (section 11, decision 3), behind its normal storage class. AI interactions and the knowledge table
+   job store in `astrometricslib/foundation/jobs.py`, next to the job framework. Alignment, guiding, and telemetry records move to wayfindinglib, behind
+   `DiskButler` (section 6.2, item 9). AI interactions and the knowledge table
    move to the backend.
 2. **One logger per module.** Every module uses `logger = logging.getLogger(__name__)`. The
    `job_{id}`, `siril_{id}`, and per-target worker loggers go away. Job and run identity travel in
@@ -475,7 +497,7 @@ each category to its transport codes.
    silences the "no handler" message when no program has set up logging. Library modules do not
    call `print`.
 4. **One setup function per program.** Each program calls
-   `corelib.logging.configure_logging(program, level, log_dir)` once at startup. The programs are
+   `astrometricslib.configure_logging(program, level, log_dir)` once at startup. The programs are
    the backend, each MCP server, and each script. The function installs:
    - a rotating log file in JSON Lines format, one JSON object per line, so tools and agents can
      filter it (for example 10 MB per file, 5 files kept);
@@ -511,6 +533,9 @@ each category to its transport codes.
 
 ### 8.1 Backend
 
+- **One declaration of the public interface.** One module lists every RPC method and every
+  non-RPC route from section 1, item 4. The router registers only those methods, and the app mounts
+  only those routes. The UI's `ActionRegistry` types are generated from the same list.
 - **Router logic.** Move the router logic in `backend/routers/rpc_router.py` into services:
   - `_save_config` calls the private `indi_driver._sync_config()`.
   - `_start_alignment` parses coordinates.
@@ -532,9 +557,9 @@ each category to its transport codes.
 
 ### 8.2 MCP servers
 
-- Move the MCP packages out of the libraries into one top-level package beside `backend/` and
-  `ui/`. The package name is open (section 11, decision 1). It must not be `mcp/`, which would hide the `mcp`
-  SDK on `sys.path`. Suggested layout:
+- Move the MCP packages out of the libraries, and out of `backend/`, into one top-level package
+  `mcp_servers/` beside `backend/` and `ui/`. Its name matches `mcp_servers.example.json`. It is not
+  `mcp/`, because that name would hide the `mcp` SDK on `sys.path`. Layout:
   - `common/`: registry, reflection, profiles, serialization;
   - `astrometrics_core/` and `wayfinding_core/`: reflection only;
   - `backend/`: HTTP only;
@@ -558,12 +583,14 @@ each category to its transport codes.
 | Check | Purpose |
 |---|---|
 | Ruff `TID251` banned-API entries for `wayfindinglib.drivers`, `.tasks`, `.models`, `.analytics`, `.session_analysis`, `.data_access`, `.observationlib`, `.observatorylib`, `.watchdog`, plus `astrometricslib.visualization`, with a per-file exemption for each library's own tree | Blocks the internal imports that pass lint today |
-| import-linter contracts: layers `backend.routers` above `backend.services` above the libraries; libraries never import `backend`; `backend.services` never imports `backend.container` or `backend.routers`; the MCP package imports only public library names | Turns the CLAUDE.md layer rules from convention into a failing check |
+| import-linter contracts: layers `backend.routers` above `backend.services` above the libraries; libraries never import `backend`; `astrometricslib` never imports `wayfindinglib`; `backend.services` never imports `backend.container` or `backend.routers`; the MCP package imports only public library names | Turns the CLAUDE.md layer rules from convention into a failing check |
 | Public-surface tests for both libraries | Keeps the export lists from growing or leaking again |
 | A test that the generated MCP tool list equals the public API minus the dispositions table | Makes every new public method a deliberate choice of AI tool |
+| A backend test that every route mounted on the FastAPI app appears in the public-interface declaration (section 8.1) | Keeps the backend's public interface explicit |
+| An ESLint rule that allows `fetch` and `WebSocket` only inside `ui/common/services/backendApi.ts` and `ui/common/utils/socketClient.ts`, and a check that every path they use is in the declaration | Keeps the UI on the backend's public interface |
 | A CI check that `ui/common/types/backendTypes.ts` matches a fresh code generation run | Keeps UI types in step with the Pydantic models |
 | Ruff rules `BLE` (blind `except Exception`), `TRY` (exception style, including `logger.exception` in handlers), `LOG` and `G` (logging calls), and `T20` (`print`, with scripts exempt). Like the import rules, they start with an allow-list of today's sites. | Holds the error and logging rules in section 7 |
-| `TID251` bans `logging.basicConfig` everywhere except `corelib.logging` and program entry points | Keeps logging setup in one place |
+| `TID251` bans `logging.basicConfig` everywhere except `astrometricslib/foundation/logging.py` and program entry points | Keeps logging setup in one place |
 | A test that every `AstrometricsError` subclass maps to a row of the section 7.4 table | Keeps the adapters complete when a library adds an error class |
 | `serialize_rpc_result` converts NumPy values with `.item()` and `.tolist()`, and fails or warns on unknown types instead of calling `str()` | Makes violations of the CLAUDE.md serialization rule visible |
 
@@ -578,8 +605,8 @@ Each phase ends with `ruff check`, the affected `pytest` suites, and, for `ui/` 
    logging lint rules from section 9, with an explicit
    allow-list of today's violations so CI stays green.
    Done when: CI runs both checks, and the allow-list is the to-do list for phases 4 to 6.
-3. **Build the shared error and logging code (section 7).** Create `corelib` with the error
-   classes, `ErrorInfo`, `to_error_info`, `configure_logging`, the log context, and the job log
+3. **Build the shared error and logging code (section 7).** Create `astrometricslib/foundation/`
+   with the error classes, `ErrorInfo`, `to_error_info`, `configure_logging`, the log context, and the job log
    router. Switch the RPC router, the MCP registries, the UI's `callBackend`, and every program
    entry point to them. While library code still raises built-in types, the adapters report a
    plain `ValueError` as `invalid_argument`. Phase 5 deletes that mapping.
@@ -611,32 +638,36 @@ consolidated methods.
 
 ## 11. Decisions for the owner
 
-Decided:
+Decided on 2026-10-04:
 
-- **wayfindinglib grouping (2026-10-04).** `Wayfinder` keeps `control`, `planning`, and
-  `execution`. `control` gains children named by topic (section 4.2). Two levels of nesting is the
-  rule for both libraries (section 6.1).
-- **Naming a target (2026-10-04).** Every method that acts on a target takes
-  `target: str | Target` (section 6.1).
-- **No deprecated or legacy names (2026-10-04).** Renames and removals keep no aliases. The change
-  that makes them updates every caller (section 3, rules 7 and 8; section 6.3).
+- **wayfindinglib grouping.** `Wayfinder` keeps `control`, `planning`, and `execution`.
+  `control` gains children named by topic (section 4.2). Two levels of nesting is the rule for
+  both libraries (section 6.1).
+- **Naming a target.** Every method that acts on a target takes `target: str | Target`
+  (section 6.1).
+- **No deprecated or legacy names.** Renames and removals keep no aliases. The change that makes
+  them updates every caller (section 3, rules 7 and 8; section 6.3).
+- **MCP package.** All MCP servers move to a top-level `mcp_servers/` package (section 8.2).
+- **Alignment and guiding records.** wayfindinglib owns them (section 6.2, item 9).
+- **Slewing.** `control.mount.slew(destination: str | Target | SkyPosition, ...)` replaces
+  `slew_to_target` and `slew_to_coordinates`, and `control.mount.sync(position)` replaces
+  `sync_coordinates` (section 4.2).
+- **The UI's access to the backend.** The UI uses only the backend's declared public interface
+  (section 1, item 4; section 8.1). The backend uses only the libraries' public API.
+- **Shared infrastructure.** wayfindinglib builds on astrometricslib, and astrometricslib never
+  imports wayfindinglib. astrometricslib holds the shared errors, logging setup, job framework, and
+  configuration in its `foundation/` subpackage. There is no separate shared package (section 1,
+  item 1; section 7).
+- **Errors and logging.** The design in section 7 stands, including:
+  - the nine error categories;
+  - HTTP 200 for every well-formed JSON-RPC reply;
+  - JSON Lines as the log file format.
 
 Open:
 
-1. The name and location of the top-level MCP package (for example `agent_servers/`).
-2. Whether maintenance scripts may import library internals.
-3. Which library owns alignment records (section 6.2, item 9). This also decides where those
-   records go when `LoggerInterface` is split (section 7.5, item 1).
-4. Whether `control.mount.slew_to_target` folds into `slew_to_coordinates` through
-   `target: str | Target`.
-5. The exact list of non-RPC routes the UI may use (WebSockets, static images, handoff), to record
-   in CLAUDE.md.
-6. Approval of the error and logging design in section 7, in particular:
-   - the category list in section 7.2;
-   - the JSON-RPC codes and HTTP statuses in section 7.4;
-   - JSON Lines as the log file format.
-7. The name of the shared package that holds errors, logging, jobs, and configuration (section 7
-   calls it `corelib`).
+1. Whether maintenance scripts may import library internals, or use only the public API through a
+   new `astrometrics.maintenance` sub-API.
+2. Whether `datastore/` moves into astrometricslib (section 6.2, item 11).
 
 ## Appendix A. Confirmed bugs
 

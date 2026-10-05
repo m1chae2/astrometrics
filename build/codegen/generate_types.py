@@ -15,7 +15,7 @@ from pydantic import BaseModel
 # Ensure we can import from backend
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
-from astrometricslib import FilterType
+from astrometricslib import ErrorInfo, FilterType
 from astrometricslib.models.astrometry_quality import CatalogMatchQuality
 from astrometricslib.models.moving_object import (
     AsteroidDetectionCandidate,
@@ -256,8 +256,14 @@ def generate_interface(model: type[BaseModel], name: str) -> str:
     return "\n".join(lines)
 
 
-def main() -> None:
-    """Run the entry point for generating backend TypeScript interfaces."""
+def render_types() -> str:
+    """Render the TypeScript text for every backend model the UI uses.
+
+    Returns
+    -------
+    content : `str`
+        The full text of ``ui/common/types/backendTypes.ts``.
+    """
     header = """/**
  * @fileoverview Auto-generated TypeScript interfaces from Pydantic models.
  */
@@ -266,6 +272,7 @@ def main() -> None:
     interfaces = [
         generate_enum(FilterType, "FilterType"),
         generate_enum(ImageType, "ImageType"),
+        generate_interface(ErrorInfo, "ErrorInfo"),
         generate_interface(FrameMeasurements, "FrameMeasurements"),
         generate_interface(FrameRecord, "FrameRecord"),
         generate_interface(TelescopeStatus, "TelescopeStatus"),
@@ -351,10 +358,13 @@ def main() -> None:
     # strips -- and this generator would re-add on the next run, so the two
     # hooks never converge and `pre-commit run` fails forever. Emitting the
     # already-stripped form makes the generated file a fixed point of both.
-    content = "\n".join(line.rstrip() for line in content.split("\n"))
+    return "\n".join(line.rstrip() for line in content.split("\n"))
 
+
+def main() -> None:
+    """Run the entry point for generating backend TypeScript interfaces."""
     with open("ui/common/types/backendTypes.ts", "w") as f:
-        f.write(content)
+        f.write(render_types())
     print("Successfully generated ui/common/types/backendTypes.ts")
 
 

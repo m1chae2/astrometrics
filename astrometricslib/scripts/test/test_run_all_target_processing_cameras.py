@@ -11,8 +11,8 @@ from typing import Any
 
 import pytest
 
-from astrometricslib.utilities.config_loader import _TomlSectionedConfig
-from astrometricslib.utilities.observatory_setups import ObservatorySetups, OpticConfig, SetupConfig
+from astrometricslib.foundation.config import _TomlSectionedConfig
+from astrometricslib.foundation.observatory_setups import ObservatorySetups, OpticConfig, SetupConfig
 
 _EXAMPLE_CONFIG_PATH = Path(__file__).resolve().parents[2] / "astrometrics.config.example.toml"
 

@@ -22,6 +22,7 @@ state it is passed against the requested new state, which is the one
 place both are actually available together.
 """
 
+from astrometricslib import ConfigurationError
 from wayfindinglib.models.policy.delegation import (
     CapabilityDelegation,
     DelegationPolicy,
@@ -42,7 +43,7 @@ Corrections Pass Through Shadow",
 `Wayfinding_Library_Architecture.md` §2.1.2)."""
 
 
-class DelegationPolicyValidationError(ValueError):
+class DelegationPolicyValidationError(ConfigurationError):
     """Raised when a delegation policy violates one of its validity rules."""
 
 

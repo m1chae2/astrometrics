@@ -79,7 +79,7 @@ class MovingObjectConfigLoader:
             The loaded settings, using defaults for anything missing.
         """
         if app_config is None:
-            from astrometricslib.utilities.config_loader import get_configuration
+            from astrometricslib.foundation.config import get_configuration
 
             app_config = get_configuration()
 

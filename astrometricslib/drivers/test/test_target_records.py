@@ -19,7 +19,7 @@ import pytest
 
 from astrometricslib import Astrometrics, Target
 from astrometricslib.drivers import local_database
-from astrometricslib.utilities.config_loader import AppConfiguration
+from astrometricslib.foundation.config import AppConfiguration
 
 
 def _make_isolated_config(tmp_path) -> AppConfiguration:  # ruff: ignore[missing-type-function-argument]

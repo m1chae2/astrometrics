@@ -69,7 +69,7 @@ def configured_primary(monkeypatch):  # ruff: ignore[missing-type-function-argum
             """
             return PRIMARY_FOCAL_MM
 
-    monkeypatch.setattr("astrometricslib.utilities.config_loader.get_configuration", lambda: _Configuration())
+    monkeypatch.setattr("astrometricslib.foundation.config.get_configuration", lambda: _Configuration())
 
 
 def test_the_primary_configuration_becomes_the_stacked_image():  # ruff: ignore[missing-return-type-undocumented-public-function]

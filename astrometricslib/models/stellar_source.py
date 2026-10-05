@@ -360,8 +360,8 @@ class StellarObject(BaseModel):
     # How much light the star gives off (a raw brightness reading).
     # `Any`, not `float`: pipeline code transiently stashes numpy/
     # astropy values here before a save normalizes them (see
-    # datastore.local_database.safe_json_dumps) -- `None` is just the
-    # "not yet known" default, not the field's only valid shape.
+    # `safe_json_dumps` in astrometricslib.foundation.storage) -- `None` is
+    # just the "not yet known" default, not the field's only valid shape.
     flux: Any = Field(default=None, alias="flux")
     # The star's brightness on the standard astronomical scale, where
     # LOWER numbers mean a BRIGHTER star (the opposite of most scales).

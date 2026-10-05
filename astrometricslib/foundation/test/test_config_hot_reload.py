@@ -10,8 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from astrometricslib.utilities import config_loader
-from astrometricslib.utilities.config_loader import AppConfiguration, _TomlSectionedConfig
+from astrometricslib.foundation import config as config_loader
+from astrometricslib.foundation.config import AppConfiguration, _TomlSectionedConfig
 
 FIRST_TEXT = '["Processing.Siril"]\npreview_star_tone_enabled = "true"\n'
 SECOND_TEXT = '["Processing.Siril"]\npreview_star_tone_enabled = "false"\n'

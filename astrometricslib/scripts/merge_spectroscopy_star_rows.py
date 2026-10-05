@@ -36,7 +36,7 @@ import argparse
 import logging
 import sys
 
-from astrometricslib import Astrometrics
+from astrometricslib import Astrometrics, configure_logging
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.shared.star_recording import merge_spectroscopy_stellar_object
 from astrometricslib.scripts.reconcile_position_only_star_catalog import _backup_catalog_database
@@ -181,7 +181,7 @@ def run_merge(argv: list[str] | None = None) -> int:
         made.
     """
     arguments = _build_argument_parser().parse_args(argv)
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+    configure_logging("merge_spectroscopy_star_rows", level=logging.INFO, log_dir="")
 
     astrometrics = Astrometrics()
     spectroscopy_row_ids = find_spectroscopy_row_ids(astrometrics)

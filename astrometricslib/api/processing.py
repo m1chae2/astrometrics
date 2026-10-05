@@ -14,6 +14,7 @@ from typing import Any, Literal
 from astrometricslib.drivers.job_logging import JobHandle, background_job, capture_job_logs, registered_job
 from astrometricslib.drivers.logger_interface import DbLogHandler, LoggerInterface
 from astrometricslib.drivers.siril_interface import ImageProcessing
+from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.calibration_ingest import CalibrationIngestReport, FlatSetAssessment
 from astrometricslib.models.excluded_frames import QuarantinePreview, RestoreReport, SetAsideFrame
 from astrometricslib.models.stack_comparison import StackComparison
@@ -27,7 +28,6 @@ from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
 from astrometricslib.pipelines.stacking.post_processing.stack_preview import PreviewSettings
 from astrometricslib.pipelines.stacking.stack_runner import run_siril_stack
 from astrometricslib.pipelines.stacking.stage import stack_frames
-from astrometricslib.utilities.config_loader import AppConfiguration
 
 __all__ = [
     "CalibrationCatalog",
@@ -859,7 +859,7 @@ class ProcessingPipelines:
         frames_to_stack : `list`, optional
             Explicit frame records to stack; defaults to the target's
             eligible light frames.
-        filter_type : `astrometricslib.utilities.enums.FilterType`, optional
+        filter_type : `astrometricslib.foundation.enums.FilterType`, optional
             Restrict stacking to frames captured with this filter.
         rejection_sigma : `tuple` [`float`, `float`], optional
             Low/high sigma-clipping rejection bounds.
@@ -1554,7 +1554,7 @@ class ProcessingPipelines:
             Enter to block until a slot is free, then hold it for the
             analysis run's duration.
         """
-        from datastore.process_locks import acquire_resource_slot
+        from astrometricslib.foundation.storage.process_locks import acquire_resource_slot
 
         return acquire_resource_slot(self._config, "job", self._config.get_max_concurrent_jobs())
 
@@ -1573,6 +1573,6 @@ class ProcessingPipelines:
             Enter to block until a slot is free, then hold it for the
             stacking run's duration.
         """
-        from datastore.process_locks import acquire_resource_slot
+        from astrometricslib.foundation.storage.process_locks import acquire_resource_slot
 
         return acquire_resource_slot(self._config, "job", self._config.get_max_concurrent_jobs())

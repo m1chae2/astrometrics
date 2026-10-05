@@ -24,7 +24,7 @@ import argparse
 import logging
 import sys
 
-from astrometricslib import Astrometrics
+from astrometricslib import Astrometrics, configure_logging
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +66,7 @@ def main(argv: list[str] | None = None) -> int:
         0 on success.
     """
     arguments = _build_argument_parser().parse_args(argv)
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    configure_logging("restore_excluded_frames", level=logging.INFO, log_dir="")
 
     astrometrics = Astrometrics()
     target_ids = arguments.targets or [target.id for target in astrometrics.targets.list()]

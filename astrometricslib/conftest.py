@@ -92,7 +92,7 @@ def _seed_synthetic_test_library(directories: SimpleNamespace) -> None:
     # 2. Seed SQLite database
     from astrometricslib import Target
     from astrometricslib.drivers.local_database import save_target
-    from astrometricslib.utilities.config_loader import AppConfiguration
+    from astrometricslib.foundation.config import AppConfiguration
 
     app_config = AppConfiguration()
     resolved_library_path = Path(str(app_config.get_library_path())).resolve()

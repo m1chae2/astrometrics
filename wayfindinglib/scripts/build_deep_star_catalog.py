@@ -41,6 +41,7 @@ import logging
 import sys
 import time
 
+from astrometricslib import configure_logging
 from wayfindinglib import Wayfinder
 from wayfindinglib.drivers.catalog import deep_star_store
 from wayfindinglib.drivers.catalog.deep_star_catalog_builder import (
@@ -298,7 +299,7 @@ def run_catalog_build(argv: list[str] | None = None) -> int:
         that do not match an existing catalog, and ``130`` if interrupted.
     """
     arguments = _build_argument_parser().parse_args(argv)
-    logging.basicConfig(level=logging.WARNING, format="%(asctime)s - %(levelname)s - %(message)s")
+    configure_logging("build_deep_star_catalog", level=logging.WARNING, log_dir="")
 
     wayfinder = Wayfinder()
     planning = wayfinder.planning

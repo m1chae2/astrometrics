@@ -8,6 +8,8 @@ state logic directly to the wayfindinglib domain high-level interface.
 import logging
 from typing import Any
 
+from astrometricslib import InvalidArgumentError, NotFoundError
+
 logger = logging.getLogger(__name__)
 
 
@@ -234,18 +236,15 @@ class TelescopeService:
 
         Raises
         ------
-        HardwareCommandError
-            If the hardware rejects or fails the slew command.
+        InvalidArgumentError
+            If the hardware driver rejects an argument of the slew command.
         """
         # REQ: BKD-1.2: The backend SHALL provide a generic interface
         # for Telescope control (Slew, Sync, Park, Track).
-        from backend.exceptions import HardwareCommandError
-        from wayfindinglib import AstrometryHardwareError
-
         try:
             return self.wayfinder.control.slew_to_coordinates(ra, dec)
-        except (AstrometryHardwareError, ValueError) as e:
-            raise HardwareCommandError(str(e)) from e
+        except ValueError as e:
+            raise InvalidArgumentError(str(e)) from e
 
     def slew_to_target_by_name(self, target_name: str) -> bool:
         """Resolve a target name from the library and slew to it.
@@ -262,11 +261,9 @@ class TelescopeService:
         InvalidArgumentError
             If ``target_name`` is empty, or the name cannot be
             resolved for a reason other than not being found.
-        TargetNotFoundError
+        NotFoundError
             If ``target_name`` is not present in the library.
         """
-        from backend.exceptions import InvalidArgumentError, TargetNotFoundError
-
         if not target_name or not target_name.strip():
             raise InvalidArgumentError("target_name must not be empty")
 
@@ -274,7 +271,7 @@ class TelescopeService:
             return self.wayfinder.control.slew_to_target(target_name)
         except ValueError as e:
             if "not found in library" in str(e):
-                raise TargetNotFoundError(str(e)) from e
+                raise NotFoundError(str(e)) from e
             raise InvalidArgumentError(str(e)) from e
 
     def slew_to_target(self, target_name: str) -> bool:
@@ -297,16 +294,13 @@ class TelescopeService:
 
         Raises
         ------
-        HardwareCommandError
-            If the hardware rejects or fails the park command.
+        InvalidArgumentError
+            If the hardware driver rejects an argument of the park command.
         """
-        from backend.exceptions import HardwareCommandError
-        from wayfindinglib import AstrometryHardwareError
-
         try:
             return self.wayfinder.control.park()
-        except (AstrometryHardwareError, ValueError) as e:
-            raise HardwareCommandError(str(e)) from e
+        except ValueError as e:
+            raise InvalidArgumentError(str(e)) from e
 
     def unpark_telescope(self) -> bool:
         """Command the telescope to unpark via the high-level interface.
@@ -318,16 +312,13 @@ class TelescopeService:
 
         Raises
         ------
-        HardwareCommandError
-            If the hardware rejects or fails the unpark command.
+        InvalidArgumentError
+            If the hardware driver rejects an argument of the unpark command.
         """
-        from backend.exceptions import HardwareCommandError
-        from wayfindinglib import AstrometryHardwareError
-
         try:
             return self.wayfinder.control.unpark()
-        except (AstrometryHardwareError, ValueError) as e:
-            raise HardwareCommandError(str(e)) from e
+        except ValueError as e:
+            raise InvalidArgumentError(str(e)) from e
 
     def set_tracking(self, enabled: bool) -> bool:
         """Set tracking state via the high-level interface.
@@ -339,16 +330,13 @@ class TelescopeService:
 
         Raises
         ------
-        HardwareCommandError
-            If the hardware rejects or fails the tracking command.
+        InvalidArgumentError
+            If the hardware driver rejects an argument of the tracking command.
         """
-        from backend.exceptions import HardwareCommandError
-        from wayfindinglib import AstrometryHardwareError
-
         try:
             return self.wayfinder.control.set_tracking(enabled)
-        except (AstrometryHardwareError, ValueError) as e:
-            raise HardwareCommandError(str(e)) from e
+        except ValueError as e:
+            raise InvalidArgumentError(str(e)) from e
 
     def manual_move(self, direction: str, start: bool = True) -> bool:
         """Start or stop manual movement via the high-level interface.
@@ -360,16 +348,13 @@ class TelescopeService:
 
         Raises
         ------
-        HardwareCommandError
-            If the hardware rejects or fails the movement command.
+        InvalidArgumentError
+            If the hardware driver rejects an argument of the movement command.
         """
-        from backend.exceptions import HardwareCommandError
-        from wayfindinglib import AstrometryHardwareError
-
         try:
             return self.wayfinder.control.manual_move(direction, start)
-        except (AstrometryHardwareError, ValueError) as e:
-            raise HardwareCommandError(str(e)) from e
+        except ValueError as e:
+            raise InvalidArgumentError(str(e)) from e
 
     def abort_motion(self) -> bool:
         """Abort all telescope mount motion immediately via astrometrics.
@@ -381,16 +366,13 @@ class TelescopeService:
 
         Raises
         ------
-        HardwareCommandError
-            If the hardware rejects or fails the abort command.
+        InvalidArgumentError
+            If the hardware driver rejects an argument of the abort command.
         """
-        from backend.exceptions import HardwareCommandError
-        from wayfindinglib import AstrometryHardwareError
-
         try:
             return self.wayfinder.control.abort_motion()
-        except (AstrometryHardwareError, ValueError) as e:
-            raise HardwareCommandError(str(e)) from e
+        except ValueError as e:
+            raise InvalidArgumentError(str(e)) from e
 
     def set_slew_rate(self, rate_index: int) -> bool:
         """Set slew rate (0-3) via the high-level interface.
@@ -402,16 +384,13 @@ class TelescopeService:
 
         Raises
         ------
-        HardwareCommandError
-            If the hardware rejects or fails the slew rate command.
+        InvalidArgumentError
+            If the hardware driver rejects the slew rate.
         """
-        from backend.exceptions import HardwareCommandError
-        from wayfindinglib import AstrometryHardwareError
-
         try:
             return self.wayfinder.control.set_slew_rate(rate_index)
-        except (AstrometryHardwareError, ValueError) as e:
-            raise HardwareCommandError(str(e)) from e
+        except ValueError as e:
+            raise InvalidArgumentError(str(e)) from e
 
     def focus_move(self, steps: int) -> bool:
         """Move focuser via the high-level interface.
@@ -423,18 +402,15 @@ class TelescopeService:
 
         Raises
         ------
-        HardwareCommandError
-            If the hardware rejects or fails the focuser move command.
+        InvalidArgumentError
+            If the hardware driver rejects the number of steps.
         """
         # REQ: BKD-1.4: The backend SHALL provide a generic interface
         # for Focuser control (Move, Position).
-        from backend.exceptions import HardwareCommandError
-        from wayfindinglib import AstrometryHardwareError
-
         try:
             return self.wayfinder.control.focus_move(steps)
-        except (AstrometryHardwareError, ValueError) as e:
-            raise HardwareCommandError(str(e)) from e
+        except ValueError as e:
+            raise InvalidArgumentError(str(e)) from e
 
     def get_focuser_position(self) -> int:
         """Get current focuser position via the high-level interface.
@@ -446,16 +422,13 @@ class TelescopeService:
 
         Raises
         ------
-        HardwareCommandError
-            If the hardware rejects or fails the query.
+        InvalidArgumentError
+            If the hardware driver rejects the query.
         """
-        from backend.exceptions import HardwareCommandError
-        from wayfindinglib import AstrometryHardwareError
-
         try:
             return self.wayfinder.control.get_focuser_position()
-        except (AstrometryHardwareError, ValueError) as e:
-            raise HardwareCommandError(str(e)) from e
+        except ValueError as e:
+            raise InvalidArgumentError(str(e)) from e
 
     def set_filter(self, filter_name: str) -> bool:
         """Set the active filter on the filterwheel.
@@ -471,29 +444,20 @@ class TelescopeService:
         Raises
         ------
         InvalidArgumentError
-            If ``filter_name`` is empty.
-        FilterNotFoundError
+            If ``filter_name`` is empty, or the filter wheel driver
+            rejects it for another reason.
+        NotFoundError
             If ``filter_name`` is not recognized by the filterwheel.
-        HardwareCommandError
-            If the hardware rejects or fails the filter command for
-            any other reason.
         """
-        from backend.exceptions import (
-            FilterNotFoundError,
-            HardwareCommandError,
-            InvalidArgumentError,
-        )
-        from wayfindinglib import AstrometryHardwareError
-
         if not filter_name or not filter_name.strip():
             raise InvalidArgumentError("filter_name must not be empty")
 
         try:
             return self.wayfinder.control.set_filter(filter_name)
-        except (AstrometryHardwareError, ValueError) as e:
+        except ValueError as e:
             if "not recognized" in str(e):
-                raise FilterNotFoundError(str(e)) from e
-            raise HardwareCommandError(str(e)) from e
+                raise NotFoundError(str(e)) from e
+            raise InvalidArgumentError(str(e)) from e
 
     def get_observer_location(self) -> dict:
         """Return observer location from INDI GPSD or a fallback default.

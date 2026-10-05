@@ -18,7 +18,7 @@ already uses elsewhere.
 import os
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any, Literal
 
@@ -412,7 +412,7 @@ PROGRESS_POLL_SECONDS = 3.0
 
 
 @contextmanager
-def report_download_progress(folder: str, expected: int) -> Iterator[None]:
+def report_download_progress(folder: str, expected: int) -> Generator[None]:
     """Report a download's progress to the running job while it transfers.
 
     A frame sync can take minutes, and rsync itself reports nothing to the

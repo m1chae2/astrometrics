@@ -14,6 +14,7 @@ from typing import Any
 
 from fastapi import APIRouter
 
+from astrometricslib import ErrorInfo, log_context, new_request_id, to_error_info
 from backend.container import container
 from backend.services.rpc_protocol import (
     RPCMethodNotFoundError,
@@ -602,6 +603,50 @@ class RPCHandlerRegistry:
 rpc_registry = RPCHandlerRegistry()
 
 
+def _text_param(params: dict[str, Any], name: str) -> str | None:
+    """Give a parameter's value if it is a string.
+
+    Parameters
+    ----------
+    params : `dict` [`str`, `~typing.Any`]
+        The parameters of an RPC call.
+    name : `str`
+        The parameter to read.
+
+    Returns
+    -------
+    value : `str` or `None`
+        The value, or `None` if the parameter is missing or not a string.
+    """
+    value = params.get(name)
+    return value if isinstance(value, str) else None
+
+
+#: Error codes that mean the caller or the current state is at fault. They are
+#: logged without a traceback, because the cause is already in the message.
+_EXPECTED_CODES = frozenset({"invalid_argument", "not_found", "conflict", "permission_denied"})
+
+
+def _log_rpc_failure(method: str, exc: Exception, info: ErrorInfo) -> None:
+    """Log a failed RPC call once, with a traceback if it is unexpected.
+
+    Parameters
+    ----------
+    method : `str`
+        The RPC method that failed.
+    exc : `Exception`
+        The exception the method raised.
+    info : `ErrorInfo`
+        The error as reported to the caller.
+    """
+    if info.code in _EXPECTED_CODES:
+        logger.warning("RPC %s failed (%s): %s", method, info.code, info.message)
+    elif info.code == "internal":
+        logger.error("RPC %s raised an unexpected error", method, exc_info=exc)
+    else:
+        logger.error("RPC %s failed (%s): %s", method, info.code, info.message, exc_info=exc)
+
+
 @router.post("/rpc")
 async def handle_rpc(request: RPCRequest):  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Serve the unified entrypoint for all frontend JSON-RPC calls.
@@ -618,15 +663,23 @@ async def handle_rpc(request: RPCRequest):  # ruff: ignore[missing-return-type-u
     response : `~fastapi.responses.JSONResponse`
         A JSON-RPC success or error envelope.
     """
-    try:
-        result = await rpc_registry.execute(request.method, request.params)
-        return make_rpc_success_response(result, request.id)
-    except RPCMethodNotFoundError as e:
-        logger.warning(f"RPC method not found: {request.method}")
-        return make_rpc_error_response(-32601, f"Method not found: {e!s}", request.id, 404)
-    except ValueError as e:
-        logger.warning(f"RPC parameter mismatch: {e!s}")
-        return make_rpc_error_response(-32602, f"Invalid params: {e!s}", request.id, 400)
-    except Exception as e:
-        logger.error(f"RPC execution error on {request.method}: {e}", exc_info=True)
-        return make_rpc_error_response(-32603, f"Internal error: {e!s}", request.id, 500)
+    request_id = new_request_id()
+    with log_context(
+        request_id=request_id,
+        method=request.method,
+        target_id=_text_param(request.params, "target_id") or _text_param(request.params, "target"),
+        session_id=_text_param(request.params, "session_id"),
+    ):
+        try:
+            result = await rpc_registry.execute(request.method, request.params)
+            return make_rpc_success_response(result, request.id)
+        except RPCMethodNotFoundError as exc:
+            logger.warning("RPC method not found: %s", request.method)
+            info = ErrorInfo(code="not_found", message=f"Method not found: {exc!s}", request_id=request_id)
+            return make_rpc_error_response(-32601, info.message, request.id, info.model_dump(by_alias=True))
+        except Exception as exc:  # ruff: ignore[blind-except] -- RPC boundary: every failure becomes an error reply
+            info = to_error_info(exc, request_id)
+            _log_rpc_failure(request.method, exc, info)
+            return make_rpc_error_response(
+                info.rpc_code, info.message, request.id, info.model_dump(by_alias=True)
+            )

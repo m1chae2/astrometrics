@@ -314,7 +314,7 @@ class ConfigLoader:
             types and defaults applied where unset.
         """
         if app_config is None:
-            from astrometricslib.utilities.config_loader import get_configuration
+            from astrometricslib.foundation.config import get_configuration
 
             app_config = get_configuration()
         cam_data = app_config.get_camera_config(camera_name)

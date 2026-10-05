@@ -11,8 +11,8 @@ from typing import Any
 
 from astrometricslib.api.star_analysis import SPECTRAL_CLASS_LABELS, spectral_class_letter, summarize_star
 from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
+from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.stellar_source import StellarObject
-from astrometricslib.utilities.config_loader import AppConfiguration
 
 # Declares this module's own public surface. Without it, sphinx-automodapi
 # documents every imported name too, which is what produced the
@@ -74,7 +74,7 @@ class StellarCatalog:
             A `CatalogAccess` over `config` is constructed when omitted.
         """
         if config is None:
-            from astrometricslib.utilities.config_loader import get_configuration
+            from astrometricslib.foundation.config import get_configuration
 
             config = get_configuration()
         self._config = config

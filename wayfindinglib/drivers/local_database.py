@@ -4,7 +4,7 @@ Description: A physically separate SQLite file from astrometricslib's
 astrometrics.db -- "separate recording per library" from the architecture
 discussion means a distinct database file and schema, not a distinct WAL
 connection helper. The plumbing for opening that file and encoding values
-as JSON comes from the shared `datastore.local_database` module, so both
+as JSON comes from the shared storage module in astrometricslib, so both
 libraries get the same WAL settings and the same encoder without either
 one importing the other.
 """
@@ -16,8 +16,8 @@ import sqlite3
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from datastore.local_database import connect_db as _connect_db
-from datastore.local_database import safe_json_dumps as _safe_json_dumps
+from astrometricslib import connect_db as _connect_db
+from astrometricslib import safe_json_dumps as _safe_json_dumps
 
 if TYPE_CHECKING:
     from wayfindinglib.observationlib.observation_session import ObservationSession

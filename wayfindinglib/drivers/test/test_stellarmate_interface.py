@@ -351,7 +351,7 @@ def test_download_refuses_and_creates_nothing_when_the_frames_drive_is_missing(t
         def get_frames_mount_point(self) -> Path:
             return mount_point
 
-    monkeypatch.setattr("astrometricslib.utilities.storage_mount.get_configuration", lambda: _Settings())
+    monkeypatch.setattr("astrometricslib.foundation.storage.mount.get_configuration", lambda: _Settings())
     driver = StellarMateInterface(host_alias="test-host", remote_pictures_path="/home/stellarmate/Pictures")
 
     with (

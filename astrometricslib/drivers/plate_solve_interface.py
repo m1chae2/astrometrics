@@ -270,7 +270,7 @@ class PlateSolver:
         header : `astropy.io.fits.Header` or `None`
             The map metadata if it worked, or None if it failed.
         """
-        from astrometricslib.utilities.config_loader import get_configuration
+        from astrometricslib.foundation.config import get_configuration
 
         config = get_configuration()
 

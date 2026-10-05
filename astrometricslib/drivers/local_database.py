@@ -2,8 +2,8 @@
 
 This is where astrometrics.db is actually read and written. The generic
 plumbing -- opening the file, encoding values as JSON -- comes from the
-shared `datastore.local_database` module; what lives here is everything
-that knows what a target or a stellar object actually is.
+shared storage module in `astrometricslib.foundation.storage`; what lives here
+is everything that knows what a target or a stellar object actually is.
 """
 
 import json
@@ -11,8 +11,8 @@ import logging
 import os
 from typing import Any
 
-from datastore.local_database import connect_db as _connect_db
-from datastore.local_database import safe_json_dumps as _safe_json_dumps
+from astrometricslib.foundation.storage.local_database import connect_db as _connect_db
+from astrometricslib.foundation.storage.local_database import safe_json_dumps as _safe_json_dumps
 
 __all__ = [
     "load_targets",
@@ -39,7 +39,7 @@ def load_targets(app_config=None) -> list[Any]:  # ruff: ignore[missing-type-fun
     from astrometricslib.models.target import Target
 
     if app_config is None:
-        from astrometricslib.utilities.config_loader import get_configuration
+        from astrometricslib.foundation.config import get_configuration
 
         app_config = get_configuration()
 
@@ -92,7 +92,7 @@ def save_target(app_config=None, target=None) -> str:  # ruff: ignore[missing-ty
         Database path saved to.
     """
     if app_config is None:
-        from astrometricslib.utilities.config_loader import get_configuration
+        from astrometricslib.foundation.config import get_configuration
 
         app_config = get_configuration()
     db_path = os.path.join(str(app_config.get_library_path()), "astrometrics.db")

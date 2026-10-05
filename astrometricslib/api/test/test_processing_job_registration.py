@@ -10,10 +10,10 @@ correctly on both the success and no-output paths.
 import pytest
 
 from astrometricslib.api.processing import ProcessingPipelines
+from astrometricslib.foundation import config as config_loader
+from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.stacking import stage as stacking_tasks
-from astrometricslib.utilities import config_loader
-from astrometricslib.utilities.config_loader import AppConfiguration
 
 
 @pytest.fixture

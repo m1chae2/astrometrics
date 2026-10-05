@@ -5,7 +5,7 @@ Checks that the different spellings of one camera compare as equal.
 
 import pytest
 
-from astrometricslib.utilities.camera_names import normalize_camera_name
+from astrometricslib.foundation.camera_names import normalize_camera_name
 
 
 @pytest.mark.parametrize(

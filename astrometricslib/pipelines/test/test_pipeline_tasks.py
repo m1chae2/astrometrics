@@ -17,6 +17,7 @@ from astropy.modeling.models import Gaussian2D
 
 from astrometricslib import Astrometrics
 from astrometricslib.drivers.catalog_access import CatalogAccess, StarPosition
+from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.moving_object import CascadeStage
 from astrometricslib.models.stellar_source import SpectroscopyResult, StellarObject
 from astrometricslib.models.target import FrameRecord, Target
@@ -32,7 +33,6 @@ from astrometricslib.pipelines.stacking import stage as stacking_stage
 from astrometricslib.pipelines.test.test_pipeline_result_keys import (
     assert_result_keys,
 )
-from astrometricslib.utilities.config_loader import AppConfiguration
 
 
 def _make_image_fits(path: str, shape: tuple = (100, 100)) -> None:
@@ -409,7 +409,7 @@ def test_target_analyze_frame_spectroscopy(tmp_path, mocker):  # ruff: ignore[mi
 
     coordinates execution, target ID mapping, and database index saving.
     """
-    from astrometricslib.utilities import config_loader
+    from astrometricslib.foundation import config as config_loader
 
     config = AppConfiguration()
     original_instance = config_loader._instance
@@ -476,7 +476,7 @@ def test_analyze_frame_spectroscopy_does_not_disturb_other_stars_indexed_columns
     only this frame's own star ids, so an unrelated row's indexed
     columns must come back unchanged.
     """
-    from astrometricslib.utilities import config_loader
+    from astrometricslib.foundation import config as config_loader
 
     config = AppConfiguration()
     original_instance = config_loader._instance

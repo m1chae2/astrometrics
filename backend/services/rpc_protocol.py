@@ -135,9 +135,18 @@ def make_rpc_success_response(result: Any, request_id: int | str | None) -> JSON
 
 
 def make_rpc_error_response(
-    code: int, message: str, request_id: int | str | None, status_code: int
+    code: int,
+    message: str,
+    request_id: int | str | None,
+    data: dict[str, Any] | None = None,
+    status_code: int = 200,
 ) -> JSONResponse:
     """Construct a standard JSON-RPC error response.
+
+    A well-formed JSON-RPC call gets HTTP status 200 whether it succeeded or
+    failed. The error code inside the reply tells the client what went wrong.
+    Other statuses are for problems below the RPC layer, such as a request
+    that is not valid JSON-RPC.
 
     Parameters
     ----------
@@ -147,13 +156,18 @@ def make_rpc_error_response(
         A human-readable description of the error.
     request_id : `int` or `str` or `None`
         The JSON-RPC request identifier to echo back to the caller.
-    status_code : `int`
-        The HTTP status code for the response.
+    data : `dict` [`str`, `~typing.Any`], optional
+        The `ErrorInfo` record of the error, as JSON-safe data.
+    status_code : `int`, optional
+        The HTTP status code for the response. Defaults to 200.
 
     Returns
     -------
     response : `~fastapi.responses.JSONResponse`
         A JSON-RPC error envelope with the standard CORS headers.
     """
-    response_body = {"jsonrpc": "2.0", "error": {"code": code, "message": message}, "id": request_id}
+    error: dict[str, Any] = {"code": code, "message": message}
+    if data is not None:
+        error["data"] = data
+    response_body = {"jsonrpc": "2.0", "error": error, "id": request_id}
     return JSONResponse(content=response_body, status_code=status_code, headers=get_cors_headers())

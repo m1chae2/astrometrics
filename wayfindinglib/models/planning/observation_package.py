@@ -6,7 +6,7 @@ independent of any specific night (`Wayfinding_Library_Architecture.md`
 exposures alike in one list rather than a separate request mechanism,
 matching how package authoring is actually used today
 (`Wayfinding_Library_Architecture.md` §2.3.2). `filter` is typed
-`astrometricslib.utilities.enums.FilterType` -- a deliberate
+`astrometricslib.foundation.enums.FilterType` -- a deliberate
 cross-library type dependency in the direction this library already
 depends, per Design Invariant 1's scope (`Wayfinding_Library_Architecture.md`
 §2.1): it constrains dependencies within this library's layers, not

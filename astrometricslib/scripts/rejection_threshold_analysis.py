@@ -15,7 +15,7 @@ import os
 import sys
 import time
 
-from astrometricslib import Astrometrics
+from astrometricslib import Astrometrics, configure_logging
 
 SIGMA_GRID: list[tuple[float, float]] = [(2.0, 2.0), (2.5, 2.5), (3.0, 3.0), (3.5, 3.5), (4.0, 4.0)]
 FILTER_WFWHM_GRID: list[str | None] = [None, "90%", "80%"]
@@ -49,7 +49,7 @@ def resolve_target_frames(  # ruff: ignore[missing-return-type-undocumented-publ
     list
         The subset of target.frames matching the criteria.
     """
-    from astrometricslib.utilities.enums import FilterType
+    from astrometricslib.foundation.enums import FilterType
 
     matching_filters = tuple(getattr(FilterType, name) for name in filter_type_names)
     return [
@@ -77,8 +77,8 @@ def run_analysis() -> None:
         Raised with exit code 1 if the target has no frames, or no
         frames match the camera/filter/date criteria.
     """
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s", stream=sys.stdout
+    configure_logging(
+        "rejection_threshold_analysis", level=logging.INFO, log_dir="", console_stream=sys.stdout
     )
 
     parser = argparse.ArgumentParser(description="Sigma x Filter-Percentile Rejection Threshold Analysis")
@@ -184,7 +184,7 @@ def run_analysis() -> None:
             f"{fwhm_str:>9} {rej_str:>9} {elapsed_str:>10}"
         )
 
-    from astrometricslib.utilities.config_loader import get_configuration
+    from astrometricslib.foundation.config import get_configuration
 
     config = get_configuration()
     safe_id = target.id.replace(" ", "_")

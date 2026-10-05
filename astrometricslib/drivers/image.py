@@ -11,7 +11,7 @@ from astropy.io import fits
 from astropy.wcs import WCS
 
 from astrometricslib.drivers.fits_access import collapse_to_2d
-from astrometricslib.utilities.enums import FilterType
+from astrometricslib.foundation.enums import FilterType
 
 logger = logging.getLogger(__name__)
 

@@ -10,7 +10,7 @@ from typing import Any
 
 from astrometricslib.drivers.camera_profile_store import camera_identity
 from astrometricslib.drivers.job_logging import get_current_job
-from astrometricslib.utilities.enums import FilterType
+from astrometricslib.foundation.enums import FilterType
 
 logger = logging.getLogger(__name__)
 
@@ -222,10 +222,10 @@ def stack_frames(
     # A frame an earlier run moved into `_excluded` can still be listed on the
     # target, if that run's save of the target did not last. Count it as set
     # aside, not as a frame that was kept.
+    from astrometricslib.foundation.config import get_configuration
     from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
         drop_frames_already_set_aside,
     )
-    from astrometricslib.utilities.config_loader import get_configuration
 
     target_frames, already_set_aside = drop_frames_already_set_aside(
         target, target_frames, str(get_configuration().get_frames_path())
@@ -250,7 +250,7 @@ def stack_frames(
     # later one, and `ProcessingPipelines.restore_excluded_frames` puts it
     # back. Spectral frames are skipped: their streaks are the spectra
     # themselves.
-    from astrometricslib.utilities.config_loader import get_configuration
+    from astrometricslib.foundation.config import get_configuration
 
     if not has_spectral and get_configuration().get_quarantine_bad_frames_enabled():
         from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import quarantine_bad_frames
@@ -270,7 +270,7 @@ def stack_frames(
     # massive, image-wide changes. Because checking every frame takes extra
     # time, this feature can be turned on or off in the settings using
     # `get_background_homogeneity_check_enabled`.
-    from astrometricslib.utilities.config_loader import get_configuration
+    from astrometricslib.foundation.config import get_configuration
 
     background_split = None
     if get_configuration().get_background_homogeneity_check_enabled():
@@ -545,7 +545,7 @@ def _expected_stack_path(target_id: str, output_file: str) -> str:
     """
     import os
 
-    from astrometricslib.utilities.config_loader import get_configuration
+    from astrometricslib.foundation.config import get_configuration
 
     if os.path.isabs(output_file):
         return output_file
@@ -569,8 +569,8 @@ def _archive_stack_before_restack(target_id: str, output_file: str) -> str | Non
         off, there was no stack, or the files could not be moved. A failure to
         move is logged and does not stop the restack.
     """
+    from astrometricslib.foundation.config import get_configuration
     from astrometricslib.pipelines.stacking.post_processing.previous_stack import archive_current_stack
-    from astrometricslib.utilities.config_loader import get_configuration
 
     if not get_configuration().get_keep_previous_stack_enabled():
         return None
@@ -713,7 +713,7 @@ def _record_configuration_stack(target, target_frames, stacked_path) -> bool:  #
     primary_camera = None
     primary_focal_length = None
     try:
-        from astrometricslib.utilities.config_loader import get_configuration
+        from astrometricslib.foundation.config import get_configuration
 
         configuration = get_configuration()
         primary_camera = configuration.get_primary_camera_name()

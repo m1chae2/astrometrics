@@ -28,7 +28,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from astrometricslib.utilities.warn_once import warn_once
+from astrometricslib.foundation.warn_once import warn_once
 
 logger = logging.getLogger(__name__)
 

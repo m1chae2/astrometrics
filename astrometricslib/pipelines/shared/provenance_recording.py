@@ -18,6 +18,7 @@ import logging
 from typing import Any
 
 from astrometricslib.drivers.provenance_store import ProvenanceStore
+from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.provenance import (
     Activity,
     ActivityDescription,
@@ -34,7 +35,6 @@ from astrometricslib.models.provenance import (
     WasGeneratedBy,
 )
 from astrometricslib.models.quality_summary import PipelineQualitySummaryBase
-from astrometricslib.utilities.config_loader import AppConfiguration
 
 logger = logging.getLogger(__name__)
 
@@ -294,7 +294,7 @@ def record_pipeline_run(
         # `config_loader.get_configuration` is honored -- the same
         # lazy-import convention `job_logging.registered_job` already
         # uses for the same reason.
-        from astrometricslib.utilities.config_loader import get_configuration
+        from astrometricslib.foundation.config import get_configuration
 
         config = get_configuration()
         store = ProvenanceStore(config.get_logs_db_path())

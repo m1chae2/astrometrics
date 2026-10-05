@@ -7,12 +7,12 @@ spectrum, with its normal-image position untouched.
 """
 
 from astrometricslib.drivers.catalog_access import CatalogAccess
+from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.stellar_source import PhotometryResult, SpectroscopyResult, StellarObject
 from astrometricslib.scripts.merge_spectroscopy_star_rows import (
     find_spectroscopy_row_ids,
     merge_spectroscopy_rows,
 )
-from astrometricslib.utilities.config_loader import AppConfiguration
 
 
 class _FakeAstrometrics:

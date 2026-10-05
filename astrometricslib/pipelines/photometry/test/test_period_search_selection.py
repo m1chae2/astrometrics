@@ -15,6 +15,7 @@ import numpy as np
 import pytest
 
 from astrometricslib.drivers.catalog_access import CatalogAccess
+from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.stellar_source import PhotometryResult, StellarObject
 from astrometricslib.pipelines.photometry.batch import (
     MAXIMUM_BRIGHTEST_STARS_FOR_PERIOD_SEARCH,
@@ -23,7 +24,6 @@ from astrometricslib.pipelines.photometry.batch import (
     select_period_search_stars,
 )
 from astrometricslib.pipelines.photometry.processing.variability_analyzer import VariabilityAnalyzer
-from astrometricslib.utilities.config_loader import AppConfiguration
 
 _CENTER_RA = 250.4225
 _CENTER_DEC = 36.4603

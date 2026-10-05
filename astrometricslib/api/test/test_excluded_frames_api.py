@@ -12,11 +12,11 @@ from unittest.mock import patch
 import pytest
 
 from astrometricslib.api.processing import ProcessingPipelines
+from astrometricslib.foundation.enums import FilterType
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.quarantine_path import QUARANTINE_FOLDER_NAME
 from astrometricslib.pipelines.stacking.pre_processing import frame_quarantine
 from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import MANIFEST_FILE_NAME
-from astrometricslib.utilities.enums import FilterType
 
 FINDER = "astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.find_frames_to_quarantine"
 

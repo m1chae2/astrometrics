@@ -33,11 +33,11 @@ def analyze_frame_spectroscopy(target: Target, path: str, limit: int | None = No
         add_frame(target, path)
 
     from astrometricslib.drivers.catalog_access import CatalogAccess
+    from astrometricslib.foundation.config import get_configuration
     from astrometricslib.pipelines.astrometry.pipeline import AstrometryPipeline
     from astrometricslib.pipelines.spectroscopy.pipeline import (
         SpectroscopyPipeline,
     )
-    from astrometricslib.utilities.config_loader import get_configuration
 
     config = get_configuration()
     astrometry = AstrometryPipeline(config)

@@ -8,6 +8,12 @@ import logging
 
 import pytest
 
+from astrometricslib.foundation.observatory_setups import (
+    ObservatorySetups,
+    OpticConfig,
+    SetupConfig,
+)
+from astrometricslib.foundation.warn_once import warn_once
 from astrometricslib.pipelines.shared.frame_optics import (
     REASON_FOCAL_LENGTH,
     REASON_ONLY_SETUP,
@@ -16,12 +22,6 @@ from astrometricslib.pipelines.shared.frame_optics import (
     UNKNOWN_TELESCOPE_NAME,
     resolve_frame_telescope,
 )
-from astrometricslib.utilities.observatory_setups import (
-    ObservatorySetups,
-    OpticConfig,
-    SetupConfig,
-)
-from astrometricslib.utilities.warn_once import warn_once
 
 APERTURA = OpticConfig(name="Apertura 75Q", focal_length_mm=405.0, focal_ratio=5.4)
 NIKKOR = OpticConfig(name="Nikkor 300mm", focal_length_mm=300.0, focal_ratio=5.6)

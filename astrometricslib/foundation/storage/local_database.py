@@ -8,7 +8,7 @@ the JSON encoder used to store values SQLite has no column type for.
 Both astrometricslib and wayfindinglib share this module, so nothing
 here knows anything about telescopes, targets, or stars -- only about
 databases. Coordinating separate programs is a different job and lives
-in `datastore.process_locks`.
+in `astrometricslib.foundation.storage.process_locks`.
 """
 
 import json

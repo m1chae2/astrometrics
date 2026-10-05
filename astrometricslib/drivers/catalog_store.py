@@ -21,7 +21,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from datastore.local_database import connect_db
+from astrometricslib.foundation.storage.local_database import connect_db
 
 logger = logging.getLogger(__name__)
 
@@ -214,7 +214,7 @@ def summarize_catalog_coverage(config: Any = None) -> dict[str, Any]:
         and how much disk space it takes up.
     """
     if config is None:
-        from astrometricslib.utilities.config_loader import get_configuration
+        from astrometricslib.foundation.config import get_configuration
 
         config = get_configuration()
 

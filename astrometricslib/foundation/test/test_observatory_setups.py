@@ -9,9 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from astrometricslib.utilities.config_loader import _TomlSectionedConfig
-from astrometricslib.utilities.observatory_setups import load_observatory_setups
-from astrometricslib.utilities.warn_once import warn_once
+from astrometricslib.foundation.config import _TomlSectionedConfig
+from astrometricslib.foundation.observatory_setups import load_observatory_setups
+from astrometricslib.foundation.warn_once import warn_once
 
 EXAMPLE_CONFIG_PATH = Path(__file__).resolve().parents[2] / "astrometrics.config.example.toml"
 

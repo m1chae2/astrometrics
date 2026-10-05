@@ -1,7 +1,8 @@
-"""Tests for datastore.local_database's NumpyEncoder / safe_json_dumps.
+"""Tests for the storage module's NumpyEncoder and safe_json_dumps.
 
 Both astrometricslib.drivers.local_database (the targets table) and the
-generic datastore.butler.Butler (used for stellar_catalog and friends)
+generic `Butler` in astrometricslib.foundation.storage (used for the stellar
+catalog and friends)
 route every save through safe_json_dumps, so this is the one place that
 decides whether a scientific value (numpy, astropy, pandas) saved into a
 model's field crashes the save or degrades safely.
@@ -14,8 +15,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from datastore.butler import Butler, DatasetSpec
-from datastore.local_database import safe_json_dumps
+from astrometricslib.foundation.storage.butler import Butler, DatasetSpec
+from astrometricslib.foundation.storage.local_database import safe_json_dumps
 
 
 def test_safe_json_dumps_handles_numpy_scalars_and_arrays():  # ruff: ignore[missing-return-type-undocumented-public-function]

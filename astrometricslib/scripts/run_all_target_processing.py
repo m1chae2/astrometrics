@@ -26,7 +26,7 @@ from typing import Any
 # target should never pop open a GUI window mid-run.
 os.environ["HEADLESS"] = "1"
 
-from astrometricslib import Astrometrics
+from astrometricslib import Astrometrics, configure_logging
 from astrometricslib.pipelines.shared.camera_passes import assign_targets_to_cameras, camera_pass_order
 from astrometricslib.utilities.parallel_batch import BatchRunSummary
 
@@ -311,9 +311,7 @@ def run_full_processing(argv: list[str] | None = None) -> None:
         )
 
         os.environ[FORCE_RESTACK_ENVIRONMENT_VARIABLE] = "1"
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s", stream=sys.stdout
-    )
+    configure_logging("run_all_target_processing", level=logging.INFO, log_dir="", console_stream=sys.stdout)
 
     print("Initializing Astrometrics...")
     astrometrics = Astrometrics()

@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from astrometricslib.foundation.enums import FilterType
 from astrometricslib.models.quality_summary import StackingPipelineQualityMetrics, StackQualitySummary
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.stacking import stage as stacking_tasks
@@ -19,7 +20,6 @@ from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
     QuarantineDecision,
     QuarantineReport,
 )
-from astrometricslib.utilities.enums import FilterType
 
 SIRIL_DRIVER = "astrometricslib.drivers.siril_interface.ImageProcessing"
 SUMMARY_BUILDER = "astrometricslib.pipelines.stacking.stage._build_stack_quality_summary"
@@ -109,7 +109,7 @@ def test_stage_stacks_only_the_frames_the_quarantine_step_keeps() -> None:
 
 def test_stage_skips_the_quarantine_step_when_the_setting_is_off(monkeypatch: pytest.MonkeyPatch) -> None:
     """With the setting off, the stage never calls the step."""
-    from astrometricslib.utilities.config_loader import get_configuration
+    from astrometricslib.foundation.config import get_configuration
 
     configuration = get_configuration()
     monkeypatch.setattr(configuration, "get_quarantine_bad_frames_enabled", lambda: False)

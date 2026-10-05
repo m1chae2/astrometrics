@@ -26,11 +26,11 @@ from pathlib import Path
 import numpy as np
 from scipy.ndimage import gaussian_filter1d
 
+from astrometricslib.foundation.camera_names import normalize_camera_name
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import (
     FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
     blur_sigma_in_samples,
 )
-from astrometricslib.utilities.camera_names import normalize_camera_name
 
 _DATA_DIR = Path(__file__).parent.parent / "data"
 

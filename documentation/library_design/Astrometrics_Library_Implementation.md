@@ -99,7 +99,7 @@ Table columns are the five pipelines plus a column for code shared across all of
 keyed-record SQLite store shared with wayfindinglib:
 
 ### Shared Storage Backend
-*Located in:* `datastore/`
+*Located in:* `astrometricslib/foundation/storage/`
 - **Generic keyed-model storage (get/put/exists/merge, one table per dataset type):** `butler.py`
 - **SQLite connection setup and JSON encoding:** `local_database.py`
 - **Cross-process file locking for shared hardware/storage resources:** `process_locks.py`

@@ -14,7 +14,10 @@ from typing import Any
 
 from mcp.types import ImageContent, TextContent, Tool
 
+from astrometricslib.foundation.errors import ErrorInfo, to_error_info
+from astrometricslib.foundation.logging import log_context, new_request_id
 from astrometricslib.mcp.profile import current_profile, find_withheld_tools, load_manifest, refusal_message
+from astrometricslib.mcp.tool_errors import error_content
 
 logger = logging.getLogger(__name__)
 
@@ -153,12 +156,40 @@ class ToolRegistry:
         content : `list` [`mcp.types.TextContent`]
             The tool's result (or an error message) wrapped as MCP
             text content.
-        """  # ruff: ignore[docstring-missing-exception] -- PermissionError
+        """
         # is raised and caught within this same function (the path
         # sandboxing block below); it never propagates to the caller.
         if name not in self.tools:
-            return [TextContent(type="text", text=refusal_message(name, self.withheld_reasons.get(name)))]
+            return error_content(
+                ErrorInfo(
+                    code="permission_denied" if name in self.withheld_reasons else "not_found",
+                    message=refusal_message(name, self.withheld_reasons.get(name)),
+                )
+            )
 
+        request_id = new_request_id()
+        with log_context(request_id=request_id, method=name):
+            return await self._run_tool(name, arguments, request_id)
+
+    async def _run_tool(self, name: str, arguments: dict, request_id: str) -> list[Any]:
+        """Validate a call's arguments, check its paths, and run the tool.
+
+        Parameters
+        ----------
+        name : `str`
+            Name of the registered tool to execute.
+        arguments : `dict`
+            Arguments to pass to the tool's implementation.
+        request_id : `str`
+            Id of the call. It tags the log lines and the error reply.
+
+        Returns
+        -------
+        content : `list`
+            The tool's result, or a `ToolErrorContent` if it failed.
+        """  # ruff: ignore[docstring-missing-exception] -- PermissionError
+        # is raised and caught within this same function (the path
+        # sandboxing block below); it never propagates to the caller.
         if not isinstance(arguments, dict):
             arguments = {}
 
@@ -173,11 +204,13 @@ class ToolRegistry:
         except ImportError:
             pass
         except Exception as e:
-            return [
-                TextContent(
-                    type="text", text=f"Error: Invalid arguments for tool '{name}'. Validation failed: {e}"
+            return error_content(
+                ErrorInfo(
+                    code="invalid_argument",
+                    message=f"Invalid arguments for tool '{name}'. Validation failed: {e}",
+                    request_id=request_id,
                 )
-            ]
+            )
 
         # MCP Path Sandboxing validation. The check refuses the call if it
         # cannot decide: a tool that takes a path must never run on a path
@@ -189,7 +222,7 @@ class ToolRegistry:
         }
         if path_arguments:
             try:
-                from astrometricslib.utilities.config_loader import get_configuration
+                from astrometricslib.foundation.config import get_configuration
 
                 config = get_configuration()
                 sandbox_roots = [
@@ -216,20 +249,23 @@ class ToolRegistry:
                             f"Access denied: path '{val}' is outside the allowed sandbox directories."
                         )
             except PermissionError as pe:
-                return [TextContent(type="text", text=f"Error: Security violation. {pe!s}")]
-            except Exception as exc:
-                logger.error(
-                    "Sandbox path validation failed for tool %r; refusing the call.", name, exc_info=True
+                return error_content(
+                    ErrorInfo(
+                        code="permission_denied", message=f"Security violation. {pe!s}", request_id=request_id
+                    )
                 )
-                return [
-                    TextContent(
-                        type="text",
-                        text=(
-                            f"Error: Security violation. The path arguments of '{name}' "
+            except Exception as exc:
+                logger.exception("Sandbox path validation failed for tool %r; refusing the call.", name)
+                return error_content(
+                    ErrorInfo(
+                        code="permission_denied",
+                        message=(
+                            f"Security violation. The path arguments of '{name}' "
                             f"could not be checked: {exc!s}"
                         ),
+                        request_id=request_id,
                     )
-                ]
+                )
 
         try:
             if inspect.iscoroutinefunction(func):
@@ -264,8 +300,13 @@ class ToolRegistry:
                 )
                 result_str = result_str[:max_bytes] + truncated_note
             return [TextContent(type="text", text=result_str)]
-        except Exception as e:
-            return [TextContent(type="text", text=f"Error during tool execution: {e!s}")]
+        except Exception as exc:
+            info = to_error_info(exc, request_id)
+            if info.code in {"invalid_argument", "not_found", "conflict", "permission_denied"}:
+                logger.warning("Tool %s failed (%s): %s", name, info.code, info.message)
+            else:
+                logger.exception("Tool %s failed (%s)", name, info.code)
+            return error_content(info)
 
 
 FIGURE_DOTS_PER_INCH = 100

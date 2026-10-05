@@ -17,11 +17,12 @@ from astropy.modeling.models import Gaussian2D
 from astropy.wcs import WCS
 
 from astrometricslib.drivers.catalog_access import CatalogAccess
+from astrometricslib.foundation import config as config_loader
+from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.spectroscopy import batch
-from astrometricslib.utilities import config_loader, parallel_batch
-from astrometricslib.utilities.config_loader import AppConfiguration
+from astrometricslib.utilities import parallel_batch
 
 
 @pytest.fixture

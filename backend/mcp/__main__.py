@@ -9,18 +9,20 @@ from pathlib import Path
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import Resource, TextContent, Tool
+from mcp.types import CallToolResult, Resource, TextContent, Tool
 
 # Ensure project root is in sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from astrometricslib import configure_logging
 from astrometricslib.mcp.profile import GAP_REPORT_GUIDANCE
+from astrometricslib.mcp.tool_errors import as_call_tool_result
 from backend.mcp.tool_registry import get_astrometrics, registry
 
 # Configure logging to stderr to avoid corrupting stdio MCP protocol
-logging.basicConfig(level=logging.INFO, stream=sys.stderr)
+configure_logging("mcp_backend", level=logging.INFO)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 app = Server("astrometrics-backend", instructions=GAP_REPORT_GUIDANCE)
@@ -43,15 +45,16 @@ async def list_tools() -> list[Tool]:  # ruff: ignore[unused-async] -- awaited b
 
 
 @app.call_tool()
-async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolResult:
     """Execute a registered tool by forwarding parameters to the registry.
 
     Returns
     -------
-    result : `list` [`TextContent`]
-        The tool's result wrapped as MCP text content.
+    result : `list` [`TextContent`] or `CallToolResult`
+        The tool's result wrapped as MCP text content, or an error result if
+        the tool failed.
     """
-    return await registry.execute(name, arguments)
+    return as_call_tool_result(await registry.execute(name, arguments))
 
 
 @app.list_resources()

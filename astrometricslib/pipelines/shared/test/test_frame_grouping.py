@@ -5,9 +5,9 @@ both object models and dictionaries across various filter representations
 (FilterType.SPEC, 'SPEC', 'Star Analyzer 200', 'Spectroscopy').
 """
 
+from astrometricslib.foundation.enums import FilterType
 from astrometricslib.models.target import FrameRecord
 from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
-from astrometricslib.utilities.enums import FilterType
 
 
 def test_frame_is_spectral_with_objects() -> None:

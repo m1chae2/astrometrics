@@ -6,7 +6,7 @@ operations backed by on-disk lock files.
 
 import os
 
-from datastore.process_locks import file_lock
+from astrometricslib import file_lock
 
 
 class HardwareLock:

@@ -6,8 +6,8 @@ and the D5300 on both the Apertura and the Nikkor lens.
 
 from types import SimpleNamespace
 
+from astrometricslib.foundation.observatory_setups import ObservatorySetups, OpticConfig, SetupConfig
 from astrometricslib.pipelines.shared.camera_passes import assign_targets_to_cameras, camera_pass_order
-from astrometricslib.utilities.observatory_setups import ObservatorySetups, OpticConfig, SetupConfig
 
 OPTICS = (
     OpticConfig(name="Apertura 75Q", focal_length_mm=405.0),

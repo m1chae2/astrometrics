@@ -47,7 +47,7 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from astrometricslib.utilities.config_loader import get_configuration
+from astrometricslib.foundation.config import get_configuration
 
 # The files that make up a stack at the top of a target folder.
 _STACK_FAMILY = re.compile(

@@ -9,6 +9,8 @@ import astropy.units as u
 from astropy.coordinates import EarthLocation
 from astropy.time import Time
 
+from astrometricslib import ConflictError
+
 from .property_wait import wait_for_switch_state
 from .pyindi_compatibility import PyIndi
 
@@ -281,7 +283,7 @@ class MountController:
 
         Raises
         ------
-        AstrometryHardwareError
+        ConflictError
             If the target altitude falls outside the configured
             minimum/maximum safe operating envelope.
         """
@@ -308,9 +310,7 @@ class MountController:
         target_altitude, _target_azimuth = compute_altaz(ra * 15.0, dec, location, observation_time)
 
         if target_altitude < min_altitude or target_altitude > max_altitude:
-            from wayfindinglib import AstrometryHardwareError
-
-            raise AstrometryHardwareError(
+            raise ConflictError(
                 f"Slew rejected: Target altitude ({target_altitude:.1f}°) is outside safe operating "
                 f"envelope ({min_altitude}° to {max_altitude}°)"
             )
@@ -344,7 +344,7 @@ class MountController:
 
         Raises
         ------
-        AstrometryHardwareError
+        ConflictError
             If the target's hour angle falls outside the configured
             maximum east/west bound.
         """
@@ -366,9 +366,7 @@ class MountController:
         hour_angle = ((hour_angle + 12.0) % 24.0) - 12.0
 
         if abs(hour_angle) > max_hour_angle_hours:
-            from wayfindinglib import AstrometryHardwareError
-
-            raise AstrometryHardwareError(
+            raise ConflictError(
                 f"Slew rejected: Target hour angle ({hour_angle:.2f}h) is outside safe operating "
                 f"envelope (±{max_hour_angle_hours}h)"
             )

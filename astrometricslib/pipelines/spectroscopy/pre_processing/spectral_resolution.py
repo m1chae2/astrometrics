@@ -47,7 +47,7 @@ from pathlib import Path
 import numpy as np
 from scipy.ndimage import gaussian_filter1d
 
-from astrometricslib.utilities.camera_names import normalize_camera_name
+from astrometricslib.foundation.camera_names import normalize_camera_name
 
 logger = logging.getLogger(__name__)
 

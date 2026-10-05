@@ -30,13 +30,13 @@ from astrometricslib.drivers import simbad_interface
 from astrometricslib.drivers.fits_access import collapse_to_2d
 from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.drivers.plate_solve_interface import PlateSolver
+from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.astrometry.post_processing.assess_match_quality import assess_match_quality
 from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_blob_width_from_data
 from astrometricslib.pipelines.astrometry.pre_processing.source_detection import SourceDetector
 from astrometricslib.pipelines.shared.solar_system_targets import is_solar_system_target
-from astrometricslib.utilities.config_loader import AppConfiguration
-from astrometricslib.utilities.exceptions import AstroLibError
+from astrometricslib.utilities.exceptions import PlateSolveFailedError
 
 logger = logging.getLogger(__name__)
 
@@ -452,7 +452,7 @@ class StarIdentifier:
             The system settings.
         """
         if config is None:
-            from astrometricslib.utilities.config_loader import get_configuration
+            from astrometricslib.foundation.config import get_configuration
 
             config = get_configuration()
 
@@ -655,7 +655,7 @@ class StarIdentifier:
 
         Raises
         ------
-        AstroLibError
+        PlateSolveFailedError
             If plate solving is attempted and the field cannot be solved.
         """
         # 1. Load Image
@@ -759,7 +759,7 @@ class StarIdentifier:
                     self._identify_stars_with_simbad(wcs, center_ra, center_dec, w, h)
                 else:
                     logger.error("Could not solve field.")
-                    raise AstroLibError("Plate solving failed: could not solve field.")
+                    raise PlateSolveFailedError("Plate solving failed: could not solve field.")
         else:
             # Not attempting plate solving, but we can still identify
             # if we have hints
@@ -900,7 +900,7 @@ class StarIdentifier:
         from astroquery.gaia import Gaia
 
         from astrometricslib.drivers import catalog_store
-        from astrometricslib.utilities.config_loader import get_configuration
+        from astrometricslib.foundation.config import get_configuration
 
         radius_deg = min(max(0.1, radius_deg), 1.0)
         # ruff: ignore[float-equality-comparison]
@@ -1007,7 +1007,7 @@ class StarIdentifier:
             The list of stars and their coordinates, or None if the search
             failed.
         """
-        from astrometricslib.utilities.config_loader import get_configuration
+        from astrometricslib.foundation.config import get_configuration
 
         radius_deg = min(radius_deg, 1.0)
         config = get_configuration()

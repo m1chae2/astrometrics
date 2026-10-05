@@ -36,7 +36,7 @@ from typing import Any
 
 import numpy as np
 
-from datastore.local_database import connect_db
+from astrometricslib import connect_db
 
 logger = logging.getLogger(__name__)
 

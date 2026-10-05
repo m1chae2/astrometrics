@@ -16,6 +16,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from astrometricslib import ConflictError, PermissionDeniedError
 from wayfindinglib.api.control_registry import ObservatoryControl
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.models.equipment_and_site.enclosure import Enclosure, EnclosureType
@@ -976,11 +977,10 @@ def test_mount_driver_commands_refused_when_not_authoritative(control):  # ruff:
     explicitly promotes the capability.
     """
     from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
-    from wayfindinglib.exceptions import AstrometryHardwareError
 
     control.driver = SimulatorIndiInterface(config=control._config)
 
-    with pytest.raises(AstrometryHardwareError, match="MOUNT_CONTROL"):
+    with pytest.raises(PermissionDeniedError, match="MOUNT_CONTROL"):
         control.slew_to_coordinates(10.0, 20.0)
 
 
@@ -1027,13 +1027,12 @@ def test_focuser_and_filter_wheel_end_to_end_against_simulator(control):  # ruff
 def test_focuser_and_filter_wheel_commands_refused_when_not_authoritative(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify focuser/filter-wheel commands fail closed by default."""
     from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
-    from wayfindinglib.exceptions import AstrometryHardwareError
 
     control.driver = SimulatorIndiInterface(config=control._config)
 
-    with pytest.raises(AstrometryHardwareError, match="AUTOFOCUS"):
+    with pytest.raises(PermissionDeniedError, match="AUTOFOCUS"):
         control.focus_move(50)
-    with pytest.raises(AstrometryHardwareError, match="CAPTURE_ORCHESTRATION"):
+    with pytest.raises(PermissionDeniedError, match="CAPTURE_ORCHESTRATION"):
         control.set_filter("Luminance")
 
 
@@ -1103,15 +1102,14 @@ def test_capture_image_and_guide_camera_end_to_end_against_simulator(control):  
 def test_capture_image_and_sync_coordinates_refused_when_not_authoritative(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify capture/sync commands fail closed by default."""
     from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
-    from wayfindinglib.exceptions import AstrometryHardwareError
 
     control.driver = SimulatorIndiInterface(config=control._config)
 
-    with pytest.raises(AstrometryHardwareError, match="CAPTURE_ORCHESTRATION"):
+    with pytest.raises(PermissionDeniedError, match="CAPTURE_ORCHESTRATION"):
         control.capture_image(1.0)
-    with pytest.raises(AstrometryHardwareError, match="AUTOGUIDING"):
+    with pytest.raises(PermissionDeniedError, match="AUTOGUIDING"):
         control.guide_expose(1.0)
-    with pytest.raises(AstrometryHardwareError, match="PLATE_SOLVE_ALIGNMENT"):
+    with pytest.raises(PermissionDeniedError, match="PLATE_SOLVE_ALIGNMENT"):
         control.sync_coordinates(10.0, 20.0)
 
 
@@ -1136,13 +1134,12 @@ def test_enclosure_state_and_commands_against_simulator(control):  # ruff: ignor
 def test_enclosure_commands_refused_when_not_authoritative(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify open_enclosure/close_enclosure fail closed by default."""
     from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
-    from wayfindinglib.exceptions import AstrometryHardwareError
 
     control.driver = SimulatorIndiInterface(config=control._config)
 
-    with pytest.raises(AstrometryHardwareError, match="OBSERVATORY_SAFETY"):
+    with pytest.raises(PermissionDeniedError, match="OBSERVATORY_SAFETY"):
         control.open_enclosure()
-    with pytest.raises(AstrometryHardwareError, match="OBSERVATORY_SAFETY"):
+    with pytest.raises(PermissionDeniedError, match="OBSERVATORY_SAFETY"):
         control.close_enclosure()
 
 
@@ -1161,7 +1158,6 @@ def test_close_enclosure_refuses_when_mount_outside_clearance(control, mocker): 
     """
     from wayfindinglib.drivers.protocols.mount_driver import MountStatus
     from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
-    from wayfindinglib.exceptions import AstrometryHardwareError
     from wayfindinglib.models.equipment_and_site.enclosure import Enclosure, EnclosureType
     from wayfindinglib.models.policy.delegation import CapabilityDelegation, DelegationPolicy
 
@@ -1202,5 +1198,5 @@ def test_close_enclosure_refuses_when_mount_outside_clearance(control, mocker): 
         {"id": "enc-1"},
     )
 
-    with pytest.raises(AstrometryHardwareError, match="clearance"):
+    with pytest.raises(ConflictError, match="clearance"):
         control.close_enclosure()

@@ -21,11 +21,11 @@ import logging
 import sys
 from typing import Any
 
-from astrometricslib import Astrometrics
+from astrometricslib import Astrometrics, configure_logging
 from astrometricslib.drivers.fits_access import read_header
+from astrometricslib.foundation.observatory_setups import ObservatorySetups
 from astrometricslib.pipelines.shared.frame_optics import resolve_frame_telescope
 from astrometricslib.utilities.iso_text import iso_or_gain_text, iso_or_gain_values_match
-from astrometricslib.utilities.observatory_setups import ObservatorySetups
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +156,7 @@ def run_report(argv: list[str] | None = None) -> int:
         Always ``0``: the script only reports.
     """
     arguments = _build_argument_parser().parse_args(argv)
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+    configure_logging("report_equipment_disagreements", level=logging.INFO, log_dir="")
 
     astrometrics = Astrometrics()
     targets = astrometrics.targets.list()

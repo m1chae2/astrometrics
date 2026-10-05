@@ -13,9 +13,9 @@ photometry's result into the spectroscopy call.
 import pytest
 
 from astrometricslib.api.processing import ProcessingPipelines
+from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines import tasks
-from astrometricslib.utilities.config_loader import AppConfiguration
 
 
 class _RecordingPipelineMatch:

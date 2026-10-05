@@ -201,7 +201,7 @@ def _build_catalog_access_with_stars(tmp_path, stars) -> CatalogAccess:  # ruff:
     catalog_access : `CatalogAccess`
         A catalog whose stellar_catalog table holds exactly `stars`.
     """
-    from astrometricslib.utilities.config_loader import AppConfiguration
+    from astrometricslib.foundation.config import AppConfiguration
 
     library_path = tmp_path / "library"
     (library_path / "targets").mkdir(parents=True)
@@ -276,7 +276,7 @@ def test_catalog_access_list_star_summaries_reads_the_stellar_catalog(tmp_path):
     DatasetSpec registered in this module actually has target_id
     available to filter on, and that it filters correctly.
     """
-    from astrometricslib.utilities.config_loader import AppConfiguration
+    from astrometricslib.foundation.config import AppConfiguration
 
     library_path = tmp_path / "library"
     (library_path / "targets").mkdir(parents=True)
@@ -305,7 +305,7 @@ def test_catalog_access_list_position_only_stars_filters_by_prefix_and_target(tm
     were missing, and a star with a real catalog name must never be
     offered up for position matching however close it sits.
     """
-    from astrometricslib.utilities.config_loader import AppConfiguration
+    from astrometricslib.foundation.config import AppConfiguration
 
     library_path = tmp_path / "library"
     (library_path / "targets").mkdir(parents=True)
@@ -351,7 +351,7 @@ def test_disk_butler_stellar_catalog_has_a_target_id_index(tmp_path):  # ruff: i
     """
     import sqlite3
 
-    from astrometricslib.utilities.config_loader import AppConfiguration
+    from astrometricslib.foundation.config import AppConfiguration
 
     library_path = tmp_path / "library"
     (library_path / "targets").mkdir(parents=True)
@@ -379,7 +379,7 @@ def _make_catalog_access_in(tmp_path) -> CatalogAccess:  # ruff: ignore[missing-
     catalog_access : `CatalogAccess`
         Reads and writes a library inside `tmp_path`, never the real one.
     """
-    from astrometricslib.utilities.config_loader import AppConfiguration
+    from astrometricslib.foundation.config import AppConfiguration
 
     library_path = tmp_path / "library"
     (library_path / "targets").mkdir(parents=True)

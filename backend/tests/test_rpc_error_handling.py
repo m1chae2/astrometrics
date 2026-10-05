@@ -16,6 +16,8 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from astrometricslib import ConflictError, HardwareError, NotFoundError
+from astrometricslib.foundation.logging import ContextFilter  # ruff: ignore[banned-api]
 from backend.mcp import tool_registry
 from backend.routers import rpc_router
 from backend.services.rpc_protocol import RPCMethodNotFoundError, RPCRequest, serialize_rpc_result
@@ -59,10 +61,12 @@ def registered_methods(monkeypatch: pytest.MonkeyPatch) -> dict:
 
 @pytest.mark.anyio
 async def test_an_unknown_method_is_reported_as_not_found(registered_methods: dict) -> None:
-    """Give a method with no handler error code -32601 and HTTP 404."""
+    """Give a method with no handler error code -32601, with HTTP 200."""
     response = await rpc_router.handle_rpc(RPCRequest(method="nothing:here", id=1))
-    assert response.status_code == 404
-    assert _body(response)["error"]["code"] == -32601
+    assert response.status_code == 200
+    error = _body(response)["error"]
+    assert error["code"] == -32601
+    assert error["data"]["code"] == "not_found"
 
 
 @pytest.mark.anyio
@@ -88,8 +92,12 @@ async def test_a_key_error_inside_a_service_is_an_internal_error(registered_meth
 
     registered_methods["test:boom"] = handler
     response = await rpc_router.handle_rpc(RPCRequest(method="test:boom", id=2))
-    assert response.status_code == 500
-    assert _body(response)["error"]["code"] == -32603
+    assert response.status_code == 200
+    error = _body(response)["error"]
+    assert error["code"] == -32603
+    assert error["data"]["code"] == "internal"
+    assert "target" not in error["message"]
+    assert error["data"]["requestId"] in error["message"]
 
 
 @pytest.mark.parametrize(
@@ -168,3 +176,62 @@ async def test_the_mcp_proxy_runs_a_method_in_process(
 
     reply = await tool_registry.execute_rpc("test:numbers", {})
     assert reply == {"status": "success", "data": {"n": 3}}
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("error", "rpc_code", "code", "retryable"),
+    [
+        (NotFoundError("No target 'M 99'."), -32001, "not_found", False),
+        (ConflictError("Device in use."), -32002, "conflict", False),
+        (HardwareError("Mount offline."), -32010, "hardware", True),
+        (ValueError("bad value"), -32602, "invalid_argument", False),
+    ],
+)
+async def test_a_category_error_is_reported_with_its_error_info(
+    registered_methods: dict, error: Exception, rpc_code: int, code: str, retryable: bool
+) -> None:
+    """Send an expected error's code, message, and retry flag to the caller."""
+
+    def handler() -> None:
+        """Raise the error under test."""
+        raise error
+
+    registered_methods["test:fail"] = handler
+    response = await rpc_router.handle_rpc(RPCRequest(method="test:fail", id=3))
+    assert response.status_code == 200
+    reply = _body(response)["error"]
+    assert reply["code"] == rpc_code
+    assert reply["message"] == str(error)
+    assert reply["data"]["code"] == code
+    assert reply["data"]["retryable"] is retryable
+    assert reply["data"]["requestId"]
+
+
+@pytest.mark.anyio
+async def test_the_request_id_tags_the_log_lines_of_the_call(
+    registered_methods: dict, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Tag a failed call's log record and its reply with the request id."""
+
+    def handler() -> None:
+        """Raise an expected error.
+
+        Raises
+        ------
+        NotFoundError
+            Always.
+        """
+        raise NotFoundError("No target 'M 99'.")
+
+    registered_methods["test:tagged"] = handler
+    # `configure_logging` puts this filter on the handlers it installs.
+    caplog.handler.addFilter(ContextFilter())
+    with caplog.at_level("WARNING", logger="backend.routers.rpc_router"):
+        response = await rpc_router.handle_rpc(
+            RPCRequest(method="test:tagged", id=4, params={"target": "M 99"})
+        )
+    request_id = _body(response)["error"]["data"]["requestId"]
+    assert caplog.records
+    assert all(getattr(record, "request_id", None) == request_id for record in caplog.records)
+    assert caplog.records[0].target_id == "M 99"

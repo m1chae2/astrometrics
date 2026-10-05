@@ -12,7 +12,7 @@ script and the backend service can both ask for "the Siril slot" and
 the operating system will make one of them wait.
 
 This module is about coordinating programs, not about storing data --
-the storage side lives in `datastore.local_database`.
+the storage side lives in `astrometricslib.foundation.storage.local_database`.
 """
 
 import contextlib
@@ -22,7 +22,14 @@ import logging
 import os
 import time
 
+from astrometricslib.foundation.errors import ConflictError
+
 logger = logging.getLogger(__name__)
+
+
+class DeviceInUseError(ConflictError):
+    """Raised when a locked resource is already held by another process."""
+
 
 # The resources whose slot the calling work already holds. A slot taken again
 # by the same work is reused (see `acquire_resource_slot`).
@@ -67,9 +74,10 @@ def file_lock(lock_path: str, blocking: bool = False):  # ruff: ignore[missing-r
             fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
         yield fh
     except BlockingIOError as e:
-        from datastore.exceptions import DeviceInUseError
-
-        raise DeviceInUseError(f"Resource descriptor is locked by another active process: {lock_path}") from e
+        raise DeviceInUseError(
+            f"Resource descriptor is locked by another active process: {lock_path}",
+            details={"lock_path": lock_path},
+        ) from e
     finally:
         fcntl.flock(fh, fcntl.LOCK_UN)
         fh.close()
@@ -117,10 +125,8 @@ def acquire_resource_slot(  # ruff: ignore[missing-return-type-undocumented-publ
     None
         The caller's code runs while holding one of the resource slots.
     """
-    from datastore.exceptions import DeviceInUseError
-
     if app_config is None:
-        from astrometricslib import get_configuration
+        from astrometricslib.foundation.config import get_configuration
 
         app_config = get_configuration()
 

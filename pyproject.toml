@@ -111,16 +111,15 @@ astrometrics = "backend.main_backend:main"
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["backend", "astrometricslib", "wayfindinglib", "datastore"]
+packages = ["backend", "astrometricslib", "wayfindinglib"]
 exclude = [
   "backend/tests",
   "astrometricslib/test",
   "wayfindinglib/test",
-  "datastore/test",
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["backend/tests", "astrometricslib/test", "wayfindinglib/test", "datastore/test"]
+testpaths = ["backend/tests", "astrometricslib/test", "astrometricslib/foundation", "wayfindinglib/test"]
 pythonpath = ["."]
 addopts = "-v -m 'not trio'"
 markers = [
@@ -188,7 +187,7 @@ convention = "numpy"
 max-doc-length = 79
 
 [tool.ruff.lint.isort]
-known-first-party = ["astrometricslib", "wayfindinglib", "backend", "datastore"]
+known-first-party = ["astrometricslib", "wayfindinglib", "backend"]
 
 # Enforces the astrometricslib public-API boundary documented in
 # astrometricslib/api/__init__.py: everything outside astrometricslib
@@ -202,6 +201,7 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "datastore"]
 "astrometricslib.utilities".msg = "Internal. Import from the top-level `astrometricslib` namespace instead."
 "astrometricslib.pipelines".msg = "Internal. Use the facade on `Astrometrics` instead."
 "astrometricslib.drivers".msg = "Internal. Use the facade on `Astrometrics` instead."
+"astrometricslib.foundation".msg = "Internal. Import from the top-level `astrometricslib` namespace instead."
 "astrometricslib.visualization".msg = "Internal. Use `Astrometrics.visualization` instead."
 "wayfindinglib.drivers".msg = "Internal. Use the `Wayfinder` API instead."
 "wayfindinglib.tasks".msg = "Internal. Use the `Wayfinder` API instead."
@@ -249,7 +249,7 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "datastore"]
 # constant, never a request body or user text field) or, for the Gaia ADQL
 # queries, numeric coordinates formatted as floats -- neither can carry a
 # string value that escapes the query.
-"datastore/butler.py" = ["hardcoded-sql-expression"]
+"astrometricslib/foundation/storage/butler.py" = ["hardcoded-sql-expression"]
 "astrometricslib/drivers/local_database.py" = ["hardcoded-sql-expression", "blind-except", "error-instead-of-exception", "logging-f-string", "verbose-raise"]
 "astrometricslib/drivers/logger_interface.py" = ["hardcoded-sql-expression", "blind-except", "error-instead-of-exception", "logging-f-string", "verbose-raise"]
 "astrometricslib/pipelines/astrometry/processing/star_identifier.py" = ["hardcoded-sql-expression", "blind-except", "error-instead-of-exception", "logging-f-string"]
@@ -294,7 +294,7 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "datastore"]
 "astrometricslib/drivers/test/test_plate_solve_retry.py" = ["raise-vanilla-class"]
 "astrometricslib/mcp/profile.py" = ["error-instead-of-exception"]
 "astrometricslib/mcp/reflection.py" = ["blind-except"]
-"astrometricslib/mcp/tool_registry.py" = ["blind-except", "logging-exc-info"]
+"astrometricslib/mcp/tool_registry.py" = ["blind-except"]
 "astrometricslib/mcp/tools/contract_validator.py" = ["blind-except"]
 "astrometricslib/pipelines/asteroid_detection/ephemeris.py" = ["blind-except", "logging-f-string"]
 "astrometricslib/pipelines/asteroid_detection/frame_wcs_composer.py" = ["logging-f-string"]
@@ -338,7 +338,6 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "datastore"]
 "astrometricslib/scripts/run_all_target_processing.py" = ["blind-except"]
 "astrometricslib/scripts/run_empirical_validation.py" = ["blind-except"]
 "astrometricslib/utilities/concurrency.py" = ["blind-except"]
-"astrometricslib/utilities/config_loader.py" = ["logging-f-string"]
 "astrometricslib/utilities/parallel_batch.py" = ["blind-except", "print"]
 "astrometricslib/utilities/test/test_parallel_batch.py" = ["print"]
 "astrometricslib/visualization/star_field_visualization.py" = ["print"]
@@ -348,7 +347,6 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "datastore"]
 "backend/mcp/tool_inventory.py" = ["print"]
 "backend/mcp/tools/contract_validator.py" = ["blind-except"]
 "backend/mcp/tools/dependency_analyzer.py" = ["blind-except", "logging-f-string"]
-"backend/routers/rpc_router.py" = ["logging-exc-info", "logging-f-string"]
 "backend/services/analysis/analysis_orchestrator.py" = ["blind-except", "error-instead-of-exception", "logging-f-string", "verbose-raise"]
 "backend/services/data/deletion_archive.py" = ["error-instead-of-exception"]
 "backend/services/data/image_service.py" = ["blind-except", "error-instead-of-exception", "logging-f-string"]
@@ -420,7 +418,7 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "datastore"]
 "wayfindinglib/tasks/planning_tasks/visibility_operations.py" = ["blind-except"]
 
 [tool.importlinter]
-root_packages = ["astrometricslib", "wayfindinglib", "backend", "datastore"]
+root_packages = ["astrometricslib", "wayfindinglib", "backend"]
 include_external_packages = false
 
 [[tool.importlinter.contracts]]
@@ -436,17 +434,6 @@ source_modules = ["wayfindinglib"]
 forbidden_modules = ["backend"]
 
 [[tool.importlinter.contracts]]
-name = "datastore never imports the libraries or backend"
-type = "forbidden"
-source_modules = ["datastore"]
-forbidden_modules = ["astrometricslib", "wayfindinglib", "backend"]
-ignore_imports = [
-    # Removed in phase 3, when datastore moves into astrometricslib.
-    "datastore.process_locks -> astrometricslib",
-    "datastore.test.** -> astrometricslib",
-]
-
-[[tool.importlinter.contracts]]
 name = "backend services never import the container or routers"
 type = "forbidden"
 source_modules = ["backend.services"]
@@ -459,6 +446,7 @@ source_modules = ["wayfindinglib"]
 forbidden_modules = [
     "astrometricslib.api",
     "astrometricslib.drivers",
+    "astrometricslib.foundation",
     "astrometricslib.mcp",
     "astrometricslib.models",
     "astrometricslib.pipelines",
@@ -473,4 +461,5 @@ ignore_imports = [
     "wayfindinglib.mcp.__main__ -> astrometricslib.mcp.profile",
     "wayfindinglib.mcp.tool_registry -> astrometricslib.mcp.reflection",
     "wayfindinglib.mcp.tool_registry -> astrometricslib.mcp.tool_registry",
+    "wayfindinglib.mcp.__main__ -> astrometricslib.mcp.tool_errors",
 ]

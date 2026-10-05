@@ -14,10 +14,11 @@ mounted there. When it is not set, nothing is checked.
 import os
 from pathlib import Path
 
-from astrometricslib.utilities.config_loader import AppConfiguration, get_configuration
+from astrometricslib.foundation.config import AppConfiguration, get_configuration
+from astrometricslib.foundation.errors import StorageError
 
 
-class StorageNotMountedError(RuntimeError):
+class StorageNotMountedError(StorageError):
     """Raised when a drive that should hold the frames is not mounted."""
 
 
@@ -92,5 +93,6 @@ def require_mounted_storage(destination: str | Path, config: AppConfiguration | 
         return
     raise StorageNotMountedError(
         f"Nothing is mounted at {mount_point}, so {destination} was not written. "
-        "Attach the drive or mount the share, then try again."
+        "Attach the drive or mount the share, then try again.",
+        details={"mount_point": str(mount_point), "destination": str(destination)},
     )

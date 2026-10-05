@@ -16,6 +16,7 @@ import asyncio
 import logging
 from typing import Any
 
+from astrometricslib import ConfigurationError, ConflictError, HardwareError, PermissionDeniedError
 from wayfindinglib.models.policy.delegation import ObservatoryCapability
 from wayfindinglib.observatorylib.site_location import configured_observer_location
 
@@ -51,13 +52,11 @@ def _require_authoritative(manager, capability: ObservatoryCapability) -> None: 
 
     Raises
     ------
-    AstrometryHardwareError
+    PermissionDeniedError
         If `capability` is not currently `AUTHORITATIVE`.
     """
-    from wayfindinglib import AstrometryHardwareError
-
     if not manager.delegation_policy().is_authoritative(capability):
-        raise AstrometryHardwareError(
+        raise PermissionDeniedError(
             f"Command requires {capability.value} to be AUTHORITATIVE, but it is not. "
             "Promote this capability (or call enter_controller_mode()) before commanding hardware."
         )
@@ -252,11 +251,9 @@ def set_filter(manager, filter_name: str) -> bool:  # ruff: ignore[missing-type-
     ------
     ValueError
         If ``filter_name`` does not match any known filter.
-    AstrometryHardwareError
+    HardwareError
         If the hardware fails to change to the resolved filter.
     """
-    from wayfindinglib import AstrometryHardwareError
-
     _require_authoritative(manager, ObservatoryCapability.CAPTURE_ORCHESTRATION)
 
     known_filters = _run_sync(manager.filter_wheel_driver.get_names())
@@ -268,7 +265,7 @@ def set_filter(manager, filter_name: str) -> bool:  # ruff: ignore[missing-type-
     final_name = resolved_name if resolved_name else filter_name
     success = _run_sync(manager.filter_wheel_driver.set_position(final_name))
     if not success:
-        raise AstrometryHardwareError(f"Filter change to '{final_name}' failed at hardware level")
+        raise HardwareError(f"Filter change to '{final_name}' failed at hardware level")
     return True
 
 
@@ -539,27 +536,29 @@ def close_enclosure(observatory) -> bool:  # ruff: ignore[missing-type-function-
 
     Raises
     ------
-    AstrometryHardwareError
-        If `OBSERVATORY_SAFETY` is not currently `AUTHORITATIVE`, if no
-        `Enclosure` is configured, or if the mount is not within the
-        configured clearance envelope of the park position.
+    ConfigurationError
+        If no `Enclosure` is configured.
+    HardwareError
+        If the mount position is not currently known.
+    ConflictError
+        If the mount is not within the configured clearance envelope of the
+        park position.
     """
-    from wayfindinglib import AstrometryHardwareError
     from wayfindinglib.tasks.control_tasks.enclosure_control import can_close_enclosure
 
     _require_authoritative(observatory, ObservatoryCapability.OBSERVATORY_SAFETY)
 
     enclosure = observatory.active_enclosure()
     if enclosure is None:
-        raise AstrometryHardwareError("Cannot close enclosure: no Enclosure is configured")
+        raise ConfigurationError("Cannot close enclosure: no Enclosure is configured")
 
     mount_status = _run_sync(observatory.mount_driver.get_status())
     mount_altitude_deg = _parse_dms_degrees(mount_status.altitude)
     mount_azimuth_deg = _parse_dms_degrees(mount_status.azimuth)
     if mount_altitude_deg is None or mount_azimuth_deg is None:
-        raise AstrometryHardwareError("Close refused: mount position is not currently known")
+        raise HardwareError("Close refused: mount position is not currently known")
     if not can_close_enclosure(enclosure, mount_altitude_deg, mount_azimuth_deg):
-        raise AstrometryHardwareError(
+        raise ConflictError(
             "Close refused: mount is not within the configured clearance envelope of the park position"
         )
     return _run_sync(observatory.enclosure_driver.close())

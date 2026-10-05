@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from wayfindinglib.exceptions import AstrometryHardwareError
+from astrometricslib import ConfigurationError, ConflictError, HardwareError, PermissionDeniedError
 from wayfindinglib.models.equipment_and_site.enclosure import Enclosure, EnclosureState, EnclosureType
 from wayfindinglib.models.policy.delegation import (
     CapabilityDelegation,
@@ -248,7 +248,7 @@ def test_slew_to_coordinates_raises_when_mount_control_not_authoritative(mocker)
     mount_driver.slew = mocker.AsyncMock(return_value=True)
     manager = _FakeManager(mount_driver=mount_driver, policy=_authoritative_policy())
 
-    with pytest.raises(AstrometryHardwareError, match="MOUNT_CONTROL"):
+    with pytest.raises(PermissionDeniedError, match="MOUNT_CONTROL"):
         ops.slew_to_coordinates(manager, 10.0, 20.0)
     mount_driver.slew.assert_not_called()
 
@@ -306,7 +306,7 @@ def test_pulse_guide_raises_when_autoguiding_not_authoritative(mocker):  # ruff:
         policy=_authoritative_policy(ObservatoryCapability.MOUNT_CONTROL),
     )
 
-    with pytest.raises(AstrometryHardwareError, match="AUTOGUIDING"):
+    with pytest.raises(PermissionDeniedError, match="AUTOGUIDING"):
         ops.pulse_guide(manager, "N", 250.0)
     mount_driver.pulse_guide.assert_not_called()
 
@@ -330,7 +330,7 @@ def test_sync_coordinates_raises_when_alignment_not_authoritative(mocker):  # ru
         policy=_authoritative_policy(ObservatoryCapability.MOUNT_CONTROL),
     )
 
-    with pytest.raises(AstrometryHardwareError, match="PLATE_SOLVE_ALIGNMENT"):
+    with pytest.raises(PermissionDeniedError, match="PLATE_SOLVE_ALIGNMENT"):
         ops.sync_coordinates(manager, 10.0, 20.0)
     mount_driver.sync.assert_not_called()
 
@@ -351,7 +351,7 @@ def test_capture_image_raises_when_capture_orchestration_not_authoritative(mocke
     camera_driver.expose = mocker.AsyncMock(return_value=True)
     manager = _FakeManager(camera_driver=camera_driver, policy=_authoritative_policy())
 
-    with pytest.raises(AstrometryHardwareError, match="CAPTURE_ORCHESTRATION"):
+    with pytest.raises(PermissionDeniedError, match="CAPTURE_ORCHESTRATION"):
         ops.capture_image(manager, 30.0)
     camera_driver.expose.assert_not_called()
 
@@ -372,7 +372,7 @@ def test_guide_expose_raises_when_autoguiding_not_authoritative(mocker):  # ruff
     guide_camera_driver.expose = mocker.AsyncMock(return_value="blob")
     manager = _FakeManager(guide_camera_driver=guide_camera_driver, policy=_authoritative_policy())
 
-    with pytest.raises(AstrometryHardwareError, match="AUTOGUIDING"):
+    with pytest.raises(PermissionDeniedError, match="AUTOGUIDING"):
         ops.guide_expose(manager, 1.5)
     guide_camera_driver.expose.assert_not_called()
 
@@ -405,7 +405,7 @@ def test_set_filter_raises_hardware_error_on_failed_command(mocker):  # ruff: ig
     filter_wheel_driver.set_position = mocker.AsyncMock(return_value=False)
     manager = _FakeManager(filter_wheel_driver=filter_wheel_driver)
 
-    with pytest.raises(AstrometryHardwareError):
+    with pytest.raises(HardwareError):
         ops.set_filter(manager, "Luminance")
 
 
@@ -427,7 +427,7 @@ def test_set_filter_raises_when_capture_orchestration_not_authoritative(mocker):
     filter_wheel_driver.set_position = mocker.AsyncMock(return_value=True)
     manager = _FakeManager(filter_wheel_driver=filter_wheel_driver, policy=_authoritative_policy())
 
-    with pytest.raises(AstrometryHardwareError, match="CAPTURE_ORCHESTRATION"):
+    with pytest.raises(PermissionDeniedError, match="CAPTURE_ORCHESTRATION"):
         ops.set_filter(manager, "Luminance")
     filter_wheel_driver.set_position.assert_not_called()
 
@@ -470,7 +470,7 @@ def test_focus_move_raises_when_autofocus_not_authoritative(mocker):  # ruff: ig
     focuser_driver.move_relative = mocker.AsyncMock(return_value=True)
     manager = _FakeManager(focuser_driver=focuser_driver, policy=_authoritative_policy())
 
-    with pytest.raises(AstrometryHardwareError, match="AUTOFOCUS"):
+    with pytest.raises(PermissionDeniedError, match="AUTOFOCUS"):
         ops.focus_move(manager, 100)
     focuser_driver.move_relative.assert_not_called()
 
@@ -632,7 +632,7 @@ def test_open_enclosure_raises_when_observatory_safety_not_authoritative(mocker)
     enclosure_driver = mocker.Mock()
     manager = _FakeManager(enclosure_driver=enclosure_driver, policy=_authoritative_policy())
 
-    with pytest.raises(AstrometryHardwareError, match="OBSERVATORY_SAFETY"):
+    with pytest.raises(PermissionDeniedError, match="OBSERVATORY_SAFETY"):
         ops.open_enclosure(manager)
     enclosure_driver.open.assert_not_called()
 
@@ -676,7 +676,7 @@ def test_close_enclosure_refuses_when_mount_is_outside_clearance(mocker):  # ruf
         policy=_authoritative_policy(ObservatoryCapability.OBSERVATORY_SAFETY),
     )
 
-    with pytest.raises(AstrometryHardwareError, match="clearance"):
+    with pytest.raises(ConflictError, match="clearance"):
         ops.close_enclosure(manager)
     enclosure_driver.close.assert_not_called()
 
@@ -688,7 +688,7 @@ def test_close_enclosure_raises_when_observatory_safety_not_authoritative(mocker
         enclosure_driver=enclosure_driver, enclosure=_test_enclosure(), policy=_authoritative_policy()
     )
 
-    with pytest.raises(AstrometryHardwareError, match="OBSERVATORY_SAFETY"):
+    with pytest.raises(PermissionDeniedError, match="OBSERVATORY_SAFETY"):
         ops.close_enclosure(manager)
     enclosure_driver.close.assert_not_called()
 
@@ -702,7 +702,7 @@ def test_close_enclosure_raises_when_no_enclosure_configured(mocker):  # ruff: i
         policy=_authoritative_policy(ObservatoryCapability.OBSERVATORY_SAFETY),
     )
 
-    with pytest.raises(AstrometryHardwareError, match="no Enclosure is configured"):
+    with pytest.raises(ConfigurationError, match="no Enclosure is configured"):
         ops.close_enclosure(manager)
     enclosure_driver.close.assert_not_called()
 

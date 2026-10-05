@@ -10,10 +10,10 @@ import os
 from typing import Any
 
 from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 from astrometricslib.pipelines.shared.analysis_context import AnalysisContext, ExtendedSourceHint
 from astrometricslib.pipelines.shared.target_center_hint import resolve_center_hint
-from astrometricslib.utilities.config_loader import AppConfiguration
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ class AstrometryPipeline:
             use the default system settings.
         """
         if app_config is None:
-            from astrometricslib.utilities.config_loader import get_configuration
+            from astrometricslib.foundation.config import get_configuration
 
             app_config = get_configuration()
 

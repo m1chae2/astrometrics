@@ -10,6 +10,7 @@ main control panel, giving you access to all the sub-tools like targets,
 stars, and image processing.
 """
 
+import logging
 import os
 from collections.abc import Callable
 from importlib.metadata import PackageNotFoundError
@@ -45,6 +46,37 @@ from astrometricslib.drivers.calibration_library import DEFAULT_DARK_TEMPERATURE
 from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib.drivers.job_logging import background_job, get_current_job
 from astrometricslib.drivers.provenance_store import ProvenanceStore, export_target_lineage_as_prov_xml
+from astrometricslib.foundation.config import AppConfiguration, get_configuration
+from astrometricslib.foundation.enums import FilterType
+from astrometricslib.foundation.errors import (
+    RPC_CODES,
+    AstrometricsError,
+    ConfigurationError,
+    ConflictError,
+    ErrorInfo,
+    ExternalServiceError,
+    HardwareError,
+    InvalidArgumentError,
+    NotFoundError,
+    PermissionDeniedError,
+    ProcessingError,
+    StorageError,
+    to_error_info,
+)
+from astrometricslib.foundation.logging import configure_logging, get_log_context, log_context, new_request_id
+from astrometricslib.foundation.storage import (
+    AbstractButler,
+    Butler,
+    DatasetSpec,
+    DeviceInUseError,
+    NumpyEncoder,
+    StorageNotMountedError,
+    acquire_resource_slot,
+    connect_db,
+    file_lock,
+    require_mounted_storage,
+    safe_json_dumps,
+)
 from astrometricslib.models.moving_object import AsteroidDetectionCandidate
 from astrometricslib.models.moving_object_config import MovingObjectConfig
 from astrometricslib.models.provenance import (
@@ -101,13 +133,11 @@ from astrometricslib.pipelines.stacking.post_processing.exposure_saturation impo
     SATURATED_FRAME_FRACTION,
 )
 from astrometricslib.utilities.concurrency import resolve_worker_counts
-from astrometricslib.utilities.config_loader import AppConfiguration, get_configuration
 from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
-from astrometricslib.utilities.enums import FilterType
+from astrometricslib.utilities.exceptions import PlateSolveFailedError
 from astrometricslib.utilities.observing_night import observing_night_id
 from astrometricslib.utilities.parallel_batch import BatchRunSummary, run_parallel_batch
 from astrometricslib.utilities.pipeline_models import ProcessingJob
-from astrometricslib.utilities.storage_mount import StorageNotMountedError, require_mounted_storage
 
 if TYPE_CHECKING:
     from astrometricslib.api.jobs import Jobs
@@ -126,6 +156,11 @@ if TYPE_CHECKING:
         parse_iso_time,
         select_library_frames,
     )
+
+# A library only writes log messages. A program decides where they go, by
+# calling `configure_logging`. The null handler stops Python from printing a
+# "no handlers" warning when no program has done so.
+logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 _DEFERRED_EXPORTS = {
     "AstrometryPipeline": "astrometricslib.pipelines.astrometry.pipeline",
@@ -207,7 +242,7 @@ class Astrometrics:
         from astrometricslib.api.targets import TargetCatalog
         from astrometricslib.api.visualization import Visualization
         from astrometricslib.drivers.catalog_access import CatalogAccess
-        from astrometricslib.utilities.config_loader import get_configuration
+        from astrometricslib.foundation.config import get_configuration
 
         self.config = config or app_config or get_configuration()
         self.catalog_access = catalog_access or CatalogAccess(self.config)
@@ -490,8 +525,10 @@ class Astrometrics:
 
 __all__ = [
     "DEFAULT_DARK_TEMPERATURE_TOLERANCE_C",
+    "RPC_CODES",
     "SATURATED_BLOB_MINIMUM_PIXELS",
     "SATURATED_FRAME_FRACTION",
+    "AbstractButler",
     "AbstractCatalogAccess",
     "Activity",
     "ActivityDescription",
@@ -502,21 +539,29 @@ __all__ = [
     "AppliedCameraProfile",
     "AsteroidDetectionCandidate",
     "Astrometrics",
+    "AstrometricsError",
     "AstrometryPipeline",
     "AstrometryPipelineQualityMetrics",
     "AstrometryQualitySummary",
     "BatchRunSummary",
+    "Butler",
     "CalibrationCatalog",
     "CatalogAccess",
     "Collection",
     "ConfigFile",
     "ConfigFileDescription",
+    "ConfigurationError",
+    "ConflictError",
     "DatasetDescription",
     "DatasetEntity",
+    "DatasetSpec",
     "DbLogHandler",
+    "DeviceInUseError",
     "Entity",
     "EntityDescription",
+    "ErrorInfo",
     "ExposureGroupSummary",
+    "ExternalServiceError",
     "FileItem",
     "FilterType",
     "FitsHeaderEntry",
@@ -524,16 +569,23 @@ __all__ = [
     "FrameSelection",
     "GenerationDescription",
     "GroupedFrameStat",
+    "HardwareError",
     "ImageProcessing",
+    "InvalidArgumentError",
     "JobHandle",
     "Jobs",
     "LoggerInterface",
     "MovingObjectConfig",
     "MovingObjectRecovery",
+    "NotFoundError",
+    "NumpyEncoder",
     "Parameter",
     "ParameterDescription",
+    "PermissionDeniedError",
     "PhotometryResult",
+    "PlateSolveFailedError",
     "PlotData",
+    "ProcessingError",
     "ProcessingJob",
     "ProcessingPipelines",
     "ProvenanceStore",
@@ -543,6 +595,7 @@ __all__ = [
     "StarIdentifier",
     "StellarCatalog",
     "StellarObject",
+    "StorageError",
     "StorageNotMountedError",
     "Target",
     "TargetCatalog",
@@ -558,14 +611,21 @@ __all__ = [
     "WasAttributedTo",
     "WasConfiguredBy",
     "WasGeneratedBy",
+    "acquire_resource_slot",
     "capture_job_logs",
     "classify_and_sort_fits_files",
     "close_interrupted_jobs",
+    "configure_logging",
+    "connect_db",
     "derive_field_centers",
     "derive_target_sessions",
     "export_target_lineage_as_prov_xml",
+    "file_lock",
     "frame_is_spectral",
     "get_configuration",
+    "get_log_context",
+    "log_context",
+    "new_request_id",
     "observing_night_id",
     "parse_coordinate_string",
     "parse_iso_time",
@@ -575,6 +635,8 @@ __all__ = [
     "resolve_worker_counts",
     "run_parallel_batch",
     "run_siril_stack",
+    "safe_json_dumps",
     "select_library_frames",
     "stack_frames",
+    "to_error_info",
 ]

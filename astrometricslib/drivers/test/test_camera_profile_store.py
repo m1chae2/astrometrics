@@ -18,7 +18,7 @@ from astrometricslib.drivers.camera_profile_store import (
     record_name_for_camera,
     resolve_camera_profile,
 )
-from astrometricslib.utilities.config_loader import _TomlSectionedConfig
+from astrometricslib.foundation.config import _TomlSectionedConfig
 
 EXAMPLE_CONFIG_PATH = Path(__file__).resolve().parents[2] / "astrometrics.config.example.toml"
 

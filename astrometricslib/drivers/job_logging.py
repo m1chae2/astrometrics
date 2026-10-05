@@ -30,11 +30,13 @@ import logging
 import os
 import threading
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import ExitStack, contextmanager
 from contextvars import ContextVar
 from datetime import datetime
 from typing import Any
+
+from astrometricslib.foundation.logging import get_job_log_router, log_context
 
 logger = logging.getLogger(__name__)
 
@@ -45,50 +47,6 @@ _TERMINAL_STATUSES = frozenset({"completed", "failed"})
 
 _current_job: ContextVar[JobHandle | None] = ContextVar("current_job", default=None)
 """The job being run, set by `registered_job` and `run_as_background_job`."""
-
-_active_job_ids: ContextVar[tuple[str, ...]] = ContextVar("active_job_ids", default=())
-"""Ids of the jobs the calling work is running inside, outermost first.
-
-Several jobs can run at once, and they all log through the same shared
-logger. Each job's log handler uses this to take only the messages from its
-own work (see `_OwnJobFilter`).
-"""
-
-
-class _OwnJobFilter(logging.Filter):
-    """Let a job's log handler take only messages from that job's own work.
-
-    The handlers sit on the shared package logger, so without this filter two
-    jobs running together each write the other's messages to their log. A
-    message is kept when the work that wrote it is running inside this job,
-    which includes jobs nested inside it, such as the stacking job inside a
-    batch job.
-
-    Work that has lost the job context, such as a worker thread started
-    without copying it, cannot be told apart. Its messages are kept, which is
-    the behaviour before this filter existed.
-    """
-
-    def __init__(self, job_id: str) -> None:
-        super().__init__()
-        self._job_id = job_id
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        """Decide whether this job's handler should write a message.
-
-        Parameters
-        ----------
-        record : `logging.LogRecord`
-            The message being logged.
-
-        Returns
-        -------
-        keep : `bool`
-            `True` if the message came from this job's own work, or from
-            work whose job cannot be known.
-        """
-        active_job_ids = _active_job_ids.get()
-        return not active_job_ids or self._job_id in active_job_ids
 
 
 def get_current_job() -> JobHandle | None:
@@ -254,21 +212,21 @@ def capture_job_logs(
     log_file_path: str | None,
     logger_interface: object | None = None,
     package_logger_name: str = "astrometricslib",
-) -> Iterator[logging.Logger]:
+) -> Generator[logging.Logger]:
     """Send this job's log messages to its own log file and database rows.
 
     This is the half every caller needs, whether the job row was just
-    created here or already existed. Handlers go on two loggers: the job's
-    own, for messages the caller writes by hand, and the shared package
-    logger, which every module deeper in the work logs through. Without
-    the second one, the job's log would only contain the handful of
-    milestone lines the caller wrote, and none of the decisions the work
-    actually made along the way.
+    created here or already existed. The job's handlers receive two kinds of
+    message: those the caller writes by hand to the job's own logger, and those
+    that every module deeper in the work logs. The second kind reaches them
+    through the job log router, because the work runs inside a log context
+    that names this job. Without it, the job's log would only contain the
+    handful of milestone lines the caller wrote, and none of the decisions the
+    work actually made along the way.
 
-    On the way out the handlers are removed *and closed*. Removing one
-    stops it receiving messages but leaves its file open, and Python keeps
-    every logger it has ever created, so an unclosed handler is a file
-    handle held for the life of the process.
+    On the way out the handlers are unregistered *and closed*. A handler that
+    is only removed stops receiving messages but leaves its file open, and an
+    unclosed handler is a file handle held for the life of the process.
 
     Parameters
     ----------
@@ -281,8 +239,9 @@ def capture_job_logs(
         Somewhere to write log rows to, such as a `LoggerInterface` or the
         backend job service's repository. `None` skips the database rows.
     package_logger_name : `str`, optional
-        The shared logger to capture messages from. Defaults to
-        "astrometricslib"; the wayfinding library passes its own.
+        The shared logger whose messages are captured even when they lost the
+        job context. Defaults to "astrometricslib"; the wayfinding library
+        passes its own.
 
     Yields
     ------
@@ -306,21 +265,21 @@ def capture_job_logs(
     if logger_interface is not None:
         attached_handlers.append(DbLogHandler(logger_interface, job_id=job_id))
 
-    package_logger = logging.getLogger(package_logger_name)
     for handler in attached_handlers:
-        handler.addFilter(_OwnJobFilter(job_id))
         job_logger.addHandler(handler)
-        package_logger.addHandler(handler)
-    package_logger.setLevel(logging.INFO)
-    active_ids_token = _active_job_ids.set((*_active_job_ids.get(), job_id))
+    # The router sends each record that carries this job's id to the handlers.
+    # No handler is attached to a shared logger, so none can be left behind.
+    router = get_job_log_router()
+    router.register(job_id, attached_handlers, (package_logger_name,))
+    logging.getLogger(package_logger_name).setLevel(logging.INFO)
 
     try:
-        yield job_logger
+        with log_context(job_id=job_id):
+            yield job_logger
     finally:
-        _active_job_ids.reset(active_ids_token)
+        router.unregister(job_id)
         for handler in attached_handlers:
             job_logger.removeHandler(handler)
-            package_logger.removeHandler(handler)
             try:
                 handler.close()
             except Exception as close_error:
@@ -340,7 +299,7 @@ def _create_job_row(*, job_type: str, target_id: str, log_file: str | None) -> t
         The open connection to the logs database.
     """
     from astrometricslib.drivers.logger_interface import LoggerInterface
-    from astrometricslib.utilities.config_loader import get_configuration
+    from astrometricslib.foundation.config import get_configuration
     from astrometricslib.utilities.pipeline_models import ProcessingJob
     from astrometricslib.utilities.process_identity import current_process_identity
 
@@ -397,7 +356,7 @@ def registered_job(
     completed_message: str | None = None,
     failed_message: str | None = None,
     package_logger_name: str = "astrometricslib",
-) -> Iterator[JobHandle]:
+) -> Generator[JobHandle]:
     """Record a job, capture its log messages, and always clean up after it.
 
     Wrap the slow work in this. On the way out the job is marked finished

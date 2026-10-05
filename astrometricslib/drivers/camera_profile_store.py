@@ -1,7 +1,7 @@
 """Finds and loads the stored profile for a camera.
 
 The profiles live in the same config file every other camera setting does
-(see `astrometricslib.utilities.config_loader`), one
+(see `astrometricslib.foundation.config`), one
 ``[Observatory.Camera.<name>]`` section per camera model (see
 `astrometricslib.models.camera_profile` for what a profile holds). This
 module reads that config and picks the right profile for a camera name
@@ -15,14 +15,14 @@ the first time each unlisted name is seen, so the gap is not silent.
 import functools
 import logging
 
+from astrometricslib.foundation.camera_names import normalize_camera_name
+from astrometricslib.foundation.config import AppConfiguration, get_configuration
 from astrometricslib.models.camera_profile import (
     CameraProfile,
     ProvenancedValue,
     QuantumEfficiencyRecord,
     ValueProvenance,
 )
-from astrometricslib.utilities.camera_names import normalize_camera_name
-from astrometricslib.utilities.config_loader import AppConfiguration, get_configuration
 
 logger = logging.getLogger(__name__)
 

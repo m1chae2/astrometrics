@@ -11,11 +11,11 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
+from astrometricslib.foundation.config import get_configuration
+from astrometricslib.foundation.enums import FilterType
 from astrometricslib.models.quality_summary import StackingPipelineQualityMetrics, StackQualitySummary
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.stacking import stage as stacking_tasks
-from astrometricslib.utilities.config_loader import get_configuration
-from astrometricslib.utilities.enums import FilterType
 
 SIRIL_DRIVER = "astrometricslib.drivers.siril_interface.ImageProcessing"
 SUMMARY_BUILDER = "astrometricslib.pipelines.stacking.stage._build_stack_quality_summary"

@@ -184,7 +184,7 @@ class CalibrationLibrary(BaseModel):
         """Initialize calibration library with optional shared config."""
         super().__init__(**data)
         if app_config is None:
-            from astrometricslib.utilities.config_loader import get_configuration
+            from astrometricslib.foundation.config import get_configuration
 
             self.app_config = get_configuration()
         else:

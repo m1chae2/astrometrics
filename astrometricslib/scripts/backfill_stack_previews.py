@@ -35,7 +35,7 @@ import os
 import sys
 from typing import Any
 
-from astrometricslib import Astrometrics
+from astrometricslib import Astrometrics, configure_logging
 from astrometricslib.pipelines.shared.stack_preview_path import preview_path_for, processed_fits_path_for
 from astrometricslib.pipelines.stacking.post_processing.stack_preview import (
     record_preview_as_processed_image,
@@ -163,7 +163,7 @@ def main(argv: list[str] | None = None) -> int:
     if arguments.targets is None and arguments.camera is None:
         print("Give --targets or --camera, so the script does not process the whole library by accident.")
         return 2
-    logging.basicConfig(level=logging.WARNING)
+    configure_logging("backfill_stack_previews", level=logging.WARNING, log_dir="")
     # Show the sky level chosen for each stack, as well as any warnings.
     logging.getLogger("astrometricslib.pipelines.stacking.post_processing.stack_preview").setLevel(
         logging.INFO

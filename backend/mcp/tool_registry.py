@@ -12,7 +12,9 @@ from typing import Any
 
 from mcp.types import TextContent, Tool
 
+from astrometricslib import ErrorInfo, log_context, new_request_id, to_error_info
 from astrometricslib.mcp.profile import current_profile, find_withheld_tools, load_manifest, refusal_message
+from astrometricslib.mcp.tool_errors import error_content
 from backend.services.infrastructure.agent_code_policy import check_agent_code
 from backend.services.infrastructure.destructive_guard import destructive_rpc_reason
 
@@ -132,7 +134,12 @@ class ToolRegistry:
             single `TextContent` describing an error.
         """
         if name not in self.tools:
-            return [TextContent(type="text", text=refusal_message(name, self.withheld_reasons.get(name)))]
+            return error_content(
+                ErrorInfo(
+                    code="permission_denied" if name in self.withheld_reasons else "not_found",
+                    message=refusal_message(name, self.withheld_reasons.get(name)),
+                )
+            )
 
         # REQ: SEC-1.5: Audit logging of all MCP tool invocations.
         import logging
@@ -168,11 +175,12 @@ class ToolRegistry:
                 "jsonschema library not found. Skipping strict argument validation."
             )
         except Exception as e:
-            return [
-                TextContent(
-                    type="text", text=f"Error: Invalid arguments for tool '{name}'. Validation failed: {e}"
+            return error_content(
+                ErrorInfo(
+                    code="invalid_argument",
+                    message=f"Invalid arguments for tool '{name}'. Validation failed: {e}",
                 )
-            ]
+            )
 
         try:
             if inspect.iscoroutinefunction(func):
@@ -199,16 +207,15 @@ class ToolRegistry:
                 result_str = result_str[:max_bytes] + truncated_note
 
             return [TextContent(type="text", text=result_str)]
-        except Exception as e:
-            remediation = self._get_generic_remediation(name, str(e))
-            error_payload = {
-                "status": "error",
-                "tool": name,
-                "error_type": type(e).__name__,
-                "message": str(e),
-                "remediation": remediation,
-            }
-            return [TextContent(type="text", text=json.dumps(error_payload, indent=2))]
+        except Exception as exc:
+            info = to_error_info(exc, new_request_id())
+            if info.code in {"invalid_argument", "not_found", "conflict", "permission_denied"}:
+                logger.warning("Tool %s failed (%s): %s", name, info.code, info.message)
+            else:
+                logger.exception("Tool %s failed (%s)", name, info.code)
+            info.details["tool"] = name
+            info.details["remediation"] = self._get_generic_remediation(name, str(exc))
+            return error_content(info)
 
     def _enrich_error_remediation(self, tool_name: str, result: dict[str, Any]) -> dict[str, Any]:
         """Attach actionable recovery hints to tool error envelopes.
@@ -345,12 +352,16 @@ async def execute_rpc(method: str, params: dict | None = None) -> dict:
         from backend.routers.rpc_router import rpc_registry
         from backend.services.rpc_protocol import serialize_rpc_result
 
+        request_id = new_request_id()
         try:
-            res = await rpc_registry.execute(method, params)
+            with log_context(request_id=request_id, method=method):
+                res = await rpc_registry.execute(method, params)
             serialized_result = serialize_rpc_result(res)
             return {"status": "success", "data": serialized_result}
-        except Exception as e:
-            return {"status": "error", "message": str(e)}
+        except Exception as exc:
+            info = to_error_info(exc, request_id)
+            logger.warning("RPC %s failed (%s): %s", method, info.code, info.message)
+            return {"status": "error", "message": info.message, "error": info.model_dump(by_alias=True)}
     else:
         from backend.mcp.mcp_http import post_to_backend
 
@@ -364,9 +375,8 @@ async def execute_rpc(method: str, params: dict | None = None) -> dict:
             error_val = res["error"]
             if isinstance(error_val, dict):
                 msg = error_val.get("message", "Unknown RPC error")
-            else:
-                msg = str(error_val)
-            return {"status": "error", "message": msg}
+                return {"status": "error", "message": msg, "error": error_val.get("data")}
+            return {"status": "error", "message": str(error_val)}
         return {"status": "success", "data": res.get("result")}
 
 

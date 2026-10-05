@@ -35,6 +35,7 @@ from typing import Any
 
 import numpy as np
 
+from astrometricslib.foundation.camera_names import normalize_camera_name
 from astrometricslib.pipelines.spectroscopy.pre_processing.neighbor_trail_deblending import (
     EmpiricalBlur,
     NeighborFit,
@@ -44,7 +45,6 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.neighbor_trail_deblen
     subtract_neighbor_wings,
 )
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor import APERTURE_SIGMA_MULTIPLIER
-from astrometricslib.utilities.camera_names import normalize_camera_name
 
 _DATA_DIR = Path(__file__).parent.parent / "data"
 

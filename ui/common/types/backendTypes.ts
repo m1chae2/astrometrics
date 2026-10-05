@@ -34,6 +34,34 @@ export enum ImageType {
 }
 
 /**
+ * The serializable form of an error.
+ *
+ * Every adapter sends this shape: the JSON-RPC ``error.data`` field, an MCP
+ * error result, a failed job record, and the failed items of a batch.
+ *
+ * Attributes
+ * ----------
+ * code : `str`
+ * The error code, one of the keys of `RPC_CODES`.
+ * message : `str`
+ * A sentence a user can read.
+ * details : `dict` [`str`, `Any`]
+ * Facts about the error.
+ * retryable : `bool`
+ * Whether the same call may succeed if tried again later.
+ * request_id : `str` or `None`
+ * The id of the call that failed. It also appears on every log line of
+ * that call.
+ */
+export interface ErrorInfo {
+  code: string;
+  message: string;
+  details?: Record<string, any>;
+  retryable?: boolean;
+  requestId?: string | null;
+}
+
+/**
  * Per-frame statistics our own code computed from the pixels.
  *
  * Unlike `FrameRecord`'s other fields, which are recorded straight

@@ -21,8 +21,8 @@ from typing import Any
 
 import pytest
 
+from astrometricslib import ConflictError
 from wayfindinglib.drivers.indi.mount_controller import MountController
-from wayfindinglib.exceptions import AstrometryHardwareError
 
 
 class _FakeNumberElement:
@@ -106,7 +106,7 @@ def test_per_rig_envelope_overrides_global_constraint(app_config):  # ruff: igno
 
     # dec=30 would pass the global 0-90 default, but fails the per-rig 50-90
     # envelope -- proving the per-rig value, not the global one, governed.
-    with pytest.raises(AstrometryHardwareError, match="outside safe operating"):
+    with pytest.raises(ConflictError, match="outside safe operating"):
         controller.validate_altitude_limits(telescope, ra=6.0, dec=30.0)
 
 
@@ -210,7 +210,7 @@ def test_validate_hour_angle_limits_rejects_ra_far_from_meridian(app_config):  #
     # regardless of exactly what LST is right now.
     far_ra = (local_sidereal_time - 8.0) % 24.0
 
-    with pytest.raises(AstrometryHardwareError, match="outside safe operating"):
+    with pytest.raises(ConflictError, match="outside safe operating"):
         controller.validate_hour_angle_limits(telescope, ra=far_ra)
 
 

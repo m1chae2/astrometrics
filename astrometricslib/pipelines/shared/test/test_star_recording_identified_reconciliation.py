@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 
 from astrometricslib.drivers.catalog_access import CatalogAccess
+from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.stellar_source import (
     PhotometryResult,
     SpectroscopyResult,
@@ -30,7 +31,6 @@ from astrometricslib.pipelines.shared.star_recording import (
     merge_astrometry_stellar_object,
     record_pipeline_stars,
 )
-from astrometricslib.utilities.config_loader import AppConfiguration
 
 _RIGHT_ASCENSION = 250.0
 _DECLINATION = 36.0

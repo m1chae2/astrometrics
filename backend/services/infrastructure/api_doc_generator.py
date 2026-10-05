@@ -505,7 +505,7 @@ def generate_wayfindinglib_docs() -> str:
     # 5. Hardware Drivers & Exceptions
     sections.append('<a id="hardware-drivers"></a>')
     sections.append("## Hardware Drivers & Exceptions\n")
-    for name in ["IndiInterface", "SimulatorIndiInterface", "AstrometryHardwareError"]:
+    for name in ["IndiInterface", "SimulatorIndiInterface"]:
         cls_obj = getattr(wayfindinglib, name, None)
         if cls_obj and isinstance(cls_obj, type):
             doc = format_docstring(inspect.getdoc(cls_obj))

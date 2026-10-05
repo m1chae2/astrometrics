@@ -8,6 +8,7 @@ merge end to end on a throwaway catalog -- never the real one.
 from datetime import UTC, datetime, timedelta
 
 from astrometricslib.drivers.catalog_access import CatalogAccess, StarSummary
+from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.stellar_source import (
     PhotometryResult,
     SpectroscopyResult,
@@ -20,7 +21,6 @@ from astrometricslib.scripts.merge_duplicate_catalog_stars import (
     merge_cluster,
     merge_light_curves,
 )
-from astrometricslib.utilities.config_loader import AppConfiguration
 
 _START = datetime(2026, 1, 1, tzinfo=UTC)
 

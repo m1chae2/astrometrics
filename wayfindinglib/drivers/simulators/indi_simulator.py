@@ -9,7 +9,7 @@ import logging
 from wayfindinglib.drivers.indi_interface import IndiInterface
 
 # Filter names the simulated filter wheel reports -- matches the real filter
-# wheel's expected name set (see astrometricslib.utilities.enums.FilterType)
+# wheel's expected name set (see astrometricslib.foundation.enums.FilterType)
 # closely enough for resolve_filter_name's fuzzy matching to exercise
 # realistic paths in tests.
 _SIMULATED_FILTER_NAMES = ["Luminance", "Red", "Green", "Blue", "H_Alpha", "OIII", "SII", "SPEC"]

@@ -9,10 +9,10 @@ closed out correctly on both success and failure.
 import pytest
 
 from astrometricslib.api.moving_objects import MovingObjectRecovery
+from astrometricslib.foundation import config as config_loader
+from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.asteroid_detection.pipeline import AsteroidDetectionPipeline
-from astrometricslib.utilities import config_loader
-from astrometricslib.utilities.config_loader import AppConfiguration
 
 _ZERO_CANDIDATE_METRICS = {
     "frames_with_wcs_estimate": 0,

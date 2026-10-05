@@ -15,6 +15,7 @@ Future Implementation Scope:
 
 import logging
 
+from astrometricslib import HardwareError, InvalidArgumentError
 from backend.services.processing.job_service import JobService
 from wayfindinglib.api.control_registry import ObservatoryControl
 
@@ -68,8 +69,6 @@ class ImagingService:
             If `exposure_seconds` or `count` is not greater than zero, or
             `delay_seconds` is negative.
         """
-        from backend.exceptions import InvalidArgumentError
-
         if exposure_seconds <= 0:
             raise InvalidArgumentError("exposure_seconds must be greater than zero")
         if count <= 0:
@@ -112,12 +111,10 @@ class ImagingService:
             # sequence is defined as one filter, and re-driving the wheel
             # between frames would add settling time for no benefit.
             if filter_name:
-                from wayfindinglib import AstrometryHardwareError
-
                 self.job_service.update_job(job_id, status_message=f"Selecting filter {filter_name}...")
                 try:
                     self._observatory.set_filter(filter_name)
-                except (ValueError, AstrometryHardwareError) as filter_error:
+                except (ValueError, HardwareError) as filter_error:
                     # Capturing in whatever filter happened to be in place
                     # would silently mislabel the frames, so fail instead.
                     logger.error(f"Job {job_id}: Could not select filter {filter_name}: {filter_error}")

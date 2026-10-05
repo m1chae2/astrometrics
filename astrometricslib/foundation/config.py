@@ -10,9 +10,9 @@ from pathlib import Path
 
 import tomlkit
 
-from .camera_names import normalize_camera_name
-from .enums import FilterType
-from .observatory_setups import ObservatorySetups, load_observatory_setups
+from astrometricslib.foundation.camera_names import normalize_camera_name
+from astrometricslib.foundation.enums import FilterType
+from astrometricslib.foundation.observatory_setups import ObservatorySetups, load_observatory_setups
 
 _instance = None
 
@@ -425,14 +425,14 @@ class AppConfiguration:
 
         if path.is_file():
             if self.app_config.read(str(path), encoding="utf-8"):
-                logger.info(f"Loaded configuration from: {path}")
+                logger.info("Loaded configuration from: %s", path)
                 self._populate_defaults()
             else:
-                logger.warning(f"Failed to read configuration from: {path}. Using defaults.")
+                logger.warning("Failed to read configuration from: %s. Using defaults.", path)
                 self._populate_defaults()
                 self.save_configuration()
         else:
-            logger.warning(f"Configuration file not found at {path}. Creating with defaults.")
+            logger.warning("Configuration file not found at %s. Creating with defaults.", path)
             self._populate_defaults()
             self.save_configuration()
 
@@ -949,7 +949,7 @@ class AppConfiguration:
         They are read from the ``[Observatory.Optics]``,
         ``[Observatory.Optic.<name>]``, ``[Observatory.Setups]`` and
         ``[Observatory.Setup.<name>]`` sections (see
-        `astrometricslib.utilities.observatory_setups`).
+        `astrometricslib.foundation.observatory_setups`).
 
         Returns
         -------
@@ -1100,7 +1100,7 @@ class AppConfiguration:
         that is not always attached, such as a USB disk or a network share.
         Downloads and file sorting then refuse to write below it unless
         something is mounted there (see
-        `astrometricslib.utilities.storage_mount`). It is usually the frames
+        `astrometricslib.foundation.storage.mount`). It is usually the frames
         path or a folder above it.
 
         Returns
@@ -1316,7 +1316,7 @@ class AppConfiguration:
         schema : `AppConfigSchema`
             Validated configuration schema built from current values.
         """
-        from .config_schema import (
+        from astrometricslib.foundation.config_schema import (
             AppConfigSchema,
             CameraConfig,
             ParallelismConfig,

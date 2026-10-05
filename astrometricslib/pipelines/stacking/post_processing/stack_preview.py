@@ -56,6 +56,7 @@ import numpy as np
 from astrometricslib.drivers.fits_access import read_data, read_header, write_image
 from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.drivers.siril_interface import siril_process_lock
+from astrometricslib.foundation.config import get_configuration
 from astrometricslib.pipelines.shared.image_scaling import AUTOSTRETCH_SHADOWS_CLIP_SIGMA
 from astrometricslib.pipelines.shared.stack_preview_path import (
     PREVIEW_JPEG_QUALITY,
@@ -70,7 +71,6 @@ from astrometricslib.pipelines.stacking.post_processing.bright_object import (
 )
 from astrometricslib.pipelines.stacking.post_processing.sky_level import choose_sky_level_for_file
 from astrometricslib.pipelines.stacking.post_processing.star_tone import tone_stars_in_file
-from astrometricslib.utilities.config_loader import get_configuration
 
 logger = logging.getLogger(__name__)
 
@@ -424,7 +424,7 @@ def denoise_with_cosmic_clarity(
         `True` if the program exited without an error code and the denoised
         image is at `output_path`.
     """
-    from datastore.process_locks import acquire_resource_slot
+    from astrometricslib.foundation.storage.process_locks import acquire_resource_slot
 
     program_folder = os.path.dirname(os.path.abspath(cosmic_clarity_executable))
     input_folder = os.path.join(program_folder, "input")

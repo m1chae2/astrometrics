@@ -373,44 +373,26 @@ export function setBackendBase(url: string | null): void {
 }
 
 /**
- * Parses a fetch Response error body into a human-readable string.
+ * Parses a failed fetch Response into a human-readable string.
+ *
+ * The backend answers every well-formed JSON-RPC call with HTTP 200, even when
+ * the call failed. A response that is not OK therefore comes from below the RPC
+ * layer: a request that was not valid JSON-RPC, or a missing or wrong session
+ * token.
  * @param response The Response object from a failed fetch.
  * @return A descriptive error message.
  */
 export async function parseResponseError(response: Response): Promise<string> {
-    try {
-        const body: any = await response.json().catch(() => null);
-        if (!body) {
-            const errorText = await response.text().catch(() => '');
-            return `${response.status} ${response.statusText}${errorText ? `: ${errorText}` : ''}`;
-        }
-        if (typeof body === 'string') {
-            return `${response.status} ${response.statusText}: ${body}`;
-        }
-        if (typeof body === 'object' && body !== null) {
-            // Priority: jsonrpc error > ApiResponse.message > legacy detail > legacy error
-            if (body.error) {
-                return `[RPC Error ${body.error.code}] ${body.error.message}`;
-            }
-            const parsedBody = body as Record<string, any>;
-            if ('message' in parsedBody && parsedBody.message) {
-                 return `${response.status} ${response.statusText}: ${String(parsedBody.message)}`;
-            }
-            if ('detail' in parsedBody && parsedBody.detail) {
-                return `${response.status} ${response.statusText}: ${String(parsedBody.detail)}`;
-            }
-            if ('error' in parsedBody && parsedBody.error) {
-                return `${response.status} ${response.statusText}: ${String(parsedBody.error)}`;
-            }
-            return `${response.status} ${response.statusText}: ${JSON.stringify(parsedBody)}`;
-        }
-    } catch {
-        // Fall through to status text only.
+    const body: any = await response.json().catch(() => null);
+    if (body && typeof body === 'object' && body.error) {
+        return `[RPC Error ${body.error.code}] ${body.error.message}`;
     }
     return `${response.status} ${response.statusText}`;
 }
 
 import { emitToast } from '../utils/emitToast';
+import { BackendError, presentBackendError } from './backendError';
+export { BackendError } from './backendError';
 
 /** Default timeout in milliseconds for standard RPC requests (45 seconds). */
 export const DEFAULT_RPC_TIMEOUT_MS = 45000;
@@ -565,7 +547,14 @@ async function executeRpcAttempt<A extends keyof ActionRegistry>(
 
         const body = await response.json();
         if (body.error) {
-            throw new Error(body.error.message || `RPC Error: ${JSON.stringify(body.error)}`);
+            const data = body.error.data;
+            throw new BackendError({
+                code: data?.code ?? 'internal',
+                message: data?.message ?? body.error.message ?? `RPC Error: ${JSON.stringify(body.error)}`,
+                details: data?.details,
+                retryable: data?.retryable,
+                requestId: data?.requestId,
+            });
         }
 
         if (body.result && body.result.status === 'success') {
@@ -629,6 +618,14 @@ async function callBackendInternal<A extends keyof ActionRegistry>(
             }
 
             if (error?.name === 'AbortError') {
+                throw error;
+            }
+
+            if (error instanceof BackendError) {
+                if (!options?.silent) {
+                    const presentation = presentBackendError(error);
+                    emitToast(presentation.text, presentation.kind, `API:${action}`);
+                }
                 throw error;
             }
 

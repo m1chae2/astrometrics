@@ -26,7 +26,7 @@ from pathlib import Path
 
 import tomlkit
 
-from astrometricslib.utilities.camera_names import normalize_camera_name
+from astrometricslib.foundation.camera_names import normalize_camera_name
 
 _CAMERA_SECTION_PREFIX = "Observatory.Camera."
 

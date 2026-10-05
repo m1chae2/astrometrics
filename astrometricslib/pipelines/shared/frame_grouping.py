@@ -11,8 +11,8 @@ the same way.
 import os
 from typing import Any
 
+from astrometricslib.foundation.enums import FilterType
 from astrometricslib.models.target import FrameRecord
-from astrometricslib.utilities.enums import FilterType
 
 
 def select_frames_for_camera(target: Any, camera_name: str) -> list:

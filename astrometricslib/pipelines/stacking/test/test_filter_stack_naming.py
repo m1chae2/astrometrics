@@ -9,13 +9,13 @@ for SPEC filters.
 
 from unittest.mock import MagicMock, patch
 
+from astrometricslib.foundation.enums import FilterType
 from astrometricslib.models.quality_summary import (
     StackingPipelineQualityMetrics,
     StackQualitySummary,
 )
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.stacking import stage as stacking_tasks
-from astrometricslib.utilities.enums import FilterType
 
 
 def test_filter_stack_naming_and_target_properties():  # ruff: ignore[missing-return-type-undocumented-public-function]

@@ -1,9 +1,9 @@
-"""Tests for the shared, generic `datastore.Butler`."""
+"""Tests for the shared, generic `Butler`."""
 
 import pytest
 from pydantic import BaseModel
 
-from datastore.butler import Butler, DatasetSpec
+from astrometricslib.foundation.storage.butler import Butler, DatasetSpec
 
 
 class _Widget(BaseModel):

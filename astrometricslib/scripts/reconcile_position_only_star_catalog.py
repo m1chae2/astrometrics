@@ -44,7 +44,7 @@ import sys
 import time
 from typing import Any
 
-from astrometricslib import Astrometrics
+from astrometricslib import Astrometrics, configure_logging
 from astrometricslib.drivers.catalog_access import StarPosition
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.astrometry.processing.star_identifier import CATALOG_MATCH_RADIUS_ARCSEC
@@ -335,7 +335,7 @@ def run_reconciliation(argv: list[str] | None = None) -> int:
         made.
     """
     arguments = _build_argument_parser().parse_args(argv)
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+    configure_logging("reconcile_position_only_star_catalog", level=logging.INFO, log_dir="")
 
     astrometrics = Astrometrics()
     clusters_by_target = find_position_only_clusters(astrometrics, arguments.target_ids)

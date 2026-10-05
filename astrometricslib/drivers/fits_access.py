@@ -9,7 +9,7 @@ does not have to worry about this structural difference.
 """
 
 import logging
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 
 import numpy as np
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 @contextmanager
-def open_primary_hdu(path: str) -> Iterator[fits.hdu.base._BaseHDU]:
+def open_primary_hdu(path: str) -> Generator[fits.hdu.base._BaseHDU]:
     """Open a FITS file and yield the HDU containing the pixel data.
 
     Parameters

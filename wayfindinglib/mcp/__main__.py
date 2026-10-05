@@ -7,18 +7,20 @@ from pathlib import Path
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import TextContent, Tool
+from mcp.types import CallToolResult, TextContent, Tool
 
 # Ensure project root is in sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from astrometricslib import configure_logging
 from astrometricslib.mcp.profile import GAP_REPORT_GUIDANCE
+from astrometricslib.mcp.tool_errors import as_call_tool_result
 from wayfindinglib.mcp.tool_registry import registry
 
 # Configure logging to stderr to avoid corrupting stdio MCP protocol
-logging.basicConfig(level=logging.INFO, stream=sys.stderr)
+configure_logging("mcp_wayfindinglib", level=logging.INFO)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 app = Server("wayfindinglib-core", instructions=GAP_REPORT_GUIDANCE)
@@ -42,15 +44,16 @@ async def list_tools() -> list[Tool]:  # ruff: ignore[unused-async] -- awaited
 
 
 @app.call_tool()
-async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolResult:
     """Execute a registered offline tool.
 
     Returns
     -------
-    content : `list` [`TextContent`]
-        Text content blocks produced by the executed tool.
+    content : `list` [`TextContent`] or `CallToolResult`
+        Text content blocks produced by the executed tool, or an error
+        result if the tool failed.
     """
-    return await registry.execute(name, arguments)
+    return as_call_tool_result(await registry.execute(name, arguments))
 
 
 async def main():  # ruff: ignore[missing-return-type-undocumented-public-function]

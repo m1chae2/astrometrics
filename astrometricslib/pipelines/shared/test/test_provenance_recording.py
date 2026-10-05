@@ -11,6 +11,8 @@ from types import SimpleNamespace
 import pytest
 
 from astrometricslib.drivers.provenance_store import ProvenanceStore
+from astrometricslib.foundation import config as config_loader
+from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.quality_summary import PipelineQualitySummaryBase
 from astrometricslib.pipelines.shared.provenance_recording import (
     note_stacked_image_upstream,
@@ -18,8 +20,6 @@ from astrometricslib.pipelines.shared.provenance_recording import (
     stacked_image_entity_id,
     stamp_generated_by_job_id,
 )
-from astrometricslib.utilities import config_loader
-from astrometricslib.utilities.config_loader import AppConfiguration
 
 
 @pytest.fixture

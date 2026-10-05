@@ -21,9 +21,15 @@ never execute at runtime, so they carry none of that cost -- they
 exist only so static analysis can see each name as real for `__all__`.
 """
 
+import logging
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _distribution_version
 from typing import TYPE_CHECKING
+
+# A library only writes log messages. A program decides where they go, by
+# calling `configure_logging`. The null handler stops Python from printing a
+# "no handlers" warning when no program has done so.
+logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 if TYPE_CHECKING:
     from wayfindinglib.api.control_registry import ObservatoryControl
@@ -31,7 +37,6 @@ if TYPE_CHECKING:
     from wayfindinglib.api.planning_registry import ObservationPlanning
     from wayfindinglib.drivers.indi_interface import IndiInterface
     from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
-    from wayfindinglib.exceptions import AstrometryHardwareError
 
 try:
     # Single source of truth is pyproject.toml; both libraries ship from the
@@ -41,7 +46,6 @@ except PackageNotFoundError:  # running from a source tree without an install
     __version__ = "0.0.0+unknown"
 
 __all__ = [
-    "AstrometryHardwareError",
     "IndiInterface",
     "ObservationExecution",
     "ObservationPlanning",
@@ -72,10 +76,6 @@ def __getattr__(name):  # ruff: ignore[missing-type-function-argument, missing-r
         from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
 
         return SimulatorIndiInterface
-    if name == "AstrometryHardwareError":
-        from wayfindinglib.exceptions import AstrometryHardwareError
-
-        return AstrometryHardwareError
     if name == "ObservatoryControl":
         from wayfindinglib.api.control_registry import ObservatoryControl
 

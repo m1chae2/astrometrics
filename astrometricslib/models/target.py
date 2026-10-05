@@ -11,6 +11,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from astrometricslib.foundation.enums import FilterType
 from astrometricslib.models.moving_object import AsteroidDetectionCandidate
 from astrometricslib.models.quality_summary import (
     AsteroidDetectionQualitySummary,
@@ -19,7 +20,6 @@ from astrometricslib.models.quality_summary import (
     SpectroscopyQualitySummary,
     StackQualitySummary,
 )
-from astrometricslib.utilities.enums import FilterType
 
 # Declares this module's own public surface. Without it, sphinx-automodapi
 # documents every imported name too, which is what produced the

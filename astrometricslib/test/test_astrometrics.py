@@ -6,8 +6,8 @@ Astrometrics high-level interface.
 
 from astrometricslib import Astrometrics
 from astrometricslib.drivers.catalog_access import CatalogAccess
+from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.pipelines.tasks import analyze_target
-from astrometricslib.utilities.config_loader import AppConfiguration
 
 
 def test_astrometrics_target_access(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]

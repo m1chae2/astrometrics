@@ -12,7 +12,7 @@ import socket
 import threading
 import time
 import warnings
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from typing import Any
 
 import uvicorn
@@ -24,6 +24,7 @@ from astropy.wcs import FITSFixedWarning
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 
+from astrometricslib import configure_logging
 from backend.routers import rpc_router
 
 warnings.filterwarnings("ignore", category=FITSFixedWarning)
@@ -44,20 +45,9 @@ from backend.container import container
 # Configure Logging
 # REQ: SYS-1.4: Maintain clean logs
 app_configuration = get_configuration()
-log_directory = str(app_configuration.get_logs_path())
-log_file_path = os.path.join(log_directory, "astrometrics.log")
-
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[logging.StreamHandler(), logging.FileHandler(log_file_path)],
+configure_logging(
+    "backend", level=getattr(logging, os.environ.get("ASTROMETRICS_LOG_LEVEL", "INFO").upper(), logging.INFO)
 )
-# Suppress noisy library logs
-# REQ: SYS-1.4: Maintain clean logs
-logging.getLogger("httpx").setLevel(logging.ERROR)
-logging.getLogger("httpcore").setLevel(logging.ERROR)
-logging.getLogger("uvicorn.access").setLevel(logging.ERROR)
-logging.getLogger("uvicorn.error").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
@@ -153,7 +143,7 @@ def _detach_log_handlers() -> None:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Start the services when the server starts and stop them after.
 
     Importing this module builds nothing. The services, the log handlers and

@@ -30,8 +30,8 @@ field in `selector`.
 from abc import ABC, abstractmethod
 from typing import Any
 
-from datastore.butler import Butler as _GenericButler
-from datastore.butler import DatasetSpec
+from astrometricslib import Butler as _GenericButler
+from astrometricslib import DatasetSpec
 from wayfindinglib.drivers import local_database
 from wayfindinglib.models.equipment_and_site.calibration import CalibrationStats
 from wayfindinglib.models.equipment_and_site.enclosure import Enclosure

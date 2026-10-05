@@ -17,7 +17,7 @@ import tempfile
 import threading
 import time
 import weakref
-from collections.abc import Iterator
+from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -355,7 +355,7 @@ def _record_siril_lock_wait(wait_seconds: float) -> None:
 @contextlib.contextmanager
 def siril_process_lock(
     job_logger: logging.Logger | None = None, max_concurrent_runs: int | None = None
-) -> Iterator[None]:
+) -> Generator[None]:
     """Hold one of a limited number of machine-wide Siril slots.
 
     Siril is very demanding on the CPU. If too many instances are run at
@@ -384,13 +384,13 @@ def siril_process_lock(
     `None`
         Control returns to the caller holding a slot.
     """
-    from datastore.process_locks import acquire_resource_slot
+    from astrometricslib.foundation.storage.process_locks import acquire_resource_slot
 
     slot_count = max_concurrent_runs
     configuration = None
     if slot_count is None:
         try:
-            from astrometricslib.utilities.config_loader import get_configuration
+            from astrometricslib.foundation.config import get_configuration
 
             configuration = get_configuration()
             slot_count = configuration.get_max_concurrent_jobs()
@@ -705,7 +705,7 @@ class ImageProcessing:
     def __init__(self, config=None, calibration_library=None, job_repository=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
         """Initialize the ImageProcessing class with optional dependencies."""
         from astrometricslib.drivers.calibration_library import CalibrationLibrary
-        from astrometricslib.utilities.config_loader import get_configuration
+        from astrometricslib.foundation.config import get_configuration
 
         self.config = config or get_configuration()
         if calibration_library is None:

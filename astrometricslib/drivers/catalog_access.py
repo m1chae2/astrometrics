@@ -16,9 +16,9 @@ from typing import Any
 import numpy as np
 from pydantic import BaseModel, Field
 
-from astrometricslib.utilities.enums import FilterType
-from datastore.butler import Butler as _GenericButler
-from datastore.butler import DatasetSpec
+from astrometricslib.foundation.enums import FilterType
+from astrometricslib.foundation.storage.butler import Butler as _GenericButler
+from astrometricslib.foundation.storage.butler import DatasetSpec
 
 # Declares this module's own public surface. Without it, sphinx-automodapi
 # documents every imported name too, which is what produced the
@@ -526,7 +526,7 @@ class CatalogAccess(AbstractCatalogAccess):
             default settings.
         """
         if config is None:
-            from astrometricslib.utilities.config_loader import get_configuration
+            from astrometricslib.foundation.config import get_configuration
 
             config = get_configuration()
         self.config = config

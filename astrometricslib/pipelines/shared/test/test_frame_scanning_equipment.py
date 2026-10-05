@@ -13,6 +13,8 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
+from astrometricslib.foundation.config import AppConfiguration, _TomlSectionedConfig
+from astrometricslib.foundation.warn_once import warn_once
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.shared.frame_scanning import (
     PLACEHOLDER_RECORD_ISO,
@@ -21,8 +23,6 @@ from astrometricslib.pipelines.shared.frame_scanning import (
     is_stacked_output,
     scan_target_directory,
 )
-from astrometricslib.utilities.config_loader import AppConfiguration, _TomlSectionedConfig
-from astrometricslib.utilities.warn_once import warn_once
 
 EXAMPLE_CONFIG_PATH = Path(__file__).resolve().parents[3] / "astrometrics.config.example.toml"
 
@@ -304,7 +304,7 @@ def test_sorting_does_not_report_a_file_that_replaced_one_of_the_same_name(tmp_p
 
 def test_sorting_refuses_and_moves_nothing_when_the_frames_drive_is_missing(tmp_path: Path) -> None:
     """Check that files stay in place if the frames mount point is empty."""
-    from astrometricslib.utilities.storage_mount import StorageNotMountedError
+    from astrometricslib.foundation.storage.mount import StorageNotMountedError
 
     incoming = tmp_path / "incoming"
     incoming.mkdir()

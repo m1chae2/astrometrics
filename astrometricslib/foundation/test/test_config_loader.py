@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from astrometricslib.utilities.config_loader import AppConfiguration
+from astrometricslib.foundation.config import AppConfiguration
 
 
 def test_a_fresh_config_defaults_the_identified_star_ceiling_to_500(

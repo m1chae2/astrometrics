@@ -78,7 +78,7 @@ def sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         get_frames_path=lambda: frames,
         get_stacks_path=lambda: stacks,
     )
-    monkeypatch.setattr("astrometricslib.utilities.config_loader.get_configuration", lambda: config)
+    monkeypatch.setattr("astrometricslib.foundation.config.get_configuration", lambda: config)
     return library
 
 
@@ -122,7 +122,7 @@ def test_the_call_is_refused_when_the_configuration_is_unreadable(monkeypatch: p
         """
         raise FileNotFoundError("no configuration")
 
-    monkeypatch.setattr("astrometricslib.utilities.config_loader.get_configuration", broken)
+    monkeypatch.setattr("astrometricslib.foundation.config.get_configuration", broken)
     ran: list[str] = []
     registry = _registry_with_probe(ran)
     reply = asyncio.run(registry.execute("probe", {"file_path": "/anywhere/a.fits"}))
@@ -146,7 +146,7 @@ def test_the_configuration_is_not_needed_when_there_is_no_path_argument(
         """
         raise FileNotFoundError("no configuration")
 
-    monkeypatch.setattr("astrometricslib.utilities.config_loader.get_configuration", broken)
+    monkeypatch.setattr("astrometricslib.foundation.config.get_configuration", broken)
     ran: list[str] = []
     registry = _registry_with_probe(ran)
     reply = asyncio.run(registry.execute("probe", {}))

@@ -9,7 +9,7 @@ import threading
 from pathlib import Path
 from types import SimpleNamespace
 
-from datastore.process_locks import acquire_resource_slot
+from astrometricslib.foundation.storage.process_locks import acquire_resource_slot
 
 WAIT_SECONDS = 20.0
 

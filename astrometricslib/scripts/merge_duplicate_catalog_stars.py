@@ -41,7 +41,7 @@ from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import connected_components
 from scipy.spatial import cKDTree
 
-from astrometricslib import Astrometrics
+from astrometricslib import Astrometrics, configure_logging
 from astrometricslib.models.stellar_source import PhotometryResult, StellarObject
 from astrometricslib.pipelines.shared.catalog_star_identity import (
     SAME_STAR_POSITION_TOLERANCE_ARCSEC,
@@ -258,7 +258,7 @@ def run_merge(argv: list[str] | None = None) -> int:
         backup could not be made.
     """
     arguments = _build_argument_parser().parse_args(argv)
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+    configure_logging("merge_duplicate_catalog_stars", level=logging.INFO, log_dir="")
 
     astrometrics = Astrometrics()
     clusters = find_duplicate_clusters(astrometrics.catalog_access.list_star_summaries())

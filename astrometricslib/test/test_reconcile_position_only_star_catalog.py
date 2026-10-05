@@ -7,6 +7,7 @@ isolated catalog database -- never the real one.
 """
 
 from astrometricslib.drivers.catalog_access import CatalogAccess, StarPosition
+from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.stellar_source import PhotometryResult, StellarObject
 from astrometricslib.scripts.reconcile_position_only_star_catalog import (
     _is_empty_value,
@@ -15,7 +16,6 @@ from astrometricslib.scripts.reconcile_position_only_star_catalog import (
     cluster_position_only_stars,
     find_position_only_clusters,
 )
-from astrometricslib.utilities.config_loader import AppConfiguration
 
 
 def _make_isolated_config(tmp_path) -> AppConfiguration:  # ruff: ignore[missing-type-function-argument]

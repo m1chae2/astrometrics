@@ -9,11 +9,11 @@ from types import SimpleNamespace
 import numpy as np
 from astropy.io import fits
 
+from astrometricslib.foundation.observatory_setups import ObservatorySetups, OpticConfig, SetupConfig
 from astrometricslib.scripts.report_equipment_disagreements import (
     find_iso_disagreements,
     find_telescope_disagreements,
 )
-from astrometricslib.utilities.observatory_setups import ObservatorySetups, OpticConfig, SetupConfig
 
 SETUPS = ObservatorySetups(
     optics=(

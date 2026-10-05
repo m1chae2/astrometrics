@@ -39,6 +39,7 @@ import time
 from typing import Any
 
 from astrometricslib.drivers.job_logging import registered_job
+from astrometricslib.foundation.storage.process_locks import acquire_resource_slot
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.asteroid_detection.runner import run_asteroid_detection_analysis
 from astrometricslib.pipelines.astrometry.runner import run_astrometry_analysis
@@ -48,7 +49,6 @@ from astrometricslib.pipelines.shared.frame_grouping import (
     split_standard_and_spectral_frames,
 )
 from astrometricslib.pipelines.spectroscopy.runner import run_spectroscopy_analysis
-from datastore.process_locks import acquire_resource_slot
 
 # -- Stacking, as a tracked job with a hard timeout --------------------
 

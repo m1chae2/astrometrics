@@ -13,9 +13,9 @@ from typing import Any
 from PIL import Image
 
 from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib.foundation.errors import ProcessingError
 from astrometricslib.pipelines.shared.image_scaling import ImageScaler
 from astrometricslib.pipelines.shared.stack_preview_path import PREVIEW_JPEG_QUALITY, preview_path_for
-from astrometricslib.utilities.exceptions import AstroLibError
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +149,7 @@ class ImageConverter:
 
         Raises
         ------
-        AstroLibError
+        ProcessingError
             If there is any problem changing the image.
         """
         try:
@@ -179,7 +179,7 @@ class ImageConverter:
             }
         except Exception as error:
             logger.error(f"Failed to convert FITS to PNG: {error}")
-            raise AstroLibError(f"Failed to convert FITS to PNG: {error}") from error
+            raise ProcessingError(f"Failed to convert FITS to PNG: {error}") from error
 
 
 def get_frame(target: Any, iso: str, exposure: str, index: int = 0) -> str:

@@ -183,7 +183,7 @@ def test_measured_fwhm_is_kept_apart_from_registration_fwhm(tmp_path):  # ruff: 
 def test_each_frames_saturation_uses_its_own_cameras_threshold(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """A frame is judged against the threshold in its camera's profile."""
     from astrometricslib.drivers import camera_profile_store
-    from astrometricslib.utilities.config_loader import AppConfiguration
+    from astrometricslib.foundation.config import AppConfiguration
 
     config_path = tmp_path / "profiles.config.toml"
     config_path.write_text(
@@ -200,7 +200,7 @@ def test_each_frames_saturation_uses_its_own_cameras_threshold(tmp_path, monkeyp
     profile_config._find_config_file = lambda: config_path
     profile_config.base_dir = tmp_path
     profile_config.config_file_path = None
-    from astrometricslib.utilities.config_loader import _TomlSectionedConfig
+    from astrometricslib.foundation.config import _TomlSectionedConfig
 
     profile_config.app_config = _TomlSectionedConfig()
     profile_config.app_config.read(str(config_path))

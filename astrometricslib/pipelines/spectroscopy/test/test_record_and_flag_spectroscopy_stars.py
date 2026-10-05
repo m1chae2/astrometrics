@@ -33,7 +33,7 @@ def catalog_access(tmp_path: Path) -> CatalogAccess:
     catalog_access : `CatalogAccess`
         Catalog access over a library that holds no stars.
     """
-    from astrometricslib.utilities.config_loader import AppConfiguration
+    from astrometricslib.foundation.config import AppConfiguration
 
     library_path = tmp_path / "library"
     (library_path / "targets").mkdir(parents=True)

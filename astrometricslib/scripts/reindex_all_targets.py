@@ -7,7 +7,7 @@ date.
 import logging
 import sys
 
-from astrometricslib import Astrometrics
+from astrometricslib import Astrometrics, configure_logging
 
 
 def run_batch_processing() -> None:
@@ -24,9 +24,7 @@ def run_batch_processing() -> None:
     target does not halt the batch run.
     """
     # Configure logging to output Siril stacking details to stdout
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s", stream=sys.stdout
-    )
+    configure_logging("reindex_all_targets", level=logging.INFO, log_dir="", console_stream=sys.stdout)
 
     print("Initializing Astrometrics...")
     astrometrics = Astrometrics()

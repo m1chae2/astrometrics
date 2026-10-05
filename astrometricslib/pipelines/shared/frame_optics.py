@@ -6,15 +6,15 @@ answer can mean the wrong calibration.
 
 Which cameras are used with which optics is not guessed here. It comes from the
 setups the observer lists in the config file (see
-`astrometricslib.utilities.observatory_setups`).
+`astrometricslib.foundation.observatory_setups`).
 """
 
 import logging
 from dataclasses import dataclass
 
 from astrometricslib.drivers.camera_profile_store import camera_identity
-from astrometricslib.utilities.observatory_setups import ObservatorySetups, OpticConfig
-from astrometricslib.utilities.warn_once import warn_once
+from astrometricslib.foundation.observatory_setups import ObservatorySetups, OpticConfig
+from astrometricslib.foundation.warn_once import warn_once
 
 logger = logging.getLogger(__name__)
 

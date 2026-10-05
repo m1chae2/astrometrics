@@ -59,7 +59,7 @@ class SpectroscopyCalibrationTuner:
             The settings object. If None, it will grab the default one.
         """
         if config is None:
-            from astrometricslib.utilities.config_loader import get_configuration
+            from astrometricslib.foundation.config import get_configuration
 
             config = get_configuration()
         self.config = config

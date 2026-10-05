@@ -15,15 +15,15 @@ from astrometricslib.drivers.camera_profile_store import record_name_for_camera,
 from astrometricslib.drivers.filter_detection import get_filter_type
 from astrometricslib.drivers.fits_access import read_header
 from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib.foundation.config import AppConfiguration
+from astrometricslib.foundation.enums import FilterType
+from astrometricslib.foundation.storage.mount import require_mounted_storage
+from astrometricslib.foundation.warn_once import warn_once
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.frame_optics import resolve_frame_telescope
 from astrometricslib.pipelines.shared.previous_stack_path import PREVIOUS_STACK_FOLDER_NAME
 from astrometricslib.pipelines.shared.quarantine_path import QUARANTINE_FOLDER_NAME
-from astrometricslib.utilities.config_loader import AppConfiguration
-from astrometricslib.utilities.enums import FilterType
 from astrometricslib.utilities.iso_text import iso_or_gain_text
-from astrometricslib.utilities.storage_mount import require_mounted_storage
-from astrometricslib.utilities.warn_once import warn_once
 
 logger = logging.getLogger(__name__)
 
@@ -233,7 +233,7 @@ def create_frame_record_from_fits(path: str, camera: str | None = None, config: 
         The record containing the image's information.
     """
     if config is None:
-        from astrometricslib.utilities.config_loader import get_configuration
+        from astrometricslib.foundation.config import get_configuration
 
         config = get_configuration()
     filename = os.path.basename(path)

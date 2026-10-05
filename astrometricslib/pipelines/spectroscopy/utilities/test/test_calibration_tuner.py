@@ -8,10 +8,10 @@ import os
 
 import pytest
 
+from astrometricslib.foundation.config import get_configuration
 from astrometricslib.pipelines.spectroscopy.utilities.calibration_tuner import (
     SpectroscopyCalibrationTuner,
 )
-from astrometricslib.utilities.config_loader import get_configuration
 
 # Environment variable naming a real stacked Vega frame for the opt-in
 # integration test below.

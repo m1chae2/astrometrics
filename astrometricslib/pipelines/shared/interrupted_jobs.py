@@ -129,7 +129,7 @@ def close_interrupted_jobs(configuration: Any | None = None) -> list[ProcessingJ
     """
     try:
         if configuration is None:
-            from astrometricslib.utilities.config_loader import get_configuration
+            from astrometricslib.foundation.config import get_configuration
 
             configuration = get_configuration()
         return recover_interrupted_jobs(

@@ -273,8 +273,8 @@ def test_query_gaia_region_pins_dr3_table_name(tmp_path, monkeypatch):  # ruff: 
     """
     import astroquery.gaia as gaia_module
 
-    import astrometricslib.utilities.config_loader as config_loader_module
-    from astrometricslib.utilities.config_loader import AppConfiguration
+    import astrometricslib.foundation.config as config_loader_module
+    from astrometricslib.foundation.config import AppConfiguration
 
     config = AppConfiguration()
     config.update_config({"Image Library": {"path": str(tmp_path)}})
@@ -339,8 +339,8 @@ class TestGaiaCircuitBreaker:
         """With the breaker open, no network call is attempted."""
         import astroquery.gaia as gaia_module
 
-        import astrometricslib.utilities.config_loader as config_loader_module
-        from astrometricslib.utilities.config_loader import AppConfiguration
+        import astrometricslib.foundation.config as config_loader_module
+        from astrometricslib.foundation.config import AppConfiguration
 
         config = AppConfiguration()
         config.update_config({"Image Library": {"path": str(tmp_path)}})
@@ -362,8 +362,8 @@ class TestGaiaCircuitBreaker:
         """The seed path is gated by the same breaker."""
         import astroquery.gaia as gaia_module
 
-        import astrometricslib.utilities.config_loader as config_loader_module
-        from astrometricslib.utilities.config_loader import AppConfiguration
+        import astrometricslib.foundation.config as config_loader_module
+        from astrometricslib.foundation.config import AppConfiguration
 
         config = AppConfiguration()
         config.update_config({"Image Library": {"path": str(tmp_path)}})
@@ -393,8 +393,8 @@ class TestGaiaCircuitBreaker:
 
         import astroquery.gaia as gaia_module
 
-        import astrometricslib.utilities.config_loader as config_loader_module
-        from astrometricslib.utilities.config_loader import AppConfiguration
+        import astrometricslib.foundation.config as config_loader_module
+        from astrometricslib.foundation.config import AppConfiguration
 
         config = AppConfiguration()
         config.update_config({"Image Library": {"path": str(tmp_path)}})

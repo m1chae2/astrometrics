@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from astrometricslib.utilities.config_loader import AppConfiguration
-from astrometricslib.utilities.storage_mount import StorageNotMountedError, require_mounted_storage
+from astrometricslib.foundation.config import AppConfiguration
+from astrometricslib.foundation.storage.mount import StorageNotMountedError, require_mounted_storage
 
 
 class _Settings:

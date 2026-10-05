@@ -16,10 +16,10 @@ import logging
 
 import pytest
 
+from astrometricslib.foundation import config as config_loader
+from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines import tasks
-from astrometricslib.utilities import config_loader
-from astrometricslib.utilities.config_loader import AppConfiguration
 
 PACKAGE_LOGGER_NAME = "astrometricslib"
 

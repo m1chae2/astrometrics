@@ -12,6 +12,7 @@ through the target catalog.
 import logging
 import sys
 
+from astrometricslib import configure_logging
 from wayfindinglib import Wayfinder
 
 
@@ -28,9 +29,7 @@ def run_full_frame_download() -> None:
     propagated, so that a single failing download does not halt the
     batch run.
     """
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s", stream=sys.stdout
-    )
+    configure_logging("download_all_target_frames", level=logging.INFO, log_dir="", console_stream=sys.stdout)
 
     print("Initializing Wayfinder...")
     wayfinder = Wayfinder()

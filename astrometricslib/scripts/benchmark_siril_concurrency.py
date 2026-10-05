@@ -20,7 +20,7 @@ import shutil
 import sys
 from typing import Any
 
-from astrometricslib import Astrometrics
+from astrometricslib import Astrometrics, configure_logging
 
 logger = logging.getLogger(__name__)
 
@@ -201,8 +201,8 @@ def run_benchmark(argv: list[str] | None = None) -> int:
         ``0`` on success, ``2`` when the targets could not be resolved.
     """
     arguments = _build_argument_parser().parse_args(argv)
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s", stream=sys.stdout
+    configure_logging(
+        "benchmark_siril_concurrency", level=logging.INFO, log_dir="", console_stream=sys.stdout
     )
 
     astrometrics = Astrometrics()

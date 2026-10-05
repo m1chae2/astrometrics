@@ -630,9 +630,8 @@ def cosmic_clarity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     folder = tmp_path / "cc"
     (folder / "input").mkdir(parents=True)
     (folder / "output").mkdir()
-    monkeypatch.setattr(
-        "datastore.process_locks.acquire_resource_slot", lambda *args, **kwargs: nullcontext()
-    )
+    slot_path = "astrometricslib.foundation.storage.process_locks.acquire_resource_slot"
+    monkeypatch.setattr(slot_path, lambda *args, **kwargs: nullcontext())
     monkeypatch.setattr(stack_preview, "get_configuration", lambda: SimpleNamespace())
     return folder / "denoise"
 

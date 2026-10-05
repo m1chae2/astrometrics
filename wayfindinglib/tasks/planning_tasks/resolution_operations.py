@@ -6,13 +6,12 @@ SIMBAD, and retrieves objects within a sky region for wayfindinglib.sky.Sky.
 
 from typing import Any
 
-from astrometricslib import StellarObject, Target
+from astrometricslib import ExternalServiceError, NotFoundError, ProcessingError, StellarObject, Target
 from wayfindinglib.drivers.catalog.simbad_catalog_driver import (
     format_target_coordinates,
     read_simbad_field,
     resolve_simbad_radec,
 )
-from wayfindinglib.exceptions import AstrometryHardwareError
 
 
 def resolve_target_coordinates(sky, target_name: str) -> Target | StellarObject:  # ruff: ignore[missing-type-function-argument]
@@ -32,8 +31,12 @@ def resolve_target_coordinates(sky, target_name: str) -> Target | StellarObject:
 
     Raises
     ------
-    AstrometryHardwareError
-        If target name cannot be resolved offline or online.
+    NotFoundError
+        If the target name cannot be resolved offline or online.
+    ExternalServiceError
+        If SIMBAD cannot be reached, or `astroquery` is not installed.
+    ProcessingError
+        If SIMBAD returns coordinates that cannot be read.
     """
     # 1. Search local targets
     targets = sky._astrometrics.targets.list()
@@ -62,7 +65,7 @@ def resolve_target_coordinates(sky, target_name: str) -> Target | StellarObject:
     try:
         from astroquery.simbad import Simbad
     except ImportError as e:
-        raise AstrometryHardwareError(f"Cannot resolve '{target_name}': astroquery not installed.") from e
+        raise ExternalServiceError(f"Cannot resolve '{target_name}': astroquery not installed.") from e
 
     # Ask only for the object-type and spectral-type columns. Adding the V
     # magnitude here would make SIMBAD return only objects that have one,
@@ -86,7 +89,7 @@ def resolve_target_coordinates(sky, target_name: str) -> Target | StellarObject:
             try:
                 ra_degrees_value, dec_degrees_value = resolve_simbad_radec(ra_str, dec_str)
             except Exception as coordinate_error:
-                raise AstrometryHardwareError(
+                raise ProcessingError(
                     f"Resolved target '{target_name}' coordinates are invalid: {coordinate_error}"
                 ) from coordinate_error
 
@@ -106,13 +109,11 @@ def resolve_target_coordinates(sky, target_name: str) -> Target | StellarObject:
                 return Target(id=main_id, commonName=main_id, ra=ra_text, dec=dec_text)
 
     except Exception as simbad_error:
-        raise AstrometryHardwareError(
+        raise ExternalServiceError(
             f"Network offline or timeout: Cannot resolve target '{target_name}' via SIMBAD: {simbad_error}"
         ) from simbad_error
 
-    raise AstrometryHardwareError(
-        f"Target '{target_name}' could not be resolved in local database or SIMBAD."
-    )
+    raise NotFoundError(f"Target '{target_name}' could not be resolved in local database or SIMBAD.")
 
 
 def get_sources(

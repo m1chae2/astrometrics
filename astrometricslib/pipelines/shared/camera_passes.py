@@ -6,15 +6,15 @@ would overwrite the first. So each target is handed to a single camera: the
 first one, in priority order, that has frames of it.
 
 The cameras and their order come from the setups in the config file (see
-`astrometricslib.utilities.observatory_setups`), not from names written into
+`astrometricslib.foundation.observatory_setups`), not from names written into
 a script.
 """
 
 from typing import Any
 
 from astrometricslib.drivers.camera_profile_store import camera_identity, record_name_for_camera
+from astrometricslib.foundation.observatory_setups import ObservatorySetups
 from astrometricslib.pipelines.shared.frame_grouping import select_frames_for_camera
-from astrometricslib.utilities.observatory_setups import ObservatorySetups
 
 
 def camera_pass_order(

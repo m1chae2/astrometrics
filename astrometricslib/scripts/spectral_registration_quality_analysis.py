@@ -39,7 +39,7 @@ import numpy as np
 from astropy.io import fits
 from astropy.stats import sigma_clipped_stats
 
-from astrometricslib import Astrometrics
+from astrometricslib import Astrometrics, configure_logging
 from astrometricslib.drivers.fits_access import collapse_to_2d
 
 SWEEP_SIGMA = (3.0, 3.0)
@@ -68,7 +68,7 @@ def resolve_spec_frames(target, camera: str, date_prefix: str | None = None):  #
         The subset of target.frames with FilterType.SPEC matching
         the given criteria.
     """
-    from astrometricslib.utilities.enums import FilterType
+    from astrometricslib.foundation.enums import FilterType
 
     return [
         frame
@@ -103,7 +103,7 @@ def run_siril_script(work_dir: str, commands: list[str], timeout: int = 600) -> 
     combined_output : `str`
         The subprocess's combined stdout and stderr.
     """
-    from astrometricslib.utilities.config_loader import get_configuration
+    from astrometricslib.foundation.config import get_configuration
 
     siril_executable = get_configuration().get_siril_executable()
 
@@ -258,7 +258,7 @@ def run_filter_sweep(astrometrics, target, spec_frames) -> None:  # ruff: ignore
         elapsed_str = f"{r['elapsed_s']:.1f}" if r["elapsed_s"] is not None else "n/a"
         print(f"{r['filter_wfwhm']:>13} {fwhm_str:>11} {rej_str:>9} {elapsed_str:>10}")
 
-    from astrometricslib.utilities.config_loader import get_configuration
+    from astrometricslib.foundation.config import get_configuration
 
     config = get_configuration()
     safe_id = target.id.replace(" ", "_")
@@ -288,8 +288,8 @@ def run_analysis() -> None:
         matching SPEC frames are available, or Siril registration
         does not complete successfully.
     """
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s", stream=sys.stdout
+    configure_logging(
+        "spectral_registration_quality_analysis", level=logging.INFO, log_dir="", console_stream=sys.stdout
     )
 
     parser = argparse.ArgumentParser(description="SA200 Spectral Registration Quality Validity Check")
@@ -445,7 +445,7 @@ def run_analysis() -> None:
     flagged_count = sum(1 for r in results if r["flags"])
     print(f"\n{flagged_count} of {len(results)} frames flagged.")
 
-    from astrometricslib.utilities.config_loader import get_configuration
+    from astrometricslib.foundation.config import get_configuration
 
     config = get_configuration()
     date_tag = f"_{args.date}" if args.date else ""

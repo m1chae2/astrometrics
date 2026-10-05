@@ -3,11 +3,11 @@
 Checks that we can load settings properly from the config file.
 """
 
+from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.moving_object_config import (
     MovingObjectConfig,
     MovingObjectConfigLoader,
 )
-from astrometricslib.utilities.config_loader import AppConfiguration
 
 
 def test_load_moving_object_config_reads_real_config_section():  # ruff: ignore[missing-return-type-undocumented-public-function]

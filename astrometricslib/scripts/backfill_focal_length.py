@@ -33,7 +33,7 @@ import logging
 import sys
 from typing import Any
 
-from astrometricslib import Astrometrics
+from astrometricslib import Astrometrics, configure_logging
 
 logger = logging.getLogger(__name__)
 
@@ -192,7 +192,7 @@ def run_backfill(argv: list[str] | None = None) -> int:
         ``2`` when there was nothing to do.
     """
     arguments = _build_argument_parser().parse_args(argv)
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+    configure_logging("backfill_focal_length", level=logging.INFO, log_dir="")
 
     try:
         cutoff_date = datetime.date.fromisoformat(arguments.before)

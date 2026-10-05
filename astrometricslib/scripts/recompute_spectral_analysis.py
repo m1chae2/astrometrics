@@ -34,7 +34,7 @@ import sys
 
 import numpy as np
 
-from astrometricslib import Astrometrics
+from astrometricslib import Astrometrics, configure_logging
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.spectroscopy.post_processing.assess_output_quality import assess_output_quality
 from astrometricslib.pipelines.spectroscopy.pre_processing.assess_input_quality import assess_input_quality
@@ -302,7 +302,7 @@ def run_recompute(argv: list[str] | None = None) -> int:
         backup could not be made.
     """
     arguments = _build_argument_parser().parse_args(argv)
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+    configure_logging("recompute_spectral_analysis", level=logging.INFO, log_dir="")
 
     astrometrics = Astrometrics()
     camera_name = astrometrics.config.get_primary_camera_name()

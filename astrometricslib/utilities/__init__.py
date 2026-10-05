@@ -5,6 +5,7 @@ utility functions used by the rest of the library. Internal -- import
 public symbols from the top-level `astrometricslib` package instead.
 """
 
-from .enums import FilterType
-from .exceptions import AstroLibError, DeviceInUseError
+from astrometricslib.foundation.enums import FilterType
+
+from .exceptions import PlateSolveFailedError
 from .spectroscopy_models import CameraConfig, ConfigLoader, SpectroscopyConfig

@@ -11,8 +11,8 @@ import logging
 import pytest
 
 from astrometricslib.drivers.job_logging import JobHandle, registered_job
-from astrometricslib.utilities import config_loader
-from astrometricslib.utilities.config_loader import AppConfiguration
+from astrometricslib.foundation import config as config_loader
+from astrometricslib.foundation.config import AppConfiguration
 
 PACKAGE_LOGGER_NAME = "astrometricslib"
 
@@ -76,16 +76,41 @@ def test_a_disabled_job_does_nothing_at_all():  # ruff: ignore[missing-return-ty
     assert logging.getLogger(PACKAGE_LOGGER_NAME).handlers == handlers_before
 
 
-def test_handlers_are_attached_during_the_work_and_gone_afterwards(isolated_logs):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify the shared logger is listened to only while the work runs."""
+def test_no_handler_is_ever_attached_to_the_shared_logger(isolated_logs):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify a job's handlers never sit on the shared logger.
+
+    The job log router sends a job its own messages, so the shared logger
+    keeps the handlers it had, and nothing is left behind when the job ends.
+    """
+    from astrometricslib.foundation.logging import get_job_log_router
+
+    router = get_job_log_router()
     assert _our_handlers(PACKAGE_LOGGER_NAME) == []
 
     with registered_job(enabled=True, job_type="analysis", target_id="Vega") as job:
         assert job.job_id is not None
-        assert len(_our_handlers(PACKAGE_LOGGER_NAME)) == 2
+        assert _our_handlers(PACKAGE_LOGGER_NAME) == []
+        assert job.job_id in router._sinks
+        assert len(_our_handlers(f"job_{job.job_id}")) == 2
 
+    assert job.job_id not in router._sinks
     assert _our_handlers(PACKAGE_LOGGER_NAME) == []
     assert _our_handlers(f"job_{job.job_id}") == []
+
+
+def test_messages_from_deeper_modules_reach_the_jobs_log_file(isolated_logs):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify a message from any module during the work is in the job log."""
+    with registered_job(enabled=True, job_type="analysis", target_id="Vega") as job:
+        logging.getLogger("astrometricslib.pipelines.example").info("deep in the pipeline")
+        log_paths = [
+            handler.baseFilename
+            for handler in job.job_logger.handlers
+            if isinstance(handler, logging.FileHandler)
+        ]
+        for handler in job.job_logger.handlers:
+            handler.flush()
+        with open(log_paths[0]) as log_file:
+            assert "deep in the pipeline" in log_file.read()
 
 
 def test_the_log_files_are_closed_not_just_detached(isolated_logs):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]

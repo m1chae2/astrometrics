@@ -17,7 +17,7 @@ import logging
 
 from astrometricslib import HardwareError, InvalidArgumentError
 from backend.services.processing.job_service import JobService
-from wayfindinglib.api.control_registry import ObservatoryControl
+from wayfindinglib import ObservatoryControl
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +113,7 @@ class ImagingService:
             if filter_name:
                 self.job_service.update_job(job_id, status_message=f"Selecting filter {filter_name}...")
                 try:
-                    self._observatory.set_filter(filter_name)
+                    self._observatory.imaging.set_filter(filter_name)
                 except (ValueError, HardwareError) as filter_error:
                     # Capturing in whatever filter happened to be in place
                     # would silently mislabel the frames, so fail instead.
@@ -131,7 +131,7 @@ class ImagingService:
 
                 logger.info(f"Job {job_id}: Capturing frame {i + 1}/{count}")
 
-                success = self._observatory.capture_image(exposure_seconds)
+                success = self._observatory.imaging.capture_image(exposure_seconds)
                 if not success:
                     logger.error(f"Job {job_id}: Failed to start capture for frame {i + 1}")
                     self.job_service.update_job(
@@ -186,7 +186,7 @@ class ImagingService:
             frame.
         """
         logger.info(f"Capturing single light frame for alignment: {exposure}s, ISO={iso}")
-        success = self._observatory.capture_image(exposure)
+        success = self._observatory.imaging.capture_image(exposure)
         if not success:
             raise RuntimeError("Underlying INDI camera failed to capture frame")
 

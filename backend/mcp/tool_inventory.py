@@ -152,7 +152,7 @@ def _rule(pattern: str, tool_class: str, confidence: str, reason: str) -> Classi
 CLASSIFICATION_RULES = (
     # Exact names first: these tools are known cases.
     _rule(
-        r"^observatory_(abort_motion|execute_safe_state)$",
+        r"^observatory_(mount_abort_motion|safety_execute_safe_state)$",
         "safe-stop",
         "high",
         "Stops motion or secures the equipment.",
@@ -238,21 +238,14 @@ CLASSIFICATION_RULES = (
         "Creates a plan object. Check whether it is saved.",
     ),
     _rule(
-        r"^observatory_(apply_promotion_decision|ingest_.+|fetch_and_ingest_.+|download_remote_.+"
-        r"|sync_all_remote_folders|sync_calibration_folder|set_active_.+)$",
+        r"^observatory_(safety_apply_promotion_decision|equipment_set_active_.+)$",
         "change-data",
         "high",
-        "Writes logs, frames or settings to local storage.",
+        "Writes settings to local storage.",
     ),
     _rule(r"^execution_record_divergence$", "change-data", "medium", "Records a divergence in session data."),
     _rule(
-        r"^observatory_sync$",
-        "change-data",
-        "medium",
-        "Starts a file sync from the remote computer, which writes local frames.",
-    ),
-    _rule(
-        r"^observatory_(drain_external_pulses|refit_guiding_spectrum)$",
+        r"^observatory_guiding_(drain_external_pulses|refit_spectrum)$",
         "change-data",
         "low",
         "Clears or refits stored guiding state. Check.",
@@ -265,21 +258,15 @@ CLASSIFICATION_RULES = (
     ),
     # Hardware.
     _rule(
-        r"^observatory_(slew_.+|capture_image|guide_expose|pulse_guide|focus_move|manual_move|set_filter"
-        r"|set_slew_rate|set_tracking|park|unpark|open_enclosure|close_enclosure|run_.+|connect"
-        r"|disconnect)$",
+        r"^observatory_(mount_(slew|sync|park|unpark|set_tracking|manual_move|set_slew_rate|run_.+)"
+        r"|imaging_(capture_image|set_filter|focus_move)|guiding_(pulse|expose|run_.+)"
+        r"|safety_(open|close)_enclosure|equipment_(connect|disconnect|set_device_property))$",
         "actuate",
         "high",
         "Moves or commands equipment.",
     ),
     _rule(
-        r"^observatory_sync_coordinates$",
-        "actuate",
-        "high",
-        "Changes the mount's own idea of where it points.",
-    ),
-    _rule(
-        r"^observatory_enter_(controller|monitoring)_mode$",
+        r"^observatory_safety_enter_(controller|monitoring)_mode$",
         "actuate",
         "low",
         "Switches who controls the hardware. Check.",
@@ -292,7 +279,7 @@ CLASSIFICATION_RULES = (
     ),
     # Reads.
     _rule(
-        r"^observatory_(list|discover|check)_.*remote|^observatory_check_remote_connection$",
+        r"^observatory_remote_(list|check_connection)$",
         "observe",
         "medium",
         "Reads, but contacts the remote computer over the network.",
@@ -304,22 +291,22 @@ CLASSIFICATION_RULES = (
         "Name says it reads.",
     ),
     _rule(
-        r"^observatory_(cooling_ramp_rate|delegation_policy|guider_plate_scale_arcsec_per_px)$",
+        r"^observatory_(equipment_(cooling_ramp_rate|summarize_device)|[a-z]+_status)$",
         "observe",
         "high",
-        "Returns a stored or derived value.",
+        "Returns a stored, derived or measured value.",
     ),
     _rule(
         r"^diagnostics_check_raw_frames$", "observe", "medium", "Flags odd frames in a folder. Reads files."
     ),
     _rule(
-        r"^observatory_night_history$",
+        r"^observatory_history_query$",
         "compute",
         "high",
         "Reads recorded nights and calculates the analyses.",
     ),
     _rule(
-        r"^observatory_sync_remote_(frames|logs)$",
+        r"^observatory_remote_sync_(frames|logs)$",
         "ingest",
         "high",
         "Brings new data from the telescope computer into the library. Never deletes.",
@@ -331,13 +318,13 @@ CLASSIFICATION_RULES = (
         "Measures frames and returns statistics. Saves nothing.",
     ),
     _rule(
-        r"^(observatory_frame_guiding|planning_get_visibility_over_time)$",
+        r"^(observatory_history_frame_guiding|planning_get_visibility_over_time)$",
         "compute",
         "high",
         "Calculates from stored records and the sky. Saves nothing.",
     ),
     _rule(
-        r"^observatory_frame_status$",
+        r"^observatory_remote_frame_status$",
         "observe",
         "high",
         "Lists the frame files on the telescope computer, the drive and the library. Changes nothing.",
@@ -388,15 +375,15 @@ CLASSIFICATION_RULES = (
     ),
     _rule(r"^calibration_load$", "observe", "medium", "Loads stored calibration into memory."),
     _rule(
-        r"^(observatory_(assess_safety|refresh_safety_assessment)|processing_preview_quarantine)$",
+        r"^(observatory_safety_assess|processing_preview_quarantine)$",
         "observe",
         "medium",
         "Reports an assessment. Check it changes nothing.",
     ),
     # Calculations.
     _rule(
-        r"^(?:moving_object|[a-z]+)_(analyze|compute|calculate|estimate|plan|plot|convert|detect|compare"
-        r"|measure|flag|resolve|assess)(_|$)",
+        r"^(?:moving_object|observatory_[a-z]+|[a-z]+)_(analyze|compute|calculate|estimate|plan|plot|convert"
+        r"|detect|compare|measure|flag|resolve|assess)(_|$)",
         "compute",
         "high",
         "Name says it calculates or plots.",

@@ -54,7 +54,7 @@ class IngestionService(BaseBackgroundService):
         if not target_name:
             return None
 
-        folders = self._wayfinder.control.list_remote_targets()
+        folders = self._wayfinder.control.remote.list("folders")
 
         normalized_target = target_name.lower().replace(" ", "").replace("_", "")
 
@@ -79,7 +79,7 @@ class IngestionService(BaseBackgroundService):
         folders : `list`
             Folder names found in the remote Pictures directory.
         """
-        return self._wayfinder.control.list_remote_targets()
+        return self._wayfinder.control.remote.list("folders")
 
     def scan_remote_targets_rpc(self) -> dict:
         """RPC wrapper for scanning remote targets.
@@ -109,7 +109,7 @@ class IngestionService(BaseBackgroundService):
         for folder_type in ["Dark", "Bias", "Flat"]:
             remote_folder = self._resolve_remote_folder(folder_type)
             if remote_folder:
-                files = self._wayfinder.control.list_remote_files(remote_folder)
+                files = self._wayfinder.control.remote.list("files", folder_name=remote_folder)
                 if files:
                     files_by_folder[remote_folder] = files
         return files_by_folder
@@ -134,7 +134,7 @@ class IngestionService(BaseBackgroundService):
         if not folder_name:
             folder_name = folder
 
-        count = len(self._wayfinder.control.list_remote_files(folder_name))
+        count = len(self._wayfinder.control.remote.list("files", folder_name=folder_name))
         return {"fileCount": count, "resolvedFolder": folder_name}
 
     def list_remote_files(self, folder: str) -> dict:
@@ -160,7 +160,7 @@ class IngestionService(BaseBackgroundService):
         folder_name = self._resolve_remote_folder(folder)
         if not folder_name:
             folder_name = folder
-        files = self._wayfinder.control.list_remote_files(folder_name)
+        files = self._wayfinder.control.remote.list("files", folder_name=folder_name)
         return {"files": files, "resolvedFolder": folder_name}
 
     def get_ingestion_status(self, job_id: str) -> dict:
@@ -492,8 +492,8 @@ class IngestionService(BaseBackgroundService):
                             self._job_service.update_job(job_id, progress=progress_pct)
 
                     try:
-                        self._wayfinder.control.download_remote_targets(
-                            rf, selected_files=folder_selected_files, log_callback=calibration_log_callback
+                        self._wayfinder.control.remote.sync_frames(
+                            rf, files=folder_selected_files, log_callback=calibration_log_callback
                         )
                         downloaded_paths.append(os.path.join(config.get_frames_path(), "lights", rf))
                     except Exception as e:
@@ -514,7 +514,7 @@ class IngestionService(BaseBackgroundService):
                 total_files = (
                     len(selected_files)
                     if selected_files
-                    else len(self._wayfinder.control.list_remote_files(remote_target))
+                    else len(self._wayfinder.control.remote.list("files", folder_name=remote_target))
                 )
                 self._log(job_id, f"Found {total_files} files in {remote_target}")
 
@@ -540,8 +540,8 @@ class IngestionService(BaseBackgroundService):
                             progress_pct = min(int((downloaded_count / total_files) * 100), 99)
                             self._job_service.update_job(job_id, progress=progress_pct)
 
-                    self._wayfinder.control.download_remote_targets(
-                        target_id=target_name, selected_files=selected_files, log_callback=ingest_log_callback
+                    self._wayfinder.control.remote.sync_frames(
+                        target_name, files=selected_files, log_callback=ingest_log_callback
                     )
                     source_dir = os.path.join(config.get_frames_path(), "lights", target_name)
                     self._log(job_id, "Download complete.")
@@ -561,9 +561,9 @@ class IngestionService(BaseBackgroundService):
             else:
                 scan_list = [source_dir]
 
-            # Delegate local ingestion to the unified
-            # download_remote_targets domain method
-            self._wayfinder.control.download_remote_targets(target_id=target_name, local_path=source_dir)
+            # Local ingestion goes through the same library entry point
+            # as remote downloads.
+            self._wayfinder.control.remote.sync_frames(target_name, local_path=source_dir)
             self._log(job_id, "Local frames ingested successfully.")
 
         # --- 3. Regeneration ---

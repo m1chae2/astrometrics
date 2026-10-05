@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 from astropy.table import Table
 
-from wayfindinglib.api.planning_registry import ObservationPlanning
+from wayfindinglib.api.planning import ObservationPlanning
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.drivers.catalog import deep_star_catalog_builder
 from wayfindinglib.scripts import build_deep_star_catalog as script

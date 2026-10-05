@@ -2,10 +2,11 @@
 
 The app records each observing night in several places: the Ekos session
 logs, the guiding runs, the guide-log samples, the frame library and the
-plate solves. The analysis methods on `ObservatoryControl` turn these into
-findings. This module is the one front door for an AI client. It picks the
-right method for a ``kind`` of question, shrinks the answer to plain data,
-and guarantees that the reply fits under a size limit.
+plate solves. The analyses in `night_analysis` turn these into findings.
+This module is the front door behind `control.history.query`. It checks
+the arguments for a ``kind`` of question, picks the right analysis,
+shrinks the answer to plain data, and guarantees that the reply fits under
+a size limit.
 
 The limit matters because the MCP server cuts any reply at 40,000
 characters, in the middle of the data. Several of the methods can produce
@@ -17,8 +18,16 @@ with a flag that says it was shrunk.
 Nothing here writes. For exact behavior, read the code.
 """
 
+from __future__ import annotations
+
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+from astrometricslib import InvalidArgumentError
+from wayfindinglib.tasks.control_tasks import night_analysis
+
+if TYPE_CHECKING:
+    from wayfindinglib.api.control.context import ControlContext
 
 KINDS = (
     "capture",
@@ -30,6 +39,17 @@ KINDS = (
     "pointing_model",
 )
 """The kinds of question `build_night_history` answers."""
+
+KIND_ARGUMENTS = {
+    "capture": ("session_id",),
+    "guiding": ("session_id",),
+    "sky_coverage": (),
+    "recurring_issues": (),
+    "ekos_sessions": ("session_id", "ekos_file_id", "include"),
+    "guiding_runs": ("session_id",),
+    "pointing_model": ("session_id",),
+}
+"""The optional arguments each kind uses. Any other one is refused."""
 
 EKOS_SECTIONS = (
     "captures",
@@ -294,7 +314,7 @@ def ekos_sections(context: Any, include: list[str], limit: int) -> dict[str, Any
 
 
 def build_night_history(
-    observatory: Any,
+    context: ControlContext,
     kind: str,
     session_id: str | None = None,
     ekos_file_id: str | None = None,
@@ -305,10 +325,11 @@ def build_night_history(
 
     Parameters
     ----------
-    observatory : `ObservatoryControl`
-        Supplies the analysis methods and the recorded data.
+    context : `ControlContext`
+        Supplies the recorded data.
     kind : `str`
-        One of ``KINDS``.
+        One of ``KINDS``. ``KIND_ARGUMENTS`` lists the optional arguments
+        each kind uses.
     session_id : `str`, optional
         An observing night, named for the local date it began, such as
         ``"2026-09-24"``.
@@ -326,16 +347,29 @@ def build_night_history(
         The answer under a key named for the kind, or ``{"error": ...}``.
         Always under ``MAXIMUM_REPLY_CHARACTERS``; if it had to be cut,
         ``truncated`` is set.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If `kind` is unknown, or an argument is given that `kind` does not
+        use.
     """
     if kind not in KINDS:
-        return {"error": f"kind must be one of: {', '.join(KINDS)}."}
+        raise InvalidArgumentError(f"kind must be one of: {', '.join(KINDS)}.")
+    given = {"session_id": session_id, "ekos_file_id": ekos_file_id, "include": include}
+    unused = [name for name, value in given.items() if value and name not in KIND_ARGUMENTS[kind]]
+    if unused:
+        raise InvalidArgumentError(
+            f"kind={kind!r} does not use {', '.join(unused)}. It uses: "
+            f"{', '.join(KIND_ARGUMENTS[kind]) or 'no optional arguments'}."
+        )
     limit = max(1, min(int(limit), MAXIMUM_LIMIT))
-    reply = _answer(observatory, kind, session_id, ekos_file_id, include, limit)
+    reply = _answer(context, kind, session_id, ekos_file_id, include, limit)
     return fit_to_budget(reply)
 
 
 def _answer(
-    observatory: Any,
+    context: ControlContext,
     kind: str,
     session_id: str | None,
     ekos_file_id: str | None,
@@ -346,7 +380,7 @@ def _answer(
 
     Parameters
     ----------
-    observatory, kind, session_id, ekos_file_id, include, limit
+    context, kind, session_id, ekos_file_id, include, limit
         As in `build_night_history`; ``limit`` is already in range.
 
     Returns
@@ -355,31 +389,33 @@ def _answer(
         The answer, or ``{"error": ...}``.
     """
     if kind in ("capture", "guiding"):
-        return _capture_or_guiding(observatory, kind, session_id, limit)
+        return _capture_or_guiding(context, kind, session_id, limit)
     if kind == "sky_coverage":
-        analysis = observatory.analyze_sky_coverage()
+        analysis = night_analysis.sky_coverage_analysis(context)
         if analysis is None:
             return {"error": "No telescope and camera are active, so the sky coverage cannot be analysed."}
         return {"kind": kind, "analysis": to_plain(analysis)}
     if kind == "recurring_issues":
-        issues = observatory.summarize_recurring_issues(latest_nights=limit)
+        issues = night_analysis.recurring_issues(context, latest_nights=limit)
         return {"kind": kind, "nights_covered": f"the latest {limit}", "issues": to_plain(issues)}
     if kind == "guiding_runs":
-        runs = observatory.list_guiding_runs(session_id)
+        runs = night_analysis.guiding_runs(context, session_id)
         shown = runs[-limit:]
         return {"kind": kind, "total": len(runs), "shown": len(shown), "runs": to_plain(shown)}
     if kind == "ekos_sessions":
-        return _ekos(observatory, session_id, ekos_file_id, include, limit)
-    return _pointing_model(observatory, session_id)
+        return _ekos(context, session_id, ekos_file_id, include, limit)
+    return _pointing_model(context, session_id)
 
 
-def _capture_or_guiding(observatory: Any, kind: str, session_id: str | None, limit: int) -> dict[str, Any]:
+def _capture_or_guiding(
+    context: ControlContext, kind: str, session_id: str | None, limit: int
+) -> dict[str, Any]:
     """Answer a capture or guiding question: one night, or recent nights.
 
     Parameters
     ----------
-    observatory : `ObservatoryControl`
-        The analysis methods.
+    context : `ControlContext`
+        Supplies the recorded data.
     kind : `str`
         ``"capture"`` or ``"guiding"``.
     session_id : `str` or `None`
@@ -395,30 +431,36 @@ def _capture_or_guiding(observatory: Any, kind: str, session_id: str | None, lim
     """
     if session_id:
         analyze = (
-            observatory.analyze_capture_session if kind == "capture" else observatory.analyze_guiding_session
+            night_analysis.capture_night_analysis
+            if kind == "capture"
+            else night_analysis.guiding_night_analysis
         )
-        analysis = analyze(session_id)
+        analysis = analyze(context, session_id)
         if analysis is None:
             return {"error": f"Nothing is recorded for the {kind} analysis of night {session_id!r}."}
         return {"kind": kind, "session_id": session_id, "analysis": to_plain(analysis)}
     summarize = (
-        observatory.summarize_capture_sessions
+        night_analysis.capture_night_summaries
         if kind == "capture"
-        else observatory.summarize_guiding_sessions
+        else night_analysis.guiding_night_summaries
     )
-    rows = summarize(latest_nights=limit)
+    rows = summarize(context, latest_nights=limit)
     return {"kind": kind, "nights_covered": f"the latest {limit}", "nights": to_plain(rows)}
 
 
 def _ekos(
-    observatory: Any, session_id: str | None, ekos_file_id: str | None, include: list[str] | None, limit: int
+    context: ControlContext,
+    session_id: str | None,
+    ekos_file_id: str | None,
+    include: list[str] | None,
+    limit: int,
 ) -> dict[str, Any]:
     """Answer an Ekos question: a list of sessions, or one session's sections.
 
     Parameters
     ----------
-    observatory : `ObservatoryControl`
-        The recorded sessions.
+    context : `ControlContext`
+        Supplies the recorded sessions.
     session_id : `str` or `None`
         Keep only the sessions of this night when listing.
     ekos_file_id : `str` or `None`
@@ -432,31 +474,38 @@ def _ekos(
     -------
     reply : `dict` [`str`, `Any`]
         The list, the overview, or the chosen sections.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If `include` is given without `ekos_file_id`.
     """
     if ekos_file_id:
-        context = observatory.get_ekos_session_context(ekos_file_id)
-        if context is None:
+        record = night_analysis.ekos_session_record(context, ekos_file_id)
+        if record is None:
             return {"error": f"No Ekos session with id {ekos_file_id!r}. List the sessions to find an id."}
         unknown = [name for name in (include or []) if name not in EKOS_SECTIONS]
         if unknown:
             return {"error": f"Unknown section(s) {unknown}. Choose from: {', '.join(EKOS_SECTIONS)}."}
         if not include:
-            return {"kind": "ekos_sessions", "session": {"overview": ekos_overview(context)}}
-        return {"kind": "ekos_sessions", "session": ekos_sections(context, include, limit)}
-    summaries = observatory.list_ekos_session_summaries()
+            return {"kind": "ekos_sessions", "session": {"overview": ekos_overview(record)}}
+        return {"kind": "ekos_sessions", "session": ekos_sections(record, include, limit)}
+    if include:
+        raise InvalidArgumentError("include needs an ekos_file_id: it picks sections of one session.")
+    summaries = night_analysis.ekos_session_summaries(context)
     if session_id:
         summaries = [row for row in summaries if row["sessionId"] == session_id]
     shown = summaries[-limit:]
     return {"kind": "ekos_sessions", "total": len(summaries), "shown": len(shown), "sessions": shown}
 
 
-def _pointing_model(observatory: Any, session_id: str | None) -> dict[str, Any]:
+def _pointing_model(context: ControlContext, session_id: str | None) -> dict[str, Any]:
     """Answer a pointing-model question for one night.
 
     Parameters
     ----------
-    observatory : `ObservatoryControl`
-        Supplies the fit and the observer location.
+    context : `ControlContext`
+        Supplies the plate solves and the observer location.
     session_id : `str` or `None`
         The night to fit. Required: a fit that mixes several nights'
         polar alignments is not meaningful.
@@ -471,10 +520,12 @@ def _pointing_model(observatory: Any, session_id: str | None) -> dict[str, Any]:
             "error": "kind='pointing_model' needs a session_id, because a model that mixes "
             "several nights is not meaningful."
         }
-    if observatory.get_observer_location() is None:
+    if context.observer_location() is None:
         return {
             "error": "No observer location is known, so the fit would have to guess the latitude. Set "
             "Observatory.Location in the configuration, or connect the mount, then ask again."
         }
-    model = observatory.get_pointing_model(session_id)
+    from wayfindinglib.tasks.control_tasks import pointing_log_ingestion
+
+    model = pointing_log_ingestion.compute_pointing_model(context, context.logger_interface, session_id)
     return {"kind": "pointing_model", "session_id": session_id, "model": to_plain(model)}

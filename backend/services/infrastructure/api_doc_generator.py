@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import inspect
 import re
+import typing
 from typing import Any
 
 # In-memory cache for generated markdown content to avoid redundant reflection
@@ -475,6 +476,17 @@ def generate_wayfindinglib_docs() -> str:
             )
         )
         sections.append("\n---\n")
+        # The operations live on the seven topic children, such as
+        # `control.mount`; the class annotations name each child's class.
+        for child_name, child_class in typing.get_type_hints(control_cls).items():
+            sections.append(
+                format_class_markdown(
+                    child_class,
+                    display_title=f"control.{child_name}",
+                    console_alias=f"telescope.{child_name}",
+                )
+            )
+            sections.append("\n---\n")
 
     # 3. ObservationPlanning
     sections.append('<a id="class-observationplanning"></a>')

@@ -1,13 +1,13 @@
-"""Purpose: Integration tests for the M5 INDI diagnostics repoint.
+"""Purpose: Integration tests for the raw INDI inspection actions.
 
-Description: `get_indi_devices`/`indi_properties`/`set_indi_property`
-were removed from `ObservatoryControl` outright and relocated to
-`IndiDiagnosticsService`, wrapping `ObservatoryControl.indi_diagnostics`
+Description: `IndiDiagnosticsService` serves the three raw INDI actions
+through `control.equipment` (`status(include=["indi_devices"])`,
+`status(include=["indi_properties"], device_name=...)` and
+`set_device_property`), which use `IndiDiagnostics`
 (`wayfindinglib/drivers/indi/diagnostics.py`). These tests confirm the
-full chain -- `rpc_router.py`'s three repointed actions ->
-`IndiDiagnosticsService` -> `ObservatoryControl.indi_diagnostics` ->
-`IndiDiagnostics` -- actually returns data end to end through the real
-JSON-RPC endpoint, not just that the pieces exist independently.
+full chain -- `rpc_router.py`'s three actions -> `IndiDiagnosticsService`
+-> `control.equipment` -> `IndiDiagnostics` -- returns data end to end
+through the real JSON-RPC endpoint.
 """
 
 from typing import Any

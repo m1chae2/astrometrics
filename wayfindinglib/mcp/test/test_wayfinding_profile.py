@@ -35,7 +35,7 @@ def test_investigator_profile_offers_no_device_command_or_writer() -> None:
         entry = manifest["tools"][name]
         assert entry["tool_class"] in ("observe", "compute", "ingest", "process"), name
         assert entry["category"] != "observatory-control", name
-    for name in ("observatory_slew_to_target", "observatory_park", "observatory_capture_image"):
+    for name in ("observatory_mount_slew", "observatory_mount_park", "observatory_imaging_capture_image"):
         assert name not in copy.tools
 
 
@@ -44,5 +44,5 @@ def test_tools_with_a_known_hazard_are_blocked_for_now() -> None:
     copy = ToolRegistry()
     copy.tools = dict(registry.tools) | dict(registry.withheld)
     copy.apply_profile(MANIFEST_PATH, "investigator")
-    assert "observatory_get_telescope_status" not in copy.tools
-    assert "observatory_get_telescope_status" in copy.withheld
+    assert "observatory_mount_status" not in copy.tools
+    assert "observatory_mount_status" in copy.withheld

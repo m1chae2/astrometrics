@@ -74,13 +74,14 @@ INTERIM_BLOCKS = {
         "Thaws Siril and the plate solver, so it is not read-only. Closed by decision: the AI may "
         "navigate and notify only."
     ),
-    "observatory_get_telescope_status": (
+    "observatory_mount_status": (
         "Connects through connect_to_telescope, which sends CONNECTION=ON to every INDI device that is off. "
-        "Blocked until observatory_hardware_status uses the connect-only path."
+        "Blocked until it uses the connect-only path. app_status reports the mount through the backend."
     ),
-    "observatory_refresh_safety_assessment": (
-        "Connects through connect_to_telescope, which sends CONNECTION=ON to every INDI device that is off. "
-        "Blocked until observatory_hardware_status uses the connect-only path."
+    "observatory_safety_status": (
+        "The assessment section connects through connect_to_telescope, which sends CONNECTION=ON to every "
+        "INDI device that is off, and enclosure_state returns unknown in the MCP process. Blocked until "
+        "those sections use the connect-only path."
     ),
     "planning_get_sources": (
         "Returns whole target records and every star, which overflows the 40,000 character reply. Use "
@@ -94,31 +95,14 @@ INTERIM_BLOCKS = {
         "Returns the whole target record, frames and all, which overflows the reply. Use "
         "planning_lookup_coordinates, which returns the position."
     ),
-    "observatory_get_focuser_position": (
-        "Returned 0 because the MCP process has no hardware connection. Use app_status with the telescope "
-        "section (focuser position, filter, pier side, tracking)."
-    ),
-    "observatory_get_filter_names": (
-        "Returned an empty list because the MCP process has no hardware connection. Use app_status with "
-        "the telescope section for the current filter."
-    ),
-    "observatory_get_enclosure_state": (
-        "Returned unknown because the MCP process has no hardware connection. Use app_status with the "
-        "telescope section."
+    "observatory_imaging_status": (
+        "The filters and focuser sections return [] and 0 because the MCP process has no hardware "
+        "connection. Use app_status with the telescope section (focuser position, filter, pier side, "
+        "tracking)."
     ),
     "visualization_get_last_captured_image": (
         "Returns the picture as base64 text, which the 40,000 character reply limit cuts in half. Use "
         "visualization_render_fits with a path, which returns a real image."
-    ),
-    "observatory_list_remote_files": (
-        "Puts folder_name into an ssh command without quoting (not tested). Blocked until the "
-        "name is checked "
-        "against the listed folders."
-    ),
-    "observatory_list_remote_files_with_sizes": (
-        "Puts folder_name into an ssh command without quoting (not tested). Blocked until the "
-        "name is checked "
-        "against the listed folders."
     ),
 }
 """Read-only tools that stay hidden from the AI until a known hazard is fixed.
@@ -468,61 +452,32 @@ PROPOSED_TOOLS = (
     ),
     # ---- Observatory status ----
     ProposedTool(
-        "observatory_equipment_state",
+        "observatory_equipment_status",
         "observatory-status",
-        "Report the selected equipment and its stored models.",
+        "Report the selected equipment, the camera profiles and the site.",
+        (),
         (
-            "observatory_active_camera",
-            "observatory_active_telescope",
-            "observatory_active_enclosure",
-            "observatory_active_guide_camera",
-            "observatory_active_guide_scope",
-            "observatory_active_focus_model",
-            "observatory_active_guider_calibration",
-            "observatory_active_guiding_spectrum_analysis",
-            "observatory_get_equipment_configuration",
-            "observatory_list_camera_profiles",
-            "observatory_guider_plate_scale_arcsec_per_px",
-            "observatory_get_observer_location",
-            "observatory_delegation_policy",
-            "observatory_get_safety_rule_set",
-        ),
-        (
-            "section: all | telescope | camera | guide_scope | guide_camera | enclosure | camera_profiles | "
-            "configuration | guider_calibration | focus_model | guiding_spectrum | "
-            "guide_plate_scale | site | "
-            "delegation_policy | safety_rules",
+            "include: telescope | camera | guide_scope | guide_camera | camera_profiles | configuration | "
+            "observer_location | commissioning_runs | indi_devices | indi_properties",
+            "device_name (only with indi_properties)",
         ),
         "observe",
         notes=(
-            "get_equipment_configuration uses a fixed telescope name, not the active one, so it can disagree "
-            "with active_telescope when two telescopes are configured. Fix that before including it. "
-            "active_enclosure returns the first row, not the selected enclosure. site has no "
-            "real source yet: "
-            "add Observatory.Location to the configuration, or read the INDI value, because the stored site "
-            "profile is a Denver placeholder. delegation_policy needs its live row cleaned first: a UI test "
-            "wrote MOUNT_CONTROL=AUTHORITATIVE into the live database. safety_rules returns null until rules "
-            "are stored."
+            "Built 2026-10-05 as control.equipment.status, which reads the active equipment, the camera "
+            "profiles, the equipment configuration and the site. The saved guider models are "
+            "observatory_guiding_status, and the delegation policy, safety rules and enclosure are "
+            "observatory_safety_status. The configuration section uses a fixed telescope name, not the "
+            "active one. The commissioning records are long, so they are read only on request."
         ),
+        built=True,
     ),
     ProposedTool(
-        "observatory_night_history",
+        "observatory_history_query",
         "observatory-status",
         "Analyse or list past nights: capture, guiding, sky coverage, recurring issues, Ekos "
         "sessions, guiding "
         "runs and the pointing model.",
-        (
-            "observatory_analyze_capture_session",
-            "observatory_analyze_guiding_session",
-            "observatory_analyze_sky_coverage",
-            "observatory_summarize_capture_sessions",
-            "observatory_summarize_guiding_sessions",
-            "observatory_summarize_recurring_issues",
-            "observatory_list_ekos_session_summaries",
-            "observatory_get_ekos_session_context",
-            "observatory_list_guiding_runs",
-            "observatory_get_pointing_model",
-        ),
+        (),
         (
             "kind: capture | guiding | sky_coverage | recurring_issues | ekos_sessions | guiding_runs | "
             "pointing_model",
@@ -533,113 +488,71 @@ PROPOSED_TOOLS = (
         ),
         "compute",
         notes=(
-            "Built 2026-10-03 as ObservatoryControl.night_history, with the logic in "
-            "wayfindinglib/tasks/control_tasks/night_history.py. Every reply is measured and shrunk to under "
-            "30,000 characters. Each night is judged against the nights before it, so the per-night work "
-            "cannot be shared; limit bounds it instead (10 nights take about 10 seconds). pointing_model "
-            "needs a session_id and an observer location, and refuses instead of guessing a 45 degree "
-            "latitude."
+            "Built 2026-10-03; control.history.query since 2026-10-05, with the "
+            "logic in wayfindinglib/tasks/control_tasks/night_history.py and night_analysis.py. Every reply "
+            "is measured and shrunk to under 30,000 characters. An argument that a kind does not use is "
+            "refused. Each night is judged against the nights before it, so the per-night work cannot be "
+            "shared; limit bounds it instead (10 nights take about 10 seconds). pointing_model needs a "
+            "session_id and an observer location, and refuses instead of guessing a 45 degree latitude."
         ),
         built=True,
-    ),
-    ProposedTool(
-        "observatory_hardware_status",
-        "observatory-status",
-        "Read the live mount, camera, focuser and weather-safety state.",
-        (
-            "observatory_get_telescope_status",
-            "observatory_refresh_safety_assessment",
-            "observatory_get_filter_names",
-            "observatory_get_focuser_position",
-            "observatory_get_enclosure_state",
-        ),
-        ("include: mount | weather_safety | filters | focuser | enclosure",),
-        "observe",
-        notes=(
-            "Read-only. Use the connect-only path (connect_to_server_if_due), not connect_to_telescope: "
-            "connect_to_telescope also sends CONNECTION=ON to every INDI device whose switch is "
-            "off, which is "
-            "a device command. The user decided on the connect-only path. Report 'not connected' instead of "
-            "0, [] or unknown: in the MCP process the INDI reads return those silently until something "
-            "connects. Opening the INDI connection and the PHD2 polling thread are allowed. Built "
-            "2026-10-04 differently: app_status reports the telescope, guiding and INDI devices and "
-            "properties by asking the backend, which already holds the connection. The three MCP-side "
-            "reads that returned 0, [] and unknown are withheld."
-        ),
     ),
     # ---- Observatory synchronization ----
     ProposedTool(
-        "observatory_remote_listing",
+        "observatory_remote_list",
         "observatory-sync",
         "List folders or files on the telescope computer.",
+        (),
         (
-            "observatory_list_remote_targets",
-            "observatory_list_remote_target_folders",
-            "observatory_list_remote_calibration_folders",
-            "observatory_discover_unassociated_remote_targets",
-            "observatory_list_remote_files",
-            "observatory_list_remote_files_with_sizes",
-        ),
-        (
-            "kind: folders | files",
-            "folder_type: all | target | calibration | unassociated",
-            "folder_name",
-            "with_sizes",
-            "limit, offset",
+            "kind: folders | target_folders | calibration_folders | unassociated_folders | files",
+            "folder_name (only with files)",
+            "sizes (only with files)",
         ),
         "observe",
         notes=(
-            "Today an offline host and an empty folder both return []; return an error instead. Check "
-            "folder_name against the listed folders before it reaches the ssh command: it is placed in the "
-            "command text without quoting (not tested). Output is cut at about 650 paths."
-        ),
-    ),
-    ProposedTool(
-        "observatory_sync_remote_frames",
-        "observatory-sync",
-        "Bring one target's new frames from the telescope computer into the library, or preview it.",
-        (
-            "observatory_check_for_new_remote_images",
-            "observatory_download_remote_frames",
-            "observatory_download_remote_targets",
-            "observatory_sync",
-            "observatory_is_syncing",
-        ),
-        ("target_id (must match a remote target folder)", "dry_run (default true)"),
-        "ingest",
-        notes=(
-            "Built 2026-10-03 as ObservatoryControl.sync_remote_frames. The user allows the AI to ingest "
-            "frames. It adds files and records and never deletes: prune_missing is off, the frames "
-            "drive must "
-            "be mounted, and the target must match a folder on the telescope computer (a made-up name cannot "
-            "reach the shell or create a target). dry_run=true is the default and uses the downloader's rule "
-            "(file name and size). A real run is a background job; follow it with jobs_query. Not covered "
-            "yet: calibration folders, all folders, guide and Ekos logs. The transfer sorts files into the "
-            "library by their headers, using a fixed telescope name (Apertura 75Q) from older code."
+            "Built 2026-10-05 as control.remote.list. folder_name is checked against the listed folders "
+            "before it reaches the ssh command. Today an offline host and an empty folder both return []; "
+            "return an error instead. Output is cut at about 650 paths."
         ),
         built=True,
     ),
     ProposedTool(
-        "observatory_sync_remote_logs",
+        "observatory_remote_sync_frames",
+        "observatory-sync",
+        "Bring new frames from the telescope computer into the library, or preview it.",
+        (),
+        (
+            "target (a library target; none means every folder)",
+            "dry_run",
+            "files, local_path, incremental (copy chosen files into the target)",
+        ),
+        "ingest",
+        notes=(
+            "Built 2026-10-03; control.remote.sync_frames since 2026-10-05, "
+            "when it also took over the calibration-folder, all-folder and local-folder copies. The user "
+            "allows the AI to ingest frames. It adds files, frame records and targets and never deletes: no "
+            "copy prunes frame records. The MCP server resolves target against the library, so a made-up "
+            "name cannot reach the shell or create a target. dry_run uses the downloader's rule (file name "
+            "and size). A real run is a background job; follow it with jobs_query. The transfer sorts files "
+            "into the library by their headers, using a fixed telescope name (Apertura 75Q) from older code."
+        ),
+        built=True,
+    ),
+    ProposedTool(
+        "observatory_remote_sync_logs",
         "observatory-sync",
         "Bring the guide and Ekos logs from the telescope computer into the library's database, "
         "or preview it.",
-        (
-            "observatory_fetch_and_ingest_new_guide_logs",
-            "observatory_ingest_ekos_session_logs",
-            "observatory_ingest_guiding_log_file",
-        ),
-        ("dry_run (default true)",),
+        (),
+        ("dry_run", "download", "destination_dir"),
         "ingest",
         notes=(
-            "Built 2026-10-03 as ObservatoryControl.sync_remote_logs, on the existing "
-            "wayfindinglib ingestion "
-            "(ingest_ekos_session_logs). A real run downloads the new guide and Ekos analyze "
-            "logs, then stores "
-            "the guiding samples and one session record per analyze file. It is safe to repeat and never "
-            "deletes. It does not refit the stored guiding spectrum. dry_run compares remote and local files "
-            "by name and size. The backend's SyncService.sync_telescope_logs still repeats part of this; it "
-            "should call this code."
+            "Built 2026-10-03; control.remote.sync_logs since 2026-10-05. A real "
+            "run downloads the new guide and Ekos analyze logs, then stores the guiding samples and one "
+            "session record per analyze file. It is safe to repeat and never deletes. It does not refit the "
+            "stored guiding spectrum: that is observatory_guiding_refit_spectrum, which the user does not "
+            "want an AI to trigger. dry_run compares remote and local files by name and size. The backend's "
+            "SyncService.sync_telescope_logs still repeats part of this; it should call this code."
         ),
         built=True,
     ),
@@ -818,33 +731,33 @@ DECISIONS = {
         "withhold", "Console variable viewer. Has no use without the code runner."
     ),
     # ---- Connection tools: not device commands, but not needed ----
-    "observatory_connect": ToolDecision(
+    "observatory_equipment_connect": ToolDecision(
         "drop",
         "Opens the INDI session. Not a device command, but the status tools already open it on demand.",
     ),
-    "observatory_disconnect": ToolDecision(
+    "observatory_equipment_disconnect": ToolDecision(
         "drop",
         "Closes the INDI session. Not a device command, but it would cut off monitoring and has "
         "no monitoring use.",
     ),
     # ---- Withheld: the user decided an AI may not change configuration ----
-    "observatory_set_active_camera": ToolDecision(
+    "observatory_equipment_set_active_camera": ToolDecision(
         "withhold", "Writes the active camera into the configuration file."
     ),
-    "observatory_set_active_telescope": ToolDecision(
+    "observatory_equipment_set_active_telescope": ToolDecision(
         "withhold", "Writes the active telescope into the configuration file."
     ),
-    "observatory_save_safety_rule_set": ToolDecision(
+    "observatory_safety_save_rule_set": ToolDecision(
         "withhold", "Changes the rules that decide when the observatory is safe."
     ),
-    "observatory_save_focus_model": ToolDecision("withhold", "Replaces the stored focus model."),
-    "observatory_save_guider_calibration": ToolDecision(
+    "observatory_imaging_save_focus_model": ToolDecision("withhold", "Replaces the stored focus model."),
+    "observatory_guiding_save_calibration": ToolDecision(
         "withhold", "Replaces the stored guider calibration."
     ),
-    "observatory_save_guiding_spectrum_analysis": ToolDecision(
+    "observatory_guiding_save_spectrum_analysis": ToolDecision(
         "withhold", "Replaces the standing guiding analysis."
     ),
-    "observatory_apply_promotion_decision": ToolDecision(
+    "observatory_safety_apply_promotion_decision": ToolDecision(
         "withhold", "Applies an operator's decision. Needs the operator."
     ),
     "star_tune_spectroscopy_calibration": ToolDecision(
@@ -893,31 +806,29 @@ DECISIONS = {
     "execution_create_recorder": ToolDecision(
         "drop", "Builds an object. The result is only a text label over MCP."
     ),
-    "observatory_assess_safety": ToolDecision(
+    "observatory_safety_assess": ToolDecision(
         "drop", "Works on readings MCP cannot express. Keeps state between calls."
     ),
-    "observatory_summarize_device": ToolDecision(
+    "observatory_equipment_summarize_device": ToolDecision(
         "drop", "Classifies values the caller passes in. Reads nothing."
     ),
     # ---- Not offered yet: parts of the old sync set not built ----
-    "observatory_sync_calibration_folder": ToolDecision(
-        "withhold", "Calibration folder sync is not part of observatory_sync_remote_frames yet."
+    "observatory_remote_sync_frames": ToolDecision(
+        "keep",
+        "Built 2026-10-03; since 2026-10-05 it also copies calibration folders, every folder, chosen files "
+        "and a local folder. The AI may ingest frames from the telescope: adds, never deletes.",
+        "ingest",
     ),
-    "observatory_sync_all_remote_folders": ToolDecision(
-        "withhold", "Syncing every folder is not part of observatory_sync_remote_frames yet."
-    ),
-    "observatory_sync_remote_frames": ToolDecision(
-        "keep", "Built 2026-10-03. The AI may ingest frames from the telescope: adds, never deletes."
-    ),
-    "observatory_sync_remote_logs": ToolDecision(
+    "observatory_remote_sync_logs": ToolDecision(
         "keep",
         "Built 2026-10-03. The AI may ingest the guide and Ekos logs: adds or updates records, "
         "never deletes.",
+        "ingest",
     ),
     "diagnostics_frame_quality": ToolDecision(
         "keep", "Built 2026-10-03. Statistics on raw frames. Nothing is saved."
     ),
-    "observatory_get_live_session_status": ToolDecision(
+    "observatory_history_get_live_session_status": ToolDecision(
         "keep",
         "Served 2026-10-03. refresh=true copies the newest Ekos and KStars logs into a local folder, "
         "which is reading from the telescope computer and adds files only. A folder argument is now "
@@ -938,7 +849,7 @@ DECISIONS = {
     "target_get_frame": ToolDecision(
         "keep", "Returns the path of one frame, found by ISO, exposure and index."
     ),
-    "observatory_frame_guiding": ToolDecision(
+    "observatory_history_frame_guiding": ToolDecision(
         "keep",
         "Built 2026-10-03. Cuts the stored guide-log samples to each light frame's exposure window. "
         "Reads only.",
@@ -947,7 +858,7 @@ DECISIONS = {
     "app_controls": ToolDecision(
         "keep", "Built 2026-10-03. Navigate and notify only; pause and resume are not offered."
     ),
-    "observatory_frame_status": ToolDecision(
+    "observatory_remote_frame_status": ToolDecision(
         "keep",
         "Built 2026-10-04. Counts a target's frames at the telescope, on the drive and in the library, and "
         "names the frames that are in one place but not the next. Reads only.",
@@ -1025,7 +936,7 @@ DECISIONS = {
         "caller-given blocked ranges, meridian crossing, Sun and Moon. Reads nothing stored.",
     ),
     # ---- Keep ----
-    "observatory_night_history": ToolDecision(
+    "observatory_history_query": ToolDecision(
         "keep",
         "Built 2026-10-03. Reads the recorded nights and calculates the analyses, in replies under 30,000 "
         "characters. The recorded-data tables are read through the butler, which creates a missing table.",
@@ -1035,16 +946,52 @@ DECISIONS = {
         "Built 2026-10-03. Reads jobs, log tails, stored results and data lineage from the logs database, "
         "opened read-only. A job stuck at 'started' after the app stopped still shows as active.",
     ),
-    "observatory_abort_motion": ToolDecision(
+    "observatory_mount_abort_motion": ToolDecision(
         "drop", "Commands the mount, so it is dropped with the other hardware tools."
     ),
-    "observatory_execute_safe_state": ToolDecision(
+    "observatory_safety_execute_safe_state": ToolDecision(
         "drop", "Commands the mount and enclosure, so it is dropped with the other hardware tools."
     ),
-    "observatory_get_performance_envelope": ToolDecision(
-        "keep", "Slow: reads every session and target twice."
+    "observatory_history_get_performance_envelope": ToolDecision(
+        "keep", "Slow: reads every session and target twice.", "observe"
     ),
-    "observatory_check_remote_connection": ToolDecision("keep", "A small network probe."),
+    "observatory_remote_check_connection": ToolDecision("keep", "A small network probe.", "observe"),
+    # ---- Status reads of the control children ----
+    "observatory_mount_status": ToolDecision(
+        "keep",
+        "Reads the mount, filter, focuser and camera temperature. Blocked for now; see the block.",
+        "observe",
+    ),
+    "observatory_imaging_status": ToolDecision(
+        "keep", "Reads the filter names, the focuser position and the saved focus model.", "observe"
+    ),
+    "observatory_guiding_status": ToolDecision(
+        "keep",
+        "Reads the saved guider calibration, the mount's periodic error model and the guide plate scale. "
+        "No device is needed.",
+        "observe",
+    ),
+    "observatory_safety_status": ToolDecision(
+        "keep",
+        "Reads the safety rules, a weather verdict, the enclosure, the delegation policy and the "
+        "agreement evidence for one capability. The delegation policy's live row was once written by a UI "
+        "test; clean it before relying on it.",
+        "observe",
+    ),
+    "observatory_equipment_status": ToolDecision(
+        "keep",
+        "Reads the active equipment, camera profiles, site, commissioning records and the INDI device "
+        "list. The INDI sections use the connect-only path.",
+        "observe",
+    ),
+    "observatory_remote_list": ToolDecision(
+        "keep", "Lists folders or files on the telescope computer. Reads only.", "observe"
+    ),
+    "observatory_equipment_set_device_property": ToolDecision(
+        "drop",
+        "Sets a raw INDI property, which commands a device. Belongs to the dropped control side.",
+        "actuate",
+    ),
     "calibration_save": ToolDecision("withhold", "Writes the calibration index. The AI is read-only."),
     "calibration_assess_flats": ToolDecision("keep", "Checks flats. Writes nothing."),
     "target_get_header": ToolDecision("keep", "Reads one FITS header."),
@@ -1059,18 +1006,18 @@ DECISIONS = {
     "target_camera_index": ToolDecision(
         None, "Summarizes each target's light frames per camera for the target list. Reads only.", "observe"
     ),
-    "observatory_run_polar_alignment_assist": ToolDecision(
+    "observatory_mount_run_polar_alignment_assist": ToolDecision(
         "drop",
         "Only fits a pointing model from plate-solve records passed in. The user does not want it.",
         "compute",
     ),
-    "observatory_enter_controller_mode": ToolDecision(
+    "observatory_safety_enter_controller_mode": ToolDecision(
         "withhold",
         "Writes the delegation state (the Safe Mode toggle) to the database. Not a hardware command, but "
         "the user decided an AI may not change configuration.",
         "change-data",
     ),
-    "observatory_enter_monitoring_mode": ToolDecision(
+    "observatory_safety_enter_monitoring_mode": ToolDecision(
         "withhold",
         "Writes the delegation state (the Safe Mode toggle) to the database. Not a hardware command, but "
         "the user decided an AI may not change configuration.",
@@ -1090,46 +1037,39 @@ DECISIONS = {
         None, "Writes the session to the wayfinding database.", "change-data"
     ),
     # ---- Records: dropped ----
-    "observatory_save_commissioning_run": ToolDecision(
+    "observatory_equipment_save_commissioning_run": ToolDecision(
         "drop", "Takes a whole run object that MCP cannot send. The ingest tools create the same records."
     ),
-    "observatory_save_ekos_session_context": ToolDecision(
+    "observatory_history_save_ekos_session_context": ToolDecision(
         "drop", "Takes a whole context object that MCP cannot send. The ingest tools create the same records."
     ),
-    "observatory_save_guiding_run": ToolDecision(
+    "observatory_guiding_save_run": ToolDecision(
         "drop", "Takes a whole run object that MCP cannot send. The ingest tools create the same records."
     ),
     # ---- No use, empty, or cannot be called through MCP ----
-    "observatory_get_guide_image": ToolDecision(
+    "observatory_guiding_get_image": ToolDecision(
         "drop",
         "Returns the text form of raw bytes, and None in practice because the app never enables BLOBs.",
+        "observe",
     ),
-    "observatory_cooling_ramp_rate": ToolDecision(
+    "observatory_equipment_cooling_ramp_rate": ToolDecision(
         "drop", "Needs a cooling-policy object that MCP cannot send. Arithmetic on the caller's input."
     ),
-    "observatory_summarize_divergence_evidence": ToolDecision(
-        "drop",
-        "Reads a table nothing ever fills, and creates it empty in the live database. "
-        "The result is a text label, not data.",
-    ),
-    "observatory_get_commissioning_runs": ToolDecision(
-        "drop", "41 identical all-OFFLINE test drills, about 48 KB, over the reply limit."
-    ),
     # ---- Not wanted by the user ----
-    "observatory_drain_external_pulses": ToolDecision(
+    "observatory_guiding_drain_external_pulses": ToolDecision(
         "drop",
         "Clears guide pulses when read. Belongs to the dropped control side. The user does not want it.",
     ),
-    "observatory_refit_guiding_spectrum": ToolDecision(
+    "observatory_guiding_refit_spectrum": ToolDecision(
         "drop", "Recomputes and stores a result. The user does not want an AI to trigger it."
     ),
-    "observatory_compute_focus_correction": ToolDecision(
+    "observatory_imaging_compute_focus_correction": ToolDecision(
         "drop", "Advice for a device command the app will not send. The user does not want it."
     ),
-    "observatory_compute_guiding_correction": ToolDecision(
+    "observatory_guiding_compute_correction": ToolDecision(
         "drop", "Advice for a device command the app will not send. The user does not want it."
     ),
-    "observatory_compute_pointing_correction": ToolDecision(
+    "observatory_mount_compute_pointing_correction": ToolDecision(
         "drop", "Advice for a device command the app will not send. The user does not want it."
     ),
     "diagnostics_flag_value_outliers": ToolDecision(
@@ -1163,7 +1103,8 @@ CATEGORY_RULES = (
     (re.compile(r"^(planning_|execution_)"), "planning-sessions"),
     (
         re.compile(
-            r"^observatory_(save_|set_active_|apply_promotion_decision|enter_(controller|monitoring)_mode)"
+            r"^observatory_[a-z]+_(save_|set_active_|apply_promotion_decision"
+            r"|enter_(controller|monitoring)_mode)"
         ),
         "observatory-config",
     ),

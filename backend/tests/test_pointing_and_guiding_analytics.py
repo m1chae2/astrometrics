@@ -129,13 +129,12 @@ def test_analyze_guiding_telemetry_detects_worm_period_and_backlash() -> None:
 def test_alignment_service_compute_pointing_model() -> None:
     """Verify AlignmentService.compute_pointing_model queries logger.
 
-    Delegates to `ObservatoryControl.get_pointing_model`
-    (`pointing_log_ingestion.py`, §6a) rather than fitting directly, so
-    the logger mock is injected on the observatory (its
-    `_logger_interface`), not on `AlignmentService` itself.
+    Delegates to `control.history.query(kind="pointing_model")` rather
+    than fitting directly, so the logger mock is injected on the control's
+    shared context, not on `AlignmentService` itself.
     """
     from backend.services.observatory.alignment_service import AlignmentService
-    from wayfindinglib.api.control_registry import ObservatoryControl
+    from wayfindinglib import ObservatoryControl
 
     logger_mock = MagicMock()
     logger_mock.get_session_alignment_attempts.return_value = [
@@ -144,7 +143,8 @@ def test_alignment_service_compute_pointing_model() -> None:
     ]
 
     observatory = ObservatoryControl(config=MagicMock())
-    observatory._logger_interface = logger_mock
+    observatory._context.logger_interface = logger_mock
+    observatory._context.observer_location = lambda: {"latitude": 39.7}
 
     service = AlignmentService(observatory_api=observatory)
     res = service.compute_pointing_model(session_id="2026-09-25")
@@ -156,20 +156,19 @@ def test_alignment_service_compute_pointing_model() -> None:
 def test_guiding_service_analyze_guiding_spectrum() -> None:
     """Verify GuidingService.analyze_guiding_spectrum delegates to logger.
 
-    Delegates to `ObservatoryControl.refit_guiding_spectrum`
-    (`guiding_log_ingestion.py`, §6a) rather than analyzing directly,
-    so the logger mock is injected on the observatory (its
-    `_logger_interface`), not on `GuidingService` itself.
+    Delegates to `control.guiding.refit_spectrum` rather than analyzing
+    directly, so the logger mock is injected on the control's shared
+    context, not on `GuidingService` itself.
     """
     from backend.services.observatory.guiding_service import GuidingService
-    from wayfindinglib.api.control_registry import ObservatoryControl
+    from wayfindinglib import ObservatoryControl
 
     logger_mock = MagicMock()
     logger_mock.get_guiding_logs.return_value = []
 
     observatory = ObservatoryControl(config=MagicMock())
-    observatory._logger_interface = logger_mock
-    observatory._butler = MagicMock()  # refit_guiding_spectrum persists; avoid real disk I/O
+    observatory._context.logger_interface = logger_mock
+    observatory._context.butler = MagicMock()  # refit_spectrum saves; avoid real disk I/O
 
     service = GuidingService(observatory_api=observatory)
     res = service.analyze_guiding_spectrum(session_id="2026-09-25")

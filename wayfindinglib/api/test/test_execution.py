@@ -4,7 +4,7 @@ Description: Verifies each method delegates to its underlying task
 function with the interface's own storage layer where relevant,
 and that this module's own source carries no direct INDI hardware import
 -- a static source-text scan mirroring
-`test_planning_registry.py::test_planning_module_tree_imports_no_device_driver`,
+`test_planning.py::test_planning_module_tree_imports_no_device_driver`,
 since a runtime `sys.modules` check would be polluted by this
 package's own pre-existing `phd2_guiding_service -> observatory
 -> drivers.indi.hardware_lock` import chain (a lightweight file-lock
@@ -17,7 +17,7 @@ from datetime import UTC, date, datetime
 
 import pytest
 
-from wayfindinglib.api.execution_registry import ObservationExecution
+from wayfindinglib.api.execution import ObservationExecution
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.models.policy.device_state import DeviceSummaryState
 from wayfindinglib.models.policy.recovery import RecoveryPolicy
@@ -90,14 +90,14 @@ def _deps() -> SessionRunnerDependencies:
     )
 
 
-def test_advance_session_delegates_to_task_function():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_advance_session_delegates_to_task_function() -> None:
     """Verify advance_session runs the queue-advancement cycle."""
     execution = ObservationExecution()
     result = execution.advance_session(_session(), _deps())
     assert result.queue[0].status == QueueEntryStatus.COMPLETED
 
 
-def test_abort_session_delegates_to_task_function():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_abort_session_delegates_to_task_function() -> None:
     """Verify abort_session skips remaining pending entries."""
     execution = ObservationExecution()
     result = execution.abort_session(_session(), "operator abort", _NOW)
@@ -105,7 +105,7 @@ def test_abort_session_delegates_to_task_function():  # ruff: ignore[missing-ret
     assert result.queue[0].status == QueueEntryStatus.SKIPPED
 
 
-def test_execute_meridian_flip_delegates_to_task_function():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_execute_meridian_flip_delegates_to_task_function() -> None:
     """Verify execute_meridian_flip runs the six-step sequence."""
     execution = ObservationExecution()
     steps = MeridianFlipSteps(
@@ -120,7 +120,7 @@ def test_execute_meridian_flip_delegates_to_task_function():  # ruff: ignore[mis
     assert outcome.resumed is True
 
 
-def test_recover_fault_delegates_to_task_function():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_recover_fault_delegates_to_task_function() -> None:
     """Verify recover_fault runs bounded recovery attempts."""
     execution = ObservationExecution()
     record = execution.recover_fault(
@@ -137,7 +137,7 @@ def test_recover_fault_delegates_to_task_function():  # ruff: ignore[missing-ret
     assert record.recovered is True
 
 
-def test_recover_guide_star_loss_delegates_to_task_function():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_recover_guide_star_loss_delegates_to_task_function() -> None:
     """Verify recover_guide_star_loss runs a bounded reacquire loop."""
     from wayfindinglib.models.session.correction_config import CorrectionConfig
 
@@ -153,7 +153,7 @@ def test_recover_guide_star_loss_delegates_to_task_function():  # ruff: ignore[m
     assert event.reacquire_attempts == 1
 
 
-def test_record_divergence_delegates_to_task_function():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_record_divergence_delegates_to_task_function() -> None:
     """Verify record_divergence builds a DivergenceRecord."""
     from wayfindinglib.models.policy.delegation import ObservatoryCapability
 
@@ -203,9 +203,9 @@ def test_reconcile_session_delegates_and_persists(butler):  # ruff: ignore[missi
     assert result.id == session.id
 
 
-def test_module_source_carries_no_direct_indi_hardware_import():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_module_source_carries_no_direct_indi_hardware_import() -> None:
     """Verify this module's own source never references INDI or PyIndi."""
-    module_path = pathlib.Path(__file__).resolve().parents[1] / "execution_registry.py"
+    module_path = pathlib.Path(__file__).resolve().parents[1] / "execution.py"
     text = module_path.read_text()
     forbidden_substrings = ("wayfindinglib.drivers.indi", "import PyIndi", "from PyIndi")
     offending = [needle for needle in forbidden_substrings if needle in text]

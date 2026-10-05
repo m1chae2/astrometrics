@@ -188,7 +188,7 @@ The Observatory Manager allows for discovering and downloading images captured b
 2. **Review Targets**: A list of unassociated remote targets will appear, displaying the target name, filter type, and number of sub-exposures.
 3. **Download & Sync**: Select the desired targets and click **Download Selected**. The files will be transferred to the local machine and automatically registered into the Library Sidebar, ready for Image Processing.
 
-*(For technical details on how the remote file protocols and target synchronizations are managed under the hood, see the {py:class}`~wayfindinglib.api.control_registry.ObservatoryControl` API Reference)*
+*(For technical details on how the remote file protocols and target synchronizations are managed under the hood, see the {py:class}`~wayfindinglib.api.control.remote.RemoteControl` API Reference)*
 
 ---
 

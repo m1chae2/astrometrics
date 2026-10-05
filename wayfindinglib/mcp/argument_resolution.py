@@ -17,8 +17,10 @@ from datetime import UTC, datetime
 from typing import Any
 
 from astropy.time import Time
+from pydantic import ValidationError
 
 from astrometricslib import StellarObject, Target
+from wayfindinglib import SkyPosition
 
 
 def build_argument_hooks(
@@ -36,8 +38,8 @@ def build_argument_hooks(
     Returns
     -------
     argument_resolvers : `dict` [`str`, `Callable`]
-        Converters keyed by parameter name (`target`, `objects`,
-        `time_input`).
+        Converters keyed by parameter name (`position`, `destination`,
+        `target`, `objects`, `time_input`).
     injected_arguments : `dict` [`str`, `Callable`]
         Factories for parameters the server supplies itself. None today.
     """
@@ -160,7 +162,37 @@ def build_argument_hooks(
             parsed = parsed.astimezone(UTC).replace(tzinfo=None)
         return Time(parsed)
 
+    def resolve_sky_position(value: Any) -> Any:
+        """Convert ``{"ra_deg": ..., "dec_deg": ...}`` into a `SkyPosition`.
+
+        Parameters
+        ----------
+        value : `dict`, `str` or `SkyPosition`
+            A coordinate dictionary. Anything else (a target id for
+            `control.mount.slew`, or a ready `SkyPosition`) passes through.
+
+        Returns
+        -------
+        position : `SkyPosition` or `Any`
+            The position, or `value` unchanged.
+
+        Raises
+        ------
+        ValueError
+            If the dictionary is not a valid position.
+        """
+        if not isinstance(value, dict):
+            return value
+        try:
+            return SkyPosition.model_validate(value)
+        except ValidationError as error:
+            raise ValueError(
+                f'{value!r} is not a sky position: use {{"ra_deg": ..., "dec_deg": ...}}. {error}'
+            ) from error
+
     argument_resolvers = {
+        "position": resolve_sky_position,
+        "destination": resolve_sky_position,
         "target": resolve_library_target,
         "objects": resolve_sky_objects,
         "time_input": parse_time,

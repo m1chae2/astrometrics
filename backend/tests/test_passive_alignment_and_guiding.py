@@ -179,7 +179,7 @@ def test_guiding_service_does_not_inject_noise_when_idle() -> None:
     phd2_mock.drain_guiding_samples.return_value = []
 
     observatory_mock = MagicMock()
-    observatory_mock.drain_external_pulses.return_value = []
+    observatory_mock.guiding.drain_external_pulses.return_value = []
 
     service = GuidingService(observatory_api=observatory_mock, phd2_service=phd2_mock)
     service.poll_external_telemetry()
@@ -283,7 +283,7 @@ def test_telescope_service_prioritizes_driver_target_name() -> None:
     from backend.services.observatory.telescope_service import TelescopeService
 
     wayfinder_mock = MagicMock()
-    wayfinder_mock.control.get_telescope_status.return_value = {
+    wayfinder_mock.control.mount.status.return_value = {
         "ra": "00 42 44",
         "dec": "+41 16 09",
         "targetName": "IC 1396",
@@ -371,16 +371,16 @@ def test_guiding_service_persists_live_samples_to_logger_interface() -> None:
 def test_guiding_service_ingest_phd2_log_file(tmp_path: pytest.TempPathFactory) -> None:
     """Verify GuidingService ingests native PHD2 guide log files.
 
-    Delegates to `ObservatoryControl.ingest_guiding_log_file`
-    (`guiding_log_ingestion.py`, §6a), so a real `ObservatoryControl`
-    with its `_logger_interface` overridden is used here rather than a
-    bare mock -- the parsing/persistence/refit chain must actually run
-    for `logger_mock.replace_guiding_samples` to be called.
+    Delegates to `control.guiding.refit_spectrum(file_path=...)`, so a
+    real `ObservatoryControl` with its context's log database replaced is
+    used here rather than a bare mock -- the parsing, storing and refit
+    chain must actually run for `logger_mock.replace_guiding_samples` to
+    be called.
     """
     from pathlib import Path
 
     from backend.services.observatory.guiding_service import GuidingService
-    from wayfindinglib.api.control_registry import ObservatoryControl
+    from wayfindinglib import ObservatoryControl
 
     log_file = Path(str(tmp_path)) / "PHD2_GuideLog_test.txt"
     log_content = (
@@ -399,8 +399,8 @@ def test_guiding_service_ingest_phd2_log_file(tmp_path: pytest.TempPathFactory) 
     logger_mock.get_guiding_logs.return_value = [{"time": 1.5, "dra": 0.12, "ddec": -0.08, "pulse_dec": 20.0}]
 
     observatory = ObservatoryControl(config=MagicMock())
-    observatory._logger_interface = logger_mock
-    observatory._butler = MagicMock()  # ingest persists via save_guiding_spectrum_analysis; avoid disk I/O
+    observatory._context.logger_interface = logger_mock
+    observatory._context.butler = MagicMock()  # the refit saves the model; avoid disk I/O
 
     service = GuidingService(observatory_api=observatory, logger_interface=logger_mock)
     count = service.ingest_phd2_log_file(str(log_file), target_name="IC 1396")
@@ -464,8 +464,8 @@ def test_indi_interface_pulse_coalescing_and_echo_filtering() -> None:
     phd2_mock = MagicMock()
     phd2_mock.drain_guiding_samples.return_value = []
     observatory_mock = MagicMock()
-    observatory_mock.drain_external_pulses.side_effect = interface.drain_external_pulses
-    observatory_mock.get_telescope_status.return_value = {}
+    observatory_mock.guiding.drain_external_pulses.side_effect = interface.drain_external_pulses
+    observatory_mock.mount.status.return_value = {}
     service = GuidingService(observatory_api=observatory_mock, phd2_service=phd2_mock)
     service.poll_external_telemetry()
 
@@ -683,8 +683,8 @@ def test_guiding_service_labels_pulse_derived_samples_as_estimates_when_persisti
     phd2_mock = MagicMock()
     phd2_mock.drain_guiding_samples.return_value = []
     observatory_mock = MagicMock()
-    observatory_mock.drain_external_pulses.return_value = [{"time": 1700000000.0, "pulse_w": 250.0}]
-    observatory_mock.get_telescope_status.return_value = {}
+    observatory_mock.guiding.drain_external_pulses.return_value = [{"time": 1700000000.0, "pulse_w": 250.0}]
+    observatory_mock.mount.status.return_value = {}
     logger_mock = MagicMock()
 
     service = GuidingService(
@@ -715,8 +715,8 @@ def _poll_pulses(pulses: list[dict[str, float]]) -> list[dict[str, float]]:
     phd2_mock = MagicMock()
     phd2_mock.drain_guiding_samples.return_value = []
     observatory_mock = MagicMock()
-    observatory_mock.drain_external_pulses.return_value = pulses
-    observatory_mock.get_telescope_status.return_value = {}
+    observatory_mock.guiding.drain_external_pulses.return_value = pulses
+    observatory_mock.mount.status.return_value = {}
     logger_mock = MagicMock()
     service = GuidingService(
         observatory_api=observatory_mock, phd2_service=phd2_mock, logger_interface=logger_mock

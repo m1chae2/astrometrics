@@ -18,14 +18,14 @@ def run_sync() -> None:
 
     Resolves (or creates) the requested `Target`, lists the files
     available on the remote telescope, and downloads any selected or
-    new frames via `Wayfinder.control.download_remote_targets`,
+    new frames via `Wayfinder.control.remote.sync_frames`,
     persisting the refreshed target index afterward.
 
     Raises
     ------
     SystemExit
         Raised with exit code 1 if remote synchronization fails
-        outside of testing mode, or if `download_remote_targets`
+        outside of testing mode, or if `control.remote.sync_frames`
         reports failure.
 
     Notes
@@ -98,27 +98,23 @@ def run_sync() -> None:
                 patch.object(
                     StellarMateInterface, "list_remote_files", return_value=["frame1.fits", "frame2.fits"]
                 ),
+                patch.object(
+                    StellarMateInterface, "resolve_remote_folder_name", side_effect=lambda name: name
+                ),
                 patch.object(StellarMateInterface, "download_target_folder", return_value=True),
             ):
                 # Probes remote connection status and lists
                 # unassociated remote targets, all through the
                 # public wayfinder.control astrometrics
-                connected = wayfinder.control.check_remote_connection()
+                connected = wayfinder.control.remote.check_connection()
                 print(f"[Testing Mode] Mocked check connection result: {connected}")
 
-                unassociated = wayfinder.control.discover_unassociated_remote_targets()
+                unassociated = wayfinder.control.remote.list("unassociated_folders")
                 print(f"[Testing Mode] Mocked discovered unassociated targets: {unassociated}")
 
-                remote_files = wayfinder.control.list_remote_files(target_id)
-
-                wayfinder.control.check_for_new_remote_images(target)
-
-                # Exercise the no-remote-files branch of
-                # check_for_new_remote_images
-                with patch.object(StellarMateInterface, "list_remote_files", return_value=[]):
-                    wayfinder.control.check_for_new_remote_images(target)
+                remote_files = wayfinder.control.remote.list("files", folder_name=target_id)
         else:
-            remote_files = wayfinder.control.list_remote_files(target_id)
+            remote_files = wayfinder.control.remote.list("files", folder_name=target_id)
 
         print(f"Found {len(remote_files)} files in {target_id} remotely.")
         print(f"Downloading telescope frames for Target {target_id}...")
@@ -132,11 +128,10 @@ def run_sync() -> None:
         if os.getenv("ASTROMETRICS_TESTING") == "1":
             # Mock download success directly
             success = True
-            print("[Testing Mode] Simulated download_remote_targets completed successfully.")
+            print("[Testing Mode] Simulated remote.sync_frames completed successfully.")
         else:
-            success = wayfinder.control.download_remote_targets(
-                target_id=target_id, selected_files=selected_list, log_callback=print
-            )
+            result = wayfinder.control.remote.sync_frames(target_id, files=selected_list, log_callback=print)
+            success = result.get("success", False)
         elapsed = time.time() - start_time
 
         if success:

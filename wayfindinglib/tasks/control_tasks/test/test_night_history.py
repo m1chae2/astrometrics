@@ -1,9 +1,8 @@
 """Tests for the past-night history front door.
 
-`build_night_history` answers questions about recorded nights for an AI
-client. These tests use a fake observatory, so they check the choice of
-method, the argument checks, and above all that every reply fits under the
-size limit.
+`build_night_history` answers `control.history.query`. These tests replace
+the night analyses with a fake, so they check the choice of analysis, the
+argument checks, and above all that every reply fits under the size limit.
 """
 
 import inspect
@@ -14,8 +13,9 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 
-from wayfindinglib.api.control_registry import ObservatoryControl
-from wayfindinglib.tasks.control_tasks import night_history
+from astrometricslib import InvalidArgumentError
+from wayfindinglib.api.control.history import HistoryControl
+from wayfindinglib.tasks.control_tasks import night_analysis, night_history, pointing_log_ingestion
 from wayfindinglib.tasks.control_tasks.night_history import (
     MAXIMUM_REPLY_CHARACTERS,
     build_night_history,
@@ -60,51 +60,159 @@ def _context(positions: int = 600) -> SimpleNamespace:
 
 
 class _Observatory:
-    """A fake observatory that records how it was called."""
+    """A fake context whose night analyses record how they were called."""
 
     def __init__(self) -> None:
         """Start with no calls and a known location."""
         self.calls: list[tuple[str, Any]] = []
         self.location: dict[str, float] | None = {"latitude": 45.0}
+        self.logger_interface = None
 
-    def analyze_capture_session(self, session_id: str) -> Any:
-        self.calls.append(("analyze_capture_session", session_id))
+    def capture_night_analysis(self, context: Any, session_id: str) -> Any:
+        """Record the call; return an analysis unless the night is "none".
+
+        Returns
+        -------
+        result : `Any`
+            The canned answer.
+        """
+        self.calls.append(("capture_night_analysis", session_id))
         return None if session_id == "none" else _Analysis(flagged=True, recommendations=["a"])
 
-    def analyze_guiding_session(self, session_id: str) -> Any:
-        self.calls.append(("analyze_guiding_session", session_id))
+    def guiding_night_analysis(self, context: Any, session_id: str) -> Any:
+        """Record the call and return an analysis.
+
+        Returns
+        -------
+        result : `Any`
+            The canned answer.
+        """
+        self.calls.append(("guiding_night_analysis", session_id))
         return _Analysis(flagged=False, recommendations=[])
 
-    def summarize_capture_sessions(self, latest_nights: int | None = None) -> list[dict]:
-        self.calls.append(("summarize_capture_sessions", latest_nights))
+    def capture_night_summaries(self, context: Any, latest_nights: int | None = None) -> list[dict]:
+        """Record the call and return one summary row.
+
+        Returns
+        -------
+        result : `Any`
+            The canned answer.
+        """
+        self.calls.append(("capture_night_summaries", latest_nights))
         return [{"sessionId": "2026-10-02"}]
 
-    def summarize_guiding_sessions(self, latest_nights: int | None = None) -> list[dict]:
-        self.calls.append(("summarize_guiding_sessions", latest_nights))
+    def guiding_night_summaries(self, context: Any, latest_nights: int | None = None) -> list[dict]:
+        """Record the call and return one summary row.
+
+        Returns
+        -------
+        result : `Any`
+            The canned answer.
+        """
+        self.calls.append(("guiding_night_summaries", latest_nights))
         return [{"sessionId": "2026-10-02"}]
 
-    def summarize_recurring_issues(self, latest_nights: int | None = None) -> list[dict]:
-        self.calls.append(("summarize_recurring_issues", latest_nights))
+    def recurring_issues(self, context: Any, latest_nights: int | None = None) -> list[dict]:
+        """Record the call and return one issue.
+
+        Returns
+        -------
+        result : `Any`
+            The canned answer.
+        """
+        self.calls.append(("recurring_issues", latest_nights))
         return [{"issue": "x"}]
 
-    def analyze_sky_coverage(self) -> Any:
+    def sky_coverage_analysis(self, context: Any) -> Any:
+        """Return a small analysis.
+
+        Returns
+        -------
+        result : `Any`
+            The canned answer.
+        """
         return _Analysis(flagged=False, recommendations=["sky"])
 
-    def list_guiding_runs(self, session_id: str | None = None) -> list[dict]:
+    def guiding_runs(self, context: Any, session_id: str | None = None) -> list[dict]:
+        """Return sixty large runs.
+
+        Returns
+        -------
+        result : `Any`
+            The canned answer.
+        """
         return [{"id": number, "pad": "z" * 900} for number in range(60)]
 
-    def list_ekos_session_summaries(self) -> list[dict]:
+    def ekos_session_summaries(self, context: Any) -> list[dict]:
+        """Return thirty session summaries, one per night.
+
+        Returns
+        -------
+        result : `Any`
+            The canned answer.
+        """
         return [{"id": f"s{number}", "sessionId": f"2026-09-{number:02d}"} for number in range(1, 31)]
 
-    def get_ekos_session_context(self, session_file_id: str) -> Any:
+    def ekos_session_record(self, context: Any, session_file_id: str) -> Any:
+        """Return the large session for "known", otherwise nothing.
+
+        Returns
+        -------
+        result : `Any`
+            The canned answer.
+        """
         return _context() if session_file_id == "known" else None
 
-    def get_observer_location(self) -> dict[str, float] | None:
+    def observer_location(self) -> dict[str, float] | None:
+        """Return the location the test set.
+
+        Returns
+        -------
+        result : `Any`
+            The canned answer.
+        """
         return self.location
 
-    def get_pointing_model(self, session_id: str) -> Any:
-        self.calls.append(("get_pointing_model", session_id))
+    def compute_pointing_model(self, context: Any, logger_interface: Any, session_id: str) -> Any:
+        """Record the call and return a small model.
+
+        Returns
+        -------
+        result : `Any`
+            The canned answer.
+        """
+        self.calls.append(("compute_pointing_model", session_id))
         return _Analysis(flagged=False, recommendations=[])
+
+
+ANALYSES = (
+    "capture_night_analysis",
+    "guiding_night_analysis",
+    "capture_night_summaries",
+    "guiding_night_summaries",
+    "recurring_issues",
+    "sky_coverage_analysis",
+    "guiding_runs",
+    "ekos_session_summaries",
+    "ekos_session_record",
+)
+"""The `night_analysis` functions the fake stands in for."""
+
+
+@pytest.fixture
+def observatory(monkeypatch: pytest.MonkeyPatch) -> _Observatory:
+    """Route the night analyses and the pointing fit to a fresh fake.
+
+    Returns
+    -------
+    observatory : `_Observatory`
+        The fake, which is also passed as the context.
+    """
+    fake = _Observatory()
+    for name in ANALYSES:
+        monkeypatch.setattr(night_analysis, name, getattr(fake, name))
+    monkeypatch.setattr(pointing_log_ingestion, "compute_pointing_model", fake.compute_pointing_model)
+    return fake
 
 
 def test_to_plain_turns_models_and_nested_data_into_plain_data() -> None:
@@ -163,50 +271,65 @@ def test_hopeless_reply_falls_back_to_the_field_names() -> None:
     assert reply["fields"] == ["blob", "kind", "other"]
 
 
-def test_unknown_kind_lists_the_kinds() -> None:
-    """A bad kind gets a plain error."""
-    assert "kind must be one of" in build_night_history(_Observatory(), "everything")["error"]
+def test_unknown_kind_lists_the_kinds(observatory: _Observatory) -> None:
+    """A bad kind is refused with the list of kinds."""
+    with pytest.raises(InvalidArgumentError, match="kind must be one of"):
+        build_night_history(observatory, "everything")
 
 
-def test_night_analysis_and_summary_choose_the_right_method() -> None:
+@pytest.mark.parametrize(
+    ("kind", "arguments"),
+    [
+        ("sky_coverage", {"session_id": "2026-10-02"}),
+        ("recurring_issues", {"ekos_file_id": "x"}),
+        ("capture", {"include": ["captures"]}),
+        ("guiding_runs", {"ekos_file_id": "x"}),
+    ],
+)
+def test_arguments_a_kind_does_not_use_are_refused(
+    observatory: _Observatory, kind: str, arguments: dict[str, Any]
+) -> None:
+    """An argument that does not apply to the kind is an error, not ignored."""
+    with pytest.raises(InvalidArgumentError, match="does not use"):
+        build_night_history(observatory, kind, **arguments)
+
+
+def test_night_analysis_and_summary_choose_the_right_method(observatory: _Observatory) -> None:
     """A night gets its analysis; no night gets recent summaries."""
-    observatory = _Observatory()
     assert build_night_history(observatory, "capture", session_id="2026-10-02")["analysis"]["flagged"] is True
     build_night_history(observatory, "guiding", session_id="2026-10-02")
     build_night_history(observatory, "capture", limit=7)
     build_night_history(observatory, "guiding", limit=1000)
     build_night_history(observatory, "recurring_issues", limit=0)
-    assert ("analyze_capture_session", "2026-10-02") in observatory.calls
-    assert ("analyze_guiding_session", "2026-10-02") in observatory.calls
-    assert ("summarize_capture_sessions", 7) in observatory.calls
-    assert ("summarize_guiding_sessions", 50) in observatory.calls
-    assert ("summarize_recurring_issues", 1) in observatory.calls
+    assert ("capture_night_analysis", "2026-10-02") in observatory.calls
+    assert ("guiding_night_analysis", "2026-10-02") in observatory.calls
+    assert ("capture_night_summaries", 7) in observatory.calls
+    assert ("guiding_night_summaries", 50) in observatory.calls
+    assert ("recurring_issues", 1) in observatory.calls
 
 
-def test_night_with_nothing_recorded_is_an_error() -> None:
+def test_night_with_nothing_recorded_is_an_error(observatory: _Observatory) -> None:
     """A night with no data says so."""
-    assert "Nothing is recorded" in build_night_history(_Observatory(), "capture", session_id="none")["error"]
+    assert "Nothing is recorded" in build_night_history(observatory, "capture", session_id="none")["error"]
 
 
-def test_guiding_runs_are_the_newest_and_fit_the_budget() -> None:
+def test_guiding_runs_are_the_newest_and_fit_the_budget(observatory: _Observatory) -> None:
     """Sixty large runs come back as the newest rows that fit."""
-    reply = build_night_history(_Observatory(), "guiding_runs", limit=50)
+    reply = build_night_history(observatory, "guiding_runs", limit=50)
     assert reply["total"] == 60
     assert reply_size(reply) <= MAXIMUM_REPLY_CHARACTERS
     assert reply["runs"][-1]["id"] == 59
 
 
-def test_ekos_list_filters_by_night_and_takes_the_newest() -> None:
+def test_ekos_list_filters_by_night_and_takes_the_newest(observatory: _Observatory) -> None:
     """The session list can be narrowed to one night and is limited."""
-    observatory = _Observatory()
     assert build_night_history(observatory, "ekos_sessions", limit=5)["shown"] == 5
     only = build_night_history(observatory, "ekos_sessions", session_id="2026-09-07")
     assert [row["id"] for row in only["sessions"]] == ["s7"]
 
 
-def test_ekos_session_overview_and_sections() -> None:
+def test_ekos_session_overview_and_sections(observatory: _Observatory) -> None:
     """One session gives an overview, or the chosen sections, sampled."""
-    observatory = _Observatory()
     overview = build_night_history(observatory, "ekos_sessions", ekos_file_id="known")
     assert overview["session"]["overview"]["section_counts"]["mount_positions"] == 600
     detail = build_night_history(
@@ -217,17 +340,15 @@ def test_ekos_session_overview_and_sections() -> None:
     assert reply_size(detail) <= MAXIMUM_REPLY_CHARACTERS
 
 
-def test_ekos_errors_name_the_problem() -> None:
+def test_ekos_errors_name_the_problem(observatory: _Observatory) -> None:
     """An unknown session or section is reported."""
-    observatory = _Observatory()
     assert "No Ekos session" in build_night_history(observatory, "ekos_sessions", ekos_file_id="x")["error"]
     unknown = build_night_history(observatory, "ekos_sessions", ekos_file_id="known", include=["nope"])
     assert "Unknown section" in unknown["error"]
 
 
-def test_pointing_model_needs_a_night_and_a_location() -> None:
+def test_pointing_model_needs_a_night_and_a_location(observatory: _Observatory) -> None:
     """The fit refuses to mix nights or to guess the latitude."""
-    observatory = _Observatory()
     assert "needs a session_id" in build_night_history(observatory, "pointing_model")["error"]
     observatory.location = None
     assert (
@@ -239,22 +360,22 @@ def test_pointing_model_needs_a_night_and_a_location() -> None:
     assert reply["model"]["flagged"] is False
 
 
-def test_every_reply_is_json_and_within_the_limit() -> None:
+def test_every_reply_is_json_and_within_the_limit(observatory: _Observatory) -> None:
     """Every kind produces JSON text under the limit."""
-    observatory = _Observatory()
     for kind in night_history.KINDS:
-        reply = build_night_history(observatory, kind, session_id="2026-10-02", limit=50)
+        night = {"session_id": "2026-10-02"} if "session_id" in night_history.KIND_ARGUMENTS[kind] else {}
+        reply = build_night_history(observatory, kind, limit=50, **night)
         assert len(json.dumps(reply, indent=2, default=str)) <= MAXIMUM_REPLY_CHARACTERS, kind
 
 
-def test_observatory_control_has_the_new_front_door_and_limits() -> None:
-    """`ObservatoryControl` has `night_history`; summaries take a limit."""
-    assert "night_history" in dir(ObservatoryControl)
-    for name in ("summarize_capture_sessions", "summarize_guiding_sessions", "summarize_recurring_issues"):
-        assert "latest_nights" in inspect.signature(getattr(ObservatoryControl, name)).parameters
+def test_control_history_has_the_front_door_and_limits() -> None:
+    """`control.history` has `query`; the summaries take a limit."""
+    assert "query" in dir(HistoryControl)
+    for name in ("capture_night_summaries", "guiding_night_summaries", "recurring_issues"):
+        assert "latest_nights" in inspect.signature(getattr(night_analysis, name)).parameters
 
 
-@pytest.mark.parametrize("name", ["observatory_night_history"])
+@pytest.mark.parametrize("name", ["observatory_history_query"])
 def test_the_mcp_server_offers_the_tool(name: str) -> None:
     """The reflected MCP tool has the documented arguments."""
     from wayfindinglib.mcp.tool_registry import registry

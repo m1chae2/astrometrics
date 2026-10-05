@@ -5,7 +5,7 @@ interface. Pre-processing judges the data, processing measures it, and
 post-processing recommends. The request carries everything the stages need,
 so the analysis is a pure function of it: the same request always gives the
 same summary. Gathering the request from storage is the caller's job
-(`ObservatoryControl.analyze_capture_session`).
+(`control.history.query(kind="capture")`).
 """
 
 from dataclasses import dataclass, field

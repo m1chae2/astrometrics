@@ -57,24 +57,24 @@ class _FakeLoggerInterface:
 
 
 class _FakeObservatory:
-    """A stand-in `ObservatoryControl` reporting a fixed observer location."""
+    """A stand-in `ControlContext` reporting a fixed observer location."""
 
     def __init__(self, observer_location: dict[str, float] | None) -> None:
-        """Initialize with a fixed `get_observer_location` response."""
+        """Initialize with a fixed observer location."""
         self._observer_location = observer_location
 
-    def get_observer_location(self) -> dict[str, float] | None:
-        """Return the fixed observer location.
+    def observer_latitude_deg(self) -> float:
+        """Return the fixed latitude, or 45 degrees when none is known.
 
         Returns
         -------
-        location : `dict` | `None`
-            The fixed response passed at construction.
+        latitude_deg : `float`
+            The latitude passed at construction, or 45.
         """
-        return self._observer_location
+        return self._observer_location["latitude"] if self._observer_location else 45.0
 
 
-def test_compute_pointing_model_uses_all_history_without_session_id():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_compute_pointing_model_uses_all_history_without_session_id() -> None:
     """Verify no session_id reads all-history, not session-scoped attempts."""
     logger_interface = _FakeLoggerInterface(all_attempts=_ATTEMPTS)
     observatory = _FakeObservatory(observer_location={"latitude": 39.7, "longitude": -105.0})
@@ -86,7 +86,7 @@ def test_compute_pointing_model_uses_all_history_without_session_id():  # ruff: 
     assert logger_interface.last_session_id is None
 
 
-def test_compute_pointing_model_uses_session_scoped_attempts_when_given():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_compute_pointing_model_uses_session_scoped_attempts_when_given() -> None:
     """Verify a session_id reads session-scoped attempts, not all-history."""
     session_attempts = _ATTEMPTS[:2]
     logger_interface = _FakeLoggerInterface(all_attempts=_ATTEMPTS, session_attempts=session_attempts)
@@ -98,7 +98,7 @@ def test_compute_pointing_model_uses_session_scoped_attempts_when_given():  # ru
     assert logger_interface.last_session_id == "s1"
 
 
-def test_compute_pointing_model_falls_back_to_default_latitude_when_unconfigured():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_compute_pointing_model_falls_back_to_default_latitude_when_unconfigured() -> None:
     """Verify a missing observer location doesn't raise, uses the default."""
     logger_interface = _FakeLoggerInterface(all_attempts=_ATTEMPTS)
     observatory = _FakeObservatory(observer_location=None)
@@ -108,7 +108,7 @@ def test_compute_pointing_model_falls_back_to_default_latitude_when_unconfigured
     assert isinstance(model, MountPointingModel)
 
 
-def test_compute_pointing_model_never_persists_anything():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_compute_pointing_model_never_persists_anything() -> None:
     """Verify the session-scoped model carries no id/persistence fields.
 
     Regression guard for the plan's explicit invariant: `MountPointingModel`

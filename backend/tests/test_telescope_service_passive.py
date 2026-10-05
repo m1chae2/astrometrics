@@ -50,7 +50,7 @@ def test_get_status_polls_external_guiding() -> None:
     guiding_service_mock.get_status.return_value = {"history": [{"time": 100, "dra": 0.1, "ddec": -0.1}]}
 
     wayfinder_mock = MagicMock()
-    wayfinder_mock.control.get_telescope_status.return_value = {
+    wayfinder_mock.control.mount.status.return_value = {
         "ra": "20h 00m 00s",
         "dec": "+22° 00m 00s",
         "trackingStatus": "Tracking",

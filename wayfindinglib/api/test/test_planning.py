@@ -12,7 +12,7 @@ from datetime import date
 
 import pytest
 
-from wayfindinglib.api.planning_registry import ObservationPlanning
+from wayfindinglib.api.planning import ObservationPlanning
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.models.equipment_and_site.equipment import Telescope
 from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
@@ -269,7 +269,7 @@ def test_sky_engine_is_constructed_once_under_concurrent_first_access(isolated_b
     assert all(engine is engines[0] for engine in engines)
 
 
-def test_planning_module_tree_imports_no_device_driver():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_planning_module_tree_imports_no_device_driver() -> None:
     """Verify no planning_tasks/api source file imports the INDI device layer.
 
     A static source-level check of "Planning Is Hardware-Free"
@@ -284,7 +284,7 @@ def test_planning_module_tree_imports_no_device_driver():  # ruff: ignore[missin
     import pathlib
 
     planning_root = pathlib.Path(__file__).resolve().parents[2] / "tasks" / "planning_tasks"
-    api_file = pathlib.Path(__file__).resolve().parents[1] / "planning_registry.py"
+    api_file = pathlib.Path(__file__).resolve().parents[1] / "planning.py"
     forbidden_substrings = ("wayfindinglib.drivers.indi", "import PyIndi", "from PyIndi")
 
     offending_files = []

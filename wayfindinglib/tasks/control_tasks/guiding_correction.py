@@ -174,7 +174,8 @@ def compute_guiding_correction(
         and `guiding_max_pulse_ms`.
     mount_model : `GuidingSpectrumAnalysis` | `None`, optional
         The active telescope's persisted, cross-night periodic-error/
-        backlash model (`ObservatoryControl.active_guiding_spectrum_analysis`).
+        backlash model (the ``spectrum_analysis`` section of
+        `control.guiding.status`).
         `None` (default) disables all feedforward, reproducing the
         pre-M7b reactive-only behavior exactly.
     elapsed_guiding_seconds : `float` | `None`, optional

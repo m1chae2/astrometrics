@@ -10,7 +10,7 @@ different.
 from typing import Any
 
 from astrometricslib import observing_night_id
-from wayfindinglib.api.control_registry import ObservatoryControl
+from wayfindinglib import ObservatoryControl
 from wayfindinglib.api.test.guiding_night_helpers import FIRST_NIGHT, record_guiding_night
 from wayfindinglib.models.session.capture_frame import CaptureFrame, StackSaturationVerdict
 from wayfindinglib.models.session.ekos_session import EkosCapture, EkosSessionContext
@@ -65,7 +65,7 @@ def record_ekos_captures(control: ObservatoryControl, day: int, count: int, expo
     """
     start = FIRST_NIGHT + day * 86400.0
     night = observing_night_id(start)
-    control._butler.put(
+    control._context.butler.put(
         EkosSessionContext(
             id=f"capture-{night}",
             session_id=night,

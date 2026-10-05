@@ -18,7 +18,7 @@ This includes:
 
 ### MCP Servers
 
-The project runs five MCP servers. For an AI client they look things up, calculate and measure, and one tool (`observatory_sync_remote_frames`) brings frames from the telescope into the library. None commands a device. The servers are started from `.mcp.json` (a developer session) or `.claude/companion.mcp.json` (a read-only companion session).
+The project runs five MCP servers. For an AI client they look things up, calculate and measure, and one tool (`observatory_remote_sync_frames`) brings frames from the telescope into the library. None commands a device. The servers are started from `.mcp.json` (a developer session) or `.claude/companion.mcp.json` (a read-only companion session).
 
 | Server | Start command | What it offers an AI |
 |---|---|---|

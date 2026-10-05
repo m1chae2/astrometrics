@@ -1,28 +1,32 @@
-"""Purpose: Unit tests for the ObservatoryControl astrometrics.
+"""Purpose: Unit tests for `ObservatoryControl` and its seven children.
 
-Description: Verifies equipment activation/resolution round-trips,
-correction methods delegate with resolved calibration (raising when
-none exists for the active pairing), the safety monitor's hysteresis
-state is carried across calls made through the same astrometrics instance,
-safe-state and capability-promotion delegation work end to end, and
-that constructing the high-level interface and calling its non-hardware methods
-never imports the INDI driver layer.
+Description: Verifies equipment activation round-trips, that the
+correction methods use the saved calibration (and refuse when none
+exists for the active pairing), that the safety monitor's hysteresis is
+kept across calls through the same `control`, that safe-state and
+capability promotion work end to end, that the hardware commands reach
+the simulator, and that the non-hardware methods never import the INDI
+driver layer.
 """
 
 import os
 import time
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
+from pytest_mock import MockerFixture
 
-from astrometricslib import ConflictError, PermissionDeniedError
-from wayfindinglib.api.control_registry import ObservatoryControl
+from astrometricslib import AppConfiguration, ConfigurationError, ConflictError, PermissionDeniedError
+from wayfindinglib import ObservatoryControl, SkyPosition
+from wayfindinglib.api.control import equipment, guiding, imaging, mount, safety
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.models.equipment_and_site.enclosure import Enclosure, EnclosureType
 from wayfindinglib.models.equipment_and_site.guider_calibration import GuiderCalibration
 from wayfindinglib.models.policy.delegation import DelegationState, ObservatoryCapability
 from wayfindinglib.models.policy.safety import SafetyRule, SafetyRuleSet, SafetyVerdict
+from wayfindinglib.tasks.control_tasks import night_analysis
 from wayfindinglib.tasks.control_tasks.safe_state import SafeStateSteps
 
 _NOW = datetime(2026, 8, 5, 4, 0, 0, tzinfo=UTC)
@@ -55,7 +59,7 @@ def utc_host_timezone() -> Iterator[None]:
 
 
 @pytest.fixture
-def app_config(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def app_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AppConfiguration:
     """Build a real, isolated AppConfiguration and matching DiskButler.
 
     Returns
@@ -73,7 +77,7 @@ def app_config(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-arg
 
 
 @pytest.fixture
-def control(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def control(app_config: AppConfiguration) -> ObservatoryControl:
     """Build an ObservatoryControl backed by the isolated app_config/butler.
 
     Returns
@@ -85,7 +89,8 @@ def control(app_config):  # ruff: ignore[missing-type-function-argument, missing
     return ObservatoryControl(config=app_config, butler=butler)
 
 
-def _configure_active_rig(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _configure_active_rig(app_config: AppConfiguration) -> None:
+    """Make one telescope and one camera the active rig."""
     app_config.update_config({
         "Observatory.Telescope": {"models": "Rig A", "active_telescope": "Rig A"},
         "Observatory.Telescope.Rig A": {"focal_length_mm": "450.0", "focal_ratio": "6.0"},
@@ -98,51 +103,61 @@ def _configure_active_rig(app_config):  # ruff: ignore[missing-type-function-arg
     })
 
 
-def test_set_active_telescope_and_camera_round_trip(control, app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_set_active_telescope_and_camera_round_trip(
+    control: ObservatoryControl, app_config: AppConfiguration
+) -> None:
     """Verify equipment activation records and resolves via active_*()."""
     _configure_active_rig(app_config)
-    assert control.set_active_telescope("Rig A") is True
-    assert control.set_active_camera("CamA") is True
-    assert control.active_telescope().id == "Rig A"
-    assert control.active_camera().id == "CamA"
+    assert control.equipment.set_active_telescope("Rig A") is True
+    assert control.equipment.set_active_camera("CamA") is True
+    assert control.equipment.status(include=["telescope"]).telescope.id == "Rig A"
+    assert control.equipment.status(include=["camera"]).camera.id == "CamA"
 
 
-def test_guider_plate_scale_falls_back_to_main_telescope_with_no_active_rig(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_guider_plate_scale_falls_back_to_main_telescope_with_no_active_rig(
+    control: ObservatoryControl,
+) -> None:
     """Verify guider_plate_scale_arcsec_per_px() is None with no active rig."""
-    assert control.guider_plate_scale_arcsec_per_px() is None
+    assert control.guiding.status(include=["plate_scale"]).plate_scale_arcsec_per_px is None
 
 
-def test_guider_plate_scale_uses_main_telescope_with_no_guide_scope_configured(control, app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_guider_plate_scale_uses_main_telescope_with_no_guide_scope_configured(
+    control: ObservatoryControl, app_config: AppConfiguration
+) -> None:
     """Verify the guide-aware plate scale matches the main one, by default."""
     _configure_active_rig(app_config)
-    control.set_active_telescope("Rig A")
-    control.set_active_camera("CamA")
+    control.equipment.set_active_telescope("Rig A")
+    control.equipment.set_active_camera("CamA")
 
-    assert control.active_guide_scope() is None
-    plate_scale = control.guider_plate_scale_arcsec_per_px()
+    assert control.equipment.status(include=["guide_scope"]).guide_scope is None
+    plate_scale = control.guiding.status(include=["plate_scale"]).plate_scale_arcsec_per_px
     expected = 206.265 * 3.76 / 450.0
     assert plate_scale == pytest.approx(expected, abs=1e-4)
 
 
-def test_guider_plate_scale_uses_active_guide_scope_focal_length(control, app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_guider_plate_scale_uses_active_guide_scope_focal_length(
+    control: ObservatoryControl, app_config: AppConfiguration
+) -> None:
     """Verify an active guide scope's focal length replaces the telescope's."""
     _configure_active_rig(app_config)
     app_config.update_config({
         "Observatory.GuideScope": {"models": "Orion 50mm", "active_guide_scope": "Orion 50mm"},
         "Observatory.GuideScope.Orion 50mm": {"focal_length_mm": "162.0"},
     })
-    control.set_active_telescope("Rig A")
-    control.set_active_camera("CamA")
+    control.equipment.set_active_telescope("Rig A")
+    control.equipment.set_active_camera("CamA")
 
-    assert control.active_guide_scope().id == "Orion 50mm"
-    plate_scale = control.guider_plate_scale_arcsec_per_px()
+    assert control.equipment.status(include=["guide_scope"]).guide_scope.id == "Orion 50mm"
+    plate_scale = control.guiding.status(include=["plate_scale"]).plate_scale_arcsec_per_px
     main_plate_scale = 206.265 * 3.76 / 450.0
     guide_plate_scale = 206.265 * 3.76 / 162.0
     assert plate_scale == pytest.approx(guide_plate_scale, abs=1e-4)
     assert plate_scale != pytest.approx(main_plate_scale, abs=1e-4)
 
 
-def test_guider_plate_scale_uses_the_active_guide_camera_pixel_size(control, app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_guider_plate_scale_uses_the_active_guide_camera_pixel_size(
+    control: ObservatoryControl, app_config: AppConfiguration
+) -> None:
     """Verify a guide camera's pixel size is used, not the main one's."""
     _configure_active_rig(app_config)
     app_config.update_config({
@@ -155,11 +170,13 @@ def test_guider_plate_scale_uses_the_active_guide_camera_pixel_size(control, app
             "sensor_height_px": "960",
         },
     })
-    control.set_active_telescope("Rig A")
-    control.set_active_camera("CamA")
+    control.equipment.set_active_telescope("Rig A")
+    control.equipment.set_active_camera("CamA")
 
-    assert control.active_guide_camera().id == "GuideCam"
-    assert control.guider_plate_scale_arcsec_per_px() == pytest.approx(206.265 * 3.75 / 162.0, abs=1e-4)
+    assert control.equipment.status(include=["guide_camera"]).guide_camera.id == "GuideCam"
+    assert control.guiding.status(include=["plate_scale"]).plate_scale_arcsec_per_px == pytest.approx(
+        206.265 * 3.75 / 162.0, abs=1e-4
+    )
 
 
 _EKOS_GUIDE_LOG = (
@@ -183,12 +200,12 @@ _EKOS_ANALYZE_LOG = (
 )
 
 
-def test_ingest_ekos_session_logs_stores_samples_and_a_retrievable_session(  # ruff: ignore[missing-return-type-undocumented-public-function]
-    control,  # ruff: ignore[missing-type-function-argument]
-    app_config,  # ruff: ignore[missing-type-function-argument]
-    tmp_path,  # ruff: ignore[missing-type-function-argument]
-    utc_host_timezone,  # ruff: ignore[missing-type-function-argument]
-):
+def test_ingest_ekos_session_logs_stores_samples_and_a_retrievable_session(
+    control: ObservatoryControl,
+    app_config: AppConfiguration,
+    tmp_path: Path,
+    utc_host_timezone: None,
+) -> None:
     """Verify the whole chain with a real Butler and a real log database."""
     (tmp_path / "science_library").mkdir()
     app_config.update_config({"Image Library": {"path": str(tmp_path / "science_library")}})
@@ -197,28 +214,28 @@ def test_ingest_ekos_session_logs_stores_samples_and_a_retrievable_session(  # r
     (logs_directory / "guide_log-2026-09-23T20-43-05.txt").write_text(_EKOS_GUIDE_LOG, encoding="utf-8")
     (logs_directory / "ekos-2026-09-23T20-31-48.analyze").write_text(_EKOS_ANALYZE_LOG, encoding="utf-8")
 
-    summary = control.ingest_ekos_session_logs(destination_dir=str(logs_directory), download=False)
+    summary = control.remote.sync_logs(destination_dir=str(logs_directory), download=False)
 
     assert summary["guide_samples_stored"] == 1
     assert summary["session_contexts_stored"] == 1
     assert summary["nights"] == ["2026-09-23"]
-    (listed,) = control.list_ekos_session_summaries()
+    (listed,) = control.history.query(kind="ekos_sessions")["sessions"]
     assert listed["id"] == "2026-09-23T20-31-48"
     assert listed["captures"] == 1
     assert "guide_focal_mm=121" in listed["equipmentFingerprint"]
-    context = control.get_ekos_session_context("2026-09-23T20-31-48")
+    context = night_analysis.ekos_session_record(control._context, "2026-09-23T20-31-48")
     assert context.equipment.guide_pixel_scale_arcsec_per_px == pytest.approx(6.39)
-    (run,) = control.list_guiding_runs()
+    (run,) = night_analysis.guiding_runs(control._context)
     assert run.session_id == "2026-09-23"
-    assert control.list_guiding_runs("1999-01-01") == []
+    assert night_analysis.guiding_runs(control._context, "1999-01-01") == []
 
 
-def test_ingest_ekos_session_logs_twice_does_not_duplicate_anything(  # ruff: ignore[missing-return-type-undocumented-public-function]
-    control,  # ruff: ignore[missing-type-function-argument]
-    app_config,  # ruff: ignore[missing-type-function-argument]
-    tmp_path,  # ruff: ignore[missing-type-function-argument]
-    utc_host_timezone,  # ruff: ignore[missing-type-function-argument]
-):
+def test_ingest_ekos_session_logs_twice_does_not_duplicate_anything(
+    control: ObservatoryControl,
+    app_config: AppConfiguration,
+    tmp_path: Path,
+    utc_host_timezone: None,
+) -> None:
     """Verify a repeat run leaves one sample and one session record."""
     (tmp_path / "science_library").mkdir()
     app_config.update_config({"Image Library": {"path": str(tmp_path / "science_library")}})
@@ -227,19 +244,19 @@ def test_ingest_ekos_session_logs_twice_does_not_duplicate_anything(  # ruff: ig
     (logs_directory / "guide_log-2026-09-23T20-43-05.txt").write_text(_EKOS_GUIDE_LOG, encoding="utf-8")
     (logs_directory / "ekos-2026-09-23T20-31-48.analyze").write_text(_EKOS_ANALYZE_LOG, encoding="utf-8")
 
-    control.ingest_ekos_session_logs(destination_dir=str(logs_directory), download=False)
-    control.ingest_ekos_session_logs(destination_dir=str(logs_directory), download=False)
+    control.remote.sync_logs(destination_dir=str(logs_directory), download=False)
+    control.remote.sync_logs(destination_dir=str(logs_directory), download=False)
 
-    assert len(control.list_ekos_session_summaries()) == 1
-    assert len(control._logger_interface.get_guiding_logs()) == 1
+    assert len(control.history.query(kind="ekos_sessions")["sessions"]) == 1
+    assert len(control._context.logger_interface.get_guiding_logs()) == 1
 
 
-def test_get_ekos_session_context_is_none_for_an_unknown_session(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_get_ekos_session_context_is_none_for_an_unknown_session(control: ObservatoryControl) -> None:
     """Verify asking for a session that was never recorded gives None."""
-    assert control.get_ekos_session_context("1999-01-01T00-00-00") is None
+    assert night_analysis.ekos_session_record(control._context, "1999-01-01T00-00-00") is None
 
 
-def _configure_two_rigs(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _configure_two_rigs(app_config: AppConfiguration) -> None:
     """Configure two complete equipment setups, a short and a long one."""
     app_config.update_config({
         "Observatory.Telescope": {"models": "Short, Long", "active_telescope": "Short"},
@@ -271,12 +288,14 @@ def _configure_two_rigs(app_config):  # ruff: ignore[missing-type-function-argum
     })
 
 
-def test_the_performance_envelope_is_none_without_active_equipment(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_the_performance_envelope_is_none_without_active_equipment(control: ObservatoryControl) -> None:
     """Verify no telescope and camera means no envelope, not a made-up one."""
-    assert control.get_performance_envelope() is None
+    assert control.history.get_performance_envelope() is None
 
 
-def test_changing_the_active_equipment_changes_every_limit_with_no_other_step(control, app_config, tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_changing_the_active_equipment_changes_every_limit_with_no_other_step(
+    control: ObservatoryControl, app_config: AppConfiguration, tmp_path: Path
+) -> None:
     """Verify the limits follow the equipment automatically.
 
     The requirement this tests: nothing about the limits is stored, so
@@ -287,13 +306,13 @@ def test_changing_the_active_equipment_changes_every_limit_with_no_other_step(co
     app_config.update_config({"Image Library": {"path": str(tmp_path / "science_library")}})
     _configure_two_rigs(app_config)
 
-    before = control.get_performance_envelope()
+    before = control.history.get_performance_envelope()
     app_config.update_config({
         "Observatory.Telescope": {"active_telescope": "Long"},
         "Observatory.Camera": {"default_primary_camera": "Main B"},
         "Observatory.GuideScope": {"active_guide_scope": "Guide 240"},
     })
-    after = control.get_performance_envelope()
+    after = control.history.get_performance_envelope()
 
     assert before.value("imaging_plate_scale") == pytest.approx(206.265 * 3.76 / 400.0)
     assert after.value("imaging_plate_scale") == pytest.approx(206.265 * 5.94 / 1000.0)
@@ -304,40 +323,46 @@ def test_changing_the_active_equipment_changes_every_limit_with_no_other_step(co
     assert "telescope=long" in after.equipment_fingerprint
 
 
-def test_the_envelope_is_honest_about_data_a_new_setup_does_not_have_yet(control, app_config, tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_the_envelope_is_honest_about_data_a_new_setup_does_not_have_yet(
+    control: ObservatoryControl, app_config: AppConfiguration, tmp_path: Path
+) -> None:
     """Verify a setup with no frames or sessions gets no measured limits."""
     (tmp_path / "science_library").mkdir()
     app_config.update_config({"Image Library": {"path": str(tmp_path / "science_library")}})
     _configure_two_rigs(app_config)
 
-    envelope = control.get_performance_envelope()
+    envelope = control.history.get_performance_envelope()
 
     for name in ("guiding_rms_limit", "trailing_limit", "guide_snr_low_limit", "guiding_rms_high_limit"):
         assert envelope.value(name) is None
         assert envelope.thresholds[name].status.value == "insufficient_data"
 
 
-def test_compute_pointing_correction_delegates_with_astrometrics_config(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_compute_pointing_correction_delegates_with_astrometrics_config(control: ObservatoryControl) -> None:
     """Verify compute_pointing_correction forwards to the task function."""
-    correction = control.compute_pointing_correction("frame-1", 180.0, 0.0, 180.0, 0.0, iteration=1)
+    correction = control.mount.compute_pointing_correction("frame-1", 180.0, 0.0, 180.0, 0.0, iteration=1)
     assert correction.converged is True
 
 
-def test_compute_guiding_correction_raises_without_calibration(control, app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_compute_guiding_correction_raises_without_calibration(
+    control: ObservatoryControl, app_config: AppConfiguration
+) -> None:
     """Verify guiding correction raises with no calibration for the pairing."""
     _configure_active_rig(app_config)
-    control.set_active_telescope("Rig A")
-    control.set_active_camera("CamA")
+    control.equipment.set_active_telescope("Rig A")
+    control.equipment.set_active_camera("CamA")
 
-    with pytest.raises(ValueError, match="No GuiderCalibration"):
-        control.compute_guiding_correction("frame-1", 5.0, 0.0)
+    with pytest.raises(ConfigurationError, match="No GuiderCalibration"):
+        control.guiding.compute_correction("frame-1", 5.0, 0.0)
 
 
-def test_compute_guiding_correction_succeeds_with_saved_calibration(control, app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_compute_guiding_correction_succeeds_with_saved_calibration(
+    control: ObservatoryControl, app_config: AppConfiguration
+) -> None:
     """Verify guiding correction resolves a saved calibration."""
     _configure_active_rig(app_config)
-    control.set_active_telescope("Rig A")
-    control.set_active_camera("CamA")
+    control.equipment.set_active_telescope("Rig A")
+    control.equipment.set_active_camera("CamA")
 
     calibration = GuiderCalibration(
         id="cal-1",
@@ -348,13 +373,15 @@ def test_compute_guiding_correction_succeeds_with_saved_calibration(control, app
         ra_rate_arcsec_per_sec=10.0,
         dec_rate_arcsec_per_sec=10.0,
     )
-    control.save_guider_calibration(calibration)
+    control.guiding.save_calibration(calibration)
 
-    correction = control.compute_guiding_correction("frame-1", 5.0, 0.0)
+    correction = control.guiding.compute_correction("frame-1", 5.0, 0.0)
     assert correction.pulse_ra_ms > 0
 
 
-def test_compute_guiding_correction_auto_resolves_persisted_mount_model(control, app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_compute_guiding_correction_auto_resolves_persisted_mount_model(
+    control: ObservatoryControl, app_config: AppConfiguration
+) -> None:
     """Verify guiding correction feeds forward the saved spectrum analysis.
 
     Unlike `pointing_model` (session-scoped, never auto-resolved), the
@@ -365,8 +392,8 @@ def test_compute_guiding_correction_auto_resolves_persisted_mount_model(control,
     from wayfindinglib.models.session.telemetry import GuidingSpectrumAnalysis
 
     _configure_active_rig(app_config)
-    control.set_active_telescope("Rig A")
-    control.set_active_camera("CamA")
+    control.equipment.set_active_telescope("Rig A")
+    control.equipment.set_active_camera("CamA")
 
     calibration = GuiderCalibration(
         id="cal-1",
@@ -377,8 +404,8 @@ def test_compute_guiding_correction_auto_resolves_persisted_mount_model(control,
         ra_rate_arcsec_per_sec=10.0,
         dec_rate_arcsec_per_sec=10.0,
     )
-    control.save_guider_calibration(calibration)
-    control.save_guiding_spectrum_analysis(
+    control.guiding.save_calibration(calibration)
+    control.guiding.save_spectrum_analysis(
         GuidingSpectrumAnalysis(
             sample_count=100,
             duration_seconds=3600.0,
@@ -389,12 +416,12 @@ def test_compute_guiding_correction_auto_resolves_persisted_mount_model(control,
 
     # At phase=0.25, the modeled sinusoid peaks -- a feedforward pulse
     # is issued even with zero measured drift, well within the deadband.
-    correction = control.compute_guiding_correction("frame-2", 0.0, 0.0, elapsed_guiding_seconds=480.0 * 0.25)
+    correction = control.guiding.compute_correction("frame-2", 0.0, 0.0, elapsed_guiding_seconds=480.0 * 0.25)
     assert correction.pulse_ra_ms != 0
     assert correction.suppressed_by_deadband is False
 
 
-def test_compute_pointing_correction_feeds_forward_a_passed_in_model(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_compute_pointing_correction_feeds_forward_a_passed_in_model(control: ObservatoryControl) -> None:
     """Verify pointing correction feeds forward a caller-supplied model.
 
     Unlike guiding's mount model, `pointing_model` is never auto-resolved
@@ -406,10 +433,10 @@ def test_compute_pointing_correction_feeds_forward_a_passed_in_model(control):  
         sample_count=10, raw_rms_arcsec=8.0, residual_rms_arcsec=0.0, id_arcsec=8.0, confidence="high"
     )
 
-    without_model = control.compute_pointing_correction(
+    without_model = control.mount.compute_pointing_correction(
         "frame-3", 180.0, 0.0, 180.0, -8.0 / 3600.0, iteration=1
     )
-    with_model = control.compute_pointing_correction(
+    with_model = control.mount.compute_pointing_correction(
         "frame-3", 180.0, 0.0, 180.0, -8.0 / 3600.0, iteration=1, pointing_model=model
     )
 
@@ -417,89 +444,112 @@ def test_compute_pointing_correction_feeds_forward_a_passed_in_model(control):  
     assert with_model.unexplained_residual_arcsec == pytest.approx(0.0, abs=1e-6)
 
 
-def test_save_and_active_guiding_spectrum_analysis_round_trip(control, app_config, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_save_and_active_guiding_spectrum_analysis_round_trip(
+    control: ObservatoryControl, app_config: AppConfiguration, mocker: MockerFixture
+) -> None:
     """Verify the standing spectrum analysis persists keyed by telescope."""
     from wayfindinglib.models.session.telemetry import GuidingSpectrumAnalysis
 
     _configure_active_rig(app_config)
-    control.set_active_telescope("Rig A")
+    control.equipment.set_active_telescope("Rig A")
 
-    assert control.active_guiding_spectrum_analysis() is None
+    assert control.guiding.status(include=["spectrum_analysis"]).spectrum_analysis is None
 
     analysis = GuidingSpectrumAnalysis(sample_count=10, duration_seconds=60.0)
-    control.save_guiding_spectrum_analysis(analysis)
+    control.guiding.save_spectrum_analysis(analysis)
 
-    persisted = control.active_guiding_spectrum_analysis()
+    persisted = control.guiding.status(include=["spectrum_analysis"]).spectrum_analysis
     assert persisted is not None
     assert persisted.id == "Rig A"
     assert persisted.telescope_id == "Rig A"
     assert persisted.sample_count == 10
 
 
-def test_ingest_guiding_log_file_delegates_to_the_task_module(mocker, control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify ingest_guiding_log_file forwards to guiding_log_ingestion."""
+def test_refit_spectrum_reads_one_guide_log_through_the_task_module(
+    mocker: MockerFixture, control: ObservatoryControl
+) -> None:
+    """Verify refit_spectrum(file_path=...) reads that one log."""
     from wayfindinglib.tasks.control_tasks import guiding_log_ingestion
 
     fake_logger_interface = mocker.Mock()
-    control._logger_interface = fake_logger_interface
+    control._context.logger_interface = fake_logger_interface
     mocker.patch.object(guiding_log_ingestion, "ingest_guide_log_file", return_value="analysis")
 
-    result = control.ingest_guiding_log_file("/tmp/log.txt", target_name="M 81")
+    result = control.guiding.refit_spectrum(file_path="/tmp/log.txt", target_name="M 81")
 
     assert result == "analysis"
     guiding_log_ingestion.ingest_guide_log_file.assert_called_once_with(
-        control, fake_logger_interface, "/tmp/log.txt", "M 81"
+        control._context, fake_logger_interface, "/tmp/log.txt", "M 81"
     )
 
 
-def test_fetch_and_ingest_new_guide_logs_delegates_to_the_task_module(mocker, control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify fetch_and_ingest_new_guide_logs forwards to the task module."""
+def test_refit_spectrum_downloads_guide_logs_through_the_task_module(
+    mocker: MockerFixture, control: ObservatoryControl
+) -> None:
+    """Verify refit_spectrum(download=True) downloads every guide log first."""
     from wayfindinglib.tasks.control_tasks import guiding_log_ingestion
 
     fake_logger_interface = mocker.Mock()
-    control._logger_interface = fake_logger_interface
+    control._context.logger_interface = fake_logger_interface
     mocker.patch.object(guiding_log_ingestion, "fetch_and_ingest_new_guide_logs", return_value="analysis")
 
-    result = control.fetch_and_ingest_new_guide_logs("/tmp/guiding", target_name="M 81")
+    result = control.guiding.refit_spectrum(download=True, destination_dir="/tmp/guiding", target_name="M 81")
 
     assert result == "analysis"
     guiding_log_ingestion.fetch_and_ingest_new_guide_logs.assert_called_once_with(
-        control, fake_logger_interface, "/tmp/guiding", "M 81"
+        control._context, fake_logger_interface, "/tmp/guiding", "M 81"
     )
 
 
-def test_get_pointing_model_delegates_to_the_task_module(mocker, control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify get_pointing_model forwards to pointing_log_ingestion."""
+def test_refit_spectrum_and_sync_logs_refuse_arguments_they_do_not_use(control: ObservatoryControl) -> None:
+    """Verify an argument that the chosen source does not use is an error."""
+    from astrometricslib import InvalidArgumentError
+
+    with pytest.raises(InvalidArgumentError, match="session_id"):
+        control.guiding.refit_spectrum(session_id="2026-09-24", file_path="/tmp/log.txt")
+    with pytest.raises(InvalidArgumentError, match="target_name"):
+        control.guiding.refit_spectrum(target_name="M 81")
+    with pytest.raises(InvalidArgumentError, match="dry_run"):
+        control.remote.sync_logs(dry_run=True, download=False)
+
+
+def test_pointing_model_query_delegates_to_the_task_module(
+    mocker: MockerFixture, control: ObservatoryControl
+) -> None:
+    """Verify the pointing-model query forwards to the task module."""
     from wayfindinglib.tasks.control_tasks import pointing_log_ingestion
 
     fake_logger_interface = mocker.Mock()
-    control._logger_interface = fake_logger_interface
-    mocker.patch.object(pointing_log_ingestion, "compute_pointing_model", return_value="model")
+    control._context.logger_interface = fake_logger_interface
+    mocker.patch.object(control._context, "observer_location", return_value={"latitude": 40.0})
+    mocker.patch.object(pointing_log_ingestion, "compute_pointing_model", return_value={"me": 1.0})
 
-    result = control.get_pointing_model(session_id="s1")
+    result = control.history.query(kind="pointing_model", session_id="s1")
 
-    assert result == "model"
+    assert result["model"] == {"me": 1.0}
     pointing_log_ingestion.compute_pointing_model.assert_called_once_with(
-        control, fake_logger_interface, "s1"
+        control._context, fake_logger_interface, "s1"
     )
 
 
-def test_logger_interface_lazily_builds_from_config(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_logger_interface_lazily_builds_from_config(control: ObservatoryControl) -> None:
     """Verify `_logger_interface` lazily builds a real LoggerInterface once."""
     from astrometricslib import LoggerInterface
 
-    logger_interface = control._logger_interface
+    logger_interface = control._context.logger_interface
     assert isinstance(logger_interface, LoggerInterface)
-    assert control._logger_interface is logger_interface
+    assert control._context.logger_interface is logger_interface
 
 
-def test_run_guider_calibration_persists_the_derived_calibration(control, app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_run_guider_calibration_persists_the_derived_calibration(
+    control: ObservatoryControl, app_config: AppConfiguration
+) -> None:
     """Verify run_guider_calibration sequences steps and saves the result."""
     from wayfindinglib.tasks.control_tasks.calibration_routines import GuiderCalibrationSteps
 
     _configure_active_rig(app_config)
-    control.set_active_telescope("Rig A")
-    control.set_active_camera("CamA")
+    control.equipment.set_active_telescope("Rig A")
+    control.equipment.set_active_camera("CamA")
 
     centroids = iter([(0.0, 0.0), (10.0, 0.0), (10.0, 0.0), (10.0, 8.0)])
     steps = GuiderCalibrationSteps(
@@ -508,24 +558,26 @@ def test_run_guider_calibration_persists_the_derived_calibration(control, app_co
         measure_guide_star_centroid=lambda: next(centroids),
     )
 
-    assert control.active_guider_calibration() is None
+    assert control.guiding.status(include=["calibration"]).calibration is None
 
-    calibration = control.run_guider_calibration(steps, "cal-1", "CamA", "Rig A", arcsec_per_pixel=2.0)
+    calibration = control.guiding.run_calibration(steps, "cal-1", "CamA", "Rig A", arcsec_per_pixel=2.0)
 
-    persisted = control.active_guider_calibration()
+    persisted = control.guiding.status(include=["calibration"]).calibration
     assert persisted is not None
     assert persisted.id == calibration.id
     assert persisted.ra_rate_arcsec_per_sec == pytest.approx(calibration.ra_rate_arcsec_per_sec)
 
 
-def test_run_backlash_calibration_delegates_to_the_task_module(mocker, control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_run_backlash_calibration_delegates_to_the_task_module(
+    mocker: MockerFixture, control: ObservatoryControl
+) -> None:
     """Verify run_backlash_calibration forwards to calibration_routines."""
     from wayfindinglib.tasks.control_tasks import calibration_routines
 
     steps = mocker.Mock()
     mocker.patch.object(calibration_routines, "run_backlash_calibration", return_value=150.0)
 
-    result = control.run_backlash_calibration(steps)
+    result = control.guiding.run_backlash_calibration(steps)
 
     assert result == pytest.approx(150.0)
     calibration_routines.run_backlash_calibration.assert_called_once_with(
@@ -533,33 +585,39 @@ def test_run_backlash_calibration_delegates_to_the_task_module(mocker, control):
     )
 
 
-def test_run_polar_alignment_assist_delegates_to_the_task_module(mocker, control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_run_polar_alignment_assist_delegates_to_the_task_module(
+    mocker: MockerFixture, control: ObservatoryControl
+) -> None:
     """Verify run_polar_alignment_assist forwards attempts and latitude."""
     from wayfindinglib.tasks.control_tasks import calibration_routines
 
     mocker.patch.object(calibration_routines, "run_polar_alignment_assist", return_value="model")
     attempts = [{"ra": 1.0, "dec": 2.0}]
 
-    result = control.run_polar_alignment_assist(attempts, latitude_deg=39.7)
+    result = control.mount.run_polar_alignment_assist(attempts, latitude_deg=39.7)
 
     assert result == "model"
     calibration_routines.run_polar_alignment_assist.assert_called_once_with(attempts, latitude_deg=39.7)
 
 
-def test_run_polar_alignment_assist_defaults_latitude_from_observer_location(mocker, control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_run_polar_alignment_assist_defaults_latitude_from_observer_location(
+    mocker: MockerFixture, control: ObservatoryControl
+) -> None:
     """Verify a missing explicit latitude falls back to observer location."""
     from wayfindinglib.tasks.control_tasks import calibration_routines
 
-    mocker.patch.object(control, "get_observer_location", return_value={"latitude": 39.7})
+    mocker.patch.object(control._context, "observer_location", return_value={"latitude": 39.7})
     mocker.patch.object(calibration_routines, "run_polar_alignment_assist", return_value="model")
     attempts = [{"ra": 1.0, "dec": 2.0}]
 
-    control.run_polar_alignment_assist(attempts)
+    control.mount.run_polar_alignment_assist(attempts)
 
     calibration_routines.run_polar_alignment_assist.assert_called_once_with(attempts, latitude_deg=39.7)
 
 
-def test_assess_safety_hysteresis_persists_across_calls_on_same_astrometrics(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_assess_safety_hysteresis_persists_across_calls_on_same_astrometrics(
+    control: ObservatoryControl,
+) -> None:
     """Verify the interface's SafetyMonitor carries hysteresis across calls."""
     rule_set = SafetyRuleSet(
         id="default",
@@ -570,21 +628,21 @@ def test_assess_safety_hysteresis_persists_across_calls_on_same_astrometrics(con
         ],
         settling_period_sec=900,
     )
-    control._butler.put(rule_set, "safety_rule_set", {"id": "default"})
+    control._context.butler.put(rule_set, "safety_rule_set", {"id": "default"})
 
-    unsafe = control.assess_safety({"wind_speed_kph": (50.0, _NOW)}, now=_NOW)
+    unsafe = control.safety.assess({"wind_speed_kph": (50.0, _NOW)}, now=_NOW)
     assert unsafe.verdict == SafetyVerdict.UNSAFE
 
     just_after = _NOW + timedelta(seconds=1)
-    still_settling = control.assess_safety({"wind_speed_kph": (5.0, just_after)}, now=just_after)
+    still_settling = control.safety.assess({"wind_speed_kph": (5.0, just_after)}, now=just_after)
     assert still_settling.verdict == SafetyVerdict.UNSAFE
 
     settled = _NOW + timedelta(seconds=900)
-    cleared = control.assess_safety({"wind_speed_kph": (5.0, settled)}, now=settled)
+    cleared = control.safety.assess({"wind_speed_kph": (5.0, settled)}, now=settled)
     assert cleared.verdict == SafetyVerdict.SAFE
 
 
-def test_refresh_safety_assessment_reflects_a_live_weather_reading(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_refresh_safety_assessment_reflects_a_live_weather_reading(control: ObservatoryControl) -> None:
     """Verify refresh_safety_assessment's verdict tracks a fed weather reading.
 
     Proof the M12 wiring is live, not just that `WeatherDriver` and
@@ -602,7 +660,7 @@ def test_refresh_safety_assessment_reflects_a_live_weather_reading(control):  # 
         ],
         settling_period_sec=1,
     )
-    control._butler.put(rule_set, "safety_rule_set", {"id": "default"})
+    control._context.butler.put(rule_set, "safety_rule_set", {"id": "default"})
 
     class _FakeWeatherDriver:
         """A stand-in `WeatherDriver` returning a settable fixed reading."""
@@ -611,7 +669,7 @@ def test_refresh_safety_assessment_reflects_a_live_weather_reading(control):  # 
             """Start with a safe wind reading."""
             self.reading = 5.0
 
-        async def get_readings(self):  # ruff: ignore[missing-return-type-private-function]
+        async def get_readings(self) -> dict[str, tuple[float, datetime]]:
             """Return the current fixed wind reading.
 
             Returns
@@ -624,15 +682,15 @@ def test_refresh_safety_assessment_reflects_a_live_weather_reading(control):  # 
     weather_driver = _FakeWeatherDriver()
     control.weather_driver = weather_driver
 
-    safe = control.refresh_safety_assessment()
+    safe = control.safety.status(include=["assessment"]).assessment
     assert safe.verdict == SafetyVerdict.SAFE
 
     weather_driver.reading = 50.0
-    unsafe = control.refresh_safety_assessment()
+    unsafe = control.safety.status(include=["assessment"]).assessment
     assert unsafe.verdict == SafetyVerdict.UNSAFE
 
 
-def test_execute_safe_state_delegates_to_task_function(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_execute_safe_state_delegates_to_task_function(control: ObservatoryControl) -> None:
     """Verify execute_safe_state runs the ordered sequence, returns outcome."""
     enclosure = Enclosure(
         id="enc-1",
@@ -650,35 +708,38 @@ def test_execute_safe_state_delegates_to_task_function(control):  # ruff: ignore
         close_session=lambda: True,
         enclosure=enclosure,
     )
-    outcome = control.execute_safe_state("unsafe_verdict", steps)
+    outcome = control.safety.execute_safe_state("unsafe_verdict", steps)
     assert outcome.failed_step is None
     assert outcome.enclosure_closed is True
 
 
-def test_apply_promotion_decision_and_summarize_divergence_evidence(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_apply_promotion_decision_and_the_divergence_status(control: ObservatoryControl) -> None:
     """Verify promotion delegation records and evidence summarizes."""
-    policy = control.apply_promotion_decision(
+    policy = control.safety.apply_promotion_decision(
         ObservatoryCapability.PLATE_SOLVE_ALIGNMENT, DelegationState.SHADOWED
     )
     assert policy.state_for(ObservatoryCapability.PLATE_SOLVE_ALIGNMENT) == DelegationState.SHADOWED
-    assert control.delegation_policy().state_for(ObservatoryCapability.PLATE_SOLVE_ALIGNMENT) == (
-        DelegationState.SHADOWED
+    assert control.safety.status(include=["delegation_policy"]).delegation_policy.state_for(
+        ObservatoryCapability.PLATE_SOLVE_ALIGNMENT
+    ) == (DelegationState.SHADOWED)
+
+    status = control.safety.status(
+        include=["divergence"], capability=ObservatoryCapability.PLATE_SOLVE_ALIGNMENT
     )
+    assert status.divergence["sample_count"] == 0
+    assert status.divergence["agreement_rate"] == pytest.approx(0.0)
 
-    summary = control.summarize_divergence_evidence(ObservatoryCapability.PLATE_SOLVE_ALIGNMENT)
-    assert summary.sample_count == 0
 
-
-def test_enter_monitoring_mode_always_fully_succeeds(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_enter_monitoring_mode_always_fully_succeeds(control: ObservatoryControl) -> None:
     """Verify monitoring mode moves every capability to DELEGATED."""
-    outcome = control.enter_monitoring_mode(evidence_note="going hands-off")
+    outcome = control.safety.enter_monitoring_mode(evidence_note="going hands-off")
 
     assert outcome.rejected == {}
     assert all(state == DelegationState.DELEGATED for state in outcome.applied.values())
     assert len(outcome.applied) == len(ObservatoryCapability)
 
 
-def test_enter_controller_mode_reports_partial_success(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_enter_controller_mode_reports_partial_success(control: ObservatoryControl) -> None:
     """Verify controller mode surfaces a partial BulkDelegationOutcome.
 
     Plan Verification (M8): from a fresh policy, only OBSERVATORY_SAFETY
@@ -686,25 +747,27 @@ def test_enter_controller_mode_reports_partial_success(control):  # ruff: ignore
     passing through SHADOWED -- the rest must be visibly rejected, not
     silently skipped or forced.
     """
-    outcome = control.enter_controller_mode()
+    outcome = control.safety.enter_controller_mode()
 
     assert outcome.applied == {
         ObservatoryCapability.OBSERVATORY_SAFETY: DelegationState.AUTHORITATIVE,
         ObservatoryCapability.MOUNT_CONTROL: DelegationState.AUTHORITATIVE,
     }
     assert ObservatoryCapability.AUTOGUIDING in outcome.rejected
-    assert control.delegation_policy().state_for(ObservatoryCapability.AUTOGUIDING) == (
-        DelegationState.DELEGATED
-    )
+    assert control.safety.status(include=["delegation_policy"]).delegation_policy.state_for(
+        ObservatoryCapability.AUTOGUIDING
+    ) == (DelegationState.DELEGATED)
 
 
-def test_enter_controller_mode_fully_succeeds_once_shadowed_and_calibrated(control, app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_enter_controller_mode_fully_succeeds_once_shadowed_and_calibrated(
+    control: ObservatoryControl, app_config: AppConfiguration
+) -> None:
     """Verify controller mode fully succeeds once every precondition is met."""
     from wayfindinglib.models.equipment_and_site.focus_model import ApproachDirection, FocusModel
 
     _configure_active_rig(app_config)
-    control.set_active_telescope("Rig A")
-    control.set_active_camera("CamA")
+    control.equipment.set_active_telescope("Rig A")
+    control.equipment.set_active_camera("CamA")
 
     calibration = GuiderCalibration(
         id="cal-1",
@@ -715,8 +778,8 @@ def test_enter_controller_mode_fully_succeeds_once_shadowed_and_calibrated(contr
         ra_rate_arcsec_per_sec=10.0,
         dec_rate_arcsec_per_sec=10.0,
     )
-    control.save_guider_calibration(calibration)
-    control.save_focus_model(
+    control.guiding.save_calibration(calibration)
+    control.imaging.save_focus_model(
         FocusModel(
             id="focus-1",
             camera_id="CamA",
@@ -731,15 +794,17 @@ def test_enter_controller_mode_fully_succeeds_once_shadowed_and_calibrated(contr
         ObservatoryCapability.AUTOGUIDING,
         ObservatoryCapability.AUTOFOCUS,
     ):
-        control.apply_promotion_decision(capability, DelegationState.SHADOWED)
+        control.safety.apply_promotion_decision(capability, DelegationState.SHADOWED)
 
-    outcome = control.enter_controller_mode()
+    outcome = control.safety.enter_controller_mode()
 
     assert outcome.rejected == {}
     assert all(state == DelegationState.AUTHORITATIVE for state in outcome.applied.values())
 
 
-def test_connect_lazily_initializes_every_configured_driver(control, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_connect_lazily_initializes_every_configured_driver(
+    control: ObservatoryControl, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify connect() lazily initializes the shared driver and succeeds.
 
     `._driver` (a bare alias for `.driver`) was retired in M5: nothing
@@ -749,48 +814,79 @@ def test_connect_lazily_initializes_every_configured_driver(control, monkeypatch
     """
     monkeypatch.setenv("ASTROMETRICS_TESTING", "1")
 
-    assert control.connect() is True
+    assert control.equipment.connect() is True
     assert control.driver is not None
 
 
-def test_sync_and_is_syncing_raise_without_configured_sync_service():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify sync()/is_syncing() raise in standalone mode."""
-    control = ObservatoryControl(config=object())
-
-    with pytest.raises(RuntimeError, match="standalone mode"):
-        control.sync("M 81")
-    with pytest.raises(RuntimeError, match="standalone mode"):
-        control.is_syncing("M 81")
-
-
-def test_remote_transfer_methods_delegate_to_the_task_module(mocker, control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify the four remote-transfer methods forward to tasks."""
+def test_remote_methods_delegate_to_the_task_module(
+    mocker: MockerFixture, control: ObservatoryControl
+) -> None:
+    """Verify list, check_connection and sync_frames forward to the tasks."""
     from wayfindinglib.tasks.control_tasks import remote_transfer_tasks
 
-    mocker.patch.object(remote_transfer_tasks, "list_remote_targets", return_value=["M 81"])
+    context = control._context
+    context.remote_transfer_driver = mocker.Mock(
+        resolve_remote_folder_name=lambda name: name.replace(" ", "_")
+    )
+    mocker.patch.object(remote_transfer_tasks, "list_remote_targets", return_value=["M_81", "Dark"])
     mocker.patch.object(remote_transfer_tasks, "list_remote_files", return_value=["frame1.fits"])
     mocker.patch.object(remote_transfer_tasks, "check_remote_connection", return_value=True)
     mocker.patch.object(remote_transfer_tasks, "download_remote_targets", return_value=True)
+    mocker.patch.object(remote_transfer_tasks, "sync_calibration_folder", return_value={"success": True})
+    mocker.patch.object(remote_transfer_tasks, "sync_target_frames", return_value={"dry_run": True})
+    mocker.patch.object(remote_transfer_tasks, "sync_all_remote_folders", return_value={"succeeded": []})
 
-    assert control.list_remote_targets() == ["M 81"]
-    remote_transfer_tasks.list_remote_targets.assert_called_once_with(control)
+    assert control.remote.list("folders") == ["M_81", "Dark"]
+    remote_transfer_tasks.list_remote_targets.assert_called_with(context)
 
-    assert control.list_remote_files("M 81") == ["frame1.fits"]
-    remote_transfer_tasks.list_remote_files.assert_called_once_with(control, "M 81")
+    assert control.remote.list("files", folder_name="M 81") == ["frame1.fits"]
+    remote_transfer_tasks.list_remote_files.assert_called_once_with(context, "M_81")
 
-    assert control.check_remote_connection() is True
-    remote_transfer_tasks.check_remote_connection.assert_called_once_with(control)
+    assert control.remote.check_connection() is True
+    remote_transfer_tasks.check_remote_connection.assert_called_once_with(context)
 
-    assert control.download_remote_targets("M 81", local_path="/local/M81") is True
+    assert control.remote.sync_frames("M 81", local_path="/local/M81") == {"success": True, "target": "M 81"}
     remote_transfer_tasks.download_remote_targets.assert_called_once_with(
-        control, "M 81", None, None, "/local/M81", True
+        context, "M 81", local_path="/local/M81"
     )
+    assert control.remote.sync_frames("Dark") == {"success": True}
+    remote_transfer_tasks.sync_calibration_folder.assert_called_once_with(context, "Dark")
+    assert control.remote.sync_frames("M 81", dry_run=True) == {"dry_run": True}
+    remote_transfer_tasks.sync_target_frames.assert_called_once_with(context, "M 81", True)
+    assert control.remote.sync_frames(register_job=False) == {"succeeded": []}
+    remote_transfer_tasks.sync_all_remote_folders.assert_called_once_with(context, None, False)
 
 
-def test_remote_transfer_driver_lazily_builds_stellarmate_interface(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_remote_list_refuses_a_folder_that_is_not_listed(
+    mocker: MockerFixture, control: ObservatoryControl
+) -> None:
+    """Verify a made-up folder name never reaches the remote shell."""
+    from astrometricslib import NotFoundError
+    from wayfindinglib.tasks.control_tasks import remote_transfer_tasks
+
+    control._context.remote_transfer_driver = mocker.Mock(resolve_remote_folder_name=lambda name: name)
+    mocker.patch.object(remote_transfer_tasks, "list_remote_targets", return_value=["M_81"])
+    listing = mocker.patch.object(remote_transfer_tasks, "list_remote_files")
+
+    with pytest.raises(NotFoundError):
+        control.remote.list("files", folder_name="M_81; rm -rf ~")
+    listing.assert_not_called()
+
+
+def test_sync_frames_refuses_arguments_its_case_does_not_use(control: ObservatoryControl) -> None:
+    """Verify sync_frames rejects arguments that the chosen case ignores."""
+    from astrometricslib import InvalidArgumentError
+
+    with pytest.raises(InvalidArgumentError, match="dry_run"):
+        control.remote.sync_frames(dry_run=True)
+    with pytest.raises(InvalidArgumentError, match="register_job"):
+        control.remote.sync_frames("M 81", register_job=True)
+
+
+def test_remote_transfer_driver_lazily_builds_stellarmate_interface(control: ObservatoryControl) -> None:
     """Verify remote_transfer_driver builds a cached StellarMateInterface.
 
-    M7: `ObservatoryControl.remote_transfer_driver` resolves once from
+    `control.remote_transfer_driver` resolves once from
     config (default ``"stellarmate"``) instead of every
     `remote_transfer_tasks.py` function constructing its own instance.
     """
@@ -804,30 +900,32 @@ def test_remote_transfer_driver_lazily_builds_stellarmate_interface(control):  #
     assert control.remote_transfer_driver is driver
 
 
-def test_remote_transfer_driver_can_be_injected_for_tests(mocker, control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_remote_transfer_driver_can_be_injected_for_tests(
+    mocker: MockerFixture, control: ObservatoryControl
+) -> None:
     """Verify the setter overrides the lazily-built driver."""
     fake_driver = mocker.Mock()
     control.remote_transfer_driver = fake_driver
     assert control.remote_transfer_driver is fake_driver
 
 
-def test_discover_unassociated_remote_targets_delegates_via_astrometrics(mocker, control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify discovery constructs a high-level interface and delegates."""
+def test_unassociated_folder_listing_delegates_to_the_task_module(
+    mocker: MockerFixture, control: ObservatoryControl
+) -> None:
+    """Verify list("unassociated_folders") hands the context to the task."""
     from wayfindinglib.tasks.control_tasks import remote_transfer_tasks
 
-    fake_astrometrics = mocker.Mock()
-    mocker.patch("astrometricslib.Astrometrics", return_value=fake_astrometrics)
     mocker.patch.object(
         remote_transfer_tasks, "discover_unassociated_remote_targets", return_value=["Unassociated"]
     )
 
-    assert control.discover_unassociated_remote_targets() == ["Unassociated"]
-    remote_transfer_tasks.discover_unassociated_remote_targets.assert_called_once_with(
-        control, fake_astrometrics.targets
-    )
+    assert control.remote.list("unassociated_folders") == ["Unassociated"]
+    remote_transfer_tasks.discover_unassociated_remote_targets.assert_called_once_with(control._context)
 
 
-def test_list_camera_profiles_and_get_equipment_configuration(control, app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_list_camera_profiles_and_get_equipment_configuration(
+    control: ObservatoryControl, app_config: AppConfiguration
+) -> None:
     """Verify the two equipment-config methods report the active rig."""
     app_config.update_config({
         "Observatory.Telescope": {"focal_length_mm": "450.0", "focal_ratio": "6.0"},
@@ -839,16 +937,16 @@ def test_list_camera_profiles_and_get_equipment_configuration(control, app_confi
         },
     })
 
-    profiles = control.list_camera_profiles()
+    profiles = control.equipment.status(include=["camera_profiles"]).camera_profiles
     assert len(profiles) == 1
     assert profiles[0]["name"] == "CamA"
 
-    configuration = control.get_equipment_configuration()
+    configuration = control.equipment.status(include=["configuration"]).configuration
     assert configuration is not None
     assert configuration["camera"]["name"] == "CamA"
 
 
-def test_save_and_get_commissioning_runs_round_trips(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_save_and_get_commissioning_runs_round_trips(control: ObservatoryControl) -> None:
     """Verify commissioning runs record and are returned by get_all."""
     from wayfindinglib.models.policy.commissioning import CommissioningObservation, CommissioningRun
 
@@ -865,20 +963,20 @@ def test_save_and_get_commissioning_runs_round_trips(control):  # ruff: ignore[m
             )
         ],
     )
-    control.save_commissioning_run(run)
+    control.equipment.save_commissioning_run(run)
 
-    runs = control.get_commissioning_runs()
+    runs = control.equipment.status(include=["commissioning_runs"]).commissioning_runs
     assert len(runs) == 1
     assert runs[0].id == "run-1"
     assert runs[0].all_passed() is True
 
 
-def test_get_safety_rule_set_returns_none_when_unconfigured(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_get_safety_rule_set_returns_none_when_unconfigured(control: ObservatoryControl) -> None:
     """Verify an unconfigured safety rule set reports None, not a default."""
-    assert control.get_safety_rule_set() is None
+    assert control.safety.status(include=["rule_set"]).rule_set is None
 
 
-def test_save_and_get_safety_rule_set_round_trips(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_save_and_get_safety_rule_set_round_trips(control: ObservatoryControl) -> None:
     """Verify a saved safety rule set is returned by get_safety_rule_set."""
     from wayfindinglib.models.policy.safety import SafetyRule, SafetyRuleSet
 
@@ -893,19 +991,19 @@ def test_save_and_get_safety_rule_set_round_trips(control):  # ruff: ignore[miss
             )
         ],
     )
-    control.save_safety_rule_set(rule_set)
+    control.safety.save_rule_set(rule_set)
 
-    fetched = control.get_safety_rule_set()
+    fetched = control.safety.status(include=["rule_set"]).rule_set
     assert fetched is not None
     assert fetched.id == "default"
     assert fetched.rules[0].measurement == "wind_speed_kph"
 
 
-def test_non_hardware_methods_do_not_reference_indi_driver():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_non_hardware_methods_do_not_reference_indi_driver() -> None:
     """Verify non-hardware methods never reference the INDI layer.
 
     A static source-text scan, mirroring
-    `test_planning_registry.py::test_planning_module_tree_imports_no_device_driver`:
+    `test_planning.py::test_planning_module_tree_imports_no_device_driver`:
     a runtime `sys.modules` snapshot is order-dependent (other tests in
     the same session legitimately import INDI modules to exercise
     hardware operations), so this checks each non-hardware method's own
@@ -916,25 +1014,19 @@ def test_non_hardware_methods_do_not_reference_indi_driver():  # ruff: ignore[mi
     import inspect
 
     non_hardware_methods = [
-        ObservatoryControl.active_telescope,
-        ObservatoryControl.active_camera,
-        ObservatoryControl.set_active_telescope,
-        ObservatoryControl.set_active_camera,
-        ObservatoryControl.compute_pointing_correction,
-        ObservatoryControl.compute_guiding_correction,
-        ObservatoryControl.compute_focus_correction,
-        ObservatoryControl.active_guider_calibration,
-        ObservatoryControl.save_guider_calibration,
-        ObservatoryControl.active_focus_model,
-        ObservatoryControl.save_focus_model,
-        ObservatoryControl.assess_safety,
-        ObservatoryControl.active_enclosure,
-        ObservatoryControl.execute_safe_state,
-        ObservatoryControl.cooling_ramp_rate,
-        ObservatoryControl.summarize_device,
-        ObservatoryControl.delegation_policy,
-        ObservatoryControl.apply_promotion_decision,
-        ObservatoryControl.summarize_divergence_evidence,
+        equipment.EquipmentControl.set_active_telescope,
+        equipment.EquipmentControl.set_active_camera,
+        equipment.EquipmentControl.cooling_ramp_rate,
+        equipment.EquipmentControl.summarize_device,
+        mount.MountControl.compute_pointing_correction,
+        guiding.GuidingControl.compute_correction,
+        guiding.GuidingControl.status,
+        guiding.GuidingControl.save_calibration,
+        imaging.ImagingControl.compute_focus_correction,
+        imaging.ImagingControl.save_focus_model,
+        safety.SafetyControl.assess,
+        safety.SafetyControl.execute_safe_state,
+        safety.SafetyControl.apply_promotion_decision,
     ]
     forbidden_substrings = ("wayfindinglib.drivers.indi", "import PyIndi", "from PyIndi")
 
@@ -947,10 +1039,10 @@ def test_non_hardware_methods_do_not_reference_indi_driver():  # ruff: ignore[mi
     assert offending == []
 
 
-def test_mount_driver_slew_end_to_end_against_simulator(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_mount_driver_slew_end_to_end_against_simulator(control: ObservatoryControl) -> None:
     """Exercise slew/park/unpark/tracking/abort through the real driver stack.
 
-    `ObservatoryControl.slew_to_coordinates()` -> `hardware_operations` ->
+    `control.mount.slew()` -> `hardware_operations` ->
     the `MountDriver` ABC -> `IndiMountDriver` -> `SimulatorIndiInterface`,
     confirming parity with pre-redesign behavior end to end (per the
     plan's Verification section) rather than only against a
@@ -958,17 +1050,19 @@ def test_mount_driver_slew_end_to_end_against_simulator(control):  # ruff: ignor
     """
     from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
 
-    control.driver = SimulatorIndiInterface(config=control._config)
-    control.apply_promotion_decision(ObservatoryCapability.MOUNT_CONTROL, DelegationState.AUTHORITATIVE)
+    control.driver = SimulatorIndiInterface(config=control._context.config)
+    control.safety.apply_promotion_decision(
+        ObservatoryCapability.MOUNT_CONTROL, DelegationState.AUTHORITATIVE
+    )
 
-    assert control.slew_to_coordinates(10.0, 20.0) is True
-    assert control.set_tracking(True) is True
-    assert control.park() is True
-    assert control.unpark() is True
-    assert control.abort_motion() is True
+    assert control.mount.slew(SkyPosition(ra_deg=150.0, dec_deg=20.0)) is True
+    assert control.mount.set_tracking(True) is True
+    assert control.mount.park() is True
+    assert control.mount.unpark() is True
+    assert control.mount.abort_motion() is True
 
 
-def test_mount_driver_commands_refused_when_not_authoritative(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_mount_driver_commands_refused_when_not_authoritative(control: ObservatoryControl) -> None:
     """Verify mount commands are refused by default (monitoring mode).
 
     `MOUNT_CONTROL` defaults to `DELEGATED`, not `AUTHORITATIVE` -- this
@@ -978,16 +1072,16 @@ def test_mount_driver_commands_refused_when_not_authoritative(control):  # ruff:
     """
     from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
 
-    control.driver = SimulatorIndiInterface(config=control._config)
+    control.driver = SimulatorIndiInterface(config=control._context.config)
 
     with pytest.raises(PermissionDeniedError, match="MOUNT_CONTROL"):
-        control.slew_to_coordinates(10.0, 20.0)
+        control.mount.slew(SkyPosition(ra_deg=150.0, dec_deg=20.0))
 
 
-def test_focuser_and_filter_wheel_end_to_end_against_simulator(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_focuser_and_filter_wheel_end_to_end_against_simulator(control: ObservatoryControl) -> None:
     """Exercise focuser/filter-wheel commands through the real driver stack.
 
-    `ObservatoryControl.focus_move()`/`.set_filter()` -> `hardware_operations`
+    `control.imaging.focus_move()`/`.set_filter()` -> `hardware_operations`
     -> the `FocuserDriver`/`FilterWheelDriver` ABCs -> the INDI adapters ->
     `SimulatorIndiInterface`, confirming parity with pre-redesign behavior
     (per the plan's Verification section).
@@ -995,13 +1089,13 @@ def test_focuser_and_filter_wheel_end_to_end_against_simulator(control):  # ruff
     from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
     from wayfindinglib.models.policy.delegation import CapabilityDelegation, DelegationPolicy
 
-    control.driver = SimulatorIndiInterface(config=control._config)
+    control.driver = SimulatorIndiInterface(config=control._context.config)
     # Persisted directly rather than via apply_promotion_decision(): AUTOFOCUS
     # and CAPTURE_ORCHESTRATION each have their own multi-step validity-rule
     # promotion path (covered by their own dedicated tests), orthogonal to
     # what this test verifies -- that the driver plumbing works once a
     # capability is AUTHORITATIVE.
-    control._butler.put(
+    control._context.butler.put(
         DelegationPolicy(
             id="default",
             capability_delegations=[
@@ -1018,28 +1112,30 @@ def test_focuser_and_filter_wheel_end_to_end_against_simulator(control):  # ruff
         {"id": "default"},
     )
 
-    assert control.focus_move(50) is True
-    assert control.get_focuser_position() == 0
-    assert control.set_filter("Luminance") is True
-    assert "Luminance" in control.get_filter_names()
+    assert control.imaging.focus_move(50) is True
+    assert control.imaging.status(include=["focuser"]).focuser_position == 0
+    assert control.imaging.set_filter("Luminance") is True
+    assert "Luminance" in control.imaging.status(include=["filters"]).filter_names
 
 
-def test_focuser_and_filter_wheel_commands_refused_when_not_authoritative(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_focuser_and_filter_wheel_commands_refused_when_not_authoritative(
+    control: ObservatoryControl,
+) -> None:
     """Verify focuser/filter-wheel commands fail closed by default."""
     from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
 
-    control.driver = SimulatorIndiInterface(config=control._config)
+    control.driver = SimulatorIndiInterface(config=control._context.config)
 
     with pytest.raises(PermissionDeniedError, match="AUTOFOCUS"):
-        control.focus_move(50)
+        control.imaging.focus_move(50)
     with pytest.raises(PermissionDeniedError, match="CAPTURE_ORCHESTRATION"):
-        control.set_filter("Luminance")
+        control.imaging.set_filter("Luminance")
 
 
-def test_get_telescope_status_golden_output_matches_pre_redesign_shape(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_mount_status_golden_output_matches_the_single_driver_read(control: ObservatoryControl) -> None:
     """Verify the four-call-assembled status matches the old single-call one.
 
-    Regression-sensitive point (plan Verification, M4): `get_telescope_status`
+    Regression-sensitive point: `control.mount.status`
     now reassembles its result from four separate driver calls
     (`mount_driver`, `filter_wheel_driver`, `focuser_driver`, `camera_driver`)
     instead of one `IndiInterface.get_status()` call. Since nothing here
@@ -1048,22 +1144,20 @@ def test_get_telescope_status_golden_output_matches_pre_redesign_shape(control):
     """
     from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
 
-    control.driver = SimulatorIndiInterface(config=control._config)
+    control.driver = SimulatorIndiInterface(config=control._context.config)
 
     golden = control.driver.get_status().model_dump(by_alias=True)
-    golden["guidingHistory"] = []  # Populated by a guiding service, not configured here.
+    golden.pop("guidingHistory", None)  # The backend's TelescopeService adds this.
 
-    from wayfindinglib.tasks.control_tasks import hardware_operations
-
-    reassembled = hardware_operations.get_telescope_status(control)
+    reassembled = control.mount.status()
 
     assert reassembled == golden
 
 
-def test_capture_image_and_guide_camera_end_to_end_against_simulator(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Exercise capture_image/guide_expose/sync_coordinates end to end.
+def test_capture_image_and_guide_camera_end_to_end_against_simulator(control: ObservatoryControl) -> None:
+    """Exercise capture_image, guiding.expose and mount.sync end to end.
 
-    `ObservatoryControl.capture_image()`/`.guide_expose()`/`.sync_coordinates()`
+    `control.imaging.capture_image()`/`control.guiding.expose()`/`control.mount.sync()`
     -> `hardware_operations` -> the `CameraDriver`/`MountDriver` ABCs ->
     the INDI adapters -> `SimulatorIndiInterface` (per the plan's
     Verification section for M2-M4).
@@ -1071,8 +1165,8 @@ def test_capture_image_and_guide_camera_end_to_end_against_simulator(control):  
     from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
     from wayfindinglib.models.policy.delegation import CapabilityDelegation, DelegationPolicy
 
-    control.driver = SimulatorIndiInterface(config=control._config)
-    control._butler.put(
+    control.driver = SimulatorIndiInterface(config=control._context.config)
+    control._context.butler.put(
         DelegationPolicy(
             id="default",
             capability_delegations=[
@@ -1093,62 +1187,64 @@ def test_capture_image_and_guide_camera_end_to_end_against_simulator(control):  
         {"id": "default"},
     )
 
-    assert control.capture_image(1.0) is True
-    assert control.guide_expose(1.0) is True
-    assert control.get_guide_image() is None
-    assert control.sync_coordinates(10.0, 20.0) is True
+    assert control.imaging.capture_image(1.0) is True
+    assert control.guiding.expose(1.0) is True
+    assert control.guiding.get_image() is None
+    assert control.mount.sync(SkyPosition(ra_deg=150.0, dec_deg=20.0)) is True
 
 
-def test_capture_image_and_sync_coordinates_refused_when_not_authoritative(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_capture_image_and_mount_sync_refused_when_not_authoritative(control: ObservatoryControl) -> None:
     """Verify capture/sync commands fail closed by default."""
     from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
 
-    control.driver = SimulatorIndiInterface(config=control._config)
+    control.driver = SimulatorIndiInterface(config=control._context.config)
 
     with pytest.raises(PermissionDeniedError, match="CAPTURE_ORCHESTRATION"):
-        control.capture_image(1.0)
+        control.imaging.capture_image(1.0)
     with pytest.raises(PermissionDeniedError, match="AUTOGUIDING"):
-        control.guide_expose(1.0)
+        control.guiding.expose(1.0)
     with pytest.raises(PermissionDeniedError, match="PLATE_SOLVE_ALIGNMENT"):
-        control.sync_coordinates(10.0, 20.0)
+        control.mount.sync(SkyPosition(ra_deg=150.0, dec_deg=20.0))
 
 
-def test_enclosure_state_and_commands_against_simulator(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_enclosure_state_and_commands_against_simulator(control: ObservatoryControl) -> None:
     """Exercise enclosure state/authority gating through the real driver stack.
 
-    `ObservatoryControl.get_enclosure_state()`/`.open_enclosure()`/
+    `control.safety.status(include=["enclosure_state"])`/`.open_enclosure()`/
     `.close_enclosure()` -> `hardware_operations` -> `EnclosureDriver` ->
     `IndiEnclosureDriver` -> `SimulatorIndiInterface` (M6). No dome/roof
-    device is simulated today, so `get_enclosure_state()` honestly
+    device is simulated today, so the enclosure state honestly
     reports `UNKNOWN` (the "Unknown Is Unsafe" invariant) rather than a
     fabricated open/closed value.
     """
     from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
     from wayfindinglib.models.equipment_and_site.enclosure import EnclosureState
 
-    control.driver = SimulatorIndiInterface(config=control._config)
+    control.driver = SimulatorIndiInterface(config=control._context.config)
 
-    assert control.get_enclosure_state() == EnclosureState.UNKNOWN
+    assert control.safety.status(include=["enclosure_state"]).enclosure_state == EnclosureState.UNKNOWN
 
 
-def test_enclosure_commands_refused_when_not_authoritative(control):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_enclosure_commands_refused_when_not_authoritative(control: ObservatoryControl) -> None:
     """Verify open_enclosure/close_enclosure fail closed by default."""
     from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
 
-    control.driver = SimulatorIndiInterface(config=control._config)
+    control.driver = SimulatorIndiInterface(config=control._context.config)
 
     with pytest.raises(PermissionDeniedError, match="OBSERVATORY_SAFETY"):
-        control.open_enclosure()
+        control.safety.open_enclosure()
     with pytest.raises(PermissionDeniedError, match="OBSERVATORY_SAFETY"):
-        control.close_enclosure()
+        control.safety.close_enclosure()
 
 
-def test_close_enclosure_refuses_when_mount_outside_clearance(control, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_close_enclosure_refuses_when_mount_outside_clearance(
+    control: ObservatoryControl, mocker: MockerFixture
+) -> None:
     """Verify close_enclosure refuses rather than closing on the mount.
 
     Plan Verification (M6): asserts refusal, not just the happy path --
     a mount position far from the configured park position must reject
-    the close through the real `ObservatoryControl.close_enclosure` ->
+    the close through the real `control.safety.close_enclosure` ->
     `hardware_operations.close_enclosure` ->
     `enclosure_control.can_close_enclosure` interlock chain, not just
     the unit-level fakes in `test_hardware_operations.py`. The mount's
@@ -1161,7 +1257,7 @@ def test_close_enclosure_refuses_when_mount_outside_clearance(control, mocker): 
     from wayfindinglib.models.equipment_and_site.enclosure import Enclosure, EnclosureType
     from wayfindinglib.models.policy.delegation import CapabilityDelegation, DelegationPolicy
 
-    control.driver = SimulatorIndiInterface(config=control._config)
+    control.driver = SimulatorIndiInterface(config=control._context.config)
     stub_mount_driver = mocker.Mock()
     stub_mount_driver.get_status = mocker.AsyncMock(
         return_value=MountStatus(
@@ -1173,7 +1269,7 @@ def test_close_enclosure_refuses_when_mount_outside_clearance(control, mocker): 
         )
     )
     control.mount_driver = stub_mount_driver
-    control._butler.put(
+    control._context.butler.put(
         DelegationPolicy(
             id="default",
             capability_delegations=[
@@ -1186,7 +1282,7 @@ def test_close_enclosure_refuses_when_mount_outside_clearance(control, mocker): 
         "delegation_policy",
         {"id": "default"},
     )
-    control._butler.put(
+    control._context.butler.put(
         Enclosure(
             id="enc-1",
             enclosure_type=EnclosureType.ROLL_OFF_ROOF,
@@ -1199,4 +1295,4 @@ def test_close_enclosure_refuses_when_mount_outside_clearance(control, mocker): 
     )
 
     with pytest.raises(ConflictError, match="clearance"):
-        control.close_enclosure()
+        control.safety.close_enclosure()

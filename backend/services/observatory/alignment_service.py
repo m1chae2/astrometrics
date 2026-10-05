@@ -7,7 +7,8 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from wayfindinglib.api.control_registry import ObservatoryControl
+from astrometricslib import InvalidArgumentError
+from wayfindinglib import MountPointingModel, ObservatoryControl, SkyPosition
 from wayfindinglib.models.session.telemetry import AlignmentAttempt
 
 logger = logging.getLogger(__name__)
@@ -260,23 +261,31 @@ class AlignmentService:
     def compute_pointing_model(self, session_id: str | None = None) -> dict[str, Any]:
         """Compute decomposed geometric mount pointing terms.
 
-        Delegates to `ObservatoryControl.get_pointing_model`
-        (`pointing_log_ingestion.py`, §6a) rather than fitting directly
-        -- this service no longer imports the analytics module itself.
+        Delegates to `control.history.query(kind="pointing_model")`
+        rather than fitting directly.
 
         Parameters
         ----------
         session_id : `str` | `None`, optional
-            Target session to model, or `None` to fit all recorded
-            historical solves.
+            The observing night to model. A model that mixes nights is
+            not meaningful, so the library refuses `None`.
 
         Returns
         -------
         model : `dict` [`str`, `Any`]
-            Decomposed model terms (ME, MA, CH, TF) and RMS improvements.
+            Decomposed model terms (ME, MA, CH, TF) and RMS improvements,
+            with camelCase keys.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If the library cannot fit a model: no night was given, or no
+            observer location is known.
         """
-        model = self._observatory.get_pointing_model(session_id)
-        return model.model_dump(by_alias=True)
+        reply = self._observatory.history.query(kind="pointing_model", session_id=session_id)
+        if "error" in reply:
+            raise InvalidArgumentError(reply["error"])
+        return MountPointingModel.model_validate(reply["model"]).model_dump(by_alias=True)
 
     def poll_external_syncs(self, indi_interface: Any = None) -> None:
         """Poll and drain external plate-solve syncs and polar alignment.
@@ -458,18 +467,18 @@ class AlignmentService:
                     # Still far off, but we'll sync and retry
                     solving_attempt.status = "warning"
 
-                # Sync telescope to solved coordinates. The mount driver's
-                # commands take RA in hours; solve_result.ra is decimal
-                # degrees (from the WCS solution), so convert at this
-                # boundary rather than upstream, where degrees is correct.
-                solved_ra_hours = solve_result.ra / 15.0
-                logger.info(f"Syncing to solved coordinates: RA={solved_ra_hours}h, DEC={solve_result.dec}")
-                self._observatory.sync_coordinates(solved_ra_hours, solve_result.dec)
+                # Sync telescope to solved coordinates. Both the solve and
+                # SkyPosition use degrees.
+                logger.info(
+                    f"Syncing to solved coordinates: RA={solve_result.ra} deg, DEC={solve_result.dec}"
+                )
+                self._observatory.mount.sync(
+                    SkyPosition(ra_deg=solve_result.ra % 360.0, dec_deg=solve_result.dec)
+                )
 
                 # Re-slew to target
-                target_ra_hours = target_ra / 15.0
-                logger.info(f"Re-slewing to target: RA={target_ra_hours}h, DEC={target_dec}")
-                self._observatory.slew_to_coordinates(target_ra_hours, target_dec)
+                logger.info(f"Re-slewing to target: RA={target_ra} deg, DEC={target_dec}")
+                self._observatory.mount.slew(SkyPosition(ra_deg=target_ra % 360.0, dec_deg=target_dec))
 
             except Exception as e:
                 logger.error(f"Alignment attempt {attempt_count} failed: {e}")

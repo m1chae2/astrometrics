@@ -27,5 +27,5 @@ class WeatherDriver(ProtocolDriver):
         -------
         readings : `SensorReadings`
             Measurement name to `(value, observed_at)`, ready to pass
-            directly to `ObservatoryControl.assess_safety`.
+            directly to `control.safety.assess`.
         """

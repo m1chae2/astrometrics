@@ -11,10 +11,15 @@ drive (the same rule the sync uses), and by file name between the drive and
 the library, since the library keeps a path and not a size.
 """
 
+from __future__ import annotations
+
 import os
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from wayfindinglib.tasks.control_tasks import remote_transfer_tasks
+
+if TYPE_CHECKING:
+    from wayfindinglib.api.control.context import ControlContext
 
 EXAMPLE_COUNT = 10
 """How many file names are shown for each kind of difference."""
@@ -63,13 +68,13 @@ def _difference(names: set[str]) -> dict[str, Any]:
     return {"count": len(ordered), "examples": ordered[-EXAMPLE_COUNT:]}
 
 
-def build_frame_status(observatory, target_id: str) -> dict[str, Any]:  # ruff: ignore[missing-type-function-argument]
+def build_frame_status(context: ControlContext, target_id: str) -> dict[str, Any]:
     """Count a target's frames at the telescope, on disk and in the library.
 
     Parameters
     ----------
-    observatory : `wayfindinglib.api.control_registry.ObservatoryControl`
-        Provides the telescope connection and the configuration.
+    context : `ControlContext`
+        Supplies the telescope connection and the configuration.
     target_id : `str`
         The target, such as ``"M 57"``.
 
@@ -84,18 +89,18 @@ def build_frame_status(observatory, target_id: str) -> dict[str, Any]:  # ruff: 
         out and ``telescope_error`` says why. A target that is not in the
         library gives ``library_error``.
     """
-    config = observatory._config
+    config = context.config
     lights_root = os.path.join(str(config.get_frames_path()), "lights")
-    astrometrics = observatory.astrometrics
+    astrometrics = context.astrometrics
     astrometrics.targets.list()  # reread the database so a recent sync shows
 
     remote_files: dict[str, int] | None = None
     remote_folder = None
     status: dict[str, Any] = {"target_id": target_id}
     try:
-        plan = remote_transfer_tasks.plan_target_download(observatory, target_id)
+        plan = remote_transfer_tasks.plan_target_download(context, target_id)
         remote_folder = plan["remote_folder"]
-        driver = observatory.remote_transfer_driver
+        driver = context.remote_transfer_driver
         remote_files = {
             os.path.basename(name): size for name, size in driver.list_remote_files_with_sizes(remote_folder)
         }

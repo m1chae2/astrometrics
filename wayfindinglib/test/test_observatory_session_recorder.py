@@ -8,6 +8,8 @@ invented equipment.
 """
 
 from datetime import date
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -19,16 +21,31 @@ from wayfindinglib.models.equipment_and_site.equipment import Camera, Telescope
 from wayfindinglib.models.session.observation_session import ObservationSession, SessionStatus
 
 
-class _FakeControl:
-    def __init__(self, telescope=None, camera=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+class _FakeEquipment:
+    """A stand-in `control.equipment` with a fixed telescope and camera."""
+
+    def __init__(self, telescope: Any = None, camera: Any = None) -> None:
+        """Hold the telescope and camera the status read reports."""
         self._telescope = telescope
         self._camera = camera
 
-    def active_telescope(self):  # ruff: ignore[missing-return-type-private-function]
-        return self._telescope
+    def status(self, include: list[str] | None = None) -> SimpleNamespace:
+        """Return the fixed telescope and camera.
 
-    def active_camera(self):  # ruff: ignore[missing-return-type-private-function]
-        return self._camera
+        Returns
+        -------
+        status : `types.SimpleNamespace`
+            With ``telescope`` and ``camera``.
+        """
+        return SimpleNamespace(telescope=self._telescope, camera=self._camera)
+
+
+class _FakeControl:
+    """A stand-in `ObservatoryControl` with only an `equipment` child."""
+
+    def __init__(self, telescope: Any = None, camera: Any = None) -> None:
+        """Build the equipment child."""
+        self.equipment = _FakeEquipment(telescope, camera)
 
 
 class _FakeExecution:

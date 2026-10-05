@@ -1,25 +1,26 @@
 """Purpose: End-to-end tests for the session-quality analysis on the facade.
 
-Description: Runs `ObservatoryControl.analyze_guiding_session` and
-`summarize_guiding_sessions` against a real isolated configuration, a real
-Butler and a real log database filled with synthetic nights. The main thing
-verified is that a night is judged only against the equipment's earlier
-nights, never against itself.
+Description: Runs the guiding analysis behind `control.history.query`
+(`night_analysis.guiding_night_analysis` and `guiding_night_summaries`) against
+a real isolated configuration, a real Butler and a real log database filled
+with synthetic nights. The main thing verified is that a night is judged only
+against the equipment's earlier nights, never against itself.
 """
 
 import pytest
 
-from wayfindinglib.api.control_registry import ObservatoryControl
+from wayfindinglib import ObservatoryControl
 from wayfindinglib.api.test.guiding_night_helpers import (
     FIRST_NIGHT,
     record_good_history,
     record_guiding_night,
 )
+from wayfindinglib.tasks.control_tasks import night_analysis
 
 
 def test_an_unknown_night_gives_none(control: ObservatoryControl) -> None:
     """Verify a night with nothing recorded is not invented."""
-    assert control.analyze_guiding_session("1999-01-01") is None
+    assert night_analysis.guiding_night_analysis(control._context, "1999-01-01") is None
 
 
 def test_a_good_night_after_arecord_good_history_is_not_flagged(control: ObservatoryControl) -> None:
@@ -27,7 +28,7 @@ def test_a_good_night_after_arecord_good_history_is_not_flagged(control: Observa
     record_good_history(control)
     night = record_guiding_night(control, 6, snr=300.0, sigma=1.0)
 
-    analysis = control.analyze_guiding_session(night)
+    analysis = night_analysis.guiding_night_analysis(control._context, night)
 
     assert analysis.input_quality.limits_equipment_match == "exact"
     assert analysis.flagged is False
@@ -39,7 +40,7 @@ def test_a_weak_lossy_night_is_flagged_against_the_earlier_nights(control: Obser
     record_good_history(control)
     night = record_guiding_night(control, 6, snr=30.0, lost=200)
 
-    analysis = control.analyze_guiding_session(night)
+    analysis = night_analysis.guiding_night_analysis(control._context, night)
 
     assert analysis.flagged is True
     assert "check_guide_signal" in analysis.flag_reasons
@@ -60,9 +61,9 @@ def test_a_bad_night_is_not_judged_against_itself(control: ObservatoryControl) -
     record_guiding_night(control, 7, snr=25.0, lost=180)
     record_guiding_night(control, 8, snr=28.0, lost=220)
 
-    analysis = control.analyze_guiding_session(night)
-    envelope_before = control.get_performance_envelope(before_night=night)
-    envelope_with_everything = control.get_performance_envelope()
+    analysis = night_analysis.guiding_night_analysis(control._context, night)
+    envelope_before = control.history.get_performance_envelope(before_night=night)
+    envelope_with_everything = control.history.get_performance_envelope()
 
     assert analysis.flagged is True
     assert envelope_before.thresholds["guide_snr_low_limit"].sample_count == 6
@@ -79,7 +80,7 @@ def test_a_night_with_too_little_history_gets_numbers_but_no_baseline_verdict(
     record_guiding_night(control, 0)
     night = record_guiding_night(control, 1, snr=30.0, lost=200)
 
-    analysis = control.analyze_guiding_session(night)
+    analysis = night_analysis.guiding_night_analysis(control._context, night)
 
     assert analysis.input_quality.median_snr == pytest.approx(30.0)
     assert analysis.input_quality.has_low_signal is None
@@ -90,12 +91,12 @@ def test_a_night_on_other_equipment_gets_no_limits(control: ObservatoryControl) 
     """Verify other equipment is not judged by this setup's limits."""
     other = "telescope=other|camera=other|guide_focal_mm=240|guide_scale=3.2"
     night = record_guiding_night(control, 0, fingerprint=other)
-    runs = control.list_guiding_runs(night)
-    control.save_guiding_run(
+    runs = night_analysis.guiding_runs(control._context, night)
+    control.guiding.save_run(
         runs[0].model_copy(update={"focal_length_mm": 240.0, "pixel_scale_arcsec_per_px": 3.2})
     )
 
-    analysis = control.analyze_guiding_session(night)
+    analysis = night_analysis.guiding_night_analysis(control._context, night)
 
     assert analysis.input_quality.limits_equipment_match == "none"
     assert analysis.input_quality.has_low_signal is None
@@ -106,7 +107,7 @@ def test_estimated_samples_never_reach_the_analysis(control: ObservatoryControl)
     """Verify fabricated pulse-derived samples never change an analysis."""
     night = record_guiding_night(control, 0)
     start = FIRST_NIGHT
-    control._logger_interface.replace_guiding_samples([
+    control._context.logger_interface.replace_guiding_samples([
         {
             "timestamp": start + 60.0 + index,
             "dra": 50.0,
@@ -117,7 +118,7 @@ def test_estimated_samples_never_reach_the_analysis(control: ObservatoryControl)
         for index in range(800)
     ])
 
-    analysis = control.analyze_guiding_session(night)
+    analysis = night_analysis.guiding_night_analysis(control._context, night)
 
     assert analysis.input_quality.samples_analyzed == 400
 
@@ -127,7 +128,7 @@ def test_the_summary_has_one_row_per_night_oldest_first(control: ObservatoryCont
     nights = record_good_history(control)
     bad = record_guiding_night(control, 6, snr=30.0, lost=200)
 
-    rows = control.summarize_guiding_sessions()
+    rows = night_analysis.guiding_night_summaries(control._context)
 
     assert [row["sessionId"] for row in rows] == [*nights, bad]
     assert rows[-1]["flagged"] is True
@@ -138,12 +139,16 @@ def test_the_summary_has_one_row_per_night_oldest_first(control: ObservatoryCont
 def test_the_analysis_is_not_stored(control: ObservatoryControl) -> None:
     """Verify analysing a night writes nothing, so nothing can go stale."""
     night = record_guiding_night(control, 0)
-    before = {name: len(control._butler.get_all(name)) for name in ("ekos_session_context", "guiding_run")}
-    samples_before = len(control._logger_interface.get_guiding_logs(limit=100000))
+    before = {
+        name: len(control._context.butler.get_all(name)) for name in ("ekos_session_context", "guiding_run")
+    }
+    samples_before = len(control._context.logger_interface.get_guiding_logs(limit=100000))
 
-    control.analyze_guiding_session(night)
-    control.summarize_guiding_sessions()
+    night_analysis.guiding_night_analysis(control._context, night)
+    night_analysis.guiding_night_summaries(control._context)
 
-    after = {name: len(control._butler.get_all(name)) for name in ("ekos_session_context", "guiding_run")}
+    after = {
+        name: len(control._context.butler.get_all(name)) for name in ("ekos_session_context", "guiding_run")
+    }
     assert after == before
-    assert len(control._logger_interface.get_guiding_logs(limit=100000)) == samples_before
+    assert len(control._context.logger_interface.get_guiding_logs(limit=100000)) == samples_before

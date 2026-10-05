@@ -40,14 +40,15 @@ from backend.mcp.tool_inventory import (
 @pytest.mark.parametrize(
     ("name", "expected_class"),
     [
-        ("observatory_abort_motion", "safe-stop"),
-        ("observatory_execute_safe_state", "safe-stop"),
-        ("observatory_slew_to_target", "actuate"),
-        ("observatory_capture_image", "actuate"),
-        ("observatory_sync_coordinates", "actuate"),
-        ("observatory_get_telescope_status", "observe"),
-        ("observatory_analyze_guiding_session", "compute"),
-        ("observatory_save_safety_rule_set", "change-data"),
+        ("observatory_mount_abort_motion", "safe-stop"),
+        ("observatory_safety_execute_safe_state", "safe-stop"),
+        ("observatory_mount_slew", "actuate"),
+        ("observatory_imaging_capture_image", "actuate"),
+        ("observatory_mount_sync", "actuate"),
+        ("observatory_mount_status", "observe"),
+        ("observatory_history_query", "compute"),
+        ("observatory_mount_compute_pointing_correction", "compute"),
+        ("observatory_safety_save_rule_set", "change-data"),
         ("processing_run_stacking", "change-data"),
         ("star_find_by_position", "observe"),
         ("star_find_or_create_by_position", "change-data"),
@@ -190,10 +191,10 @@ def test_collect_inventory_covers_all_four_servers() -> None:
         ("target_process_all_targets", "change-data", "image-processing"),
         ("planning_get_visibility", "observe", "planning-sessions"),
         ("execution_abort_session", "change-data", "planning-sessions"),
-        ("observatory_slew_to_target", "actuate", "observatory-control"),
-        ("observatory_download_remote_frames", "change-data", "observatory-sync"),
-        ("observatory_get_telescope_status", "observe", "observatory-status"),
-        ("observatory_save_safety_rule_set", "change-data", "observatory-config"),
+        ("observatory_mount_slew", "actuate", "observatory-control"),
+        ("observatory_remote_sync_frames", "ingest", "observatory-sync"),
+        ("observatory_mount_status", "observe", "observatory-status"),
+        ("observatory_safety_save_rule_set", "change-data", "observatory-config"),
         ("backend_call_rpc", "unrestricted", "app"),
         ("ui_run_tests", "develop", "developer"),
     ],
@@ -234,7 +235,7 @@ def test_apply_decisions_corrects_the_class_and_keeps_the_note() -> None:
 
 def test_config_writers_are_withheld() -> None:
     """The tools that change configuration are withheld from AI clients."""
-    for name in ("observatory_set_active_camera", "observatory_save_safety_rule_set"):
+    for name in ("observatory_equipment_set_active_camera", "observatory_safety_save_rule_set"):
         assert DECISIONS[name].disposition == "withhold"
 
 
@@ -267,14 +268,14 @@ def test_every_hardware_control_tool_is_dropped() -> None:
 
 def test_polar_alignment_assist_is_a_calculation_not_a_command() -> None:
     """The fit uses records passed in, so it is a monitoring calculation."""
-    record = ToolRecord("srv", "observatory_run_polar_alignment_assist", "", tool_class="actuate")
+    record = ToolRecord("srv", "observatory_mount_run_polar_alignment_assist", "", tool_class="actuate")
     apply_decisions(record, replaced_by_lookup())
     assert (record.tool_class, record.category) == ("compute", "observatory-status")
 
 
 def test_delegation_mode_switches_count_as_configuration() -> None:
     """The Safe Mode toggle writes saved state, so an AI may not change it."""
-    for name in ("observatory_enter_controller_mode", "observatory_enter_monitoring_mode"):
+    for name in ("observatory_safety_enter_controller_mode", "observatory_safety_enter_monitoring_mode"):
         record = ToolRecord("srv", name, "", tool_class="actuate")
         apply_decisions(record, replaced_by_lookup())
         assert (record.category, record.disposition) == ("observatory-config", "withhold")
@@ -283,16 +284,16 @@ def test_delegation_mode_switches_count_as_configuration() -> None:
 def test_tools_the_user_declined_are_dropped() -> None:
     """Tools the user declined stay dropped."""
     dropped = (
-        "observatory_compute_focus_correction",
-        "observatory_compute_guiding_correction",
-        "observatory_compute_pointing_correction",
-        "observatory_run_polar_alignment_assist",
+        "observatory_imaging_compute_focus_correction",
+        "observatory_guiding_compute_correction",
+        "observatory_mount_compute_pointing_correction",
+        "observatory_mount_run_polar_alignment_assist",
         "diagnostics_flag_value_outliers",
-        "observatory_drain_external_pulses",
-        "observatory_refit_guiding_spectrum",
-        "observatory_save_commissioning_run",
-        "observatory_save_ekos_session_context",
-        "observatory_save_guiding_run",
+        "observatory_guiding_drain_external_pulses",
+        "observatory_guiding_refit_spectrum",
+        "observatory_equipment_save_commissioning_run",
+        "observatory_history_save_ekos_session_context",
+        "observatory_guiding_save_run",
     )
     for name in dropped:
         assert DECISIONS[name].disposition == "drop", name
@@ -315,36 +316,28 @@ def test_no_proposed_tool_offers_a_writer_to_the_investigator() -> None:
         assert "operator" not in proposed.argument_rules, proposed.name
 
 
-def test_log_ingest_tools_merge_into_the_log_sync_tool() -> None:
-    """The three log ingest tools are replaced by the built log sync tool."""
-    lookup = replaced_by_lookup()
-    for name in (
-        "observatory_fetch_and_ingest_new_guide_logs",
-        "observatory_ingest_ekos_session_logs",
-        "observatory_ingest_guiding_log_file",
-    ):
-        assert lookup[name].name == "observatory_sync_remote_logs"
-    assert lookup["observatory_ingest_ekos_session_logs"].built is True
+def test_the_log_sync_tool_is_built_and_offered_to_the_investigator() -> None:
+    """The log sync is an ingest; the refit saves a model, so it is not."""
+    by_name = {proposed.name: proposed for proposed in PROPOSED_TOOLS}
+    logs = by_name["observatory_remote_sync_logs"]
+    assert (logs.built, logs.tool_class, logs.investigator_access()) == (True, "ingest", "full")
+    assert DECISIONS["observatory_guiding_refit_spectrum"].disposition == "drop"
 
 
-def test_the_frame_ingest_tool_is_built_and_replaces_the_download_tools() -> None:
-    """The sync tool is built, and its predecessors are merged."""
-    sync = next(proposed for proposed in PROPOSED_TOOLS if proposed.name == "observatory_sync_remote_frames")
+def test_the_frame_ingest_tool_is_built_and_offered_to_the_investigator() -> None:
+    """The frame sync is built as an ingest the investigator may use."""
+    sync = next(proposed for proposed in PROPOSED_TOOLS if proposed.name == "observatory_remote_sync_frames")
     assert sync.built is True
     assert sync.tool_class == "ingest"
     assert sync.investigator_access() == "full"
-    assert (
-        replaced_by_lookup()["observatory_download_remote_targets"].name == "observatory_sync_remote_frames"
-    )
+    assert sync.replaces == ()
 
 
-def test_status_reads_merge_into_the_status_tools() -> None:
-    """Night history, settings reads and device reads each have one home."""
-    lookup = replaced_by_lookup()
-    assert lookup["observatory_analyze_capture_session"].name == "observatory_night_history"
-    assert lookup["observatory_get_pointing_model"].name == "observatory_night_history"
-    assert lookup["observatory_get_observer_location"].name == "observatory_equipment_state"
-    assert lookup["observatory_get_focuser_position"].name == "observatory_hardware_status"
+def test_each_control_child_has_one_status_read() -> None:
+    """Every child with readable state has a status tool with a decision."""
+    for child in ("mount", "imaging", "guiding", "safety", "equipment"):
+        decision = DECISIONS[f"observatory_{child}_status"]
+        assert (decision.disposition, decision.tool_class) == ("keep", "observe"), child
 
 
 def test_navigate_and_notify_are_allowed_but_pause_is_not() -> None:

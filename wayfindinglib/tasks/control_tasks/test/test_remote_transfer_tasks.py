@@ -1,13 +1,13 @@
 """Purpose: Unit tests for remote telescope file transfer.
 
-Description: Verifies check_for_new_remote_images's local/remote diffing
-and download_remote_frames's science-astrometrics indexing call, using a fake
-`RemoteTransferDriver` (matching `StellarMateInterface`'s shape) rather than
-a real SSH-reachable host.
+Description: Verifies the listing, download, sync and log-sync tasks behind
+`control.remote`, using a fake `RemoteTransferDriver` (matching
+`StellarMateInterface`'s shape) rather than a real SSH-reachable host.
 """
 
 import os
 import time
+from contextlib import AbstractContextManager
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import ANY, Mock, patch
@@ -18,9 +18,10 @@ from wayfindinglib.tasks.control_tasks import remote_transfer_tasks as remote_op
 
 
 class _FakeObservatory:
-    """A stand-in `ObservatoryControl` exposing a `remote_transfer_driver`."""
+    """A stand-in `ControlContext` exposing a `remote_transfer_driver`."""
 
-    def __init__(self, remote_transfer_driver):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, remote_transfer_driver: Mock) -> None:
+        """Hold the driver and a mock science library."""
         self.remote_transfer_driver = remote_transfer_driver
         self.astrometrics = Mock()
 
@@ -54,35 +55,7 @@ def _patched_config(**overrides):  # ruff: ignore[missing-type-kwargs, missing-r
     return _FakeConfig()
 
 
-def test_check_for_new_remote_images_reports_only_new_filenames():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify only remote files absent from the local baseline are reported."""
-    target = _FakeTarget("M 81", frame_paths=["/local/frame1.fits"])
-    driver = Mock()
-    driver.list_remote_files.return_value = ["frame1.fits", "frame2.fits"]
-    observatory = _FakeObservatory(driver)
-
-    result = remote_operations.check_for_new_remote_images(observatory, target)
-
-    assert result == {
-        "remote_files_available": True,
-        "remote_files_count": 1,
-        "remote_files": ["frame2.fits"],
-    }
-
-
-def test_check_for_new_remote_images_no_remote_files():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify an empty remote listing reports unavailable, not a raise."""
-    target = _FakeTarget("M 81", frame_paths=[])
-    driver = Mock()
-    driver.list_remote_files.return_value = []
-    observatory = _FakeObservatory(driver)
-
-    result = remote_operations.check_for_new_remote_images(observatory, target)
-
-    assert result == {"remote_files_available": False, "remote_files_count": 0, "remote_files": []}
-
-
-def test_download_remote_frames_indexes_through_science_astrometrics_on_success():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_download_remote_frames_indexes_through_science_astrometrics_on_success() -> None:
     """Verify a successful download scans the directory via Astrometrics.
 
     Astrometrics.processing.scan_target_directory is the underlying call.
@@ -109,7 +82,7 @@ def test_download_remote_frames_indexes_through_science_astrometrics_on_success(
     assert target.recalculate_total_exposure_calls == 1
 
 
-def test_download_remote_frames_returns_false_without_indexing_on_failure():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_download_remote_frames_returns_false_without_indexing_on_failure() -> None:
     """Verify a failed download does not attempt to index frames."""
     target = _FakeTarget("M 81", frame_paths=[])
     driver = Mock()
@@ -161,7 +134,7 @@ class _FakeAstrometrics:
         self.saved = True
 
 
-def test_download_remote_targets_downloads_and_reindexes_on_success():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_download_remote_targets_downloads_and_reindexes_on_success() -> None:
     """Verify a remote download classifies frames and reindexes the target."""
     fake_astrometrics = _FakeAstrometrics()
     driver = Mock()
@@ -186,7 +159,7 @@ def test_download_remote_targets_downloads_and_reindexes_on_success():  # ruff: 
     assert fake_astrometrics.saved is True
 
 
-def test_download_remote_targets_local_path_skips_download():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_download_remote_targets_local_path_skips_download() -> None:
     """Verify a local_path ingests without touching the remote driver."""
     fake_astrometrics = _FakeAstrometrics(existing=[_FakeTargetRecord("M 81")])
     driver = Mock()
@@ -210,32 +183,26 @@ def test_download_remote_targets_local_path_skips_download():  # ruff: ignore[mi
     assert fake_astrometrics.saved is True
 
 
-def test_discover_unassociated_remote_targets_fuzzy_matches():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_discover_unassociated_remote_targets_fuzzy_matches() -> None:
     """Verify space/underscore/hyphen variants are treated as associated."""
+    driver = Mock()
+    driver.list_remote_targets.return_value = ["M_81", "NGC 7000", "Unassociated Target"]
+    context = _FakeObservatory(driver)
+    context.astrometrics.targets.list.return_value = [_FakeTarget("M 81", []), _FakeTarget("NGC-7000", [])]
 
-    class _FakeControl:
-        def list_remote_targets(self):  # ruff: ignore[missing-return-type-private-function]
-            return ["M_81", "NGC 7000", "Unassociated Target"]
-
-    class _FakeTargets:
-        def list(self):  # ruff: ignore[missing-return-type-private-function]
-            return [_FakeTarget("M 81", []), _FakeTarget("NGC-7000", [])]
-
-    result = remote_operations.discover_unassociated_remote_targets(_FakeControl(), _FakeTargets())
+    result = remote_operations.discover_unassociated_remote_targets(context)
     assert result == ["Unassociated Target"]
 
 
-def test_discover_unassociated_remote_targets_empty_on_listing_failure():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_discover_unassociated_remote_targets_empty_on_listing_failure() -> None:
     """Verify a failed remote listing degrades to an empty list."""
+    driver = Mock()
+    driver.list_remote_targets.side_effect = RuntimeError("unreachable")
 
-    class _FakeControl:
-        def list_remote_targets(self):  # ruff: ignore[missing-return-type-private-function]
-            raise RuntimeError("unreachable")
-
-    assert remote_operations.discover_unassociated_remote_targets(_FakeControl(), None) == []
+    assert remote_operations.discover_unassociated_remote_targets(_FakeObservatory(driver)) == []
 
 
-def test_download_remote_targets_stages_into_the_resolved_remote_folder(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_download_remote_targets_stages_into_the_resolved_remote_folder(tmp_path: Path) -> None:
     """Verify staging/classification use the resolved remote folder name.
 
     A local id of "M 42" resolves to a remote folder of "M_42", which is
@@ -267,7 +234,7 @@ def test_download_remote_targets_stages_into_the_resolved_remote_folder(tmp_path
     assert mock_classify.call_args.args[0] == [str(tmp_path / "lights" / "M_42")]
 
 
-def test_download_remote_targets_transfers_only_files_not_held_locally(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_download_remote_targets_transfers_only_files_not_held_locally(tmp_path: Path) -> None:
     """Verify already-held frames are excluded from the rsync file list."""
     fake_astrometrics = _FakeAstrometrics()
     classified_dir = tmp_path / "lights" / "M 42" / "Apertura 75Q" / "ZWO ASI 533MM Pro"
@@ -296,7 +263,7 @@ def test_download_remote_targets_transfers_only_files_not_held_locally(tmp_path)
     assert driver.download_target_folder.call_args.kwargs["selected_files"] == ["Light/Luminance/fresh.fits"]
 
 
-def test_download_remote_targets_incremental_filters_explicit_selected_files(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_download_remote_targets_incremental_filters_explicit_selected_files(tmp_path: Path) -> None:
     """Verify explicit selected_files list is also filtered.
 
     Already-held frames must be excluded even if selected_files is passed.
@@ -330,7 +297,7 @@ def test_download_remote_targets_incremental_filters_explicit_selected_files(tmp
     assert driver.download_target_folder.call_args.kwargs["selected_files"] == ["Dark_002.fits"]
 
 
-def test_download_remote_targets_skips_transfer_when_nothing_is_new(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_download_remote_targets_skips_transfer_when_nothing_is_new(tmp_path: Path) -> None:
     """Verify a fully-synced target transfers nothing but still reindexes."""
     fake_astrometrics = _FakeAstrometrics()
     staging_dir = tmp_path / "lights" / "M_42"
@@ -360,7 +327,7 @@ def test_download_remote_targets_skips_transfer_when_nothing_is_new(tmp_path):  
     assert fake_astrometrics.saved is True
 
 
-def test_download_remote_targets_incremental_false_forces_full_transfer(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_download_remote_targets_incremental_false_forces_full_transfer(tmp_path: Path) -> None:
     """Verify incremental=False bypasses the local-library diff."""
     fake_astrometrics = _FakeAstrometrics()
     driver = Mock()
@@ -383,7 +350,7 @@ def test_download_remote_targets_incremental_false_forces_full_transfer(tmp_path
     assert driver.download_target_folder.call_args.kwargs["selected_files"] is None
 
 
-def test_download_remote_targets_transfers_same_name_file_of_different_size(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_download_remote_targets_transfers_same_name_file_of_different_size(tmp_path: Path) -> None:
     """Verify a same-named but differently-sized remote frame still transfers.
 
     Separate sessions can reuse a capture-order naming pattern, so a
@@ -453,7 +420,9 @@ def _our_log_handlers(logger_name: str) -> list:
     ]
 
 
-def test_sync_all_remote_folders_records_a_job_and_cleans_up_its_log_handlers(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_sync_all_remote_folders_records_a_job_and_cleans_up_its_log_handlers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify the sync records a job and leaves no log handlers behind.
 
     The handlers are attached to the shared "wayfindinglib" logger so
@@ -478,13 +447,13 @@ def test_sync_all_remote_folders_records_a_job_and_cleans_up_its_log_handlers(tm
     configuration.update_config({"Image Library": {"path": str(library_path)}})
     monkeypatch.setattr(configuration, "get_logs_path", lambda: logs_path)
     monkeypatch.setattr(astrometricslib, "get_configuration", lambda: configuration)
-    monkeypatch.setattr(remote_operations, "list_remote_calibration_folders", lambda api: [])
-    monkeypatch.setattr(remote_operations, "discover_unassociated_remote_targets", lambda api, targets: [])
+    monkeypatch.setattr(remote_operations, "list_remote_calibration_folders", lambda context: [])
+    monkeypatch.setattr(remote_operations, "discover_unassociated_remote_targets", lambda context: [])
 
     handlers_before = len(_our_log_handlers("wayfindinglib"))
 
     result = remote_operations.sync_all_remote_folders(
-        api=SimpleNamespace(astrometrics=_EmptyAstrometrics()), register_job=True
+        context=SimpleNamespace(astrometrics=_EmptyAstrometrics()), register_job=True
     )
 
     assert result["succeeded"] == []
@@ -503,7 +472,9 @@ def test_sync_all_remote_folders_records_a_job_and_cleans_up_its_log_handlers(tm
     assert _our_log_handlers(f"job_{result['job_id']}") == []
 
 
-def test_sync_all_remote_folders_without_job_registration_records_nothing(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_sync_all_remote_folders_without_job_registration_records_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify the opt-out skips the job row and attaches no handlers."""
     import astrometricslib
     from astrometricslib import AppConfiguration
@@ -513,20 +484,22 @@ def test_sync_all_remote_folders_without_job_registration_records_nothing(tmp_pa
     configuration = AppConfiguration()
     configuration.update_config({"Image Library": {"path": str(library_path)}})
     monkeypatch.setattr(astrometricslib, "get_configuration", lambda: configuration)
-    monkeypatch.setattr(remote_operations, "list_remote_calibration_folders", lambda api: [])
-    monkeypatch.setattr(remote_operations, "discover_unassociated_remote_targets", lambda api, targets: [])
+    monkeypatch.setattr(remote_operations, "list_remote_calibration_folders", lambda context: [])
+    monkeypatch.setattr(remote_operations, "discover_unassociated_remote_targets", lambda context: [])
 
     handlers_before = len(_our_log_handlers("wayfindinglib"))
 
     result = remote_operations.sync_all_remote_folders(
-        api=SimpleNamespace(astrometrics=_EmptyAstrometrics()), register_job=False
+        context=SimpleNamespace(astrometrics=_EmptyAstrometrics()), register_job=False
     )
 
     assert result["job_id"] is None
     assert len(_our_log_handlers("wayfindinglib")) == handlers_before
 
 
-def test_sync_calibration_folder_summarises_what_was_added(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_sync_calibration_folder_summarises_what_was_added(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify the sync reports counts and the folders new frames landed in.
 
     The remote listing has three files and the library already holds
@@ -558,9 +531,6 @@ def test_sync_calibration_folder_summarises_what_was_added(tmp_path, monkeypatch
     class _Api:
         astrometrics = _Astrometrics(None)
 
-        def download_remote_frames(self, target: object, **kwargs: object) -> bool:
-            return True
-
     def fake_classify(
         scan_list: list[str],
         target_id: str,
@@ -576,10 +546,11 @@ def test_sync_calibration_folder_summarises_what_was_added(tmp_path, monkeypatch
 
     monkeypatch.setattr(astrometricslib, "get_configuration", lambda: _Configuration())
     monkeypatch.setattr(astrometricslib, "classify_and_sort_fits_files", fake_classify)
+    monkeypatch.setattr(remote_operations, "download_remote_frames", lambda context, target, **kwargs: True)
     monkeypatch.setattr(
         remote_operations,
         "list_remote_files_with_sizes",
-        lambda api, folder: [("Dark_001.fits", 10), ("Dark_002.fits", 10), ("Dark_003.fits", 10)],
+        lambda context, folder: [("Dark_001.fits", 10), ("Dark_002.fits", 10), ("Dark_003.fits", 10)],
     )
 
     summary = remote_operations.sync_calibration_folder(_Api(), "Dark")
@@ -609,7 +580,7 @@ def _sync_observatory(remote_folders, resolved, remote_files) -> tuple[_FakeObse
     return _FakeObservatory(driver), driver
 
 
-def test_plan_target_download_counts_new_and_held_files(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_plan_target_download_counts_new_and_held_files(tmp_path: Path) -> None:
     """A plan separates held files (same name and size) from new ones."""
     held = tmp_path / "lights" / "M 13"
     held.mkdir(parents=True)
@@ -624,7 +595,7 @@ def test_plan_target_download_counts_new_and_held_files(tmp_path):  # ruff: igno
     assert plan["examples"] == ["Light/b.fits", "Light/c.fits"]
 
 
-def test_plan_refuses_a_name_that_is_not_a_remote_target_folder():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_plan_refuses_a_name_that_is_not_a_remote_target_folder() -> None:
     """A made-up name cannot reach the shell or create a target."""
     observatory, driver = _sync_observatory(["M_13", "Bias"], "x; rm -rf /", [])
     with patch("astrometricslib.get_configuration", return_value=_patched_config()):
@@ -634,7 +605,7 @@ def test_plan_refuses_a_name_that_is_not_a_remote_target_folder():  # ruff: igno
     driver.download_target_folder.assert_not_called()
 
 
-def test_dry_run_writes_nothing(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_dry_run_writes_nothing(tmp_path: Path) -> None:
     """A dry run reports the plan and never downloads or indexes."""
     observatory, driver = _sync_observatory(["M_13"], "M_13", [("Light/b.fits", 20)])
     with (
@@ -648,7 +619,7 @@ def test_dry_run_writes_nothing(tmp_path):  # ruff: ignore[missing-type-function
     astrometrics.assert_not_called()
 
 
-def test_real_run_downloads_without_pruning(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_real_run_downloads_without_pruning(tmp_path: Path) -> None:
     """A real run transfers, sorts and indexes, and never prunes."""
     observatory, driver = _sync_observatory(["M_13"], "M_13", [("Light/b.fits", 20)])
     fake_astrometrics = _FakeAstrometrics(existing=[_FakeTargetRecord("M 13")])
@@ -665,7 +636,7 @@ def test_real_run_downloads_without_pruning(tmp_path):  # ruff: ignore[missing-t
     assert fake_astrometrics.prune_flags == [False]
 
 
-def test_real_run_with_nothing_new_does_nothing(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_real_run_with_nothing_new_does_nothing(tmp_path: Path) -> None:
     """When every file is held, nothing is transferred."""
     held = tmp_path / "lights" / "M 13"
     held.mkdir(parents=True)
@@ -677,7 +648,7 @@ def test_real_run_with_nothing_new_does_nothing(tmp_path):  # ruff: ignore[missi
     driver.download_target_folder.assert_not_called()
 
 
-def test_real_run_refuses_when_the_drive_is_not_mounted(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_real_run_refuses_when_the_drive_is_not_mounted(tmp_path: Path) -> None:
     """With the frames drive missing, nothing is written."""
     from astrometricslib import StorageNotMountedError
 
@@ -699,10 +670,9 @@ class _LogObservatory:
 
     def __init__(self, tmp_path: Path, reachable: bool = True) -> None:
         """Set up a driver with two guide logs and two Ekos logs."""
-        self.reachable = reachable
-        self._config = object()
         self.ingested: list[tuple[str, bool]] = []
         self.driver = Mock()
+        self.driver.check_connection.return_value = reachable
         self.driver._remote_guide_log_sizes.return_value = {
             "/r/guide_log-a.txt": 10,
             "/r/guide_log-b.txt": 20,
@@ -714,17 +684,19 @@ class _LogObservatory:
         self.remote_transfer_driver = self.driver
         self.library = tmp_path
 
-    def check_remote_connection(self) -> bool:
-        """Report whether the telescope computer answers.
+    def ekos_log_directory(self) -> str:
+        """Return the local Ekos log folder inside the temporary library.
 
         Returns
         -------
-        reachable : `bool`
-            The value the test set.
+        directory : `str`
+            ``ekos_logs`` under the temporary folder.
         """
-        return self.reachable
+        return str(self.library / "ekos_logs")
 
-    def ingest_ekos_session_logs(self, destination_dir: str, download: bool = True) -> dict[str, int]:
+    def record_ingestion(
+        self, context: object, destination_dir: str, download: bool = True
+    ) -> dict[str, int]:
         """Record the call and return a summary.
 
         Returns
@@ -736,15 +708,17 @@ class _LogObservatory:
         return {"session_contexts_stored": 2}
 
 
-def _log_patches(tmp_path: Path):  # ruff: ignore[missing-return-type-private-function]
-    """Point the library data folder at a temporary folder.
+def _log_patches(observatory: _LogObservatory) -> AbstractContextManager[Mock]:
+    """Send the log ingestion to the fake observatory's recorder.
 
     Returns
     -------
-    patcher : `unittest.mock._patch`
-        A patch for the wayfinding library path helper.
+    patcher : `contextlib.AbstractContextManager`
+        A patch of `ekos_log_ingestion.ingest_ekos_logs`.
     """
-    return patch("wayfindinglib.drivers.local_database._wayfinding_library_path", return_value=tmp_path)
+    from wayfindinglib.tasks.control_tasks import ekos_log_ingestion
+
+    return patch.object(ekos_log_ingestion, "ingest_ekos_logs", side_effect=observatory.record_ingestion)
 
 
 def test_plan_log_sync_compares_names_and_sizes(tmp_path: Path) -> None:
@@ -773,7 +747,7 @@ class SimpleNamespaceDriver:
 def test_log_sync_dry_run_ingests_nothing(tmp_path: Path) -> None:
     """A dry run reports the plan and never calls the ingestion."""
     observatory = _LogObservatory(tmp_path)
-    with _log_patches(tmp_path):
+    with _log_patches(observatory):
         result = remote_operations.sync_remote_logs(observatory)
     assert result["dry_run"] is True
     assert observatory.ingested == []
@@ -783,7 +757,7 @@ def test_log_sync_dry_run_ingests_nothing(tmp_path: Path) -> None:
 def test_log_sync_real_run_ingests_with_download(tmp_path: Path) -> None:
     """A real run calls the repeat-safe ingestion with downloading on."""
     observatory = _LogObservatory(tmp_path)
-    with _log_patches(tmp_path):
+    with _log_patches(observatory):
         result = remote_operations.sync_remote_logs(observatory, dry_run=False)
     assert observatory.ingested == [(str(tmp_path / "ekos_logs"), True)]
     assert result["ingested"] == {"session_contexts_stored": 2}
@@ -792,7 +766,7 @@ def test_log_sync_real_run_ingests_with_download(tmp_path: Path) -> None:
 def test_log_sync_refuses_when_the_telescope_computer_is_unreachable(tmp_path: Path) -> None:
     """With no connection, the tool reports it and does nothing."""
     observatory = _LogObservatory(tmp_path, reachable=False)
-    with _log_patches(tmp_path):
+    with _log_patches(observatory):
         result = remote_operations.sync_remote_logs(observatory, dry_run=False)
     assert "cannot be reached" in result["error"]
     assert observatory.ingested == []

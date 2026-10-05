@@ -22,18 +22,19 @@ of importing `fit_pointing_model` directly is
 with this milestone but not part of it.
 """
 
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 from wayfindinglib.analytics.pointing_model import fit_pointing_model
 from wayfindinglib.models.session.telemetry import MountPointingModel
 
-_DEFAULT_LATITUDE_DEG = 45.0
-"""Matches `fit_pointing_model`'s own default, used when no observer
-location is configured on the active rig."""
+if TYPE_CHECKING:
+    from wayfindinglib.api.control.context import ControlContext
 
 
 def compute_pointing_model(
-    observatory,  # ruff: ignore[missing-type-function-argument]
+    context: ControlContext,
     logger_interface: Any,
     session_id: str | None = None,
     limit: int = 5000,
@@ -42,8 +43,9 @@ def compute_pointing_model(
 
     Parameters
     ----------
-    observatory : `wayfindinglib.api.control_registry.ObservatoryControl`
-        Provides `get_observer_location` for the fit's latitude input.
+    context : `ControlContext`
+        Supplies the observer latitude for the fit (45 degrees when no
+        location is known).
     logger_interface : `astrometricslib.LoggerInterface`
         Source of recorded alignment attempts.
     session_id : `str` | `None`, optional
@@ -64,7 +66,4 @@ def compute_pointing_model(
     else:
         attempts = logger_interface.get_alignment_logs(limit=limit)
 
-    observer_location = observatory.get_observer_location()
-    latitude_deg = observer_location["latitude"] if observer_location else _DEFAULT_LATITUDE_DEG
-
-    return fit_pointing_model(attempts, latitude_deg=latitude_deg)
+    return fit_pointing_model(attempts, latitude_deg=context.observer_latitude_deg())

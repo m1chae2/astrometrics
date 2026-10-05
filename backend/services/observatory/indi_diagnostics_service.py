@@ -1,15 +1,15 @@
-"""Backend service wrapping `ObservatoryControl.indi_diagnostics`.
+"""Backend service for raw INDI device and property inspection.
 
-Registered as its own router service so `rpc_router.py` can repoint the
-three raw-INDI-inspection actions at it once those methods are removed
-from `ObservatoryControl` outright (M5) -- `IndiStatusPanel`, the UI
-this backs, needs no change: it only ever calls the action name, never
-the backend method directly.
+Serves the three raw INDI actions that `IndiStatusPanel` calls, through
+`control.equipment`: `status(include=["indi_devices"])`,
+`status(include=["indi_properties"], device_name=...)` and
+`set_device_property`. Each returns an empty answer when the active mount
+does not use INDI.
 """
 
 from typing import Any
 
-from wayfindinglib.api.control_registry import ObservatoryControl
+from wayfindinglib import ObservatoryControl
 
 
 class IndiDiagnosticsService:
@@ -28,8 +28,7 @@ class IndiDiagnosticsService:
             Names of the currently connected INDI devices, or an empty
             list if the active mount protocol isn't ``"indi"``.
         """
-        diagnostics = self._observatory.indi_diagnostics
-        return diagnostics.get_devices() if diagnostics else []
+        return self._observatory.equipment.status(include=["indi_devices"]).indi_devices or []
 
     def get_properties(self, device_name: str) -> dict[str, Any]:
         """List all registered properties for an INDI device.
@@ -40,8 +39,8 @@ class IndiDiagnosticsService:
             Mapping of property name to its details for the device, or
             an empty dict if the active mount protocol isn't ``"indi"``.
         """
-        diagnostics = self._observatory.indi_diagnostics
-        return diagnostics.get_properties(device_name) if diagnostics else {}
+        status = self._observatory.equipment.status(include=["indi_properties"], device_name=device_name)
+        return status.indi_properties or {}
 
     def set_property(
         self, device_name: str, property_name: str, value: Any, element: str | None = None
@@ -54,5 +53,4 @@ class IndiDiagnosticsService:
             `True` if the property element was updated, `False` if the
             active mount protocol isn't ``"indi"``.
         """
-        diagnostics = self._observatory.indi_diagnostics
-        return diagnostics.set_property(device_name, property_name, value, element) if diagnostics else False
+        return self._observatory.equipment.set_device_property(device_name, property_name, value, element)

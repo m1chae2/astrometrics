@@ -29,7 +29,7 @@ import pytest
 
 from astrometricslib import AppConfiguration
 from backend.services.observatory.alignment_service import AlignmentService
-from wayfindinglib.api.control_registry import ObservatoryControl
+from wayfindinglib import ObservatoryControl
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.drivers.indi_interface import IndiInterface
 from wayfindinglib.models.policy.delegation import DelegationState, ObservatoryCapability
@@ -130,7 +130,7 @@ def observatory(live_interface, tmp_path_factory):  # ruff: ignore[missing-type-
 
     MOUNT_CONTROL/PLATE_SOLVE_ALIGNMENT are promoted to AUTHORITATIVE
     (via SHADOWED first, per the correction-capability shadow-precedence
-    rule) so `sync_coordinates`/`slew_to_coordinates` actually dispatch
+    rule) so `control.mount.sync`/`control.mount.slew` actually dispatch
     to the driver rather than raising -- an isolated, temp-directory
     `DiskButler` backs the delegation policy so this never touches a
     real config/database file.
@@ -148,13 +148,13 @@ def observatory(live_interface, tmp_path_factory):  # ruff: ignore[missing-type-
 
     observatory_control = ObservatoryControl(config=config, butler=DiskButler(app_config=config))
     observatory_control.driver = live_interface
-    observatory_control.apply_promotion_decision(
+    observatory_control.safety.apply_promotion_decision(
         ObservatoryCapability.MOUNT_CONTROL, DelegationState.AUTHORITATIVE
     )
-    observatory_control.apply_promotion_decision(
+    observatory_control.safety.apply_promotion_decision(
         ObservatoryCapability.PLATE_SOLVE_ALIGNMENT, DelegationState.SHADOWED
     )
-    observatory_control.apply_promotion_decision(
+    observatory_control.safety.apply_promotion_decision(
         ObservatoryCapability.PLATE_SOLVE_ALIGNMENT, DelegationState.AUTHORITATIVE
     )
     return observatory_control

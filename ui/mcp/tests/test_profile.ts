@@ -55,10 +55,10 @@ describe("withheldReason", () => {
 
   it("withholds a merged tool and names its replacement", () => {
     const reason = withheldReason(
-      { tool_class: "compute", disposition: "merged", merge_into: "observatory_night_history" },
+      { tool_class: "compute", disposition: "merged", merge_into: "observatory_history_query" },
       "investigator"
     );
-    expect(reason).toContain("observatory_night_history");
+    expect(reason).toContain("observatory_history_query");
   });
 
   it("withholds a tool that is not in the manifest", () => {

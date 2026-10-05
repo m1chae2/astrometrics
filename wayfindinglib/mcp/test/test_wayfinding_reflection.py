@@ -27,18 +27,20 @@ def anyio_backend():  # ruff: ignore[missing-return-type-undocumented-public-fun
     return "asyncio"
 
 
-def test_wayfindinglib_mcp_reflection_registers_tools():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_wayfindinglib_mcp_reflection_registers_tools() -> None:
     """Verify wayfindinglib MCP server reflects Wayfinder tools."""
     tool_defs = wayfinding_registry.get_tool_definitions()
     tool_names = {t.name for t in tool_defs}
 
     # Verify key reflected tools are present
-    assert "observatory_get_telescope_status" in tool_names
+    assert "observatory_mount_status" in tool_names
+    assert "observatory_remote_list" in tool_names
+    assert not any(name.startswith("observatory_get_") for name in tool_names)
     assert "planning_get_visibility" in tool_names
     assert "planning_calculate_panels" in tool_names
 
 
-async def test_wayfinding_reflected_tool_execution():  # ruff: ignore[missing-return-type-undocumented-public-function]
+async def test_wayfinding_reflected_tool_execution() -> None:
     """Verify executing a reflected tool via Wayfinding registry succeeds."""
     res = await wayfinding_registry.execute(
         "planning_calculate_panels",

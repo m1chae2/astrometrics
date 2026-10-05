@@ -243,12 +243,14 @@ class ToolRegistry:
         elif "disconnected" in msg or "not connected" in msg or "indi" in msg:
             remediation = {
                 "suggestion": "Hardware driver is currently offline or disconnected.",
-                "recommended_tool": "call_mcp_tool('wayfindinglib-core', 'observatory_connect', {})",
+                "recommended_tool": (
+                    "call_mcp_tool('wayfindinglib-core', 'observatory_equipment_connect', {})"
+                ),
             }
         elif "filter" in msg:
             remediation = {
                 "suggestion": "Requested filter wheel slot is unknown or unconfigured.",
-                "recommended_tool": "call_mcp_tool('wayfindinglib-core', 'observatory_get_filter_names', {})",
+                "recommended_tool": "call_mcp_tool('wayfindinglib-core', 'observatory_imaging_status', {})",
             }
         elif "syntax" in msg or "unexpected" in msg:
             remediation = {

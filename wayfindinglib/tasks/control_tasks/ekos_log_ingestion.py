@@ -22,13 +22,15 @@ frames captured in the same hours). That identity is what later lets
 measurements from different equipment be kept apart.
 """
 
+from __future__ import annotations
+
 import bisect
 import collections
 import logging
 import os
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from astrometricslib import observing_night_id
 from wayfindinglib.drivers.ekos.analyze_log_parser import parse_ekos_analyze_log
@@ -37,6 +39,9 @@ from wayfindinglib.models.equipment_and_site.equipment_fingerprint import build_
 from wayfindinglib.models.session.ekos_session import EkosSessionContext, SessionEquipmentAttribution
 from wayfindinglib.models.session.guide_log import GuidingSection
 from wayfindinglib.models.session.guiding_run import GuidingRunSummary
+
+if TYPE_CHECKING:
+    from wayfindinglib.api.control.context import ControlContext
 
 logger = logging.getLogger(__name__)
 
@@ -278,7 +283,7 @@ def _sorted_paths(directory: str, prefixes: tuple[str, ...], suffix: str) -> lis
 
 
 def ingest_ekos_session_logs_from_directory(
-    observatory: Any,
+    context: ControlContext,
     logger_interface: Any,
     directory: str,
     frame_lookup: FrameLookup | None = None,
@@ -287,8 +292,8 @@ def ingest_ekos_session_logs_from_directory(
 
     Parameters
     ----------
-    observatory : `wayfindinglib.api.control_registry.ObservatoryControl`
-        Provides the configured guide plate scale, used as a fallback and
+    context : `ControlContext`
+        Supplies the configured guide plate scale, used as a fallback and
         for comparison, and stores the session records.
     logger_interface : `astrometricslib.LoggerInterface`
         Stores the guiding samples.
@@ -305,7 +310,7 @@ def ingest_ekos_session_logs_from_directory(
         What was read and stored.
     """
     summary = EkosLogIngestionSummary()
-    configured_guide_scale = observatory.guider_plate_scale_arcsec_per_px()
+    configured_guide_scale = context.guider_plate_scale_arcsec_per_px()
     nights: set[str] = set()
     all_sections: list[GuidingSection] = []
 
@@ -321,7 +326,7 @@ def ingest_ekos_session_logs_from_directory(
             s.frames_without_pixel_scale for s in parsed_log.sections
         )
         for run_index, section in enumerate(parsed_log.sections):
-            observatory.save_guiding_run(
+            context.save_guiding_run(
                 _summarize_run(
                     section, run_index, os.path.basename(guide_log_path), parsed_log.written_by_ekos
                 )
@@ -338,21 +343,21 @@ def ingest_ekos_session_logs_from_directory(
         if parsed is None:
             summary.analyze_files_skipped.append(os.path.basename(analyze_path))
             continue
-        context, _guide_stats = parsed
+        record, _guide_stats = parsed
         summary.analyze_files_read += 1
-        context.equipment = attribute_session_equipment(
-            context, all_sections, configured_guide_scale, frame_lookup
+        record.equipment = attribute_session_equipment(
+            record, all_sections, configured_guide_scale, frame_lookup
         )
-        observatory.save_ekos_session_context(context)
+        context.save_ekos_session_context(record)
         summary.session_contexts_stored += 1
-        nights.add(context.session_id)
+        nights.add(record.session_id)
 
     summary.nights = sorted(nights)
     return summary
 
 
 def fetch_and_ingest_ekos_session_logs(
-    observatory: Any,
+    context: ControlContext,
     logger_interface: Any,
     destination_dir: str,
     frame_lookup: FrameLookup | None = None,
@@ -367,8 +372,8 @@ def fetch_and_ingest_ekos_session_logs(
 
     Parameters
     ----------
-    observatory : `wayfindinglib.api.control_registry.ObservatoryControl`
-        Provides `remote_transfer_driver` and the ingestion inputs.
+    context : `ControlContext`
+        Supplies `remote_transfer_driver` and the ingestion inputs.
     logger_interface : `astrometricslib.LoggerInterface`
         Stores the guiding samples.
     destination_dir : `str`
@@ -381,13 +386,49 @@ def fetch_and_ingest_ekos_session_logs(
     summary : `EkosLogIngestionSummary`
         What was read and stored.
     """
-    driver = observatory.remote_transfer_driver
+    driver = context.remote_transfer_driver
     for method_name in ("download_guide_logs", "download_ekos_analyze_logs", "download_kstars_logs"):
         download = getattr(driver, method_name, None)
         if download is None:
             logger.info("Remote-transfer driver has no %s; reading local files only", method_name)
             continue
         download(destination_dir)
-    return ingest_ekos_session_logs_from_directory(
-        observatory, logger_interface, destination_dir, frame_lookup
-    )
+    return ingest_ekos_session_logs_from_directory(context, logger_interface, destination_dir, frame_lookup)
+
+
+def ingest_ekos_logs(context: ControlContext, destination_dir: str, download: bool = True) -> dict[str, Any]:
+    """Read Ekos's guide and session logs and store what they record.
+
+    Names the imaging equipment of each session from the science
+    library's frames when that library can be read.
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        Supplies the drivers, the log database and the science library.
+    destination_dir : `str`
+        Local folder for the logs.
+    download : `bool`, optional
+        If `False`, read only what is already in `destination_dir` and do
+        not contact the telescope computer.
+
+    Returns
+    -------
+    summary : `dict` [`str`, `Any`]
+        What was read and stored (see `EkosLogIngestionSummary`).
+    """
+    frame_lookup = None
+    try:
+        frame_lookup = build_frame_lookup(context.astrometrics)
+    except Exception as error:
+        logger.warning("Could not read the frame library to name imaging equipment: %s", error)
+
+    if download:
+        summary = fetch_and_ingest_ekos_session_logs(
+            context, context.logger_interface, destination_dir, frame_lookup
+        )
+    else:
+        summary = ingest_ekos_session_logs_from_directory(
+            context, context.logger_interface, destination_dir, frame_lookup
+        )
+    return summary.as_dict()

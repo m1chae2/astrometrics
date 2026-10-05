@@ -7,15 +7,20 @@ and picks the newest of each; the judging is done in the pure functions
 there.
 """
 
+from __future__ import annotations
+
 import logging
 import os
-from typing import Any
+from typing import TYPE_CHECKING
 
 from wayfindinglib.drivers.ekos.analyze_log_parser import parse_ekos_analyze_log
 from wayfindinglib.drivers.ekos.kstars_log_parser import parse_dither_events
 from wayfindinglib.models.session.live_session_status import LiveSessionStatus
 from wayfindinglib.session_analysis.live_status import summarize_live_session
 from wayfindinglib.tasks.control_tasks.night_history import EKOS_SECTIONS, MAXIMUM_LIMIT, ekos_sections
+
+if TYPE_CHECKING:
+    from wayfindinglib.api.control.context import ControlContext
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +69,7 @@ def _newest_kstars_log(directory: str) -> str | None:
 
 
 def get_live_session_status(
-    observatory: Any,
+    context: ControlContext,
     destination_dir: str,
     window_minutes: float = 10.0,
     refresh: bool = True,
@@ -75,8 +80,8 @@ def get_live_session_status(
 
     Parameters
     ----------
-    observatory : `wayfindinglib.api.control_registry.ObservatoryControl`
-        Provides `remote_transfer_driver`.
+    context : `ControlContext`
+        Supplies `remote_transfer_driver`.
     destination_dir : `str`
         Local folder the logs are downloaded into and read from.
     window_minutes : `float`, optional
@@ -100,7 +105,7 @@ def get_live_session_status(
     if unknown:
         return {"error": f"Unknown section(s) {unknown}. Choose from: {', '.join(EKOS_SECTIONS)}."}
     if refresh:
-        driver = observatory.remote_transfer_driver
+        driver = context.remote_transfer_driver
         for method_name in ("download_ekos_analyze_logs", "download_kstars_logs"):
             download = getattr(driver, method_name, None)
             if download is None:

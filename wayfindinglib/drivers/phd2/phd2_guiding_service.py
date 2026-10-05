@@ -1,13 +1,13 @@
-"""Purpose: PHD2-backed implementation of the guiding_service contract.
+"""Purpose: A guiding-telemetry source backed by a live PHD2 connection.
 
-Description: `hardware_operations.get_telescope_status()` reads guiding
-telemetry from a settable `guiding_service` property. It calls
-`poll_external_telemetry()` and then `get_status()` on that object.
-`PHD2GuidingService` implements this interface. It runs PHD2Client's
+Description: The guiding-telemetry interface is two calls: a caller calls
+`poll_external_telemetry()` and then `get_status()`. The backend's
+`GuidingService` and the execution session recorder use it to read the guiding
+history. `PHD2GuidingService` implements this interface. It runs PHD2Client's
 event stream on a background thread and stores each GuideStep event as a
-GuidingSample record. It returns those records in two forms: as history
-entries for status reports, and as GuidingSample objects for
-ObservationSession recording.
+GuidingSample record. It returns those records in two forms: as history entries
+for status reports, and as GuidingSample objects for ObservationSession
+recording.
 """
 
 import logging
@@ -25,8 +25,8 @@ logger = logging.getLogger(__name__)
 class PHD2GuidingService:
     """Guiding-telemetry source backed by a live PHD2 connection.
 
-    Implements the `guiding_service` interface used by
-    `hardware_operations.get_telescope_status()`.
+    Implements the guiding-telemetry interface (`poll_external_telemetry`
+    and `get_status`) that the session recorder and the backend use.
 
     Parameters
     ----------
@@ -56,7 +56,7 @@ class PHD2GuidingService:
     def poll_external_telemetry(self) -> None:
         """Ensure the background PHD2 event-reading thread is running.
 
-        Matches the guiding_service contract's expected method name
+        Matches the guiding-telemetry interface's expected method name
         and signature exactly. Lazily starts (or restarts, if the
         thread died) the connection thread rather than requiring a
         separate explicit start() call -- constructing and assigning

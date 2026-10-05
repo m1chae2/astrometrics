@@ -8,7 +8,7 @@ state logic directly to the wayfindinglib domain high-level interface.
 import logging
 from typing import Any
 
-from astrometricslib import InvalidArgumentError, NotFoundError
+from astrometricslib import InvalidArgumentError
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +90,7 @@ class TelescopeService:
 
         logger = logging.getLogger(__name__)
         try:
-            data = self.wayfinder.control.get_telescope_status()
+            data = self.wayfinder.control.mount.status()
         except Exception as e:
             logger.warning(f"Failed to query telescope status (telescope may be offline): {e}")
             data = {
@@ -198,10 +198,17 @@ class TelescopeService:
         result : `bool`
             `True` if the connection succeeded.
         """
-        return self.wayfinder.control.connect()
+        return self.wayfinder.control.equipment.connect()
 
     def slew_to_coordinates(self, ra: float, dec: float) -> bool:
         """Command the telescope to slew to the specified coordinates.
+
+        Parameters
+        ----------
+        ra : `float`
+            Right ascension in hours, as the UI sends it.
+        dec : `float`
+            Declination in degrees.
 
         Returns
         -------
@@ -216,7 +223,10 @@ class TelescopeService:
         # REQ: BKD-1.2: The backend SHALL provide a generic interface
         # for Telescope control (Slew, Sync, Park, Track).
         try:
-            return self.wayfinder.control.slew_to_coordinates(ra, dec)
+            from wayfindinglib import SkyPosition
+
+            position = SkyPosition(ra_deg=(float(ra) * 15.0) % 360.0, dec_deg=float(dec))
+            return self.wayfinder.control.mount.slew(position)
         except ValueError as e:
             raise InvalidArgumentError(str(e)) from e
 
@@ -233,20 +243,13 @@ class TelescopeService:
         Raises
         ------
         InvalidArgumentError
-            If ``target_name`` is empty, or the name cannot be
-            resolved for a reason other than not being found.
-        NotFoundError
-            If ``target_name`` is not present in the library.
+            If ``target_name`` is empty. A name that is not in the library
+            is refused by `control.mount.slew` with `NotFoundError`.
         """
         if not target_name or not target_name.strip():
             raise InvalidArgumentError("target_name must not be empty")
 
-        try:
-            return self.wayfinder.control.slew_to_target(target_name)
-        except ValueError as e:
-            if "not found in library" in str(e):
-                raise NotFoundError(str(e)) from e
-            raise InvalidArgumentError(str(e)) from e
+        return self.wayfinder.control.mount.slew(target_name)
 
     def slew_to_target(self, target_name: str) -> bool:
         """Reflected tool execution alias for slew_to_target_by_name.
@@ -272,7 +275,7 @@ class TelescopeService:
             If the hardware driver rejects an argument of the park command.
         """
         try:
-            return self.wayfinder.control.park()
+            return self.wayfinder.control.mount.park()
         except ValueError as e:
             raise InvalidArgumentError(str(e)) from e
 
@@ -290,7 +293,7 @@ class TelescopeService:
             If the hardware driver rejects an argument of the unpark command.
         """
         try:
-            return self.wayfinder.control.unpark()
+            return self.wayfinder.control.mount.unpark()
         except ValueError as e:
             raise InvalidArgumentError(str(e)) from e
 
@@ -308,7 +311,7 @@ class TelescopeService:
             If the hardware driver rejects an argument of the tracking command.
         """
         try:
-            return self.wayfinder.control.set_tracking(enabled)
+            return self.wayfinder.control.mount.set_tracking(enabled)
         except ValueError as e:
             raise InvalidArgumentError(str(e)) from e
 
@@ -326,7 +329,7 @@ class TelescopeService:
             If the hardware driver rejects an argument of the movement command.
         """
         try:
-            return self.wayfinder.control.manual_move(direction, start)
+            return self.wayfinder.control.mount.manual_move(direction, start)
         except ValueError as e:
             raise InvalidArgumentError(str(e)) from e
 
@@ -344,7 +347,7 @@ class TelescopeService:
             If the hardware driver rejects an argument of the abort command.
         """
         try:
-            return self.wayfinder.control.abort_motion()
+            return self.wayfinder.control.mount.abort_motion()
         except ValueError as e:
             raise InvalidArgumentError(str(e)) from e
 
@@ -362,7 +365,7 @@ class TelescopeService:
             If the hardware driver rejects the slew rate.
         """
         try:
-            return self.wayfinder.control.set_slew_rate(rate_index)
+            return self.wayfinder.control.mount.set_slew_rate(rate_index)
         except ValueError as e:
             raise InvalidArgumentError(str(e)) from e
 
@@ -382,7 +385,7 @@ class TelescopeService:
         # REQ: BKD-1.4: The backend SHALL provide a generic interface
         # for Focuser control (Move, Position).
         try:
-            return self.wayfinder.control.focus_move(steps)
+            return self.wayfinder.control.imaging.focus_move(steps)
         except ValueError as e:
             raise InvalidArgumentError(str(e)) from e
 
@@ -400,7 +403,7 @@ class TelescopeService:
             If the hardware driver rejects the query.
         """
         try:
-            return self.wayfinder.control.get_focuser_position()
+            return self.wayfinder.control.imaging.status(include=["focuser"]).focuser_position
         except ValueError as e:
             raise InvalidArgumentError(str(e)) from e
 
@@ -418,20 +421,14 @@ class TelescopeService:
         Raises
         ------
         InvalidArgumentError
-            If ``filter_name`` is empty, or the filter wheel driver
-            rejects it for another reason.
-        NotFoundError
-            If ``filter_name`` is not recognized by the filterwheel.
+            If ``filter_name`` is empty. A name the filter wheel does not
+            know is refused by `control.imaging.set_filter` with
+            `NotFoundError`.
         """
         if not filter_name or not filter_name.strip():
             raise InvalidArgumentError("filter_name must not be empty")
 
-        try:
-            return self.wayfinder.control.set_filter(filter_name)
-        except ValueError as e:
-            if "not recognized" in str(e):
-                raise NotFoundError(str(e)) from e
-            raise InvalidArgumentError(str(e)) from e
+        return self.wayfinder.control.imaging.set_filter(filter_name)
 
     def get_observer_location(self) -> dict:
         """Return observer location from INDI GPSD or a fallback default.
@@ -445,7 +442,7 @@ class TelescopeService:
         REQ: PLN-2.3
         """
         try:
-            geo = self.wayfinder.control.get_observer_location()
+            geo = self.wayfinder.control.equipment.status(include=["observer_location"]).observer_location
             if geo:
                 return geo
         except Exception as exc:

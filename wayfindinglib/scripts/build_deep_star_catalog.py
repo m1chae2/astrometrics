@@ -174,7 +174,7 @@ def _choose_search_circles(
     ----------
     arguments : `argparse.Namespace`
         The parsed command-line arguments.
-    planning : `wayfindinglib.api.planning_registry.ObservationPlanning`
+    planning : `wayfindinglib.ObservationPlanning`
         Used to look up imaged field centers for ``--near-targets``.
 
     Returns
@@ -248,7 +248,7 @@ def _run_estimate(planning: object, arguments: argparse.Namespace) -> int:
 
     Parameters
     ----------
-    planning : `wayfindinglib.api.planning_registry.ObservationPlanning`
+    planning : `wayfindinglib.ObservationPlanning`
         Used to run the size estimate.
     arguments : `argparse.Namespace`
         The parsed command-line arguments.

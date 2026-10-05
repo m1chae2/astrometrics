@@ -30,7 +30,7 @@ def _control(rows: list[dict[str, float]], library: object = None) -> SimpleName
         An object with the two attributes the module uses.
     """
     logger = SimpleNamespace(get_guiding_logs=lambda **_: rows)
-    return SimpleNamespace(_config=None, _logger_interface=logger, astrometrics=library)
+    return SimpleNamespace(config=None, logger_interface=logger, astrometrics=library)
 
 
 def _samples(start: float, count: int, error: float) -> list[dict[str, float]]:

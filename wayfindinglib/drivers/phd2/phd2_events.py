@@ -1,10 +1,10 @@
 """Purpose: Pure parsing of PHD2 event-stream JSON messages.
 
-Description: Maps PHD2's GuideStep event fields onto GuidingSample's real
-field names, and adapts GuidingSample back to the flat dict shape
-observatory_guiding_telemetry.py already expects from
-get_telescope_status()'s guidingHistory. No I/O -- these are pure functions
-over already-decoded JSON, fully unit-testable with synthetic events.
+Description: Maps PHD2's GuideStep event fields onto GuidingSample's real field
+names, and adapts GuidingSample back to the flat dict shape
+observatory_guiding_telemetry.py already expects from the guiding history
+(``guidingHistory``) in the telescope status reply. No I/O -- these are pure
+functions over already-decoded JSON, fully unit-testable with synthetic events.
 """
 
 from typing import Any
@@ -70,7 +70,7 @@ def to_history_entry(guiding_sample: GuidingSample) -> dict[str, Any]:
     -------
     history_entry : `dict`
         Keyed `timestamp`/`raDrift`/`decDrift`/`raPulse`/`decPulse` -- the
-        shape of each item in `get_telescope_status()`'s `guidingHistory`.
+        shape of each item in the telescope status reply's `guidingHistory`.
     """
     return {
         "timestamp": guiding_sample.time,

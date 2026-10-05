@@ -34,8 +34,14 @@ def register_wayfinder_reflected_tools():  # ruff: ignore[missing-return-type-un
     if not wayfinder:
         return
 
+    # `control` itself holds only the driver properties, which are not
+    # tools. Its operations live on seven children, so each child gets its
+    # own prefix, such as `observatory_mount_park`.
     branch_mapping = {
-        "control": "observatory",
+        **{
+            f"control.{child}": f"observatory_{child}"
+            for child in ("mount", "imaging", "guiding", "remote", "history", "safety", "equipment")
+        },
         "planning": "planning",
         "execution": "execution",
     }

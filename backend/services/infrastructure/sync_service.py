@@ -8,7 +8,7 @@ from typing import Any
 
 from astrometricslib import require_mounted_storage
 from backend.services.infrastructure import thread_management
-from wayfindinglib.api.control_registry import ObservatoryControl
+from wayfindinglib import ObservatoryControl
 
 
 class SyncService:
@@ -29,9 +29,8 @@ class SyncService:
         Parameters
         ----------
         observatory_api : `ObservatoryControl`, optional
-            Provides `remote_transfer_driver`/`list_remote_targets` --
-            no deprecated `StellarMateInterface` fallback (M9's backend
-            cleanup).
+            Provides `remote_transfer_driver` and the remote folder list
+            (`control.remote.list`).
         config_service : `Any`, optional
             Injected AppConfiguration instance.
         guiding_service : `Any`, optional
@@ -143,7 +142,7 @@ class SyncService:
         if not self._observatory:
             return {"status": "error", "message": "ObservatoryControl not available"}
 
-        target_list = self._observatory.list_remote_targets()
+        target_list = self._observatory.remote.list("folders")
         target_list = [t for t in target_list if t not in ["Bias", "Dark", "Flat"]]
         return self.sync_all(target_list)
 

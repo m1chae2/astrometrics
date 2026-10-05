@@ -1,21 +1,25 @@
-"""Purpose: Unit tests for the relocated INDI hardware operations.
+"""Purpose: Unit tests for the hardware operations behind `control`.
 
-Description: Verifies `tasks/control_tasks/hardware_operations.py`
-behaves identically to the deprecated `observatorylib.hardware_operations`
-it was mechanically relocated from (§2.5.11's "hardware operations
-behave identically after relocation"). The original module had no
-direct unit tests of its own -- it was exercised only indirectly via
-`ObservatoryManager` -- so this suite is new coverage written against
-the relocated module directly, using a duck-typed fake manager rather
-than a real INDI connection.
+Description: Verifies `tasks/control_tasks/hardware_operations.py` against
+a duck-typed fake `ControlContext` rather than a real INDI connection:
+each command checks its capability in the delegation policy, then calls
+the right driver; each read calls its driver with no check.
 """
 
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from pytest_mock import MockerFixture
 
-from astrometricslib import ConfigurationError, ConflictError, HardwareError, PermissionDeniedError
+from astrometricslib import (
+    ConfigurationError,
+    ConflictError,
+    HardwareError,
+    InvalidArgumentError,
+    NotFoundError,
+    PermissionDeniedError,
+)
 from wayfindinglib.models.equipment_and_site.enclosure import Enclosure, EnclosureState, EnclosureType
 from wayfindinglib.models.policy.delegation import (
     CapabilityDelegation,
@@ -23,6 +27,7 @@ from wayfindinglib.models.policy.delegation import (
     DelegationState,
     ObservatoryCapability,
 )
+from wayfindinglib.models.sky_position import SkyPosition
 from wayfindinglib.tasks.control_tasks import hardware_operations as ops
 
 
@@ -44,7 +49,9 @@ def _authoritative_policy(*capabilities: ObservatoryCapability) -> DelegationPol
 
 
 class _FakeManager:
-    def __init__(  # ruff: ignore[missing-return-type-special-method]
+    """A stand-in for `ControlContext` with only what the operations use."""
+
+    def __init__(
         self,
         driver: Any = None,
         mount_driver: Any = None,
@@ -55,11 +62,10 @@ class _FakeManager:
         enclosure_driver: Any = None,
         enclosure: Any = None,
         config: Any = None,
-        guiding_service: Any = None,
-        sync_service: Any = None,
         policy: DelegationPolicy | None = None,
         astrometrics: Any = None,
-    ):
+    ) -> None:
+        """Hold the given drivers, configuration and policy."""
         self.astrometrics = astrometrics if astrometrics is not None else MagicMock()
         self.driver = driver
         self.mount_driver = mount_driver
@@ -69,9 +75,7 @@ class _FakeManager:
         self.guide_camera_driver = guide_camera_driver
         self.enclosure_driver = enclosure_driver
         self._enclosure = enclosure
-        self._config = config
-        self._guiding_service = guiding_service
-        self._sync_service = sync_service
+        self.config = config
         self._policy = (
             policy
             if policy is not None
@@ -108,16 +112,17 @@ class _FakeManager:
 class _FakeMountStatus:
     """A stand-in for `MountStatus` with the fields the status read uses."""
 
-    def __init__(  # ruff: ignore[missing-return-type-special-method]
+    def __init__(
         self,
-        ra="10:00:00",  # ruff: ignore[missing-type-function-argument]
-        dec="+20:00:00",  # ruff: ignore[missing-type-function-argument]
-        altitude="45:00:00",  # ruff: ignore[missing-type-function-argument]
-        azimuth="180:00:00",  # ruff: ignore[missing-type-function-argument]
-        tracking_status="Tracking",  # ruff: ignore[missing-type-function-argument]
-        connection_status="Connected",  # ruff: ignore[missing-type-function-argument]
-        target_name=None,  # ruff: ignore[missing-type-function-argument]
-    ):
+        ra: str = "10:00:00",
+        dec: str = "+20:00:00",
+        altitude: str = "45:00:00",
+        azimuth: str = "180:00:00",
+        tracking_status: str = "Tracking",
+        connection_status: str = "Connected",
+        target_name: str | None = None,
+    ) -> None:
+        """Hold the mount status fields."""
         self.ra = ra
         self.dec = dec
         self.altitude = altitude
@@ -127,7 +132,9 @@ class _FakeMountStatus:
         self.target_name = target_name
 
 
-def _manager_for_status_reassembly(mocker, guiding_service=None, driver_status=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _manager_for_status_reassembly(
+    mocker: MockerFixture, driver_status: dict[str, str] | None = None
+) -> _FakeManager:
     """Build a `_FakeManager` with the four drivers a status read uses.
 
     Returns
@@ -158,17 +165,16 @@ def _manager_for_status_reassembly(mocker, guiding_service=None, driver_status=N
         filter_wheel_driver=filter_wheel_driver,
         focuser_driver=focuser_driver,
         camera_driver=camera_driver,
-        guiding_service=guiding_service,
     )
 
 
-def test_get_telescope_status_without_guiding_service(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_mount_status_reassembles_the_four_driver_reads(mocker: MockerFixture) -> None:
     """Verify status is reassembled from the four driver calls."""
     manager = _manager_for_status_reassembly(
         mocker, driver_status={"TEMPERATURE": "15.0°C", "HUMIDITY": "40.0%", "CAMERA_STATUS": "Idle"}
     )
 
-    status = ops.get_telescope_status(manager)
+    status = ops.mount_status(manager)
 
     assert status == {
         "ra": "10:00:00",
@@ -181,82 +187,86 @@ def test_get_telescope_status_without_guiding_service(mocker):  # ruff: ignore[m
         "connectionStatus": "Connected",
         "focuserPosition": 12345,
         "filter": "Luminance",
-        "guidingHistory": [],
         "cameraTemperature": "-10.0°C",
         "cameraStatus": "Idle",
         "targetName": None,
     }
 
 
-def test_get_telescope_status_adds_guiding_history(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify guidingHistory is merged in when a guiding service is present."""
-    guiding_service = mocker.Mock()
-    guiding_service.get_status.return_value = {"history": [{"time": 1.0}]}
-    manager = _manager_for_status_reassembly(mocker, guiding_service=guiding_service)
+def test_mount_status_reads_only_the_sections_asked_for(mocker: MockerFixture) -> None:
+    """Verify `include` limits the device reads and rejects unknown names."""
+    manager = _manager_for_status_reassembly(mocker)
 
-    status = ops.get_telescope_status(manager)
+    status = ops.mount_status(manager, include=["focuser"])
 
-    guiding_service.poll_external_telemetry.assert_called_once()
-    assert status["guidingHistory"] == [{"time": 1.0}]
+    assert status == {"focuserPosition": 12345}
+    manager.mount_driver.get_status.assert_not_called()
+    with pytest.raises(InvalidArgumentError, match="Unknown section"):
+        ops.mount_status(manager, include=["weather"])
 
 
-def test_slew_to_target_raises_for_unknown_target(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify an unrecognized target raises ValueError."""
+def test_resolve_destination_raises_for_unknown_target(mocker: MockerFixture) -> None:
+    """Verify an unrecognized target raises NotFoundError."""
     manager = _FakeManager(config=mocker.Mock())
     manager.astrometrics.targets.get.return_value = None
 
-    with pytest.raises(ValueError, match="not found"):
-        ops.slew_to_target(manager, "does-not-exist")
+    with pytest.raises(NotFoundError, match="not found"):
+        ops.resolve_destination(manager, "does-not-exist")
 
 
-def test_slew_to_target_raises_for_unresolved_placeholder_coordinates(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_resolve_destination_raises_for_unresolved_placeholder_coordinates(mocker: MockerFixture) -> None:
     """Verify a target with placeholder (unsolved) coordinates raises."""
-    target = mocker.Mock(ra="0h 0m 0s", dec="0d 0m 0s")
+    target = mocker.Mock(id="M 81", ra="0h 0m 0s", dec="0d 0m 0s")
     manager = _FakeManager(config=mocker.Mock())
     manager.astrometrics.targets.get.return_value = target
 
-    with pytest.raises(ValueError, match="hasn't been plate-solved"):
-        ops.slew_to_target(manager, "M 81")
+    with pytest.raises(InvalidArgumentError, match="hasn't been plate-solved"):
+        ops.resolve_destination(manager, "M 81")
 
 
-def test_slew_to_target_resolves_coordinates_and_delegates(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify a valid target resolves coordinates and delegates the slew."""
+def test_resolve_destination_reads_a_target_s_coordinates(mocker: MockerFixture) -> None:
+    """Verify a target id becomes its plate-solved position in degrees."""
     target = mocker.Mock(ra="12h 00m 00s", dec="+45d 00m 00s")
     manager = _FakeManager(config=mocker.Mock())
     manager.astrometrics.targets.get.return_value = target
-    manager.slew_to_coordinates = mocker.Mock(return_value=True)
 
-    result = ops.slew_to_target(manager, "M 81")
+    position = ops.resolve_destination(manager, "M 81")
 
-    assert result is True
-    manager.slew_to_coordinates.assert_called_once()
-    called_ra, called_dec = manager.slew_to_coordinates.call_args[0]
-    assert called_ra == pytest.approx(12.0, abs=1e-3)
-    assert called_dec == pytest.approx(45.0, abs=1e-3)
+    assert position.ra_deg == pytest.approx(180.0, abs=1e-3)
+    assert position.dec_deg == pytest.approx(45.0, abs=1e-3)
 
 
-def test_slew_to_coordinates_delegates_to_mount_driver(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify slew_to_coordinates calls mount_driver.slew with the values."""
+def test_resolve_destination_accepts_a_position_or_its_dictionary() -> None:
+    """Verify a `SkyPosition`, or its JSON form, passes through unchanged."""
+    position = SkyPosition(ra_deg=10.0, dec_deg=20.0)
+    manager = _FakeManager()
+
+    assert ops.resolve_destination(manager, position) is position
+    assert ops.resolve_destination(manager, {"ra_deg": 10.0, "dec_deg": 20.0}) == position
+
+
+def test_slew_delegates_to_mount_driver(mocker: MockerFixture) -> None:
+    """Verify slew sends RA in hours and Dec in degrees to the mount driver."""
     mount_driver = mocker.Mock()
     mount_driver.slew = mocker.AsyncMock(return_value=True)
     manager = _FakeManager(mount_driver=mount_driver)
 
-    assert ops.slew_to_coordinates(manager, 10.0, 20.0) is True
+    assert ops.slew(manager, SkyPosition(ra_deg=150.0, dec_deg=20.0)) is True
     mount_driver.slew.assert_called_once_with(10.0, 20.0)
 
 
-def test_slew_to_coordinates_raises_when_mount_control_not_authoritative(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_slew_raises_when_mount_control_not_authoritative(mocker: MockerFixture) -> None:
     """Verify a command is refused when MOUNT_CONTROL is not AUTHORITATIVE."""
     mount_driver = mocker.Mock()
     mount_driver.slew = mocker.AsyncMock(return_value=True)
     manager = _FakeManager(mount_driver=mount_driver, policy=_authoritative_policy())
 
     with pytest.raises(PermissionDeniedError, match="MOUNT_CONTROL"):
-        ops.slew_to_coordinates(manager, 10.0, 20.0)
+        ops.slew(manager, SkyPosition(ra_deg=150.0, dec_deg=20.0))
     mount_driver.slew.assert_not_called()
 
 
-def test_park_and_unpark_delegate_to_mount_driver(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_park_and_unpark_delegate_to_mount_driver(mocker: MockerFixture) -> None:
     """Verify park/unpark delegate to the mount driver.
 
     Each should return the driver's own result.
@@ -270,7 +280,7 @@ def test_park_and_unpark_delegate_to_mount_driver(mocker):  # ruff: ignore[missi
     assert ops.unpark(manager) is True
 
 
-def test_set_tracking_delegates_to_mount_driver(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_set_tracking_delegates_to_mount_driver(mocker: MockerFixture) -> None:
     """Verify set_tracking passes the enabled flag to the mount driver."""
     mount_driver = mocker.Mock()
     mount_driver.set_tracking = mocker.AsyncMock(return_value=True)
@@ -280,7 +290,7 @@ def test_set_tracking_delegates_to_mount_driver(mocker):  # ruff: ignore[missing
     mount_driver.set_tracking.assert_called_once_with(True)
 
 
-def test_abort_motion_delegates_to_mount_driver(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_abort_motion_delegates_to_mount_driver(mocker: MockerFixture) -> None:
     """Verify abort_motion delegates to the mount driver."""
     mount_driver = mocker.Mock()
     mount_driver.abort_motion = mocker.AsyncMock(return_value=True)
@@ -290,18 +300,18 @@ def test_abort_motion_delegates_to_mount_driver(mocker):  # ruff: ignore[missing
     mount_driver.abort_motion.assert_called_once()
 
 
-def test_pulse_guide_delegates_to_mount_driver(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify pulse_guide delegates to the mount driver."""
+def test_pulse_delegates_to_mount_driver(mocker: MockerFixture) -> None:
+    """Verify pulse delegates to the mount driver."""
     mount_driver = mocker.Mock()
     mount_driver.pulse_guide = mocker.AsyncMock(return_value=True)
     manager = _FakeManager(mount_driver=mount_driver)
 
-    assert ops.pulse_guide(manager, "N", 250.0) is True
+    assert ops.pulse(manager, "N", 250.0) is True
     mount_driver.pulse_guide.assert_called_once_with("N", 250.0)
 
 
-def test_pulse_guide_raises_when_autoguiding_not_authoritative(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify pulse_guide is gated on AUTOGUIDING, not MOUNT_CONTROL."""
+def test_pulse_raises_when_autoguiding_not_authoritative(mocker: MockerFixture) -> None:
+    """Verify pulse is gated on AUTOGUIDING, not MOUNT_CONTROL."""
     mount_driver = mocker.Mock()
     mount_driver.pulse_guide = mocker.AsyncMock(return_value=True)
     manager = _FakeManager(
@@ -310,22 +320,22 @@ def test_pulse_guide_raises_when_autoguiding_not_authoritative(mocker):  # ruff:
     )
 
     with pytest.raises(PermissionDeniedError, match="AUTOGUIDING"):
-        ops.pulse_guide(manager, "N", 250.0)
+        ops.pulse(manager, "N", 250.0)
     mount_driver.pulse_guide.assert_not_called()
 
 
-def test_sync_coordinates_delegates_to_mount_driver(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify sync_coordinates delegates to the mount driver."""
+def test_sync_mount_delegates_to_mount_driver(mocker: MockerFixture) -> None:
+    """Verify sync_mount sends RA in hours and Dec in degrees."""
     mount_driver = mocker.Mock()
     mount_driver.sync = mocker.AsyncMock(return_value=True)
     manager = _FakeManager(mount_driver=mount_driver)
 
-    assert ops.sync_coordinates(manager, 10.0, 20.0) is True
+    assert ops.sync_mount(manager, SkyPosition(ra_deg=150.0, dec_deg=20.0)) is True
     mount_driver.sync.assert_called_once_with(10.0, 20.0)
 
 
-def test_sync_coordinates_raises_when_alignment_not_authoritative(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify sync_coordinates is gated on alignment, not mount control."""
+def test_sync_mount_raises_when_alignment_not_authoritative(mocker: MockerFixture) -> None:
+    """Verify sync_mount is gated on alignment, not mount control."""
     mount_driver = mocker.Mock()
     mount_driver.sync = mocker.AsyncMock(return_value=True)
     manager = _FakeManager(
@@ -334,11 +344,11 @@ def test_sync_coordinates_raises_when_alignment_not_authoritative(mocker):  # ru
     )
 
     with pytest.raises(PermissionDeniedError, match="PLATE_SOLVE_ALIGNMENT"):
-        ops.sync_coordinates(manager, 10.0, 20.0)
+        ops.sync_mount(manager, SkyPosition(ra_deg=150.0, dec_deg=20.0))
     mount_driver.sync.assert_not_called()
 
 
-def test_capture_image_delegates_to_camera_driver(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_capture_image_delegates_to_camera_driver(mocker: MockerFixture) -> None:
     """Verify capture_image delegates to the main-camera driver."""
     camera_driver = mocker.Mock()
     camera_driver.expose = mocker.AsyncMock(return_value=True)
@@ -348,7 +358,7 @@ def test_capture_image_delegates_to_camera_driver(mocker):  # ruff: ignore[missi
     camera_driver.expose.assert_called_once_with(30.0)
 
 
-def test_capture_image_raises_when_capture_orchestration_not_authoritative(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_capture_image_raises_when_capture_orchestration_not_authoritative(mocker: MockerFixture) -> None:
     """Verify capture_image is refused without orchestration authority."""
     camera_driver = mocker.Mock()
     camera_driver.expose = mocker.AsyncMock(return_value=True)
@@ -359,7 +369,7 @@ def test_capture_image_raises_when_capture_orchestration_not_authoritative(mocke
     camera_driver.expose.assert_not_called()
 
 
-def test_guide_expose_delegates_to_guide_camera_driver(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_guide_expose_delegates_to_guide_camera_driver(mocker: MockerFixture) -> None:
     """Verify guide_expose delegates to the guide-camera driver."""
     guide_camera_driver = mocker.Mock()
     guide_camera_driver.expose = mocker.AsyncMock(return_value="blob")
@@ -369,7 +379,7 @@ def test_guide_expose_delegates_to_guide_camera_driver(mocker):  # ruff: ignore[
     guide_camera_driver.expose.assert_called_once_with(1.5, gain=100)
 
 
-def test_guide_expose_raises_when_autoguiding_not_authoritative(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_guide_expose_raises_when_autoguiding_not_authoritative(mocker: MockerFixture) -> None:
     """Verify guide_expose is refused without AUTOGUIDING authority."""
     guide_camera_driver = mocker.Mock()
     guide_camera_driver.expose = mocker.AsyncMock(return_value="blob")
@@ -380,27 +390,27 @@ def test_guide_expose_raises_when_autoguiding_not_authoritative(mocker):  # ruff
     guide_camera_driver.expose.assert_not_called()
 
 
-def test_get_guide_image_is_a_read_with_no_authority_check(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify get_guide_image delegates without requiring authority."""
+def test_guide_image_is_a_read_with_no_authority_check(mocker: MockerFixture) -> None:
+    """Verify guide_image delegates without requiring authority."""
     guide_camera_driver = mocker.Mock()
     guide_camera_driver.get_last_image = mocker.AsyncMock(return_value="blob")
     manager = _FakeManager(guide_camera_driver=guide_camera_driver, policy=_authoritative_policy())
 
-    assert ops.get_guide_image(manager) == "blob"
+    assert ops.guide_image(manager) == "blob"
 
 
-def test_set_filter_raises_for_unrecognized_filter(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify an unrecognized filter name raises ValueError."""
+def test_set_filter_raises_for_unrecognized_filter(mocker: MockerFixture) -> None:
+    """Verify an unrecognized filter name raises NotFoundError."""
     filter_wheel_driver = mocker.Mock()
     filter_wheel_driver.get_names = mocker.AsyncMock(return_value=["Luminance", "Red"])
     filter_wheel_driver.resolve_name = mocker.AsyncMock(return_value=None)
     manager = _FakeManager(filter_wheel_driver=filter_wheel_driver)
 
-    with pytest.raises(ValueError, match="not recognized"):
+    with pytest.raises(NotFoundError, match="not recognized"):
         ops.set_filter(manager, "Nonexistent")
 
 
-def test_set_filter_raises_hardware_error_on_failed_command(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_set_filter_raises_hardware_error_on_failed_command(mocker: MockerFixture) -> None:
     """Verify a hardware-level filter failure raises the hardware error."""
     filter_wheel_driver = mocker.Mock()
     filter_wheel_driver.get_names = mocker.AsyncMock(return_value=["Luminance"])
@@ -412,7 +422,7 @@ def test_set_filter_raises_hardware_error_on_failed_command(mocker):  # ruff: ig
         ops.set_filter(manager, "Luminance")
 
 
-def test_set_filter_succeeds_with_resolved_name(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_set_filter_succeeds_with_resolved_name(mocker: MockerFixture) -> None:
     """Verify a successful filter change returns True."""
     filter_wheel_driver = mocker.Mock()
     filter_wheel_driver.get_names = mocker.AsyncMock(return_value=["Luminance"])
@@ -424,7 +434,7 @@ def test_set_filter_succeeds_with_resolved_name(mocker):  # ruff: ignore[missing
     filter_wheel_driver.set_position.assert_called_once_with("Luminance")
 
 
-def test_set_filter_raises_when_capture_orchestration_not_authoritative(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_set_filter_raises_when_capture_orchestration_not_authoritative(mocker: MockerFixture) -> None:
     """Verify set_filter is refused without CAPTURE_ORCHESTRATION authority."""
     filter_wheel_driver = mocker.Mock()
     filter_wheel_driver.set_position = mocker.AsyncMock(return_value=True)
@@ -435,16 +445,16 @@ def test_set_filter_raises_when_capture_orchestration_not_authoritative(mocker):
     filter_wheel_driver.set_position.assert_not_called()
 
 
-def test_get_filter_names_delegates_to_filter_wheel_driver(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify get_filter_names is a read with no authority check."""
+def test_filter_names_delegates_to_filter_wheel_driver(mocker: MockerFixture) -> None:
+    """Verify filter_names is a read with no authority check."""
     filter_wheel_driver = mocker.Mock()
     filter_wheel_driver.get_names = mocker.AsyncMock(return_value=["Luminance", "Red"])
     manager = _FakeManager(filter_wheel_driver=filter_wheel_driver, policy=_authoritative_policy())
 
-    assert ops.get_filter_names(manager) == ["Luminance", "Red"]
+    assert ops.filter_names(manager) == ["Luminance", "Red"]
 
 
-def test_manual_move_and_slew_rate_delegate_to_mount_driver(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_manual_move_and_slew_rate_delegate_to_mount_driver(mocker: MockerFixture) -> None:
     """Verify move/set-slew-rate delegate to the mount driver."""
     mount_driver = mocker.Mock()
     mount_driver.move = mocker.AsyncMock(return_value=True)
@@ -457,7 +467,7 @@ def test_manual_move_and_slew_rate_delegate_to_mount_driver(mocker):  # ruff: ig
     mount_driver.set_slew_rate.assert_called_once_with(3)
 
 
-def test_focus_move_delegates_to_focuser_driver(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_focus_move_delegates_to_focuser_driver(mocker: MockerFixture) -> None:
     """Verify focus_move delegates to the focuser driver."""
     focuser_driver = mocker.Mock()
     focuser_driver.move_relative = mocker.AsyncMock(return_value=True)
@@ -467,7 +477,7 @@ def test_focus_move_delegates_to_focuser_driver(mocker):  # ruff: ignore[missing
     focuser_driver.move_relative.assert_called_once_with(100)
 
 
-def test_focus_move_raises_when_autofocus_not_authoritative(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_focus_move_raises_when_autofocus_not_authoritative(mocker: MockerFixture) -> None:
     """Verify focus_move is refused when AUTOFOCUS isn't authoritative."""
     focuser_driver = mocker.Mock()
     focuser_driver.move_relative = mocker.AsyncMock(return_value=True)
@@ -478,16 +488,16 @@ def test_focus_move_raises_when_autofocus_not_authoritative(mocker):  # ruff: ig
     focuser_driver.move_relative.assert_not_called()
 
 
-def test_get_focuser_position_is_a_read_with_no_authority_check(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify get_focuser_position delegates without requiring authority."""
+def test_focuser_position_is_a_read_with_no_authority_check(mocker: MockerFixture) -> None:
+    """Verify focuser_position delegates without requiring authority."""
     focuser_driver = mocker.Mock()
     focuser_driver.get_position = mocker.AsyncMock(return_value=5000)
     manager = _FakeManager(focuser_driver=focuser_driver, policy=_authoritative_policy())
 
-    assert ops.get_focuser_position(manager) == 5000
+    assert ops.focuser_position(manager) == 5000
 
 
-def _manager_with_all_drivers(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _manager_with_all_drivers(mocker: MockerFixture) -> tuple[_FakeManager, Any]:
     """Build a `_FakeManager` with all six connect/disconnect-capable drivers.
 
     Returns
@@ -516,7 +526,7 @@ def _manager_with_all_drivers(mocker):  # ruff: ignore[missing-type-function-arg
     return _FakeManager(guide_camera_driver=guide_camera_driver, **drivers), guide_camera_driver
 
 
-def test_connect_connects_every_configured_driver(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_connect_connects_every_configured_driver(mocker: MockerFixture) -> None:
     """Verify connect() connects each of the six drivers and returns True."""
     manager, guide_camera_driver = _manager_with_all_drivers(mocker)
 
@@ -529,7 +539,7 @@ def test_connect_connects_every_configured_driver(mocker):  # ruff: ignore[missi
     manager.enclosure_driver.connect.assert_called_once()
 
 
-def test_disconnect_disconnects_every_configured_driver(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_disconnect_disconnects_every_configured_driver(mocker: MockerFixture) -> None:
     """Verify disconnect() disconnects each of the six drivers."""
     manager, guide_camera_driver = _manager_with_all_drivers(mocker)
 
@@ -542,48 +552,24 @@ def test_disconnect_disconnects_every_configured_driver(mocker):  # ruff: ignore
     manager.enclosure_driver.disconnect.assert_called_once()
 
 
-def test_sync_raises_without_sync_service():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify sync raises RuntimeError in standalone mode (no sync service)."""
-    observatory = _FakeManager(sync_service=None)
-    with pytest.raises(RuntimeError, match="standalone mode"):
-        ops.sync(observatory, "M 81")
-
-
-def test_sync_delegates_to_sync_service(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify sync starts a sync task through the configured sync service."""
-    sync_service = mocker.Mock()
-    sync_service.start_sync.return_value = {"status": "started"}
-    observatory = _FakeManager(sync_service=sync_service)
-
-    assert ops.sync(observatory, "M 81") == {"status": "started"}
-    sync_service.start_sync.assert_called_once_with("M 81")
-
-
-def test_is_syncing_raises_without_sync_service():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify is_syncing raises RuntimeError in standalone mode."""
-    observatory = _FakeManager(sync_service=None)
-    with pytest.raises(RuntimeError, match="standalone mode"):
-        ops.is_syncing(observatory, "M 81")
-
-
-def test_get_observer_location_returns_none_when_unreported(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify get_observer_location returns None when nothing is reported."""
+def test_observer_location_returns_none_when_unreported(mocker: MockerFixture) -> None:
+    """Verify observer_location returns None when nothing is reported."""
     mount_driver = mocker.Mock()
     mount_driver.get_observer_location = mocker.AsyncMock(return_value=None)
     manager = _FakeManager(mount_driver=mount_driver)
 
-    assert ops.get_observer_location(manager) is None
+    assert ops.observer_location(manager) is None
 
 
-def test_get_observer_location_returns_dict_when_reported(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify get_observer_location returns the mount driver's dict."""
+def test_observer_location_returns_dict_when_reported(mocker: MockerFixture) -> None:
+    """Verify observer_location returns the mount driver's dict."""
     mount_driver = mocker.Mock()
     mount_driver.get_observer_location = mocker.AsyncMock(
         return_value={"latitude": 39.7392, "longitude": -104.9903, "elevation": 1600.0}
     )
     manager = _FakeManager(mount_driver=mount_driver)
 
-    assert ops.get_observer_location(manager) == {
+    assert ops.observer_location(manager) == {
         "latitude": 39.7392,
         "longitude": -104.9903,
         "elevation": 1600.0,
@@ -608,16 +594,16 @@ def _test_enclosure() -> Enclosure:
     )
 
 
-def test_get_enclosure_state_is_a_read_with_no_authority_check(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify get_enclosure_state delegates to the driver with no gating."""
+def test_enclosure_state_is_a_read_with_no_authority_check(mocker: MockerFixture) -> None:
+    """Verify enclosure_state delegates to the driver with no gating."""
     enclosure_driver = mocker.Mock()
     enclosure_driver.get_state = mocker.AsyncMock(return_value=EnclosureState.OPEN)
     manager = _FakeManager(enclosure_driver=enclosure_driver, policy=_authoritative_policy())
 
-    assert ops.get_enclosure_state(manager) == EnclosureState.OPEN
+    assert ops.enclosure_state(manager) == EnclosureState.OPEN
 
 
-def test_open_enclosure_delegates_to_enclosure_driver(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_open_enclosure_delegates_to_enclosure_driver(mocker: MockerFixture) -> None:
     """Verify open_enclosure delegates once OBSERVATORY_SAFETY is granted."""
     enclosure_driver = mocker.Mock()
     enclosure_driver.open = mocker.AsyncMock(return_value=True)
@@ -630,7 +616,7 @@ def test_open_enclosure_delegates_to_enclosure_driver(mocker):  # ruff: ignore[m
     enclosure_driver.open.assert_called_once()
 
 
-def test_open_enclosure_raises_when_observatory_safety_not_authoritative(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_open_enclosure_raises_when_observatory_safety_not_authoritative(mocker: MockerFixture) -> None:
     """Verify open_enclosure refuses without OBSERVATORY_SAFETY authority."""
     enclosure_driver = mocker.Mock()
     manager = _FakeManager(enclosure_driver=enclosure_driver, policy=_authoritative_policy())
@@ -640,7 +626,7 @@ def test_open_enclosure_raises_when_observatory_safety_not_authoritative(mocker)
     enclosure_driver.open.assert_not_called()
 
 
-def test_close_enclosure_delegates_when_mount_is_within_clearance(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_close_enclosure_delegates_when_mount_is_within_clearance(mocker: MockerFixture) -> None:
     """Verify close_enclosure dispatches when the mount is parked clear."""
     enclosure_driver = mocker.Mock()
     enclosure_driver.close = mocker.AsyncMock(return_value=True)
@@ -659,7 +645,7 @@ def test_close_enclosure_delegates_when_mount_is_within_clearance(mocker):  # ru
     enclosure_driver.close.assert_called_once()
 
 
-def test_close_enclosure_refuses_when_mount_is_outside_clearance(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_close_enclosure_refuses_when_mount_is_outside_clearance(mocker: MockerFixture) -> None:
     """Verify close_enclosure refuses rather than closing on the mount.
 
     This is the damage case `enclosure_control.can_close_enclosure`
@@ -684,7 +670,7 @@ def test_close_enclosure_refuses_when_mount_is_outside_clearance(mocker):  # ruf
     enclosure_driver.close.assert_not_called()
 
 
-def test_close_enclosure_raises_when_observatory_safety_not_authoritative(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_close_enclosure_raises_when_observatory_safety_not_authoritative(mocker: MockerFixture) -> None:
     """Verify close_enclosure refuses without OBSERVATORY_SAFETY authority."""
     enclosure_driver = mocker.Mock()
     manager = _FakeManager(
@@ -696,7 +682,7 @@ def test_close_enclosure_raises_when_observatory_safety_not_authoritative(mocker
     enclosure_driver.close.assert_not_called()
 
 
-def test_close_enclosure_raises_when_no_enclosure_configured(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_close_enclosure_raises_when_no_enclosure_configured(mocker: MockerFixture) -> None:
     """Verify close_enclosure raises a clear error with no `Enclosure`."""
     enclosure_driver = mocker.Mock()
     manager = _FakeManager(
@@ -751,29 +737,31 @@ def _configured_site(**overrides: str) -> Any:
     return _Config()
 
 
-def test_get_observer_location_falls_back_to_the_configuration_when_the_mount_is_offline(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_observer_location_falls_back_to_the_configuration_when_mount_offline(
+    mocker: MockerFixture,
+) -> None:
     """An unreachable mount does not leave the tool with no answer."""
     mount_driver = mocker.Mock()
     mount_driver.get_observer_location = mocker.AsyncMock(side_effect=ConnectionError("not connected"))
     manager = _FakeManager(mount_driver=mount_driver, config=_configured_site())
 
-    assert ops.get_observer_location(manager) == {
+    assert ops.observer_location(manager) == {
         "latitude": 45.76,
         "longitude": -110.74,
         "elevation": 1500.0,
     }
 
 
-def test_get_observer_location_falls_back_when_the_mount_reports_nothing(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_observer_location_falls_back_when_the_mount_reports_nothing(mocker: MockerFixture) -> None:
     """A mount that reports no location defers to the configured site."""
     mount_driver = mocker.Mock()
     mount_driver.get_observer_location = mocker.AsyncMock(return_value=None)
     manager = _FakeManager(mount_driver=mount_driver, config=_configured_site())
 
-    assert ops.get_observer_location(manager)["latitude"] == pytest.approx(45.76)
+    assert ops.observer_location(manager)["latitude"] == pytest.approx(45.76)
 
 
-def test_get_observer_location_prefers_the_mount_over_the_configuration(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_observer_location_prefers_the_mount_over_the_configuration(mocker: MockerFixture) -> None:
     """The telescope's own location wins when it reports one."""
     mount_driver = mocker.Mock()
     mount_driver.get_observer_location = mocker.AsyncMock(
@@ -781,10 +769,10 @@ def test_get_observer_location_prefers_the_mount_over_the_configuration(mocker):
     )
     manager = _FakeManager(mount_driver=mount_driver, config=_configured_site())
 
-    assert ops.get_observer_location(manager)["latitude"] == pytest.approx(1.0)
+    assert ops.observer_location(manager)["latitude"] == pytest.approx(1.0)
 
 
-def test_configured_observer_location_is_none_without_a_latitude_and_longitude():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_configured_observer_location_is_none_without_a_latitude_and_longitude() -> None:
     """A configuration with no site gives no location, not a made-up one."""
 
     class _EmptyConfig:

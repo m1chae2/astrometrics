@@ -15,12 +15,18 @@ astrometrics (`Astrometrics.processing`) rather than to its internal
 already uses elsewhere.
 """
 
+from __future__ import annotations
+
 import os
 import threading
 import time
 from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    from astrometricslib import Target
+    from wayfindinglib.api.control.context import ControlContext
 
 # Matches the private `_CalibrationKind` literal that
 # `astrometricslib.api.processing.CalibrationCatalog.refresh` accepts.
@@ -50,45 +56,9 @@ def is_calibration_folder(folder_name: str) -> bool:
     return folder_name.strip().lower() in CALIBRATION_FOLDER_KINDS
 
 
-def check_for_new_remote_images(observatory, target) -> dict[str, Any]:  # ruff: ignore[missing-type-function-argument]
-    """Check for new FITS files on the telescope pictures path.
-
-    Compares the remote file listing with the local target.frames
-    list and reports the difference.
-
-    Parameters
-    ----------
-    observatory : `wayfindinglib.api.control_registry.ObservatoryControl`
-        Provides the cached `remote_transfer_driver`.
-    target : `Any`
-        The target whose remote pictures path is checked; its
-        existing target.frames list is used as the local baseline.
-
-    Returns
-    -------
-    result : `Dict[str, Any]`
-        A dict with keys "remote_files_available" (`bool`),
-        "remote_files_count" (`int`), and "remote_files"
-        (`List[str]`, the remote-only filenames).
-    """
-    remote_files = observatory.remote_transfer_driver.list_remote_files(target.id)
-    if not remote_files:
-        return {"remote_files_available": False, "remote_files_count": 0, "remote_files": []}
-
-    local_filenames = {os.path.basename(f.path) for f in target.frames}
-
-    new_files = [rf for rf in remote_files if os.path.basename(rf) not in local_filenames]
-
-    return {
-        "remote_files_available": len(new_files) > 0,
-        "remote_files_count": len(new_files),
-        "remote_files": new_files,
-    }
-
-
 def download_remote_frames(
-    observatory,  # ruff: ignore[missing-type-function-argument]
-    target,  # ruff: ignore[missing-type-function-argument]
+    context: ControlContext,
+    target: Target,
     selected_files: list[str] | None = None,
     remote_target_name: str | None = None,
     local_subfolder: str = "lights",
@@ -101,7 +71,7 @@ def download_remote_frames(
 
     Parameters
     ----------
-    observatory : `wayfindinglib.api.control_registry.ObservatoryControl`
+    context : `ControlContext`
         Provides the cached `remote_transfer_driver`.
     target : `Any`
         The target the downloaded frames belong to.
@@ -125,13 +95,13 @@ def download_remote_frames(
     config = get_configuration()
     local_dest = os.path.join(config.get_frames_path(), local_subfolder)
 
-    success = observatory.remote_transfer_driver.download_target_folder(
+    success = context.remote_transfer_driver.download_target_folder(
         remote_target_name=remote_target_name or target.id,
         local_dest_path=local_dest,
         selected_files=selected_files,
     )
     if success and local_subfolder == "lights":
-        observatory.astrometrics.processing.scan_target_directory(target, config.get_frames_path())
+        context.astrometrics.processing.scan_target_directory(target, config.get_frames_path())
         target.recalculate_total_exposure()
         return True
     return success
@@ -180,13 +150,13 @@ def local_fits_fingerprints(directories: list[str]) -> set[tuple[str, int]]:
 
 
 def download_remote_targets(
-    observatory,  # ruff: ignore[missing-type-function-argument]
+    context: ControlContext,
     target_id: str,
     selected_files: list[str] | None = None,
     log_callback: Any | None = None,
     local_path: str | None = None,
     incremental: bool = True,
-    prune_missing: bool = True,
+    prune_missing: bool = False,
 ) -> bool:
     """Download target files into the light frames directory and reindex.
 
@@ -196,7 +166,7 @@ def download_remote_targets(
 
     Parameters
     ----------
-    observatory : `wayfindinglib.api.control_registry.ObservatoryControl`
+    context : `ControlContext`
         Provides the cached `remote_transfer_driver`.
     target_id : `str`
         The target id/name to resolve or create locally, and (unless
@@ -220,8 +190,10 @@ def download_remote_targets(
         compares against is empty on the next run and every file
         looks missing. Pass `False` to force a full-folder transfer.
     prune_missing : `bool`, optional
-        If `True` (default), the reindex also drops frame records whose
-        file is gone from disk. Pass `False` to only add records.
+        If `True`, the reindex also drops frame records whose file is gone
+        from disk. `False` (default) only adds records, so a copy never
+        deletes anything; the app's own ingestion prunes in a separate,
+        later step.
 
     Returns
     -------
@@ -232,7 +204,7 @@ def download_remote_targets(
     from astrometricslib import classify_and_sort_fits_files, get_configuration
 
     config = get_configuration()
-    astrometrics = observatory.astrometrics
+    astrometrics = context.astrometrics
     target = astrometrics.targets.get(target_id, refresh=True)
     if not target:
         target = astrometrics.targets.create(target_id)
@@ -243,7 +215,7 @@ def download_remote_targets(
         scan_list = [local_path]
         success = True
     else:
-        driver = observatory.remote_transfer_driver
+        driver = context.remote_transfer_driver
 
         # download_target_folder resolves space/underscore naming
         # mismatches internally (local "M 42" -> remote "M_42") and
@@ -342,11 +314,37 @@ def download_remote_targets(
     return success
 
 
+def matching_remote_folder(context: ControlContext, folder_name: str, folders: list[str]) -> str | None:
+    """Find the listed remote folder a name refers to.
+
+    The name is first resolved the way a download resolves it (a local
+    ``"M 42"`` finds a remote ``"M_42"``), then matched against `folders`
+    ignoring case. Checking a name against the listing keeps a made-up
+    name away from the remote shell.
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        Supplies the remote transfer driver.
+    folder_name : `str`
+        The folder or target name to look for.
+    folders : `list` [`str`]
+        The listed remote folders to match against.
+
+    Returns
+    -------
+    folder : `str` or `None`
+        The listed folder name, or `None` if none matches.
+    """
+    resolved = str(context.remote_transfer_driver.resolve_remote_folder_name(folder_name)).lower()
+    return next((name for name in folders if name.lower() == resolved), None)
+
+
 EXAMPLE_FILE_COUNT = 10
 """How many file names a plan shows as examples."""
 
 
-def plan_target_download(observatory, target_id: str) -> dict[str, Any]:  # ruff: ignore[missing-type-function-argument]
+def plan_target_download(context: ControlContext, target_id: str) -> dict[str, Any]:
     """Work out what a download of one target would transfer. Writes nothing.
 
     Uses the same rule as `download_remote_targets`: a remote file counts as
@@ -354,7 +352,7 @@ def plan_target_download(observatory, target_id: str) -> dict[str, Any]:  # ruff
 
     Parameters
     ----------
-    observatory : `wayfindinglib.api.control_registry.ObservatoryControl`
+    context : `ControlContext`
         Provides the cached `remote_transfer_driver`.
     target_id : `str`
         The target to look up. It must match a remote target folder, so a
@@ -375,10 +373,9 @@ def plan_target_download(observatory, target_id: str) -> dict[str, Any]:  # ruff
     """
     from astrometricslib import get_configuration
 
-    driver = observatory.remote_transfer_driver
-    folders = list_remote_target_folders(observatory)
-    resolved = driver.resolve_remote_folder_name(target_id)
-    matching = next((name for name in folders if name.lower() == str(resolved).lower()), None)
+    driver = context.remote_transfer_driver
+    folders = list_remote_target_folders(context)
+    matching = matching_remote_folder(context, target_id, folders)
     if matching is None:
         shown = ", ".join(sorted(folders)[:15]) or "none found (is the telescope computer reachable?)"
         raise ValueError(f"No remote target folder matches {target_id!r}. Remote target folders: {shown}.")
@@ -481,7 +478,7 @@ def report_download_progress(folder: str, expected: int) -> Generator[None]:
         thread.join(timeout=PROGRESS_POLL_SECONDS + 1.0)
 
 
-def sync_target_frames(observatory, target_id: str, dry_run: bool = True) -> dict[str, Any]:  # ruff: ignore[missing-type-function-argument]
+def sync_target_frames(context: ControlContext, target_id: str, dry_run: bool = True) -> dict[str, Any]:
     """Bring one target's new frames into the library.
 
     A dry run only reports the plan. A real run transfers the files that are
@@ -491,7 +488,7 @@ def sync_target_frames(observatory, target_id: str, dry_run: bool = True) -> dic
 
     Parameters
     ----------
-    observatory : `wayfindinglib.api.control_registry.ObservatoryControl`
+    context : `ControlContext`
         Provides the cached `remote_transfer_driver`.
     target_id : `str`
         The target to sync. It must match a remote target folder.
@@ -508,7 +505,7 @@ def sync_target_frames(observatory, target_id: str, dry_run: bool = True) -> dic
     from astrometricslib import StorageNotMountedError, get_configuration, require_mounted_storage
 
     try:
-        plan = plan_target_download(observatory, target_id)
+        plan = plan_target_download(context, target_id)
     except ValueError as error:
         return {"error": str(error)}
     result: dict[str, Any] = {"dry_run": dry_run, **plan}
@@ -528,7 +525,7 @@ def sync_target_frames(observatory, target_id: str, dry_run: bool = True) -> dic
     folder = os.path.join(str(get_configuration().get_frames_path()), "lights", plan["remote_folder"])
     with report_download_progress(folder, plan["to_transfer"]):
         success = download_remote_targets(
-            observatory,
+            context,
             target_id,
             incremental=True,
             prune_missing=False,
@@ -539,7 +536,7 @@ def sync_target_frames(observatory, target_id: str, dry_run: bool = True) -> dic
     return {**result, "success": bool(success), "transferred": plan["to_transfer"] if success else 0}
 
 
-def plan_log_sync(observatory, destination_dir: str) -> dict[str, Any]:  # ruff: ignore[missing-type-function-argument]
+def plan_log_sync(context: ControlContext, destination_dir: str) -> dict[str, Any]:
     """Find which guide and Ekos logs on the telescope computer are new.
 
     A log counts as already held when a local file with the same name and
@@ -548,7 +545,7 @@ def plan_log_sync(observatory, destination_dir: str) -> dict[str, Any]:  # ruff:
 
     Parameters
     ----------
-    observatory : `wayfindinglib.api.control_registry.ObservatoryControl`
+    context : `ControlContext`
         Provides the cached `remote_transfer_driver`.
     destination_dir : `str`
         The local folder the logs are downloaded into.
@@ -561,7 +558,7 @@ def plan_log_sync(observatory, destination_dir: str) -> dict[str, Any]:  # ruff:
         few ``examples``. A kind the driver cannot list shows
         ``supported: False``.
     """
-    driver = observatory.remote_transfer_driver
+    driver = context.remote_transfer_driver
     plan: dict[str, Any] = {"destination_dir": destination_dir}
     for label, method_name in (
         ("guide_logs", "_remote_guide_log_sizes"),
@@ -587,7 +584,9 @@ def plan_log_sync(observatory, destination_dir: str) -> dict[str, Any]:  # ruff:
     return plan
 
 
-def sync_remote_logs(observatory, dry_run: bool = True) -> dict[str, Any]:  # ruff: ignore[missing-type-function-argument]
+def sync_remote_logs(
+    context: ControlContext, dry_run: bool = True, destination_dir: str | None = None
+) -> dict[str, Any]:
     """Bring the guide and Ekos logs into the library's own database.
 
     A dry run only reports which logs are new. A real run downloads the new
@@ -597,10 +596,13 @@ def sync_remote_logs(observatory, dry_run: bool = True) -> dict[str, Any]:  # ru
 
     Parameters
     ----------
-    observatory : `wayfindinglib.api.control_registry.ObservatoryControl`
+    context : `ControlContext`
         Provides the remote driver and the ingestion.
     dry_run : `bool`, optional
         `True` (default) only reports what is new.
+    destination_dir : `str`, optional
+        Local folder for the logs. The context's Ekos log folder when
+        omitted.
 
     Returns
     -------
@@ -609,27 +611,25 @@ def sync_remote_logs(observatory, dry_run: bool = True) -> dict[str, Any]:  # ru
         ``ingested`` (what was read and stored). A problem comes back
         under ``error``.
     """
-    from wayfindinglib.drivers import local_database
+    from wayfindinglib.tasks.control_tasks import ekos_log_ingestion
 
-    destination_dir = str(local_database._wayfinding_library_path(observatory._config) / "ekos_logs")
-    if not observatory.check_remote_connection():
+    destination_dir = destination_dir or context.ekos_log_directory()
+    if not check_remote_connection(context):
         return {"error": "The telescope computer cannot be reached, so no logs can be listed or fetched."}
-    result: dict[str, Any] = {"dry_run": dry_run, **plan_log_sync(observatory, destination_dir)}
+    result: dict[str, Any] = {"dry_run": dry_run, **plan_log_sync(context, destination_dir)}
     if dry_run:
         return result
-    summary = observatory.ingest_ekos_session_logs(destination_dir, download=True)
+    summary = ekos_log_ingestion.ingest_ekos_logs(context, destination_dir, download=True)
     return {**result, "ingested": summary}
 
 
-def discover_unassociated_remote_targets(control, targets) -> list[str]:  # ruff: ignore[missing-type-function-argument]
+def discover_unassociated_remote_targets(context: ControlContext) -> list[str]:
     """Discover remote folders that are not associated with any target.
 
     Parameters
     ----------
-    control : `wayfindinglib.api.control_registry.ObservatoryControl`
-        Provides the remote target directory listing.
-    targets : `astrometricslib.api.targets.TargetCatalog`
-        Provides the local target catalog listing.
+    context : `ControlContext`
+        Supplies the remote folder listing and the local target catalog.
 
     Returns
     -------
@@ -638,11 +638,11 @@ def discover_unassociated_remote_targets(control, targets) -> list[str]:  # ruff
         Empty if the remote listing could not be retrieved.
     """
     try:
-        remote_folders = control.list_remote_targets()
+        remote_folders = list_remote_targets(context)
     except Exception:
         return []
 
-    local_targets = targets.list()
+    local_targets = context.astrometrics.targets.list()
 
     def fuzzy_normalize(name: str) -> str:
         """Normalize a target name for fuzzy comparison.
@@ -664,12 +664,12 @@ def discover_unassociated_remote_targets(control, targets) -> list[str]:  # ruff
     return unassociated
 
 
-def check_remote_connection(api) -> bool:  # ruff: ignore[missing-type-function-argument]
+def check_remote_connection(context: ControlContext) -> bool:
     """Probe remote connection status.
 
     Parameters
     ----------
-    api : `wayfindinglib.api.control_registry.ObservatoryControl`
+    context : `ControlContext`
         Provides the cached `remote_transfer_driver`.
 
     Returns
@@ -678,15 +678,15 @@ def check_remote_connection(api) -> bool:  # ruff: ignore[missing-type-function-
         `True` if the remote telescope connection is reachable,
         `False` otherwise.
     """
-    return api.remote_transfer_driver.check_connection()
+    return context.remote_transfer_driver.check_connection()
 
 
-def list_remote_targets(api) -> list[str]:  # ruff: ignore[missing-type-function-argument]
+def list_remote_targets(context: ControlContext) -> list[str]:
     """List astronomical target directories on the remote telescope.
 
     Parameters
     ----------
-    api : `wayfindinglib.api.control_registry.ObservatoryControl`
+    context : `ControlContext`
         Provides the cached `remote_transfer_driver`.
 
     Returns
@@ -695,10 +695,10 @@ def list_remote_targets(api) -> list[str]:  # ruff: ignore[missing-type-function
         The target directory names discovered on the remote
         telescope.
     """
-    return api.remote_transfer_driver.list_remote_targets()
+    return context.remote_transfer_driver.list_remote_targets()
 
 
-def list_remote_target_folders(api) -> list[str]:  # ruff: ignore[missing-type-function-argument]
+def list_remote_target_folders(context: ControlContext) -> list[str]:
     """List remote folders that represent astronomical targets.
 
     Excludes Bias/Dark/Flat calibration folders from the full remote
@@ -706,41 +706,39 @@ def list_remote_target_folders(api) -> list[str]:  # ruff: ignore[missing-type-f
 
     Parameters
     ----------
-    api : `Any`
-        the high-level interface (unused directly; accepted for
-        interface consistency with the other remote operations).
+    context : `ControlContext`
+        Supplies the cached `remote_transfer_driver`.
 
     Returns
     -------
     target_folder_names : `List[str]`
         Remote folder names that are not calibration folders.
     """
-    return [name for name in list_remote_targets(api) if not is_calibration_folder(name)]
+    return [name for name in list_remote_targets(context) if not is_calibration_folder(name)]
 
 
-def list_remote_calibration_folders(api) -> list[str]:  # ruff: ignore[missing-type-function-argument]
+def list_remote_calibration_folders(context: ControlContext) -> list[str]:
     """List remote folders that hold Bias/Dark/Flat calibration frames.
 
     Parameters
     ----------
-    api : `Any`
-        the high-level interface (unused directly; accepted for
-        interface consistency with the other remote operations).
+    context : `ControlContext`
+        Supplies the cached `remote_transfer_driver`.
 
     Returns
     -------
     calibration_folder_names : `List[str]`
         Remote folder names matching Bias, Dark, or Flat.
     """
-    return [name for name in list_remote_targets(api) if is_calibration_folder(name)]
+    return [name for name in list_remote_targets(context) if is_calibration_folder(name)]
 
 
-def list_remote_files(api, folder_name: str) -> list[str]:  # ruff: ignore[missing-type-function-argument]
+def list_remote_files(context: ControlContext, folder_name: str) -> list[str]:
     """List FITS file relative paths inside a remote target directory.
 
     Parameters
     ----------
-    api : `wayfindinglib.api.control_registry.ObservatoryControl`
+    context : `ControlContext`
         Provides the cached `remote_transfer_driver`.
     folder_name : `str`
         The remote target directory to list files from.
@@ -750,15 +748,15 @@ def list_remote_files(api, folder_name: str) -> list[str]:  # ruff: ignore[missi
     file_paths : `List[str]`
         FITS file relative paths inside the remote target directory.
     """
-    return api.remote_transfer_driver.list_remote_files(folder_name)
+    return context.remote_transfer_driver.list_remote_files(folder_name)
 
 
-def list_remote_files_with_sizes(api, folder_name: str) -> list[tuple[str, int]]:  # ruff: ignore[missing-type-function-argument]
+def list_remote_files_with_sizes(context: ControlContext, folder_name: str) -> list[tuple[str, int]]:
     """List remote FITS relative paths paired with their byte sizes.
 
     Parameters
     ----------
-    api : `wayfindinglib.api.control_registry.ObservatoryControl`
+    context : `ControlContext`
         Provides the cached `remote_transfer_driver`.
     folder_name : `str`
         The remote target directory to list files from.
@@ -768,10 +766,10 @@ def list_remote_files_with_sizes(api, folder_name: str) -> list[tuple[str, int]]
     files_with_sizes : `List[Tuple[str, int]]`
         ``(relative_path, size_in_bytes)`` for each FITS file found.
     """
-    return api.remote_transfer_driver.list_remote_files_with_sizes(folder_name)
+    return context.remote_transfer_driver.list_remote_files_with_sizes(folder_name)
 
 
-def sync_calibration_folder(api, remote_folder_name: str) -> dict[str, Any]:  # ruff: ignore[missing-type-function-argument]
+def sync_calibration_folder(context: ControlContext, remote_folder_name: str) -> dict[str, Any]:
     """Download a Bias/Dark/Flat remote folder into the calibration library.
 
     Fetches `remote_folder_name` into a temporary staging directory
@@ -782,12 +780,12 @@ def sync_calibration_folder(api, remote_folder_name: str) -> dict[str, Any]:  # 
     saves the calibration library. Never calls
     `astrometrics.targets.create`/`.save`, so `remote_folder_name` is
     never registered as an astronomical target -- the `Target`
-    instance passed to `api.download_remote_frames` is a throwaway,
+    instance passed to `context.download_remote_frames` is a throwaway,
     in-memory-only stand-in required by that method's signature.
 
     Parameters
     ----------
-    api : `wayfindinglib.api.control_registry.ObservatoryControl`
+    context : `ControlContext`
         Provides the remote download operation.
     remote_folder_name : `str`
         The remote calibration folder name (Bias, Dark, or Flat,
@@ -821,7 +819,7 @@ def sync_calibration_folder(api, remote_folder_name: str) -> dict[str, Any]:  # 
         )
 
     config = get_configuration()
-    astrometrics = api.astrometrics
+    astrometrics = context.astrometrics
     frames_path = str(config.get_frames_path())
     staging_dir = os.path.join(frames_path, "lights", remote_folder_name)
 
@@ -829,7 +827,7 @@ def sync_calibration_folder(api, remote_folder_name: str) -> dict[str, Any]:  # 
     # calibration frames live under darks/biases/flats rather than in
     # the staging directory rsync compares against, so the already-held
     # baseline has to be assembled from those directories explicitly.
-    remote_files = list_remote_files_with_sizes(api, remote_folder_name)
+    remote_files = list_remote_files_with_sizes(context, remote_folder_name)
     files_to_transfer = None
     if remote_files:
         already_held = local_fits_fingerprints([
@@ -850,7 +848,8 @@ def sync_calibration_folder(api, remote_folder_name: str) -> dict[str, Any]:  # 
         success = True
     else:
         staging_target = Target(id="Calibration")
-        success = api.download_remote_frames(
+        success = download_remote_frames(
+            context,
             staging_target,
             selected_files=files_to_transfer,
             remote_target_name=remote_folder_name,
@@ -886,7 +885,7 @@ def sync_calibration_folder(api, remote_folder_name: str) -> dict[str, Any]:  # 
 
 
 def sync_all_remote_folders(
-    api,  # ruff: ignore[missing-type-function-argument]
+    context: ControlContext,
     log_callback: Any | None = None,
     register_job: bool = True,
 ) -> dict[str, Any]:
@@ -897,13 +896,13 @@ def sync_all_remote_folders(
     `sync_calibration_folder`) and target folders (every
     locally-catalogued target plus every remote folder with no
     matching local target, routed through
-    `api.download_remote_targets`). Never halts on a single folder's
+    `context.download_remote_targets`). Never halts on a single folder's
     failure -- every folder is attempted, and failures are collected
     rather than raised.
 
     Parameters
     ----------
-    api : `wayfindinglib.api.control_registry.ObservatoryControl`
+    context : `ControlContext`
         Provides the remote listing and download operations.
     log_callback : callable, optional
         Callable receiver for progress messages.
@@ -1022,15 +1021,15 @@ def sync_all_remote_folders(
     failed: list[tuple[str, str]] = []
 
     try:
-        calibration_folder_names = list_remote_calibration_folders(api)
+        calibration_folder_names = list_remote_calibration_folders(context)
 
-        astrometrics = api.astrometrics
+        astrometrics = context.astrometrics
         known_target_ids = [
             target.id for target in astrometrics.targets.list() if not is_calibration_folder(target.id)
         ]
         new_target_ids = [
             folder_name
-            for folder_name in discover_unassociated_remote_targets(api, astrometrics.targets)
+            for folder_name in discover_unassociated_remote_targets(context)
             if not is_calibration_folder(folder_name)
         ]
         target_ids_to_sync = known_target_ids + new_target_ids
@@ -1042,7 +1041,7 @@ def sync_all_remote_folders(
         for folder_name in calibration_folder_names:
             log(f"Syncing calibration folder '{folder_name}'...")
             try:
-                if sync_calibration_folder(api, folder_name)["success"]:
+                if sync_calibration_folder(context, folder_name)["success"]:
                     succeeded.append(folder_name)
                     log(f"Calibration folder '{folder_name}' synced.")
                 else:
@@ -1055,7 +1054,7 @@ def sync_all_remote_folders(
         for target_id in target_ids_to_sync:
             log(f"Syncing target '{target_id}'...")
             try:
-                if api.download_remote_targets(target_id, log_callback=log_callback):
+                if download_remote_targets(context, target_id, log_callback=log_callback):
                     succeeded.append(target_id)
                 else:
                     failed.append((target_id, "Download reported failure (no remote frames found?)."))

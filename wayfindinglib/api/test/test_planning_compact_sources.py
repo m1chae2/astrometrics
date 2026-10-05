@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from astrometricslib import StellarObject, Target
-from wayfindinglib.api.planning_registry import ObservationPlanning
+from wayfindinglib.api.planning import ObservationPlanning
 
 
 def make_planning(

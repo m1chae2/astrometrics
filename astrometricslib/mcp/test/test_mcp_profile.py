@@ -144,6 +144,6 @@ def test_investigator_profile_offers_only_reading_tools() -> None:
 
 def test_a_merged_tool_is_withheld_and_names_its_replacement() -> None:
     """A merged tool is withheld, and the reason names its replacement."""
-    entry = {"tool_class": "compute", "disposition": "merged", "merge_into": "observatory_night_history"}
+    entry = {"tool_class": "compute", "disposition": "merged", "merge_into": "observatory_history_query"}
     reason = withheld_reason(entry, "investigator")
-    assert "observatory_night_history" in reason
+    assert "observatory_history_query" in reason

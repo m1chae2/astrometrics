@@ -82,7 +82,7 @@ def _capture_guide_frame(exposure: float = 1.0, gain: float | None = None) -> bo
     captured : `bool`
         `True` if the driver accepted the exposure command.
     """
-    return bool(container.wayfinder.control.guide_expose(exposure, gain=gain))
+    return bool(container.wayfinder.control.guiding.expose(exposure, gain=gain))
 
 
 def _start_alignment(target_ra: str, target_dec: str) -> bool:
@@ -241,28 +241,32 @@ class RPCHandlerRegistry:
         # `guiding:start` runs. Goes straight to Observatory Control rather
         # than through GuidingService, which only owns the loop's lifecycle.
         self.register("guiding:capture_frame", _capture_guide_frame)
-        self.register("telescope:connect", lambda: container.wayfinder.control.connect())
-        for rpc_name, control_method in (
-            ("abort_motion", "abort_motion"),
-            ("apply_promotion_decision", "apply_promotion_decision"),
-            ("focus_move", "focus_move"),
-            ("get_focuser_position", "get_focuser_position"),
-            ("is_syncing", "is_syncing"),
-            ("manual_move", "manual_move"),
-            ("park", "park"),
-            ("set_filter", "set_filter"),
-            ("set_slew_rate", "set_slew_rate"),
-            ("set_tracking", "set_tracking"),
-            ("slew_coordinates", "slew_to_coordinates"),
-            ("status", "get_telescope_status"),
-            ("sync", "sync"),
-            ("unpark", "unpark"),
+        self.register("telescope:connect", ("wayfinder.control.equipment", "connect"))
+        for rpc_name, handler in (
+            ("abort_motion", ("wayfinder.control.mount", "abort_motion")),
+            ("apply_promotion_decision", ("wayfinder.control.safety", "apply_promotion_decision")),
+            ("focus_move", ("wayfinder.control.imaging", "focus_move")),
+            ("get_focuser_position", ("telescope_service", "get_focuser_position")),
+            ("manual_move", ("wayfinder.control.mount", "manual_move")),
+            ("park", ("wayfinder.control.mount", "park")),
+            ("set_filter", ("wayfinder.control.imaging", "set_filter")),
+            ("set_slew_rate", ("wayfinder.control.mount", "set_slew_rate")),
+            ("set_tracking", ("wayfinder.control.mount", "set_tracking")),
+            # The UI sends RA in hours; the service makes a SkyPosition.
+            ("slew_coordinates", ("telescope_service", "slew_to_coordinates")),
+            # The service adds the guiding history and alignment state to
+            # `control.mount.status`.
+            ("status", ("telescope_service", "get_status")),
+            # Frame syncs and their running state belong to the backend's
+            # SyncService, which takes the UI's `object_id`.
+            ("sync", ("sync_service", "start_sync")),
+            ("is_syncing", ("sync_service", "is_syncing")),
+            ("unpark", ("wayfinder.control.mount", "unpark")),
         ):
-            self.register(f"telescope:{rpc_name}", ("wayfinder.control", control_method))
+            self.register(f"telescope:{rpc_name}", handler)
 
         # --- Raw INDI diagnostics (IndiStatusPanel) ---
-        # The INDI diagnostics live in `IndiDiagnosticsService`, not in
-        # `ObservatoryControl`.
+        # `IndiDiagnosticsService` serves these through `control.equipment`.
         self.register("telescope:indi_devices", ("indi_diagnostics_service", "get_devices"))
         self.register("telescope:indi_properties", ("indi_diagnostics_service", "get_properties"))
         self.register("telescope:set_indi_property", ("indi_diagnostics_service", "set_property"))
@@ -338,17 +342,17 @@ class RPCHandlerRegistry:
         self.register("astronomy:get_status", ("stellar_service", "get_target_status"))
         self.register("astronomy:visible", ("stellar_service", "get_visible_targets"))
         self.register("astronomy:get_visible_targets", ("stellar_service", "get_visible_targets"))
-        self.register("observatory:connect", lambda: container.wayfinder.control.connect())
+        self.register("observatory:connect", ("wayfinder.control.equipment", "connect"))
         self.register(
             "observatory:enter_monitoring_mode",
             lambda evidence_note="": _serialize_bulk_delegation_outcome(
-                container.wayfinder.control.enter_monitoring_mode(evidence_note=evidence_note)
+                container.wayfinder.control.safety.enter_monitoring_mode(evidence_note=evidence_note)
             ),
         )
         self.register(
             "observatory:enter_controller_mode",
             lambda evidence_note="": _serialize_bulk_delegation_outcome(
-                container.wayfinder.control.enter_controller_mode(evidence_note=evidence_note)
+                container.wayfinder.control.safety.enter_controller_mode(evidence_note=evidence_note)
             ),
         )
         self.register("targets:list", ("target_service", "get_all_targets_list"))
@@ -359,15 +363,15 @@ class RPCHandlerRegistry:
         # --- Equipment Configuration ---
         self.register(
             "observatory:list_cameras",
-            lambda: container.wayfinder.control.list_camera_profiles(),
+            lambda: container.wayfinder.control.equipment.status(include=["camera_profiles"]).camera_profiles,
         )
         self.register(
             "observatory:get_equipment_configuration",
-            lambda: container.wayfinder.control.get_equipment_configuration(),
+            lambda: container.wayfinder.control.equipment.status(include=["configuration"]).configuration,
         )
         self.register(
             "observatory:set_active_camera",
-            lambda camera_name: container.wayfinder.control.set_active_camera(camera_name),
+            lambda camera_name: container.wayfinder.control.equipment.set_active_camera(camera_name),
         )
 
         # --- Planetarium ---

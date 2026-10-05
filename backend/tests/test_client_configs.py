@@ -74,14 +74,16 @@ def test_committed_file_matches_the_generator(relative_path: str) -> None:
 def test_investigator_agent_has_only_offered_mcp_tools() -> None:
     """The agent lists offered MCP tools only, and no built-in tool."""
     tools = _agent_tools()
-    assert len(tools) > 60
+    # Folding the narrow `control` reads into one read per child left about
+    # 60 tools; the check guards against an empty or truncated list.
+    assert len(tools) > 50
     assert all(tool.startswith("mcp__") for tool in tools)
     assert not set(tools) & set(BUILT_IN_TOOLS)
     for forbidden in (
         "electron_run_python",
         "backend_call_rpc",
-        "observatory_park",
-        "observatory_slew_to_target",
+        "observatory_mount_park",
+        "observatory_mount_slew",
         "ui_run_tests",
         "typegen_contract_validator",
         "target_save",

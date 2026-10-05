@@ -9,7 +9,7 @@ a night different.
 import numpy as np
 
 from astrometricslib import observing_night_id
-from wayfindinglib.api.control_registry import ObservatoryControl
+from wayfindinglib import ObservatoryControl
 from wayfindinglib.models.equipment_and_site.equipment_fingerprint import build_equipment_fingerprint
 from wayfindinglib.models.session.ekos_session import EkosSessionContext, SessionEquipmentAttribution
 from wayfindinglib.models.session.guiding_run import GuidingRunSummary
@@ -47,7 +47,7 @@ def record_guiding_night(
     start = FIRST_NIGHT + day * 86400.0
     night = observing_night_id(start)
     generator = np.random.default_rng(day)
-    control._logger_interface.replace_guiding_samples([
+    control._context.logger_interface.replace_guiding_samples([
         {
             "timestamp": start + 60.0 + 3.2 * index,
             "dra": float(generator.normal(0.0, sigma)),
@@ -59,7 +59,7 @@ def record_guiding_night(
         }
         for index in range(400)
     ])
-    control._butler.put(
+    control._context.butler.put(
         EkosSessionContext(
             id=f"session-{night}",
             session_id=night,
@@ -73,7 +73,7 @@ def record_guiding_night(
         "ekos_session_context",
         {"id": f"session-{night}"},
     )
-    control.save_guiding_run(
+    control.guiding.save_run(
         GuidingRunSummary(
             id=f"guide_log-{night}.txt#0",
             session_id=night,

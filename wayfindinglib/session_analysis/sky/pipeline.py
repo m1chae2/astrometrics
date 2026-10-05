@@ -6,7 +6,7 @@ together, because a comparison between parts of the sky needs several nights
 in each part. The request's `session_id` names the span of nights
 (``"first..last"``). The analysis is a pure function of the request, and
 gathering the request from storage is the caller's job
-(`ObservatoryControl.analyze_sky_coverage`).
+(`control.history.query(kind="sky_coverage")`).
 """
 
 from dataclasses import dataclass, field

@@ -1,7 +1,8 @@
 """Purpose: End-to-end tests for the sky and recurring-issue analyses.
 
-Description: Runs `ObservatoryControl.analyze_sky_coverage` and
-`summarize_recurring_issues` against a real isolated configuration, Butler and
+Description: Runs the sky-coverage and recurring-issue analyses behind
+`control.history.query` (`night_analysis.sky_coverage_analysis` and
+`recurring_issues`) against a real isolated configuration, Butler and
 log database, with the science library's frames replaced by synthetic ones.
 Checks that a planted low-altitude effect is found across nights, that nights
 with no pointing are counted as left out, and that a problem on several nights
@@ -12,10 +13,11 @@ import numpy as np
 import pytest
 
 from astrometricslib import observing_night_id
-from wayfindinglib.api.control_registry import ObservatoryControl
+from wayfindinglib import ObservatoryControl
 from wayfindinglib.api.test.capture_night_helpers import Library
 from wayfindinglib.api.test.guiding_night_helpers import FIRST_NIGHT, record_guiding_night
 from wayfindinglib.models.session.capture_frame import CaptureFrame
+from wayfindinglib.tasks.control_tasks import night_analysis
 
 
 def _add_night(library: Library, day: int, low_factor: float = 1.0) -> str:
@@ -54,7 +56,7 @@ def test_no_nights_gives_an_analysis_that_says_there_is_too_little(
     control: ObservatoryControl, library: Library
 ) -> None:
     """Verify an empty history is stated, not invented."""
-    analysis = control.analyze_sky_coverage()
+    analysis = night_analysis.sky_coverage_analysis(control._context)
 
     assert analysis.input_quality.nights == 0
     assert [r.kind.value for r in analysis.recommendations] == ["insufficient_data"]
@@ -66,7 +68,7 @@ def test_a_low_altitude_effect_across_nights_is_found(control: ObservatoryContro
         record_guiding_night(control, day)
         _add_night(library, day, low_factor=1.3)
 
-    analysis = control.analyze_sky_coverage()
+    analysis = night_analysis.sky_coverage_analysis(control._context)
     kinds = {r.kind.value for r in analysis.recommendations}
 
     assert analysis.input_quality.nights == 8
@@ -81,7 +83,7 @@ def test_a_uniform_history_finds_no_poor_region(control: ObservatoryControl, lib
         record_guiding_night(control, day)
         _add_night(library, day)
 
-    analysis = control.analyze_sky_coverage()
+    analysis = night_analysis.sky_coverage_analysis(control._context)
 
     assert "sky_region_poor" not in {r.kind.value for r in analysis.recommendations}
 
@@ -95,7 +97,7 @@ def test_a_problem_on_several_nights_is_reported_as_recurring(
     for day in (6, 7, 8):
         record_guiding_night(control, day, snr=30.0, lost=200)
 
-    issues = control.summarize_recurring_issues()
+    issues = night_analysis.recurring_issues(control._context)
 
     weak = next(issue for issue in issues if issue.kind.value == "check_guide_signal")
     assert weak.pipeline == "guiding"
@@ -108,7 +110,9 @@ def test_no_recurring_issue_when_every_night_is_fine(control: ObservatoryControl
     for day in range(6):
         record_guiding_night(control, day, snr=300.0 + 10.0 * day)
 
-    assert not [i for i in control.summarize_recurring_issues() if i.worst_severity.value == "warning"]
+    assert not [
+        i for i in night_analysis.recurring_issues(control._context) if i.worst_severity.value == "warning"
+    ]
 
 
 def test_exposure_lengths_reach_the_guiding_analysis(control: ObservatoryControl, library: Library) -> None:
@@ -117,7 +121,9 @@ def test_exposure_lengths_reach_the_guiding_analysis(control: ObservatoryControl
         record_guiding_night(control, day)
         _add_night(library, day)
 
-    analysis = control.analyze_guiding_session(observing_night_id(FIRST_NIGHT + 86400.0))
+    analysis = night_analysis.guiding_night_analysis(
+        control._context, observing_night_id(FIRST_NIGHT + 86400.0)
+    )
 
     (result,) = analysis.performance.exposure_feasibility
     assert result.exposure_seconds == pytest.approx(30.0)

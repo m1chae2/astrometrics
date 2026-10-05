@@ -1,26 +1,22 @@
-"""Purpose: Wayfinder Navigation high-level interface exports and API.
+"""Purpose: The Wayfinder, the entry point to the wayfinding library.
 
-Description: Exposes the Wayfinder high-level interface class
-composing the three root functions -- Observatory Control,
-Observation Planning, Observation Execution.
+Description: `Wayfinder` composes the library's three sub-APIs:
+`control` (operate the observatory), `planning` (decide what to
+observe) and `execution` (run and recover an observing session).
+`control` has seven children named by topic, such as `control.mount`
+and `control.history`.
 
-Every name below except `Wayfinder` itself is resolved lazily (module
-`__getattr__`, PEP 562) rather than imported at module level.
-`wayfindinglib.api.planning_registry` -- and every other submodule --
-is a submodule of this package, so Python must execute this file before
-any of them are reachable; a top-level `from wayfindinglib.drivers
-.indi_interface import IndiInterface` here would mean importing
-anything under `wayfindinglib.*` transitively imports INDI hardware
-modules, directly undermining "Planning Is Hardware-Free"
-(`Wayfinding_Library_Architecture.md` §2.3.4). `Wayfinder.__init__`
-itself already imports `ObservatoryControl`/`ObservationPlanning`
-/`ObservationExecution` locally inside the method body rather than at
-class-definition time, so the class definition alone carries no
-hardware import either. The `TYPE_CHECKING`-guarded imports below
-never execute at runtime, so they carry none of that cost -- they
-exist only so static analysis can see each name as real for `__all__`.
+Every name below except `Wayfinder` is loaded on first use (module
+`__getattr__`, PEP 562) from one lookup table. Importing a submodule
+such as `wayfindinglib.api.planning` runs this file first, so an eager
+import of the INDI drivers here would make every import of the library
+load hardware code. The `TYPE_CHECKING` imports never run; they only let
+type checkers see each name in `__all__`.
 """
 
+from __future__ import annotations
+
+import importlib
 import logging
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _distribution_version
@@ -32,11 +28,20 @@ from typing import TYPE_CHECKING
 logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 if TYPE_CHECKING:
-    from wayfindinglib.api.control_registry import ObservatoryControl
-    from wayfindinglib.api.execution_registry import ObservationExecution
-    from wayfindinglib.api.planning_registry import ObservationPlanning
+    from astrometricslib import AppConfiguration, Astrometrics
+    from wayfindinglib.api.control import ObservatoryControl
+    from wayfindinglib.api.execution import ObservationExecution
+    from wayfindinglib.api.planning import ObservationPlanning
     from wayfindinglib.drivers.indi_interface import IndiInterface
     from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
+    from wayfindinglib.models.control_status import (
+        EquipmentStatus,
+        GuidingStatus,
+        ImagingStatus,
+        SafetyStatus,
+    )
+    from wayfindinglib.models.session.telemetry import MountPointingModel
+    from wayfindinglib.models.sky_position import SkyPosition
 
 try:
     # Single source of truth is pyproject.toml; both libraries ship from the
@@ -46,49 +51,57 @@ except PackageNotFoundError:  # running from a source tree without an install
     __version__ = "0.0.0+unknown"
 
 __all__ = [
+    "EquipmentStatus",
+    "GuidingStatus",
+    "ImagingStatus",
     "IndiInterface",
+    "MountPointingModel",
     "ObservationExecution",
     "ObservationPlanning",
     "ObservatoryControl",
+    "SafetyStatus",
     "SimulatorIndiInterface",
+    "SkyPosition",
     "Wayfinder",
 ]
 
+_LAZY_EXPORTS = {
+    "IndiInterface": "wayfindinglib.drivers.indi_interface",
+    "SimulatorIndiInterface": "wayfindinglib.drivers.simulators.indi_simulator",
+    "ObservatoryControl": "wayfindinglib.api.control",
+    "ObservationPlanning": "wayfindinglib.api.planning",
+    "ObservationExecution": "wayfindinglib.api.execution",
+    "SkyPosition": "wayfindinglib.models.sky_position",
+    "MountPointingModel": "wayfindinglib.models.session.telemetry",
+    "ImagingStatus": "wayfindinglib.models.control_status",
+    "GuidingStatus": "wayfindinglib.models.control_status",
+    "SafetyStatus": "wayfindinglib.models.control_status",
+    "EquipmentStatus": "wayfindinglib.models.control_status",
+}
+"""Export name -> the module that defines it."""
 
-def __getattr__(name):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
-    """Lazily resolve every export but Wayfinder, avoiding hardware imports.
+
+def __getattr__(name: str) -> type:
+    """Load an export on first use, so no hardware code loads early.
+
+    Parameters
+    ----------
+    name : `str`
+        The attribute asked for.
 
     Returns
     -------
-    resolved : `Any`
-        The resolved export.
+    resolved : `type`
+        The exported class.
 
     Raises
     ------
     AttributeError
-        Raised if `name` is not a lazily-resolved export.
+        If `name` is not an export of this package.
     """
-    if name == "IndiInterface":
-        from wayfindinglib.drivers.indi_interface import IndiInterface
-
-        return IndiInterface
-    if name == "SimulatorIndiInterface":
-        from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
-
-        return SimulatorIndiInterface
-    if name == "ObservatoryControl":
-        from wayfindinglib.api.control_registry import ObservatoryControl
-
-        return ObservatoryControl
-    if name == "ObservationPlanning":
-        from wayfindinglib.api.planning_registry import ObservationPlanning
-
-        return ObservationPlanning
-    if name == "ObservationExecution":
-        from wayfindinglib.api.execution_registry import ObservationExecution
-
-        return ObservationExecution
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    if name not in _LAZY_EXPORTS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    return getattr(importlib.import_module(_LAZY_EXPORTS[name]), name)
 
 
 class Wayfinder:
@@ -108,7 +121,12 @@ class Wayfinder:
     (`Wayfinding_Library_Architecture.md` §2.5.7).
     """
 
-    def __init__(self, config=None, app_config=None, astrometrics=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(
+        self,
+        config: AppConfiguration | None = None,
+        app_config: AppConfiguration | None = None,
+        astrometrics: Astrometrics | None = None,
+    ) -> None:
         """Initialize the Wayfinder high-level interface.
 
         Description: Composes the three root-function high-level interfaces
@@ -127,9 +145,9 @@ class Wayfinder:
             the configuration when omitted.
         """
         from astrometricslib import Astrometrics, get_configuration
-        from wayfindinglib.api.control_registry import ObservatoryControl
-        from wayfindinglib.api.execution_registry import ObservationExecution
-        from wayfindinglib.api.planning_registry import ObservationPlanning
+        from wayfindinglib.api.control import ObservatoryControl
+        from wayfindinglib.api.execution import ObservationExecution
+        from wayfindinglib.api.planning import ObservationPlanning
         from wayfindinglib.drivers.butler import DiskButler
 
         self.config = config or app_config or get_configuration()

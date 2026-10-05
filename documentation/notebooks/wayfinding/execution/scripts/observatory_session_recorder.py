@@ -41,8 +41,8 @@ def _ensure_session(wayfinder: Wayfinder, session_id: str) -> ObservationSession
     if existing is not None:
         return existing
 
-    telescope = wayfinder.control.active_telescope()
-    camera = wayfinder.control.active_camera()
+    equipment = wayfinder.control.equipment.status(include=["telescope", "camera"])
+    telescope, camera = equipment.telescope, equipment.camera
     if telescope is None or camera is None:
         raise RuntimeError(
             "No existing session found and no active telescope/camera is configured "
@@ -100,7 +100,7 @@ def run_observation_session_recorder() -> None:
 
     print("Connecting to observatory INDI driver...")
     try:
-        wayfinder.control.connect()
+        wayfinder.control.equipment.connect()
         _ensure_session(wayfinder, session_id)
 
         recorder = wayfinder.execution.create_recorder(

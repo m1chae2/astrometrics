@@ -11,13 +11,18 @@ Only guide-log samples are used. The pulse-based estimates the app makes
 while guiding live are not measurements of the star, so they are left out.
 """
 
+from __future__ import annotations
+
 import os
 import statistics
 from datetime import UTC, datetime
 from itertools import pairwise
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from astrometricslib import FrameSelection, select_library_frames
+
+if TYPE_CHECKING:
+    from wayfindinglib.api.control.context import ControlContext
 
 GUIDE_LOG_SOURCE = "ekos_guide_log"
 """The guiding samples that are real star measurements."""
@@ -146,7 +151,7 @@ def _add_image_quality(
 
 
 def link_frames_to_guiding(
-    control: Any,
+    context: ControlContext,
     target_id: str,
     selection: FrameSelection,
     limit: int,
@@ -156,8 +161,8 @@ def link_frames_to_guiding(
 
     Parameters
     ----------
-    control : `ObservatoryControl`
-        Supplies the library configuration and the guiding records.
+    context : `ControlContext`
+        Supplies the science library and the guiding records.
     target_id : `str`
         The library target whose light frames to match.
     selection : `FrameSelection`
@@ -178,7 +183,7 @@ def link_frames_to_guiding(
         the frames well above it), or ``{"error": ...}``.
     """
     limit = max(1, min(int(limit), MAXIMUM_FRAMES))
-    target = control.astrometrics.targets.get(target_id, refresh=True)
+    target = context.astrometrics.targets.get(target_id, refresh=True)
     if target is None:
         return {"error": f"No target with id {target_id!r} in the library."}
     lights = [frame for frame in target.frames if str(frame.role).upper() == "LIGHT"]
@@ -198,7 +203,7 @@ def link_frames_to_guiding(
         windows.append((frame, frame.timestamp, frame.timestamp + exposure_seconds, exposure_seconds))
     first_start = min(window[1] for window in windows)
     last_end = max(window[2] for window in windows)
-    rows = control._logger_interface.get_guiding_logs(
+    rows = context.logger_interface.get_guiding_logs(
         start_time=first_start - 5.0, limit=500_000, sources=[GUIDE_LOG_SOURCE]
     )
     rows = sorted(
@@ -220,7 +225,7 @@ def link_frames_to_guiding(
 
     quality_note = None
     if include_quality:
-        quality_note = _add_image_quality(control.astrometrics, target, selection, frames)
+        quality_note = _add_image_quality(context.astrometrics, target, selection, frames)
 
     measured = [row["rms_total_arcsec"] for row in frames if row.get("rms_total_arcsec") is not None]
     median_error = statistics.median(measured) if measured else None

@@ -41,7 +41,7 @@ def make_observatory(frames_root: Path) -> SimpleNamespace:
         With the configuration and driver the status reads.
     """
     config = SimpleNamespace(get_frames_path=lambda: str(frames_root))
-    return SimpleNamespace(_config=config, remote_transfer_driver=FakeDriver(), astrometrics=_FAKE_LIBRARY)
+    return SimpleNamespace(config=config, remote_transfer_driver=FakeDriver(), astrometrics=_FAKE_LIBRARY)
 
 
 @pytest.fixture

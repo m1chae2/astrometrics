@@ -10,9 +10,10 @@ from pathlib import Path
 import pytest
 
 from astrometricslib import AppConfiguration
-from wayfindinglib.api.control_registry import ObservatoryControl
+from wayfindinglib import ObservatoryControl
 from wayfindinglib.api.test.capture_night_helpers import Library
 from wayfindinglib.drivers.butler import DiskButler
+from wayfindinglib.tasks.control_tasks import night_analysis
 
 
 @pytest.fixture
@@ -65,8 +66,8 @@ def library(control: ObservatoryControl, monkeypatch: pytest.MonkeyPatch) -> Lib
     """
     synthetic = Library()
     monkeypatch.setattr(
-        ObservatoryControl,
-        "_capture_library",
-        lambda self, telescope_name, camera_name, cache: (synthetic.frames, synthetic.verdicts),
+        night_analysis,
+        "capture_library",
+        lambda context, telescope_name, camera_name, cache: (synthetic.frames, synthetic.verdicts),
     )
     return synthetic

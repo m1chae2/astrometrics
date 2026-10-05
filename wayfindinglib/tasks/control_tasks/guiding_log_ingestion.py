@@ -16,7 +16,7 @@ catch-up/backfill call:
 
 - `ingest_guide_log_file`: process one already-downloaded log file.
 - `fetch_and_ingest_new_guide_logs`: download every remote log first,
-  via `ObservatoryControl.remote_transfer_driver`, then process each.
+  via the context's `remote_transfer_driver`, then process each.
   `download_guide_logs`/`list_remote_guide_logs` are deliberately not
   part of the generic `RemoteTransferDriver` ABC (PHD2-log-specific,
   not a universal telescope-host concept) -- this function degrades to
@@ -28,19 +28,24 @@ of running the same steps themselves is `Wayfinding_Library_Architecture.md`
 M9's backend-cleanup scope, paired with this milestone but not part of it.
 """
 
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 from astrometricslib import observing_night_id
 from wayfindinglib.analytics.guiding_spectrum import analyze_guiding_telemetry
 from wayfindinglib.drivers.phd2.guide_log_parser import parse_phd2_guide_log
 from wayfindinglib.models.session.telemetry import MEASURED_GUIDING_SAMPLE_SOURCES, GuidingSpectrumAnalysis
 
+if TYPE_CHECKING:
+    from wayfindinglib.api.control.context import ControlContext
+
 _REFIT_SAMPLE_LIMIT = 50000
 """Most samples one refit reads. A long night holds about 10,000."""
 
 
 def refit_and_persist_guiding_spectrum(
-    observatory,  # ruff: ignore[missing-type-function-argument]
+    context: ControlContext,
     logger_interface: Any,
     session_id: str | None = None,
     limit: int = 2000,
@@ -50,7 +55,7 @@ def refit_and_persist_guiding_spectrum(
     The refit itself re-reads the full accumulated sample history on
     every call (unchanged from `GuidingService.analyze_guiding_spectrum`'s
     existing behavior) -- the only change this pipeline makes is writing
-    the result back to standing `ObservatoryControl` storage instead of
+    the result back to the saved models instead of
     only returning it to whichever caller asked.
 
     Only samples measured from a real guide star are read. Samples that
@@ -60,9 +65,8 @@ def refit_and_persist_guiding_spectrum(
 
     Parameters
     ----------
-    observatory : `wayfindinglib.api.control_registry.ObservatoryControl`
-        Provides `save_guiding_spectrum_analysis` and the active
-        telescope this analysis is scoped to.
+    context : `ControlContext`
+        Saves the analysis for the active telescope.
     logger_interface : `astrometricslib.LoggerInterface`
         Source of recorded guiding samples.
     session_id : `str` | `None`, optional
@@ -81,12 +85,12 @@ def refit_and_persist_guiding_spectrum(
         sources=[source.value for source in MEASURED_GUIDING_SAMPLE_SOURCES],
     )
     analysis = analyze_guiding_telemetry(samples)
-    observatory.save_guiding_spectrum_analysis(analysis)
+    context.save_guiding_spectrum_analysis(analysis)
     return analysis
 
 
 def ingest_guide_log_file(
-    observatory,  # ruff: ignore[missing-type-function-argument]
+    context: ControlContext,
     logger_interface: Any,
     file_path: str,
     target_name: str | None = None,
@@ -95,8 +99,8 @@ def ingest_guide_log_file(
 
     Parameters
     ----------
-    observatory : `wayfindinglib.api.control_registry.ObservatoryControl`
-        Provides `save_guiding_spectrum_analysis`.
+    context : `ControlContext`
+        Saves the refit analysis.
     logger_interface : `astrometricslib.LoggerInterface`
         Records the parsed samples and supplies the cumulative history
         the refit reads back.
@@ -116,7 +120,7 @@ def ingest_guide_log_file(
         return None
     logger_interface.replace_guiding_samples(samples)
     return refit_and_persist_guiding_spectrum(
-        observatory,
+        context,
         logger_interface,
         session_id=observing_night_id(samples[-1]["timestamp"]),
         limit=_REFIT_SAMPLE_LIMIT,
@@ -124,7 +128,7 @@ def ingest_guide_log_file(
 
 
 def fetch_and_ingest_new_guide_logs(
-    observatory,  # ruff: ignore[missing-type-function-argument]
+    context: ControlContext,
     logger_interface: Any,
     destination_dir: str,
     target_name: str | None = None,
@@ -138,8 +142,8 @@ def fetch_and_ingest_new_guide_logs(
 
     Parameters
     ----------
-    observatory : `wayfindinglib.api.control_registry.ObservatoryControl`
-        Provides `remote_transfer_driver` and `save_guiding_spectrum_analysis`.
+    context : `ControlContext`
+        Supplies `remote_transfer_driver` and saves the refit analysis.
     logger_interface : `astrometricslib.LoggerInterface`
         Records parsed samples and supplies the cumulative history the
         refit reads back.
@@ -155,7 +159,7 @@ def fetch_and_ingest_new_guide_logs(
         configured remote-transfer driver doesn't support guide-log
         retrieval, or no new samples were found in any downloaded log.
     """
-    download_guide_logs = getattr(observatory.remote_transfer_driver, "download_guide_logs", None)
+    download_guide_logs = getattr(context.remote_transfer_driver, "download_guide_logs", None)
     if download_guide_logs is None:
         return None
 
@@ -175,7 +179,7 @@ def fetch_and_ingest_new_guide_logs(
     if total_new_samples == 0:
         return None
     return refit_and_persist_guiding_spectrum(
-        observatory,
+        context,
         logger_interface,
         session_id=observing_night_id(latest_sample_time),
         limit=_REFIT_SAMPLE_LIMIT,

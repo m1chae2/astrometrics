@@ -176,7 +176,6 @@ class Container:
             observatory_api=self.wayfinder.control,
             logger_interface=self.job_repository,
         )
-        self.wayfinder.control.guiding_service = self.guiding_service
 
         # 5. Initialize Domain Services with proper DI
         self.telescope_service = TelescopeService(
@@ -275,10 +274,6 @@ class Container:
         from backend.services.infrastructure.scripting_service import ScriptingService
 
         self.scripting_service = ScriptingService(self)
-
-        # Wire the optional injected services into the Wayfinder domain
-        # high-level interface
-        self.wayfinder.control.sync_service = self.sync_service
 
         # 7. Start Background Maintenance
         self.maintenance_service.system_status_service = self.system_status_service

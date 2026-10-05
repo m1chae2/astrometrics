@@ -29,7 +29,7 @@ The parser turns each set into one `DitherEvent`. The event records the start ti
 - **Eccentricity** of an exposure, from 0 (round stars) toward 1 (stretched stars). Ekos writes `-1` when it could not measure it, and the parser stores `None`.
 - **Autofocus run** with its measured curve and the position Ekos chose. A run that was aborted has no chosen position.
 
-Later code reads these through `ObservatoryControl.list_ekos_session_summaries` and `get_ekos_session_context`. The equipment-specific limits that judge them come from the performance envelope (`wayfindinglib/analytics/performance_envelope.py`).
+Later code reads these through `control.history.query(kind="ekos_sessions")`. The equipment-specific limits that judge them come from the performance envelope (`wayfindinglib/analytics/performance_envelope.py`).
 
 ## What is deliberately not kept
 

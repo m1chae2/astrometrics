@@ -6,7 +6,7 @@ import time
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from wayfindinglib.api.control_registry import ObservatoryControl
+from wayfindinglib import ObservatoryControl
 from wayfindinglib.drivers.phd2.phd2_client import PHD2Client
 from wayfindinglib.drivers.phd2.phd2_guiding_service import PHD2GuidingService
 from wayfindinglib.models.session.telemetry import GuidingSampleSource
@@ -80,11 +80,13 @@ class GuidingService:
         # Validate telescope is tracking (with a small retry loop for sync)
         max_retries = 5
         for _i in range(max_retries):
-            tracking_status = self._observatory.get_telescope_status().get("trackingStatus", "Unknown")
+            tracking_status = self._observatory.mount.status(include=["mount"]).get(
+                "trackingStatus", "Unknown"
+            )
             if tracking_status == "Tracking":
                 break
             # Force a refresh in the driver if possible
-            self._observatory.connect()
+            self._observatory.equipment.connect()
             time.sleep(0.5)
         else:
             logger.error(
@@ -140,7 +142,7 @@ class GuidingService:
         target_name : `str` | `None`
             The active target name, or `None` if none is set.
         """
-        return self._observatory.get_telescope_status().get("targetName")
+        return self._observatory.mount.status(include=["mount"]).get("targetName")
 
     def poll_external_telemetry(self) -> None:
         """Drain queued real-time external timed guide pulses passively.
@@ -218,7 +220,7 @@ class GuidingService:
 
         # 2. Fall back to INDI timed guide pulse queue
         try:
-            pulses = self._observatory.drain_external_pulses()
+            pulses = self._observatory.guiding.drain_external_pulses()
 
             if not pulses:
                 return
@@ -360,7 +362,7 @@ class GuidingService:
                 # 0. Safety Check: Ensure Telescope is still Tracking
                 # We log it but allow 3 consecutive failures before
                 # breaking loop (to handle transient INDI states)
-                current_tracking = self._observatory.get_telescope_status().get("trackingStatus")
+                current_tracking = self._observatory.mount.status(include=["mount"]).get("trackingStatus")
                 if current_tracking != "Tracking":
                     if not hasattr(self, "_tracking_fail_count"):
                         self._tracking_fail_count = 0
@@ -381,7 +383,7 @@ class GuidingService:
                     self._tracking_fail_count = 0
 
                 # 1. Start Exposure
-                if not self._observatory.guide_expose(self.exposure_time, self.gain):
+                if not self._observatory.guiding.expose(self.exposure_time, self.gain):
                     logger.error("Failed to start guide exposure")
                     time.sleep(1)
                     continue
@@ -396,7 +398,7 @@ class GuidingService:
                     break
 
                 # 3. Process Image (Simulated Drift)
-                # In real life: blob = self._observatory.get_guide_image() ->
+                # In real life: blob = self._observatory.guiding.get_image() ->
                 # processing -> dRA/dDEC
 
                 # Simulate "Random Walk" drift
@@ -422,14 +424,14 @@ class GuidingService:
 
                 if pulse_duration_ra > 50:
                     direction = "W" if correction_ra > 0 else "E"  # Direction logic depends on mount
-                    self._observatory.pulse_guide(direction, int(pulse_duration_ra))
+                    self._observatory.guiding.pulse(direction, int(pulse_duration_ra))
                     # "Physics" update: drift is reduced by correction
                     # Assume 90% efficiency
                     self._sim_drift_ra += correction_ra * 0.9
 
                 if pulse_duration_dec > 50:
                     direction = "N" if correction_dec > 0 else "S"
-                    self._observatory.pulse_guide(direction, int(pulse_duration_dec))
+                    self._observatory.guiding.pulse(direction, int(pulse_duration_dec))
                     self._sim_drift_dec += correction_dec * 0.9
 
                 # 5. Update Stats & RMS
@@ -477,10 +479,8 @@ class GuidingService:
     def ingest_phd2_log_file(self, file_path: str, target_name: str | None = None) -> int:
         """Parse and persist a native PHD2 guide log text file into SQLite.
 
-        Delegates to `ObservatoryControl.ingest_guiding_log_file`
-        (`guiding_log_ingestion.py`, §6a) rather than parsing and
-        analyzing directly -- this service no longer imports the
-        parser/analytics modules itself.
+        Delegates to `control.guiding.refit_spectrum(file_path=...)`
+        rather than parsing and analyzing directly.
 
         Parameters
         ----------
@@ -496,15 +496,14 @@ class GuidingService:
             across all history, not just this file), `0` if the file
             contained no parseable samples.
         """
-        analysis = self._observatory.ingest_guiding_log_file(file_path, target_name=target_name)
+        analysis = self._observatory.guiding.refit_spectrum(file_path=file_path, target_name=target_name)
         return analysis.sample_count if analysis else 0
 
     def analyze_guiding_spectrum(self, session_id: str | None = None) -> dict[str, Any]:
         """Analyze periodic error, worm harmonics, and backlash.
 
-        Delegates to `ObservatoryControl.refit_guiding_spectrum`
-        (`guiding_log_ingestion.py`, §6a) rather than analyzing
-        directly.
+        Delegates to `control.guiding.refit_spectrum` rather than
+        analyzing directly.
 
         Parameters
         ----------
@@ -517,5 +516,5 @@ class GuidingService:
         spectrum : `dict` [`str`, `Any`]
             Dominant periods, peak-to-peak PE, and PSD curve points.
         """
-        analysis = self._observatory.refit_guiding_spectrum(session_id=session_id, limit=2000)
+        analysis = self._observatory.guiding.refit_spectrum(session_id=session_id, limit=2000)
         return analysis.model_dump(by_alias=True)

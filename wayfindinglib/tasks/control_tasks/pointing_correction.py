@@ -60,7 +60,7 @@ def compute_pointing_correction(
         Supplies `alignment_convergence_tolerance_arcsec`.
     pointing_model : `MountPointingModel` | `None`, optional
         Tonight's session-scoped fitted model
-        (`ObservatoryControl.get_pointing_model`). `None` (default)
+        (`control.history.query(kind="pointing_model")`). `None` (default)
         disables the feedforward, reproducing the pre-M7b behavior
         exactly: `converged` is judged against the raw measured error.
         Skipped even when supplied if its `confidence` is

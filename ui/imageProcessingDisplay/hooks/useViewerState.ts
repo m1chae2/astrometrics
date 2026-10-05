@@ -4,7 +4,7 @@
  * Coordinates fetching of light frames, arbitrary files, stretch state, and auto-pan triggers.
  */
 import { useState, useEffect, useRef } from 'react';
-import { fetchLightFrame, fetchImageByPath } from '../../common/services/imagingService';
+import { fetchLightFrame, fetchImageByPath } from '../../common/services/imaging/imageService';
 import { reportError } from '../../common/utils/reportError';
 
 export interface ImageFrameInfo {

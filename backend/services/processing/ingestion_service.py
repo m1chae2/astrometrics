@@ -299,7 +299,7 @@ class IngestionService(BaseBackgroundService):
             if self._job_service:
                 self._job_service.update_job(job_id, progress=progress_pct)
 
-            target = self._target_service.get_target(target_id)
+            target = self._target_service.get_targets(target_id)
             if not target:
                 target = self._target_service.create_target(target_id)
 
@@ -326,11 +326,9 @@ class IngestionService(BaseBackgroundService):
         # 4. Migrate Stellar Objects to SQLite
         if hasattr(self._target_service, "stellar_service") and self._target_service.stellar_service:
             self._log(job_id, "Migrating stellar objects to SQLite...")
-            self._target_service.stellar_service.load_stellar_objects()
             self._target_service.stellar_service.save_objects()
         elif hasattr(self, "_stellar_service") and self._stellar_service:
             self._log(job_id, "Migrating stellar objects to SQLite...")
-            self._stellar_service.load_stellar_objects()
             self._stellar_service.save_objects()
 
         self._log(job_id, "Re-index complete.")
@@ -402,7 +400,7 @@ class IngestionService(BaseBackgroundService):
         if target_name and self._target_service:
             # Create target immediately so it appears in UI during
             # long downloads
-            target = self._target_service.get_target(target_name)
+            target = self._target_service.get_targets(target_name)
             if not target:
                 self._target_service.create_target(target_name)
                 self._target_service.save_targets()
@@ -521,7 +519,7 @@ class IngestionService(BaseBackgroundService):
                 self._log(job_id, f"Found {total_files} files in {remote_target}")
 
                 # Fetch target instance
-                target = self._target_service.get_target(target_name)
+                target = self._target_service.get_targets(target_name)
                 if not target:
                     target = self._target_service.create_target(target_name)
 
@@ -584,18 +582,14 @@ class IngestionService(BaseBackgroundService):
                 logger.warning(f"Failed to refresh calibration library in ingestion job: {e}")
 
             # 2. Update Targets
-            self._target_service.load_targets(refresh_images=False)
 
             if target_name:
-                target = self._target_service.get_target(target_name)
+                target = self._target_service.get_targets(target_name)
                 if not target:
                     target = self._target_service.create_target(target_name)
                 self._target_service.refresh_target_images(target)
 
             self._target_service.save_targets()
-            # Crucial Fix: Reload once more to ensure indices are
-            # 100% fresh in shared memory.
-            self._target_service.load_targets(refresh_images=False)
 
         self._log(job_id, "Ingestion Complete.")
         return True

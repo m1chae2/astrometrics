@@ -399,21 +399,6 @@ class ScriptingService:
                 traceback.print_exc()
         return buffer.getvalue()
 
-    def run_code(self, source_code: str) -> str:
-        """Legacy wrapper, delegates to execute.
-
-        Parameters
-        ----------
-        source_code : `str`
-            Source code string to run.
-
-        Returns
-        -------
-        output : `str`
-            The captured stdout/stderr produced by `source_code`.
-        """
-        return self.execute(source_code)
-
     def get_introspection_tree(self) -> list[dict[str, Any]]:
         """Return a tree of available objects and their methods.
 

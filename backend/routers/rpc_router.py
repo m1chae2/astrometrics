@@ -161,8 +161,8 @@ class RPCHandlerRegistry:
     """Registry for dynamic RPC action dispatching.
 
     Maps action string keys to Python callable methods or tuples referencing
-    container services. Also supports dynamic reflection of methods on
-    Astrometrics high-level interface branches.
+    container services. Every method the user interface or an agent can
+    call has an explicit entry.
     """
 
     def __init__(self):  # ruff: ignore[missing-return-type-special-method]
@@ -242,12 +242,27 @@ class RPCHandlerRegistry:
         # than through GuidingService, which only owns the loop's lifecycle.
         self.register("guiding:capture_frame", _capture_guide_frame)
         self.register("telescope:connect", lambda: container.wayfinder.control.connect())
+        for rpc_name, control_method in (
+            ("abort_motion", "abort_motion"),
+            ("apply_promotion_decision", "apply_promotion_decision"),
+            ("focus_move", "focus_move"),
+            ("get_focuser_position", "get_focuser_position"),
+            ("is_syncing", "is_syncing"),
+            ("manual_move", "manual_move"),
+            ("park", "park"),
+            ("set_filter", "set_filter"),
+            ("set_slew_rate", "set_slew_rate"),
+            ("set_tracking", "set_tracking"),
+            ("slew_coordinates", "slew_to_coordinates"),
+            ("status", "get_telescope_status"),
+            ("sync", "sync"),
+            ("unpark", "unpark"),
+        ):
+            self.register(f"telescope:{rpc_name}", ("wayfinder.control", control_method))
 
         # --- Raw INDI diagnostics (IndiStatusPanel) ---
-        # `get_indi_devices`/`indi_properties`/`set_indi_property` were
-        # removed from `ObservatoryControl` outright (M5) -- relocated to
-        # `IndiDiagnosticsService`, registered explicitly here so these three
-        # take priority over the generic dynamic-reflection fallback below.
+        # The INDI diagnostics live in `IndiDiagnosticsService`, not in
+        # `ObservatoryControl`.
         self.register("telescope:indi_devices", ("indi_diagnostics_service", "get_devices"))
         self.register("telescope:indi_properties", ("indi_diagnostics_service", "get_properties"))
         self.register("telescope:set_indi_property", ("indi_diagnostics_service", "set_property"))
@@ -403,144 +418,12 @@ class RPCHandlerRegistry:
         self.register("sequencer:begin", ("target_imaging_executor", "begin_imaging"))
         self.register("sequencer:modify", ("target_imaging_executor", "modify_queue_item"))
 
-    def _resolve_dynamic_reflected_handler(self, method: str) -> Callable[..., Any] | None:
-        """Resolve a handler by reflecting on high-level interface branches.
-
-        Supports 'branch:sub_api:method_name' style, as well as
-        legacy 2-part 'namespace:method_name' style mapping to
-        Astrometrics API branches.
-
-        Parameters
-        ----------
-        method : `str`
-            The JSON-RPC method key.
-
-        Returns
-        -------
-        handler : callable or `None`
-            The resolved callable, or `None` if no branch, sub-API,
-            or method matched.
-        """
-        parts = method.split(":")
-
-        # 1. 3-part style
-        if len(parts) == 3:
-            branch_name, sub_api_name, method_name = parts
-            wayfinder_branch_mapping = {"observatory": "control", "observation": "planning"}
-            if branch_name in wayfinder_branch_mapping:
-                branch = getattr(container.wayfinder, wayfinder_branch_mapping[branch_name], None)
-            else:
-                branch = getattr(container.astrometrics, branch_name, None)
-            if branch:
-                sub_api = getattr(branch, sub_api_name, None)
-                if sub_api:
-                    handler = getattr(sub_api, method_name, None)
-                    if callable(handler):
-                        return handler
-
-        # 2. 2-part legacy style
-        elif len(parts) == 2:
-            namespace, method_name = parts
-
-            # Namespace mapping to properties on container.astrometrics
-            # or container.wayfinder
-            namespace_mapping = {
-                "target": "targets",
-                "telescope": "control",
-                "astronomy": "astronomy",
-                "processing": "processing",
-                "imaging": "imaging",
-                "planning": "planning",
-                "system": "control",
-                "analysis": "analysis",
-            }
-
-            # Method-level alias and redirection mapping
-            method_aliases = {
-                "target": {
-                    "get_targets": ("astrometrics", "get_targets"),
-                    "create_target": ("astrometrics", "create_target"),
-                    "delete_target": ("astrometrics", "delete_target"),
-                    "save_targets": ("astrometrics", "save_targets"),
-                    "get_frames": ("targets", "get_frame_stats"),
-                    "get_frames_grouped": ("targets", "get_frame_stats_grouped"),
-                },
-                "telescope": {
-                    "status": ("control", "get_telescope_status"),
-                    "slew": ("control", "slew_to_target"),
-                    "slew_coordinates": ("control", "slew_to_coordinates"),
-                    "get_focuser_position": ("control", "get_focuser_position"),
-                    "focus_move": ("control", "focus_move"),
-                    "set_filter": ("control", "set_filter"),
-                    "park": ("control", "park"),
-                    "unpark": ("control", "unpark"),
-                    "set_tracking": ("control", "set_tracking"),
-                    "manual_move": ("control", "manual_move"),
-                    "set_slew_rate": ("control", "set_slew_rate"),
-                    "abort_motion": ("control", "abort_motion"),
-                    "connect": ("control", "connect"),
-                },
-                "astronomy": {
-                    "get_status": ("astronomy", "get_target_status"),
-                    "visible": ("astronomy", "get_visible_targets"),
-                },
-                "processing": {
-                    "active_jobs": ("processing", "get_active_jobs"),
-                },
-                "system": {
-                    "save": ("astrometrics", "save_targets"),
-                },
-            }
-
-            astrometrics = container.astrometrics
-            wayfinder = container.wayfinder
-
-            # A. Check explicit aliases first
-            if namespace in method_aliases and method_name in method_aliases[namespace]:
-                target_api_name, actual_method = method_aliases[namespace][method_name]
-                if target_api_name == "astrometrics":
-                    sub_api = astrometrics
-                elif target_api_name in ("control", "planning"):
-                    sub_api = getattr(wayfinder, target_api_name, None)
-                elif target_api_name == "astronomy" and actual_method in (
-                    "get_target_status",
-                    "get_visible_targets",
-                ):
-                    sub_api = getattr(wayfinder, target_api_name, None)
-                else:
-                    sub_api = getattr(astrometrics, target_api_name, None)
-                if sub_api:
-                    handler = getattr(sub_api, actual_method, None)
-                    if callable(handler):
-                        return handler
-
-            # B. Fallback to direct attribute resolution on mapped property
-            prop_name = namespace_mapping.get(namespace)
-            if prop_name:
-                if namespace in ("telescope", "system", "planning"):
-                    sub_api = getattr(wayfinder, prop_name, None)
-                elif namespace == "astronomy" and method_name in (
-                    "get_status",
-                    "visible",
-                    "get_target_status",
-                    "get_visible_targets",
-                ):
-                    sub_api = getattr(wayfinder, prop_name, None)
-                else:
-                    sub_api = getattr(astrometrics, prop_name, None) or getattr(wayfinder, prop_name, None)
-                if sub_api:
-                    handler = getattr(sub_api, method_name, None)
-                    if callable(handler):
-                        return handler
-
-        return None
-
     async def execute(self, method: str, params: dict[str, Any]) -> Any:
         """Execute the handler registered or reflected for a method.
 
-        Resolves the handler registered explicitly or, failing that,
-        dynamically reflected from the domain high-level interfaces. Checks for
-        coroutines and awaits them if necessary.
+        Resolves the explicitly registered handler. A service name may be
+        dotted, such as ``wayfinder.control``, to reach a nested object.
+        Checks for coroutines and awaits them if necessary.
 
         Parameters
         ----------
@@ -560,8 +443,7 @@ class RPCHandlerRegistry:
             If a registered service/method cannot be found, or if a
             required parameter for the handler is missing.
         RPCMethodNotFoundError
-            If no handler can be resolved for `method`, either
-            explicitly registered or dynamically reflected.
+            If no handler is registered for `method`.
         """
         # First, try to resolve via explicitly registered handlers
         handler = None
@@ -569,7 +451,9 @@ class RPCHandlerRegistry:
             val = self._handlers[method]
             if isinstance(val, tuple):
                 service_name, method_name = val
-                service = getattr(container, service_name, None)
+                service = container
+                for part in service_name.split("."):
+                    service = getattr(service, part, None)
                 if not service:
                     raise ValueError(f"Service '{service_name}' not found or initialized in Container")
                 handler = getattr(service, method_name, None)
@@ -577,10 +461,6 @@ class RPCHandlerRegistry:
                     raise ValueError(f"Method '{method_name}' not found on service '{service_name}'")
             else:
                 handler = val
-
-        if not handler:
-            # Fallback to dynamic reflection
-            handler = self._resolve_dynamic_reflected_handler(method)
 
         if not handler:
             raise RPCMethodNotFoundError(f"Method '{method}' not found in RPC registry")

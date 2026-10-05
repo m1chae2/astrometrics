@@ -69,5 +69,4 @@ interface Window {
       sendAction: (action: string, payload?: Record<string, string>) => void;
     };
   };
-  electronAPI?: any; // Deprecated/Legacy check
 }

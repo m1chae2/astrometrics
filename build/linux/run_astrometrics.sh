@@ -22,7 +22,7 @@ set -euo pipefail
 #   ./run_astrometrics.sh restart [port]      - Restart background processes
 #   ./run_astrometrics.sh status              - Show status
 #   ./run_astrometrics.sh foreground [port]   - Run in foreground (original behavior)
-#   ./run_astrometrics.sh [port]              - Defaults to foreground for backward compatibility
+#   ./run_astrometrics.sh [port]              - Defaults to foreground
 
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LOG_DIR="$ROOT_DIR/.run_logs"

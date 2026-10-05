@@ -23,7 +23,7 @@ vi.mock('../common/context/AstrometricsContext', () => ({
     useAstrometrics: () => ({ activeJobs: [] }),
 }));
 
-vi.mock('../common/services/imagingService', () => ({
+vi.mock('../common/services/imaging/processingService', () => ({
     processTarget: vi.fn(),
     cancelProcessing: vi.fn(),
     fetchAllProcesses: vi.fn(),

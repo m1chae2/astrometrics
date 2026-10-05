@@ -1,18 +1,7 @@
 import { useState } from 'react';
-import {
-    parkTelescope,
-    unparkTelescope,
-    slewTelescope,
-    abortTelescopeMotion,
-    setTelescopeTracking,
-    moveTelescope,
-    setTelescopeSlewRate,
-    moveFocuser,
-    setFilterWheelPosition,
-    startGuiding,
-    stopGuiding,
-    captureGuideFrame
-} from '../../common/services/telescopeService';
+import { parkTelescope, unparkTelescope, slewTelescope, abortTelescopeMotion, setTelescopeTracking, moveTelescope, setTelescopeSlewRate } from '../../common/services/telescope/motionService';
+import { moveFocuser, setFilterWheelPosition } from '../../common/services/telescope/deviceService';
+import { startGuiding, stopGuiding, captureGuideFrame } from '../../common/services/telescope/guidingService';
 import { startAlignment, stopAlignment } from '../../common/services/alignmentApi';
 import { createTarget } from '../../common/services/targetService';
 import { emitToast } from '../../common/utils/emitToast';

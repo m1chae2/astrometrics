@@ -5,16 +5,7 @@
  * REQ: IMG-5.1: The display SHALL provide a "Process Target" command.
  */
 import { useState, useEffect, useRef } from 'react';
-import {
-    processTarget,
-    cancelProcessing,
-    fetchAllProcesses,
-    fetchJobs,
-    fetchJobLogTail,
-    streamJobLog,
-    dismissJob,
-    openSiril
-} from '../../common/services/imagingService';
+import { processTarget, cancelProcessing, fetchAllProcesses, fetchJobs, fetchJobLogTail, streamJobLog, dismissJob, openSiril } from '../../common/services/imaging/processingService';
 import {
     GroupedFrameStat,
     ProcessStatus,

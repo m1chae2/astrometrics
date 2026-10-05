@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { fetchProcessedImage } from '../../common/services/imagingService';
+import { fetchProcessedImage } from '../../common/services/imaging/imageService';
 import { reportError } from '../../common/utils/reportError';
 import { on as onEvent } from '../../common/utils/eventBus';
 

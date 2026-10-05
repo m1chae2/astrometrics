@@ -1073,13 +1073,6 @@ class StellarService:
             for star in stars
         ]
 
-    def load_stellar_objects(self) -> None:
-        """No-op retained for backward compatibility.
-
-        Preloading is not required; this service is stateless.
-        """
-        pass
-
     def save_objects(self) -> str:
         """Report that the stellar catalog is saved; there is nothing to do.
 

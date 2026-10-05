@@ -310,7 +310,7 @@ class ConfigLoader:
         -------
         spectroscopy_config : `SpectroscopyConfig`
             The resolved spectroscopy configuration for the requested
-            camera, with legacy config values coerced to the expected
+            camera, with config values coerced to the expected
             types and defaults applied where unset.
         """
         if app_config is None:

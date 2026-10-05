@@ -10,7 +10,7 @@
 
 import React, { useEffect, useRef } from 'react';
 import { PlanetariumSource } from '../../common/types/planetariumTypes';
-import { slewTelescope } from '../../common/services/telescopeService';
+import { slewTelescope } from '../../common/services/telescope/motionService';
 import { emitToast } from '../../common/utils/emitToast';
 import { navigateToElement } from '../../common/utils/displayCoordinator';
 

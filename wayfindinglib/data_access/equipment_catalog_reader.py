@@ -6,10 +6,10 @@ concern -- both peer functions need the active specifications; changing
 which entry is active is a Control operation
 (`Wayfinding_Library_Architecture.md` §2.2.2, §2.5.2).
 
-Extends the existing camera-catalog config reader
-(`observatorylib.equipment_configuration.EquipmentConfigurationManager`)
-to telescopes, generalizing the same multi-section pattern cameras
-already had: an `[Observatory.Telescope]` base section carries a
+Cameras and telescopes share one multi-section config pattern (the
+camera side matches
+`observatorylib.equipment_configuration.EquipmentConfigurationManager`).
+For telescopes, an `[Observatory.Telescope]` base section carries a
 comma-separated `models` list and an `active_telescope` key, with each
 named telescope's fields in `[Observatory.Telescope.<Name>]`, falling
 back through `Telescope.<Name>`, `Observatory.Telescope`, then
@@ -27,10 +27,7 @@ Where no `models` list is configured at all -- today's state, before an
 operator has split telescopes into named sections -- resolution falls
 back to constructing exactly one `Telescope` from the flat
 `[Observatory.Telescope]` section's existing `focal_length_mm`/
-`focal_ratio`, named after the hardcoded single-telescope name the
-deprecated `EquipmentConfigurationManager` used
-(`_TELESCOPE_NAME = "Apertura 75Q"`), so behavior is unchanged until an
-operator configures more than one rig.
+`focal_ratio`, named `_SINGLE_TELESCOPE_FALLBACK_NAME`.
 """
 
 import logging
@@ -40,7 +37,6 @@ from wayfindinglib.models.equipment_and_site.equipment import Camera, EquipmentC
 logger = logging.getLogger(__name__)
 
 TELESCOPE_SECTION = "Observatory.Telescope"
-_LEGACY_TELESCOPE_SECTION = "Telescope"
 ACTIVE_TELESCOPE_KEY = "active_telescope"
 CAMERA_SECTION = "Observatory.Camera"
 ACTIVE_CAMERA_KEY = "default_primary_camera"
@@ -71,10 +67,8 @@ def _as_bool(value: str | bool | None, default: bool) -> bool:
 def _telescope_section_for_name(config, telescope_name: str) -> dict[str, str]:  # ruff: ignore[missing-type-function-argument]
     """Return the resolved config section dict for a named telescope.
 
-    Checked in order of ``Observatory.Telescope.<name>``,
-    ``Telescope.<name>``, ``Observatory.Telescope``, then ``Telescope``
-    -- the same fallback chain `AppConfiguration.get_camera_config` uses
-    for cameras.
+    Checked in order of ``Observatory.Telescope.<name>``, then
+    ``Observatory.Telescope``.
 
     Returns
     -------
@@ -83,9 +77,7 @@ def _telescope_section_for_name(config, telescope_name: str) -> dict[str, str]: 
     """
     for section in [
         f"{TELESCOPE_SECTION}.{telescope_name}",
-        f"{_LEGACY_TELESCOPE_SECTION}.{telescope_name}",
         TELESCOPE_SECTION,
-        _LEGACY_TELESCOPE_SECTION,
     ]:
         if section in config.app_config:
             return dict(config.app_config[section])
@@ -356,8 +348,8 @@ def get_equipment_catalog(config) -> EquipmentCatalog:  # ruff: ignore[missing-t
 
     The active identifiers default to the first configured entry of
     each kind when no active selection is configured, matching the
-    deprecated `EquipmentConfigurationManager.get_active_camera_profile`'s
-    "first available" fallback.
+    the "first available" fallback of
+    `EquipmentConfigurationManager.get_active_camera_profile`.
 
     Every configured protocol-selection field is validated against its
     driver registry here, so a misconfigured protocol name fails at

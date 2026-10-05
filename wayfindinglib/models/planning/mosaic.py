@@ -5,9 +5,8 @@ package *generator*: an operator supplies a tiling of one region and a
 shared exposure recipe, and Planning expands the request into one
 sibling `ObservationPackage` per panel, each targeting its own panel
 sub-target created through astrometricslib's public high-level interface
-(`Wayfinding_Library_Architecture.md` §2.3.2). Supersedes the deprecated
-`observation.MosaicPanel`, which carried `ra_str`/`dec_str`/`panel_id`
-rather than a resolved `panel_target_id`.
+(`Wayfinding_Library_Architecture.md` §2.3.2). Each `MosaicPanel` carries a
+resolved `panel_target_id` rather than raw `ra_str`/`dec_str` coordinates.
 """
 
 from pydantic import BaseModel, ConfigDict, Field

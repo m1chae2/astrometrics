@@ -9,12 +9,11 @@ sub-target with the shared recipe
 package is independent from that point on -- placement, quality
 advisory, and calibration advisory all treat it like any other package.
 
-The panel-offset math (gnomonic RA compression by 1/cos(dec)) is
-carried forward from the deprecated `observationlib.planning_operations
-.calculate_panels`; field-of-view is read from the new
-`EquipmentConfiguration`'s already-computed properties rather than raw
-config keys, since Planning takes the active equipment as an argument
-(hardware-free) rather than reading it itself.
+The panel-offset math uses a gnomonic projection, so the right
+ascension (RA) step is compressed by 1/cos(dec). Field of view is read
+from the computed properties of `EquipmentConfiguration`, not from raw
+config keys. Planning takes the active equipment as an argument, so it
+stays free of hardware access.
 """
 
 import math

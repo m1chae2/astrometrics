@@ -129,8 +129,6 @@ class Container:
         self.calibration_library = self.astrometrics.processing.calibration.library
 
         # Load data from disk
-        self.target_service.load_targets()
-        self.stellar_object_service.load_stellar_objects()
         self.calibration_library.load_library()
 
         # 3. Initialize Hardware Drivers
@@ -272,11 +270,7 @@ class Container:
 
         from backend.services.infrastructure.system_status_service import SystemStatusService
 
-        self.system_status_service = SystemStatusService(
-            telescope_service=self.telescope_service,
-            image_processing_service=self.image_processing_service,
-            astrometrics_service=self.astrometrics_service,
-        )
+        self.system_status_service = SystemStatusService(astrometrics_service=self.astrometrics_service)
 
         from backend.services.infrastructure.scripting_service import ScriptingService
 

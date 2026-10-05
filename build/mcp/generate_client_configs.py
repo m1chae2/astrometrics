@@ -13,8 +13,8 @@ This script holds the list once and writes:
   no file access and no code runner.
 * ``.gemini/settings.json``: the Gemini CLI settings, with the same tools
   listed in ``includeTools``. Paths are absolute, so the file is not tracked.
-* ``mcp_servers.example.json``, ``.claude/mcp.json`` and ``mcp_servers.json``:
-  the older copies of the server list, kept in step.
+* ``mcp_servers.example.json`` and ``mcp_servers.json``: the same server list
+  for other clients.
 
 The tool lists come from each server's ``tool_manifest.json``, so a tool the
 manifest withholds never appears in an allowlist. Run it from the project
@@ -129,7 +129,6 @@ SERVERS = (
 
 CLAUDE_OUTPUT_PATHS = {
     "developer": ".mcp.json",
-    "legacy": ".claude/mcp.json",
     "companion": ".claude/companion.mcp.json",
     "agent": ".claude/agents/investigator.md",
     "local": "mcp_servers.json",
@@ -386,7 +385,6 @@ def render_all(root: Path = PROJECT_ROOT) -> dict[str, str]:
     developer = as_json(build_claude_config(companion=False))
     return {
         CLAUDE_OUTPUT_PATHS["developer"]: developer,
-        CLAUDE_OUTPUT_PATHS["legacy"]: developer,
         CLAUDE_OUTPUT_PATHS["local"]: developer,
         CLAUDE_OUTPUT_PATHS["example"]: as_json(build_claude_config(companion=False, root_text=EXAMPLE_ROOT)),
         CLAUDE_OUTPUT_PATHS["companion"]: as_json(build_claude_config(companion=True)),

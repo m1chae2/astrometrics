@@ -173,12 +173,6 @@ class TestParallelBatchResourceGovernors:
         """Initialize worker process with zero memory does not error."""
         parallel_batch._initialize_worker_process(niceness=0, max_memory_mb=0)
 
-    def test_deprecated_set_worker_niceness_delegates_to_initializer(
-        self,
-    ) -> None:
-        """Verify deprecated niceness setter delegates properly."""
-        parallel_batch._set_worker_process_niceness(niceness=0)
-
     def test_sliding_window_execution_and_recycling(self) -> None:
         """Verify sliding-window dispatch processes items with recycling."""
         items = [f"Item_{i}" for i in range(8)]

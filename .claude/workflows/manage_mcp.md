@@ -13,7 +13,7 @@ Use this workflow to restart or start the split MCP servers (Core, Backend, and 
 ```bash
 # Stop all Python and Node MCP servers
 pkill -f astrometrics_core_mcp_server.py
-pkill -f astrometrics_mcp_server.py
+pkill -f astrometrics_core_mcp_server.py
 pkill -f astrometrics_ui_mcp_server.sh
 pkill -f "node dist/index.js"
 ```

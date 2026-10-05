@@ -119,7 +119,7 @@ exclude = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["backend/tests", "astrometricslib/test", "astrometricslib/foundation", "wayfindinglib/test"]
+testpaths = ["backend/tests", "astrometricslib/test", "astrometricslib/foundation", "wayfindinglib/test", "build/migrations"]
 pythonpath = ["."]
 addopts = "-v -m 'not trio'"
 markers = [

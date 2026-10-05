@@ -58,8 +58,8 @@ def parse_guide_step_event(event: dict[str, Any]) -> GuidingSample | None:
     )
 
 
-def to_legacy_history_entry(guiding_sample: GuidingSample) -> dict[str, Any]:
-    """Adapt a GuidingSample to the legacy guiding-telemetry history shape.
+def to_history_entry(guiding_sample: GuidingSample) -> dict[str, Any]:
+    """Convert a GuidingSample to one entry of the guiding history.
 
     Parameters
     ----------
@@ -70,9 +70,7 @@ def to_legacy_history_entry(guiding_sample: GuidingSample) -> dict[str, Any]:
     -------
     history_entry : `dict`
         Keyed `timestamp`/`raDrift`/`decDrift`/`raPulse`/`decPulse` -- the
-        pre-existing shape `get_telescope_status()`'s `guidingHistory`
-        already returns, so that consumer keeps working unmodified rather
-        than the shape silently changing underneath it.
+        shape of each item in `get_telescope_status()`'s `guidingHistory`.
     """
     return {
         "timestamp": guiding_sample.time,

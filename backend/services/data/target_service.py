@@ -109,25 +109,6 @@ class TargetService:
         camera_names = list(self.config.get_available_cameras())
         return self.astrometrics.targets.camera_index(camera_names)
 
-    def get_target(self, target_id: str) -> Target | None:
-        """Query a specific target by identifier.
-
-        Deprecated: use get_targets instead.
-
-        Returns
-        -------
-        result : `Target` or `None`
-            The matching target, or `None` if not found.
-        """
-        return self.get_targets(target_id)
-
-    def load_targets(self, refresh_images: bool = False) -> None:
-        """No-op retained for backward compatibility.
-
-        Preloading is not required; this service is stateless.
-        """
-        pass
-
     def create_target(
         self,
         target_or_id: Any = None,

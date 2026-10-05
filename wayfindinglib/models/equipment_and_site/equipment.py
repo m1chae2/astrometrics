@@ -13,11 +13,9 @@ than independently stored, per `Wayfinding_Library_Architecture.md`
 flips rather than merely reporting them means the two can no longer be
 allowed to disagree.
 
-`EquipmentConfiguration`'s plate-scale and field-of-view formulas are
-carried forward unchanged from the deprecated
-`observatorylib.equipment_configuration.EquipmentConfiguration`, per
-`Wayfinding_Library_Architecture.md` §2.2.5's verification requirement
-that this arithmetic match the prior implementation exactly.
+`EquipmentConfiguration`'s plate-scale and field-of-view formulas match
+`observatorylib.equipment_configuration.EquipmentConfiguration` exactly,
+as `Wayfinding_Library_Architecture.md` §2.2.5 requires.
 """
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator

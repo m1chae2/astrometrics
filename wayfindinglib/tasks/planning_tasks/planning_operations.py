@@ -189,7 +189,19 @@ def _get_fov_from_config(config_service) -> tuple[float, float]:  # ruff: ignore
     fov_deg : `tuple` [`float`, `float`]
         The (width, height) field of view, in degrees.
     """
-    sw = float(config_service.get_value("Camera", "sensor_width_mm") or 23.5)
-    sh = float(config_service.get_value("Camera", "sensor_height_mm") or 15.6)
-    fl = float(config_service.get_value("Telescope", "focal_length_mm") or 400.0)
+
+    def positive_value(section: str, key: str, default: float) -> float:
+        """Read a configured number, or use `default` if it is not positive.
+
+        Returns
+        -------
+        value : `float`
+            The configured number, or `default` if missing, zero, or negative.
+        """
+        value = float(config_service.get_value(section, key) or 0.0)
+        return value if value > 0 else default
+
+    sw = positive_value("Observatory.Camera", "sensor_width_mm", 23.5)
+    sh = positive_value("Observatory.Camera", "sensor_height_mm", 15.6)
+    fl = positive_value("Observatory.Telescope", "focal_length_mm", 400.0)
     return 2 * math.degrees(math.atan((sw / 2) / fl)), 2 * math.degrees(math.atan((sh / 2) / fl))

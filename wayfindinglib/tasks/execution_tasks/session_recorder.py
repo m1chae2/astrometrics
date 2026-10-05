@@ -1,29 +1,22 @@
 """Purpose: Builds an ObservationSession by Recording Observatory Telemetry.
 
-Description: `ObservationSessionRecorder`'s guiding/weather telemetry
-loop is carried forward unchanged from the deprecated
-`observationlib.session_recorder` (`Wayfinding_Library_Architecture.md`
-§2.4.7-§2.4.8) -- it listens to guiding telemetry via a
-`PHD2GuidingService` and takes periodic INDI status/weather snapshots;
-it never issues commands to PHD2 or the mount.
+Description: `ObservationSessionRecorder` runs a guiding and weather
+telemetry loop (`Wayfinding_Library_Architecture.md` §2.4.7-§2.4.8). It
+listens to guiding telemetry through a `PHD2GuidingService` and takes
+periodic INDI status and weather snapshots. It never issues commands to
+PHD2 or the mount.
 
-What does change: the deprecated recorder constructed a bare
-`ObservationSession` from just an id. The new
-`wayfindinglib.models.session.observation_session.ObservationSession` requires
-`site_profile_id`/`telescope_id`/`camera_id` it has no way to invent,
-because those belong to Observation Planning
+The recorder does not create sessions. A
+`wayfindinglib.models.session.observation_session.ObservationSession`
+needs `site_profile_id`, `telescope_id`, and `camera_id`, and the recorder
+cannot supply them. Those fields belong to Observation Planning
 (`Wayfinding_Library_Architecture.md` §2.2.3's session field-ownership
-invariant: the queue and its placement context are written only by
-Planning). `run()` therefore loads an existing, already-planned session
-by id and attaches telemetry to it, rather than creating one from
-scratch -- this follows directly from the field-ownership invariant,
-not from a change in what the recorder itself does.
+rule: only Planning writes the queue and its placement context).
+`run()` therefore loads an existing, already-planned session by id and
+attaches telemetry to it.
 
-`PHD2GuidingService.drain_guiding_samples()` yields the new
-`wayfindinglib.models.session.telemetry.GuidingSample` directly (the deprecated
-`wayfindinglib.observatory.GuidingSample` it originally yielded carried
-an identical field/alias shape, so repointing its import was a pure
-relocation rather than a data transformation).
+`PHD2GuidingService.drain_guiding_samples()` yields
+`wayfindinglib.models.session.telemetry.GuidingSample` objects directly.
 """
 
 import logging

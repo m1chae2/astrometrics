@@ -178,18 +178,16 @@ def get_observation_session(app_config=None, session_id: str = "") -> Observatio
 _WAYFINDING_SESSION_TABLE_NAME = "wayfinding_observation_sessions"
 """Deliberately distinct from `_TABLE_NAME` ("observation_sessions") above.
 
-The three-function redesign's `wayfindinglib.models.session.observation_session
-.ObservationSession` (queue, telescope_id, camera_id, divergence_records,
-...) supersedes the deprecated single-target telemetry-only
-`observationlib.observation_session.ObservationSession` this module's
-`_TABLE_NAME` functions above already serve -- the two are not
-schema-compatible. Rather than rewrite those functions (which the
-not-yet-relocated `observationlib.session_recorder.ObservationSessionRecorder`
-still calls directly, bypassing `DiskButler` entirely), the new model gets
-its own table and functions; `DiskButler`'s public "observation_session"
-dataset type routes to these. The old table/functions are retired only
-once the recorder itself is relocated onto the new model (a separate,
-not-yet-done milestone).
+`wayfindinglib.models.session.observation_session.ObservationSession`
+(queue, telescope_id, camera_id, divergence_records, ...) is not
+schema-compatible with the single-target, telemetry-only
+`observationlib.observation_session.ObservationSession` that the
+`_TABLE_NAME` functions above serve. That older model is still used by
+`observationlib.session_recorder.ObservationSessionRecorder`, which calls
+those functions directly and does not go through `DiskButler`.
+The `ObservationSession` in `wayfindinglib` therefore has its own table
+and functions. `DiskButler`'s public "observation_session" dataset type
+routes to these.
 """
 
 

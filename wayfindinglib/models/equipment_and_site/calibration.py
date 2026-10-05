@@ -8,9 +8,8 @@ written by a running session (`Wayfinding_Library_Architecture.md`
 during package authoring -- informational only, never adjusting
 placement or priority.
 
-`CalibrationEntry`/`CalibrationStats` supersede the deprecated
-`observation.CalibrationEntry`/`CalibrationStats` (which had no writer
-in the codebase); `post_session_reconciliation` closes that gap
+`post_session_reconciliation` is the writer that updates
+`CalibrationEntry`/`CalibrationStats` after a session
 (`Wayfinding_Library_Architecture.md` §2.2.2).
 """
 

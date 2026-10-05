@@ -616,7 +616,7 @@ async def websocket_endpoint(websocket: WebSocket):  # ruff: ignore[missing-retu
             data = await websocket.receive_text()
             # Handle "Load Script" logic or direct commands
             # For simplicity, we assume all text is code to run
-            output = container.scripting_service.run_code(data)
+            output = container.scripting_service.execute(data)
             if output:
                 await websocket.send_text(output)
     except WebSocketDisconnect:

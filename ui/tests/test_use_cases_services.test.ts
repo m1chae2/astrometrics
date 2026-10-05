@@ -7,7 +7,8 @@
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import { getTargets, createTarget, deleteTarget, addTargetData, fetchFrameStatsGrouped } from '../common/services/targetService';
-import { fetchTelescopeStatus, slewTelescope } from '../common/services/telescopeService';
+import { fetchTelescopeStatus } from '../common/services/telescope/statusService';
+import { slewTelescope } from '../common/services/telescope/motionService';
 import { fetchAstronomyList, fetchAstronomyData } from '../common/services/astronomyService';
 import { startIngestion, scanRemoteTargets } from '../common/services/imaging/ingestionService';
 import { previewMosaic } from '../common/services/mosaicService';

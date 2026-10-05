@@ -6,20 +6,18 @@ equipment catalog is a Foundation concern both Control and Planning
 need, but *changing* which entry is active is a Control operation, so
 it lives here rather than in `data_access/equipment_catalog_reader.py`.
 
-Carries forward the validate-before-record pattern of the deprecated
-`observatorylib.equipment_configuration.EquipmentConfigurationManager.set_active_camera`:
-an unrecognized id is rejected rather than silently recorded, so a
-typo cannot leave the active selection pointing at nothing.
+Selection validates before it records. An unrecognized id is rejected
+instead of being saved, so a typo cannot leave the active selection
+pointing at nothing.
 
-`list_camera_profiles`/`get_equipment_configuration` delegate to the
-still-existing `observatorylib.equipment_configuration
-.EquipmentConfigurationManager` (composition, not duplication, mirroring
-`api.planning_registry.ObservationPlanning`'s Sky/Observation engines):
-the frontend's `observatory:list_cameras`/`observatory
-:get_equipment_configuration` RPC endpoints depend on that class's exact
-`CameraProfile`/`EquipmentConfiguration` dict shapes, so reimplementing
-against the new `Camera`/`Telescope` Foundation models here would change
-a live UI contract.
+`list_camera_profiles` and `get_equipment_configuration` delegate to
+`observatorylib.equipment_configuration.EquipmentConfigurationManager`
+instead of duplicating its logic. The frontend's
+`observatory:list_cameras` and `observatory:get_equipment_configuration`
+RPC endpoints depend on the exact `CameraProfile` and
+`EquipmentConfiguration` dict shapes that class returns. Rebuilding them
+on the `Camera` and `Telescope` Foundation models would change that UI
+contract.
 """
 
 import logging

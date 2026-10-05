@@ -555,7 +555,7 @@ class ObservationPlanning:
             include_samples,
         )
 
-    # -- Mosaic & sequence planning (legacy dict-based) ---------------------
+    # -- Mosaic & sequence planning ---------------------
 
     def calculate_panels(
         self, center_ra: str, center_dec: str, rows: int, cols: int, overlap_percent: float

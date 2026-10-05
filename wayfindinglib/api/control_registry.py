@@ -7,11 +7,9 @@ state, equipment selection, capability promotion, and remote transfer
 (`Wayfinding_Library_Architecture.md` §2.5.1). Callers should never
 import `tasks.control_tasks` directly.
 
-Composes the driver layer the same way the deprecated
-`ObservatoryManager` did (a lazily-initialized `.driver`), so
-`tasks.control_tasks.hardware_operations` -- relocated verbatim from
-`observatorylib` -- works unmodified against this high-level interface as its
-"manager".
+Composes the driver layer through a lazily initialized `.driver`
+attribute. `tasks.control_tasks.hardware_operations` uses this
+high-level interface as its "manager" object.
 
 Per §2.5.9's "Corrections Are Pure": `compute_*_correction` methods here
 resolve the calibration/config inputs and forward to the pure task
@@ -517,7 +515,7 @@ class ObservatoryControl:
         """Set the active plate-solve sync service."""
         self._sync_service = sync_service
 
-    # -- Hardware operations (relocated verbatim from observatorylib) ----
+    # -- Hardware operations ----
 
     def get_telescope_status(self) -> dict[str, Any]:
         """Return the current mount coordinates, tracking, and telemetry.

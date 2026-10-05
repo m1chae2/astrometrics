@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { fetchTargetFiles } from '../../common/services/targetService';
-import { deleteFiles } from '../../common/services/imagingService';
+import { deleteFiles } from '../../common/services/imaging/imageService';
 import { emitToast } from '../../common/utils/emitToast';
 import { matchesQuery } from '../../common/utils/searchLogic';
 import { FileItem } from '../fileBrowser/FileBrowser';

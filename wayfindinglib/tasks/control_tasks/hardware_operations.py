@@ -2,14 +2,11 @@
 
 Description: Telescope connection, manual slewing motor controls,
 camera filter wheels, and focuser hardware operations over the INDI
-driver layer. Relocated verbatim from the deprecated
-`observatorylib.hardware_operations` into Observatory Control
-(`Wayfinding_Library_Architecture.md` §2.5.1, §2.5.2: "Hardware
-operations are carried forward from the earlier `observatorylib/`
-implementation; relocation into `tasks/control_tasks/` is mechanical").
-Callers pass a manager-like object exposing `.driver`/`._config`
-(`ObservatoryControl` in `api/control_registry.py`), matching the
-duck-typed shape the deprecated `ObservatoryManager` already used.
+driver layer. These operations are part of Observatory Control
+(`Wayfinding_Library_Architecture.md` §2.5.1, §2.5.2).
+Callers pass a manager-like object that exposes `.driver` and `._config`
+(`ObservatoryControl` in `api/control_registry.py`). The functions rely
+only on those two attributes (duck typing).
 """
 
 import asyncio

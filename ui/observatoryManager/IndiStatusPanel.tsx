@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useIsDisplayActive } from '../common/context/DisplayActiveContext';
 import { IndiDevicePanel } from './panels/IndiDevicePanel';
 import { IndiPropertyInspector } from './panels/IndiPropertyInspector';
-import { fetchIndiDevices, fetchIndiProperties, setIndiProperty } from '../common/services/telescopeService';
+import { fetchIndiDevices, fetchIndiProperties, setIndiProperty } from '../common/services/telescope/deviceService';
 import { SectionPanel } from '../common/components/SectionPanel';
 import '../common/styles/manager.css';
 import '../common/styles/panels.css';

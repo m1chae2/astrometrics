@@ -4,11 +4,7 @@
  * REQ: IMG-4: Data Analysis Workflow
  */
 import { useState, useEffect, useRef } from 'react';
-import {
-    analyzeTarget,
-    fetchAnalysisResults,
-    streamJobLog,
-} from '../../common/services/imagingService';
+import { analyzeTarget, fetchAnalysisResults, streamJobLog } from '../../common/services/imaging/processingService';
 import { reportError } from '../../common/utils/reportError';
 import { AnalysisResult } from '../../common/types/backendTypes';
 import { useAstrometrics } from '../../common/context/AstrometricsContext';

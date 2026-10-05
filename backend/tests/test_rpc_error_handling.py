@@ -55,7 +55,6 @@ def registered_methods(monkeypatch: pytest.MonkeyPatch) -> dict:
     """
     handlers: dict = {}
     monkeypatch.setattr(rpc_router.rpc_registry, "_handlers", handlers)
-    monkeypatch.setattr(rpc_router.rpc_registry, "_resolve_dynamic_reflected_handler", lambda _method: None)
     return handlers
 
 

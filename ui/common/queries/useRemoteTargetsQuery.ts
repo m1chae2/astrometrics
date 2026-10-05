@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { scanRemoteTargets } from '../services/imagingService';
+import { scanRemoteTargets } from '../services/imaging/ingestionService';
 
 /**
  * Shared, periodically-refreshed query for the remote telescope's

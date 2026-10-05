@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { isSyncing, syncLightFrames } from '../../../common/services/telescopeService';
+import { isSyncing, syncLightFrames } from '../../../common/services/telescope/motionService';
 import { fetchTargetObject } from '../../../common/services/targetService';
 import { emitToast } from '../../../common/utils/emitToast';
 import { reportError } from '../../../common/utils/reportError';

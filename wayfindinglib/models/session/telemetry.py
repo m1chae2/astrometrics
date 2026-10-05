@@ -1,10 +1,7 @@
 """Purpose: Telemetry Domain Models.
 
 Description: Guiding samples, alignment attempts, and live guiding
-status, carried forward unchanged from the deprecated
-`observatory.py` -- these models and their computed properties are
-untouched by the three-function redesign
-(`Wayfinding_Library_Architecture.md` §2.4.7). Once `AUTOGUIDING`
+status (`Wayfinding_Library_Architecture.md` §2.4.7). Once `AUTOGUIDING`
 reaches `AUTHORITATIVE`, `GuidingSample` records are produced by this
 library's own guiding correction computation rather than parsed from
 the incumbent guider, with identical fields, so downstream consumers

@@ -1,8 +1,8 @@
 
 /**
  * @fileoverview Global test setup configuration for Vitest.
- * Extends matchers and defines global fetch mocks to simulate both JSON-RPC 2.0
- * and legacy REST API endpoints during testing.
+ * Extends matchers and defines a global fetch mock that simulates JSON-RPC 2.0
+ * backend calls during testing.
  */
 
 import '@testing-library/jest-dom';
@@ -57,7 +57,7 @@ afterAll(() => {
 
 /**
  * Global mock implementation for the fetch API.
- * Supports legacy REST URLs and structured JSON-RPC 2.0 endpoints by parsing request payloads.
+ * Answers structured JSON-RPC 2.0 requests by parsing request payloads.
  * @param url Request target URL.
  * @param init Optional request options including HTTP method and request body.
  * @return Mocked fetch response.
@@ -132,19 +132,8 @@ global.fetch = vi.fn((url: string | Request | URL, init?: RequestInit) => {
         }
     }
 
-    // Legacy REST routing fallback
-    let jsonResponse: any = [];
-
-    if (urlString.includes('/remote/scan')) {
-        jsonResponse = { folders: [] };
-    } else if (urlString.includes('/ingest')) {
-        jsonResponse = { jobId: 'mock-job-id', status: 'idle', progress: '0%', logs: [] };
-    } else if (urlString.includes('/status')) {
-        // Generic status or specific
-        jsonResponse = { status: 'idle', history: [] };
-    } else if (urlString.includes('/targets')) {
-        jsonResponse = []; // List of targets
-    }
+    // Anything that is not a JSON-RPC call or a test-backend call gets an empty list.
+    const jsonResponse: any = [];
 
     return Promise.resolve({
         json: () => Promise.resolve(jsonResponse),

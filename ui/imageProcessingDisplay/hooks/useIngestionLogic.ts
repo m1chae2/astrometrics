@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useBackendFetch } from '../../common/hooks/useBackendFetch';
 import { usePollTick } from '../../common/hooks/usePollTick';
-import { scanRemoteTargets } from '../../common/services/imagingService';
+import { scanRemoteTargets } from '../../common/services/imaging/ingestionService';
 
 /** How often to re-scan for remote target folders, in milliseconds. */
 const REMOTE_SCAN_POLL_INTERVAL_MS = 30000;

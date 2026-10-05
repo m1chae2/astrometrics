@@ -33,11 +33,6 @@ export interface TargetContextValue {
     setDecShared: (val: string) => void;
 }
 
-/**
- * Alias for TargetContextValue for backward compatibility with older hook signatures.
- */
-export type UseTargetSelectionResult = TargetContextValue;
-
 const TargetContext = createContext<TargetContextValue | undefined>(undefined);
 
 interface TargetProviderProps {

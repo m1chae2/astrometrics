@@ -189,7 +189,7 @@ class ImageService:
         ValueError
             If no target exists for ``target_id``.
         """
-        target = self.target_service.get_target(target_id)
+        target = self.target_service.get_targets(target_id)
         if not target:
             raise ValueError(f"Target not found: {target_id}")
         return self.get_light_frame_data(target, iso=iso, exposure=exposure, index=index, stretch=stretch)
@@ -207,7 +207,7 @@ class ImageService:
         ValueError
             If no target exists for ``target_id``.
         """
-        target = self.target_service.get_target(target_id)
+        target = self.target_service.get_targets(target_id)
         if not target:
             raise ValueError(f"Target not found: {target_id}")
         return self.get_target_frame(target, iso=iso, exposure=exposure, index=index)

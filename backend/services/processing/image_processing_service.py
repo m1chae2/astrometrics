@@ -121,7 +121,7 @@ class ImageProcessingService(BaseBackgroundService):
         if not self.siril or not self._target_service:
             return False
 
-        target = self._target_service.get_target(target_id)
+        target = self._target_service.get_targets(target_id)
         if not target:
             return False
 
@@ -159,7 +159,7 @@ class ImageProcessingService(BaseBackgroundService):
         # Rehydrate metadata if image_files is a flat list
         if isinstance(image_files, list) and self._target_service:
             try:
-                target = self._target_service.get_target(target_id)
+                target = self._target_service.get_targets(target_id)
                 if target and target.frames:
                     # Check if first item is a path string
                     first = image_files[0] if image_files else None
@@ -301,7 +301,7 @@ def start_siril_processing_task(
         # The stacking stage works on the target's own frame records, so
         # the frames the viewer sent (as paths or as dicts) are matched back
         # to them.
-        target = target_service.get_target(target_id) if target_service else None
+        target = target_service.get_targets(target_id) if target_service else None
         if target is None:
             raise ValueError(f"Cannot stack '{target_id}': the target is not in the library.")
         requested_paths = {frame if isinstance(frame, str) else frame.get("path") for frame in image_files}

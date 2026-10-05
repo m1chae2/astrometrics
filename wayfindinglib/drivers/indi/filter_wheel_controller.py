@@ -120,7 +120,7 @@ class FilterWheelController:
             except ValueError:
                 pass
 
-        # 2. Try Legacy/Text (Text Property)
+        # 2. Try the Text property
         filter_property = device.getText("FILTER_SLOT")
         if filter_property:
             filter_property[0].text = filter_name

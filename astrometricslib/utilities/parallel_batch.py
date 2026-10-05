@@ -108,19 +108,6 @@ def _initialize_worker_process(niceness: int = 10, max_memory_mb: int = 20480) -
             logger.debug("Failed to set worker RLIMIT_AS memory limit: %s", limit_err)
 
 
-# TODO: DEPRECATED - Use _initialize_worker_process instead to include memory
-# limits alongside niceness.
-def _set_worker_process_niceness(niceness: int) -> None:
-    """Lower this worker process's OS scheduling priority.
-
-    Used as a ``ProcessPoolExecutor`` initializer. Runs once per worker
-    process at pool startup, so the Linux scheduler favors
-    interactive/foreground processes under contention without capping
-    batch throughput when the machine is otherwise idle.
-    """
-    _initialize_worker_process(niceness=niceness, max_memory_mb=0)
-
-
 def _run_worker_with_captured_output(
     worker_function: Callable[..., dict], item_id: str, worker_arguments: tuple
 ) -> tuple[dict, str]:

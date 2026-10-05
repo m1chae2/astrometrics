@@ -38,7 +38,7 @@ def test_worker_runs_the_full_stacking_stage_on_the_chosen_frames() -> None:
     paths = ["/lights/M_42/lum_001.fits", "/lights/M_42/lum_002.fits", "/lights/M_42/lum_003.fits"]
     target = _target_with_frames("M 42", paths)
     target_service = MagicMock()
-    target_service.get_target.return_value = target
+    target_service.get_targets.return_value = target
     notification_service = MagicMock()
     stacked_path = "/stacks/M 42/M_42_L_Stacked.fits"
 
@@ -65,7 +65,7 @@ def test_worker_accepts_frame_paths_as_well_as_frame_dicts() -> None:
     paths = ["/lights/Arcturus/spec_001.fits", "/lights/Arcturus/spec_002.fits"]
     target = _target_with_frames("Arcturus", paths)
     target_service = MagicMock()
-    target_service.get_target.return_value = target
+    target_service.get_targets.return_value = target
 
     with patch(STAGE, return_value="/stacks/Arcturus_SPEC_Stacked.fits") as stage:
         start_siril_processing_task(
@@ -82,7 +82,7 @@ def test_worker_reports_failure_and_does_not_save_when_nothing_was_stacked() -> 
     """A stage with no stack leaves the target unsaved and sends an error."""
     target = _target_with_frames("M 42", ["/lights/M_42/lum_001.fits"])
     target_service = MagicMock()
-    target_service.get_target.return_value = target
+    target_service.get_targets.return_value = target
     notification_service = MagicMock()
 
     with patch(STAGE, return_value=None):
@@ -102,7 +102,7 @@ def test_worker_reports_failure_and_does_not_save_when_nothing_was_stacked() -> 
 def test_worker_refuses_a_target_that_is_not_in_the_library() -> None:
     """An unknown target raises instead of stacking nothing."""
     target_service = MagicMock()
-    target_service.get_target.return_value = None
+    target_service.get_targets.return_value = None
 
     with patch(STAGE) as stage, pytest.raises(ValueError, match="not in the library"):
         start_siril_processing_task(
@@ -120,7 +120,7 @@ def test_worker_job_log_holds_what_the_stacking_stage_logs(tmp_path: Path) -> No
     paths = ["/lights/M_42/lum_001.fits"]
     target = _target_with_frames("M 42", paths)
     target_service = MagicMock()
-    target_service.get_target.return_value = target
+    target_service.get_targets.return_value = target
     log_file = tmp_path / "job.log"
 
     def fake_stage(*args: object, **kwargs: object) -> str:
@@ -165,7 +165,7 @@ def _run_worker_with_saved_record(tmp_path: Path, saved_stack: str) -> str:
     saved.stacking.stacked_image = saved_stack
     saved.stacking.processed_image = "/stacks/M 42/M_42_L_Stacked_processed.fits"
     target_service = MagicMock()
-    target_service.get_target.return_value = target
+    target_service.get_targets.return_value = target
     target_service.read_saved_target.return_value = saved
     log_file = tmp_path / "job.log"
 

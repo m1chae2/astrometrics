@@ -11,15 +11,14 @@ single SQLite-backed pydantic model.
 "observation_session" routes to `local_database.save_wayfinding_session`/
 `get_wayfinding_session`, serving
 `wayfindinglib.models.session.observation_session.ObservationSession`
-(the three-function redesign's session, with its queue, telescope_id,
-camera_id, divergence records, etc.) under its own
-table, physically distinct from the deprecated single-target
-telemetry-only `observationlib.observation_session.ObservationSession`
-that `local_database`'s original `save_observation_session`/etc.
-functions still serve -- those are untouched, since
-`observationlib.session_recorder.ObservationSessionRecorder` still calls
-them directly, bypassing this Butler entirely, until it is relocated
-onto the new model. Every other dataset type -- observation_package,
+(the session with its queue, telescope_id, camera_id, divergence
+records, etc.) under its own table. That table is separate from the
+single-target, telemetry-only
+`observationlib.observation_session.ObservationSession` served by
+`local_database`'s `save_observation_session` functions.
+`observationlib.session_recorder.ObservationSessionRecorder` calls
+those functions directly, without going through this Butler.
+Every other dataset type -- observation_package,
 site_profile, enclosure, guider_calibration, focus_model,
 delegation_policy, safety_rule_set, commissioning_run -- is dispatched
 generically via `_GENERIC_DATASET_TYPES` to

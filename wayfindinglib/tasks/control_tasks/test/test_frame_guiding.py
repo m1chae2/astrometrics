@@ -7,7 +7,6 @@ and the flag for a frame far above its neighbours.
 """
 
 from types import SimpleNamespace
-from unittest.mock import patch
 
 import pytest
 
@@ -15,13 +14,15 @@ from astrometricslib import FrameRecord, FrameSelection, Target
 from wayfindinglib.tasks.control_tasks.frame_guiding import link_frames_to_guiding
 
 
-def _control(rows: list[dict[str, float]]) -> SimpleNamespace:
+def _control(rows: list[dict[str, float]], library: object = None) -> SimpleNamespace:
     """Build a stand-in control with fixed guiding rows.
 
     Parameters
     ----------
     rows : `list` [`dict`]
         The guiding rows to hand back, whatever the query.
+    library : `object`, optional
+        The stand-in for the control's shared `Astrometrics` handle.
 
     Returns
     -------
@@ -29,7 +30,7 @@ def _control(rows: list[dict[str, float]]) -> SimpleNamespace:
         An object with the two attributes the module uses.
     """
     logger = SimpleNamespace(get_guiding_logs=lambda **_: rows)
-    return SimpleNamespace(_config=None, _logger_interface=logger)
+    return SimpleNamespace(_config=None, _logger_interface=logger, astrometrics=library)
 
 
 def _samples(start: float, count: int, error: float) -> list[dict[str, float]]:
@@ -70,9 +71,8 @@ def _link(frames: list[FrameRecord], rows: list[dict[str, float]], selection: Fr
         The module's report.
     """
     target = Target(id="T 1", frames=frames)
-    library = SimpleNamespace(targets=SimpleNamespace(get=lambda _id: target))
-    with patch("astrometricslib.Astrometrics", return_value=library):
-        return link_frames_to_guiding(_control(rows), "T 1", selection, 50)
+    library = SimpleNamespace(targets=SimpleNamespace(get=lambda _id, refresh=False: target))
+    return link_frames_to_guiding(_control(rows, library), "T 1", selection, 50)
 
 
 def _frame(number: int, start: float) -> FrameRecord:
@@ -130,9 +130,8 @@ def test_a_frame_far_above_the_group_is_flagged() -> None:
 
 def test_an_unknown_target_is_an_error() -> None:
     """A target that is not in the library gives an error, not a crash."""
-    library = SimpleNamespace(targets=SimpleNamespace(get=lambda _id: None))
-    with patch("astrometricslib.Astrometrics", return_value=library):
-        report = link_frames_to_guiding(_control([]), "Nope", FrameSelection(), 10)
+    library = SimpleNamespace(targets=SimpleNamespace(get=lambda _id, refresh=False: None))
+    report = link_frames_to_guiding(_control([], library), "Nope", FrameSelection(), 10)
     assert "No target" in report["error"]
 
 
@@ -160,11 +159,13 @@ def test_image_quality_is_put_on_the_same_row_as_the_guide_error() -> None:
 
     diagnostics = SimpleNamespace(frame_quality=frame_quality)
     library = SimpleNamespace(
-        targets=SimpleNamespace(get=lambda _id: target), processing=SimpleNamespace(diagnostics=diagnostics)
+        targets=SimpleNamespace(get=lambda _id, refresh=False: target),
+        processing=SimpleNamespace(diagnostics=diagnostics),
     )
     rows = _samples(1000.0, 20, 1.0) + _samples(1060.0, 20, 4.0)
-    with patch("astrometricslib.Astrometrics", return_value=library):
-        report = link_frames_to_guiding(_control(rows), "T 1", FrameSelection(), 50, include_quality=True)
+    report = link_frames_to_guiding(
+        _control(rows, library), "T 1", FrameSelection(), 50, include_quality=True
+    )
     first, second = report["frames"]
     assert (asked["first_file"], asked["last_file"]) == ("T_1_001.fits", "T_1_002.fits")
     assert first["star_count"] == 900

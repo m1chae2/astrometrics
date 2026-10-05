@@ -27,6 +27,11 @@ class FakeDriver:
         return [("Light/a.fits", 4), ("Light/b.fits", 4), ("Light/c.fits", 4)]
 
 
+#: The stand-in science library the observatory holds. The `library` fixture
+#: fills in its targets.
+_FAKE_LIBRARY = SimpleNamespace(targets=None)
+
+
 def make_observatory(frames_root: Path) -> SimpleNamespace:
     """Build a stand-in observatory whose frames drive is `frames_root`.
 
@@ -36,7 +41,7 @@ def make_observatory(frames_root: Path) -> SimpleNamespace:
         With the configuration and driver the status reads.
     """
     config = SimpleNamespace(get_frames_path=lambda: str(frames_root))
-    return SimpleNamespace(_config=config, remote_transfer_driver=FakeDriver())
+    return SimpleNamespace(_config=config, remote_transfer_driver=FakeDriver(), astrometrics=_FAKE_LIBRARY)
 
 
 @pytest.fixture
@@ -61,7 +66,7 @@ def library(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         return [SimpleNamespace(path=f"/anywhere/{name}", role="LIGHT") for name in names]
 
     fake_targets = SimpleNamespace(list=lambda: [], get=lambda target_id: SimpleNamespace(frames=frames()))
-    monkeypatch.setattr(frame_status, "Astrometrics", lambda config: SimpleNamespace(targets=fake_targets))
+    monkeypatch.setattr(_FAKE_LIBRARY, "targets", fake_targets)
     monkeypatch.setattr(
         frame_status.remote_transfer_tasks,
         "plan_target_download",

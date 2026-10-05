@@ -141,10 +141,10 @@ def create_mosaic_targets(
         If ``parent_target_id`` does not resolve to an existing
         target.
     """
-    from astrometricslib import Astrometrics, Target
+    from astrometricslib import Target
 
-    astrometrics = Astrometrics(planner._config)
-    parent = astrometrics.targets.get(parent_target_id)
+    astrometrics = planner._astrometrics
+    parent = astrometrics.targets.get(parent_target_id, refresh=True)
     if not parent:
         raise ValueError(f"Parent target {parent_target_id} not found")
 

@@ -13,6 +13,7 @@ import tomlkit
 from astrometricslib.foundation.camera_names import normalize_camera_name
 from astrometricslib.foundation.enums import FilterType
 from astrometricslib.foundation.observatory_setups import ObservatorySetups, load_observatory_setups
+from astrometricslib.foundation.paths import resolve_mounted_path
 
 _instance = None
 
@@ -1078,15 +1079,7 @@ class AppConfiguration:
                 else:
                     path = path.absolute()
                 if not path.exists():
-                    p_str = str(path)
-                    if p_str.startswith("/run/media/"):
-                        alt = Path(p_str.replace("/run/media/", "/media/", 1))
-                        if alt.exists():
-                            path = alt
-                    elif p_str.startswith("/media/"):
-                        alt = Path(p_str.replace("/media/", "/run/media/", 1))
-                        if alt.exists():
-                            path = alt
+                    path = Path(resolve_mounted_path(str(path)))
                 return path
         except configparser.NoSectionError, configparser.NoOptionError, KeyError:
             pass

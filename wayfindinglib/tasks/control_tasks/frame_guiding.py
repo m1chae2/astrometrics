@@ -177,10 +177,8 @@ def link_frames_to_guiding(
         ``frames`` (one row per frame) and ``group`` (the median error and
         the frames well above it), or ``{"error": ...}``.
     """
-    from astrometricslib import Astrometrics
-
     limit = max(1, min(int(limit), MAXIMUM_FRAMES))
-    target = Astrometrics(control._config).targets.get(target_id)
+    target = control.astrometrics.targets.get(target_id, refresh=True)
     if target is None:
         return {"error": f"No target with id {target_id!r} in the library."}
     lights = [frame for frame in target.frames if str(frame.role).upper() == "LIGHT"]
@@ -222,7 +220,7 @@ def link_frames_to_guiding(
 
     quality_note = None
     if include_quality:
-        quality_note = _add_image_quality(Astrometrics(control._config), target, selection, frames)
+        quality_note = _add_image_quality(control.astrometrics, target, selection, frames)
 
     measured = [row["rms_total_arcsec"] for row in frames if row.get("rms_total_arcsec") is not None]
     median_error = statistics.median(measured) if measured else None

@@ -16,51 +16,11 @@ from pathlib import Path
 
 from astrometricslib.foundation.config import AppConfiguration, get_configuration
 from astrometricslib.foundation.errors import StorageError
+from astrometricslib.foundation.paths import is_path_inside, mount_path_variants
 
 
 class StorageNotMountedError(StorageError):
     """Raised when a drive that should hold the frames is not mounted."""
-
-
-def _path_variants(path: str) -> set[str]:
-    """List the ways one drive's path can be written on Linux.
-
-    Desktop Linux mounts a drive under ``/media/<user>/`` on some systems
-    and ``/run/media/<user>/`` on others.
-
-    Parameters
-    ----------
-    path : `str`
-        An absolute path.
-
-    Returns
-    -------
-    variants : `set` [`str`]
-        The path and its other ``/media`` or ``/run/media`` spelling, with
-        no trailing slash.
-    """
-    normalised = os.path.normpath(path)
-    variants = {normalised}
-    if normalised.startswith("/run/media/"):
-        variants.add(normalised.replace("/run/media/", "/media/", 1))
-    elif normalised.startswith("/media/"):
-        variants.add(normalised.replace("/media/", "/run/media/", 1))
-    return variants
-
-
-def _is_below(path: str, folder: str) -> bool:
-    """Tell whether `path` is `folder` or lies inside it.
-
-    Returns
-    -------
-    inside : `bool`
-        `True` if the two share the whole of `folder` as their start.
-    """
-    for path_variant in _path_variants(path):
-        for folder_variant in _path_variants(folder):
-            if path_variant == folder_variant or path_variant.startswith(folder_variant + os.sep):
-                return True
-    return False
 
 
 def require_mounted_storage(destination: str | Path, config: AppConfiguration | None = None) -> None:
@@ -87,9 +47,9 @@ def require_mounted_storage(destination: str | Path, config: AppConfiguration | 
     mount_point = settings.get_frames_mount_point()
     if mount_point is None:
         return
-    if not _is_below(str(destination), str(mount_point)):
+    if not is_path_inside(str(mount_point), str(destination)):
         return
-    if any(os.path.ismount(variant) for variant in _path_variants(str(mount_point))):
+    if any(os.path.ismount(variant) for variant in mount_path_variants(str(mount_point))):
         return
     raise StorageNotMountedError(
         f"Nothing is mounted at {mount_point}, so {destination} was not written. "

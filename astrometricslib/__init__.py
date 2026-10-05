@@ -64,6 +64,7 @@ from astrometricslib.foundation.errors import (
     to_error_info,
 )
 from astrometricslib.foundation.logging import configure_logging, get_log_context, log_context, new_request_id
+from astrometricslib.foundation.paths import is_path_inside, resolve_mounted_path
 from astrometricslib.foundation.storage import (
     AbstractButler,
     Butler,
@@ -624,6 +625,7 @@ __all__ = [
     "frame_is_spectral",
     "get_configuration",
     "get_log_context",
+    "is_path_inside",
     "log_context",
     "new_request_id",
     "observing_night_id",
@@ -632,6 +634,7 @@ __all__ = [
     "registered_job",
     "require_mounted_storage",
     "resolve_camera_profile",
+    "resolve_mounted_path",
     "resolve_worker_counts",
     "run_parallel_batch",
     "run_siril_stack",

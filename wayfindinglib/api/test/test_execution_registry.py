@@ -190,13 +190,13 @@ def test_reconcile_session_delegates_and_persists(butler):  # ruff: ignore[missi
         def __init__(self):  # ruff: ignore[missing-return-type-special-method]
             self.targets = _FakeTargetRegistry()
 
-    execution = ObservationExecution(butler=butler)
+    execution = ObservationExecution(butler=butler, astrometrics=_FakeAstrometrics())
     session = _session()
     session.status = SessionStatus.COMPLETED
     session.queue[0].status = QueueEntryStatus.COMPLETED
     butler.put(session, "observation_session", {"session_id": session.id})
 
-    result = execution.reconcile_session(session, _FakeAstrometrics())
+    result = execution.reconcile_session(session)
 
     reloaded = butler.get("observation_session", {"session_id": session.id})
     assert reloaded is not None

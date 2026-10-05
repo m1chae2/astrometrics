@@ -24,20 +24,17 @@ logger = logging.getLogger(__name__)
 class ExecutionService:
     """Expose the data-only parts of Observation Execution over RPC."""
 
-    def __init__(self, wayfinder: Any, astrometrics: Any, config: Any = None):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, wayfinder: Any, config: Any = None):  # ruff: ignore[missing-return-type-special-method]
         """Initialize the ExecutionService.
 
         Parameters
         ----------
         wayfinder : `Any`
             The facade for wayfindinglib, providing the Execution API.
-        astrometrics : `Any`
-            The facade for astrometricslib, used during session reconciliation.
         config : `Any`, optional
             Application configuration instance for locating the datastore.
         """
         self.wayfinder = wayfinder
-        self.astrometrics = astrometrics
 
         # Its own butler rather than the high-level interface's
         # private one. Both resolve to the same wayfinding.db, so reads
@@ -157,7 +154,7 @@ class ExecutionService:
         # Reconciliation links the physical images captured by the
         # execution loop back to the logical target data models in
         # astrometricslib.
-        reconciled = self._execution.reconcile_session(session, self.astrometrics)
+        reconciled = self._execution.reconcile_session(session)
         return reconciled.model_dump(mode="json", by_alias=True)
 
     def record_divergence(

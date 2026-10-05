@@ -11,6 +11,7 @@ than a real INDI connection.
 """
 
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -57,7 +58,9 @@ class _FakeManager:
         guiding_service: Any = None,
         sync_service: Any = None,
         policy: DelegationPolicy | None = None,
+        astrometrics: Any = None,
     ):
+        self.astrometrics = astrometrics if astrometrics is not None else MagicMock()
         self.driver = driver
         self.mount_driver = mount_driver
         self.focuser_driver = focuser_driver
@@ -199,8 +202,8 @@ def test_get_telescope_status_adds_guiding_history(mocker):  # ruff: ignore[miss
 
 def test_slew_to_target_raises_for_unknown_target(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify an unrecognized target raises ValueError."""
-    mocker.patch("astrometricslib.Astrometrics").return_value.targets.get.return_value = None
     manager = _FakeManager(config=mocker.Mock())
+    manager.astrometrics.targets.get.return_value = None
 
     with pytest.raises(ValueError, match="not found"):
         ops.slew_to_target(manager, "does-not-exist")
@@ -209,8 +212,8 @@ def test_slew_to_target_raises_for_unknown_target(mocker):  # ruff: ignore[missi
 def test_slew_to_target_raises_for_unresolved_placeholder_coordinates(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify a target with placeholder (unsolved) coordinates raises."""
     target = mocker.Mock(ra="0h 0m 0s", dec="0d 0m 0s")
-    mocker.patch("astrometricslib.Astrometrics").return_value.targets.get.return_value = target
     manager = _FakeManager(config=mocker.Mock())
+    manager.astrometrics.targets.get.return_value = target
 
     with pytest.raises(ValueError, match="hasn't been plate-solved"):
         ops.slew_to_target(manager, "M 81")
@@ -219,8 +222,8 @@ def test_slew_to_target_raises_for_unresolved_placeholder_coordinates(mocker):  
 def test_slew_to_target_resolves_coordinates_and_delegates(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify a valid target resolves coordinates and delegates the slew."""
     target = mocker.Mock(ra="12h 00m 00s", dec="+45d 00m 00s")
-    mocker.patch("astrometricslib.Astrometrics").return_value.targets.get.return_value = target
     manager = _FakeManager(config=mocker.Mock())
+    manager.astrometrics.targets.get.return_value = target
     manager.slew_to_coordinates = mocker.Mock(return_value=True)
 
     result = ops.slew_to_target(manager, "M 81")

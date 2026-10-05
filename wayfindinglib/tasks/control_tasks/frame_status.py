@@ -14,7 +14,6 @@ the library, since the library keeps a path and not a size.
 import os
 from typing import Any
 
-from astrometricslib import Astrometrics
 from wayfindinglib.tasks.control_tasks import remote_transfer_tasks
 
 EXAMPLE_COUNT = 10
@@ -87,7 +86,7 @@ def build_frame_status(observatory, target_id: str) -> dict[str, Any]:  # ruff: 
     """
     config = observatory._config
     lights_root = os.path.join(str(config.get_frames_path()), "lights")
-    astrometrics = Astrometrics(config)
+    astrometrics = observatory.astrometrics
     astrometrics.targets.list()  # reread the database so a recent sync shows
 
     remote_files: dict[str, int] | None = None

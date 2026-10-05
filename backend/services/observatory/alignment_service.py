@@ -144,33 +144,13 @@ class AlignmentService:
 
                 # Count targets per session date from the target library,
                 # when it is available
-                session_target_counts: dict[str, int] = {}
                 try:
-                    import json
-                    import os
-                    import sqlite3
-                    from datetime import datetime
-
-                    target_db_path = os.path.join(
-                        os.path.dirname(self._logger_interface.db_path), "astrometrics.db"
-                    )
-                    if os.path.exists(target_db_path):
-                        conn_t = sqlite3.connect(target_db_path)
-                        c_t = conn_t.cursor()
-                        c_t.execute("SELECT id, data_json FROM targets")
-                        for _tid, djson in c_t.fetchall():
-                            data = json.loads(djson) if djson else {}
-                            dates: set[str] = set()
-                            for f in data.get("frames", []):
-                                ts = f.get("timestamp")
-                                if ts:
-                                    d = datetime.fromtimestamp(ts - 43200).strftime("%Y-%m-%d")
-                                    dates.add(d)
-                            for d in dates:
-                                session_target_counts[d] = session_target_counts.get(d, 0) + 1
-                        conn_t.close()
+                    session_target_counts = self._observatory.astrometrics.targets.query(detail="nights")[
+                        "nights"
+                    ]
                 except Exception as target_count_err:
-                    logger.debug(f"Error computing session target counts: {target_count_err}")
+                    logger.debug("Error computing session target counts: %s", target_count_err)
+                    session_target_counts = {}
 
                 sessions = []
                 for s in raw_sessions:

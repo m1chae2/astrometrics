@@ -91,13 +91,19 @@ class ObservatoryControl:
         driver: Any | None = None,
         butler: DiskButler | None = None,
         correction_config: CorrectionConfig | None = None,
+        astrometrics: Any | None = None,
     ):
-        """Initialize the interface with config, a driver, and recording."""
+        """Initialize the interface with config, a driver, and recording.
+
+        `astrometrics` is the science library handle shared with the rest of
+        the `Wayfinder`. When omitted, one is built over `config` on first use.
+        """
         if config is None:
             from astrometricslib import get_configuration
 
             config = get_configuration()
         self._config = config
+        self._astrometrics = astrometrics
         self.__driver = driver
         self.__mount_driver = None
         self.__focuser_driver = None
@@ -115,6 +121,21 @@ class ObservatoryControl:
         self._butler = butler or DiskButler(app_config=config)
         self._correction_config = correction_config or CorrectionConfig()
         self._safety_monitor = SafetyMonitor()
+
+    @property
+    def astrometrics(self) -> Any:
+        """The shared `Astrometrics` handle, built on first use if not given.
+
+        Returns
+        -------
+        astrometrics : `astrometricslib.Astrometrics`
+            The science library handle.
+        """
+        if self._astrometrics is None:
+            from astrometricslib import Astrometrics
+
+            self._astrometrics = Astrometrics(self._config)
+        return self._astrometrics
 
     @property
     def driver(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
@@ -1583,9 +1604,7 @@ class ObservatoryControl:
 
         frame_lookup = None
         try:
-            from astrometricslib import Astrometrics
-
-            frame_lookup = ekos_log_ingestion.build_frame_lookup(Astrometrics())
+            frame_lookup = ekos_log_ingestion.build_frame_lookup(self.astrometrics)
         except Exception as error:
             logger.warning("Could not read the frame library to name imaging equipment: %s", error)
 
@@ -1664,9 +1683,7 @@ class ObservatoryControl:
         key = ("library", telescope_name, camera_name)
         if key not in library_cache:
             try:
-                from astrometricslib import Astrometrics
-
-                astrometrics = Astrometrics()
+                astrometrics = self.astrometrics
                 library_cache[key] = (
                     capture_analysis_tasks.collect_capture_frames(
                         astrometrics, telescope_name, camera_name, self._config
@@ -2661,11 +2678,9 @@ class ObservatoryControl:
         folder_names : `list` [`str`]
             Remote folder names with no matching local target.
         """
-        from astrometricslib import Astrometrics
         from wayfindinglib.tasks.control_tasks import remote_transfer_tasks
 
-        astrometrics = Astrometrics(self._config)
-        return remote_transfer_tasks.discover_unassociated_remote_targets(self, astrometrics.targets)
+        return remote_transfer_tasks.discover_unassociated_remote_targets(self, self.astrometrics.targets)
 
     def frame_status(self, target_id: str) -> dict[str, Any]:
         """Show where a target's frames are: telescope, drive, library.

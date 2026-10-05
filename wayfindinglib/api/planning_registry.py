@@ -51,9 +51,20 @@ MAXIMUM_SOURCES = 300
 class ObservationPlanning:
     """Synchronous observation-planning API: packages, advisories, sessions."""
 
-    def __init__(self, butler: DiskButler | None = None, planning_config: PlanningConfig | None = None):  # ruff: ignore[missing-return-type-special-method]
-        """Initialize with a storage layer and configuration."""
+    def __init__(  # ruff: ignore[missing-return-type-special-method]
+        self,
+        butler: DiskButler | None = None,
+        planning_config: PlanningConfig | None = None,
+        astrometrics: Any | None = None,
+    ):
+        """Initialize with a storage layer, configuration, and science handle.
+
+        `astrometrics` is the science library handle shared with the rest of
+        the `Wayfinder`. When omitted, one is built over the butler's
+        configuration on first use.
+        """
         self._butler = butler or DiskButler()
+        self._astrometrics = astrometrics
         self._planning_config = planning_config or PlanningConfig()
         self.__sky_engine = None
         self.__observation_engine = None
@@ -63,6 +74,21 @@ class ObservationPlanning:
         # would otherwise find an engine still None on every thread and build
         # one apiece -- each `Sky` loads its own full copy of the star catalog.
         self._engine_construction_lock = threading.Lock()
+
+    @property
+    def astrometrics(self) -> Any:
+        """The shared `Astrometrics` handle, built on first use if not given.
+
+        Returns
+        -------
+        astrometrics : `astrometricslib.Astrometrics`
+            The science library handle.
+        """
+        if self._astrometrics is None:
+            from astrometricslib import Astrometrics
+
+            self._astrometrics = Astrometrics(self._butler.config)
+        return self._astrometrics
 
     @property
     def _sky_engine(self) -> Any:
@@ -83,7 +109,7 @@ class ObservationPlanning:
                 if self.__sky_engine is None:
                     from wayfindinglib.sky import Sky
 
-                    self.__sky_engine = Sky(config=self._butler.config)
+                    self.__sky_engine = Sky(config=self._butler.config, astrometrics=self.astrometrics)
         return self.__sky_engine
 
     @property
@@ -100,7 +126,9 @@ class ObservationPlanning:
                 if self.__observation_engine is None:
                     from wayfindinglib.observation import Observation
 
-                    self.__observation_engine = Observation(config=self._butler.config)
+                    self.__observation_engine = Observation(
+                        config=self._butler.config, astrometrics=self.astrometrics
+                    )
         return self.__observation_engine
 
     # -- Sky browsing (visibility, resolution, catalog) -------------------
@@ -411,9 +439,9 @@ class ObservationPlanning:
             and ``frames_examined``. See
             `astrometricslib`'s ``derive_field_centers`` for the exact shape.
         """
-        from astrometricslib import Astrometrics, derive_field_centers
+        from astrometricslib import derive_field_centers
 
-        return derive_field_centers(Astrometrics(self._butler.config).targets.list())
+        return derive_field_centers(self.astrometrics.targets.list())
 
     def get_meridian_status(self, ra_deg: float, dec_deg: float, time_input: Any) -> dict[str, Any]:
         """Return meridian proximity/flip status for one coordinate/time.
@@ -574,7 +602,6 @@ class ObservationPlanning:
 
     def create_observation_package(
         self,
-        astrometrics: Any,
         target_id: str,
         exposure_requests: list[ExposureRequest],
         dither_config: DitherConfig | None = None,
@@ -598,7 +625,7 @@ class ObservationPlanning:
         ValueError
             Raised if `target_id` does not resolve to an existing target.
         """
-        if not astrometrics.targets.get(target_id):
+        if not self.astrometrics.targets.get(target_id):
             raise ValueError(f"Target {target_id} not found")
 
         package = ObservationPackage(
@@ -617,7 +644,7 @@ class ObservationPlanning:
 
     # -- Advisory computation --------------------------------------------
 
-    def get_target_quality_advisory(self, astrometrics: Any, target_id: str) -> TargetQualityAdvisory:
+    def get_target_quality_advisory(self, target_id: str) -> TargetQualityAdvisory:
         """Return the computed-on-demand quality advisory for a target.
 
         Returns
@@ -627,7 +654,7 @@ class ObservationPlanning:
         """
         from wayfindinglib.tasks.planning_tasks.quality_advisory_tasks import build_target_quality_advisory
 
-        return build_target_quality_advisory(astrometrics, target_id)
+        return build_target_quality_advisory(self.astrometrics, target_id)
 
     def get_calibration_advisory(
         self, camera_id: str, frame_type: FrameType, exposure_sec: float | None = None, filter: Any = None
@@ -647,7 +674,6 @@ class ObservationPlanning:
 
     def generate_mosaic_packages(
         self,
-        astrometrics: Any,
         parent_target_id: str,
         grid_config: MosaicGridConfig,
         exposure_requests: list[ExposureRequest],
@@ -664,7 +690,7 @@ class ObservationPlanning:
         from wayfindinglib.tasks.planning_tasks.mosaic_tasks import generate_mosaic_packages
 
         packages = generate_mosaic_packages(
-            astrometrics, parent_target_id, grid_config, exposure_requests, equipment, dither_config
+            self.astrometrics, parent_target_id, grid_config, exposure_requests, equipment, dither_config
         )
         for package in packages:
             self._butler.put(package, "observation_package", {"id": package.id})
@@ -674,7 +700,6 @@ class ObservationPlanning:
 
     def plan_observation_session(
         self,
-        astrometrics: Any,
         requests: list[tuple[ObservationPackage, StartTimeMode, datetime | None]],
         site_profile: SiteProfile,
         telescope: Telescope,
@@ -699,12 +724,10 @@ class ObservationPlanning:
         quality_advisories = {}
         for package, _mode, _requested in requests:
             if package.quality_weighting_enabled:
-                quality_advisories[package.target_id] = self.get_target_quality_advisory(
-                    astrometrics, package.target_id
-                )
+                quality_advisories[package.target_id] = self.get_target_quality_advisory(package.target_id)
 
         session = plan_observation_session(
-            astrometrics,
+            self.astrometrics,
             requests,
             site_profile,
             telescope,

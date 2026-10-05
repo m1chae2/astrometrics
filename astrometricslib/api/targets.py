@@ -93,13 +93,17 @@ class TargetCatalog:
 
         return target_records.list_targets(self)
 
-    def get(self, target_id: str) -> Target | None:
+    def get(self, target_id: str, refresh: bool = False) -> Target | None:
         """Retrieve a single target by id, supporting fuzzy matching.
 
         Parameters
         ----------
         target_id : `str`
             The target id to look up, exact or fuzzy-matched.
+        refresh : `bool`, optional
+            Read the stored targets first, so a target that another program
+            added or changed is seen. This is the same read `list` does.
+            Defaults to `False`, which uses the targets held in memory.
 
         Returns
         -------
@@ -108,6 +112,8 @@ class TargetCatalog:
         """
         from astrometricslib.pipelines.shared import target_records
 
+        if refresh:
+            target_records.list_targets(self)
         return target_records.get_target(self, target_id)
 
     def read_saved(self, target_id: str) -> Target | None:
@@ -434,11 +440,15 @@ class TargetCatalog:
             target's record (needs ``target_id``) with grouped frames, stack
             paths and flags, and condensed quality summaries.
             ``"cameras"``: the cameras used and how many frames each took.
+            ``"nights"``: for each observing night, how many targets have
+            frames from it.
         include_frames : `int`, optional
             With ``detail="full"``, also list this many of the newest light
             frames (at most 50), with their measurements.
         sort : `str`, optional
-            ``"newest"`` (default, by the last frame taken) or ``"name"``.
+            ``"newest"`` (default, by the last frame taken), ``"name"``, or
+            ``"separation"`` (nearest the centre first; needs a region
+            search).
         include_empty : `bool`, optional
             Also list targets with no frames, such as the placeholders the
             calibration folders create. Off by default.
@@ -457,10 +467,10 @@ class TargetCatalog:
         from astrometricslib.api.target_overview import describe_target, summarize_target
         from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
 
-        if detail not in ("summary", "full", "cameras"):
-            return {"error": "detail must be one of: summary, full, cameras."}
-        if sort not in ("newest", "name"):
-            return {"error": "sort must be 'newest' or 'name'."}
+        if detail not in ("summary", "full", "cameras", "nights"):
+            return {"error": "detail must be one of: summary, full, cameras, nights."}
+        if sort not in ("newest", "name", "separation"):
+            return {"error": "sort must be 'newest', 'name' or 'separation'."}
         touched_before = set(getattr(self, "_touched_target_ids", set()))
         try:
             targets = self.list()
@@ -470,6 +480,15 @@ class TargetCatalog:
             from astrometricslib.pipelines.shared.quality import frame_statistics
 
             return {"cameras": frame_statistics.list_camera_names(targets)}
+        if detail == "nights":
+            from astrometricslib.utilities.observing_night import observing_night_id
+
+            counts: dict[str, int] = {}
+            for target in targets:
+                timestamps = [frame.timestamp for frame in target.frames if frame.timestamp]
+                for night in {observing_night_id(stamp) for stamp in timestamps}:
+                    counts[night] = counts.get(night, 0) + 1
+            return {"nights": dict(sorted(counts.items()))}
         if detail == "full":
             if not target_id:
                 return {"error": "detail='full' needs a target_id."}
@@ -509,6 +528,10 @@ class TargetCatalog:
             rows.append(row)
         if sort == "name":
             rows.sort(key=lambda row: row["id"].lower())
+        elif sort == "separation":
+            if radius_deg is None:
+                return {"error": "sort='separation' needs a region search (ra, dec and radius_deg)."}
+            rows.sort(key=lambda row: row["separation_deg"])
         else:
             rows.sort(key=lambda row: row["last_frame"] or "", reverse=True)
         limit = max(1, min(int(limit), 200))

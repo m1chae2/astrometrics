@@ -164,47 +164,21 @@ class TelescopeService:
             return None
 
         try:
-            import math
-
             from astrometricslib import parse_coordinate_string
 
-            mount_ra_deg = parse_coordinate_string(ra_str, is_ra=True)
-            mount_dec_deg = parse_coordinate_string(dec_str, is_ra=False)
-
-            targets = self._target_service.get_targets()
-            if not isinstance(targets, list):
-                return None
-
-            best_match = None
-            min_sep_deg = 1.0  # 1 degree tolerance for sensor FOV match
-
-            for target in targets:
-                t_ra = getattr(target, "ra", None)
-                t_dec = getattr(target, "dec", None)
-                if not t_ra or not t_dec or t_ra in ("-", "Unknown", "00 00 00"):
-                    continue
-
-                try:
-                    target_ra_deg = parse_coordinate_string(t_ra, is_ra=True)
-                    target_dec_deg = parse_coordinate_string(t_dec, is_ra=False)
-
-                    # Simple angular separation approximation (small angles)
-                    cos_dec = math.cos(math.radians(mount_dec_deg))
-                    d_ra = (mount_ra_deg - target_ra_deg) * cos_dec
-                    d_dec = mount_dec_deg - target_dec_deg
-                    sep_deg = math.hypot(d_ra, d_dec)
-
-                    if sep_deg < min_sep_deg:
-                        min_sep_deg = sep_deg
-                        best_match = getattr(target, "name", None) or getattr(target, "id", None)
-                except Exception as exc:
-                    logger.debug(f"Target candidate parsing failed: {exc}")
-                    continue
-
-            return best_match
+            nearest = self._target_service.astrometrics.targets.query(
+                ra=parse_coordinate_string(ra_str, is_ra=True),
+                dec=parse_coordinate_string(dec_str, is_ra=False),
+                radius_deg=1.0,  # 1 degree tolerance for sensor FOV match
+                include_empty=True,
+                sort="separation",
+                limit=1,
+            )
         except Exception as exc:
-            logger.debug(f"Target inference failed: {exc}")
+            logger.debug("Target inference failed: %s", exc)
             return None
+        rows = nearest.get("targets") or []
+        return (rows[0].get("common_name") or rows[0]["id"]) if rows else None
 
     def get_telescope_status(self) -> dict[str, Any]:
         """Alias of get_status for reflected tool calls.

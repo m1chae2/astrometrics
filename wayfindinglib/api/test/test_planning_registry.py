@@ -69,11 +69,11 @@ def _telescope():  # ruff: ignore[missing-return-type-private-function]
 
 def test_create_observation_package_validates_and_persists(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify package creation validates the target and records the result."""
-    planning = ObservationPlanning(butler=isolated_butler)
     astrometrics = _FakeAstrometrics([_FakeTarget("M 81")])
+    planning = ObservationPlanning(butler=isolated_butler, astrometrics=astrometrics)
 
     package = planning.create_observation_package(
-        astrometrics, "M 81", [ExposureRequest(frame_type=FrameType.LIGHT, exposure_sec=300.0, count=10)]
+        "M 81", [ExposureRequest(frame_type=FrameType.LIGHT, exposure_sec=300.0, count=10)]
     )
 
     loaded = isolated_butler.get("observation_package", {"id": package.id})
@@ -83,11 +83,10 @@ def test_create_observation_package_validates_and_persists(isolated_butler):  # 
 
 def test_create_observation_package_rejects_unknown_target(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify package creation raises when the target does not resolve."""
-    planning = ObservationPlanning(butler=isolated_butler)
     astrometrics = _FakeAstrometrics([])
+    planning = ObservationPlanning(butler=isolated_butler, astrometrics=astrometrics)
     with pytest.raises(ValueError):
         planning.create_observation_package(
-            astrometrics,
             "does-not-exist",
             [ExposureRequest(frame_type=FrameType.LIGHT, exposure_sec=300.0, count=1)],
         )
@@ -95,14 +94,14 @@ def test_create_observation_package_rejects_unknown_target(isolated_butler):  # 
 
 def test_manual_queue_authoring_matches_automated_structure(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify create_empty_session/add_to_queue matches the automated shape."""
-    planning = ObservationPlanning(butler=isolated_butler)
     astrometrics = _FakeAstrometrics([_FakeTarget("M 81")])
+    planning = ObservationPlanning(butler=isolated_butler, astrometrics=astrometrics)
 
     session = planning.create_empty_session(_site(), _telescope(), "c1", date(2026, 8, 10))
     assert session.queue == []
 
     package = planning.create_observation_package(
-        astrometrics, "M 81", [ExposureRequest(frame_type=FrameType.LIGHT, exposure_sec=300.0, count=5)]
+        "M 81", [ExposureRequest(frame_type=FrameType.LIGHT, exposure_sec=300.0, count=5)]
     )
     updated = planning.add_to_queue(session.id, package, StartTimeMode.SOONEST)
 
@@ -115,9 +114,10 @@ def test_manual_queue_authoring_matches_automated_structure(isolated_butler):  #
 
 def test_add_to_queue_raises_for_unknown_session(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify add_to_queue raises when the session does not resolve."""
-    planning = ObservationPlanning(butler=isolated_butler)
+    planning = ObservationPlanning(
+        butler=isolated_butler, astrometrics=_FakeAstrometrics([_FakeTarget("M 81")])
+    )
     package = planning.create_observation_package(
-        _FakeAstrometrics([_FakeTarget("M 81")]),
         "M 81",
         [ExposureRequest(frame_type=FrameType.LIGHT, exposure_sec=300.0, count=1)],
     )
@@ -127,11 +127,11 @@ def test_add_to_queue_raises_for_unknown_session(isolated_butler):  # ruff: igno
 
 def test_reorder_queue_rejects_mismatched_entry_set(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify reorder_queue rejects an entry_ids list mismatching the queue."""
-    planning = ObservationPlanning(butler=isolated_butler)
     astrometrics = _FakeAstrometrics([_FakeTarget("M 81")])
+    planning = ObservationPlanning(butler=isolated_butler, astrometrics=astrometrics)
     session = planning.create_empty_session(_site(), _telescope(), "c1", date(2026, 8, 10))
     package = planning.create_observation_package(
-        astrometrics, "M 81", [ExposureRequest(frame_type=FrameType.LIGHT, exposure_sec=300.0, count=1)]
+        "M 81", [ExposureRequest(frame_type=FrameType.LIGHT, exposure_sec=300.0, count=1)]
     )
     planning.add_to_queue(session.id, package, StartTimeMode.SOONEST)
 
@@ -141,17 +141,16 @@ def test_reorder_queue_rejects_mismatched_entry_set(isolated_butler):  # ruff: i
 
 def test_plan_observation_session_runs_successfully(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify a full session plans successfully end to end."""
-    planning = ObservationPlanning(butler=isolated_butler)
     astrometrics = _FakeAstrometrics([
         _FakeTarget("M 81"),
         _FakeTarget("M 13", ra="16:41:41", dec="+36:27:35"),
     ])
+    planning = ObservationPlanning(butler=isolated_butler, astrometrics=astrometrics)
     package = planning.create_observation_package(
-        astrometrics, "M 81", [ExposureRequest(frame_type=FrameType.LIGHT, exposure_sec=60.0, count=1)]
+        "M 81", [ExposureRequest(frame_type=FrameType.LIGHT, exposure_sec=60.0, count=1)]
     )
 
     session = planning.plan_observation_session(
-        astrometrics,
         [(package, StartTimeMode.SOONEST, None)],
         _site(),
         _telescope(),
@@ -242,7 +241,7 @@ def test_sky_engine_is_constructed_once_under_concurrent_first_access(isolated_b
     count_lock = threading.Lock()
 
     class SlowFakeSky:
-        def __init__(self, config=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+        def __init__(self, config=None, astrometrics=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
             nonlocal construction_count
             with count_lock:
                 construction_count += 1

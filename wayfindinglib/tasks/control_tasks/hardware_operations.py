@@ -132,10 +132,7 @@ def slew_to_target(manager, target_name: str) -> bool:  # ruff: ignore[missing-t
         If the target is not found in the library, has no
         coordinates yet, or has an invalid coordinate format.
     """
-    from astrometricslib import Astrometrics
-
-    astrometrics = Astrometrics(manager._config)
-    target = astrometrics.targets.get(target_name)
+    target = manager.astrometrics.targets.get(target_name, refresh=True)
     if not target:
         raise ValueError(f"Target '{target_name}' not found in library")
 

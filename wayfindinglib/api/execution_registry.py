@@ -51,9 +51,32 @@ __all__ = [
 class ObservationExecution:
     """Synchronous observation-execution API: queue advancement and support."""
 
-    def __init__(self, butler: DiskButler | None = None):  # ruff: ignore[missing-return-type-special-method]
-        """Initialize the high-level interface with a storage layer."""
+    def __init__(  # ruff: ignore[missing-return-type-special-method]
+        self, butler: DiskButler | None = None, astrometrics: Any | None = None
+    ):
+        """Initialize the high-level interface with a storage layer.
+
+        `astrometrics` is the science library handle shared with the rest of
+        the `Wayfinder`. When omitted, one is built over the butler's
+        configuration on first use.
+        """
         self._butler = butler or DiskButler()
+        self._astrometrics = astrometrics
+
+    @property
+    def astrometrics(self) -> Any:
+        """The shared `Astrometrics` handle, built on first use if not given.
+
+        Returns
+        -------
+        astrometrics : `astrometricslib.Astrometrics`
+            The science library handle.
+        """
+        if self._astrometrics is None:
+            from astrometricslib import Astrometrics
+
+            self._astrometrics = Astrometrics(self._butler.config)
+        return self._astrometrics
 
     # -- Queue advancement -------------------------------------------------
 
@@ -212,7 +235,7 @@ class ObservationExecution:
 
     # -- Post-session reconciliation -----------------------------------------
 
-    def reconcile_session(self, session: ObservationSession, astrometrics: Any) -> ObservationSession:
+    def reconcile_session(self, session: ObservationSession) -> ObservationSession:
         """Run both post-session reconciliations, recording the results.
 
         Returns
@@ -220,4 +243,4 @@ class ObservationExecution:
         session : `ObservationSession`
             The session after reconciliation, with results recorded.
         """
-        return reconcile_session(self._butler, session, astrometrics)
+        return reconcile_session(self._butler, session, self.astrometrics)

@@ -16,33 +16,11 @@ from mcp.types import ImageContent, TextContent, Tool
 
 from astrometricslib.foundation.errors import ErrorInfo, to_error_info
 from astrometricslib.foundation.logging import log_context, new_request_id
+from astrometricslib.foundation.paths import is_path_inside, resolve_mounted_path
 from astrometricslib.mcp.profile import current_profile, find_withheld_tools, load_manifest, refusal_message
 from astrometricslib.mcp.tool_errors import error_content
 
 logger = logging.getLogger(__name__)
-
-
-def _is_inside(root: str, path: str) -> bool:
-    """Say whether a resolved path is `root` or lies below it.
-
-    Parameters
-    ----------
-    root : `str`
-        A resolved directory path.
-    path : `str`
-        A resolved path to test.
-
-    Returns
-    -------
-    inside : `bool`
-        `True` if `path` is `root` or inside it. `False` if it is not, or
-        if the two cannot be compared (for example, paths on different
-        drives).
-    """
-    try:
-        return os.path.commonpath([root, path]) == root
-    except ValueError:
-        return False
 
 
 class ToolRegistry:
@@ -233,18 +211,8 @@ class ToolRegistry:
                 ]
 
                 for val in path_arguments.values():
-                    check_val = val
-                    if not os.path.exists(check_val):
-                        if check_val.startswith("/run/media/"):
-                            alt = check_val.replace("/run/media/", "/media/", 1)
-                            if os.path.exists(alt):
-                                check_val = alt
-                        elif check_val.startswith("/media/"):
-                            alt = check_val.replace("/media/", "/run/media/", 1)
-                            if os.path.exists(alt):
-                                check_val = alt
-                    real_val = os.path.realpath(check_val)
-                    if not any(_is_inside(root, real_val) for root in sandbox_roots):
+                    real_val = os.path.realpath(resolve_mounted_path(val))
+                    if not any(is_path_inside(root, real_val) for root in sandbox_roots):
                         raise PermissionError(
                             f"Access denied: path '{val}' is outside the allowed sandbox directories."
                         )

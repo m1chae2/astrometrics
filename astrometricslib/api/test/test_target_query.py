@@ -92,6 +92,27 @@ def test_filters_by_text_camera_and_region(catalog: TargetCatalog) -> None:
     assert near[0]["separation_deg"] < 0.2
 
 
+def test_a_region_search_can_put_the_nearest_target_first(catalog: TargetCatalog) -> None:
+    """Sorting by separation lists the target nearest the centre first."""
+    near = catalog.query(ra=283.9, dec=32.6, radius_deg=180.0, sort="separation")["targets"]
+    separations = [row["separation_deg"] for row in near]
+    assert separations == sorted(separations)
+    assert near[0]["id"] == "M 57"
+
+
+def test_sorting_by_separation_needs_a_region(catalog: TargetCatalog) -> None:
+    """Sorting by separation without a region says what is missing."""
+    assert "region search" in catalog.query(sort="separation")["error"]
+
+
+def test_the_nights_view_counts_targets_per_observing_night(catalog: TargetCatalog) -> None:
+    """Each observing night lists how many targets have frames from it."""
+    nights = catalog.query(detail="nights")["nights"]
+    assert nights
+    assert all(count >= 1 for count in nights.values())
+    assert list(nights) == sorted(nights)
+
+
 def test_the_full_record_groups_frames_by_night(catalog: TargetCatalog) -> None:
     """Three frames over two nights become two groups, with the file range."""
     record = catalog.query(target_id="m 57", detail="full", include_frames=2)["target"]

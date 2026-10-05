@@ -120,7 +120,7 @@ def download_remote_frames(
     success : `bool`
         `True` if the download succeeded, `False` otherwise.
     """
-    from astrometricslib import Astrometrics, get_configuration
+    from astrometricslib import get_configuration
 
     config = get_configuration()
     local_dest = os.path.join(config.get_frames_path(), local_subfolder)
@@ -131,7 +131,7 @@ def download_remote_frames(
         selected_files=selected_files,
     )
     if success and local_subfolder == "lights":
-        Astrometrics(config).processing.scan_target_directory(target, config.get_frames_path())
+        observatory.astrometrics.processing.scan_target_directory(target, config.get_frames_path())
         target.recalculate_total_exposure()
         return True
     return success
@@ -229,11 +229,11 @@ def download_remote_targets(
         `True` if the download (or local ingest) and reindex
         completed successfully.
     """
-    from astrometricslib import Astrometrics, classify_and_sort_fits_files, get_configuration
+    from astrometricslib import classify_and_sort_fits_files, get_configuration
 
     config = get_configuration()
-    astrometrics = Astrometrics(config)
-    target = astrometrics.targets.get(target_id)
+    astrometrics = observatory.astrometrics
+    target = astrometrics.targets.get(target_id, refresh=True)
     if not target:
         target = astrometrics.targets.create(target_id)
 
@@ -811,7 +811,7 @@ def sync_calibration_folder(api, remote_folder_name: str) -> dict[str, Any]:  # 
         Raised if `remote_folder_name` does not match Bias, Dark, or
         Flat.
     """
-    from astrometricslib import Astrometrics, Target, classify_and_sort_fits_files, get_configuration
+    from astrometricslib import Target, classify_and_sort_fits_files, get_configuration
 
     kind = CALIBRATION_FOLDER_KINDS.get(remote_folder_name.strip().lower())
     if not kind:
@@ -821,7 +821,7 @@ def sync_calibration_folder(api, remote_folder_name: str) -> dict[str, Any]:  # 
         )
 
     config = get_configuration()
-    astrometrics = Astrometrics(config)
+    astrometrics = api.astrometrics
     frames_path = str(config.get_frames_path())
     staging_dir = os.path.join(frames_path, "lights", remote_folder_name)
 
@@ -933,7 +933,7 @@ def sync_all_remote_folders(
     from contextlib import ExitStack
     from datetime import datetime
 
-    from astrometricslib import Astrometrics, get_configuration
+    from astrometricslib import get_configuration
 
     def log(message: str) -> None:
         if log_callback:
@@ -1024,7 +1024,7 @@ def sync_all_remote_folders(
     try:
         calibration_folder_names = list_remote_calibration_folders(api)
 
-        astrometrics = Astrometrics(get_configuration())
+        astrometrics = api.astrometrics
         known_target_ids = [
             target.id for target in astrometrics.targets.list() if not is_calibration_folder(target.id)
         ]

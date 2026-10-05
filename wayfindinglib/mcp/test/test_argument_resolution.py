@@ -2,7 +2,7 @@
 
 Description: Covers the converters in `wayfindinglib.mcp.argument_resolution`
 (names to targets and sky objects, ISO strings to astropy times, the
-injected `Astrometrics` handle) and the Wayfinder tools that depend on
+shared `Astrometrics` handle) and the Wayfinder tools that depend on
 them, which used to fail with `'str' object has no attribute 'id'`.
 """
 
@@ -13,7 +13,6 @@ from typing import Any
 import pytest
 from astropy.time import Time
 
-from wayfindinglib.mcp import argument_resolution
 from wayfindinglib.mcp.argument_resolution import build_argument_hooks
 from wayfindinglib.mcp.tool_registry import registry as wayfinding_registry
 
@@ -53,28 +52,52 @@ class _FakeTargets:
         self.reload_count += 1
         return list(self._by_id.values())
 
-    def get(self, target_id: str) -> object | None:
+    def get(self, target_id: str, refresh: bool = False) -> object | None:
         """Return the target with this id, or `None`.
+
+        Parameters
+        ----------
+        target_id : `str`
+            The id to look up.
+        refresh : `bool`, optional
+            Re-read the catalog first, as the real one does from disk.
 
         Returns
         -------
         target : `object` or `None`
             The stored target.
         """
+        if refresh:
+            self.list()
         return self._by_id.get(target_id)
 
 
 @pytest.fixture
-def hooks(monkeypatch: pytest.MonkeyPatch) -> Hooks:
-    """Build hooks over a fake Wayfinder and a fake `Astrometrics`.
+def fake_astrometrics() -> types.SimpleNamespace:
+    """Make a fake `Astrometrics` holding one target.
+
+    Returns
+    -------
+    astrometrics : `types.SimpleNamespace`
+        An object with a `targets` catalog.
+    """
+    return types.SimpleNamespace(targets=_FakeTargets())
+
+
+@pytest.fixture
+def hooks(fake_astrometrics: types.SimpleNamespace) -> Hooks:
+    """Build hooks over a fake Wayfinder that holds a fake `Astrometrics`.
+
+    Parameters
+    ----------
+    fake_astrometrics : `types.SimpleNamespace`
+        The fake science library handle.
 
     Returns
     -------
     hooks : `tuple`
         The `(argument_resolvers, injected_arguments)` pair.
     """
-    fake_astrometrics = types.SimpleNamespace(targets=_FakeTargets())
-    monkeypatch.setattr(argument_resolution, "Astrometrics", lambda config: fake_astrometrics)
 
     def resolve_name(name: str) -> object:
         """Resolve one known name and reject the rest.
@@ -94,7 +117,9 @@ def hooks(monkeypatch: pytest.MonkeyPatch) -> Hooks:
         raise RuntimeError("not found")
 
     wayfinder = types.SimpleNamespace(
-        config=object(), planning=types.SimpleNamespace(resolve_target_coordinates=resolve_name)
+        config=object(),
+        astrometrics=fake_astrometrics,
+        planning=types.SimpleNamespace(resolve_target_coordinates=resolve_name),
     )
     return build_argument_hooks(wayfinder)
 
@@ -169,10 +194,10 @@ def test_now_is_accepted_as_a_time(hooks: Hooks) -> None:
     assert isinstance(resolvers["time_input"]("now"), Time)
 
 
-def test_astrometrics_is_injected_once(hooks: Hooks) -> None:
-    """The factory returns one shared handle."""
+def test_no_parameter_is_injected(hooks: Hooks) -> None:
+    """The server supplies no parameters; the library holds the handle."""
     _, injected = hooks
-    assert injected["astrometrics"]() is injected["astrometrics"]()
+    assert injected == {}
 
 
 def test_injected_parameters_are_hidden_from_registered_tool_schemas() -> None:
@@ -197,10 +222,12 @@ async def test_visibility_accepts_coordinates_and_an_offset_time() -> None:
     assert "altitude" in result[0].text.lower() or "alt" in result[0].text.lower()
 
 
-def test_a_target_id_reads_the_catalog_fresh_each_time(hooks: Hooks) -> None:
+def test_a_target_id_reads_the_catalog_fresh_each_time(
+    hooks: Hooks, fake_astrometrics: types.SimpleNamespace
+) -> None:
     """Resolving a target re-reads the catalog, so a frame sync is seen."""
-    resolvers, injected = hooks
-    catalog = injected["astrometrics"]().targets
+    resolvers, _ = hooks
+    catalog = fake_astrometrics.targets
     resolvers["target"]("M 52")
     resolvers["target"]("M 52")
     assert catalog.reload_count == 2

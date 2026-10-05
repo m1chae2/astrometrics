@@ -18,7 +18,7 @@ from typing import Any
 
 from astropy.time import Time
 
-from astrometricslib import Astrometrics, StellarObject, Target
+from astrometricslib import StellarObject, Target
 
 
 def build_argument_hooks(
@@ -39,22 +39,8 @@ def build_argument_hooks(
         Converters keyed by parameter name (`target`, `objects`,
         `time_input`).
     injected_arguments : `dict` [`str`, `Callable`]
-        Factories for parameters the server supplies itself
-        (`astrometrics`).
+        Factories for parameters the server supplies itself. None today.
     """
-    astrometrics_handle: list[Astrometrics] = []
-
-    def get_astrometrics() -> Astrometrics:
-        """Return one shared `Astrometrics` handle, created on first use.
-
-        Returns
-        -------
-        astrometrics : `Astrometrics`
-            The handle over the configured library.
-        """
-        if not astrometrics_handle:
-            astrometrics_handle.append(Astrometrics(wayfinder.config))
-        return astrometrics_handle[0]
 
     def resolve_library_target(value: Any) -> Any:
         """Convert a target id or name into the library's `Target`.
@@ -77,11 +63,10 @@ def build_argument_hooks(
         """
         if not isinstance(value, str):
             return value
-        library = get_astrometrics().targets
         # Another program (a frame sync, the app) may have changed the
-        # catalog since this server loaded it. A fresh read takes about 0.1 s.
-        library.list()
-        target = library.get(value)
+        # catalog since this server loaded it, so read it fresh. That takes
+        # about 0.1 s.
+        target = wayfinder.astrometrics.targets.get(value, refresh=True)
         if target is None:
             raise ValueError(
                 f"No target {value!r} in the library. Create it first with target_create, "
@@ -180,5 +165,5 @@ def build_argument_hooks(
         "objects": resolve_sky_objects,
         "time_input": parse_time,
     }
-    injected_arguments = {"astrometrics": get_astrometrics}
+    injected_arguments: dict[str, Callable[[], Any]] = {}
     return argument_resolvers, injected_arguments

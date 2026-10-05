@@ -108,14 +108,25 @@ class Wayfinder:
     (`Wayfinding_Library_Architecture.md` §2.5.7).
     """
 
-    def __init__(self, config=None, app_config=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, config=None, app_config=None, astrometrics=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
         """Initialize the Wayfinder high-level interface.
 
         Description: Composes the three root-function high-level interfaces
-        (control, planning, execution) over a shared config and
-        recording butler.
+        (control, planning, execution) over a shared config, recording
+        butler, and `Astrometrics` handle.
+
+        Parameters
+        ----------
+        config : `AppConfiguration`, optional
+            The application configuration. Loaded when omitted.
+        app_config : `AppConfiguration`, optional
+            Another way to pass the configuration.
+        astrometrics : `Astrometrics`, optional
+            The science library handle every part of the Wayfinder uses, so
+            all of them see the same target catalog. A new one is built over
+            the configuration when omitted.
         """
-        from astrometricslib import get_configuration
+        from astrometricslib import Astrometrics, get_configuration
         from wayfindinglib.api.control_registry import ObservatoryControl
         from wayfindinglib.api.execution_registry import ObservationExecution
         from wayfindinglib.api.planning_registry import ObservationPlanning
@@ -123,7 +134,9 @@ class Wayfinder:
 
         self.config = config or app_config or get_configuration()
 
+        self.astrometrics = astrometrics or Astrometrics(self.config)
+
         butler = DiskButler(app_config=self.config)
-        self.control = ObservatoryControl(config=self.config, butler=butler)
-        self.planning = ObservationPlanning(butler=butler)
-        self.execution = ObservationExecution(butler=butler)
+        self.control = ObservatoryControl(config=self.config, butler=butler, astrometrics=self.astrometrics)
+        self.planning = ObservationPlanning(butler=butler, astrometrics=self.astrometrics)
+        self.execution = ObservationExecution(butler=butler, astrometrics=self.astrometrics)

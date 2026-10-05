@@ -20,9 +20,7 @@ from backend.services.infrastructure.handoff_service import HandoffService
 from backend.services.infrastructure.maintenance_service import MaintenanceService
 from backend.services.infrastructure.notification_service import NotificationService
 from backend.services.infrastructure.sync_service import SyncService
-from backend.services.observatory.observatory_service import ObservatoryService
 from backend.services.observatory.target_imaging_executor import TargetImagingExecutor
-from backend.services.observatory.target_imaging_planner import TargetImagingPlanner
 from backend.services.observatory.telescope_service import TelescopeService
 from backend.services.processing.image_processing_service import ImageProcessingService
 from backend.services.processing.job_service import JobService
@@ -63,7 +61,6 @@ class Container:
         self.job_repository = None
         self.job_service = None
         self.maintenance_service = None
-        self.target_imaging_planner = None
         self.target_imaging_executor = None
         self.execution_service = None
         self.stellar_service = None
@@ -114,8 +111,7 @@ class Container:
         from wayfindinglib import Wayfinder
 
         self.astrometrics = Astrometrics(self.config_service)
-        self.wayfinder = Wayfinder(self.config_service)
-        self.wayfinder.control.driver = self.indi_driver
+        self.wayfinder = Wayfinder(self.config_service, astrometrics=self.astrometrics)
 
         self.target_service = TargetService(self.config_service, astrometrics=self.astrometrics)
         self.stellar_object_service = StellarService(
@@ -236,7 +232,6 @@ class Container:
 
         self.indi_diagnostics_service = IndiDiagnosticsService(observatory_api=self.wayfinder.control)
 
-        self.target_imaging_planner = TargetImagingPlanner()
         self.target_imaging_executor = TargetImagingExecutor(
             telescope_service=self.telescope_service, imaging_service=self.imaging_service
         )
@@ -245,9 +240,7 @@ class Container:
         # which had no route into the application at all before this.
         from backend.services.observatory.execution_service import ExecutionService
 
-        self.execution_service = ExecutionService(
-            wayfinder=self.wayfinder, astrometrics=self.astrometrics, config=self.config_service
-        )
+        self.execution_service = ExecutionService(wayfinder=self.wayfinder, config=self.config_service)
 
         from astrometricslib import StarIdentifier
         from backend.services.observatory.alignment_service import AlignmentService
@@ -263,7 +256,7 @@ class Container:
 
         from backend.services.observatory.mosaic_service import MosaicService
 
-        self.mosaic_service = MosaicService(target_manager=self.target_service, wayfinder=self.wayfinder)
+        self.mosaic_service = MosaicService(wayfinder=self.wayfinder)
 
         from backend.services.processing.ingestion_service import IngestionService
 
@@ -292,9 +285,6 @@ class Container:
         # Wire the optional injected services into the Wayfinder domain
         # high-level interface
         self.wayfinder.control.sync_service = self.sync_service
-
-        # Initialize ObservatoryService (peripheral state)
-        self.observatory_service = ObservatoryService(observatory_api=self.wayfinder.control)
 
         # 7. Start Background Maintenance
         self.maintenance_service.system_status_service = self.system_status_service

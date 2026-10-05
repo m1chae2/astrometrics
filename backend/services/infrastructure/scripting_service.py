@@ -268,6 +268,9 @@ class ScriptingService:
 
         local_scope["astrometrics"] = getattr(self.container, "astrometrics", None)
         local_scope["wayfinder"] = getattr(self.container, "wayfinder", None)
+        if local_scope["wayfinder"] is not None:
+            local_scope["planner"] = local_scope["wayfinder"].planning
+            local_scope["observatory"] = local_scope["wayfinder"].control
 
         # Standard system aliases for rapid scripting
         aliases = {
@@ -278,8 +281,6 @@ class ScriptingService:
             "guiding_service": "guiding",
             "imaging_service": "imaging",
             "alignment_service": "alignment",
-            "observatory_service": "observatory",
-            "target_imaging_planner": "planner",
             "target_imaging_executor": "executor",
             "mosaic_service": "mosaic",
             "ingestion_service": "ingestion",

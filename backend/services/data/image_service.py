@@ -4,7 +4,7 @@ import logging
 import os
 from typing import Any
 
-from astrometricslib import FilterType, FrameRecord, Target
+from astrometricslib import FrameRecord, Target, resolve_mounted_path
 
 logger = logging.getLogger(__name__)
 
@@ -78,75 +78,6 @@ class ImageService:
 
         return Astrometrics().targets
 
-    @staticmethod
-    def get_filter_type(header: dict[str, Any]) -> FilterType:
-        """Extract the FilterType from a FITS header, or infer it.
-
-        Parameters
-        ----------
-        header : `dict`
-            FITS header key/value mapping. The ``"FILTER"`` entry, if
-            present, is matched against known filter name tokens.
-
-        Returns
-        -------
-        filter_type : `FilterType`
-            The matched filter type, or `FilterType.NONE` if no token
-            matches.
-        """
-        filter_str = str(header.get("FILTER", "")).upper()
-
-        mapping = {
-            "SPECTROSCOPY": FilterType.SPEC,
-            "SPEC": FilterType.SPEC,
-            "H-ALPHA": FilterType.Ha,
-            "HA": FilterType.Ha,
-            "OIII": FilterType.OIII,
-            "SII": FilterType.SII,
-            "RED": FilterType.R,
-            "GREEN": FilterType.G,
-            "BLUE": FilterType.B,
-            "L": FilterType.L,
-            "R": FilterType.R,
-            "G": FilterType.G,
-            "B": FilterType.B,
-            "NONE": FilterType.NONE,
-        }
-
-        # Sort by length descending to match most specific terms first
-        sorted_keys = sorted(mapping.keys(), key=len, reverse=True)
-        for key in sorted_keys:
-            if key in filter_str:
-                return mapping[key]
-
-        return FilterType.NONE
-
-    @staticmethod
-    def _resolve_mount_path(path: str) -> str:
-        """Resolve mount path differences between /run/media and /media.
-
-        Parameters
-        ----------
-        path : `str`
-            The candidate filesystem path.
-
-        Returns
-        -------
-        resolved_path : `str`
-            The existing filesystem path if an alternative mount prefix exists.
-        """
-        if not path or os.path.exists(path):
-            return path
-        if path.startswith("/run/media/"):
-            alt = path.replace("/run/media/", "/media/", 1)
-            if os.path.exists(alt):
-                return alt
-        elif path.startswith("/media/"):
-            alt = path.replace("/media/", "/run/media/", 1)
-            if os.path.exists(alt):
-                return alt
-        return path
-
     def create_frame_record(self, path: str, camera: str | None = None) -> FrameRecord:
         """Parse a file and returns a standard FrameRecord.
 
@@ -167,7 +98,7 @@ class ImageService:
         FileNotFoundError
             If ``path`` does not exist on disk.
         """
-        resolved = self._resolve_mount_path(path)
+        resolved = resolve_mounted_path(path)
         if not os.path.exists(resolved):
             raise FileNotFoundError(f"{path} not found")
         return self.imaging_api.create_frame_record(resolved, camera)
@@ -238,7 +169,7 @@ class ImageService:
             ``png_bytes`` is the encoded image and the min/max are the
             pixel statistics used for the stretch.
         """
-        resolved = self._resolve_mount_path(path)
+        resolved = resolve_mounted_path(path)
         return self.visualization_api.convert_fits_to_png_with_stats(
             resolved, max_dimensions=maxdim, center=center, width=width, cmap=cmap, stretch=stretch
         )
@@ -327,7 +258,7 @@ class ImageService:
             One dictionary per header card, with ``"key"``, ``"value"``,
             and ``"comment"`` entries.
         """
-        resolved = self._resolve_mount_path(path)
+        resolved = resolve_mounted_path(path)
         return self.target_registry_api.get_header(resolved)
 
     def delete_images(self, paths: list[str], target_id: str | None = None) -> dict[str, Any]:
@@ -346,7 +277,7 @@ class ImageService:
         result : `dict`
             Deletion result payload from the ImagingAPI astrometrics.
         """
-        resolved_paths = [self._resolve_mount_path(p) for p in paths]
+        resolved_paths = [resolve_mounted_path(p) for p in paths]
         return self.target_registry_api.delete_images(resolved_paths, target_id=target_id)
 
     def get_last_image(self, stretch: bool = True) -> dict[str, Any] | None:
@@ -376,7 +307,7 @@ class ImageService:
             Base64-encoded PNG payload with min/max pixel statistics,
             or `None` if the FITS file could not be converted.
         """
-        resolved = self._resolve_mount_path(path)
+        resolved = resolve_mounted_path(path)
         res = self.visualization_api.convert_fits_to_png(resolved, max_dimensions=maxdim, stretch=stretch)
         if res and "image_data" in res and "imageData" not in res:
             res["imageData"] = res["image_data"]

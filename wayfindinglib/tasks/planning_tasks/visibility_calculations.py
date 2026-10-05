@@ -25,9 +25,9 @@ def get_target_status(observation, target_id: str) -> dict[str, Any] | None:  # 
         flag, or `None` if the target could not be resolved or the
         coordinate calculation failed.
     """
-    from astrometricslib import Astrometrics, StellarCatalog, parse_coordinate_string
+    from astrometricslib import StellarCatalog, parse_coordinate_string
 
-    astrometrics = Astrometrics(observation._config)
+    astrometrics = observation._astrometrics
     target = astrometrics.targets.get(target_id)
 
     if not target:
@@ -72,10 +72,8 @@ def get_visible_targets(observation) -> list[dict[str, Any]]:  # ruff: ignore[mi
         Status fields for each visible target, sorted by descending
         altitude.
     """
-    from astrometricslib import Astrometrics
-
     visible_list = []
-    astrometrics = Astrometrics(observation._config)
+    astrometrics = observation._astrometrics
     targets = astrometrics.targets.list()
 
     for target in targets:

@@ -49,6 +49,7 @@ class Sky:
         latitude: float | None = None,
         longitude: float | None = None,
         elevation: float | None = None,
+        astrometrics: Any | None = None,
     ) -> None:
         from astropy.utils import iers
 
@@ -86,7 +87,7 @@ class Sky:
         from astrometricslib import Astrometrics
         from wayfindinglib.drivers.catalog import LocalDeepStarStore
 
-        self._astrometrics = Astrometrics()
+        self._astrometrics = astrometrics or Astrometrics(self._config)
         self._catalog_driver_registry = build_catalog_driver_registry(
             star_source=LocalDeepStarStore(self._config)
         )

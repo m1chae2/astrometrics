@@ -12,7 +12,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrometricslib.mcp.tool_registry import ToolRegistry, _is_inside
+from astrometricslib.foundation.paths import is_path_inside
+from astrometricslib.mcp.tool_registry import ToolRegistry
 
 SCHEMA = {"type": "object", "properties": {"file_path": {"type": "string"}}, "required": []}
 
@@ -156,6 +157,6 @@ def test_the_configuration_is_not_needed_when_there_is_no_path_argument(
 
 def test_paths_that_cannot_be_compared_are_not_inside() -> None:
     """`_is_inside` returns `False` for a relative root instead of raising."""
-    assert _is_inside("/a/b", "/a/b/c")
-    assert not _is_inside("/a/b", "/a/bc")
-    assert not _is_inside("relative", "/a/b")
+    assert is_path_inside("/a/b", "/a/b/c")
+    assert not is_path_inside("/a/b", "/a/bc")
+    assert not is_path_inside("relative", "/a/b")

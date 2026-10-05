@@ -121,6 +121,24 @@ def _serialize_bulk_delegation_outcome(outcome: Any) -> dict[str, dict[str, str]
     }
 
 
+def _create_sequence_plan(target_name: str, items: list[dict[str, Any]]) -> dict[str, Any]:
+    """Build an imaging sequence plan with the Wayfinder planning API.
+
+    Parameters
+    ----------
+    target_name : `str`
+        Name of the target the plan is for.
+    items : `list` [`dict`]
+        The plan items, each with ``count``, ``exposure`` and ``filter``.
+
+    Returns
+    -------
+    plan : `dict`
+        The sequence plan.
+    """
+    return container.wayfinder.planning.create_sequence_plan(target_name, items)
+
+
 def _get_session_alignment(session_id: str = "") -> dict:
     """Fetch alignment attempts and polar alignment data for a session.
 
@@ -378,7 +396,7 @@ class RPCHandlerRegistry:
         self.register("execution:record_divergence", ("execution_service", "record_divergence"))
 
         self.register("sequencer:get_queue", ("target_imaging_executor", "get_queue"))
-        self.register("sequencer:create_plan", ("target_imaging_planner", "create_plan"))
+        self.register("sequencer:create_plan", _create_sequence_plan)
         self.register("sequencer:add", ("target_imaging_executor", "enqueue_sequence"))
         self.register("sequencer:remove", ("target_imaging_executor", "remove_from_queue"))
         self.register("sequencer:reorder", ("target_imaging_executor", "reorder_queue"))

@@ -77,9 +77,18 @@ class MosaicPanel(BaseModel):
 class SessionPlanner:
     """Compute mosaic panels and design sequence session queues."""
 
-    def __init__(self, config):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
-        """Initialize the SessionPlanner with application configuration."""
+    def __init__(self, config, astrometrics=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+        """Initialize the SessionPlanner with application configuration.
+
+        `astrometrics` is the shared science library handle. A new one is
+        built over `config` when omitted.
+        """
         self._config = config
+        if astrometrics is None:
+            from astrometricslib import Astrometrics
+
+            astrometrics = Astrometrics(config)
+        self._astrometrics = astrometrics
 
     def create_sequence_plan(self, target_name: str, plan_items: list[dict[str, Any]]) -> dict[str, Any]:
         """Delegate sequence plan creation to planning_operations.
@@ -134,10 +143,15 @@ class SessionPlanner:
 class Observation:
     """Session planning, visibility, sequence, and mosaic calculation."""
 
-    def __init__(self, config):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
-        """Initialize the Observation planner astrometrics."""
+    def __init__(self, config, astrometrics=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+        """Initialize the Observation planner astrometrics.
+
+        `astrometrics` is the shared science library handle. A new one is
+        built over `config` when omitted.
+        """
         self._config = config
-        self._planner = SessionPlanner(config)
+        self._planner = SessionPlanner(config, astrometrics)
+        self._astrometrics = self._planner._astrometrics
         self.location = EarthLocation(lat=39.7392 * u.deg, lon=-104.9903 * u.deg, height=1600 * u.m)
 
     def get_target_status(self, target_id: str) -> dict[str, Any] | None:

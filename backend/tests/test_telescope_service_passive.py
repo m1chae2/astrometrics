@@ -6,27 +6,40 @@ import pytest
 
 
 def test_infer_target_at_coordinates() -> None:
-    """Verify target match when coordinates are close."""
+    """Match the mount position to the nearest target within 1 degree."""
     from backend.services.observatory.telescope_service import TelescopeService
 
-    target_mock = MagicMock()
-    target_mock.id = "M 27"
-    target_mock.name = "M 27"
-    target_mock.ra = "19h 59m 36s"
-    target_mock.dec = "+22° 43′ 16″"
-
     target_service_mock = MagicMock()
-    target_service_mock.get_targets.return_value = [target_mock]
+    targets = target_service_mock.astrometrics.targets
+    targets.query.side_effect = [
+        {"targets": [{"id": "M 27", "common_name": None, "separation_deg": 0.3}]},
+        {"targets": []},
+    ]
 
     service = TelescopeService(target_service=target_service_mock)
 
     # Coordinates near M 27 (within 20 arcmin)
-    matched = service._infer_target_at_coordinates("20h 01m 00s", "+22° 46′ 00″")
-    assert matched == "M 27"
+    assert service._infer_target_at_coordinates("20h 01m 00s", "+22° 46′ 00″") == "M 27"
+    asked = targets.query.call_args_list[0].kwargs
+    assert asked["radius_deg"] == pytest.approx(1.0)
+    assert asked["sort"] == "separation"
+    assert asked["ra"] == pytest.approx(300.25)
+    assert asked["dec"] == pytest.approx(22.7667, abs=1e-3)
 
-    # Coordinates far from M 27 (e.g. Vega)
-    matched_far = service._infer_target_at_coordinates("18h 36m 56s", "+38° 47′ 01″")
-    assert matched_far is None
+    # Coordinates far from every target (e.g. Vega)
+    assert service._infer_target_at_coordinates("18h 36m 56s", "+38° 47′ 01″") is None
+
+
+def test_infer_target_at_coordinates_ignores_missing_coordinates() -> None:
+    """Return no match without a query when the mount has no position."""
+    from backend.services.observatory.telescope_service import TelescopeService
+
+    target_service_mock = MagicMock()
+    service = TelescopeService(target_service=target_service_mock)
+
+    assert service._infer_target_at_coordinates(None, None) is None
+    assert service._infer_target_at_coordinates("Unknown", "+22° 46′ 00″") is None
+    target_service_mock.astrometrics.targets.query.assert_not_called()
 
 
 def test_get_status_polls_external_guiding() -> None:

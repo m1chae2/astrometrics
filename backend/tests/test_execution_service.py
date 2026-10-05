@@ -33,7 +33,7 @@ def execution_service(config_in_tmp_path):  # ruff: ignore[missing-type-function
     from wayfindinglib import Wayfinder
 
     config = config_in_tmp_path
-    return ExecutionService(wayfinder=Wayfinder(config), astrometrics=Astrometrics(config), config=config)
+    return ExecutionService(wayfinder=Wayfinder(config, astrometrics=Astrometrics(config)), config=config)
 
 
 def _record_session(service: ExecutionService, session_id: str):  # ruff: ignore[missing-return-type-private-function]

@@ -190,14 +190,14 @@ def _infer_background_job_target_id(kwargs: dict[str, Any]) -> str:
     -------
     target_id : `str`
         The resolved `Target`'s own id for a single-target call, a
-        synthetic `"batch:<camera>"` label for an all-targets call, or
+        synthetic `"batch:<camera>"` label for a many-target call, or
         `"unknown"` if neither is present.
     """
     target_value = kwargs.get("target")
     if target_value is not None and hasattr(target_value, "id"):
         return target_value.id
-    if "camera_name" in kwargs:
-        return f"batch:{kwargs['camera_name']}"
+    if "camera_id" in kwargs and (target_value is None or isinstance(target_value, list)):
+        return f"batch:{kwargs['camera_id']}"
     return "unknown"
 
 
@@ -217,7 +217,9 @@ def _make_quality_snapshot_fn(
     if target_value is not None and hasattr(target_value, "id"):
         return lambda: {target_value.id: _snapshot_target_quality(target_value)}
 
-    if "camera_name" not in kwargs:
+    # The many-target form of `process_target`: a list of targets, or
+    # `None` for every target, always with a camera.
+    if "camera_id" not in kwargs or not (target_value is None or isinstance(target_value, list)):
         return None
 
     targets_api = getattr(astrometrics_instance, "targets", None)
@@ -225,14 +227,24 @@ def _make_quality_snapshot_fn(
         return None
 
     def snapshot_all_batch_targets() -> dict[str, Any]:
+        """Read every affected target fresh and snapshot its quality.
+
+        Returns
+        -------
+        snapshot : `dict` [`str`, `Any`]
+            Each affected target's quality summaries, by target id.
+        """
         # `.list()` always re-reads from disk (unlike `.get()`, which
         # prefers its in-memory cache); a fresh read matters here because
         # each target in the batch is actually processed in its own
-        # `ProcessPoolExecutor` worker (see `astrometricslib.api.batch`),
-        # so this process's cached copies would not reflect that work.
+        # `ProcessPoolExecutor` worker (see
+        # `astrometricslib.pipelines.target_batch`), so this process's
+        # cached copies would not reflect that work.
         fresh_targets_by_id = {t.id: t for t in targets_api.list()}
-        explicit_ids = kwargs.get("target_ids")
-        target_ids = list(explicit_ids) if explicit_ids else list(fresh_targets_by_id)
+        if target_value:
+            target_ids = [getattr(item, "id", item) for item in target_value]
+        else:
+            target_ids = list(fresh_targets_by_id)
         return {
             target_id: _snapshot_target_quality(fresh_targets_by_id[target_id])
             for target_id in target_ids
@@ -280,6 +292,12 @@ def _prepare_arguments(
 # (a target was once deleted on an unclear request), so deleting is left to
 # the app's own UI, which asks the person directly.
 WITHHELD_METHOD_PREFIXES = ("delete",)
+
+# Parameters the server decides, never the client: whether a call shows up
+# in the job list (the server already runs each slow call as a job), and
+# progress callbacks, which a client cannot send. They are left out of every
+# tool's schema.
+SERVER_ONLY_PARAMETERS = ("register_job", "on_item_complete", "on_progress")
 
 
 def register_astrometrics_tools(
@@ -358,10 +376,10 @@ def register_astrometrics_tools(
                 for name, factory in (injected_arguments or {}).items()
                 if name in method_parameter_names
             }
-            for injected_name in method_injected:
-                schema["properties"].pop(injected_name, None)
-                if injected_name in schema["required"]:
-                    schema["required"].remove(injected_name)
+            for hidden_name in (*method_injected, *SERVER_ONLY_PARAMETERS):
+                schema["properties"].pop(hidden_name, None)
+                if hidden_name in schema["required"]:
+                    schema["required"].remove(hidden_name)
 
             try:
                 type_hints = typing.get_type_hints(method)

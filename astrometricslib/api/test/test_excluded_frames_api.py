@@ -7,7 +7,7 @@ the frame measurement replaced so no star finding runs.
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -31,7 +31,7 @@ def pipelines(tmp_path: Path) -> ProcessingPipelines:
         Pipelines on a stub configuration.
     """
     configuration = SimpleNamespace(get_frames_path=lambda: tmp_path / "frames")
-    return ProcessingPipelines(configuration)
+    return ProcessingPipelines(configuration, None, targets=MagicMock())
 
 
 def camera_folder(tmp_path: Path) -> Path:
@@ -169,7 +169,7 @@ def test_preview_names_the_frames_it_would_move_and_moves_none(
     cloudy = folder / "frame_011.fits"
 
     with patch(FINDER, side_effect=with_measurement({"frame_011.fits": 100})):
-        preview = pipelines.preview_quarantine(target)
+        preview = pipelines.diagnostics.frame_quality(target, kind="quarantine_preview", register_job=False)
 
     assert preview.target_id == "M 1"
     assert preview.frames_checked == 12
@@ -185,7 +185,7 @@ def test_preview_skips_frames_that_are_not_lights(pipelines: ProcessingPipelines
     target = make_target(camera_folder(tmp_path), 12, role="FLAT")
 
     with patch(FINDER, side_effect=with_measurement({})):
-        preview = pipelines.preview_quarantine(target)
+        preview = pipelines.diagnostics.frame_quality(target, kind="quarantine_preview", register_job=False)
 
     assert preview.frames_checked == 0
     assert preview.would_move == []
@@ -196,7 +196,7 @@ def test_list_reads_the_manifests(pipelines: ProcessingPipelines, tmp_path: Path
     folder = camera_folder(tmp_path)
     quarantine = write_manifest(folder, [manifest_entry(folder, "frame_003.fits")])
 
-    frames = pipelines.list_excluded_frames(Target(id="M 1"))
+    frames = pipelines.restore_excluded_frames(Target(id="M 1")).frames
 
     assert [frame.file for frame in frames] == ["frame_003.fits"]
     assert frames[0].star_count == 203
@@ -210,7 +210,7 @@ def test_list_is_empty_for_a_target_with_nothing_set_aside(
     """A target with no `_excluded` folder lists nothing."""
     camera_folder(tmp_path)
 
-    assert pipelines.list_excluded_frames(Target(id="M 1")) == []
+    assert pipelines.restore_excluded_frames(Target(id="M 1")).frames == []
 
 
 def test_a_stray_excluded_folder_without_a_manifest_is_not_listed(
@@ -219,7 +219,7 @@ def test_a_stray_excluded_folder_without_a_manifest_is_not_listed(
     """Only `_excluded` folders that hold a manifest count."""
     (camera_folder(tmp_path) / QUARANTINE_FOLDER_NAME).mkdir()
 
-    assert pipelines.list_excluded_frames(Target(id="M 1")) == []
+    assert pipelines.restore_excluded_frames(Target(id="M 1")).frames == []
 
 
 def test_restore_without_apply_only_lists(pipelines: ProcessingPipelines, tmp_path: Path) -> None:
@@ -243,14 +243,13 @@ def test_restore_with_apply_moves_frames_back_and_rescans(
     quarantine = write_manifest(folder, [manifest_entry(folder, "frame_003.fits")])
     target = Target(id="M 1")
 
-    with patch.object(ProcessingPipelines, "scan_target_directory") as scan:
-        report = pipelines.restore_excluded_frames(target, apply=True)
+    report = pipelines.restore_excluded_frames(target, apply=True)
 
     assert report.applied is True
     assert report.restored_count == 1
     assert (folder / "frame_003.fits").exists()
     assert not quarantine.exists()
-    scan.assert_called_once_with(target, str(tmp_path / "frames"))
+    pipelines._targets.reindex_frames.assert_called_once_with(target)
 
 
 def test_restore_with_apply_does_not_rescan_when_nothing_moved(
@@ -259,11 +258,26 @@ def test_restore_with_apply_does_not_rescan_when_nothing_moved(
     """A target with nothing set aside is left alone."""
     camera_folder(tmp_path)
 
-    with patch.object(ProcessingPipelines, "scan_target_directory") as scan:
-        report = pipelines.restore_excluded_frames(Target(id="M 1"), apply=True)
+    report = pipelines.restore_excluded_frames(Target(id="M 1"), apply=True)
 
     assert report.restored_count == 0
-    scan.assert_not_called()
+    pipelines._targets.reindex_frames.assert_not_called()
+
+
+def test_frame_quality_can_include_the_frames_already_set_aside(
+    pipelines: ProcessingPipelines, tmp_path: Path
+) -> None:
+    """``include=["excluded"]`` adds the manifest's frames to a preview."""
+    folder = camera_folder(tmp_path)
+    write_manifest(folder, [manifest_entry(folder, "frame_003.fits")])
+    target = make_target(folder, 12)
+
+    with patch(FINDER, side_effect=with_measurement({})):
+        preview = pipelines.diagnostics.frame_quality(
+            target, kind="quarantine_preview", include=["excluded"], register_job=False
+        )
+
+    assert [frame.file for frame in preview.excluded] == ["frame_003.fits"]
 
 
 def test_target_folder_names_cover_the_spellings_a_folder_may_have() -> None:

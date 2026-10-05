@@ -808,13 +808,17 @@ export interface GuidingStatus {
 }
 
 /**
- * A finished PNG image ready to display, plus brightness stats.
+ * A finished picture ready to display in the app, plus brightness stats.
+ *
+ * `Visualization.render_fits(kind="data_url")` returns it.
  */
 export interface RenderedImage {
-  id: string;
+  id?: string;
   min: number;
   max: number;
   imageData: string;
+  headers?: FitsHeaderEntry[];
+  path?: string | null;
 }
 
 /**

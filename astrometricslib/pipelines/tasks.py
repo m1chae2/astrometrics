@@ -19,7 +19,7 @@ Three layers, smallest first:
   results along with it -- the same per-stage save discipline
   `backend/services/analysis/analysis_orchestrator.py` already uses
   for UI-triggered single-stage runs. Its only caller is
-  `api/batch.py`, which runs many targets through this same sequence
+  `target_batch.py`, which runs many targets through this same sequence
   in parallel worker processes; this module doesn't know or care about
   that, it just runs one target's full sequence.
 
@@ -40,11 +40,13 @@ from typing import Any
 
 from astrometricslib.drivers.job_logging import registered_job
 from astrometricslib.foundation.storage.process_locks import acquire_resource_slot
+from astrometricslib.models.processing_results import ProcessTargetResult
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.asteroid_detection.runner import run_asteroid_detection_analysis
 from astrometricslib.pipelines.astrometry.runner import run_astrometry_analysis
 from astrometricslib.pipelines.photometry.runner import run_photometry_analysis
 from astrometricslib.pipelines.shared.frame_grouping import (
+    frame_is_spectral,
     select_frames_for_processing,
     split_standard_and_spectral_frames,
 )
@@ -312,6 +314,87 @@ def _run_analysis_pipeline_match(
     if runner is None:
         raise ValueError(f"Unknown analysis type: {pipeline_type}")
     return runner(target, frames, filter_type, catalog_access, path, **kwargs)
+
+
+# -- Running chosen analysis stages for one target ----------------------
+
+ANALYSIS_STAGES = ("astrometry", "photometry", "spectroscopy", "asteroids")
+"""The analysis stages `run_target_stages` can run, in the order run."""
+
+DEFAULT_ANALYSIS_STAGES = ("astrometry", "photometry", "spectroscopy")
+"""The stages that run for one target when the caller names none."""
+
+STAGE_OPTIONS = {
+    "astrometry": frozenset({"path"}),
+    "photometry": frozenset({"frames", "filter_type", "use_astrometry_seed", "max_workers"}),
+    "spectroscopy": frozenset({"path", "limit"}),
+    "asteroids": frozenset({"moving_object_config"}),
+}
+"""The options each stage accepts in its options dictionary."""
+
+_PIPELINE_TYPES = {
+    "astrometry": "astrometry",
+    "photometry": "photometry",
+    "spectroscopy": "spectroscopy",
+    "asteroids": "asteroid_detection",
+}
+
+
+def run_target_stages(
+    target: Target,
+    stages: tuple[str, ...],
+    stage_options: dict[str, dict[str, Any]],
+    catalog_access: Any,
+    register_job: bool,
+) -> ProcessTargetResult:
+    """Run the chosen analysis stages for one target, always in the same order.
+
+    The order is astrometry, photometry, spectroscopy, asteroids, whatever
+    order ``stages`` lists them in. Spectroscopy is skipped, with a
+    ``{"status": "skipped", ...}`` entry, when the target has no spectral
+    data, and otherwise receives photometry's result.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target to process. Each stage records its results on it.
+    stages : `tuple` [`str`, ...]
+        The stages to run, from `ANALYSIS_STAGES`.
+    stage_options : `dict` [`str`, `dict`]
+        Each stage's own options (see `STAGE_OPTIONS`), keyed by stage.
+    catalog_access : `AbstractCatalogAccess`
+        The star catalog the stages read and write.
+    register_job : `bool`
+        Whether each stage's run shows up in the job list.
+
+    Returns
+    -------
+    result : `ProcessTargetResult`
+        One result per stage that ran, keyed by stage name.
+    """
+    result = ProcessTargetResult(target_id=target.id)
+    for stage in ANALYSIS_STAGES:
+        if stage not in stages:
+            continue
+        options = dict(stage_options.get(stage) or {})
+        if stage == "spectroscopy":
+            has_spectral_input = bool(target.spectral_stacking.stacked_image) or any(
+                frame_is_spectral(frame) for frame in target.frames or []
+            )
+            if not has_spectral_input:
+                result.results[stage] = {"status": "skipped", "reason": "target has no spectral data"}
+                result.stages_run.append(stage)
+                continue
+            options["photometry_result"] = result.results.get("photometry")
+        result.results[stage] = analyze_target(
+            target,
+            pipeline_type=_PIPELINE_TYPES[stage],
+            catalog_access=catalog_access,
+            register_job=register_job,
+            **options,
+        )
+        result.stages_run.append(stage)
+    return result
 
 
 # -- Running every stage for one target, start to finish ---------------

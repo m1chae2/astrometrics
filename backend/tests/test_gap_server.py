@@ -24,8 +24,8 @@ from backend.mcp.tool_registry import ToolRegistry
 
 VALID_REPORT = {
     "tier": "astrometricslib",
-    "goal": "Compare two stacks with a different rejection threshold",
-    "tools_tried": [{"tool": "processing_run_stacking", "result": "Unknown tool"}],
+    "goal": "Compare the stack quality at a different rejection threshold",
+    "tools_tried": [{"tool": "processing_trial_stack", "result": "Unknown tool"}],
     "why_insufficient": "No tool runs a stack without writing to the live stacks.",
 }
 
@@ -50,13 +50,13 @@ def test_a_valid_report_is_saved_and_listed(store: GapStore) -> None:
     assert len(gaps) == 1
     assert gaps[0]["goal"] == VALID_REPORT["goal"]
     assert gaps[0]["status"] == "open"
-    assert gaps[0]["tools_tried"][0]["tool"] == "processing_run_stacking"
+    assert gaps[0]["tools_tried"][0]["tool"] == "processing_trial_stack"
 
 
 def test_a_repeated_report_is_counted_not_copied(store: GapStore) -> None:
     """The same goal, with other case and punctuation, counts as a repeat."""
     store.add_gap(validate_report(VALID_REPORT))
-    repeat = dict(VALID_REPORT, goal="compare two stacks, with a different rejection threshold!")
+    repeat = dict(VALID_REPORT, goal="compare the stack quality, at a different rejection threshold!")
     saved = store.add_gap(validate_report(repeat))
     assert saved["duplicate"] is True
     assert saved["occurrences"] == 2
@@ -141,7 +141,7 @@ def test_review_command_lists_shows_and_sets_status(
     monkeypatch.setenv("ASTROMETRICS_GAP_DATABASE", str(tmp_path / "review.db"))
     GapStore().add_gap(validate_report(VALID_REPORT))
     assert review.main(["list"]) == 0
-    assert "Compare two stacks" in capsys.readouterr().out
+    assert "Compare the stack quality" in capsys.readouterr().out
     assert review.main(["show", "1"]) == 0
     assert "Why they fell short" in capsys.readouterr().out
     assert review.main(["set-status", "1", "accepted", "--note", "Design together"]) == 0
@@ -158,7 +158,7 @@ def test_brief_lists_overlapping_tools_and_the_steps(
     assert review.main(["brief", "1"]) == 0
     output = capsys.readouterr().out
     assert "Existing tools that may overlap" in output
-    assert "diagnostics_compare_stacks" in output
+    assert "diagnostics_stack_quality" in output
     assert "Steps:" in output
     assert "9. Update the README" in output
     assert review.main(["brief", "99"]) == 1

@@ -266,3 +266,129 @@ def describe_target(target: Any, include_frames: int = 0) -> dict[str, Any]:
             for frame in newest
         ]
     return record
+
+
+def angular_separation_deg(ra1: float, dec1: float, ra2: float, dec2: float) -> float:
+    """Give the angle between two sky positions, in degrees.
+
+    Parameters
+    ----------
+    ra1, dec1, ra2, dec2 : `float`
+        The two positions, in degrees.
+
+    Returns
+    -------
+    separation : `float`
+        The great-circle angle between them.
+    """
+    import math
+
+    first, second = math.radians(dec1), math.radians(dec2)
+    delta = math.radians(ra1 - ra2)
+    cosine = math.sin(first) * math.sin(second) + math.cos(first) * math.cos(second) * math.cos(delta)
+    return math.degrees(math.acos(max(-1.0, min(1.0, cosine))))
+
+
+def count_targets_per_night(targets: list[Any]) -> dict[str, int]:
+    """Count, for each observing night, how many targets have frames from it.
+
+    Parameters
+    ----------
+    targets : `list` [`Target`]
+        The targets to count.
+
+    Returns
+    -------
+    nights : `dict` [`str`, `int`]
+        Night id (``YYYY-MM-DD``, the evening's date) to target count, in
+        date order.
+    """
+    counts: dict[str, int] = {}
+    for target in targets:
+        timestamps = [frame.timestamp for frame in target.frames if frame.timestamp]
+        for night in {observing_night_id(stamp) for stamp in timestamps}:
+            counts[night] = counts.get(night, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def find_target_loosely(targets: list[Any], target_id: str) -> Any | None:
+    """Find one target by id, exactly first, then as part of an id.
+
+    Parameters
+    ----------
+    targets : `list` [`Target`]
+        The targets to search.
+    target_id : `str`
+        The id, matched ignoring case.
+
+    Returns
+    -------
+    target : `Target` or `None`
+        The first match, or `None`.
+    """
+    wanted = target_id.lower()
+    exact = next((item for item in targets if item.id.lower() == wanted), None)
+    return exact or next((item for item in targets if wanted in item.id.lower()), None)
+
+
+def summary_rows(
+    targets: list[Any],
+    target_id: str | None,
+    text: str | None,
+    camera_id: str | None,
+    region: tuple[float, float, float] | None,
+    include_empty: bool,
+) -> list[dict[str, Any]]:
+    """Build the summary rows of the targets that pass every filter.
+
+    Parameters
+    ----------
+    targets : `list` [`Target`]
+        The targets to describe.
+    target_id : `str` or `None`
+        Keep targets whose id contains this text, ignoring case.
+    text : `str` or `None`
+        Keep targets whose id or common name contains this text.
+    camera_id : `str` or `None`
+        Keep targets with light frames from a camera whose name contains
+        this text.
+    region : `tuple` [`float`, `float`, `float`] or `None`
+        Right ascension, declination and radius of a circle on the sky, in
+        degrees. Rows inside it get ``separation_deg``.
+    include_empty : `bool`
+        Also keep targets with no frames.
+
+    Returns
+    -------
+    rows : `list` [`dict`]
+        One `summarize_target` row per kept target, in catalog order.
+    """
+    from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
+
+    rows = []
+    for target in targets:
+        if target_id and target_id.lower() not in target.id.lower():
+            continue
+        if text and text.lower() not in f"{target.id} {target.common_name}".lower():
+            continue
+        if not include_empty and not target.frames:
+            continue
+        row = summarize_target(target)
+        if camera_id and not any(camera_id.lower() in name.lower() for name in row["cameras"]):
+            continue
+        if region is not None:
+            ra_deg, dec_deg, radius_deg = region
+            try:
+                separation = angular_separation_deg(
+                    ra_deg,
+                    dec_deg,
+                    parse_coordinate_string(target.ra, True),
+                    parse_coordinate_string(target.dec, False),
+                )
+            except TypeError, ValueError:
+                continue
+            if separation > radius_deg:
+                continue
+            row["separation_deg"] = round(separation, 3)
+        rows.append(row)
+    return rows

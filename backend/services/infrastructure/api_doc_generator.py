@@ -208,7 +208,7 @@ def generate_api_index() -> str:
         "",
         "# Plot stacked light frame or spectroscopy if available",
         "if target.stacking.stacked_image:",
-        "    astrometrics.visualization.plot_astrometry(target.stacking.stacked_image)",
+        '    figure = astrometrics.visualization.plot("astrometry", target)',
         "```",
         "",
         "---",
@@ -260,7 +260,6 @@ def generate_astrometricslib_docs() -> str:
         "- [Stellar Catalog: `StellarCatalog`](#class-stellarcatalog)",
         "- [Processing Pipelines: `ProcessingPipelines`](#class-processingpipelines)",
         "- [Visualization: `Visualization`](#class-visualization)",
-        "- [Moving Object Recovery: `MovingObjectRecovery`](#class-movingobjectrecovery)",
         "- [Calibration Catalog: `CalibrationCatalog`](#class-calibrationcatalog)",
         "- [Quality Diagnostics: `QualityDiagnostics`](#class-qualitydiagnostics)",
         "- [Utility Functions](#utility-functions)",
@@ -335,20 +334,7 @@ def generate_astrometricslib_docs() -> str:
         )
         sections.append("\n---\n")
 
-    # 6. MovingObjectRecovery
-    sections.append('<a id="class-movingobjectrecovery"></a>')
-    moving_cls = getattr(astrometricslib, "MovingObjectRecovery", None)
-    if moving_cls:
-        sections.append(
-            format_class_markdown(
-                moving_cls,
-                display_title="MovingObjectRecovery",
-                console_alias="astrometrics.moving_objects",
-            )
-        )
-        sections.append("\n---\n")
-
-    # 7. CalibrationCatalog & QualityDiagnostics
+    # 6. CalibrationCatalog & QualityDiagnostics
     sections.append('<a id="class-calibrationcatalog"></a>')
     calib_cls = getattr(astrometricslib, "CalibrationCatalog", None)
     if calib_cls:
@@ -371,7 +357,7 @@ def generate_astrometricslib_docs() -> str:
         )
         sections.append("\n---\n")
 
-    # 8. Utility Functions
+    # 7. Utility Functions
     sections.append('<a id="utility-functions"></a>')
     sections.append("## Utility Functions\n")
     utility_names = [
@@ -380,9 +366,6 @@ def generate_astrometricslib_docs() -> str:
         "derive_target_sessions",
         "get_configuration",
         "parse_coordinate_string",
-        "resolve_worker_counts",
-        "run_parallel_batch",
-        "run_siril_stack",
     ]
     for u_name in utility_names:
         func = getattr(astrometricslib, u_name, None)
@@ -390,7 +373,7 @@ def generate_astrometricslib_docs() -> str:
             sections.append(format_method_markdown(u_name, func))
             sections.append("\n---\n")
 
-    # 9. Core Data Models
+    # 8. Core Data Models
     sections.append('<a id="core-data-models"></a>')
     sections.append("## Core Data Models\n")
     sections.append(

@@ -49,11 +49,13 @@ from backend.mcp.tool_inventory import (
         ("observatory_history_query", "compute"),
         ("observatory_mount_compute_pointing_correction", "compute"),
         ("observatory_safety_save_rule_set", "change-data"),
-        ("processing_run_stacking", "change-data"),
-        ("star_find_by_position", "observe"),
+        ("processing_process_target", "change-data"),
+        ("processing_stack", "process"),
+        ("star_get", "observe"),
         ("star_find_or_create_by_position", "change-data"),
-        ("moving_object_detect_asteroids", "compute"),
-        ("visualization_plot_photometry", "compute"),
+        ("calibration_query", "observe"),
+        ("diagnostics_stack_quality", "compute"),
+        ("visualization_plot", "compute"),
         ("electron_run_python", "unrestricted"),
         ("backend_call_rpc", "unrestricted"),
         ("ui_run_tests", "develop"),
@@ -182,13 +184,12 @@ def test_collect_inventory_covers_all_four_servers() -> None:
 @pytest.mark.parametrize(
     ("name", "tool_class", "expected_category"),
     [
-        ("calibration_stats", "observe", "calibration"),
-        ("target_get_calibration_frame_statistics", "observe", "calibration"),
+        ("calibration_query", "observe", "calibration"),
         ("target_get", "observe", "targets"),
-        ("processing_scan_target_directory", "change-data", "targets"),
-        ("star_get_object", "observe", "stars"),
-        ("processing_run_stacking", "change-data", "image-processing"),
-        ("target_process_all_targets", "change-data", "image-processing"),
+        ("target_reindex_frames", "change-data", "targets"),
+        ("star_get", "observe", "stars"),
+        ("processing_stack", "process", "image-processing"),
+        ("processing_process_target", "change-data", "image-processing"),
         ("planning_get_visibility", "observe", "planning-sessions"),
         ("execution_abort_session", "change-data", "planning-sessions"),
         ("observatory_mount_slew", "actuate", "observatory-control"),
@@ -219,9 +220,9 @@ def test_every_served_tool_gets_a_category_and_disposition() -> None:
 
 def test_apply_decisions_merges_into_the_proposed_tool() -> None:
     """A replaced tool gets the new tool's category and merged status."""
-    record = ToolRecord("srv", "star_get_object", "", tool_class="observe")
+    record = ToolRecord("srv", "target_list", "", tool_class="observe")
     apply_decisions(record, replaced_by_lookup())
-    assert (record.category, record.disposition, record.merge_into) == ("stars", "merged", "star_query")
+    assert (record.category, record.disposition, record.merge_into) == ("targets", "merged", "target_query")
 
 
 def test_apply_decisions_corrects_the_class_and_keeps_the_note() -> None:

@@ -19,15 +19,15 @@
     "calibration_get": {
       "tool_class": "observe",
       "category": "calibration",
-      "disposition": "merge",
-      "merge_into": "calibration_status",
+      "disposition": "merged",
+      "merge_into": "calibration_query",
       "interim_block": ""
     },
-    "calibration_load": {
+    "calibration_query": {
       "tool_class": "observe",
       "category": "calibration",
-      "disposition": "merge",
-      "merge_into": "calibration_status",
+      "disposition": "keep",
+      "merge_into": "",
       "interim_block": ""
     },
     "calibration_refresh": {
@@ -44,27 +44,6 @@
       "merge_into": "",
       "interim_block": ""
     },
-    "calibration_stats": {
-      "tool_class": "observe",
-      "category": "calibration",
-      "disposition": "merge",
-      "merge_into": "calibration_status",
-      "interim_block": ""
-    },
-    "diagnostics_check_raw_frames": {
-      "tool_class": "observe",
-      "category": "image-processing",
-      "disposition": "merged",
-      "merge_into": "diagnostics_frame_quality",
-      "interim_block": ""
-    },
-    "diagnostics_compare_stacks": {
-      "tool_class": "compute",
-      "category": "image-processing",
-      "disposition": "merge",
-      "merge_into": "diagnostics_stack_quality",
-      "interim_block": ""
-    },
     "diagnostics_flag_value_outliers": {
       "tool_class": "compute",
       "category": "image-processing",
@@ -79,35 +58,14 @@
       "merge_into": "",
       "interim_block": ""
     },
-    "diagnostics_measure_stack_fwhm": {
-      "tool_class": "compute",
-      "category": "image-processing",
-      "disposition": "merge",
-      "merge_into": "diagnostics_stack_quality",
-      "interim_block": ""
-    },
-    "diagnostics_measure_stack_rejected_fraction": {
-      "tool_class": "compute",
-      "category": "image-processing",
-      "disposition": "merge",
-      "merge_into": "diagnostics_stack_quality",
-      "interim_block": ""
-    },
-    "diagnostics_parse_stack_registration_seq": {
-      "tool_class": "observe",
-      "category": "image-processing",
-      "disposition": "merge",
-      "merge_into": "diagnostics_stack_quality",
-      "interim_block": ""
-    },
-    "diagnostics_parse_stack_zero_order_star": {
-      "tool_class": "observe",
-      "category": "image-processing",
-      "disposition": "merge",
-      "merge_into": "diagnostics_stack_quality",
-      "interim_block": ""
-    },
     "diagnostics_spectral_frame_check": {
+      "tool_class": "compute",
+      "category": "image-processing",
+      "disposition": "keep",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "diagnostics_stack_quality": {
       "tool_class": "compute",
       "category": "image-processing",
       "disposition": "keep",
@@ -119,13 +77,6 @@
       "category": "jobs-history",
       "disposition": "keep",
       "merge_into": "",
-      "interim_block": ""
-    },
-    "moving_object_detect_asteroids": {
-      "tool_class": "change-data",
-      "category": "image-processing",
-      "disposition": "merge",
-      "merge_into": "pipeline_run",
       "interim_block": ""
     },
     "processing_acquire_analysis_slot": {
@@ -142,39 +93,11 @@
       "merge_into": "",
       "interim_block": ""
     },
-    "processing_compare_with_previous_stack": {
-      "tool_class": "compute",
-      "category": "image-processing",
-      "disposition": "merge",
-      "merge_into": "diagnostics_stack_quality",
-      "interim_block": ""
-    },
-    "processing_create_frame_record": {
-      "tool_class": "observe",
-      "category": "targets",
-      "disposition": "merge",
-      "merge_into": "target_index_frames",
-      "interim_block": ""
-    },
     "processing_discard_previous_stack": {
       "tool_class": "change-data",
       "category": "image-processing",
       "disposition": "withhold",
       "merge_into": "",
-      "interim_block": ""
-    },
-    "processing_list_excluded_frames": {
-      "tool_class": "observe",
-      "category": "image-processing",
-      "disposition": "merge",
-      "merge_into": "excluded_frames",
-      "interim_block": ""
-    },
-    "processing_preview_quarantine": {
-      "tool_class": "observe",
-      "category": "image-processing",
-      "disposition": "merged",
-      "merge_into": "diagnostics_frame_quality",
       "interim_block": ""
     },
     "processing_process_target": {
@@ -184,32 +107,18 @@
       "merge_into": "pipeline_run",
       "interim_block": ""
     },
+    "processing_remake_preview": {
+      "tool_class": "process",
+      "category": "image-processing",
+      "disposition": "keep",
+      "merge_into": "",
+      "interim_block": ""
+    },
     "processing_restore_excluded_frames": {
       "tool_class": "change-data",
       "category": "image-processing",
       "disposition": "merge",
       "merge_into": "excluded_frames",
-      "interim_block": ""
-    },
-    "processing_run_astrometry": {
-      "tool_class": "change-data",
-      "category": "image-processing",
-      "disposition": "merge",
-      "merge_into": "pipeline_run",
-      "interim_block": ""
-    },
-    "processing_run_photometry": {
-      "tool_class": "change-data",
-      "category": "image-processing",
-      "disposition": "merge",
-      "merge_into": "pipeline_run",
-      "interim_block": ""
-    },
-    "processing_run_spectroscopy": {
-      "tool_class": "change-data",
-      "category": "image-processing",
-      "disposition": "merge",
-      "merge_into": "pipeline_run",
       "interim_block": ""
     },
     "processing_run_spectroscopy_by_session": {
@@ -219,18 +128,11 @@
       "merge_into": "",
       "interim_block": ""
     },
-    "processing_run_stacking": {
-      "tool_class": "change-data",
+    "processing_stack": {
+      "tool_class": "process",
       "category": "image-processing",
-      "disposition": "withhold",
+      "disposition": "keep",
       "merge_into": "",
-      "interim_block": ""
-    },
-    "processing_scan_target_directory": {
-      "tool_class": "change-data",
-      "category": "targets",
-      "disposition": "merge",
-      "merge_into": "target_index_frames",
       "interim_block": ""
     },
     "processing_stack_summary": {
@@ -268,34 +170,6 @@
       "merge_into": "",
       "interim_block": ""
     },
-    "star_existing_ids": {
-      "tool_class": "observe",
-      "category": "stars",
-      "disposition": "merged",
-      "merge_into": "star_query",
-      "interim_block": ""
-    },
-    "star_find_all_by_id_or_name": {
-      "tool_class": "observe",
-      "category": "stars",
-      "disposition": "merged",
-      "merge_into": "star_query",
-      "interim_block": ""
-    },
-    "star_find_by_id_or_name": {
-      "tool_class": "observe",
-      "category": "stars",
-      "disposition": "merged",
-      "merge_into": "star_query",
-      "interim_block": ""
-    },
-    "star_find_by_position": {
-      "tool_class": "observe",
-      "category": "stars",
-      "disposition": "merged",
-      "merge_into": "star_query",
-      "interim_block": ""
-    },
     "star_find_or_create_by_position": {
       "tool_class": "change-data",
       "category": "stars",
@@ -303,74 +177,11 @@
       "merge_into": "",
       "interim_block": ""
     },
-    "star_get_audit": {
+    "star_get": {
       "tool_class": "observe",
       "category": "stars",
-      "disposition": "merged",
-      "merge_into": "star_query",
-      "interim_block": ""
-    },
-    "star_get_object": {
-      "tool_class": "observe",
-      "category": "stars",
-      "disposition": "merged",
-      "merge_into": "star_query",
-      "interim_block": ""
-    },
-    "star_list_object_ids": {
-      "tool_class": "observe",
-      "category": "stars",
-      "disposition": "merged",
-      "merge_into": "star_query",
-      "interim_block": ""
-    },
-    "star_list_object_summaries": {
-      "tool_class": "observe",
-      "category": "stars",
-      "disposition": "merged",
-      "merge_into": "star_query",
-      "interim_block": ""
-    },
-    "star_list_object_summaries_in_region": {
-      "tool_class": "observe",
-      "category": "stars",
-      "disposition": "merged",
-      "merge_into": "star_query",
-      "interim_block": ""
-    },
-    "star_list_objects": {
-      "tool_class": "observe",
-      "category": "stars",
-      "disposition": "merged",
-      "merge_into": "star_query",
-      "interim_block": ""
-    },
-    "star_list_objects_by_ids": {
-      "tool_class": "observe",
-      "category": "stars",
-      "disposition": "merged",
-      "merge_into": "star_query",
-      "interim_block": ""
-    },
-    "star_list_objects_for_target": {
-      "tool_class": "observe",
-      "category": "stars",
-      "disposition": "merged",
-      "merge_into": "star_query",
-      "interim_block": ""
-    },
-    "star_list_objects_in_region": {
-      "tool_class": "observe",
-      "category": "stars",
-      "disposition": "merged",
-      "merge_into": "star_query",
-      "interim_block": ""
-    },
-    "star_list_spectrum_object_ids": {
-      "tool_class": "observe",
-      "category": "stars",
-      "disposition": "merged",
-      "merge_into": "star_query",
+      "disposition": "keep",
+      "merge_into": "",
       "interim_block": ""
     },
     "star_query": {
@@ -384,13 +195,6 @@
       "tool_class": "change-data",
       "category": "stars",
       "disposition": "withhold",
-      "merge_into": "",
-      "interim_block": ""
-    },
-    "star_spectral_class_counts": {
-      "tool_class": "unclassified",
-      "category": "stars",
-      "disposition": "undecided",
       "merge_into": "",
       "interim_block": ""
     },
@@ -415,20 +219,6 @@
       "merge_into": "",
       "interim_block": ""
     },
-    "target_add_frame": {
-      "tool_class": "change-data",
-      "category": "targets",
-      "disposition": "merge",
-      "merge_into": "target_index_frames",
-      "interim_block": ""
-    },
-    "target_camera_index": {
-      "tool_class": "observe",
-      "category": "targets",
-      "disposition": "merged",
-      "merge_into": "target_query",
-      "interim_block": ""
-    },
     "target_create": {
       "tool_class": "change-data",
       "category": "targets",
@@ -441,13 +231,6 @@
       "category": "targets",
       "disposition": "merged",
       "merge_into": "target_query",
-      "interim_block": ""
-    },
-    "target_get_calibration_frame_statistics": {
-      "tool_class": "observe",
-      "category": "calibration",
-      "disposition": "merge",
-      "merge_into": "calibration_status",
       "interim_block": ""
     },
     "target_get_frame": {
@@ -478,27 +261,6 @@
       "merge_into": "target_query",
       "interim_block": ""
     },
-    "target_list_camera_names": {
-      "tool_class": "observe",
-      "category": "targets",
-      "disposition": "merged",
-      "merge_into": "target_query",
-      "interim_block": ""
-    },
-    "target_measure_frame_input_quality": {
-      "tool_class": "change-data",
-      "category": "image-processing",
-      "disposition": "merged",
-      "merge_into": "diagnostics_frame_quality",
-      "interim_block": ""
-    },
-    "target_process_all_targets": {
-      "tool_class": "change-data",
-      "category": "image-processing",
-      "disposition": "merge",
-      "merge_into": "pipeline_run_batch",
-      "interim_block": ""
-    },
     "target_query": {
       "tool_class": "observe",
       "category": "targets",
@@ -520,24 +282,10 @@
       "merge_into": "target_index_frames",
       "interim_block": ""
     },
-    "target_remake_preview": {
-      "tool_class": "process",
-      "category": "targets",
-      "disposition": "keep",
-      "merge_into": "",
-      "interim_block": ""
-    },
     "target_save": {
       "tool_class": "change-data",
       "category": "targets",
       "disposition": "withhold",
-      "merge_into": "",
-      "interim_block": ""
-    },
-    "target_stack": {
-      "tool_class": "process",
-      "category": "targets",
-      "disposition": "keep",
       "merge_into": "",
       "interim_block": ""
     },
@@ -548,20 +296,6 @@
       "merge_into": "",
       "interim_block": ""
     },
-    "visualization_convert_fits_to_png": {
-      "tool_class": "compute",
-      "category": "image-processing",
-      "disposition": "merged",
-      "merge_into": "visualization_render_fits",
-      "interim_block": ""
-    },
-    "visualization_convert_fits_to_png_with_stats": {
-      "tool_class": "compute",
-      "category": "image-processing",
-      "disposition": "merged",
-      "merge_into": "visualization_render_fits",
-      "interim_block": ""
-    },
     "visualization_get_last_captured_image": {
       "tool_class": "observe",
       "category": "image-processing",
@@ -569,60 +303,11 @@
       "merge_into": "",
       "interim_block": "Returns the picture as base64 text, which the 40,000 character reply limit cuts in half. Use visualization_render_fits with a path, which returns a real image."
     },
-    "visualization_get_light_frame_data": {
-      "tool_class": "observe",
-      "category": "image-processing",
-      "disposition": "merged",
-      "merge_into": "visualization_render_fits",
-      "interim_block": ""
-    },
-    "visualization_plot_asteroid_detection": {
+    "visualization_plot": {
       "tool_class": "compute",
       "category": "image-processing",
-      "disposition": "merge",
-      "merge_into": "visualization_plot",
-      "interim_block": ""
-    },
-    "visualization_plot_astrometry": {
-      "tool_class": "compute",
-      "category": "image-processing",
-      "disposition": "merge",
-      "merge_into": "visualization_plot",
-      "interim_block": ""
-    },
-    "visualization_plot_focus_vs_temperature": {
-      "tool_class": "compute",
-      "category": "image-processing",
-      "disposition": "merge",
-      "merge_into": "visualization_plot",
-      "interim_block": ""
-    },
-    "visualization_plot_photometry": {
-      "tool_class": "compute",
-      "category": "image-processing",
-      "disposition": "merge",
-      "merge_into": "visualization_plot",
-      "interim_block": ""
-    },
-    "visualization_plot_spectroscopy": {
-      "tool_class": "compute",
-      "category": "image-processing",
-      "disposition": "merge",
-      "merge_into": "visualization_plot",
-      "interim_block": ""
-    },
-    "visualization_plot_star_dashboard": {
-      "tool_class": "compute",
-      "category": "image-processing",
-      "disposition": "merge",
-      "merge_into": "visualization_plot",
-      "interim_block": ""
-    },
-    "visualization_plot_target_dashboard": {
-      "tool_class": "compute",
-      "category": "image-processing",
-      "disposition": "merge",
-      "merge_into": "visualization_plot",
+      "disposition": "keep",
+      "merge_into": "",
       "interim_block": ""
     },
     "visualization_render_fits": {

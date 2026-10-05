@@ -292,7 +292,7 @@ def _stored_star_radius_px(astrometrics: Any, star_id: str) -> float | None:
         `StellarObject.radius_px`, or `None` if the star or radius is missing.
     """
     try:
-        star = astrometrics.stars.get_object(star_id)
+        star = astrometrics.stars.get(star_id)
     except Exception as err:
         logger.debug("Could not load %s for its radius: %s", star_id, err)
         return None
@@ -382,7 +382,7 @@ class StellarService:
                 if cache_is_current and cache_is_within_fallback_window:
                     return cached_summaries
 
-        summaries = self.astrometrics.stars.list_object_summaries(limit=None, apply_default_limit=False)
+        summaries = self.astrometrics.stars.query(limit=None).stars or []
 
         with self._catalog_summary_cache_lock:
             self._catalog_summary_cache = (now, current_version, summaries)
@@ -426,11 +426,12 @@ class StellarService:
             getattr(self.astrometrics, "stars", None), Mock
         )
         if is_mock:
-            return self.astrometrics.stars.list_objects()
+            return self.astrometrics.stars.query(detail="objects", limit=None).objects or []
 
-        if target_id:
-            return self.astrometrics.stars.list_objects_for_target(target_id)
-        return self.astrometrics.stars.list_objects()
+        return (
+            self.astrometrics.stars.query(target_id=target_id or None, detail="objects", limit=None).objects
+            or []
+        )
 
     def get_displayable_stellar_objects(self, target_id: str | None = None) -> list[StellarObject]:
         """Stellar objects suitable for a user-facing catalog listing.
@@ -882,12 +883,15 @@ class StellarService:
         needs_full_scan = bool(target_id or search or filter_type or (offset and offset > 0))
         effective_limit = None if needs_full_scan else limit
         # A search/filter/paginated request must see every row before its
-        # own in-memory filtering below runs, or a real match past
-        # DEFAULT_UNFILTERED_SUMMARY_LIMIT would be silently dropped
-        # before this function ever got a chance to check it.
-        summaries = self.astrometrics.stars.list_object_summaries(
-            target_id, effective_limit, apply_default_limit=not needs_full_scan
-        )
+        # own in-memory filtering below runs, or a real match past the
+        # query's row cap would be silently dropped before this function
+        # ever got a chance to check it. A plain first page asks for that
+        # page only; the query caps it at 500 rows.
+        summaries = (
+            self.astrometrics.stars.query(target_id=target_id or None, limit=effective_limit or 500).stars
+            if not needs_full_scan
+            else self.astrometrics.stars.query(target_id=target_id or None, limit=None).stars
+        ) or []
 
         search_needle = search.strip().lower() if search and search.strip() else None
 
@@ -1051,7 +1055,7 @@ class StellarService:
             and not _is_per_frame_photometry_detection(str(summary.get("id") or ""))
         ]
 
-        stars = self.astrometrics.stars.list_objects_by_ids(matching_ids)
+        stars = self.astrometrics.stars.query(ids=matching_ids, detail="objects", limit=None).objects or []
 
         def match_rms(star: StellarObject) -> float | None:
             return star.spectroscopy.self_determined_spectral_type_rms if star.spectroscopy else None
@@ -1101,7 +1105,7 @@ class StellarService:
         result : `StellarObject` or `None`
             The matching stellar object, or `None` if not found.
         """
-        return self.astrometrics.stars.get_object(object_id)
+        return self.astrometrics.stars.get(object_id)
 
     def get_object_fuzzy(self, search_term: str) -> StellarObject | None:
         """Retrieve a stellar object by ID or name.
@@ -1115,7 +1119,7 @@ class StellarService:
 
         REQ: BKD-7.2
         """
-        return self.astrometrics.stars.get_object(search_term)
+        return self.astrometrics.stars.get(search_term)
 
     def get_object_fuzzy_by_id(
         self, object_id: str | None = None, search_term: str | None = None
@@ -1174,7 +1178,7 @@ class StellarService:
         result : `bool`
             `True` if the object was deleted, `False` otherwise.
         """
-        existing = self.astrometrics.stars.get_object(object_id)
+        existing = self.astrometrics.stars.get(object_id)
         if existing is not None:
             archive_record_before_delete(
                 self.config.get_library_path(), "stellar_object", existing.id, existing.serialize()
@@ -1199,7 +1203,7 @@ class StellarService:
         result : `list` of `str`
             IDs of objects with processed spectrum data.
         """
-        return self.astrometrics.stars.list_spectrum_object_ids()
+        return self.astrometrics.stars.query(has_spectra=True, detail="ids", limit=None).ids or []
 
     def find_or_create_by_position(
         self,
@@ -1239,7 +1243,7 @@ class StellarService:
         result : `dict`
             Statistical summary of the stellar library.
         """
-        return self.astrometrics.stars.get_audit()
+        return self.astrometrics.stars.query(detail="stats").stats
 
     def get_sources(
         self,
@@ -1298,7 +1302,12 @@ class StellarService:
         # are checked with a query for just the ids returned above; they
         # used to be collected by loading every star in the library.
         local_star_ids = (
-            self.astrometrics.stars.existing_ids([o.id for o in objects if isinstance(o, StellarObject)])
+            set(
+                self.astrometrics.stars.query(
+                    ids=[o.id for o in objects if isinstance(o, StellarObject)], detail="exists", limit=None
+                ).found
+                or []
+            )
             if include_catalog
             else None
         )

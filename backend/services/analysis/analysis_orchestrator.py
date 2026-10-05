@@ -8,7 +8,7 @@ from typing import Any
 
 from astropy.io import fits
 
-from astrometricslib import FilterType, resolve_worker_counts
+from astrometricslib import FilterType
 from backend.services.infrastructure.base_service import BaseBackgroundService
 
 # REQ: IMG-4: Scientific Analysis Pipeline
@@ -237,8 +237,6 @@ class AnalysisOrchestrator(BaseBackgroundService):
         """
         job_logger.info(f"[{target_id}] Background analysis worker started for {target_id} (Job: {job_id})")
 
-        from astrometricslib import AstrometryPipeline
-
         paths = []
         if isinstance(image_files, list):
             for item in image_files:
@@ -280,9 +278,9 @@ class AnalysisOrchestrator(BaseBackgroundService):
         if not paths and type != "photometry":
             return {"status": "error", "message": "No paths provided for analysis"}
 
-        pipeline = getattr(self.astrometrics, "image_pipeline", None) or AstrometryPipeline(
-            self._config_service
-        )
+        # Only the test double of `Astrometrics` carries an image pipeline;
+        # the real library runs its own inside `process_target`.
+        pipeline = getattr(self.astrometrics, "image_pipeline", None)
 
         target = self._target_service.get_targets(target_id) if self._target_service else None
 
@@ -393,7 +391,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
         session's stars once (reusing an existing FITS-header WCS when
         present), and extracts spectra for those same identified stars
         from every frame in that session -- see
-        `Astrometrics.processing.run_spectroscopy_by_session`.
+        `ProcessingPipelines.run_spectroscopy_by_session`.
         Builds `target.quality.spectroscopy` here, in this
         (parent) process, from the aggregated per-frame results:
         earlier, each frame worker built its own quality summary
@@ -460,12 +458,12 @@ class AnalysisOrchestrator(BaseBackgroundService):
         for master_path in master_paths:
             log.info(f"[{target_id}] Analyzing the master stacked spectral image: {master_path}")
             with self.astrometrics.processing.acquire_analysis_slot():
-                master_result = self.astrometrics.processing.run_spectroscopy(
+                master_result = self.astrometrics.processing.process_target(
                     target,
-                    path=master_path,
-                    limit=MASTER_STACK_STAR_LIMIT,
-                    catalog_access=self.astrometrics.catalog_access,
-                )
+                    stages=["spectroscopy"],
+                    spectroscopy={"path": master_path, "limit": MASTER_STACK_STAR_LIMIT},
+                    register_job=False,
+                ).results["spectroscopy"]
             master_star_count = len((master_result or {}).get("stellar_objects") or [])
             results["starsProcessed"] += master_star_count
             results["spectraExtracted"] += master_star_count
@@ -545,39 +543,33 @@ class AnalysisOrchestrator(BaseBackgroundService):
         Returns
         -------
         result : `dict`
-            The photometry analysis result produced by
-            `astrometrics.processing.run_photometry`.
+            The photometry stage's result from
+            `ProcessingPipelines.process_target`.
         """
         log = logger or logging
-        log.info(f"[{target_id}] Running photometry analysis via astrometrics.processing.run_photometry")
+        log.info(f"[{target_id}] Running the photometry stage of processing.process_target")
 
         # Resolve the Target domain object
         target = self._target_service.get_targets(target_id)
         if not target:
             target = self._target_service.create_target(target_id)
 
-        worker_counts = resolve_worker_counts("1", self._config_service.get_photometry_workers())
-
         self._update_job_progress(job_id, target_id, 1, 2, filter_type=filter_type)
         try:
             with self.astrometrics.processing.acquire_analysis_slot():
-                res = self.astrometrics.processing.run_photometry(
+                # The worker count comes from the configured photometry
+                # workers. Each session's stars are identified against a
+                # real catalog (reusing an existing FITS-header WCS when
+                # present) instead of tracked as anonymous detections.
+                res = self.astrometrics.processing.process_target(
                     target,
-                    filter_type=filter_type,
-                    max_workers=worker_counts.inner_worker_count,
-                    # Identify each session's stars against a real
-                    # catalog (reusing an existing FITS-header WCS when
-                    # present) instead of tracking anonymous per-run
-                    # pixel detections -- see
-                    # session_identification.identify_session_stars.
-                    use_astrometry_seed=True,
+                    stages=["photometry"],
+                    photometry={"filter_type": filter_type, "use_astrometry_seed": True},
                     # This orchestrator already created and is tracking
-                    # its own ProcessingJob (job_id, above) for this
-                    # exact call, via _submit_job/job_wrapper -- without
-                    # this, analyze_target() would register a second,
-                    # redundant job for the same UI-triggered run.
+                    # its own job (job_id, above) for this exact call, via
+                    # _submit_job/job_wrapper, so the stage registers none.
                     register_job=False,
-                )
+                ).results["photometry"]
             self._update_job_progress(job_id, target_id, 2, 2, filter_type=filter_type)
 
             log.info(

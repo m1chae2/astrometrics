@@ -25,7 +25,7 @@ def test_astrometrics_target_access(tmp_path):  # ruff: ignore[missing-type-func
     config.update_config({"Image Library": {"path": str(library_path)}})
 
     try:
-        astrometrics = Astrometrics(app_config=config)
+        astrometrics = Astrometrics(config=config)
 
         # Verify initial state
         assert len(astrometrics.targets.list()) == 0
@@ -67,7 +67,7 @@ def test_astrometrics_keeps_no_copy_of_the_star_catalog(tmp_path, monkeypatch): 
 
         monkeypatch.setattr(CatalogAccess, "get", _counting_get)
 
-        astrometrics = Astrometrics(app_config=config)
+        astrometrics = Astrometrics(config=config)
 
         assert "stellar_catalog" not in dataset_types_read
         assert not hasattr(astrometrics, "stellar_objects")
@@ -91,7 +91,7 @@ def test_astrometry_pulls_solved_coordinates_when_unpopulated(tmp_path):  # ruff
     config.update_config({"Image Library": {"path": str(library_path)}})
 
     try:
-        astrometrics = Astrometrics(app_config=config)
+        astrometrics = Astrometrics(config=config)
         target = astrometrics.targets.create("TestTarget")
         # Ensure coordinates are unpopulated
         target.ra = "0h 0m 0s"

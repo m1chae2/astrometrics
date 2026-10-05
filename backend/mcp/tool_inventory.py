@@ -195,7 +195,7 @@ CLASSIFICATION_RULES = (
     # Writes to saved data.
     _rule(r"_save(_|$)", "change-data", "high", "Name says it saves."),
     _rule(
-        r"^target_(add|add_frame|create|reindex_frames|process_all_targets)$",
+        r"^target_(add|create|reindex_frames)$",
         "change-data",
         "high",
         "Adds or changes targets in the catalog.",
@@ -209,14 +209,13 @@ CLASSIFICATION_RULES = (
     _rule(r"^calibration_add$", "change-data", "high", "Adds calibration data."),
     _rule(r"^calibration_refresh$", "change-data", "medium", "Probably rebuilds stored calibration."),
     _rule(
-        r"^processing_(create_frame_record|discard_previous_stack|restore_excluded_frames"
-        r"|swap_with_previous_stack|process_target)$",
+        r"^processing_(discard_previous_stack|restore_excluded_frames|swap_with_previous_stack|process_target)$",
         "change-data",
         "high",
         "Changes frames or stacks on disk or in the database.",
     ),
     _rule(
-        r"^processing_run_(astrometry|photometry|spectroscopy|spectroscopy_by_session|stacking)$",
+        r"^processing_run_spectroscopy_by_session$",
         "change-data",
         "high",
         "Pipeline run that writes results to the live catalog or stacks.",
@@ -297,9 +296,6 @@ CLASSIFICATION_RULES = (
         "Returns a stored, derived or measured value.",
     ),
     _rule(
-        r"^diagnostics_check_raw_frames$", "observe", "medium", "Flags odd frames in a folder. Reads files."
-    ),
-    _rule(
         r"^observatory_history_query$",
         "compute",
         "high",
@@ -330,7 +326,7 @@ CLASSIFICATION_RULES = (
         "Lists the frame files on the telescope computer, the drive and the library. Changes nothing.",
     ),
     _rule(
-        r"^(target_stack|target_remake_preview)$",
+        r"^processing_(stack|remake_preview)$",
         "process",
         "high",
         "Stacks a target's chosen frames with the app's own stage, like the Stack button.",
@@ -373,16 +369,27 @@ CLASSIFICATION_RULES = (
         "high",
         "Reads the job history and lineage. The logs database is opened read-only.",
     ),
-    _rule(r"^calibration_load$", "observe", "medium", "Loads stored calibration into memory."),
     _rule(
-        r"^(observatory_safety_assess|processing_preview_quarantine)$",
+        r"^calibration_query$",
+        "observe",
+        "high",
+        "Reads calibration counts. refresh reloads the index into memory and writes nothing.",
+    ),
+    _rule(
+        r"^diagnostics_stack_quality$",
+        "compute",
+        "high",
+        "Measures a stack and compares it with another. Saves nothing.",
+    ),
+    _rule(
+        r"^observatory_safety_assess$",
         "observe",
         "medium",
         "Reports an assessment. Check it changes nothing.",
     ),
     # Calculations.
     _rule(
-        r"^(?:moving_object|observatory_[a-z]+|[a-z]+)_(analyze|compute|calculate|estimate|plan|plot|convert"
+        r"^(?:observatory_[a-z]+|[a-z]+)_(analyze|compute|calculate|estimate|plan|plot|convert"
         r"|detect|compare|measure|flag|resolve|assess)(_|$)",
         "compute",
         "high",

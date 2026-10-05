@@ -5,27 +5,33 @@ free functions in pipelines.shared. The underlying functions already
 have their own thorough tests, so these tests only check the wiring:
 that each method calls the right function with the right arguments and
 returns its result unchanged. The handful of methods with real branching
-logic of their own (get_header's ownership check, measure_frame_input_
-quality's conditional save, get_calibration_frame_statistics' grouped/
-flat split) get behavior tests instead.
+logic of their own (get_header's ownership check, reindex_frames' three
+forms) get behavior tests instead.
 """
 
 from unittest.mock import MagicMock
 
 import pytest
 
-from astrometricslib.api.processing import CalibrationCatalog
 from astrometricslib.api.targets import TargetCatalog
-from astrometricslib.models.target import Target
+from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
+from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared import frame_grouping, image_conversions, target_records
 from astrometricslib.pipelines.shared.quality import frame_statistics
 
 
 def _make_catalog() -> TargetCatalog:
+    """Build a catalog over a mock config and an empty mock storage.
+
+    Returns
+    -------
+    catalog : `TargetCatalog`
+        A catalog holding no targets.
+    """
     config = MagicMock()
     catalog_access = MagicMock()
     catalog_access.get.return_value = []
-    return TargetCatalog(config=config, catalog_access=catalog_access)
+    return TargetCatalog(config, catalog_access)
 
 
 def test_list_delegates_to_target_records(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
@@ -112,34 +118,58 @@ def test_add_does_not_duplicate_an_existing_target(monkeypatch):  # ruff: ignore
     assert catalog._targets == [existing]
 
 
-def test_add_frame_delegates_to_frame_grouping(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify all arguments are forwarded positionally and in order."""
+def test_reindex_frames_with_paths_adds_each_file_and_saves(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify each path reaches add_frame with the overrides, then a save."""
     catalog = _make_catalog()
     target = Target(id="M13")
-    mock = MagicMock(return_value="a frame record")
+    mock = MagicMock(side_effect=lambda t, path, *rest: FrameRecord(path=path))
     monkeypatch.setattr(frame_grouping, "add_frame", mock)
+    save_mock = MagicMock()
+    monkeypatch.setattr(catalog, "save", save_mock)
 
-    result = catalog.add_frame(target, "/frame.fits", role="DARK", filter_type="Ha", camera="ASI294")
+    report = catalog.reindex_frames(
+        target, paths=["/frame.fits"], role="DARK", filter_type="Ha", camera_id="ASI294"
+    )
 
-    assert result == "a frame record"
     mock.assert_called_once_with(target, "/frame.fits", "DARK", "Ha", "ASI294")
+    assert report.added_paths == ["/frame.fits"]
+    assert report.targets[0].target_id == "M13"
+    save_mock.assert_called_once()
 
 
-def test_reindex_frames_delegates_with_keyword_arguments(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify all options are forwarded as keyword arguments."""
+def test_reindex_frames_of_one_target_delegates_with_keyword_arguments(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify the scan options are forwarded as keyword arguments."""
     catalog = _make_catalog()
+    monkeypatch.setattr(catalog, "save", MagicMock())
     target = Target(id="M13")
     mock = MagicMock()
     monkeypatch.setattr(target_records, "reindex_frames", mock)
-    other_catalog_access = MagicMock()
 
-    catalog.reindex_frames(
-        target, prune_missing=True, catalog_access=other_catalog_access, refresh_headers=True
-    )
+    catalog.reindex_frames(target, prune_missing=True, refresh_headers=True)
 
     mock.assert_called_once_with(
-        target, prune_missing=True, catalog_access=other_catalog_access, refresh_headers=True
+        target, prune_missing=True, catalog_access=catalog.catalog_access, refresh_headers=True
     )
+
+
+def test_reindex_frames_refuses_arguments_its_form_does_not_use() -> None:
+    """Verify a header override without paths, or bare paths, is refused."""
+    catalog = _make_catalog()
+
+    with pytest.raises(InvalidArgumentError, match="does not use"):
+        catalog.reindex_frames(Target(id="M13"), camera_id="ASI294")
+    with pytest.raises(InvalidArgumentError, match="needs a target"):
+        catalog.reindex_frames(paths=["/frame.fits"])
+
+
+def test_reindex_frames_refuses_a_name_that_matches_no_target() -> None:
+    """Verify a target name that names nothing raises NotFoundError."""
+    catalog = _make_catalog()
+
+    with pytest.raises(NotFoundError):
+        catalog.reindex_frames("No Such Target")
 
 
 def test_get_frame_delegates_to_image_conversions(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
@@ -155,29 +185,29 @@ def test_get_frame_delegates_to_image_conversions(monkeypatch):  # ruff: ignore[
     mock.assert_called_once_with(target, "800", "60", 2)
 
 
-def test_delete_images_delegates_to_image_conversions(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_delete_images_delegates_to_image_conversions(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify the catalog itself is forwarded, so frames can be pruned."""
     catalog = _make_catalog()
     mock = MagicMock(return_value={"deleted": 1})
     monkeypatch.setattr(image_conversions, "delete_images", mock)
 
-    result = catalog.delete_images(["/a.fits"], target_id="M13")
+    result = catalog.delete_images(["/a.fits"], target=Target(id="M13"))
 
     assert result == {"deleted": 1}
     mock.assert_called_once_with(["/a.fits"], catalog, "M13")
 
 
-def test_list_camera_names_delegates_with_the_full_target_list(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify it is handed this catalog's own target list, not a fresh one."""
+def test_camera_query_delegates_with_the_full_target_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify `query(detail="cameras")` gets this catalog's own targets."""
     catalog = _make_catalog()
     targets = [Target(id="M13")]
     monkeypatch.setattr(catalog, "list", lambda: targets)
     mock = MagicMock(return_value={"ASI294": 3})
     monkeypatch.setattr(frame_statistics, "list_camera_names", mock)
 
-    result = catalog.list_camera_names()
+    result = catalog.query(detail="cameras")
 
-    assert result == {"ASI294": 3}
+    assert result.cameras == {"ASI294": 3}
     mock.assert_called_once_with(targets)
 
 
@@ -211,79 +241,5 @@ class TestGetHeader:
         catalog = _make_catalog()
         target = Target(id="M13")
 
-        with pytest.raises(ValueError, match="does not belong to target"):
+        with pytest.raises(InvalidArgumentError, match="does not belong to target"):
             catalog.get_header("/unrelated.fits", target=target)
-
-
-class TestMeasureFrameInputQuality:
-    """Behavior tests for measure_frame_input_quality's conditional save."""
-
-    def test_saves_when_frames_were_measured(self, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-        """Verify a run that measured anything triggers a save."""
-        catalog = _make_catalog()
-        target = Target(id="M13")
-        counts = {"measured": 3, "skipped": 0, "failed": 0}
-        monkeypatch.setattr(frame_statistics, "measure_frame_input_quality", lambda *a, **k: counts)
-        save_mock = MagicMock()
-        monkeypatch.setattr(catalog, "save", save_mock)
-
-        result = catalog.measure_frame_input_quality(target)
-
-        assert result == counts
-        save_mock.assert_called_once()
-
-    def test_does_not_save_when_nothing_was_measured(self, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-        """Verify a run that measured nothing skips the save entirely."""
-        catalog = _make_catalog()
-        target = Target(id="M13")
-        counts = {"measured": 0, "skipped": 2, "failed": 0}
-        monkeypatch.setattr(frame_statistics, "measure_frame_input_quality", lambda *a, **k: counts)
-        save_mock = MagicMock()
-        monkeypatch.setattr(catalog, "save", save_mock)
-
-        catalog.measure_frame_input_quality(target)
-
-        save_mock.assert_not_called()
-
-    def test_save_false_skips_saving_even_when_frames_were_measured(self, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-        """Verify the explicit opt-out is honored regardless of counts."""
-        catalog = _make_catalog()
-        target = Target(id="M13")
-        monkeypatch.setattr(frame_statistics, "measure_frame_input_quality", lambda *a, **k: {"measured": 3})
-        save_mock = MagicMock()
-        monkeypatch.setattr(catalog, "save", save_mock)
-
-        catalog.measure_frame_input_quality(target, save=False)
-
-        save_mock.assert_not_called()
-
-
-class TestGetCalibrationFrameStatistics:
-    """Behavior tests for the grouped/flat branch."""
-
-    def test_grouped_builds_a_calibration_catalog_from_this_catalog_s_config(self, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-        """Verify the grouped path is handed a real CalibrationCatalog."""
-        catalog = _make_catalog()
-        target = Target(id="M13")
-        mock = MagicMock(return_value={"grouped": True})
-        monkeypatch.setattr(frame_statistics, "get_frame_stats_grouped", mock)
-
-        result = catalog.get_calibration_frame_statistics(target, [], camera="ASI294")
-
-        assert result == {"grouped": True}
-        called_target, called_calibration, called_camera = mock.call_args[0]
-        assert called_target is target
-        assert isinstance(called_calibration, CalibrationCatalog)
-        assert called_camera == "ASI294"
-
-    def test_not_grouped_returns_flat_stats_without_a_calibration_catalog(self, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-        """Verify the flat path never touches calibration data at all."""
-        catalog = _make_catalog()
-        target = Target(id="M13")
-        mock = MagicMock(return_value={"flat": True})
-        monkeypatch.setattr(frame_statistics, "get_frame_stats", mock)
-
-        result = catalog.get_calibration_frame_statistics(target, [], grouped=False)
-
-        assert result == {"flat": True}
-        mock.assert_called_once_with(target)

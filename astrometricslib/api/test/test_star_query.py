@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 from astrometricslib.api.stars import StellarCatalog
+from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.stellar_source import StellarObject
 
 
@@ -98,69 +99,75 @@ def catalog() -> StellarCatalog:
         ]
 
     access = SimpleNamespace(list_star_summaries=summaries, list_stars_in_region=region)
-    return StellarCatalog(config=None, catalog_access=access)
+    return StellarCatalog(None, access)
 
 
 def test_browse_pages_in_id_order(catalog: StellarCatalog) -> None:
     """With no selector the library is browsed in id order and paged."""
     first = catalog.query(limit=10)
     second = catalog.query(limit=10, offset=10)
-    assert [s["id"] for s in first["stars"]] == [f"S{n:03d}" for n in range(10)]
-    assert second["stars"][0]["id"] == "S010"
-    assert first["total_matching"] == 30
-    assert first["truncated"] is True
+    assert [s["id"] for s in first.stars] == [f"S{n:03d}" for n in range(10)]
+    assert second.stars[0]["id"] == "S010"
+    assert first.total_matching == 30
+    assert first.truncated is True
 
 
 def test_region_and_magnitude_filters_combine(catalog: StellarCatalog) -> None:
     """A region search keeps only stars within the magnitude bounds."""
-    answer = catalog.query(ra=10.0, dec=0.0, radius_deg=3.0, magnitude_min=8.0, magnitude_max=11.0)
-    assert [s["id"] for s in answer["stars"]] == ["S008", "S009", "S010", "S011"]
-    assert answer["truncated"] is False
+    answer = catalog.query(ra_deg=10.0, dec_deg=0.0, radius_deg=3.0, magnitude_min=8.0, magnitude_max=11.0)
+    assert [s["id"] for s in answer.stars] == ["S008", "S009", "S010", "S011"]
+    assert answer.truncated is False
 
 
 def test_stars_without_a_magnitude_are_dropped_by_a_bound(catalog: StellarCatalog) -> None:
     """Giving a magnitude bound removes stars that have none."""
     answer = catalog.query(magnitude_max=5.0, detail="ids")
-    assert "S001" not in answer["ids"]
-    assert answer["ids"] == ["S000", "S002", "S003", "S004", "S005"]
+    assert "S001" not in answer.ids
+    assert answer.ids == ["S000", "S002", "S003", "S004", "S005"]
 
 
 def test_has_spectra_filters(catalog: StellarCatalog) -> None:
     """has_spectra keeps only stars with (or without) a spectrum."""
     answer = catalog.query(has_spectra=True, detail="ids", limit=100)
-    assert answer["ids"] == ["S000", "S005", "S010", "S015", "S020", "S025"]
+    assert answer.ids == ["S000", "S005", "S010", "S015", "S020", "S025"]
 
 
 def test_limits_are_capped(catalog: StellarCatalog) -> None:
     """A huge limit is cut to the cap, and full records to 10."""
-    assert len(catalog.query(limit=10_000)["stars"]) == 30
-    catalog.list_objects_by_ids = lambda ids: [StellarObject(id=i) for i in ids]
-    assert len(catalog.query(detail="full", limit=500)["stars"]) == 10
+    assert len(catalog.query(limit=10_000).stars) == 30
+    catalog.catalog_access.get_by_ids = lambda dataset, ids: [StellarObject(id=i) for i in ids]
+    assert len(catalog.query(detail="objects", limit=500).objects) == 10
 
 
 def test_bad_requests_are_errors(catalog: StellarCatalog) -> None:
-    """Two selectors, a wide region or an unknown detail give errors."""
-    assert "one selector" in catalog.query(name="x", target_id="T 1")["error"]
-    assert "radius_deg" in catalog.query(ra=1.0, dec=0.0, radius_deg=9.0)["error"]
-    assert "needs ra and dec" in catalog.query(radius_deg=1.0)["error"]
-    assert "not both" in catalog.query(ra=1.0, dec=0.0, radius_deg=1.0, tolerance_arcsec=2.0)["error"]
-    assert "detail must be" in catalog.query(detail="everything")["error"]
-    assert "needs ids" in catalog.query(detail="exists")["error"]
+    """Two selectors, a wide region or an unknown detail are refused."""
+    bad_requests = [
+        ({"name": "x", "target_id": "T 1"}, "one selector"),
+        ({"ra_deg": 1.0, "dec_deg": 0.0, "radius_deg": 9.0}, "radius_deg"),
+        ({"radius_deg": 1.0}, "needs ra_deg and dec_deg"),
+        ({"ra_deg": 1.0, "dec_deg": 0.0, "radius_deg": 1.0, "tolerance_arcsec": 2.0}, "not both"),
+        ({"detail": "everything"}, "detail must be"),
+        ({"detail": "exists"}, "needs ids"),
+    ]
+    for arguments, message in bad_requests:
+        with pytest.raises(InvalidArgumentError, match=message):
+            catalog.query(**arguments)
 
 
 def test_spectral_class_filter_and_counts(catalog: StellarCatalog) -> None:
     """The fake stars are all class G, so G keeps them all and K keeps none."""
-    assert catalog.query(spectral_class="G2V", detail="ids", limit=100)["total_matching"] == 30
-    assert catalog.query(spectral_class="K", detail="ids")["total_matching"] == 0
-    assert "spectral_class must" in catalog.query(spectral_class="Z")["error"]
-    counts = catalog.query(detail="class_counts")["classes"]
+    assert catalog.query(spectral_class="G2V", detail="ids", limit=100).total_matching == 30
+    assert catalog.query(spectral_class="K", detail="ids").total_matching == 0
+    with pytest.raises(InvalidArgumentError, match="spectral_class must"):
+        catalog.query(spectral_class="Z")
+    counts = catalog.query(detail="class_counts").classes
     assert counts == [{"spectralClass": "G", "label": "Yellow dwarfs", "count": 30}]
 
 
 def test_analysis_detail_returns_short_records_not_raw_arrays() -> None:
     """A star's analysis record holds no wavelength list."""
-    from astrometricslib.api.star_analysis import summarize_star
     from astrometricslib.models.stellar_source import SpectroscopyResult
+    from astrometricslib.pipelines.shared.star_analysis import summarize_star
 
     star = StellarObject(
         id="S1",

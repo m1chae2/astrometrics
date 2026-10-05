@@ -10,7 +10,6 @@ classes from the main `astrometricslib` package instead.
 """
 
 from astrometricslib.api.jobs import Jobs
-from astrometricslib.api.moving_objects import MovingObjectRecovery
 from astrometricslib.api.processing import CalibrationCatalog, ProcessingPipelines, QualityDiagnostics
 from astrometricslib.api.stars import StellarCatalog
 from astrometricslib.api.targets import TargetCatalog
@@ -22,7 +21,6 @@ __all__ = [
     "CalibrationCatalog",
     "CatalogAccess",
     "Jobs",
-    "MovingObjectRecovery",
     "ProcessingPipelines",
     "QualityDiagnostics",
     "StellarCatalog",

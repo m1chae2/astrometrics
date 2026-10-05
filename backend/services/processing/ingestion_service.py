@@ -286,29 +286,16 @@ class IngestionService(BaseBackgroundService):
         self._setup_worker_logger(f"job_{job_id}", log_file_path)
         self._log(job_id, "Starting full library re-index...")
 
-        # 1. Discover all targets on disk
-        self._log(job_id, "Scanning lights directory...")
-        found_target_ids = self._target_service.discover_all_targets()
-        total_targets = len(found_target_ids)
-        self._log(job_id, f"Found {total_targets} target folders on disk.")
-
-        # 2. Refresh each target
-        for i, target_id in enumerate(found_target_ids):
-            progress_pct = int(((i + 1) / total_targets) * 100)
-            self._log(job_id, f"Indexing target {i + 1}/{total_targets}: {target_id}")
+        # 1. Reindex every target folder on disk. The library creates a
+        # target for a new folder and saves each target as it finishes.
+        def report_progress(index: int, total: int, folder: str) -> None:
+            """Log the target being indexed and move the job's progress."""
+            self._log(job_id, f"Indexing target {index + 1}/{total}: {folder}")
             if self._job_service:
-                self._job_service.update_job(job_id, progress=progress_pct)
+                self._job_service.update_job(job_id, progress=int(((index + 1) / total) * 100))
 
-            target = self._target_service.get_targets(target_id)
-            if not target:
-                target = self._target_service.create_target(target_id)
-
-            self._target_service.refresh_target_images(target, prune_missing=True)
-
-            # REQ: BKD-5.3 - Save incrementally (now efficient with sharding)
-            self._target_service.save_target(target)
-
-        self._log(job_id, "Light frames indexed and saved.")
+        report = self._target_service.reindex_library(prune_missing=True, on_progress=report_progress)
+        self._log(job_id, f"Light frames of {len(report.targets)} target folders indexed and saved.")
 
         # 3. Refresh calibration frames
         self._log(job_id, "Scanning dark frames...")

@@ -493,7 +493,7 @@ def _load_target_stars(target: Any, stars: Any, limit: int) -> tuple[list, list,
     target_id = getattr(target, "id", "")
     # Only this target's stars are read from the database, not the whole
     # catalog of every target ever imaged.
-    all_objects = stars.list_objects_for_target(target_id)
+    all_objects = stars.query(target_id=target_id, detail="objects", limit=None).objects or []
 
     astrometry_stars = sorted(
         (

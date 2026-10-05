@@ -300,7 +300,7 @@ def test_target_analyze_target(tmp_path: Any) -> None:
     config.update_config({"Image Library": {"path": str(tmp_path)}})
 
     try:
-        astrometrics = Astrometrics(app_config=config)
+        astrometrics = Astrometrics(config=config)
 
         image_path = str(tmp_path / "test_image.fits")
         _make_image_fits(image_path)

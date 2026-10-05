@@ -19,6 +19,8 @@ import os
 import shutil
 from typing import Any
 
+from astrometricslib.foundation.errors import NotFoundError, ProcessingError
+from astrometricslib.models.processing_results import PreviewRemakeResult
 from astrometricslib.pipelines.shared.stack_preview_path import preview_path_for, processed_fits_path_for
 from astrometricslib.pipelines.stacking.post_processing.stack_preview import (
     PreviewSettings,
@@ -77,7 +79,7 @@ def remake_stack_preview(
     spectral: bool,
     settings: PreviewSettings,
     keep_previous: bool = True,
-) -> dict[str, Any]:
+) -> PreviewRemakeResult:
     """Make the preview of a target's current stack again.
 
     Parameters
@@ -94,19 +96,27 @@ def remake_stack_preview(
 
     Returns
     -------
-    result : `dict` [`str`, `Any`]
-        ``preview_path``, ``processed_fits_path``, ``steps_run``, whether the
-        picture is ``shown_in_viewer``, where the old pictures went, and
-        whether the stack file was left unchanged. A problem comes back
-        under ``error``, with the steps that ran.
+    result : `PreviewRemakeResult`
+        Where the picture went, the steps that ran, whether the viewer shows
+        it, where the old pictures went, and whether the stack file was left
+        unchanged.
+
+    Raises
+    ------
+    NotFoundError
+        If the target has no such stack, or its file is missing.
+    ProcessingError
+        If no preview was made. The old pictures are put back first.
     """
     stacking = target.spectral_stacking if spectral else target.stacking
     stacked_path = stacking.stacked_image
     kind = "spectral stack" if spectral else "stack"
     if not stacked_path:
-        return {"error": f"Target '{target.id}' has no {kind}."}
+        raise NotFoundError(f"Target '{target.id}' has no {kind}.", details={"target": target.id})
     if not os.path.isfile(stacked_path):
-        return {"error": f"The {kind} file of '{target.id}' is missing: {stacked_path}."}
+        raise NotFoundError(
+            f"The {kind} file of '{target.id}' is missing: {stacked_path}.", details={"path": stacked_path}
+        )
 
     modified_before = os.path.getmtime(stacked_path)
     kept = _keep_old_pictures(stacked_path) if keep_previous else []
@@ -115,24 +125,22 @@ def remake_stack_preview(
     if preview_path is None:
         if kept:
             _put_old_pictures_back(stacked_path, kept)
-        return {
-            "error": (
-                "No preview was made (see the job log). "
-                + ("The old pictures were put back." if kept else "The old pictures were removed.")
-            ),
-            "steps_run": steps,
-        }
+        raise ProcessingError(
+            "No preview was made (see the job log). "
+            + ("The old pictures were put back." if kept else "The old pictures were removed."),
+            details={"target": target.id, "steps_run": steps},
+        )
     processed_path = processed_fits_path_for(stacked_path)
     shown = record_preview_as_processed_image(
         target, spectral, stacked_path, preview_path, keep_attached=True
     )
-    return {
-        "target_id": target.id,
-        "stack_path": stacked_path,
-        "preview_path": preview_path,
-        "processed_fits_path": processed_path if os.path.isfile(processed_path) else None,
-        "steps_run": steps,
-        "shown_in_viewer": shown,
-        "previous_pictures": kept,
-        "stack_file_unchanged": os.path.getmtime(stacked_path) == modified_before,
-    }
+    return PreviewRemakeResult(
+        target_id=target.id,
+        stack_path=stacked_path,
+        preview_path=preview_path,
+        processed_fits_path=processed_path if os.path.isfile(processed_path) else None,
+        steps_run=steps,
+        shown_in_viewer=shown,
+        previous_pictures=kept,
+        stack_file_unchanged=os.path.getmtime(stacked_path) == modified_before,
+    )

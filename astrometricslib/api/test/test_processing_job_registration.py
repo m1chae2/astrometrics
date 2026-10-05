@@ -1,18 +1,20 @@
-"""Purpose: Unit tests for job registration in run_stacking.
+"""Purpose: Unit tests for job registration in `ProcessingPipelines.stack`.
 
-Description: run_stacking previously called the Siril stacking driver
-directly with no job bookkeeping, so a stacking run triggered from a
-script (as opposed to the backend's own independent job tracking) never
-showed up in the UI. Verifies the job is now recorded and closed out
-correctly on both the success and no-output paths.
+Description: A stacking run triggered from a script (as opposed to the
+backend's own independent job tracking) must show up in the UI. Verifies the
+job is recorded and closed out correctly on the success, no-output and error
+paths.
 """
+
+from unittest.mock import MagicMock
 
 import pytest
 
 from astrometricslib.api.processing import ProcessingPipelines
 from astrometricslib.foundation import config as config_loader
 from astrometricslib.foundation.config import AppConfiguration
-from astrometricslib.models.target import Target
+from astrometricslib.foundation.errors import ProcessingError
+from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.stacking import stage as stacking_tasks
 
 
@@ -51,14 +53,34 @@ def _read_jobs(logs_database_path: str, target_id: str) -> list:
     return LoggerInterface(logs_database_path).get_jobs_by_target(target_id)
 
 
+def _target(target_id: str) -> Target:
+    """Build a target with one light frame to stack.
+
+    Returns
+    -------
+    target : `Target`
+        The target.
+    """
+    return Target(id=target_id, frames=[FrameRecord(path="/frames/a.fits", role="LIGHT", camera="Cam")])
+
+
+def _pipelines() -> ProcessingPipelines:
+    """Build the processing API with a stand-in target catalog.
+
+    Returns
+    -------
+    pipelines : `ProcessingPipelines`
+        The API. Saving the catalog does nothing.
+    """
+    return ProcessingPipelines(AppConfiguration(), MagicMock(), targets=MagicMock())
+
+
 def test_a_successful_stack_records_a_completed_job(isolated_job_logging, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify a successful stack is recorded as a completed job."""
     monkeypatch.setattr(stacking_tasks, "stack_frames", lambda *args, **kwargs: "/fake/stack.fits")
-    pipelines = ProcessingPipelines(AppConfiguration())
+    result = _pipelines().stack(_target("StackJobTarget"))
 
-    result = pipelines.run_stacking(Target(id="StackJobTarget"))
-
-    assert result == "/fake/stack.fits"
+    assert result.stacked_path == "/fake/stack.fits"
     jobs = _read_jobs(isolated_job_logging, "StackJobTarget")
     assert len(jobs) == 1
     assert jobs[0].job_type == "stacking"
@@ -74,11 +96,9 @@ def test_a_stack_with_no_output_records_a_failed_job(isolated_job_logging, monke
     "no exception means success" default.
     """
     monkeypatch.setattr(stacking_tasks, "stack_frames", lambda *args, **kwargs: None)
-    pipelines = ProcessingPipelines(AppConfiguration())
+    with pytest.raises(ProcessingError, match="without making a stack"):
+        _pipelines().stack(_target("StackNoOutputTarget"))
 
-    result = pipelines.run_stacking(Target(id="StackNoOutputTarget"))
-
-    assert result is None
     jobs = _read_jobs(isolated_job_logging, "StackNoOutputTarget")
     assert len(jobs) == 1
     assert jobs[0].status == "failed"
@@ -91,10 +111,8 @@ def test_a_stacking_error_records_a_failed_job_and_still_raises(isolated_job_log
         raise RuntimeError("siril blew up")
 
     monkeypatch.setattr(stacking_tasks, "stack_frames", _explode)
-    pipelines = ProcessingPipelines(AppConfiguration())
-
     with pytest.raises(RuntimeError, match="siril blew up"):
-        pipelines.run_stacking(Target(id="StackErrorTarget"))
+        _pipelines().stack(_target("StackErrorTarget"))
 
     jobs = _read_jobs(isolated_job_logging, "StackErrorTarget")
     assert len(jobs) == 1

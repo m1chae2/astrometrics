@@ -8,6 +8,8 @@ only the specific summary columns it needs directly from the database.
 This is much faster.
 """
 
+from pathlib import Path
+
 import pytest
 
 from astrometricslib.foundation.config import AppConfiguration
@@ -31,20 +33,21 @@ def _make_isolated_config(tmp_path) -> AppConfiguration:  # ruff: ignore[missing
     return config
 
 
-def test_list_object_summaries_reports_the_expected_fields(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_star_summaries_reports_the_expected_fields(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify summaries carry id/name/targetIds/hasSpectra/hasPhotometry.
 
-    Exercises StellarCatalog.list_object_summaries end-to-end through a
+    Exercises StellarCatalog.query end-to-end through a
     real CatalogAccess -- has_spectra/has_photometry are real columns
     populated by drivers.catalog_access._stellar_extra_columns at write
     time (via StellarObject's own computed properties), not derived
     from the JSON at read time the way the code this superseded did.
     """
     from astrometricslib.api.stars import StellarCatalog
+    from astrometricslib.drivers.catalog_access import CatalogAccess
     from astrometricslib.models.stellar_source import SpectroscopyResult, StellarObject
 
     config = _make_isolated_config(tmp_path)
-    catalog = StellarCatalog(config=config)
+    catalog = StellarCatalog(config, CatalogAccess(config))
 
     vega = StellarObject(id="Vega", name="Vega", target_ids=["Lyra Field"], ra=279.2347, dec=38.7837)
     vega.spectroscopy = SpectroscopyResult(wavelengths_angstrom=[5000], intensities=[1.0])
@@ -53,7 +56,7 @@ def test_list_object_summaries_reports_the_expected_fields(tmp_path):  # ruff: i
     empty_star = StellarObject(id="EmptyStar", name="EmptyStar", target_ids=[])
     catalog.catalog_access.put([vega, betelgeuse, empty_star], "stellar_catalog", {})
 
-    summaries = {s["id"]: s for s in catalog.list_object_summaries()}
+    summaries = {s["id"]: s for s in catalog.query(limit=None).stars}
 
     assert summaries["Vega"]["hasSpectra"] is True
     assert summaries["Vega"]["hasPhotometry"] is False
@@ -71,24 +74,25 @@ def test_list_object_summaries_reports_the_expected_fields(tmp_path):  # ruff: i
     assert summaries["EmptyStar"]["hasPhotometry"] is False
 
 
-def test_list_object_summaries_filters_by_target_id(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_star_summaries_filters_by_target_id(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify target_id restricts to stars whose targetIds include it."""
     from astrometricslib.api.stars import StellarCatalog
+    from astrometricslib.drivers.catalog_access import CatalogAccess
     from astrometricslib.models.stellar_source import StellarObject
 
     config = _make_isolated_config(tmp_path)
-    catalog = StellarCatalog(config=config)
+    catalog = StellarCatalog(config, CatalogAccess(config))
 
     in_field = StellarObject(id="InField", name="InField", target_ids=["M 13"])
     out_of_field = StellarObject(id="OutOfField", name="OutOfField", target_ids=["M 81"])
     catalog.catalog_access.put([in_field, out_of_field], "stellar_catalog", {})
 
-    summaries = catalog.list_object_summaries(target_id="M 13")
+    summaries = catalog.query(target_id="M 13", limit=None).stars
 
     assert [s["id"] for s in summaries] == ["InField"]
 
 
-def test_list_object_summaries_target_id_substring_collision_is_still_exact(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_star_summaries_target_id_substring_collision_is_still_exact(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """A target id that is a substring of another must not false-match.
 
     target_id narrows the SQL query with a LIKE prefilter for
@@ -99,110 +103,82 @@ def test_list_object_summaries_target_id_substring_collision_is_still_exact(tmp_
     query, not from the SQL LIKE itself.
     """
     from astrometricslib.api.stars import StellarCatalog
+    from astrometricslib.drivers.catalog_access import CatalogAccess
     from astrometricslib.models.stellar_source import StellarObject
 
     config = _make_isolated_config(tmp_path)
-    catalog = StellarCatalog(config=config)
+    catalog = StellarCatalog(config, CatalogAccess(config))
 
     in_m1 = StellarObject(id="InM1", name="InM1", target_ids=["M 1"])
     in_m13_only = StellarObject(id="InM13Only", name="InM13Only", target_ids=["M 13"])
     in_both = StellarObject(id="InBoth", name="InBoth", target_ids=["M 1", "M 13"])
     catalog.catalog_access.put([in_m1, in_m13_only, in_both], "stellar_catalog", {})
 
-    summaries = catalog.list_object_summaries(target_id="M 1")
+    summaries = catalog.query(target_id="M 1", limit=None).stars
 
     assert {s["id"] for s in summaries} == {"InM1", "InBoth"}
 
 
-def test_list_object_summaries_caps_the_unfiltered_case_by_default(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_star_summaries_are_capped_by_the_default_limit(tmp_path: Path) -> None:
     """A browse-everything request must not return the whole catalog.
 
-    DEFAULT_UNFILTERED_SUMMARY_LIMIT bounds what an unfiltered listing
-    transmits and re-serializes -- without it, a catalog-browsing view
-    with no target filter hydrates and sends every row in the catalog
-    on every poll.
+    The default limit bounds what an unfiltered listing transmits and
+    re-serializes -- without it, a catalog-browsing view with no target
+    filter hydrates and sends every row in the catalog on every poll.
     """
-    import astrometricslib.api.stars as stars_module
     from astrometricslib.api.stars import StellarCatalog
+    from astrometricslib.drivers.catalog_access import CatalogAccess
     from astrometricslib.models.stellar_source import StellarObject
 
-    monkeypatch.setattr(stars_module, "DEFAULT_UNFILTERED_SUMMARY_LIMIT", 3)
     config = _make_isolated_config(tmp_path)
-    catalog = StellarCatalog(config=config)
+    catalog = StellarCatalog(config, CatalogAccess(config))
+    catalog.catalog_access.put(
+        [StellarObject(id=f"Star{i:03d}", name=f"Star{i}") for i in range(60)], "stellar_catalog", {}
+    )
+
+    answer = catalog.query()
+
+    assert len(answer.stars) == 50
+    assert answer.total_matching == 60
+    assert answer.truncated is True
+
+
+def test_star_summaries_explicit_limit_overrides_the_default(tmp_path: Path) -> None:
+    """A caller-supplied limit wins over the built-in default."""
+    from astrometricslib.api.stars import StellarCatalog
+    from astrometricslib.drivers.catalog_access import CatalogAccess
+    from astrometricslib.models.stellar_source import StellarObject
+
+    config = _make_isolated_config(tmp_path)
+    catalog = StellarCatalog(config, CatalogAccess(config))
     catalog.catalog_access.put(
         [StellarObject(id=f"Star{i}", name=f"Star{i}") for i in range(10)], "stellar_catalog", {}
     )
 
-    summaries = catalog.list_object_summaries()
-
-    assert len(summaries) == 3
+    assert len(catalog.query(limit=7).stars) == 7
 
 
-def test_list_object_summaries_explicit_limit_overrides_the_default(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """A caller-supplied limit wins over the built-in default either way."""
-    import astrometricslib.api.stars as stars_module
-    from astrometricslib.api.stars import StellarCatalog
-    from astrometricslib.models.stellar_source import StellarObject
-
-    monkeypatch.setattr(stars_module, "DEFAULT_UNFILTERED_SUMMARY_LIMIT", 3)
-    config = _make_isolated_config(tmp_path)
-    catalog = StellarCatalog(config=config)
-    catalog.catalog_access.put(
-        [StellarObject(id=f"Star{i}", name=f"Star{i}") for i in range(10)], "stellar_catalog", {}
-    )
-
-    summaries = catalog.list_object_summaries(limit=7)
-
-    assert len(summaries) == 7
-
-
-def test_list_object_summaries_a_target_scoped_request_is_not_capped_by_default(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """A single target's own stars are not subject to the browse-all cap."""
-    import astrometricslib.api.stars as stars_module
-    from astrometricslib.api.stars import StellarCatalog
-    from astrometricslib.models.stellar_source import StellarObject
-
-    monkeypatch.setattr(stars_module, "DEFAULT_UNFILTERED_SUMMARY_LIMIT", 3)
-    config = _make_isolated_config(tmp_path)
-    catalog = StellarCatalog(config=config)
-    catalog.catalog_access.put(
-        [StellarObject(id=f"Star{i}", name=f"Star{i}", target_ids=["M 13"]) for i in range(10)],
-        "stellar_catalog",
-        {},
-    )
-
-    summaries = catalog.list_object_summaries(target_id="M 13")
-
-    assert len(summaries) == 10
-
-
-def test_list_object_summaries_apply_default_limit_false_bypasses_the_cap(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_star_summaries_without_a_limit_return_every_row(tmp_path: Path) -> None:
     """A caller doing its own full-catalog search must see every row.
 
-    `get_displayable_stellar_object_summaries` filters by search text or
-    category *after* calling this function -- if this function silently
-    capped an unfiltered request to `DEFAULT_UNFILTERED_SUMMARY_LIMIT`
-    rows first, a real match sitting past that cutoff would never reach
-    that filtering step, so the search would wrongly report no match at
-    all rather than just truncating how many matches come back.
+    A caller that filters by search text or category *after* reading the
+    summaries would otherwise never see a real match sitting past the
+    cutoff, so the search would wrongly report no match at all.
     """
-    import astrometricslib.api.stars as stars_module
     from astrometricslib.api.stars import StellarCatalog
+    from astrometricslib.drivers.catalog_access import CatalogAccess
     from astrometricslib.models.stellar_source import StellarObject
 
-    monkeypatch.setattr(stars_module, "DEFAULT_UNFILTERED_SUMMARY_LIMIT", 3)
     config = _make_isolated_config(tmp_path)
-    catalog = StellarCatalog(config=config)
+    catalog = StellarCatalog(config, CatalogAccess(config))
     catalog.catalog_access.put(
-        [StellarObject(id=f"Star{i}", name=f"Star{i}") for i in range(10)], "stellar_catalog", {}
+        [StellarObject(id=f"Star{i:03d}", name=f"Star{i}") for i in range(60)], "stellar_catalog", {}
     )
 
-    summaries = catalog.list_object_summaries(apply_default_limit=False)
-
-    assert len(summaries) == 10
+    assert len(catalog.query(limit=None).stars) == 60
 
 
-def test_list_object_summaries_matches_the_model_computed_properties(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_star_summaries_matches_the_model_computed_properties(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify the recorded columns agree with StellarObject's own properties.
 
     has_spectra/has_photometry are computed once at write time (see
@@ -212,17 +188,18 @@ def test_list_object_summaries_matches_the_model_computed_properties(tmp_path): 
     that wiring, not a reimplementation of the model's rules.
     """
     from astrometricslib.api.stars import StellarCatalog
+    from astrometricslib.drivers.catalog_access import CatalogAccess
     from astrometricslib.models.stellar_source import SpectroscopyResult, StellarObject
 
     config = _make_isolated_config(tmp_path)
-    catalog = StellarCatalog(config=config)
+    catalog = StellarCatalog(config, CatalogAccess(config))
 
     vega = StellarObject(id="Vega", name="Vega", target_ids=["Lyra Field"])
     vega.spectroscopy = SpectroscopyResult(wavelengths_angstrom=[5000], intensities=[1.0])
     vega.photometry = {"timestamps": ["2026-01-01T00:00:00Z"], "fluxes": [1.0]}
     catalog.catalog_access.put([vega], "stellar_catalog", {})
 
-    (summary,) = catalog.list_object_summaries()
+    (summary,) = catalog.query(limit=None).stars
 
     assert summary["hasSpectra"] == vega.has_spectra
     assert summary["hasPhotometry"] == vega.has_photometry

@@ -7,8 +7,11 @@ frames back:
 
 - `SetAsideFrame` describes one frame, moved or about to be moved.
 - `QuarantinePreview` says what the check would move, without moving it.
+  `QualityDiagnostics.frame_quality(kind="quarantine_preview")` returns it.
 - `RestoreReport` says what a restore listed or moved back.
 """
+
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -49,15 +52,20 @@ class QuarantinePreview(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
+    kind: Literal["quarantine_preview"] = "quarantine_preview"
     target_id: str = Field(alias="targetId")
     # Light frames the check measured.
     frames_checked: int = Field(alias="framesChecked")
-    # The frames it would move.
+    # How many frames it would move. ``would_move`` may list fewer.
+    would_move_total: int = Field(default=0, alias="wouldMoveTotal")
+    # The frames it would move, up to the limit the caller gave.
     would_move: list[SetAsideFrame] = Field(default_factory=list, alias="wouldMove")
     # One sentence for each batch it would leave alone, with the reason.
     notes: list[str] = Field(default_factory=list)
     # Frames that could not be measured. They would stay where they are.
     unreadable: list[str] = Field(default_factory=list)
+    # The frames the stacker has already set aside, when asked for.
+    excluded: list[SetAsideFrame] | None = None
 
 
 class RestoreReport(BaseModel):

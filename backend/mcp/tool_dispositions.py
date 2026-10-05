@@ -195,34 +195,21 @@ PROPOSED_TOOLS = (
         "star_query",
         "stars",
         "Look up library stars by id, name, target, region or position, with a hard cap on the answer.",
+        (),
         (
-            "star_get_object",
-            "star_find_by_id_or_name",
-            "star_find_all_by_id_or_name",
-            "star_existing_ids",
-            "star_find_by_position",
-            "star_list_objects",
-            "star_list_object_ids",
-            "star_list_object_summaries",
-            "star_list_object_summaries_in_region",
-            "star_list_objects_by_ids",
-            "star_list_objects_for_target",
-            "star_list_objects_in_region",
-            "star_list_spectrum_object_ids",
-            "star_get_audit",
-        ),
-        (
-            "selector: at most one of ids, name, target_id, region{ra, dec, radius_deg}, "
-            "position{ra, dec, tolerance_arcsec}",
-            "magnitude_min, magnitude_max, has_spectra",
-            "detail: exists | ids | summary | full | stats",
-            "limit (ids 2000, summary 500, full 10), offset",
+            "selector: at most one of ids, name, target_id, region{ra_deg, dec_deg, radius_deg}, "
+            "position{ra_deg, dec_deg, tolerance_arcsec}",
+            "magnitude_min, magnitude_max, has_spectra, spectral_class",
+            "detail: exists | ids | summary | analysis | objects | class_counts | stats",
+            "limit (ids 2000, summary 500, analysis and objects 10), offset",
         ),
         "observe",
         notes=(
-            "Built 2026-10-03 as StellarCatalog.query. Region radius is at most 5 degrees. Answers are in "
-            "id order so offset paging is stable. Library stars only: the online and deep catalogs stay "
-            "on the planning_* tools. Browsing the whole library takes about 3 seconds."
+            "Built 2026-10-03 as StellarCatalog.query. Since 2026-10-05 it is the only star read besides "
+            "star_get: the narrow list, find, audit and class-count tools are gone. Region radius is at "
+            "most 5 degrees. Answers are in id order so offset paging is stable. Library stars only: the "
+            "online and deep catalogs stay on the planning_* tools. Browsing the whole library takes "
+            "about 3 seconds."
         ),
         built=True,
     ),
@@ -233,12 +220,10 @@ PROPOSED_TOOLS = (
         (
             "target_get",
             "target_list",
-            "target_list_camera_names",
-            "target_camera_index",
         ),
         (
-            "target_id, text, camera, or region{ra, dec, radius_deg}",
-            "detail: summary | full | cameras",
+            "target_id, text, camera_id, or region{ra_deg, dec_deg, radius_deg}",
+            "detail: summary | full | cameras | nights | camera_index",
             "include_frames, sort, include_empty, limit, offset",
         ),
         "observe",
@@ -246,7 +231,8 @@ PROPOSED_TOOLS = (
             "Built 2026-10-04 as TargetCatalog.query. summary leaves out the frame list and the empty "
             "placeholder targets; full groups one target's frames by night, filter, exposure and camera "
             "and condenses its quality summaries (about 13 KB for M 57, where target_get was cut at 40 KB). "
-            "Looking does not mark targets as touched, so a later save never writes them."
+            "Looking does not mark targets as touched, so a later save never writes them. The camera "
+            "names and the per-camera frame index are detail='cameras' and detail='camera_index'."
         ),
         built=True,
     ),
@@ -254,70 +240,55 @@ PROPOSED_TOOLS = (
         "target_index_frames",
         "targets",
         "Add frames to a target: one file, or a rescan of the target's folder.",
+        ("target_reindex_frames",),
         (
-            "processing_scan_target_directory",
-            "target_reindex_frames",
-            "target_add_frame",
-            "processing_create_frame_record",
-        ),
-        (
-            "target",
-            "path (one file) or none (rescan)",
-            "role, filter_type, camera",
-            "prune_missing, refresh_headers, frames_root_path",
-            "persist",
+            "target (none for every target)",
+            "paths (only these files) or none (rescan)",
+            "role, filter_type, camera_id",
+            "prune_missing, refresh_headers",
             "dry_run",
         ),
         "change-data",
         {"investigator": {"dry_run": {"allowed": [True]}}},
         (
-            "dry_run=true is read-only and reports what would change. prune_missing needs a check that the "
-            "frames drive is mounted; with the drive missing it empties the frame list. Return "
-            "counts, not None."
+            "TargetCatalog.reindex_frames(target=None, paths=None) now covers the folder scan, adding single "
+            "files and the full-library reindex, and returns a ReindexReport of counts. Still to do: "
+            "dry_run=true, read-only, reporting what would change; and a check that the frames drive is "
+            "mounted before prune_missing, which with the drive missing empties the frame list."
         ),
     ),
     # ---- Calibration ----
     ProposedTool(
-        "calibration_status",
+        "calibration_query",
         "calibration",
-        "Report the calibration library: counts, file paths, or how a target's frames match it.",
+        "Report the calibration library: counts, or how a target's frames match it.",
+        ("calibration_get",),
         (
-            "calibration_stats",
-            "calibration_get",
-            "target_get_calibration_frame_statistics",
-            "calibration_load",
-        ),
-        (
-            "kind: dark | bias | flat | all",
-            "camera, exposure, filter, telescope",
-            "target_id",
-            "detail: counts | paths | target_match",
-            "reload",
-            "limit",
+            "kind: dark | bias | flat (none for all)",
+            "detail: counts | target_match | target_frames",
+            "target, camera_id",
+            "refresh",
         ),
         "observe",
         notes=(
-            "calibration_get hides its keyword arguments from MCP today, so no camera or filter "
-            "can be passed. "
-            "reload replaces the in-memory index, which is not a write to disk."
+            "Built 2026-10-05 as CalibrationCatalog.query, folding stats, load and the target's calibration "
+            "frame statistics. refresh replaces the in-memory index, which is not a write to disk. "
+            "calibration_get, which lists file paths, hides its keyword arguments from MCP, so no camera "
+            "or filter can be passed; it stays merged until a paths detail exists."
         ),
+        built=True,
     ),
     # ---- Image processing ----
     ProposedTool(
         "pipeline_run",
         "image-processing",
         "Run the processing stages for one target: stack, astrometry, photometry, spectroscopy, asteroids.",
+        ("processing_process_target",),
         (
-            "processing_process_target",
-            "processing_run_astrometry",
-            "processing_run_photometry",
-            "processing_run_spectroscopy",
-            "moving_object_detect_asteroids",
-        ),
-        (
-            "target",
-            "stages",
-            "per-stage settings (stack, astrometry, photometry, spectroscopy)",
+            "target (one, a list, or none for every target)",
+            "stages: astrometry | photometry | spectroscopy | asteroids",
+            "per-stage settings (astrometry, photometry, spectroscopy, asteroids)",
+            "camera_id, focal_length_mm (several targets)",
             "mode: plan | run",
             "workspace",
         ),
@@ -331,54 +302,42 @@ PROPOSED_TOOLS = (
             "frame folders. The only complete way is a separate process with a scratch config, library and "
             "stacks folder (ASTROMETRICS_CONFIG_PATH). A workspace argument is the first piece "
             "of the stacking "
-            "trial tool."
+            "trial tool. Since 2026-10-05 ProcessingPipelines.process_target takes the stages (with the "
+            "asteroid search as a stage) and, given a list of targets or none, runs the full pipeline for "
+            "each, which stacks and saves every target."
         ),
-    ),
-    ProposedTool(
-        "pipeline_run_batch",
-        "image-processing",
-        "Run the full pipeline for a named list of targets.",
-        ("target_process_all_targets",),
-        ("target_ids (required, never all)", "camera_name", "focal_length_mm", "mode: plan | run"),
-        "change-data",
-        {"investigator": {"mode": {"allowed": ["plan"]}}},
-        "Kept apart from pipeline_run because of its reach: it stacks and saves each target.",
     ),
     ProposedTool(
         "diagnostics_stack_quality",
         "image-processing",
         "Measure a stack, and optionally compare it with another or with the previous stack.",
+        (),
         (
-            "diagnostics_compare_stacks",
-            "processing_compare_with_previous_stack",
-            "diagnostics_measure_stack_fwhm",
-            "diagnostics_measure_stack_rejected_fraction",
-            "diagnostics_parse_stack_registration_seq",
-            "diagnostics_parse_stack_zero_order_star",
-        ),
-        (
-            "stack_path or target",
+            "path_or_target",
+            "kind: imaging | spectral (with a target)",
             "compare_to: none | previous | path",
-            "include: fwhm, noise, flatness, rejected_fraction, registration, zero_order",
+            "include: fwhm, rejected_fraction, registration",
         ),
         "compute",
-        notes="The .seq and .lst companion files can be found from the stack path.",
+        notes=(
+            "Built 2026-10-05 as QualityDiagnostics.stack_quality. The comparison always measures noise and "
+            "flatness. The zero-order star of each spectral frame is read from Siril's per-frame .lst file, "
+            "not from a stack, so it is not a section here."
+        ),
+        built=True,
     ),
     ProposedTool(
         "diagnostics_frame_quality",
         "image-processing",
         "Measure raw frames: statistics for a target, a check of a folder, or a quarantine preview.",
-        (
-            "diagnostics_check_raw_frames",
-            "processing_preview_quarantine",
-            "target_measure_frame_input_quality",
-        ),
+        (),
         (
             "target or folder_path",
-            "mode: input_quality | raw_check | quarantine_preview",
-            "include_fwhm, remeasure, camera_name",
+            "kind: input_quality | raw_check | quarantine_preview",
+            "include: fwhm, spectra, excluded",
+            "remeasure, camera_id",
             "limit (1 to 300; the newest frames, or the first inside a range)",
-            "filter_name, first_file, last_file, since, until, include_spectra",
+            "filter_name, first_file, last_file, since, until",
         ),
         "compute",
         notes=(
@@ -387,7 +346,8 @@ PROPOSED_TOOLS = (
             "measured keep their stored values. Frames are chosen by filter, file range (a bare number "
             "such as 013 means frame 013) and time, with the choosing code in "
             "pipelines/shared/quality/frame_selection.py. Spectroscopy frames are left out unless asked "
-            "for, because their smeared stars are flagged as trailing. raw_check also takes a target."
+            "for, because their smeared stars are flagged as trailing. raw_check also takes a target. "
+            "include=['excluded'] lists the frames the stacker set aside."
         ),
         built=True,
     ),
@@ -395,23 +355,23 @@ PROPOSED_TOOLS = (
         "excluded_frames",
         "image-processing",
         "List the frames the stacker set aside, or move them back.",
-        ("processing_list_excluded_frames", "processing_restore_excluded_frames"),
+        ("processing_restore_excluded_frames",),
         ("target", "apply"),
         "change-data",
         {"investigator": {"apply": {"allowed": [False]}}},
-        "apply=true moves raw files back into the live frames folder and changes the in-memory target.",
+        (
+            "apply=true moves raw files back into the live frames folder and reindexes the target. The read "
+            "half is built: diagnostics_frame_quality with include=['excluded']."
+        ),
     ),
     ProposedTool(
         "visualization_render_fits",
         "image-processing",
         "Draw a FITS frame or stack as a real image, optionally zoomed on one place.",
+        (),
         (
-            "visualization_convert_fits_to_png",
-            "visualization_convert_fits_to_png_with_stats",
-            "visualization_get_light_frame_data",
-        ),
-        (
-            "path, or target and file_name (a name, or a number such as 013)",
+            "path, or target and file_name (a name, or a number such as 013), or target, iso and exposure",
+            "kind: image | data_url",
             "max_dimensions (100 to 2000, default 1200), stretch, center, width",
             "crop_center_x, crop_center_y, crop_size",
         ),
@@ -429,26 +389,18 @@ PROPOSED_TOOLS = (
         "visualization_plot",
         "image-processing",
         "Draw a target dashboard, a single view of it, or the focus-versus-temperature trend.",
-        (
-            "visualization_plot_target_dashboard",
-            "visualization_plot_photometry",
-            "visualization_plot_spectroscopy",
-            "visualization_plot_astrometry",
-            "visualization_plot_asteroid_detection",
-            "visualization_plot_focus_vs_temperature",
-            "visualization_plot_star_dashboard",
-        ),
+        (),
         (
             "kind: dashboard | photometry | spectroscopy | astrometry | asteroids | focus | star",
-            "target",
-            "limit",
+            "target, or star (and spectral_star) for kind=star",
+            "selected_star, limit, figsize",
         ),
         "observe",
         notes=(
-            "A figure comes back to an MCP client as the text 'Figure(1600x900)', so the tool must return a "
-            "PNG. plot_star_dashboard always fails through MCP today because its star argument is not "
-            "resolved from an id."
+            "Built 2026-10-05 as Visualization.plot, which takes star ids as well as records. The MCP "
+            "registry draws the figure to a PNG image."
         ),
+        built=True,
     ),
     # ---- Observatory status ----
     ProposedTool(
@@ -863,7 +815,7 @@ DECISIONS = {
         "Built 2026-10-04. Counts a target's frames at the telescope, on the drive and in the library, and "
         "names the frames that are in one place but not the next. Reads only.",
     ),
-    "target_remake_preview": ToolDecision(
+    "processing_remake_preview": ToolDecision(
         "keep",
         "Built 2026-10-04 from gap report #1. Makes a target's preview picture again from its existing "
         "stack, without restacking. denoise, denoise_strength and star_toning apply to that run only and "
@@ -872,17 +824,14 @@ DECISIONS = {
         "processed FITS and the target's processed-image pointer.",
         "process",
     ),
-    "target_stack": ToolDecision(
+    "processing_stack": ToolDecision(
         "keep",
         "Built 2026-10-04 at the user's request: the AI may stack a target the way the app's Stack "
         "button does, choosing imaging or spectral frames, a filter and a file or time range. "
         "plan_only lists the frames without stacking. It runs the app's own stage: sets aside bad "
-        "frames into _excluded (never deletes), keeps one previous stack, and saves the target.",
+        "frames into _excluded (never deletes), keeps one previous stack, and saves the target. Since "
+        "2026-10-05 it is ProcessingPipelines.stack, which also takes the exact frames to stack.",
         "process",
-    ),
-    "processing_run_stacking": ToolDecision(
-        "withhold",
-        "Replaced by target_stack, which picks the frames, holds the stacking slot and saves the result.",
     ),
     "diagnostics_spectral_frame_check": ToolDecision(
         "keep",
@@ -918,6 +867,22 @@ DECISIONS = {
     ),
     "star_query": ToolDecision(
         "keep", "Built 2026-10-03. Library star lookup with hard caps on rows, region size and full records."
+    ),
+    "star_get": ToolDecision("keep", "Reads one star's full record by id. Writes nothing."),
+    "calibration_query": ToolDecision(
+        "keep",
+        "Built 2026-10-05. Calibration counts, or how a target's light frames match the darks. refresh "
+        "reloads the index into memory and writes nothing.",
+    ),
+    "diagnostics_stack_quality": ToolDecision(
+        "keep",
+        "Built 2026-10-05. Measures a stack (star width, rejected share, registration) and compares it with "
+        "the previous stack or another stack file. Saves nothing.",
+    ),
+    "visualization_plot": ToolDecision(
+        "keep",
+        "Built 2026-10-05. Draws one chart of a target or a star; the registry sends it as a PNG image. "
+        "Saves nothing.",
     ),
     "planning_get_library_star_summaries": ToolDecision("keep", "Reads star summaries for planning."),
     "planning_get_sources": ToolDecision(
@@ -1003,9 +968,6 @@ DECISIONS = {
     "ui_build_check": ToolDecision("keep", "Developer check."),
     "typegen_contract_validator": ToolDecision("keep", "Developer check."),
     # ---- Class corrections found by reading the code ----
-    "target_camera_index": ToolDecision(
-        None, "Summarizes each target's light frames per camera for the target list. Reads only.", "observe"
-    ),
     "observatory_mount_run_polar_alignment_assist": ToolDecision(
         "drop",
         "Only fits a pointing model from plate-solve records passed in. The user does not want it.",
@@ -1022,16 +984,6 @@ DECISIONS = {
         "Writes the delegation state (the Safe Mode toggle) to the database. Not a hardware command, but "
         "the user decided an AI may not change configuration.",
         "change-data",
-    ),
-    "processing_scan_target_directory": ToolDecision(
-        None, "Changes the cached target in memory; a later save writes it.", "change-data"
-    ),
-    "processing_create_frame_record": ToolDecision(None, "Only reads the FITS header.", "observe"),
-    "moving_object_detect_asteroids": ToolDecision(
-        None, "Writes job and provenance rows and changes the cached target.", "change-data"
-    ),
-    "target_measure_frame_input_quality": ToolDecision(
-        None, "Saves to the database by default.", "change-data"
     ),
     "planning_plan_observation_session": ToolDecision(
         None, "Writes the session to the wayfinding database.", "change-data"
@@ -1093,12 +1045,10 @@ CATEGORY_RULES = (
         ),
         "developer",
     ),
-    (re.compile(r"^(calibration_|target_get_calibration_frame_statistics$)"), "calibration"),
-    (re.compile(r"^(target_measure_frame_input_quality|target_process_all_targets)$"), "image-processing"),
-    (re.compile(r"^processing_(scan_target_directory|create_frame_record)$"), "targets"),
+    (re.compile(r"^calibration_"), "calibration"),
     (re.compile(r"^target_"), "targets"),
     (re.compile(r"^star_"), "stars"),
-    (re.compile(r"^(processing_|diagnostics_|visualization_|moving_object_)"), "image-processing"),
+    (re.compile(r"^(processing_|diagnostics_|visualization_)"), "image-processing"),
     (re.compile(r"^jobs_"), "jobs-history"),
     (re.compile(r"^(planning_|execution_)"), "planning-sessions"),
     (

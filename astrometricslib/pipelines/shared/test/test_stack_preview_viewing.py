@@ -15,7 +15,7 @@ import pytest
 from astropy.io import fits
 from PIL import Image
 
-from astrometricslib.pipelines.shared.image_conversions import ImageConverter
+from astrometricslib.pipelines.shared.image_conversions import render_data_url
 from astrometricslib.pipelines.shared.stack_preview_path import preview_path_for
 
 _JPEG_PREFIX = "data:image/jpeg;base64,"
@@ -69,50 +69,50 @@ def test_a_stretched_view_uses_the_saved_jpeg(stack: Path) -> None:
     """Verify the viewer gets the JPEG and its 8-bit range."""
     _save_preview(stack, (40, 30), age_seconds=5)
 
-    result = ImageConverter.convert_fits_to_base64_png(str(stack), stretch=True)
+    result = render_data_url(str(stack), stretch=True)
 
     assert result is not None
-    assert result["image_data"].startswith(_JPEG_PREFIX)
-    assert (result["min"], result["max"]) == (0.0, 255.0)
-    assert result["headers"]
+    assert result.image_data.startswith(_JPEG_PREFIX)
+    assert (result.min, result.max) == (0.0, 255.0)
+    assert result.headers
 
 
 def test_a_linear_view_ignores_the_jpeg(stack: Path) -> None:
     """Verify an unstretched view is still drawn from the FITS data."""
     _save_preview(stack, (40, 30), age_seconds=5)
 
-    result = ImageConverter.convert_fits_to_base64_png(str(stack), stretch=False)
+    result = render_data_url(str(stack), stretch=False)
 
     assert result is not None
-    assert result["image_data"].startswith(_PNG_PREFIX)
+    assert result.image_data.startswith(_PNG_PREFIX)
 
 
 def test_a_stack_without_a_jpeg_is_drawn_as_before(stack: Path) -> None:
     """Verify a missing preview falls back to the PNG."""
-    result = ImageConverter.convert_fits_to_base64_png(str(stack), stretch=True)
+    result = render_data_url(str(stack), stretch=True)
 
     assert result is not None
-    assert result["image_data"].startswith(_PNG_PREFIX)
+    assert result.image_data.startswith(_PNG_PREFIX)
 
 
 def test_a_jpeg_older_than_the_stack_is_not_shown(stack: Path) -> None:
     """Verify a picture of an older stack is never shown."""
     _save_preview(stack, (40, 30), age_seconds=-60)
 
-    result = ImageConverter.convert_fits_to_base64_png(str(stack), stretch=True)
+    result = render_data_url(str(stack), stretch=True)
 
     assert result is not None
-    assert result["image_data"].startswith(_PNG_PREFIX)
+    assert result.image_data.startswith(_PNG_PREFIX)
 
 
 def test_a_large_jpeg_is_shrunk_to_the_size_limit(stack: Path) -> None:
     """Verify the picture fits the requested size, as the PNG does."""
     _save_preview(stack, (400, 300), age_seconds=5)
 
-    result = ImageConverter.convert_fits_to_base64_png(str(stack), max_dimensions=100, stretch=True)
+    result = render_data_url(str(stack), max_dimensions=100, stretch=True)
 
     assert result is not None
-    assert _decoded_size(result["image_data"]) == (100, 75)
+    assert _decoded_size(result.image_data) == (100, 75)
 
 
 def test_an_unreadable_jpeg_falls_back_to_the_png(stack: Path) -> None:
@@ -121,7 +121,7 @@ def test_an_unreadable_jpeg_falls_back_to_the_png(stack: Path) -> None:
     preview.write_bytes(b"not a jpeg")
     os.utime(preview, (stack.stat().st_mtime + 5, stack.stat().st_mtime + 5))
 
-    result = ImageConverter.convert_fits_to_base64_png(str(stack), stretch=True)
+    result = render_data_url(str(stack), stretch=True)
 
     assert result is not None
-    assert result["image_data"].startswith(_PNG_PREFIX)
+    assert result.image_data.startswith(_PNG_PREFIX)

@@ -15,7 +15,9 @@ import pytest
 from astropy.io import fits
 from PIL import Image
 
-from astrometricslib.api.visualization import ViewableImage, Visualization
+from astrometricslib.api.visualization import Visualization
+from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
+from astrometricslib.models.target import ViewableImage
 
 
 @pytest.fixture
@@ -37,7 +39,7 @@ def frame_path(tmp_path: Path) -> str:
 
 def test_render_fits_returns_a_png_and_a_description(frame_path: str) -> None:
     """The picture is a PNG no larger than asked, with its brightness range."""
-    picture = Visualization(None).render_fits(frame_path, max_dimensions=150)
+    picture = Visualization(None, None).render_fits(frame_path, max_dimensions=150)
     assert isinstance(picture, ViewableImage)
     decoded = Image.open(BytesIO(picture.png_bytes))
     assert max(decoded.size) == 150
@@ -47,7 +49,7 @@ def test_render_fits_returns_a_png_and_a_description(frame_path: str) -> None:
 
 def test_a_crop_is_zoomed_and_reported(frame_path: str) -> None:
     """A crop around the star is cut at full size and enlarged to view."""
-    picture = Visualization(None).render_fits(
+    picture = Visualization(None, None).render_fits(
         frame_path, crop_center_x=150, crop_center_y=100, crop_size=40, max_dimensions=400
     )
     assert picture.description["crop"] == {"left": 130, "top": 80, "width": 40, "height": 40}
@@ -56,10 +58,10 @@ def test_a_crop_is_zoomed_and_reported(frame_path: str) -> None:
 
 def test_half_given_options_are_refused(frame_path: str) -> None:
     """One of center/width, or part of a crop, is an error."""
-    with pytest.raises(ValueError):
-        Visualization(None).render_fits(frame_path, center=1000.0)
-    with pytest.raises(ValueError):
-        Visualization(None).render_fits(frame_path, crop_size=40)
+    with pytest.raises(InvalidArgumentError):
+        Visualization(None, None).render_fits(frame_path, center=1000.0)
+    with pytest.raises(InvalidArgumentError):
+        Visualization(None, None).render_fits(frame_path, crop_size=40)
 
 
 def test_the_registry_returns_image_content(frame_path: str) -> None:
@@ -67,7 +69,7 @@ def test_the_registry_returns_image_content(frame_path: str) -> None:
     from astrometricslib.mcp.tool_registry import ToolRegistry
 
     registry = ToolRegistry()
-    registry.register("view", "View a frame.")(lambda: Visualization(None).render_fits(frame_path))
+    registry.register("view", "View a frame.")(lambda: Visualization(None, None).render_fits(frame_path))
     content = asyncio.run(registry.execute("view", {}))
     assert content[0].type == "image"
     assert content[0].mimeType == "image/png"
@@ -87,12 +89,12 @@ def test_a_target_frame_is_found_by_its_number(frame_path: str) -> None:
         ],
     )
     # frame_path ends in "frame.fits": give it a number-free full name.
-    picture = Visualization(None).render_fits(target=target, file_name="frame.fits")
+    picture = Visualization(None, None).render_fits(target=target, file_name="frame.fits")
     assert picture.description["path"] == frame_path
-    with pytest.raises(ValueError):
-        Visualization(None).render_fits(target=target, file_name="999")
-    with pytest.raises(ValueError):
-        Visualization(None).render_fits()
+    with pytest.raises(NotFoundError):
+        Visualization(None, None).render_fits(target=target, file_name="999")
+    with pytest.raises(InvalidArgumentError):
+        Visualization(None, None).render_fits()
 
 
 def test_a_processed_fits_is_drawn_without_a_second_stretch(tmp_path: Path) -> None:
@@ -104,8 +106,8 @@ def test_a_processed_fits_is_drawn_without_a_second_stretch(tmp_path: Path) -> N
     for path in (processed, plain):
         fits.PrimaryHDU(data).writeto(path)
 
-    drawn_processed = Visualization(None).render_fits(str(processed), max_dimensions=150)
-    drawn_plain = Visualization(None).render_fits(str(plain), max_dimensions=150)
+    drawn_processed = Visualization(None, None).render_fits(str(processed), max_dimensions=150)
+    drawn_plain = Visualization(None, None).render_fits(str(plain), max_dimensions=150)
 
     assert drawn_processed.description["stretched"] is False
     assert drawn_plain.description["stretched"] is True

@@ -101,8 +101,9 @@ def download_remote_frames(
         selected_files=selected_files,
     )
     if success and local_subfolder == "lights":
-        context.astrometrics.processing.scan_target_directory(target, config.get_frames_path())
-        target.recalculate_total_exposure()
+        # Reindexing finds the new files, recomputes the total exposure and
+        # saves the target.
+        context.astrometrics.targets.reindex_frames(target)
         return True
     return success
 

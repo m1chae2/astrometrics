@@ -34,6 +34,7 @@ __all__ = [
     "Target",
     "TargetQualitySummaries",
     "TargetStackingResult",
+    "ViewableImage",
 ]
 
 
@@ -420,9 +421,35 @@ class FitsHeaderEntry(BaseModel):
 
 
 class RenderedImage(BaseModel):
-    """A finished PNG image ready to display, plus brightness stats."""
+    """A finished picture ready to display in the app, plus brightness stats.
 
-    id: str = Field(alias="id")
+    `Visualization.render_fits(kind="data_url")` returns it.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    # What the picture shows, such as the target id or the frame's folder.
+    id: str = Field(default="", alias="id")
+    # The brightness range shown, in pixel values (0 and 255 for a JPEG).
     min: float = Field(alias="min")
     max: float = Field(alias="max")
+    # The picture as a ``data:image/png;base64,...`` (or JPEG) URL.
     image_data: str = Field(alias="imageData")
+    # The FITS header of the file that was drawn.
+    headers: list[FitsHeaderEntry] = Field(default_factory=list, alias="headers")
+    # The file that was drawn.
+    path: str | None = Field(default=None, alias="path")
+
+
+class ViewableImage(BaseModel):
+    """A picture a client should show as an image, not as text.
+
+    `Visualization.render_fits(kind="image")` returns it. An MCP client
+    receives the PNG as an image block, with the description beside it.
+    """
+
+    # The PNG file.
+    png_bytes: bytes
+    # What the picture shows: the file, the brightness range, the size and
+    # the crop.
+    description: dict[str, Any] = Field(default_factory=dict)

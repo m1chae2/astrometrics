@@ -1,19 +1,21 @@
-"""Purpose: Unit tests for `ProcessingPipelines`' pipeline-running methods.
+"""Purpose: Unit tests for `ProcessingPipelines.process_target`'s stages.
 
-Description: `run_astrometry`/`run_photometry`/`run_spectroscopy` used to
-take a bare `**kwargs`, so a caller (or the MCP schema built from these
-signatures) had no way to see what options actually existed. These tests
-verify each method's now-explicit named parameters still reach the
-underlying pipeline dispatch correctly, and that `process_target` runs the
-three stages in the right fixed order, respects a `stages` subset, skips
-spectroscopy gracefully when a target has no spectral data, and threads
-photometry's result into the spectroscopy call.
+Description: Each stage takes its options in its own dictionary, so an
+option meant for one stage never reaches another. These tests verify each
+stage's options reach the underlying pipeline dispatch correctly, that an
+unknown option is refused, and that `process_target` runs the stages in the
+right fixed order, respects a `stages` subset, skips spectroscopy gracefully
+when a target has no spectral data, and threads photometry's result into
+the spectroscopy call.
 """
+
+from unittest.mock import MagicMock
 
 import pytest
 
 from astrometricslib.api.processing import ProcessingPipelines
 from astrometricslib.foundation.config import AppConfiguration
+from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines import tasks
 
@@ -70,33 +72,33 @@ def recording_pipelines(monkeypatch):  # ruff: ignore[missing-type-function-argu
     """
     recorder = _RecordingPipelineMatch()
     monkeypatch.setattr(tasks, "_run_analysis_pipeline_match", recorder)
-    return ProcessingPipelines(AppConfiguration()), recorder
+    return ProcessingPipelines(AppConfiguration(), MagicMock()), recorder
 
 
-def test_run_astrometry_forwards_its_named_parameters(recording_pipelines):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify `run_astrometry`'s named parameters reach the dispatch call."""
+def test_the_astrometry_stage_forwards_its_options(recording_pipelines):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify the astrometry options reach the dispatch call."""
     pipelines, recorder = recording_pipelines
     target = Target(id="AstrometryParamsTarget", stacked_image="/fake/stack.fits")
 
-    pipelines.run_astrometry(target, path="/override.fits", register_job=False)
+    pipelines.process_target(
+        target, stages=["astrometry"], astrometry={"path": "/override.fits"}, register_job=False
+    )
 
     assert len(recorder.calls) == 1
     assert recorder.calls[0]["pipeline_type"] == "astrometry"
     assert recorder.calls[0]["path"] == "/override.fits"
 
 
-def test_run_photometry_forwards_its_named_parameters(recording_pipelines):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify `run_photometry`'s named parameters reach the dispatch call."""
+def test_the_photometry_stage_forwards_its_options(recording_pipelines):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify the photometry options reach the dispatch call."""
     pipelines, recorder = recording_pipelines
     target = Target(id="PhotometryParamsTarget")
     frame = FrameRecord(path="/frame1.fits", filter="Luminance")
 
-    pipelines.run_photometry(
+    pipelines.process_target(
         target,
-        frames=[frame],
-        filter_type="L",
-        use_astrometry_seed=False,
-        max_workers=3,
+        stages=["photometry"],
+        photometry={"frames": [frame], "filter_type": "L", "use_astrometry_seed": False, "max_workers": 3},
         register_job=False,
     )
 
@@ -109,18 +111,30 @@ def test_run_photometry_forwards_its_named_parameters(recording_pipelines):  # r
     assert call["max_workers"] == 3
 
 
-def test_run_spectroscopy_forwards_its_named_parameters(recording_pipelines):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify `run_spectroscopy`'s named parameters reach the dispatch call."""
+def test_the_spectroscopy_stage_forwards_its_options(recording_pipelines):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify the spectroscopy options reach the dispatch call."""
     pipelines, recorder = recording_pipelines
     target = Target(id="SpectroscopyParamsTarget", stacked_spectral_target="/fake/spec.fits")
 
-    pipelines.run_spectroscopy(target, limit=5, register_job=False, photometry_result={"status": "finished"})
+    pipelines.process_target(target, stages=["spectroscopy"], spectroscopy={"limit": 5}, register_job=False)
 
     assert len(recorder.calls) == 1
     call = recorder.calls[0]
     assert call["pipeline_type"] == "spectroscopy"
     assert call["limit"] == 5
-    assert call["photometry_result"] == {"status": "finished"}
+    assert call["photometry_result"] is None
+
+
+def test_an_option_a_stage_does_not_know_is_refused(recording_pipelines):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    """Verify a misspelt or misplaced option raises, not being dropped."""
+    pipelines, recorder = recording_pipelines
+    target = Target(id="UnknownOptionTarget", stacked_image="/fake/stack.fits")
+
+    with pytest.raises(InvalidArgumentError, match="Unknown astrometry option"):
+        pipelines.process_target(target, stages=["astrometry"], astrometry={"limit": 5}, register_job=False)
+    with pytest.raises(InvalidArgumentError, match="does not use: camera_id"):
+        pipelines.process_target(target, camera_id="ASI294", register_job=False)
+    assert recorder.calls == []
 
 
 def test_process_target_runs_all_three_stages_in_order(recording_pipelines):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
@@ -139,7 +153,7 @@ def test_process_target_runs_all_three_stages_in_order(recording_pipelines):  # 
         "photometry",
         "spectroscopy",
     ]
-    assert set(results) == {"astrometry", "photometry", "spectroscopy"}
+    assert results.stages_run == ["astrometry", "photometry", "spectroscopy"]
 
 
 def test_process_target_threads_photometry_result_into_spectroscopy(recording_pipelines):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
@@ -154,7 +168,7 @@ def test_process_target_threads_photometry_result_into_spectroscopy(recording_pi
     results = pipelines.process_target(target, register_job=False)
 
     spectroscopy_call = next(call for call in recorder.calls if call["pipeline_type"] == "spectroscopy")
-    assert spectroscopy_call["photometry_result"] == results["photometry"]
+    assert spectroscopy_call["photometry_result"] == results.results["photometry"]
 
 
 def test_process_target_stages_subset_runs_only_the_requested_stages(recording_pipelines):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
@@ -166,12 +180,10 @@ def test_process_target_stages_subset_runs_only_the_requested_stages(recording_p
         stacked_spectral_target="/fake/spec.fits",
     )
 
-    results = pipelines.process_target(
-        target, stages=frozenset({"spectroscopy", "photometry"}), register_job=False
-    )
+    results = pipelines.process_target(target, stages=["spectroscopy", "photometry"], register_job=False)
 
     assert [call["pipeline_type"] for call in recorder.calls] == ["photometry", "spectroscopy"]
-    assert set(results) == {"photometry", "spectroscopy"}
+    assert set(results.results) == {"photometry", "spectroscopy"}
 
 
 def test_process_target_skips_spectroscopy_without_spectral_data(recording_pipelines):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
@@ -182,11 +194,11 @@ def test_process_target_skips_spectroscopy_without_spectral_data(recording_pipel
     results = pipelines.process_target(target, register_job=False)
 
     assert "spectroscopy" not in [call["pipeline_type"] for call in recorder.calls]
-    assert results["spectroscopy"] == {"status": "skipped", "reason": "target has no spectral data"}
+    assert results.results["spectroscopy"] == {"status": "skipped", "reason": "target has no spectral data"}
 
 
 def test_stack_summary_reports_a_target_with_no_stack() -> None:
-    """A target without a saved stack summary gets an error, not a crash."""
+    """A target without a saved stack summary raises NotFoundError."""
     target = Target(id="Nothing_Yet", name="Nothing Yet")
-    answer = ProcessingPipelines(AppConfiguration()).stack_summary(target)
-    assert "has no saved summary" in answer["error"]
+    with pytest.raises(NotFoundError, match="has no saved summary"):
+        ProcessingPipelines(AppConfiguration(), MagicMock()).stack_summary(target)

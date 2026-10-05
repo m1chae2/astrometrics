@@ -30,14 +30,35 @@ class _Stars:
         self.spectrum_ids: list[str] = []
         self.found_or_created = StellarObject(id="Created")
 
-    def list_objects(self) -> list[StellarObject]:
-        """Fail, because reading every star is what must not happen.
+    def query(
+        self,
+        ids: list[str] | None = None,
+        target_id: str | None = None,
+        has_spectra: bool | None = None,
+        detail: str = "summary",
+        limit: int | None = 50,
+    ) -> SimpleNamespace:
+        """Answer the star queries the service may make, and record them.
+
+        Returns
+        -------
+        answer : `types.SimpleNamespace`
+            ``objects`` for one target's stars, ``found`` for an ``exists``
+            check, or ``ids`` for the stars with spectra.
 
         Raises
         ------
         AssertionError
-            Always.
+            If the query would read every star in the catalog.
         """
+        if detail == "exists":
+            self.calls.append(("exists", sorted(ids or [])))
+            return SimpleNamespace(found=sorted(self.existing & set(ids or [])))
+        if detail == "ids" and has_spectra:
+            return SimpleNamespace(ids=self.spectrum_ids)
+        if detail == "objects" and target_id is not None:
+            self.calls.append(("query", target_id))
+            return SimpleNamespace(objects=self.by_target.get(target_id, []))
         raise AssertionError("the whole star catalog was read")
 
     def save_all(self, objects: list[StellarObject], allow_empty: bool = False) -> str:
@@ -49,38 +70,6 @@ class _Stars:
             Always.
         """
         raise AssertionError("the whole star catalog was rewritten")
-
-    def list_objects_for_target(self, target_id: str) -> list[StellarObject]:
-        """Return the stars of one target and record the request.
-
-        Returns
-        -------
-        stars : `list` [`StellarObject`]
-            That target's stars.
-        """
-        self.calls.append(("list_objects_for_target", target_id))
-        return self.by_target.get(target_id, [])
-
-    def existing_ids(self, ids: list[str]) -> set[str]:
-        """Return which ids exist and record which ids were asked about.
-
-        Returns
-        -------
-        found : `set` [`str`]
-            The ids that exist.
-        """
-        self.calls.append(("existing_ids", sorted(ids)))
-        return self.existing & set(ids)
-
-    def list_spectrum_object_ids(self) -> list[str]:
-        """Return the ids of stars with spectra.
-
-        Returns
-        -------
-        ids : `list` [`str`]
-            The ids set by the test.
-        """
-        return self.spectrum_ids
 
     def find_or_create_by_position(self, ra: float, dec: float, **details: object) -> StellarObject:
         """Record the request and return the prepared star.
@@ -115,7 +104,7 @@ def test_stars_of_one_target_are_read_from_that_target_only() -> None:
     found = _make_service(stars).get_stellar_objects("M 13")
 
     assert [star.id for star in found] == ["A", "B"]
-    assert stars.calls == [("list_objects_for_target", "M 13")]
+    assert stars.calls == [("query", "M 13")]
 
 
 def test_the_displayable_listing_for_a_target_hides_detection_stubs() -> None:
@@ -187,4 +176,4 @@ def test_get_sources_with_the_global_catalog_checks_only_the_returned_ids() -> N
 
     flags = {source["id"]: source["global"] for source in sources}
     assert flags == {"Local": False, "Global": True}
-    assert stars.calls == [("existing_ids", ["Global", "Local"])]
+    assert stars.calls == [("exists", ["Global", "Local"])]

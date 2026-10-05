@@ -12,6 +12,7 @@ import pytest
 from astropy.io import fits
 
 from astrometricslib.api.processing import CalibrationCatalog
+from astrometricslib.foundation.errors import InvalidArgumentError
 
 CAMERA = "ZWO ASI 533MM Pro"
 
@@ -57,7 +58,7 @@ def catalog(tmp_path: Path) -> CalibrationCatalog:
         get_frames_path=lambda: tmp_path / "frames",
         get_library_file_path=lambda name: str(tmp_path / "library" / name),
     )
-    return CalibrationCatalog(configuration)
+    return CalibrationCatalog(configuration, None)
 
 
 def flat_folder(tmp_path: Path, filter_folder: str) -> Path:
@@ -146,5 +147,5 @@ def test_assess_flats_with_nothing_matching_is_empty(catalog: CalibrationCatalog
 
 def test_refresh_rejects_an_unknown_kind(catalog: CalibrationCatalog) -> None:
     """A kind other than dark, bias or flat is refused."""
-    with pytest.raises(ValueError, match="Unknown calibration kind"):
+    with pytest.raises(InvalidArgumentError, match="kind must be one of"):
         catalog.refresh("lamp")  # ty: ignore[invalid-argument-type]

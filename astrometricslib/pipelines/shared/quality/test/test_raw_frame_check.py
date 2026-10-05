@@ -7,12 +7,14 @@ moved in. A clean batch must come back unflagged.
 """
 
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
 from astropy.io import fits
 
 from astrometricslib.api.processing import QualityDiagnostics
+from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.pipelines.shared.quality import raw_frame_check
 
 _SIZE = 512
@@ -172,9 +174,11 @@ def test_an_empty_folder_gives_an_empty_report(tmp_path: Path) -> None:
 
 
 def test_the_diagnostics_api_runs_the_check_on_a_folder(tmp_path: Path) -> None:
-    """The tool entry point returns the same report."""
+    """`frame_quality(kind="raw_check")` runs the same check on a folder."""
     _write_batch(tmp_path, _clean_batch(3))
 
-    report = QualityDiagnostics(config=None).check_raw_frames(str(tmp_path))
+    diagnostics = QualityDiagnostics(AppConfiguration(), MagicMock())
+    report = diagnostics.frame_quality(folder_path=str(tmp_path), kind="raw_check", register_job=False)
 
-    assert report["batch"]["frame_count"] == 3
+    assert report.batch["frame_count"] == 3
+    assert report.frames_checked == 3

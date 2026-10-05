@@ -124,18 +124,22 @@ def _add_image_quality(
         What was done, including any frames left unmeasured.
     """
     wanted = [row["file"] for row in frames][:MAXIMUM_QUALITY_FRAMES]
-    report = astrometrics.processing.diagnostics.frame_quality(
-        target=target,
-        mode="raw_check",
-        filter_name=selection.filter_name,
-        first_file=wanted[0],
-        last_file=wanted[-1],
-        include_spectra=selection.include_spectra,
-        limit=len(wanted),
-    )
-    if "error" in report:
-        return f"Image quality could not be measured: {report['error']}"
-    by_file = {os.path.basename(row["path"]): row for row in report.get("frames", [])}
+    from astrometricslib import InvalidArgumentError, NotFoundError
+
+    try:
+        report = astrometrics.processing.diagnostics.frame_quality(
+            target=target,
+            kind="raw_check",
+            include=["spectra"] if selection.include_spectra else None,
+            filter_name=selection.filter_name,
+            first_file=wanted[0],
+            last_file=wanted[-1],
+            limit=len(wanted),
+            register_job=False,
+        )
+    except (InvalidArgumentError, NotFoundError) as error:
+        return f"Image quality could not be measured: {error}"
+    by_file = {os.path.basename(row["path"]): row for row in report.frames}
     for row in frames:
         measured = by_file.get(row["file"])
         if measured is None:

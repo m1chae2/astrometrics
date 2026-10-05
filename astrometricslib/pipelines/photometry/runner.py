@@ -261,11 +261,22 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         sessions_with_reused_header_wcs: list[str] = []
         sessions_with_replaced_header_wcs: list[str] = []
 
+        # With no worker count given, use the configured photometry
+        # workers, checked against the CPUs and memory this computer has.
+        max_workers = options.get("max_workers")
+        if max_workers is None:
+            from astrometricslib.foundation.config import get_configuration
+            from astrometricslib.utilities.concurrency import resolve_worker_counts
+
+            max_workers = resolve_worker_counts(
+                "1", get_configuration().get_photometry_workers()
+            ).inner_worker_count
+
         for session in photometry_sessions:
             id_prefix = f"{session.id}:" if id_prefix_enabled else ""
             analyzer, session_candidates, identify_result = _run_variability_analysis_for_session(
                 session,
-                options.get("max_workers"),
+                max_workers,
                 id_prefix,
                 target=target,
                 star_identifier=star_identifier,

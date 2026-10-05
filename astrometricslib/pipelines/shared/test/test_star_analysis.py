@@ -2,8 +2,12 @@
 
 import pytest
 
-from astrometricslib.api.star_analysis import ladder_position, spectral_class_letter, summarize_star
 from astrometricslib.models.stellar_source import PhotometryResult, SpectroscopyResult, StellarObject
+from astrometricslib.pipelines.shared.star_analysis import (
+    ladder_position,
+    spectral_class_letter,
+    summarize_star,
+)
 
 
 @pytest.mark.parametrize(

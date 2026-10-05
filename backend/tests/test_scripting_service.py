@@ -167,7 +167,7 @@ def test_scripting_service_api_docs() -> None:
     # Verify resolving individual class generated stub
     stub_doc = service.get_doc_topic("generated/astrometricslib.Astrometrics.rst")
     assert "Astrometrics" in stub_doc["title"]
-    assert "process_all_targets" in stub_doc["content"]
+    assert "sub-APIs" in stub_doc["content"]
 
 
 def test_get_figure_manager_provides_toolbar() -> None:

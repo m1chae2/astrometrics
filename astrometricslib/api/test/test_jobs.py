@@ -74,7 +74,7 @@ def jobs(database: Path) -> Jobs:
     jobs : `Jobs`
         The interface under test.
     """
-    return Jobs(SimpleNamespace(get_logs_db_path=lambda: str(database)))
+    return Jobs(SimpleNamespace(get_logs_db_path=lambda: str(database)), None)
 
 
 def test_summary_lists_newest_first_with_progress(jobs: Jobs) -> None:
@@ -115,7 +115,7 @@ def test_a_job_updated_just_now_is_active(tmp_path: Path) -> None:
     fresh = _job("job-f", "M 57", "stacking", "running", 0)
     fresh.created_at = fresh.updated_at = datetime.now().isoformat()
     LoggerInterface(str(path)).upsert_job(fresh)
-    job = Jobs(SimpleNamespace(get_logs_db_path=lambda: str(path))).query(active_only=True)["jobs"][0]
+    job = Jobs(SimpleNamespace(get_logs_db_path=lambda: str(path)), None).query(active_only=True)["jobs"][0]
     assert job["is_active"] is True
     assert job["looks_stale"] is False
 
@@ -190,7 +190,7 @@ def test_problems_come_back_as_errors(jobs: Jobs, arguments: dict, message: str)
 def test_missing_database_is_reported_and_not_created(tmp_path: Path) -> None:
     """With no logs database, the answer says so and no file appears."""
     path = tmp_path / "absent.db"
-    answer = Jobs(SimpleNamespace(get_logs_db_path=lambda: str(path))).query()
+    answer = Jobs(SimpleNamespace(get_logs_db_path=lambda: str(path)), None).query()
     assert "does not exist" in answer["error"]
     assert not path.exists()
 

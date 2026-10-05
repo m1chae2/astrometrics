@@ -1,17 +1,18 @@
-"""Purpose: Unit tests for api/batch.py's per-target worker and driver.
+"""Purpose: Unit tests for the many-target run in `pipelines/target_batch.py`.
 
-Description: Unlike most of the api/ facade, this module has real
-branching logic of its own -- classifying a target as success, skipped,
-or failed, and reconciling worker counts -- so it gets behavior tests
-rather than delegation-contract tests.
+Description: This module has real branching logic of its own -- classifying
+a target as success, skipped, or failed, and reconciling worker counts -- so
+it gets behavior tests rather than delegation-contract tests. The last tests
+check that `ProcessingPipelines.process_target` hands a list of targets, or
+every target, to it.
 """
 
 from unittest.mock import MagicMock
 
 import astrometricslib
-from astrometricslib.api import batch
+from astrometricslib.api.processing import ProcessingPipelines
 from astrometricslib.models.target import Target
-from astrometricslib.pipelines import tasks
+from astrometricslib.pipelines import target_batch, tasks
 from astrometricslib.pipelines.shared import frame_grouping
 from astrometricslib.utilities import concurrency, parallel_batch
 
@@ -38,7 +39,7 @@ class TestProcessSingleTargetWorker:
         """Verify a missing target is reported as a failure, not a crash."""
         _patch_astrometrics(monkeypatch, target=None)
 
-        result = batch._process_single_target_worker("Missing", 2, "ASI294")
+        result = target_batch._process_single_target_worker("Missing", 2, "ASI294")
 
         assert result["status"] == "failed"
         assert result["error"] == "Target not found in catalog"
@@ -53,7 +54,7 @@ class TestProcessSingleTargetWorker:
         _patch_astrometrics(monkeypatch, target=target)
         monkeypatch.setattr(frame_grouping, "select_frames_for_camera", lambda t, c: [])
 
-        result = batch._process_single_target_worker("M13", 2, "ASI294")
+        result = target_batch._process_single_target_worker("M13", 2, "ASI294")
 
         assert result["status"] == "skipped"
         assert "ASI294" in result["error"]
@@ -66,7 +67,7 @@ class TestProcessSingleTargetWorker:
         pipeline_mock = MagicMock(return_value={"astrometry": "ok"})
         monkeypatch.setattr(tasks, "run_full_pipeline", pipeline_mock)
 
-        result = batch._process_single_target_worker("M13", 2, "ASI294", focal_length_mm=600.0)
+        result = target_batch._process_single_target_worker("M13", 2, "ASI294", focal_length_mm=600.0)
 
         assert result["status"] == "success"
         assert result["stack_outputs"] == {"astrometry": "ok"}
@@ -90,7 +91,7 @@ class TestProcessSingleTargetWorker:
 
         monkeypatch.setattr(tasks, "run_full_pipeline", _explode)
 
-        result = batch._process_single_target_worker("M13", 2, "ASI294")
+        result = target_batch._process_single_target_worker("M13", 2, "ASI294")
 
         assert result["status"] == "failed"
         assert "RuntimeError" in result["error"]
@@ -115,55 +116,57 @@ class TestProcessSingleTargetWorker:
 
         monkeypatch.setattr(tasks, "run_full_pipeline", _explode_with_no_message)
 
-        result = batch._process_single_target_worker("M13", 2, "ASI294")
+        result = target_batch._process_single_target_worker("M13", 2, "ASI294")
 
         assert result["status"] == "failed"
         assert result["error"]
         assert "RuntimeError" in result["error"]
 
 
-class TestProcessAllTargets:
+class TestProcessTargetsInParallel:
     """Behavior tests for target selection and worker-count reconciliation."""
 
-    def _make_api(self, target_ids: list) -> MagicMock:
-        """Build a fake top-level api with a catalog and worker config.
+    def _make_pipelines(self, target_ids: list) -> ProcessingPipelines:
+        """Build the processing API over a fake catalog and worker config.
 
         Returns
         -------
-        api : `MagicMock`
-            A fake `Astrometrics`-shaped object.
+        pipelines : `ProcessingPipelines`
+            The API, whose target catalog lists ``target_ids``.
         """
-        api = MagicMock()
-        api.targets.list.return_value = [Target(id=target_id) for target_id in target_ids]
-        api.config.get_target_workers.return_value = "auto"
-        api.config.get_photometry_workers.return_value = "auto"
-        api.config.get_worker_niceness.return_value = 5
-        return api
+        config = MagicMock()
+        config.get_target_workers.return_value = "auto"
+        config.get_photometry_workers.return_value = "auto"
+        config.get_worker_niceness.return_value = 5
+        targets = MagicMock()
+        targets.list.return_value = [Target(id=target_id) for target_id in target_ids]
+        targets.get.side_effect = lambda target_id, refresh=False: Target(id=target_id)
+        return ProcessingPipelines(config, MagicMock(), targets=targets)
 
-    def test_defaults_to_every_catalog_target_when_target_ids_is_none(self, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-        """Verify a missing target_ids falls back to the whole catalog."""
-        api = self._make_api(["M13", "M31"])
+    def test_defaults_to_every_catalog_target_when_target_is_none(self, monkeypatch: object) -> None:
+        """Verify `target=None` processes the whole catalog."""
+        pipelines = self._make_pipelines(["M13", "M31"])
         run_mock = MagicMock()
         monkeypatch.setattr(parallel_batch, "run_parallel_batch", run_mock)
 
-        batch.process_all_targets(api, camera_name="ASI294")
+        pipelines.process_target(None, camera_id="ASI294", register_job=False)
 
         called_item_ids = run_mock.call_args[0][0]
         assert called_item_ids == ["M13", "M31"]
 
-    def test_uses_explicit_target_ids_instead_of_the_full_catalog(self, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-        """Verify an explicit target_ids list is used as-is, unfiltered."""
-        api = self._make_api(["M13", "M31"])
+    def test_uses_the_listed_targets_instead_of_the_full_catalog(self, monkeypatch: object) -> None:
+        """Verify a list of targets is used as it is, unfiltered."""
+        pipelines = self._make_pipelines(["M13", "M31"])
         run_mock = MagicMock()
         monkeypatch.setattr(parallel_batch, "run_parallel_batch", run_mock)
 
-        batch.process_all_targets(api, target_ids=["M31"], camera_name="ASI294")
+        pipelines.process_target(["M31"], camera_id="ASI294", register_job=False)
 
         called_item_ids = run_mock.call_args[0][0]
         assert called_item_ids == ["M31"]
-        api.targets.list.assert_not_called()
+        pipelines._targets.list.assert_not_called()
 
-    def test_forwards_resolved_worker_counts_and_niceness(self, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_forwards_resolved_worker_counts_and_niceness(self, monkeypatch: object) -> None:
         """Verify config settings reach run_parallel_batch resolved.
 
         resolve_worker_counts is monkeypatched to a deterministic stub so
@@ -173,11 +176,12 @@ class TestProcessAllTargets:
         runners. Memory-based capping logic is tested separately in the
         concurrency module's own unit tests.
         """
-        api = self._make_api(["M13"])
-        api.config.get_target_workers.return_value = "2"
-        api.config.get_photometry_workers.return_value = "3"
+        config = MagicMock()
+        config.get_target_workers.return_value = "2"
+        config.get_photometry_workers.return_value = "3"
+        config.get_worker_niceness.return_value = 5
         monkeypatch.setattr(
-            batch,
+            target_batch,
             "resolve_worker_counts",
             lambda outer, inner: concurrency.WorkerCounts(
                 outer_worker_count=int(outer), inner_worker_count=int(inner)
@@ -186,7 +190,9 @@ class TestProcessAllTargets:
         run_mock = MagicMock(return_value="a summary")
         monkeypatch.setattr(parallel_batch, "run_parallel_batch", run_mock)
 
-        result = batch.process_all_targets(api, camera_name="ASI294", focal_length_mm=600.0)
+        result = target_batch.process_targets_in_parallel(
+            config, ["M13"], camera_id="ASI294", focal_length_mm=600.0
+        )
 
         assert result == "a summary"
         _, kwargs = run_mock.call_args

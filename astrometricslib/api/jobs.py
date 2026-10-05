@@ -16,8 +16,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
 from astrometricslib.drivers.logger_interface import LoggerInterface
 from astrometricslib.drivers.provenance_store import ProvenanceStore
+from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.utilities.pipeline_models import ProcessingJob
 
 __all__ = ["Jobs"]
@@ -108,14 +110,22 @@ def _minutes_since(timestamp: str | None) -> float | None:
 class Jobs:
     """Read-only view of the job history and the data lineage.
 
+    Nothing is opened when this is built; each query opens the logs
+    database read-only.
+
     Parameters
     ----------
     config : `AppConfiguration`
-        The app configuration. It supplies the path of the logs database.
+        The application settings. They give the path of the logs database.
+    storage : `AbstractCatalogAccess`
+        The database the rest of the library reads and writes. Jobs are kept
+        in the separate logs database, so it is held only to match the other
+        sub-APIs.
     """
 
-    def __init__(self, config: Any):  # ruff: ignore[missing-return-type-special-method]
-        """Remember where the logs database is. Nothing is opened yet."""
+    def __init__(self, config: AppConfiguration, storage: AbstractCatalogAccess) -> None:
+        self._config = config
+        self._storage = storage
         self._database_path = str(config.get_logs_db_path())
 
     def _summarize(self, job: ProcessingJob) -> dict[str, Any]:

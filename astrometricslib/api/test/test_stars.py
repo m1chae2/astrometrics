@@ -14,13 +14,32 @@ from unittest.mock import MagicMock
 import pytest
 
 from astrometricslib.api.stars import StellarCatalog
+from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.stellar_source import PhotometryResult, StellarObject
 
 
 def _make_catalog() -> StellarCatalog:
+    """Build a catalog over a mock config and a mock storage.
+
+    Returns
+    -------
+    catalog : `StellarCatalog`
+        The catalog.
+    """
     config = MagicMock()
     catalog_access = MagicMock()
-    return StellarCatalog(config=config, catalog_access=catalog_access)
+    return StellarCatalog(config, catalog_access)
+
+
+def _ids(catalog: StellarCatalog) -> list[str]:
+    """List every star id in a catalog.
+
+    Returns
+    -------
+    ids : `list` [`str`]
+        The ids, in id order.
+    """
+    return catalog.query(detail="ids", limit=None).ids
 
 
 class TestSaveAll:
@@ -50,7 +69,7 @@ class TestSaveAll:
         """
         catalog = _make_catalog()
 
-        with pytest.raises(ValueError, match="empty list"):
+        with pytest.raises(InvalidArgumentError, match="empty list"):
             catalog.save_all([])
 
         catalog.catalog_access.put.assert_not_called()
@@ -79,7 +98,7 @@ class TestAnalyzePeriodicity:
                 fluxes_detrended=[1.0 + 0.1 * (index % 4) for index in range(20)],
             ),
         )
-        catalog.get_object = MagicMock(return_value=star)
+        catalog.get = MagicMock(return_value=star)
         catalog.update = MagicMock(return_value=star)
 
         result = catalog.analyze_periodicity("Gaia DR3 1")
@@ -98,7 +117,7 @@ class TestAnalyzePeriodicity:
                 timestamps=[datetime(2026, 1, 1, tzinfo=UTC)] * 3, fluxes_detrended=[1.0, 1.1, 1.0]
             ),
         )
-        catalog.get_object = MagicMock(return_value=star)
+        catalog.get = MagicMock(return_value=star)
         catalog.update = MagicMock()
 
         assert catalog.analyze_periodicity("Gaia DR3 1") is star
@@ -107,7 +126,7 @@ class TestAnalyzePeriodicity:
     def test_returns_none_for_an_unknown_star(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Verify an id that is not in the catalog gives None."""
         catalog = _make_catalog()
-        catalog.get_object = MagicMock(return_value=None)
+        catalog.get = MagicMock(return_value=None)
 
         assert catalog.analyze_periodicity("missing") is None
 
@@ -130,7 +149,7 @@ def _make_real_catalog(tmp_path, stars: list[StellarObject]) -> StellarCatalog: 
     config.update_config({"Image Library": {"path": str(library_path)}})
     catalog_access = CatalogAccess(config=config)
     catalog_access.put(stars, "stellar_catalog", {})
-    return StellarCatalog(config=config, catalog_access=catalog_access)
+    return StellarCatalog(config, catalog_access)
 
 
 def _positioned_star(star_id: str, ra: float, dec: float, **fields: Any) -> StellarObject:
@@ -184,56 +203,54 @@ class TestQueriesNeverLoadTheWholeCatalog:
         """Verify the nearest star inside the tolerance is found."""
         catalog = self._catalog_that_fails_on_a_full_read(tmp_path, mocker)
 
-        found = catalog.find_by_position(279.2347, 38.7837, tolerance_arcsec=5.0)
+        found = catalog.query(
+            ra_deg=279.2347, dec_deg=38.7837, tolerance_arcsec=5.0, detail="objects"
+        ).objects
 
-        assert found is not None
-        assert found.id == "* alf Lyr"
+        assert [star.id for star in found] == ["* alf Lyr"]
 
     def test_find_by_position_returns_none_outside_the_tolerance(self, tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
         """Verify a spot with no star within the tolerance finds nothing."""
         catalog = self._catalog_that_fails_on_a_full_read(tmp_path, mocker)
 
-        assert catalog.find_by_position(200.0, 0.0) is None
+        assert catalog.query(ra_deg=200.0, dec_deg=0.0, tolerance_arcsec=5.0, detail="ids").ids == []
 
     def test_find_by_position_prefers_the_nearest_of_two_candidates(self, tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
         """Verify that with two stars in range, the closer one wins."""
         catalog = self._catalog_that_fails_on_a_full_read(tmp_path, mocker)
 
         # 0.4 arcsec from HD 172167 and about 7 arcsec from Vega.
-        found = catalog.find_by_position(279.2350, 38.78381, tolerance_arcsec=20.0)
+        found = catalog.query(ra_deg=279.2350, dec_deg=38.78381, tolerance_arcsec=20.0, detail="ids").ids
 
-        assert found is not None
-        assert found.id == "HD 172167"
+        assert found == ["HD 172167"]
 
     def test_get_object_fuzzy_lookup_loads_only_the_matching_star(self, tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
         """Verify a slightly mistyped id still finds its star."""
         catalog = self._catalog_that_fails_on_a_full_read(tmp_path, mocker)
 
-        found = catalog.get_object("*ALF_lyr")
+        found = catalog.get("*ALF_lyr")
 
         assert found is not None
         assert found.id == "* alf Lyr"
-        assert catalog.get_object("no such star") is None
+        assert catalog.get("no such star") is None
 
     def test_find_by_id_or_name_matches_the_name_ignoring_case(self, tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
         """Verify a star is found by its common name or by its id."""
         catalog = self._catalog_that_fails_on_a_full_read(tmp_path, mocker)
 
-        by_name = catalog.find_by_id_or_name("vega")
-        by_id = catalog.find_by_id_or_name("HD 172167")
+        by_name = catalog.query(name="vega", detail="ids").ids
+        by_id = catalog.query(name="HD 172167", detail="ids").ids
 
-        assert by_name is not None
-        assert by_name.id == "* alf Lyr"
-        assert by_id is not None
-        assert by_id.id == "HD 172167"
-        assert catalog.find_by_id_or_name("Sirius") is None
+        assert by_name == ["* alf Lyr"]
+        assert by_id == ["HD 172167"]
+        assert catalog.query(name="Sirius", detail="ids").ids == []
 
     def test_list_objects_for_target_uses_exact_target_membership(self, tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
         """Verify "M 1" does not pick up a star that only belongs to "M 13"."""
         catalog = self._catalog_that_fails_on_a_full_read(tmp_path, mocker)
 
-        assert [star.id for star in catalog.list_objects_for_target("M 1")] == ["Far Away"]
-        assert sorted(star.id for star in catalog.list_objects_for_target("M 13")) == [
+        assert catalog.query(target_id="M 1", detail="ids").ids == ["Far Away"]
+        assert sorted(catalog.query(target_id="M 13", detail="ids").ids) == [
             "Far Away",
             "HD 172167",
         ]
@@ -242,7 +259,7 @@ class TestQueriesNeverLoadTheWholeCatalog:
         """Verify a region query returns the stars inside it and no others."""
         catalog = self._catalog_that_fails_on_a_full_read(tmp_path, mocker)
 
-        found = catalog.list_objects_in_region(279.2347, 38.7837, 0.05)
+        found = catalog.query(ra_deg=279.2347, dec_deg=38.7837, radius_deg=0.05, detail="objects").objects
 
         assert sorted(star.id for star in found) == ["* alf Lyr", "HD 172167"]
 
@@ -250,7 +267,7 @@ class TestQueriesNeverLoadTheWholeCatalog:
         """Verify only the given ids are loaded, in full."""
         catalog = self._catalog_that_fails_on_a_full_read(tmp_path, mocker)
 
-        found = catalog.list_objects_by_ids(["HD 172167", "Missing"])
+        found = catalog.query(ids=["HD 172167", "Missing"], detail="objects").objects
 
         assert [star.id for star in found] == ["HD 172167"]
 
@@ -258,10 +275,10 @@ class TestQueriesNeverLoadTheWholeCatalog:
         """Verify ids, existence checks and the audit load no stars."""
         catalog = self._catalog_that_fails_on_a_full_read(tmp_path, mocker)
 
-        assert sorted(catalog.list_object_ids()) == ["* alf Lyr", "Far Away", "HD 172167"]
-        assert catalog.existing_ids(["Far Away", "Missing"]) == {"Far Away"}
-        assert catalog.get_audit()["total_objects"] == 3
-        assert catalog.list_spectrum_object_ids() == []
+        assert _ids(catalog) == ["* alf Lyr", "Far Away", "HD 172167"]
+        assert catalog.query(ids=["Far Away", "Missing"], detail="exists").found == ["Far Away"]
+        assert catalog.query(detail="stats").stats["total_objects"] == 3
+        assert catalog.query(has_spectra=True, detail="ids").ids == []
 
 
 class TestFindOrCreateByPosition:
@@ -279,7 +296,7 @@ class TestFindOrCreateByPosition:
         assert created.spectral_type == "A0V"
         assert created.magnitude == pytest.approx(5.5)
         assert created.target_ids == ["M 1"]
-        assert sorted(catalog.list_object_ids()) == ["HD 1", "Other"]
+        assert _ids(catalog) == ["HD 1", "Other"]
 
     def test_reuses_the_star_at_the_same_position_instead_of_duplicating_it(self, tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
         """Verify a star 1 arcsecond away is reused and gains the target."""
@@ -289,7 +306,7 @@ class TestFindOrCreateByPosition:
 
         assert found.id == "HD 1"
         assert found.target_ids == ["M 13"]
-        assert catalog.list_object_ids() == ["HD 1"]
+        assert _ids(catalog) == ["HD 1"]
 
     def test_finds_a_star_by_its_exact_name_wherever_it_sits(self, tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
         """Verify an existing id is reused wherever the position is."""
@@ -299,7 +316,7 @@ class TestFindOrCreateByPosition:
 
         assert found.id == "HD 1"
         assert found.magnitude == pytest.approx(4.0)
-        assert catalog.list_object_ids() == ["HD 1"]
+        assert _ids(catalog) == ["HD 1"]
 
     def test_a_field_detection_takes_the_catalog_name_it_is_given(self, tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
         """Verify an unnamed "Star_" detection takes a catalog name."""
@@ -308,7 +325,7 @@ class TestFindOrCreateByPosition:
         found = catalog.find_or_create_by_position(50.0, 20.0, name="* bet Lyr")
 
         assert found.id == "* bet Lyr"
-        assert catalog.list_object_ids() == ["* bet Lyr"]
+        assert _ids(catalog) == ["* bet Lyr"]
 
     def test_an_unnamed_new_star_gets_a_numbered_id(self, tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
         """Verify a nameless star with no neighbour gets a Star_ id."""

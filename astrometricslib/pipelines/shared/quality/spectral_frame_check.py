@@ -358,3 +358,108 @@ def summarize_spectral_frames(rows: list[dict[str, Any]], minimum_contrast: floa
             "largest_tilt_degrees": round(max(tilts), 3) if tilts else None,
         }
     return {"by_exposure": by_exposure, "by_pier_side": by_pier_side}
+
+
+def _exposure_matches(recorded: Any, wanted: float) -> bool:
+    """Say whether a frame's recorded exposure equals a wanted length.
+
+    Returns
+    -------
+    matches : `bool`
+        `True` if the two agree to a thousandth of a second.
+    """
+    try:
+        return abs(float(recorded) - wanted) < 0.001
+    except TypeError, ValueError:
+        return False
+
+
+def check_spectral_frames(
+    target: Any,
+    selection: Any,
+    exposure_seconds: float | None,
+    predict_exposure_seconds: float | None,
+    limit: int,
+) -> Any:
+    """Measure a target's raw spectrum frames and summarize where they clip.
+
+    This is the work behind `QualityDiagnostics.spectral_frame_check`. Each
+    frame takes about a second. A frame that cannot be read gets an
+    ``error`` in its row, and the other frames are still measured.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target whose spectrum frames to measure.
+    selection : `FrameSelection`
+        The file range and time window to keep.
+    exposure_seconds : `float` or `None`
+        Only frames with this exposure length.
+    predict_exposure_seconds : `float` or `None`
+        An exposure to predict the peaks at, in seconds.
+    limit : `int`
+        How many frames to measure.
+
+    Returns
+    -------
+    report : `SpectralFrameCheckReport`
+        One row per frame and the summary by exposure and by pier side.
+    """
+    import os
+
+    from astrometricslib.drivers.job_logging import get_current_job
+    from astrometricslib.models.quality_reports import SpectralFrameCheckReport
+    from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
+    from astrometricslib.pipelines.shared.quality.frame_selection import select_library_frames
+    from astrometricslib.pipelines.stacking.processing.group_derotation import MINIMUM_TRAIL_CONTRAST_SIGMA
+
+    lights = [
+        frame for frame in target.frames if str(frame.role).upper() == "LIGHT" and frame_is_spectral(frame)
+    ]
+    chosen = select_library_frames(lights, selection)
+    if exposure_seconds is not None:
+        chosen = [frame for frame in chosen if _exposure_matches(frame.exposure, exposure_seconds)]
+    matching = len(chosen)
+    if not chosen:
+        return SpectralFrameCheckReport(target_id=target.id)
+    chosen = chosen[:limit] if selection.has_bounds else chosen[-limit:]
+
+    job = get_current_job()
+    geometry_by_camera: dict[str, dict[str, Any]] = {}
+    rows = []
+    for index, frame in enumerate(chosen):
+        if job is not None:
+            job.mark(
+                "running",
+                index,
+                progress_total=len(chosen),
+                message=f"Measured {index} of {len(chosen)} spectrum frames",
+            )
+        row: dict[str, Any] = {
+            "file": os.path.basename(frame.path),
+            "exposure_seconds": float(frame.exposure),
+            "pier_side": frame.pier_side,
+        }
+        try:
+            if frame.camera not in geometry_by_camera:
+                geometry_by_camera[frame.camera] = load_dispersion_geometry(frame.camera)
+            row.update(
+                measure_spectral_frame_file(
+                    frame.path,
+                    frame.camera,
+                    row["exposure_seconds"],
+                    geometry_by_camera[frame.camera],
+                    predict_exposure_seconds,
+                )
+            )
+        except (OSError, ValueError) as error:
+            row["error"] = str(error)
+        rows.append(row)
+    return SpectralFrameCheckReport(
+        target_id=target.id,
+        frames_matching=matching,
+        frames_measured=len(rows),
+        summary=summarize_spectral_frames(rows, MINIMUM_TRAIL_CONTRAST_SIGMA),
+        frames=rows,
+        note="Nothing was saved. Peaks above 65,000 ADU are lower bounds; predictions scale linearly.",
+    )

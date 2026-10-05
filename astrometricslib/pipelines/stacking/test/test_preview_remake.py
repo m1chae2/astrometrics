@@ -6,12 +6,13 @@ overrides reach the step, and the target's processed image is updated.
 """
 
 import os
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from astrometricslib import Astrometrics, Target
+from astrometricslib import InvalidArgumentError, NotFoundError, ProcessingError, ProcessingPipelines, Target
 from astrometricslib.pipelines.shared.stack_preview_path import preview_path_for, processed_fits_path_for
 from astrometricslib.pipelines.stacking.post_processing import preview_remake
 from astrometricslib.pipelines.stacking.post_processing.preview_remake import (
@@ -101,12 +102,12 @@ def test_a_remake_replaces_the_pictures_and_leaves_the_stack_alone(
     result = remake_stack_preview(target, False, settings)
 
     assert seen == [settings]
-    assert Path(result["preview_path"]).read_bytes() == b"new jpeg"
+    assert Path(result.preview_path).read_bytes() == b"new jpeg"
     assert stacked.read_bytes() == b"stack"
-    assert result["stack_file_unchanged"] is True
-    assert result["steps_run"] == ["GraXpert done", "Star toning done"]
-    assert result["shown_in_viewer"] is True
-    kept = {Path(path).name: Path(path).read_bytes() for path in result["previous_pictures"]}
+    assert result.stack_file_unchanged is True
+    assert result.steps_run == ["GraXpert done", "Star toning done"]
+    assert result.shown_in_viewer is True
+    kept = {Path(path).name: Path(path).read_bytes() for path in result.previous_pictures}
     assert kept == {
         "NGC_7331_L_Stacked_preview.jpg": b"old jpeg",
         "NGC_7331_L_Stacked_processed.fits": b"old fits",
@@ -120,7 +121,7 @@ def test_keep_previous_off_copies_nothing(stacked: Path, monkeypatch: pytest.Mon
 
     result = remake_stack_preview(make_target(stacked), False, PreviewSettings(), keep_previous=False)
 
-    assert result["previous_pictures"] == []
+    assert result.previous_pictures == []
     assert not (stacked.parent / PREVIOUS_PICTURES_FOLDER).exists()
 
 
@@ -128,37 +129,44 @@ def test_a_failed_remake_puts_the_old_pictures_back(stacked: Path, monkeypatch: 
     """A failure after the step removed the old pictures restores them."""
     fake_preview(monkeypatch, succeeds=False)
 
-    result = remake_stack_preview(make_target(stacked), False, PreviewSettings())
+    with pytest.raises(ProcessingError, match="put back") as raised:
+        remake_stack_preview(make_target(stacked), False, PreviewSettings())
 
-    assert "put back" in result["error"]
     assert Path(preview_path_for(str(stacked))).read_bytes() == b"old jpeg"
     assert Path(processed_fits_path_for(str(stacked))).read_bytes() == b"old fits"
-    assert result["steps_run"] == ["GraXpert done", "Star toning done"]
+    assert raised.value.details["steps_run"] == ["GraXpert done", "Star toning done"]
 
 
 def test_a_target_without_a_stack_is_an_error(tmp_path: Path) -> None:
     """No stack file means nothing to make a picture of."""
-    assert "has no stack" in remake_stack_preview(Target(id="T"), False, PreviewSettings())["error"]
+    with pytest.raises(NotFoundError, match="has no stack"):
+        remake_stack_preview(Target(id="T"), False, PreviewSettings())
     target = Target(id="T")
     target.stacking.stacked_image = str(tmp_path / "gone.fits")
-    assert "is missing" in remake_stack_preview(target, False, PreviewSettings())["error"]
-    assert "has no spectral stack" in remake_stack_preview(Target(id="T"), True, PreviewSettings())["error"]
+    with pytest.raises(NotFoundError, match="is missing"):
+        remake_stack_preview(target, False, PreviewSettings())
+    with pytest.raises(NotFoundError, match="has no spectral stack"):
+        remake_stack_preview(Target(id="T"), True, PreviewSettings())
 
 
-def make_astrometrics(saved: list[int]) -> Astrometrics:
-    """Build an `Astrometrics` whose stacking slot and catalog are fakes.
+def make_pipelines(saved: list[int]) -> ProcessingPipelines:
+    """Build pipelines whose stacking slot and target catalog are fakes.
+
+    Parameters
+    ----------
+    saved : `list` [`int`]
+        Gets one entry each time the catalog is saved.
 
     Returns
     -------
-    astrometrics : `Astrometrics`
+    pipelines : `ProcessingPipelines`
         The object under test.
     """
-    from contextlib import nullcontext
-
-    astrometrics = Astrometrics.__new__(Astrometrics)
-    astrometrics.processing = SimpleNamespace(acquire_stacking_slot=nullcontext)
-    astrometrics.targets = SimpleNamespace(save=lambda: saved.append(1))
-    return astrometrics
+    pipelines = ProcessingPipelines(
+        SimpleNamespace(), SimpleNamespace(), targets=SimpleNamespace(save=lambda: saved.append(1))
+    )
+    pipelines.acquire_stacking_slot = nullcontext
+    return pipelines
 
 
 def test_the_method_checks_its_inputs_and_saves_the_target(
@@ -166,15 +174,19 @@ def test_the_method_checks_its_inputs_and_saves_the_target(
 ) -> None:
     """Bad inputs are refused, and a shown picture is saved to the catalog."""
     saved: list[int] = []
-    astrometrics = make_astrometrics(saved)
+    pipelines = make_pipelines(saved)
     target = make_target(stacked)
-    assert "frame_type" in astrometrics.remake_preview(target, frame_type="all")["error"]
-    assert "between 0 and 1" in astrometrics.remake_preview(target, denoise_strength=1.5)["error"]
+    with pytest.raises(InvalidArgumentError, match="kind"):
+        pipelines.remake_preview(target, kind="all", register_job=False)
+    with pytest.raises(InvalidArgumentError, match="between 0 and 1"):
+        pipelines.remake_preview(target, denoise_strength=1.5, register_job=False)
     assert saved == []
 
     seen = fake_preview(monkeypatch)
-    result = astrometrics.remake_preview(target, denoise=False, denoise_strength=0.4, star_toning=True)
+    result = pipelines.remake_preview(
+        target, denoise=False, denoise_strength=0.4, star_toning=True, register_job=False
+    )
 
     assert seen == [PreviewSettings(denoise=False, denoise_strength=0.4, star_toning=True)]
-    assert result["shown_in_viewer"] is True
+    assert result.shown_in_viewer is True
     assert saved == [1]

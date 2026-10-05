@@ -1,9 +1,9 @@
 """Unit tests for the background image processing service and its worker task.
 
 Verifies that `start_siril_processing_task` runs the full stacking stage
-(`stack_frames`) on the frames the viewer chose, so a stack made from the
-viewer gets the same post-processing as a batch stack, and that it saves the
-target and reports the outcome.
+(through `ProcessingPipelines.stack`) on the frames the viewer chose, so a
+stack made from the viewer gets the same post-processing as a batch stack,
+and that it saves the target and reports the outcome.
 """
 
 import logging
@@ -12,12 +12,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from astrometricslib import FrameRecord, Target
+from astrometricslib import AppConfiguration, FrameRecord, ProcessingPipelines, Target
 from backend.services.processing.image_processing_service import (
     start_siril_processing_task,
 )
 
-STAGE = "astrometricslib.stack_frames"
+STAGE = "astrometricslib.pipelines.stacking.stage.stack_frames"
 
 
 def _target_with_frames(target_id: str, paths: list[str]) -> Target:
@@ -33,12 +33,29 @@ def _target_with_frames(target_id: str, paths: list[str]) -> Target:
     return target
 
 
+def _target_service(target: Target | None) -> MagicMock:
+    """Make a target service that stacks through a real `ProcessingPipelines`.
+
+    Returns
+    -------
+    target_service : `MagicMock`
+        A service that finds ``target``. Its ``astrometrics.processing`` is
+        a real `ProcessingPipelines` over a mock target catalog, so its
+        ``astrometrics.processing._targets.save`` records the save.
+    """
+    target_service = MagicMock()
+    target_service.get_targets.return_value = target
+    target_service.astrometrics.processing = ProcessingPipelines(
+        AppConfiguration(), MagicMock(), targets=MagicMock()
+    )
+    return target_service
+
+
 def test_worker_runs_the_full_stacking_stage_on_the_chosen_frames() -> None:
     """The stage gets the target's own records for the chosen frames."""
     paths = ["/lights/M_42/lum_001.fits", "/lights/M_42/lum_002.fits", "/lights/M_42/lum_003.fits"]
     target = _target_with_frames("M 42", paths)
-    target_service = MagicMock()
-    target_service.get_targets.return_value = target
+    target_service = _target_service(target)
     notification_service = MagicMock()
     stacked_path = "/stacks/M 42/M_42_L_Stacked.fits"
 
@@ -56,7 +73,7 @@ def test_worker_runs_the_full_stacking_stage_on_the_chosen_frames() -> None:
     assert stage.call_args.args == (target,)
     assert stage.call_args.kwargs["frames_to_stack"] == target.frames[:2]
     assert stage.call_args.kwargs["job_id"] == "job-1"
-    target_service.save_targets.assert_called_once()
+    target_service.astrometrics.processing._targets.save.assert_called_once()
     assert notification_service.notify.call_args.kwargs["status"] == "success"
 
 
@@ -64,8 +81,7 @@ def test_worker_accepts_frame_paths_as_well_as_frame_dicts() -> None:
     """A flat list of path strings picks out the same frame records."""
     paths = ["/lights/Arcturus/spec_001.fits", "/lights/Arcturus/spec_002.fits"]
     target = _target_with_frames("Arcturus", paths)
-    target_service = MagicMock()
-    target_service.get_targets.return_value = target
+    target_service = _target_service(target)
 
     with patch(STAGE, return_value="/stacks/Arcturus_SPEC_Stacked.fits") as stage:
         start_siril_processing_task(
@@ -81,8 +97,7 @@ def test_worker_accepts_frame_paths_as_well_as_frame_dicts() -> None:
 def test_worker_reports_failure_and_does_not_save_when_nothing_was_stacked() -> None:
     """A stage with no stack leaves the target unsaved and sends an error."""
     target = _target_with_frames("M 42", ["/lights/M_42/lum_001.fits"])
-    target_service = MagicMock()
-    target_service.get_targets.return_value = target
+    target_service = _target_service(target)
     notification_service = MagicMock()
 
     with patch(STAGE, return_value=None):
@@ -95,14 +110,13 @@ def test_worker_reports_failure_and_does_not_save_when_nothing_was_stacked() -> 
         )
 
     assert result is None
-    target_service.save_targets.assert_not_called()
+    target_service.astrometrics.processing._targets.save.assert_not_called()
     assert notification_service.notify.call_args.kwargs["status"] == "error"
 
 
 def test_worker_refuses_a_target_that_is_not_in_the_library() -> None:
     """An unknown target raises instead of stacking nothing."""
-    target_service = MagicMock()
-    target_service.get_targets.return_value = None
+    target_service = _target_service(None)
 
     with patch(STAGE) as stage, pytest.raises(ValueError, match="not in the library"):
         start_siril_processing_task(
@@ -119,8 +133,7 @@ def test_worker_job_log_holds_what_the_stacking_stage_logs(tmp_path: Path) -> No
     """Lines the stage writes through the package logger reach the job log."""
     paths = ["/lights/M_42/lum_001.fits"]
     target = _target_with_frames("M 42", paths)
-    target_service = MagicMock()
-    target_service.get_targets.return_value = target
+    target_service = _target_service(target)
     log_file = tmp_path / "job.log"
 
     def fake_stage(*args: object, **kwargs: object) -> str:
@@ -164,8 +177,7 @@ def _run_worker_with_saved_record(tmp_path: Path, saved_stack: str) -> str:
     saved = _target_with_frames("M 42", paths)
     saved.stacking.stacked_image = saved_stack
     saved.stacking.processed_image = "/stacks/M 42/M_42_L_Stacked_processed.fits"
-    target_service = MagicMock()
-    target_service.get_targets.return_value = target
+    target_service = _target_service(target)
     target_service.read_saved_target.return_value = saved
     log_file = tmp_path / "job.log"
 

@@ -34,7 +34,7 @@ def _create_mock_stellar_service(
         Configured StellarService instance.
     """
     mock_astrometrics = MagicMock()
-    mock_astrometrics.stars.list_objects.return_value = stellar_objects or []
+    mock_astrometrics.stars.query.return_value.objects = stellar_objects or []
     mock_astrometrics.targets.list.return_value = []
 
     mock_wayfinder = MagicMock()
@@ -177,7 +177,7 @@ def test_get_astrometry_overlay_stars_projects_celestial_coords_with_wcs() -> No
         is_catalog_identified=True,
     )
     mock_astrometrics = MagicMock()
-    mock_astrometrics.stars.list_objects.return_value = [star]
+    mock_astrometrics.stars.query.return_value.objects = [star]
 
     mock_target = MagicMock()
     mock_target.stacking.stacked_image = None
@@ -268,7 +268,7 @@ def test_overlay_stars_carry_the_size_of_the_target_stack(tmp_path: Path) -> Non
         star_data={"xcentroid": 10.0, "ycentroid": 20.0},
     )
     mock_astrometrics = MagicMock()
-    mock_astrometrics.stars.list_objects.return_value = [star]
+    mock_astrometrics.stars.query.return_value.objects = [star]
     mock_astrometrics.targets.get.return_value = SimpleNamespace(
         stacking=SimpleNamespace(stacked_image=str(stack_path), processed_image="")
     )

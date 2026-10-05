@@ -68,7 +68,7 @@ def _make_service(stellar_objects=None, planning_sources=None, library_stars=Non
         A service wired to mock astrometrics and wayfinder objects.
     """
     astrometrics = MagicMock()
-    astrometrics.stars.list_objects.return_value = stellar_objects or []
+    astrometrics.stars.query.return_value.objects = stellar_objects or []
     astrometrics.targets.list.return_value = []
 
     wayfinder = MagicMock()
@@ -261,7 +261,7 @@ def test_get_displayable_stellar_object_summaries_excludes_per_frame_detections(
 
     Mirrors test_get_displayable_stellar_objects_excludes_per_frame_detections
     for get_displayable_stellar_object_summaries, the path astronomy:list
-    actually uses -- built on StellarCatalog.list_object_summaries's
+    actually uses -- built on StellarCatalog.query's
     disk-backed lightweight read rather than a fully-hydrated
     StellarObject list, so the per-frame-stub filter needs its own
     coverage against that path. Uses a real Astrometrics (not a
@@ -322,7 +322,7 @@ def test_get_displayable_stellar_object_summaries_limits_to_100_by_default() -> 
         for i in range(250)
     ]
     astrometrics = MagicMock()
-    astrometrics.stars.list_object_summaries.return_value = mock_stars
+    astrometrics.stars.query.return_value.stars = mock_stars
     service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
 
     summaries = service.get_displayable_stellar_object_summaries()
@@ -349,7 +349,7 @@ def test_get_displayable_stellar_object_summaries_searches_across_all_records() 
         "hasPhotometry": True,
     })
     astrometrics = MagicMock()
-    astrometrics.stars.list_object_summaries.return_value = mock_stars
+    astrometrics.stars.query.return_value.stars = mock_stars
     service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
 
     # Search for star at the end of the 200+ list
@@ -366,34 +366,33 @@ def test_get_displayable_stellar_object_summaries_searches_across_all_records() 
 def test_get_displayable_stellar_object_summaries_search_disables_the_summary_cap() -> None:
     """Verify a search request asks for every row, not a capped slice.
 
-    The test above (searches_across_all_records) mocks
-    list_object_summaries to always return every row regardless of what
-    it was asked for, so it cannot catch list_object_summaries itself
-    silently capping the real, un-mocked catalog at
-    DEFAULT_UNFILTERED_SUMMARY_LIMIT (5000) rows before this function's
+    The test above (searches_across_all_records) mocks the star query to
+    always return every row regardless of what it was asked for, so it
+    cannot catch the query itself silently capping the real, un-mocked
+    catalog at its row limit before this function's
     own search filtering ever runs -- a real match past that cutoff
     would then never be found. This checks the actual call contract
     instead: a search request must pass apply_default_limit=False.
     """
     astrometrics = MagicMock()
-    astrometrics.stars.list_object_summaries.return_value = []
+    astrometrics.stars.query.return_value.stars = []
     service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
 
     service.get_displayable_stellar_object_summaries(search="Target Star")
-    astrometrics.stars.list_object_summaries.assert_called_once_with(None, None, apply_default_limit=False)
+    astrometrics.stars.query.assert_called_once_with(target_id=None, limit=None)
 
-    astrometrics.stars.list_object_summaries.reset_mock()
+    astrometrics.stars.query.reset_mock()
     service.get_displayable_stellar_object_summaries(filter_type="With Spectra")
-    astrometrics.stars.list_object_summaries.assert_called_once_with(None, None, apply_default_limit=False)
+    astrometrics.stars.query.assert_called_once_with(target_id=None, limit=None)
 
-    astrometrics.stars.list_object_summaries.reset_mock()
+    astrometrics.stars.query.reset_mock()
     service.get_displayable_stellar_object_summaries(offset=100)
-    astrometrics.stars.list_object_summaries.assert_called_once_with(None, None, apply_default_limit=False)
+    astrometrics.stars.query.assert_called_once_with(target_id=None, limit=None)
 
     # A plain unfiltered request still uses the default cap.
-    astrometrics.stars.list_object_summaries.reset_mock()
+    astrometrics.stars.query.reset_mock()
     service.get_displayable_stellar_object_summaries()
-    astrometrics.stars.list_object_summaries.assert_called_once_with(None, 100, apply_default_limit=True)
+    astrometrics.stars.query.assert_called_once_with(target_id=None, limit=100)
 
 
 def test_get_displayable_stellar_object_summaries_category_filters() -> None:
@@ -409,7 +408,7 @@ def test_get_displayable_stellar_object_summaries_category_filters() -> None:
         {"id": "Star_None_1", "name": "None 1", "hasSpectra": False, "hasPhotometry": False},
     ]
     astrometrics = MagicMock()
-    astrometrics.stars.list_object_summaries.return_value = mock_stars
+    astrometrics.stars.query.return_value.stars = mock_stars
     service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
 
     spectra_results = service.get_displayable_stellar_object_summaries(filter_type="With Spectra")
@@ -428,7 +427,7 @@ def test_get_displayable_stellar_object_summaries_offset_pagination() -> None:
         for i in range(250)
     ]
     astrometrics = MagicMock()
-    astrometrics.stars.list_object_summaries.return_value = mock_stars
+    astrometrics.stars.query.return_value.stars = mock_stars
     service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
 
     page_1 = service.get_displayable_stellar_object_summaries(limit=100, offset=0)
@@ -459,7 +458,7 @@ def test_count_displayable_stellar_objects_matches_the_unpaginated_total() -> No
         for i in range(250)
     ]
     astrometrics = MagicMock()
-    astrometrics.stars.list_object_summaries.return_value = mock_stars
+    astrometrics.stars.query.return_value.stars = mock_stars
     service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
 
     assert service.count_displayable_stellar_objects(search="Star") == 250
@@ -480,7 +479,7 @@ def test_get_target_data_availability_aggregates_across_a_target_s_stars() -> No
         {"id": "Star_D", "targetIds": ["NGC 2403"], "hasSpectra": False, "hasPhotometry": False},
     ]
     astrometrics = MagicMock()
-    astrometrics.stars.list_object_summaries.return_value = mock_stars
+    astrometrics.stars.query.return_value.stars = mock_stars
     service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
 
     availability = service.get_target_data_availability()
@@ -488,7 +487,7 @@ def test_get_target_data_availability_aggregates_across_a_target_s_stars() -> No
     assert availability["M 81"] == {"hasSpectra": True, "hasPhotometry": False, "starCount": 2}
     assert availability["M 13"] == {"hasSpectra": False, "hasPhotometry": True, "starCount": 1}
     assert availability["NGC 2403"] == {"hasSpectra": False, "hasPhotometry": False, "starCount": 1}
-    astrometrics.stars.list_object_summaries.assert_called_once_with(limit=None, apply_default_limit=False)
+    astrometrics.stars.query.assert_called_once_with(limit=None)
 
 
 def test_get_target_data_availability_excludes_per_frame_detections() -> None:
@@ -507,7 +506,7 @@ def test_get_target_data_availability_excludes_per_frame_detections() -> None:
         },
     ]
     astrometrics = MagicMock()
-    astrometrics.stars.list_object_summaries.return_value = mock_stars
+    astrometrics.stars.query.return_value.stars = mock_stars
     service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
 
     assert service.get_target_data_availability() == {}
@@ -528,7 +527,7 @@ def test_get_spectral_class_summary_groups_by_primary_letter() -> None:
         {"id": "Star_E", "spectralType": "Unknown"},
     ]
     astrometrics = MagicMock()
-    astrometrics.stars.list_object_summaries.return_value = mock_stars
+    astrometrics.stars.query.return_value.stars = mock_stars
     service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
 
     classes = service.get_spectral_class_summary()
@@ -556,7 +555,7 @@ def test_get_spectral_class_summary_folds_r_and_n_into_carbon_and_drops_others()
         {"id": "Star_D", "spectralType": "DA"},
     ]
     astrometrics = MagicMock()
-    astrometrics.stars.list_object_summaries.return_value = mock_stars
+    astrometrics.stars.query.return_value.stars = mock_stars
     service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
 
     classes = service.get_spectral_class_summary()
@@ -574,8 +573,8 @@ def test_get_stars_by_spectral_class_accepts_the_r_and_n_aliases_for_carbon() ->
         {"id": "Star_C", "spectralType": "C6"},
     ]
     astrometrics = MagicMock()
-    astrometrics.stars.list_object_summaries.return_value = mock_stars
-    astrometrics.stars.list_objects_by_ids.return_value = [
+    astrometrics.stars.query.return_value.stars = mock_stars
+    astrometrics.stars.query.return_value.objects = [
         StellarObject(id="Star_R", spectral_type="R5"),
         StellarObject(id="Star_C", spectral_type="C6"),
     ]
@@ -584,7 +583,7 @@ def test_get_stars_by_spectral_class_accepts_the_r_and_n_aliases_for_carbon() ->
     for query in ("R", "N", "C"):
         results = service.get_stars_by_spectral_class(query)
         assert {r["id"] for r in results} == {"Star_R", "Star_C"}
-    astrometrics.stars.list_objects_by_ids.assert_called_with(["Star_R", "Star_C"])
+    astrometrics.stars.query.assert_called_with(ids=["Star_R", "Star_C"], detail="objects", limit=None)
 
 
 def test_catalog_summary_scan_is_cached_across_the_three_browser_endpoints() -> None:
@@ -597,15 +596,18 @@ def test_catalog_summary_scan_is_cached_across_the_three_browser_endpoints() -> 
     the cache's lifetime.
     """
     astrometrics = MagicMock()
-    astrometrics.stars.list_object_summaries.return_value = [{"id": "HD 1", "spectralType": "G2V"}]
-    astrometrics.stars.list_objects_by_ids.return_value = [StellarObject(id="HD 1", spectral_type="G2V")]
+    astrometrics.stars.query.return_value.stars = [{"id": "HD 1", "spectralType": "G2V"}]
+    astrometrics.stars.query.return_value.objects = [StellarObject(id="HD 1", spectral_type="G2V")]
     service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
 
     service.get_target_data_availability()
     service.get_spectral_class_summary()
     service.get_stars_by_spectral_class("G")
 
-    astrometrics.stars.list_object_summaries.assert_called_once_with(limit=None, apply_default_limit=False)
+    summary_scans = [
+        call for call in astrometrics.stars.query.call_args_list if call.kwargs == {"limit": None}
+    ]
+    assert len(summary_scans) == 1
 
 
 def test_warm_catalog_summary_cache_serves_the_next_call_from_cache() -> None:
@@ -616,13 +618,13 @@ def test_warm_catalog_summary_cache_serves_the_next_call_from_cache() -> None:
     user happens to open first.
     """
     astrometrics = MagicMock()
-    astrometrics.stars.list_object_summaries.return_value = [{"id": "HD 1", "spectralType": "G2V"}]
+    astrometrics.stars.query.return_value.stars = [{"id": "HD 1", "spectralType": "G2V"}]
     service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
 
     service.warm_catalog_summary_cache()
     service.get_target_data_availability()
 
-    astrometrics.stars.list_object_summaries.assert_called_once_with(limit=None, apply_default_limit=False)
+    astrometrics.stars.query.assert_called_once_with(limit=None)
 
 
 def test_catalog_summary_scan_refreshes_when_the_dataset_version_changes() -> None:
@@ -634,7 +636,7 @@ def test_catalog_summary_scan_refreshes_when_the_dataset_version_changes() -> No
     rather than serving a stale cache until a timer expires.
     """
     astrometrics = MagicMock()
-    astrometrics.stars.list_object_summaries.return_value = []
+    astrometrics.stars.query.return_value.stars = []
     service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
 
     astrometrics.catalog_access.get_dataset_version.return_value = 1
@@ -642,7 +644,7 @@ def test_catalog_summary_scan_refreshes_when_the_dataset_version_changes() -> No
     astrometrics.catalog_access.get_dataset_version.return_value = 2
     service.get_target_data_availability()
 
-    assert astrometrics.stars.list_object_summaries.call_count == 2
+    assert astrometrics.stars.query.call_count == 2
 
 
 def test_catalog_summary_rescan_broadcasts_a_ui_event() -> None:
@@ -652,7 +654,7 @@ def test_catalog_summary_rescan_broadcasts_a_ui_event() -> None:
     rediscovering it on its own polling schedule.
     """
     astrometrics = MagicMock()
-    astrometrics.stars.list_object_summaries.return_value = []
+    astrometrics.stars.query.return_value.stars = []
     service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
     socket_manager = MagicMock()
     service.set_socket_manager(socket_manager)
@@ -667,7 +669,7 @@ def test_catalog_summary_rescan_broadcasts_a_ui_event() -> None:
 def test_catalog_summary_cache_hit_does_not_broadcast() -> None:
     """Verify serving the cache (nothing changed) does not spam a broadcast."""
     astrometrics = MagicMock()
-    astrometrics.stars.list_object_summaries.return_value = []
+    astrometrics.stars.query.return_value.stars = []
     service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
     socket_manager = MagicMock()
     service.set_socket_manager(socket_manager)
@@ -692,7 +694,7 @@ def test_catalog_summary_scan_refreshes_after_the_fallback_window_passes(mocker)
     from backend.services.data import stellar_service as stellar_service_module
 
     astrometrics = MagicMock()
-    astrometrics.stars.list_object_summaries.return_value = []
+    astrometrics.stars.query.return_value.stars = []
     service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
 
     fake_time = [1000.0]
@@ -702,7 +704,7 @@ def test_catalog_summary_scan_refreshes_after_the_fallback_window_passes(mocker)
     fake_time[0] += stellar_service_module._CATALOG_SUMMARY_CACHE_FALLBACK_MAX_AGE_SECONDS + 1
     service.get_target_data_availability()
 
-    assert astrometrics.stars.list_object_summaries.call_count == 2
+    assert astrometrics.stars.query.call_count == 2
 
 
 def test_get_spectral_class_summary_excludes_per_frame_detections() -> None:
@@ -711,7 +713,7 @@ def test_get_spectral_class_summary_excludes_per_frame_detections() -> None:
         {"id": "M 81:2026-01-14:0:0:Star_60", "spectralType": "G2V"},
     ]
     astrometrics = MagicMock()
-    astrometrics.stars.list_object_summaries.return_value = mock_stars
+    astrometrics.stars.query.return_value.stars = mock_stars
     service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
 
     assert service.get_spectral_class_summary() == []
@@ -741,11 +743,11 @@ def test_get_stars_by_spectral_class_sorts_by_match_quality() -> None:
     other_class = StellarObject(id="Betelgeuse", spectral_type="M2")
 
     astrometrics = MagicMock()
-    astrometrics.stars.list_object_summaries.return_value = [
+    astrometrics.stars.query.return_value.stars = [
         {"id": star.id, "spectralType": star.spectral_type}
         for star in (good_match, weaker_match, unmatched, other_class)
     ]
-    astrometrics.stars.list_objects_by_ids.return_value = [unmatched, weaker_match, good_match]
+    astrometrics.stars.query.return_value.objects = [unmatched, weaker_match, good_match]
     service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
 
     results = service.get_stars_by_spectral_class("G")
@@ -755,14 +757,16 @@ def test_get_stars_by_spectral_class_sorts_by_match_quality() -> None:
     assert results[0]["ra"] == pytest.approx(48.87)
     assert results[0]["dec"] == pytest.approx(34.99)
     assert results[2]["selfDeterminedSpectralTypeRms"] is None
-    astrometrics.stars.list_objects_by_ids.assert_called_once_with(["HD 20630", "HD 143761", "HD 190406"])
+    astrometrics.stars.query.assert_called_with(
+        ids=["HD 20630", "HD 143761", "HD 190406"], detail="objects", limit=None
+    )
 
 
 def test_get_stars_by_spectral_class_accepts_a_full_catalog_string() -> None:
     """Verify passing "G2V" instead of "G" still selects the right class."""
     astrometrics = MagicMock()
-    astrometrics.stars.list_object_summaries.return_value = [{"id": "HD 20630", "spectralType": "G2V"}]
-    astrometrics.stars.list_objects_by_ids.return_value = [StellarObject(id="HD 20630", spectral_type="G2V")]
+    astrometrics.stars.query.return_value.stars = [{"id": "HD 20630", "spectralType": "G2V"}]
+    astrometrics.stars.query.return_value.objects = [StellarObject(id="HD 20630", spectral_type="G2V")]
     service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
 
     results = service.get_stars_by_spectral_class("G2V")
@@ -773,14 +777,14 @@ def test_get_stars_by_spectral_class_accepts_a_full_catalog_string() -> None:
 def test_get_stars_by_spectral_class_excludes_per_frame_detections() -> None:
     """Verify a per-frame detection stub is never sent to be fully loaded."""
     astrometrics = MagicMock()
-    astrometrics.stars.list_object_summaries.return_value = [
+    astrometrics.stars.query.return_value.stars = [
         {"id": "M 81:2026-01-14:0:0:Star_60", "spectralType": "G2V"},
     ]
-    astrometrics.stars.list_objects_by_ids.return_value = []
+    astrometrics.stars.query.return_value.objects = []
     service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
 
     assert service.get_stars_by_spectral_class("G") == []
-    astrometrics.stars.list_objects_by_ids.assert_called_once_with([])
+    astrometrics.stars.query.assert_called_with(ids=[], detail="objects", limit=None)
 
 
 def test_has_catalog_magnitude_rejects_missing_and_instrumental_values():  # ruff: ignore[missing-return-type-undocumented-public-function]
@@ -911,7 +915,7 @@ def test_get_displayable_stellar_object_summaries_sorts_a_targets_stars_usefully
         {"id": "Gaia DR3 4", "hasSpectra": False, "hasPhotometry": False, "magnitude": 5.0},
     ]
     astrometrics = MagicMock()
-    astrometrics.stars.list_object_summaries.return_value = mock_stars
+    astrometrics.stars.query.return_value.stars = mock_stars
     service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
 
     summaries = service.get_displayable_stellar_object_summaries(target_id="M 13")
@@ -924,7 +928,7 @@ def test_get_displayable_stellar_object_summaries_sorts_a_targets_stars_usefully
         "Gaia DR3 4",
         "FIELD_J10.0000+20.0000",
     ]
-    astrometrics.stars.list_object_summaries.assert_called_once_with("M 13", None, apply_default_limit=False)
+    astrometrics.stars.query.assert_called_once_with(target_id="M 13", limit=None)
 
 
 def test_get_displayable_stellar_object_summaries_leaves_unfiltered_order_alone() -> None:
@@ -934,7 +938,7 @@ def test_get_displayable_stellar_object_summaries_leaves_unfiltered_order_alone(
         {"id": "Gaia DR3 1", "hasSpectra": True, "hasPhotometry": True, "magnitude": 3.0},
     ]
     astrometrics = MagicMock()
-    astrometrics.stars.list_object_summaries.return_value = mock_stars
+    astrometrics.stars.query.return_value.stars = mock_stars
     service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
 
     summaries = service.get_displayable_stellar_object_summaries()

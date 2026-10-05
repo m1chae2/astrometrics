@@ -75,8 +75,9 @@ def test_investigator_agent_has_only_offered_mcp_tools() -> None:
     """The agent lists offered MCP tools only, and no built-in tool."""
     tools = _agent_tools()
     # Folding the narrow `control` reads into one read per child left about
-    # 60 tools; the check guards against an empty or truncated list.
-    assert len(tools) > 50
+    # 60 tools, and folding the astrometricslib ones about 45; the check
+    # guards against an empty or truncated list.
+    assert len(tools) > 40
     assert all(tool.startswith("mcp__") for tool in tools)
     assert not set(tools) & set(BUILT_IN_TOOLS)
     for forbidden in (
@@ -87,7 +88,7 @@ def test_investigator_agent_has_only_offered_mcp_tools() -> None:
         "ui_run_tests",
         "typegen_contract_validator",
         "target_save",
-        "star_list_objects",
+        "star_update",
     ):
         assert not any(tool.endswith(f"__{forbidden}") for tool in tools), forbidden
 

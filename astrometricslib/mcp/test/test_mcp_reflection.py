@@ -95,12 +95,12 @@ def test_astrometricslib_mcp_reflection_registers_tools():  # ruff: ignore[missi
     # Verify key reflected tools are present
     assert "target_list" in tool_names
     assert "target_create" in tool_names
-    assert "visualization_convert_fits_to_png" in tool_names
-    assert "star_get_audit" in tool_names
+    assert "visualization_render_fits" in tool_names
+    assert "star_query" in tool_names
 
     # Verify nested sub-APIs (dotted branch_mapping keys) are reflected too
-    assert "diagnostics_measure_stack_fwhm" in tool_names
-    assert "calibration_stats" in tool_names
+    assert "diagnostics_stack_quality" in tool_names
+    assert "calibration_query" in tool_names
 
 
 def test_delete_methods_are_never_offered_as_tools():  # ruff: ignore[missing-return-type-undocumented-public-function]
@@ -142,7 +142,7 @@ def test_infer_background_job_target_id_prefers_a_resolved_target():  # ruff: ig
 
 def test_infer_background_job_target_id_falls_back_to_a_batch_label():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verify an all-targets call gets a synthetic, camera-scoped label."""
-    target_id = _infer_background_job_target_id({"camera_name": "ZWO ASI 533MM Pro"})
+    target_id = _infer_background_job_target_id({"target": None, "camera_id": "ZWO ASI 533MM Pro"})
     assert target_id == "batch:ZWO ASI 533MM Pro"
 
 
@@ -182,7 +182,9 @@ def test_quality_snapshot_fn_covers_every_target_in_a_batch_call():  # ruff: ign
         targets=types.SimpleNamespace(list=lambda: list(fake_targets.values()))
     )
 
-    snapshot_fn = _make_quality_snapshot_fn(fake_astrometrics, {"camera_name": "ZWO ASI 533MM Pro"})
+    snapshot_fn = _make_quality_snapshot_fn(
+        fake_astrometrics, {"target": None, "camera_id": "ZWO ASI 533MM Pro"}
+    )
 
     assert snapshot_fn is not None
     assert set(snapshot_fn().keys()) == {"Vega", "Albireo"}

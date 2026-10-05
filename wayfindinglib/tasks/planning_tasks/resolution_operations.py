@@ -53,7 +53,7 @@ def resolve_target_coordinates(sky, target_name: str) -> Target | StellarObject:
     # 2. Search local stellar objects
     # Only the stars that match the name are read from the library, not
     # every star in it.
-    for star in sky._astrometrics.stars.find_all_by_id_or_name(target_name):
+    for star in sky._astrometrics.stars.query(name=target_name, detail="objects", limit=None).objects or []:
         # Only return if coordinates are initialized (nonzero)
         if (
             star.right_ascension != 0.0  # ruff: ignore[float-equality-comparison] -- exact sentinel: 0.0 means "uninitialized"
@@ -204,8 +204,17 @@ def get_library_star_summaries(
         ``ra``, ``dec``, ``targetIds``, ``hasSpectra``, ``hasPhotometry``,
         ``magnitude`` and ``spectralType``.
     """
-    return sky._astrometrics.stars.list_object_summaries_in_region(
-        ra_deg, dec_deg, radius_deg, magnitude_range
+    magnitude_min, magnitude_max = magnitude_range if magnitude_range is not None else (None, None)
+    return (
+        sky._astrometrics.stars.query(
+            ra_deg=ra_deg,
+            dec_deg=dec_deg,
+            radius_deg=radius_deg,
+            magnitude_min=magnitude_min,
+            magnitude_max=magnitude_max,
+            limit=None,
+        ).stars
+        or []
     )
 
 

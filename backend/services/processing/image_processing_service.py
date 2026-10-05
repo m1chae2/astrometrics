@@ -307,24 +307,26 @@ def start_siril_processing_task(
         requested_paths = {frame if isinstance(frame, str) else frame.get("path") for frame in image_files}
         frames_to_stack = [frame for frame in target.frames if frame.path in requested_paths]
 
-        # Bound how many Siril subprocesses run concurrently system-wide,
-        # whether they were started here or by the offline batch script
-        # (pipeline_tasks.run_full_pipeline) -- an OS-level lock, respected
-        # across processes.
-        from astrometricslib import ProcessingPipelines, get_configuration, stack_frames
+        # `ProcessingPipelines.stack` runs the whole stacking stage, the same
+        # one the batch script runs: it holds a stacking slot (an OS-level
+        # lock that bounds Siril runs across processes), sets aside bad
+        # frames, stacks (spectral frames of different exposure lengths one
+        # length at a time), trims the noisy edges, records the quality
+        # summary and provenance, makes the preview picture the viewer shows,
+        # and saves the target. This job is already in the job list, so the
+        # stack records its provenance against it instead of a new job.
+        from astrometricslib import ProcessingError, frame_is_spectral, log_context
 
-        # `stack_frames` is the whole stacking stage, the same one the batch
-        # script runs: it sets aside bad frames, stacks (spectral frames of
-        # different exposure lengths one length at a time), trims the noisy
-        # edges, records the quality summary and provenance, and makes the
-        # preview picture the viewer shows as the processed image.
-        with ProcessingPipelines(get_configuration()).acquire_stacking_slot():
-            final_path = stack_frames(
-                target,
-                log_file=log_file_path,
-                frames_to_stack=frames_to_stack,
-                job_id=job_id,
-            )
+        kind = "spectral" if frames_to_stack and all(map(frame_is_spectral, frames_to_stack)) else "imaging"
+        try:
+            with log_context(job_id=job_id):
+                stack_result = target_service.astrometrics.processing.stack(
+                    target, frames=frames_to_stack, kind=kind, log_file=log_file_path, register_job=False
+                )
+            final_path = stack_result.stacked_path
+        except ProcessingError as error:
+            logger.error(f"Stacking {target_id} made no stack: {error}")
+            final_path = None
 
         if notification_service:
             if final_path:
@@ -336,16 +338,10 @@ def start_siril_processing_task(
 
             notification_service.notify(target_id, message, status=status)
 
-        # The stage records the stack, its quality summary and its processed
-        # picture on the target; this saves them.
-        if final_path and target_service:
-            try:
-                target_service.save_targets()
-                if logger:
-                    logger.info(f"Saved target {target_id} with stacked image: {final_path}")
-                    _log_what_the_saved_record_names(target_service, target_id, final_path, logger)
-            except Exception as e:
-                if logger:
-                    logger.error(f"Failed to update target metadata: {e}")
+        # The stack call saved the target with its stack, quality summary
+        # and processed picture; this checks what the saved record names.
+        if final_path:
+            logger.info(f"Saved target {target_id} with stacked image: {final_path}")
+            _log_what_the_saved_record_names(target_service, target_id, final_path, logger)
 
         return final_path

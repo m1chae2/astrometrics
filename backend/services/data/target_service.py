@@ -6,9 +6,10 @@ Astrometrics library. # REQ: BKD-5: Data Persistence
 
 import logging
 import os
+from collections.abc import Callable
 from typing import Any, ClassVar
 
-from astrometricslib import FilterType, Target
+from astrometricslib import FilterType, ReindexReport, Target
 from backend.services.data.deletion_archive import archive_record_before_delete
 from backend.services.data.image_service import ImageService
 
@@ -65,22 +66,28 @@ class TargetService:
             for target in targets
         ]
 
-    def discover_all_targets(self) -> list[str]:
-        """Walk the filesystem lights directory.
+    def reindex_library(
+        self, prune_missing: bool = False, on_progress: Callable[[int, int, str], None] | None = None
+    ) -> ReindexReport:
+        """Bring every target's frame list up to date with the frames folder.
 
-        Lists potential physical target folder matches.
+        The library scans each target folder under the frames folder's
+        ``lights`` folder, creates a target for a folder that has none, and
+        saves each target as it finishes.
+
+        Parameters
+        ----------
+        prune_missing : `bool`, optional
+            Also drop records of files that no longer exist.
+        on_progress : `Callable`, optional
+            Called as ``(index, total, target_id)`` before each target.
 
         Returns
         -------
-        result : `list` of `str`
-            Sorted candidate target folder names.
+        report : `ReindexReport`
+            Each target's frame count before and after.
         """
-        lights_path = os.path.join(self.config.get_frames_path(), "lights")
-        if not os.path.exists(lights_path):
-            return []
-
-        folders = [d for d in os.listdir(lights_path) if os.path.isdir(os.path.join(lights_path, d))]
-        return sorted([f for f in folders if f != "test_write"])
+        return self.astrometrics.targets.reindex_frames(prune_missing=prune_missing, on_progress=on_progress)
 
     def get_targets(self, target_id: str | None = None) -> Any:
         """Unified targets getter.
@@ -106,8 +113,7 @@ class TargetService:
             per target the newest light-frame time and per-camera frame
             counts. See `build_target_camera_index`.
         """
-        camera_names = list(self.config.get_available_cameras())
-        return self.astrometrics.targets.camera_index(camera_names)
+        return self.astrometrics.targets.query(detail="camera_index").camera_index
 
     def create_target(
         self,
@@ -176,8 +182,8 @@ class TargetService:
             self.astrometrics.targets.save()
             return {"status": "success"}
 
-        frame = self.astrometrics.targets.add_frame(target, path, camera=camera or "Unknown")
-        self.astrometrics.targets.save()
+        self.astrometrics.targets.reindex_frames(target, paths=[path], camera_id=camera or "Unknown")
+        frame = next((frame for frame in target.frames if frame.path == path), None)
         return {"status": "success", "frame": frame}
 
     def refresh_target_images(self, target: Target, prune_missing: bool = False) -> None:
@@ -187,7 +193,6 @@ class TargetService:
         """
         try:
             self.astrometrics.targets.reindex_frames(target, prune_missing=prune_missing)
-            self.astrometrics.targets.save()
         except Exception as e:
             logger.warning(f"Failed to refresh images for {target.id}: {e}")
 
@@ -239,9 +244,8 @@ class TargetService:
         target = self.astrometrics.targets.get(target_id)
         if not target:
             return {"lights": []}
-        return self.astrometrics.targets.get_calibration_frame_statistics(
-            target, target.frames, grouped=False
-        )
+        lights = self.astrometrics.processing.calibration.query(detail="target_frames", target=target).lights
+        return {"lights": lights or []}
 
     def get_file_list(self, target_id: str) -> dict:
         """Return a formatted catalog file list with all frame details.
@@ -288,9 +292,10 @@ class TargetService:
         target = self.astrometrics.targets.get(target_id)
         if not target:
             return []
-        return self.astrometrics.targets.get_calibration_frame_statistics(
-            target, target.frames, grouped=True, camera=camera
+        answer = self.astrometrics.processing.calibration.query(
+            detail="target_match", target=target, camera_id=camera
         )
+        return answer.groups or []
 
     def save_target(self, target: Target) -> None:
         """Save target database states.
@@ -367,7 +372,6 @@ class TargetService:
         if target:
             old_count = len(target.frames)
             self.astrometrics.targets.reindex_frames(target, prune_missing=prune_missing)
-            self.astrometrics.targets.save()
             new_count = len(target.frames)
             logger.info(
                 f"Reindex complete for target '{target_id}'. Frames before: {old_count}, after: {new_count}"

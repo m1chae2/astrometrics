@@ -18,13 +18,14 @@ already uses elsewhere.
 from __future__ import annotations
 
 import os
+import sqlite3
 import threading
 import time
 from collections.abc import Generator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Literal
 
-from astrometricslib import InvalidArgumentError
+from astrometricslib import AstrometricsError, InvalidArgumentError
 
 if TYPE_CHECKING:
     from astrometricslib import Target
@@ -651,7 +652,7 @@ def discover_unassociated_remote_targets(context: ControlContext) -> list[str]:
     """
     try:
         remote_folders = list_remote_targets(context)
-    except Exception:
+    except AstrometricsError, OSError:
         return []
 
     local_targets = context.astrometrics.targets.list()
@@ -1002,7 +1003,7 @@ def sync_all_remote_folders(
                     package_logger_name="wayfindinglib",
                 )
             )
-        except Exception as job_err:
+        except (AstrometricsError, sqlite3.Error, OSError) as job_err:
             logger_if = None
             job_id = None
             job_logger = None
@@ -1026,7 +1027,7 @@ def sync_all_remote_folders(
             if status in ("completed", "completed_with_errors", "failed"):
                 job.completed_at = datetime.now().isoformat()
             logger_if.upsert_job(job)
-        except Exception as update_err:
+        except sqlite3.Error as update_err:
             _logging.getLogger(__name__).debug("Failed to record job status update: %s", update_err)
 
     succeeded: list[str] = []
@@ -1058,7 +1059,7 @@ def sync_all_remote_folders(
                     log(f"Calibration folder '{folder_name}' synced.")
                 else:
                     failed.append((folder_name, "Download reported failure."))
-            except Exception as err:
+            except (AstrometricsError, OSError) as err:
                 failed.append((folder_name, str(err)))
             completed_count += 1
             update_job(progress_current=completed_count, message=f"Synced '{folder_name}'")
@@ -1070,7 +1071,7 @@ def sync_all_remote_folders(
                     succeeded.append(target_id)
                 else:
                     failed.append((target_id, "Download reported failure (no remote frames found?)."))
-            except Exception as err:
+            except (AstrometricsError, OSError) as err:
                 failed.append((target_id, str(err)))
             completed_count += 1
             update_job(progress_current=completed_count, message=f"Synced '{target_id}'")

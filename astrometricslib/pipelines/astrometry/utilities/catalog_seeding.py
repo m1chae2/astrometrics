@@ -8,12 +8,17 @@ heavy lifting.
 """
 
 import logging
+import sqlite3
 import time
 from collections.abc import Callable
 from typing import Any
 
 import astropy.units as u
 from astropy.coordinates import SkyCoord
+
+from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
+from astrometricslib.foundation.errors import AstrometricsError
+from astrometricslib.utilities.exceptions import DATA_ERRORS, ONLINE_QUERY_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +110,7 @@ def _coordinate_from_header(header: Any) -> tuple[float, float] | None:
 
         sky_coordinate = SkyCoord(f"{right_ascension} {declination}", unit=("hourangle", "deg"))
         return float(sky_coordinate.ra.deg), float(sky_coordinate.dec.deg)
-    except Exception as coordinate_error:
+    except DATA_ERRORS as coordinate_error:
         logger.debug("Could not parse OBJCTRA/OBJCTDEC pair: %s", coordinate_error)
         return None
 
@@ -178,7 +183,7 @@ def derive_field_centers(
                 continue
             try:
                 header = fits.getheader(frame_path)
-            except Exception as header_error:
+            except FITS_READ_ERRORS as header_error:
                 logger.debug("Could not read header for %s: %s", frame_path, header_error)
                 continue
 
@@ -335,7 +340,7 @@ def _seed_one_field(
             field_result["status"] = "seeded"
             field_result["sources"] = int(cached_count or 0)
             break
-        except Exception as seeding_error:
+        except (AstrometricsError, sqlite3.Error, *ONLINE_QUERY_ERRORS) as seeding_error:
             field_result["error"] = str(seeding_error)
             if attempt_number < max_attempts:
                 time.sleep(_RETRY_BACKOFF_BASE_SECONDS * attempt_number)
@@ -363,8 +368,11 @@ def _report_field_progress(
     if progress_callback is not None:
         try:
             progress_callback(field_result)
-        except Exception as callback_error:
-            logger.debug("Seeding progress callback raised: %s", callback_error)
+        except Exception:
+            # The callback is the caller's code and may raise anything. A
+            # broken progress report must not stop the seeding, so the error
+            # is logged with its traceback and the run goes on.
+            logger.exception("Seeding progress callback raised")
 
     # Skipped after the final field so the sweep does not end on a
     # pause that buys nothing.

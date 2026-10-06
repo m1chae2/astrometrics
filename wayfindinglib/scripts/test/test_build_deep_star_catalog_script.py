@@ -13,6 +13,7 @@ from typing import Any
 
 import numpy as np
 import pytest
+import requests
 from astropy.table import Table
 
 from wayfindinglib.api.planning import ObservationPlanning
@@ -323,7 +324,7 @@ def test_a_failed_near_chunk_leaves_the_chosen_chunks_unfinished(fake_environmen
     """A chosen chunk that fails leaves a non-zero exit code and a hint."""
 
     def always_fail(*_arguments: Any, **_keyword_arguments: Any) -> Any:
-        raise RuntimeError("Error 500: archive down")
+        raise requests.exceptions.HTTPError("Error 500: archive down")
 
     monkeypatch.setattr(fake_environment, "launch_job_async", always_fail)
 

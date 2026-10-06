@@ -6,6 +6,7 @@ workflow relies on -- the free functions that replaced Target's former
 orchestration methods.
 """
 
+import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Never
@@ -269,7 +270,7 @@ def test_reconcile_position_only_star_ids_skips_catalog_matched_stars():  # ruff
     assert result[0].id == "* alf Lyr"
 
 
-def test_reconcile_position_only_star_ids_handles_a_lookup_failure_gracefully():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_reconcile_position_only_star_ids_handles_a_lookup_failure_gracefully() -> None:
     """Verify a lookup error doesn't block recording of this run's stars.
 
     Reconciliation is an optimisation over an already-correct (if
@@ -279,7 +280,7 @@ def test_reconcile_position_only_star_ids_handles_a_lookup_failure_gracefully():
 
     class _BrokenCatalogAccess:
         def list_position_only_stars(self, *args: Any, **kwargs: Any) -> Never:
-            raise RuntimeError("catalog unreachable")
+            raise sqlite3.OperationalError("catalog unreachable")
 
     new_star = _position_only_star("FIELD_J083344.3050-263739.9980", ra=128.834305, dec=-26.62777)
 

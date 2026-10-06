@@ -9,9 +9,11 @@ import os
 from typing import Any
 
 from astrometricslib.drivers.camera_profile_store import camera_identity
+from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.drivers.job_logging import get_current_job
 from astrometricslib.foundation.enums import FilterType
-from astrometricslib.foundation.errors import ConflictError, ProcessingError
+from astrometricslib.foundation.errors import AstrometricsError, ConflictError, ProcessingError
+from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -300,7 +302,7 @@ def stack_frames(
                     frame.measurements.saturated_pixel_fraction = measure_frame_saturated_pixel_fraction(
                         frame.path, camera_profile.saturation_threshold_adu.value
                     )
-            except Exception as exc:
+            except (AstrometricsError, *FITS_READ_ERRORS, *DATA_ERRORS) as exc:
                 logger.debug("Skipping background/saturation measurement for '%s': %s", frame.path, exc)
                 continue
 
@@ -653,7 +655,7 @@ def _disambiguating_configuration_tag(target, target_frames) -> str:  # ruff: ig
     try:
         if len(group_frames_by_configuration(target)) < 2:
             return ""
-    except Exception as grouping_error:
+    except (AstrometricsError, *DATA_ERRORS) as grouping_error:
         # A tag is only ever additive, so failing to decide costs
         # nothing beyond the collision this guards against.
         logger.debug("Could not group '%s' by configuration: %s", getattr(target, "id", "?"), grouping_error)
@@ -724,7 +726,7 @@ def _record_configuration_stack(target, target_frames, stacked_path) -> bool:  #
         configuration = get_configuration()
         primary_camera = configuration.get_primary_camera_name()
         primary_focal_length = configuration.get_primary_focal_length_mm()
-    except Exception as configuration_error:
+    except (AstrometricsError, OSError, ValueError) as configuration_error:
         logger.debug("Could not read the primary camera or optic: %s", configuration_error)
 
     # Both must match. Focal length alone would mark two cameras sharing
@@ -1001,7 +1003,7 @@ def _measure_fwhm_degradation(
             fwhm = measure_image_fwhm(frame.path)
             if fwhm is not None:
                 input_fwhms.append(fwhm)
-        except Exception as exc:
+        except (AstrometricsError, *FITS_READ_ERRORS, *DATA_ERRORS) as exc:
             logger.debug("Skipping FWHM measurement for '%s': %s", frame.path, exc)
             continue
     expected = expected_stack_fwhm(input_fwhms)

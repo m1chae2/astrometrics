@@ -104,7 +104,7 @@ def _initialize_worker_process(niceness: int = 10, max_memory_mb: int = 20480) -
             if hasattr(resource, "RLIMIT_AS"):
                 bytes_limit = int(max_memory_mb * 1024 * 1024)
                 resource.setrlimit(resource.RLIMIT_AS, (bytes_limit, bytes_limit))
-        except Exception as limit_err:
+        except (ImportError, OSError, ValueError) as limit_err:
             logger.debug("Failed to set worker RLIMIT_AS memory limit: %s", limit_err)
 
 
@@ -204,7 +204,7 @@ def _dispatch_pending_batch_items(
                     max_memory_percent_throttle,
                 )
                 break
-        except Exception as memory_check_err:
+        except (OSError, psutil.Error) as memory_check_err:
             logger.debug(
                 "Could not query virtual memory for throttle check: %s",
                 memory_check_err,
@@ -325,8 +325,11 @@ def run_parallel_batch(
             return
         try:
             on_item_complete(item_id, result, completed_item_count, total_item_count)
-        except Exception as exc:
-            logger.debug("on_item_complete callback raised for item '%s': %s", item_id, exc)
+        except Exception:
+            # The callback is the caller's code and may raise anything. A
+            # broken progress report must not stop the batch, so the error
+            # is logged with its traceback and the batch goes on.
+            logger.exception("on_item_complete callback raised for item '%s'", item_id)
 
     while pending_item_ids:
         item_ids_for_this_pass = pending_item_ids
@@ -386,6 +389,10 @@ def run_parallel_batch(
                         report_item_complete(item_id, failure_result)
                         continue
                     except Exception as worker_error:
+                        # A worker may fail in any way. The batch is a job
+                        # runner, so it logs the traceback, records the item
+                        # as failed, and goes on with the other items.
+                        logger.exception("Batch item '%s' failed", item_id)
                         failure_result = {"status": "failed", "error": str(worker_error)}
                         summary.failed.append((item_id, str(worker_error)))
                         processed_item_ids.add(item_id)

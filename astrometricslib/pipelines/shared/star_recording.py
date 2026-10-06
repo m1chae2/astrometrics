@@ -22,9 +22,11 @@ passes `already_dropped=True` here to skip repeating it.
 import logging
 import math
 import re
+import sqlite3
 from typing import NamedTuple
 
 from astrometricslib.drivers.catalog_access import POSITION_ONLY_STAR_ID_PREFIX
+from astrometricslib.foundation.errors import AstrometricsError
 from astrometricslib.pipelines.shared.catalog_star_identity import (
     SAME_STAR_POSITION_TOLERANCE_ARCSEC,
     catalog_family,
@@ -190,7 +192,7 @@ def _reconcile_position_only_star_ids(
 
     try:
         existing_position_only = catalog_access.list_position_only_stars(target_id=target_id)
-    except Exception as lookup_error:
+    except (AstrometricsError, sqlite3.Error) as lookup_error:
         # Reconciliation is an optimization over an already-correct (if
         # duplicative) storage path; a lookup failure must not block
         # a run's own stars from being saved.
@@ -289,13 +291,13 @@ def _move_catalog_row_to_new_id(
         catalog_access.merge_and_record(
             "stellar_catalog", [renamed_row], lambda _existing_row, updated_row: updated_row
         )
-    except Exception as storage_error:
+    except (AstrometricsError, sqlite3.Error, ValueError) as storage_error:
         logger.warning("Could not rename catalog row %s to %s: %s", old_id, new_id, storage_error)
         return False
 
     try:
         catalog_access.delete_by_ids("stellar_catalog", [old_id])
-    except Exception as storage_error:
+    except (AstrometricsError, sqlite3.Error) as storage_error:
         logger.warning(
             "Renamed catalog row %s to %s but could not delete the old row: %s", old_id, new_id, storage_error
         )
@@ -389,7 +391,7 @@ def _reconcile_identified_star_ids(
             center_right_ascension, center_declination, search_radius_degrees
         )
         nearby_rows = [row for row in nearby_rows if not row.id.startswith(_POSITION_ONLY_STAR_ID_PREFIX)]
-    except Exception as lookup_error:
+    except (AstrometricsError, sqlite3.Error) as lookup_error:
         # Same reasoning as the position-only step: a failed lookup must
         # not stop a run's own stars being saved.
         logger.debug(

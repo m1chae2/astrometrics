@@ -6,9 +6,10 @@ state logic directly to the wayfindinglib domain high-level interface.
 """
 
 import logging
+import sqlite3
 from typing import Any
 
-from astrometricslib import InvalidArgumentError
+from astrometricslib import AstrometricsError, InvalidArgumentError
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +92,7 @@ class TelescopeService:
         logger = logging.getLogger(__name__)
         try:
             data = self.wayfinder.control.mount.status()
-        except Exception as e:
+        except (AstrometricsError, OSError, RuntimeError) as e:
             logger.warning("Failed to query telescope status (telescope may be offline): %s", e)
             data = {
                 "ra": "00 00 00",
@@ -111,7 +112,7 @@ class TelescopeService:
         if self._guiding_service:
             try:
                 self._guiding_service.poll_external_telemetry()
-            except Exception as e:
+            except AstrometricsError as e:
                 logger.debug("Failed to poll external guiding telemetry: %s", e)
             guiding_status = self._guiding_service.get_status()
             data["guidingHistory"] = guiding_status.get("history", [])
@@ -123,7 +124,7 @@ class TelescopeService:
                     self.wayfinder.control, "_driver", None
                 )
                 self._alignment_service.poll_external_syncs(driver)
-            except Exception as e:
+            except AstrometricsError as e:
                 logger.debug("Failed to poll external syncs: %s", e)
             data["alignmentAttempts"] = self._alignment_service.get_attempts()
             data["alignmentActive"] = self._alignment_service.is_active()
@@ -174,7 +175,7 @@ class TelescopeService:
                 sort="separation",
                 limit=1,
             )
-        except Exception as exc:
+        except (AstrometricsError, sqlite3.Error) as exc:
             logger.debug("Target inference failed: %s", exc)
             return None
         rows = nearest.get("targets") or []
@@ -445,7 +446,7 @@ class TelescopeService:
             geo = self.wayfinder.control.equipment.status(include=["observer_location"]).observer_location
             if geo:
                 return geo
-        except Exception as exc:
+        except (AstrometricsError, OSError, RuntimeError) as exc:
             logger.debug("Failed to get observer location from wayfinder: %s", exc)
         # Default fallback: Denver, CO
         return {"latitude": 39.7392, "longitude": -104.9903, "elevation": 1600.0}

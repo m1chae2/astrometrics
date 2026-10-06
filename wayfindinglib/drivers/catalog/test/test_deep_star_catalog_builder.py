@@ -13,6 +13,7 @@ from typing import Any
 
 import numpy as np
 import pytest
+import requests
 from astropy.table import MaskedColumn, Table
 
 from astrometricslib import ConflictError, ExternalServiceError, InvalidArgumentError
@@ -97,8 +98,9 @@ class _FakeArchive:
 
             Raises
             ------
-            RuntimeError
-                If this chunk is set to fail.
+            requests.exceptions.HTTPError
+                If this chunk is set to fail, as astroquery reports an HTTP
+                error from the archive.
             """
             archive = self._archive
             if archive.hang_event is not None:
@@ -106,10 +108,10 @@ class _FakeArchive:
             low, _high = (int(value) for value in ID_RANGE_PATTERN.search(self._query).groups())
             archive.calls_by_range_start[low] = archive.calls_by_range_start.get(low, 0) + 1
             if low in archive.fail_range_starts:
-                raise RuntimeError("Error 408: archive timed out")
+                raise requests.exceptions.HTTPError("Error 408: archive timed out")
             if archive.fail_first_calls > 0:
                 archive.fail_first_calls -= 1
-                raise RuntimeError("Error 500: temporary failure")
+                raise requests.exceptions.HTTPError("Error 500: temporary failure")
             if archive.return_none:
                 return None
             if archive.rows_override is not None:

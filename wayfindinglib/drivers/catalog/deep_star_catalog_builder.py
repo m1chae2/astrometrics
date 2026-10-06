@@ -25,6 +25,7 @@ carries on.
 import logging
 import math
 import queue
+import sqlite3
 import threading
 import time
 from collections.abc import Callable, Iterable
@@ -32,7 +33,7 @@ from typing import Any
 
 import numpy as np
 
-from astrometricslib import ExternalServiceError, InvalidArgumentError
+from astrometricslib import ONLINE_QUERY_ERRORS, AstrometricsError, ExternalServiceError, InvalidArgumentError
 from wayfindinglib.drivers.catalog import deep_star_store
 
 logger = logging.getLogger(__name__)
@@ -157,7 +158,10 @@ def _run_with_daemon_thread_timeout(query_function: Callable[[], Any], timeout_s
             result_queue.put((True, query_function()))
         except BaseException as query_error:
             # Caught broadly and re-raised on the caller's thread below via
-            # `raise payload` -- nothing here is swallowed.
+            # `raise payload` -- nothing here is swallowed. The traceback is
+            # also kept at debug level, in case the caller has given up
+            # waiting and never raises it.
+            logger.debug("The background query raised an error.", exc_info=True)
             result_queue.put((False, query_error))
 
     threading.Thread(target=_run_and_report, daemon=True).start()
@@ -527,7 +531,13 @@ def _download_pixel(
                 result["error"] = None
                 return result
             result["error"] = problem
-        except Exception as download_error:
+        except (
+            AstrometricsError,
+            sqlite3.Error,
+            *ONLINE_QUERY_ERRORS,
+            KeyError,
+            TypeError,
+        ) as download_error:
             result["error"] = str(download_error) or type(download_error).__name__
         logger.warning(
             "Pixel %d attempt %d of %d failed: %s", pixel, attempt_number, max_attempts, result["error"]
@@ -659,8 +669,11 @@ def build_deep_star_catalog(
                     "pixels_total": pixels_total,
                     "stars_total": report["stars_added"],
                 })
-            except Exception as callback_error:
-                logger.debug("Progress callback raised: %s", callback_error)
+            except Exception:
+                # The callback is the caller's code and may raise anything. A
+                # broken progress report must not stop the download, so the
+                # error is logged with its traceback and the build goes on.
+                logger.exception("Progress callback raised")
 
         if consecutive_failures >= _CONSECUTIVE_FAILURE_LIMIT:
             logger.error(
@@ -741,7 +754,7 @@ def estimate_catalog_size(
         try:
             table = _run_query(gaia, query, query_timeout_seconds)
             counts.append(int(table["star_count"][0]))
-        except Exception as count_error:
+        except (AstrometricsError, *ONLINE_QUERY_ERRORS, KeyError, IndexError, TypeError) as count_error:
             logger.warning("Could not count pixel %d: %s", pixel, count_error)
         if request_delay_seconds > 0 and position < len(sampled_pixels) - 1:
             sleep(request_delay_seconds)

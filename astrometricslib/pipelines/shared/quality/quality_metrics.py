@@ -13,11 +13,12 @@ import numpy as np
 from astropy.io import fits
 from astropy.stats import sigma_clipped_stats
 
-from astrometricslib.drivers.fits_access import collapse_to_2d
+from astrometricslib.drivers.fits_access import FITS_READ_ERRORS, collapse_to_2d
 from astrometricslib.pipelines.shared.quality.saturation import (
     compute_saturated_pixel_fraction,
     compute_stack_saturated_pixel_fraction,
 )
+from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,7 @@ def measure_frame_input_quality(
             if data is None:
                 return metrics
             data = np.asarray(data, dtype=float)
-    except Exception as read_error:
+    except FITS_READ_ERRORS as read_error:
         logger.debug("Could not read %s for input-quality measurement: %s", path, read_error)
         return metrics
 
@@ -73,12 +74,12 @@ def measure_frame_input_quality(
     try:
         _, median, _ = sigma_clipped_stats(data, sigma=3.0)
         metrics["background_level"] = float(median)
-    except Exception as background_error:
+    except DATA_ERRORS as background_error:
         logger.debug("Background measurement failed for %s: %s", path, background_error)
 
     try:
         metrics["saturated_pixel_fraction"] = compute_saturated_pixel_fraction(data, saturation_threshold_adu)
-    except Exception as saturation_error:
+    except DATA_ERRORS as saturation_error:
         logger.debug("Saturation measurement failed for %s: %s", path, saturation_error)
 
     if include_fwhm:
@@ -86,7 +87,7 @@ def measure_frame_input_quality(
             from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_fwhm_from_data
 
             metrics["fwhm_px"] = measure_fwhm_from_data(data)
-        except Exception as fwhm_error:
+        except DATA_ERRORS as fwhm_error:
             logger.debug("FWHM measurement failed for %s: %s", path, fwhm_error)
 
     return metrics

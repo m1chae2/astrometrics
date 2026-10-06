@@ -13,10 +13,11 @@ from typing import Any
 
 from astrometricslib.drivers.camera_profile_store import record_name_for_camera, resolve_camera_profile
 from astrometricslib.drivers.filter_detection import get_filter_type
-from astrometricslib.drivers.fits_access import read_header
+from astrometricslib.drivers.fits_access import FITS_READ_ERRORS, read_header
 from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.enums import FilterType
+from astrometricslib.foundation.errors import AstrometricsError
 from astrometricslib.foundation.storage.mount import require_mounted_storage
 from astrometricslib.foundation.warn_once import warn_once
 from astrometricslib.models.target import FrameRecord, Target
@@ -281,7 +282,7 @@ def create_frame_record_from_fits(path: str, camera: str | None = None, config: 
         record.telescope = resolve_frame_telescope(
             record.camera, record.focal_length_mm, path, config.get_observatory_setups(), config
         ).telescope_name
-    except Exception as e:
+    except (AstrometricsError, *FITS_READ_ERRORS) as e:
         logger.warning("Failed to parse FITS header for %s: %s", filename, e)
 
     return record
@@ -314,7 +315,7 @@ def refresh_acquisition_conditions(frame: FrameRecord) -> bool:
         # every field _populate_acquisition_conditions sets with None,
         # even though the initial scan recorded them correctly.
         header = AstrometricsImage(frame.path).header
-    except Exception as header_error:
+    except (AstrometricsError, *FITS_READ_ERRORS) as header_error:
         logger.debug("Could not refresh header conditions for %s: %s", frame.path, header_error)
         return False
 
@@ -444,7 +445,7 @@ def _read_header_or_none(file_path: str) -> Any:
     """
     try:
         return read_header(file_path)
-    except Exception as error:
+    except FITS_READ_ERRORS as error:
         logger.warning("Could not read the header of %s: %s", file_path, error)
         return None
 
@@ -541,7 +542,7 @@ def classify_and_sort_fits_files(
                 processed_count += 1
                 if added_paths is not None and is_new_file:
                     added_paths.append(destination_file)
-        except Exception as e:
-            logger.error("Error classifying frame %s: %s", file, e)
+        except (AstrometricsError, *FITS_READ_ERRORS):
+            logger.exception("Error classifying frame %s", file)
 
     return processed_count

@@ -36,7 +36,7 @@ def run_frontend_diagnostics(repo_root: str):  # ruff: ignore[missing-return-typ
             if len(output) > 5000:
                 output = output[:2500] + "\n... [TRUNCATED] ...\n" + output[-2500:]
             results.append(f"❌ TypeScript Type Check: Failed\n{output}")
-    except Exception as e:
+    except (OSError, subprocess.SubprocessError) as e:
         results.append(f"⚠️ Error running type-check: {e!s}")
 
     # Linting
@@ -51,7 +51,7 @@ def run_frontend_diagnostics(repo_root: str):  # ruff: ignore[missing-return-typ
             if len(output) > 2000:
                 output = output[:1000] + "\n... [TRUNCATED] ...\n" + output[-1000:]
             results.append(f"❌ Linting: Failed\n{output}")
-    except Exception as e:
+    except (OSError, subprocess.SubprocessError) as e:
         results.append(f"⚠️ Error running lint: {e!s}")
 
     return "\n\n".join(results)
@@ -84,7 +84,7 @@ def run_frontend_tests(repo_root: str):  # ruff: ignore[missing-return-type-undo
             return f"✅ Tests Passed!\n{output}"
         else:
             return f"❌ Tests Failed!\n{output}"
-    except Exception as e:
+    except (OSError, subprocess.SubprocessError) as e:
         return f"⚠️ Error running tests: {e!s}"
 
 
@@ -131,5 +131,5 @@ def run_backend_tests(repo_root: str, test_path: str | None = None):  # ruff: ig
             return f"✅ Backend Tests Passed!\n{output}"
         else:
             return f"❌ Backend Tests Failed!\n{output}"
-    except Exception as e:
+    except (OSError, subprocess.SubprocessError) as e:
         return f"⚠️ Error running backend tests: {e!s}"

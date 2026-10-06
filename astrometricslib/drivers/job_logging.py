@@ -28,6 +28,7 @@ both loggers.
 import dataclasses
 import logging
 import os
+import sqlite3
 import threading
 import uuid
 from collections.abc import Callable, Generator
@@ -36,7 +37,9 @@ from contextvars import ContextVar
 from datetime import datetime
 from typing import Any
 
+from astrometricslib.foundation.errors import AstrometricsError
 from astrometricslib.foundation.logging import get_job_log_router, log_context
+from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -201,7 +204,7 @@ class JobHandle:
                     stored_job.output_metrics = output_metrics
                 stored_job.updated_at = datetime.now().isoformat()
                 self._logger_interface.upsert_job(stored_job)
-        except Exception as update_error:
+        except sqlite3.Error as update_error:
             logger.debug("Could not update job '%s' to '%s': %s", self.job_id, status, update_error)
 
 
@@ -282,7 +285,7 @@ def capture_job_logs(
             job_logger.removeHandler(handler)
             try:
                 handler.close()
-            except Exception as close_error:
+            except OSError as close_error:
                 logger.debug("Could not close a job log handler: %s", close_error)
 
 
@@ -444,7 +447,7 @@ def registered_job(
                     job_type=job_type,
                     target_id=target_id,
                 )
-            except Exception as registration_error:
+            except (sqlite3.Error, OSError, AstrometricsError) as registration_error:
                 # A job we cannot record is still a job worth doing.
                 logger.warning("Could not register %s job: %s", job_type, registration_error)
                 handle = JobHandle()
@@ -588,7 +591,7 @@ def run_as_background_job(
             return None
         try:
             return snapshot_fn()
-        except Exception as snapshot_error:
+        except (AstrometricsError, sqlite3.Error, OSError, *DATA_ERRORS) as snapshot_error:
             logger.debug("Could not take %s-processing quality snapshot: %s", when, snapshot_error)
             return None
 

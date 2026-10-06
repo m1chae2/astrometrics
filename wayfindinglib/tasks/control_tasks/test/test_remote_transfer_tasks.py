@@ -194,7 +194,7 @@ def test_discover_unassociated_remote_targets_fuzzy_matches() -> None:
 def test_discover_unassociated_remote_targets_empty_on_listing_failure() -> None:
     """Verify a failed remote listing degrades to an empty list."""
     driver = Mock()
-    driver.list_remote_targets.side_effect = RuntimeError("unreachable")
+    driver.list_remote_targets.side_effect = ExternalServiceError("unreachable")
 
     assert remote_operations.discover_unassociated_remote_targets(_FakeObservatory(driver)) == []
 

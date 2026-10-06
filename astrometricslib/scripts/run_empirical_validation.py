@@ -11,7 +11,7 @@ import argparse
 import sys
 import traceback
 
-from astrometricslib import Astrometrics
+from astrometricslib import DATA_ERRORS, Astrometrics, AstrometricsError
 
 
 def run_spectroscopy_validation(astrometrics: Astrometrics, camera_name: str) -> dict:
@@ -45,7 +45,7 @@ def run_spectroscopy_validation(astrometrics: Astrometrics, camera_name: str) ->
             rms_err = tune_res.get("rms_error_nm", 0.0)
             print(f"  Vega Calibration RMS Error: {rms_err:.3f} nm")
             results["vega_calibration"] = tune_res
-        except Exception as err:
+        except (AstrometricsError, *DATA_ERRORS) as err:
             print(f"  Vega calibration tuning notice: {err}")
 
     # Target 2: Field spectroscopy analysis on Vega & M 13
@@ -64,7 +64,7 @@ def run_spectroscopy_validation(astrometrics: Astrometrics, camera_name: str) ->
                     results[t.id] = {"status": "success", "flagged": flagged}
                 astrometrics.targets.save()
                 print(f"  Incremental save completed for target: {t.id}")
-            except Exception as err:
+            except (AstrometricsError, OSError, *DATA_ERRORS) as err:
                 print(f"  Spectroscopy analysis error for {t.id}: {err}")
                 results[t.id] = {"status": "error", "message": str(err)}
 
@@ -117,7 +117,7 @@ def run_photometry_validation(astrometrics: Astrometrics, camera_name: str) -> d
 
                 astrometrics.targets.save()
                 print(f"  Incremental save completed for target: {target.id}")
-            except Exception as err:
+            except (AstrometricsError, OSError, *DATA_ERRORS) as err:
                 print(f"  Photometry error on {target.id}: {err}")
                 results[target.id] = {"status": "error", "message": str(err)}
 
@@ -174,7 +174,7 @@ def run_asteroid_detection_validation(astrometrics: Astrometrics, camera_name: s
 
                 astrometrics.targets.save()
                 print(f"  Incremental save completed for target: {target.id}")
-            except Exception as err:
+            except (AstrometricsError, OSError, *DATA_ERRORS) as err:
                 print(f"  Asteroid detection notice for {target.id}: {err}")
                 results[target.id] = {"status": "notice", "message": str(err)}
 
@@ -219,7 +219,7 @@ def run_astrometry_validation(astrometrics: Astrometrics, camera_name: str) -> d
 
                 astrometrics.targets.save()
                 print(f"  Incremental save completed for target: {target.id}")
-            except Exception as err:
+            except (AstrometricsError, OSError, *DATA_ERRORS) as err:
                 print(f"  Astrometry error for {target.id}: {err}")
                 results[target.id] = {"status": "error", "message": str(err)}
 
@@ -305,7 +305,7 @@ def main() -> None:
         print("==================================================")
         print("All target quality summaries have been generated and recorded to astrometrics.db.")
 
-    except Exception as fatal_err:
+    except AstrometricsError as fatal_err:
         print(f"\nFatal error during validation execution: {fatal_err}")
         traceback.print_exc()
         sys.exit(1)

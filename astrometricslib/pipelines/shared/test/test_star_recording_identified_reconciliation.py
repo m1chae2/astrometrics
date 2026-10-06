@@ -9,6 +9,7 @@ must NOT happen: two names from one catalog, a crowded spot, a far star.
 """
 
 import math
+import sqlite3
 from pathlib import Path
 from typing import Any
 
@@ -245,12 +246,12 @@ def test_position_only_and_unpositioned_stars_are_ignored(catalog_access):  # ru
     assert [star.id for star in result] == ["FIELD_J250.0000+36.0000", "Gaia DR3 5"]
 
 
-def test_a_failed_catalog_lookup_does_not_stop_the_save():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_failed_catalog_lookup_does_not_stop_the_save() -> None:
     """Verify a broken lookup leaves the stars as they were."""
 
     class BrokenCatalogAccess:
         def list_stars_in_region(self, *args: object, **kwargs: object) -> None:
-            raise RuntimeError("database is locked")
+            raise sqlite3.OperationalError("database is locked")
 
     star = _star("Gaia DR3 1")
 

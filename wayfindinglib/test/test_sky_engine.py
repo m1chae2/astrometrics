@@ -223,6 +223,8 @@ def test_compute_altaz_matches_recorded_indi_driver_baseline() -> None:
 
 def test_meridian_status_and_flips() -> None:
     """Verifies hour angle and meridian flip triggers."""
+    from wayfindinglib.tasks.planning_tasks.visibility_report import build_visibility_report, to_astropy_time
+
     sky = Sky(latitude=40.0, longitude=-100.0, elevation=1000.0)
     sky.meridian_flip_delay_min = 10.0  # 10 minutes delay
 
@@ -230,17 +232,19 @@ def test_meridian_status_and_flips() -> None:
     time = datetime(2026, 6, 21, 22, 0, 0)
     lst = sky.get_local_sidereal_time(time)
 
-    # Target transiting (RA = LST)
-    ra_transiting = lst * 15.0
-    status_transiting = sky.get_meridian_status(ra_transiting, 40.0, time)
-    assert pytest.approx(status_transiting["hour_angle"], abs=1e-3) == 0.0
-    assert not status_transiting["flip_required"]
-
-    # Target past meridian (RA = LST - 15 minutes / 3.75 degrees)
-    ra_past = (lst - 0.25) * 15.0
-    status_past = sky.get_meridian_status(ra_past, 40.0, time)
-    assert pytest.approx(status_past["hour_angle"], abs=1e-3) == 0.25  # 15 minutes past
-    assert status_past["flip_required"]  # Since 15 mins > 10 mins delay limit
+    # One target transiting (RA = LST), one past the meridian by 15 minutes.
+    objects = [
+        StellarObject(id="transiting", name="transiting", ra=lst * 15.0, dec=40.0),
+        StellarObject(id="past", name="past", ra=(lst - 0.25) * 15.0, dec=40.0),
+    ]
+    report = build_visibility_report(
+        sky, objects, to_astropy_time(time), None, None, frozenset({"meridian"}), 0.0, [], 0.0
+    )
+    transiting, past = (entry.meridian for entry in report.objects)
+    assert transiting.hour_angle_hours == pytest.approx(0.0, abs=1e-3)
+    assert not transiting.flip_required
+    assert past.hour_angle_hours == pytest.approx(0.25, abs=1e-3)  # 15 minutes past
+    assert past.flip_required  # Since 15 mins > 10 mins delay limit
 
 
 def test_object_visibility() -> None:

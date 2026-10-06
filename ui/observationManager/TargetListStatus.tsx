@@ -33,9 +33,9 @@ export const TargetListStatus: React.FC = () => {
                         {visibleTargets.map((target, idx) => (
                             <tr key={idx}>
                                 <td>{target.id}</td>
-                                <td>{target.alt}</td>
-                                <td>{target.az}</td>
-                                <td>{target.set_time || '--'}</td>
+                                <td>{`${target.altitude_deg.toFixed(1)}°`}</td>
+                                <td>{`${target.azimuth_deg.toFixed(1)}°`}</td>
+                                <td>{target.set_utc || '--'}</td>
                             </tr>
                         ))}
                         {loading && visibleTargets.length === 0 && (

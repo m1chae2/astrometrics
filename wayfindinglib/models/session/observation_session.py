@@ -160,3 +160,42 @@ class ObservationSession(BaseModel):
     weather_samples: list[WeatherSample] = Field(default_factory=list, alias="weatherSamples")
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), alias="createdAt")
     closed_at: datetime | None = Field(default=None, alias="closedAt")
+
+
+class QueueRequest(BaseModel):
+    """A request to put one recorded package into a session's queue.
+
+    Used by `ObservationPlanning.edit_queue` to add entries by hand and by
+    `ObservationPlanning.create_plan(kind="scheduled_session")` to place
+    packages automatically. The package is named by its id, so the request
+    is plain data.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    package_id: str = Field(alias="packageId", description="The recorded observation package to queue.")
+    start_time_mode: StartTimeMode = Field(
+        default=StartTimeMode.SOONEST, alias="startTimeMode", description="When the entry may start."
+    )
+    requested_start_time: datetime | None = Field(
+        default=None, alias="requestedStartTime", description="The fixed start, for a fixed-time entry."
+    )
+    computed_start_time: datetime | None = Field(
+        default=None,
+        alias="computedStartTime",
+        description="A start worked out by hand. Manual entries only.",
+    )
+    computed_end_time: datetime | None = Field(
+        default=None, alias="computedEndTime", description="An end worked out by hand. Manual entries only."
+    )
+
+
+class ObservationSessionSummary(BaseModel):
+    """One line about a recorded observation session, for a list."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str = Field(alias="id", description="The session id.")
+    status: SessionStatus = Field(alias="status", description="Where the session is in its life.")
+    night_date: date = Field(alias="nightDate", description="The local date the observing night began.")
+    entry_count: int = Field(alias="entryCount", description="How many entries its queue holds.")

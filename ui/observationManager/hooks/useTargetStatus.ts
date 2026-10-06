@@ -43,13 +43,13 @@ export const useTargetStatus = (selectedTargetId?: string) => {
                 );
                 if (statusData) {
                     return {
-                        ra: statusData.ra,
-                        dec: statusData.dec,
-                        alt: statusData.alt,
-                        az: statusData.az,
-                        riseTime: statusData.rise_time,
-                        setTime: statusData.set_time,
-                        visible: statusData.visible
+                        ra: targetData.ra as string,
+                        dec: targetData.dec as string,
+                        alt: `${statusData.altitude_deg.toFixed(1)}°`,
+                        az: `${statusData.azimuth_deg.toFixed(1)}°`,
+                        riseTime: statusData.rise_utc,
+                        setTime: statusData.set_utc,
+                        visible: statusData.above_horizon
                     };
                 }
             } catch (err) {

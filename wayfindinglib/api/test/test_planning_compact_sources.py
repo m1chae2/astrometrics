@@ -80,6 +80,15 @@ def test_a_star_is_looked_up_with_its_magnitude() -> None:
     assert answer["dec_deg"] == pytest.approx(38.8)
 
 
-def test_an_unknown_name_is_an_error_not_a_crash() -> None:
-    """A failed lookup comes back under `error`."""
-    assert "cannot resolve" in make_planning([], []).lookup_coordinates("Nowhere")["error"]
+def test_an_unknown_name_raises_the_lookup_error() -> None:
+    """A failed lookup raises; it is not turned into an error reply."""
+    with pytest.raises(ValueError, match="cannot resolve"):
+        make_planning([], []).lookup_coordinates("Nowhere")
+
+
+def test_targets_can_be_left_out() -> None:
+    """include=[] lists the stars only."""
+    answer = make_planning([], [Target(id="M 57", ra="18 55 54", dec="32 37 45")]).find_sources(
+        284.0, 32.6, 1.0, include=[]
+    )
+    assert "targets" not in answer

@@ -32,6 +32,7 @@ from typing import Any
 
 import numpy as np
 
+from astrometricslib import ExternalServiceError
 from wayfindinglib.drivers.catalog import deep_star_store
 
 logger = logging.getLogger(__name__)
@@ -714,7 +715,7 @@ def estimate_deep_catalog_size(
 
     Raises
     ------
-    RuntimeError
+    ExternalServiceError
         If no chunk could be counted.
     """
     if gaia is None:
@@ -742,7 +743,9 @@ def estimate_deep_catalog_size(
             sleep(request_delay_seconds)
 
     if not counts:
-        raise RuntimeError("None of the sample counts succeeded, so there is nothing to estimate from.")
+        raise ExternalServiceError(
+            "None of the sample counts succeeded, so there is nothing to estimate from."
+        )
 
     mean_stars = float(np.mean(counts))
     estimated_stars = mean_stars * pixels_total

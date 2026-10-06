@@ -510,22 +510,23 @@ PROPOSED_TOOLS = (
     ),
     # ---- Planning and sessions ----
     ProposedTool(
-        "planning_get_visibility_over_time",
+        "planning_get_visibility",
         "planning-sessions",
-        "Report where objects are over a span of times, or at one moment, with the Sun, Moon and horizon.",
-        ("planning_get_visibility", "planning_get_meridian_status"),
+        "Report where objects are at one moment or over a span, with the Sun, Moon and horizon.",
+        (),
         (
-            "objects: names or {id, ra_deg, dec_deg}",
-            "start, end (equal for one moment), step_minutes",
-            "minimum_altitude_deg, horizon_zones",
-            "timezone_offset_hours, include_samples",
+            "objects: names or {id, ra_deg, dec_deg} (none for every library target)",
+            "time, end_time (none for one moment), step_minutes",
+            "include: meridian | samples",
+            "minimum_altitude_deg, horizon_zones, timezone_offset_hours, clear_only",
         ),
-        "observe",
+        "compute",
         notes=(
-            "Built 2026-10-03; the single-time tools were folded in the same day. at_start gives altitude, "
-            "azimuth, hour angle, flip status and rise, set and transit at the start time. Names not in "
-            "the library go to SIMBAD over the network. planning_resolve_target_coordinates stays "
-            "separate: it looks up a position, not a time."
+            "Built 2026-10-03 as a night table; since 2026-10-06 it is ObservationPlanning.get_visibility, "
+            "which also took over the single-moment answer, the meridian status (include=['meridian']) and "
+            "the backend's visible-targets list. A span covers at most 30 objects and 150 rows. Names not in "
+            "the library go to SIMBAD over the network. planning_lookup_coordinates stays separate: it looks "
+            "up a position, not a time."
         ),
         built=True,
     ),
@@ -533,100 +534,86 @@ PROPOSED_TOOLS = (
         "planning_get_advisory",
         "planning-sessions",
         "Report the quality advisory for a target, or the calibration inventory advisory for a camera.",
-        ("planning_get_target_quality_advisory", "planning_get_calibration_advisory"),
-        ("kind: quality | calibration | both", "target_id", "camera_id, frame_type, exposure_sec, filter"),
+        (),
+        ("kind: quality | calibration", "target", "camera_id, frame_type, exposure_seconds, filter"),
         "observe",
         notes=(
-            "The calibration advisory always reports 0 today: it reads a table that only reconcile_session "
-            "fills, and that has never run. The quality advisory has the variable-star count fixed at 0."
+            "Built 2026-10-06 as ObservationPlanning.get_advisory. The calibration advisory always reports 0 "
+            "today: it reads a table that only reconcile_session fills, and that has never run. The quality "
+            "advisory has the variable-star count fixed at 0."
         ),
+        built=True,
     ),
     ProposedTool(
-        "planning_plan_mosaic",
+        "planning_create_mosaic",
         "planning-sessions",
-        "Compute mosaic panels, and optionally create their targets and packages.",
-        ("planning_calculate_panels", "planning_create_mosaic_targets", "planning_generate_mosaic_packages"),
-        (
-            "parent_target_id or centre",
-            "rows, cols, overlap_percent",
-            "equipment",
-            "exposure_requests",
-            "dither_config",
-            "commit",
-        ),
+        "Add one library target per mosaic panel, and optionally one observation package each.",
+        (),
+        ("target", "panels (from planning_calculate_panels)", "exposure_requests, dither_config", "packages"),
         "change-data",
-        {"investigator": {"commit": {"allowed": [False]}}},
-        (
-            "commit=true writes panel targets to the catalog and packages to the wayfinding database, not in "
-            "one step. calculate_panels uses a fixed 23.5 x 15.6 mm sensor and 400 mm focal "
-            "length because it "
-            "reads configuration sections that do not exist. The same offset maths is written twice."
+        notes=(
+            "Built 2026-10-06 as ObservationPlanning.create_mosaic, the write half of mosaic planning; "
+            "planning_calculate_panels is the read half. It writes panel targets to the catalog even with "
+            "packages=false, so no read-only form exists. calculate_panels uses a fixed 23.5 x 15.6 mm "
+            "sensor and 400 mm focal length unless equipment is given, because it reads configuration "
+            "keys that do not exist."
         ),
+        built=True,
     ),
     ProposedTool(
-        "planning_manage_plan",
+        "planning_create_plan",
         "planning-sessions",
-        "Create observation packages and sessions, place them in a night, and edit the queue.",
+        "Create a sequence plan, an observation package, or an observing session (empty or placed).",
+        (),
         (
-            "planning_create_observation_package",
-            "planning_create_empty_session",
-            "planning_plan_observation_session",
-            "planning_add_to_queue",
-            "planning_reorder_queue",
-        ),
-        (
-            "action: create_package | create_session | auto_place | add_entry | reorder_queue",
-            "package_id, session_id, site_profile_id, camera_id, night_date, entry_ids",
-            "dry_run",
+            "kind: sequence | package | empty_session | scheduled_session",
+            "target, plan_items, exposure_requests and the package settings",
+            "requests (package ids), site_profile, telescope, camera_id, night_id",
         ),
         "change-data",
-        {"investigator": {"action": {"allowed": ["auto_place"]}, "dry_run": {"allowed": [True]}}},
-        (
-            "None of these five can be called through MCP today: they need package, session, site and "
-            "telescope objects that MCP cannot send. The tool needs id-based arguments and resolvers. The "
-            "production database holds no packages and one hand-made empty session. Consider waiting until "
-            "planning matures."
+        notes=(
+            "Built 2026-10-06 as ObservationPlanning.create_plan. Only sequence writes nothing. The session "
+            "kinds need site and telescope objects that MCP cannot send. The production database holds no "
+            "packages and one hand-made empty session."
         ),
+        built=True,
+    ),
+    ProposedTool(
+        "planning_edit_queue",
+        "planning-sessions",
+        "Add recorded packages to a session's queue, or reorder it.",
+        (),
+        ("session_id", "add: [{package_id, start_time_mode, requested_start_time}]", "order: entry ids"),
+        "change-data",
+        notes="Built 2026-10-06 as ObservationPlanning.edit_queue. Writes the session.",
+        built=True,
     ),
     ProposedTool(
         "planning_get_plan",
         "planning-sessions",
-        "Read observation packages, sessions and their queues.",
+        "Read one observing session with its queue, or list the sessions.",
         (),
-        ("session_id or package_id, or none to list",),
+        ("session_id, or none to list",),
         "observe",
-        notes="New. No tool reads a session or queue back today, so the queue tools cannot be checked.",
+        notes=(
+            "Built 2026-10-06 as ObservationPlanning.get_plan, which also serves the backend's session list "
+            "and session view. Packages are not listed yet."
+        ),
+        built=True,
     ),
     ProposedTool(
-        "planning_deep_catalog",
+        "planning_deep_catalog_status",
         "planning-sessions",
-        "Report on the deep star catalog download, estimate its size, or start the build.",
-        (
-            "planning_get_deep_catalog_status",
-            "planning_estimate_deep_catalog_size",
-            "planning_build_deep_star_catalog",
+        "Report on the deep star catalog download, and optionally estimate its full size.",
+        (),
+        ("include: estimate", "healpix_level, magnitude_limit, sample_count (estimate only)"),
+        "compute",
+        notes=(
+            "Built 2026-10-06 as ObservationPlanning.deep_catalog_status. The estimate sends about two dozen "
+            "network queries to the Gaia archive and saves nothing. planning_build_deep_star_catalog stays "
+            "separate because it writes: it downloads from Gaia for hours and writes the catalog database."
         ),
-        ("action: status | estimate | build", "healpix_level, magnitude_limit"),
-        "change-data",
-        {"investigator": {"action": {"allowed": ["status", "estimate"]}}},
-        (
-            "build downloads from Gaia for hours and writes the catalog database. Keep it away "
-            "from AI clients. "
-            "estimate sends about two dozen network queries."
-        ),
-    ),
-    ProposedTool(
-        "execution_session",
-        "planning-sessions",
-        "Read a session or list sessions, abort one, or run its after-session checks.",
-        ("execution_abort_session", "execution_reconcile_session"),
-        ("action: get | list | abort | reconcile", "session_id"),
-        "change-data",
-        {"investigator": {"action": {"allowed": ["get", "list"]}}},
-        (
-            "get and list are new. abort_session changes the session in memory only and nothing saves it, so "
-            "an abort is lost; fix that first. reconcile writes the calibration counts and the session."
-        ),
+        built=True,
     ),
     # ---- App ----
     ProposedTool(
@@ -738,9 +725,6 @@ DECISIONS = {
     ),
     "processing_acquire_stacking_slot": ToolDecision(
         "drop", "Internal concurrency lock exposed by reflection."
-    ),
-    "planning_create_sequence_plan": ToolDecision(
-        "drop", "Old duplicate of create_observation_package. Writes nothing.", "compute"
     ),
     "planning_get_constellation_lines": ToolDecision(
         "drop",
@@ -895,10 +879,31 @@ DECISIONS = {
     "planning_resolve_target_coordinates": ToolDecision(
         "keep", "Looks up an object's position by name. Unknown names go to SIMBAD over the network."
     ),
-    "planning_get_visibility_over_time": ToolDecision(
+    "planning_get_visibility": ToolDecision(
         "keep",
-        "Built 2026-10-03. A night table for several objects: altitude, horizon clearance with "
+        "Built 2026-10-03. Where objects are now or over a night: altitude, horizon clearance with "
         "caller-given blocked ranges, meridian crossing, Sun and Moon. Reads nothing stored.",
+    ),
+    "planning_get_advisory": ToolDecision(
+        "keep", "Built 2026-10-06. Quality or calibration advice, worked out on demand. Saves nothing."
+    ),
+    "planning_get_plan": ToolDecision(
+        "keep", "Built 2026-10-06. Reads a recorded session or the session list."
+    ),
+    "planning_deep_catalog_status": ToolDecision(
+        "keep",
+        "Built 2026-10-06. Reads the catalog file; the optional estimate queries the Gaia archive and "
+        "saves nothing.",
+    ),
+    "planning_calculate_panels": ToolDecision("keep", "Works out mosaic panel centers. Saves nothing."),
+    "planning_build_deep_star_catalog": ToolDecision(
+        "withhold", "Downloads from Gaia for hours and writes the catalog database."
+    ),
+    "execution_abort_session": ToolDecision(
+        "withhold", "Closes a session and records it. Stays separate from the read tools (section 4.2)."
+    ),
+    "execution_reconcile_session": ToolDecision(
+        "withhold", "Writes the calibration counts and the session after a night."
     ),
     # ---- Keep ----
     "observatory_history_query": ToolDecision(
@@ -984,9 +989,6 @@ DECISIONS = {
         "Writes the delegation state (the Safe Mode toggle) to the database. Not a hardware command, but "
         "the user decided an AI may not change configuration.",
         "change-data",
-    ),
-    "planning_plan_observation_session": ToolDecision(
-        None, "Writes the session to the wayfinding database.", "change-data"
     ),
     # ---- Records: dropped ----
     "observatory_equipment_save_commissioning_run": ToolDecision(

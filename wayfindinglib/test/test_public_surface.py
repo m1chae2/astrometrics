@@ -1,15 +1,15 @@
-"""Purpose: Pin the public surface of wayfindinglib and of `control`.
+"""Purpose: Pin the public surface of wayfindinglib and its three sub-APIs.
 
 Description: `wayfindinglib/__init__.py` is the only door into this library
-that code outside it should use, and `Wayfinder.control` is split into a
-root and seven children named by topic. Renaming, adding or removing a
-public name is a change to the library's contract with the backend, the
-MCP servers and the UI, so it must be a deliberate edit to the lists below
-rather than a side effect of moving code. The tests also check that every
-export resolves, that `control` stays under its size limit, and that the
-two argument guards the plan asks for work: `SkyPosition` checks its
-ranges, and `control.remote.list` refuses arguments its `kind` does not
-use.
+that code outside it should use. `Wayfinder.control` is split into a root
+and seven children named by topic, and `planning` and `execution` are
+single classes. Renaming, adding or removing a public name is a change to
+the library's contract with the backend, the MCP servers and the UI, so it
+must be a deliberate edit to the lists below rather than a side effect of
+moving code. The tests also check that every export resolves, that
+`control` stays under its size limit, and that the argument guards work:
+`SkyPosition` checks its ranges, and `control.remote.list` refuses
+arguments its `kind` does not use.
 """
 
 from pathlib import Path
@@ -19,24 +19,88 @@ from pydantic import ValidationError
 
 import wayfindinglib
 from astrometricslib import AppConfiguration, InvalidArgumentError
-from wayfindinglib import ObservatoryControl, SkyPosition
+from wayfindinglib import ObservationExecution, ObservationPlanning, ObservatoryControl, SkyPosition
 from wayfindinglib.drivers.butler import DiskButler
 
 EXPECTED_EXPORTS = frozenset({
-    "EquipmentStatus",
-    "GuidingStatus",
-    "ImagingStatus",
-    "IndiInterface",
-    "MountPointingModel",
-    "ObservationExecution",
-    "ObservationPlanning",
-    "ObservatoryControl",
-    "SafetyStatus",
-    "SimulatorIndiInterface",
-    "SkyPosition",
+    # The root object, the sub-APIs and the drivers callers put in.
     "Wayfinder",
+    "ObservatoryControl",
+    "ObservationPlanning",
+    "ObservationExecution",
+    "IndiInterface",
+    "SimulatorIndiInterface",
+    # Models.
+    "CalibrationAdvisory",
+    "DeepCatalogEstimate",
+    "DeepCatalogStatus",
+    "DitherConfig",
+    "EquipmentConfiguration",
+    "EquipmentStatus",
+    "ExposureRequest",
+    "FrameType",
+    "GuidingStatus",
+    "HorizonZone",
+    "ImagingStatus",
+    "MeridianStatus",
+    "MosaicPanel",
+    "MosaicPlan",
+    "MountPointingModel",
+    "NightConditions",
+    "ObjectVisibility",
+    "ObservationPackage",
+    "ObservationSession",
+    "ObservationSessionSummary",
+    "QueueRequest",
+    "SafetyStatus",
+    "SequenceItem",
+    "SequencePlan",
+    "SiteProfile",
+    "SkyPosition",
+    "StartTimeMode",
+    "TargetQualityAdvisory",
+    "Telescope",
+    "VisibilityReport",
+    "VisibilitySpan",
+    # The library's own error class.
+    "DelegationPolicyValidationError",
 })
 """What `from wayfindinglib import ...` offers."""
+
+PLANNING_MEMBERS = frozenset({
+    "get_visibility",
+    "get_advisory",
+    "calculate_panels",
+    "create_mosaic",
+    "create_plan",
+    "edit_queue",
+    "get_plan",
+    "deep_catalog_status",
+    "build_deep_star_catalog",
+    # Sky browsing around a point, and name lookups.
+    "find_sources",
+    "get_sources",
+    "get_library_star_summaries",
+    "get_online_catalog_sources",
+    "list_catalog_driver_metadata",
+    "get_constellation_lines",
+    "get_imaged_field_centers",
+    "lookup_coordinates",
+    "resolve_target_coordinates",
+})
+"""The public members of `ObservationPlanning`."""
+
+EXECUTION_MEMBERS = frozenset({
+    "advance_session",
+    "abort_session",
+    "reconcile_session",
+    "execute_meridian_flip",
+    "recover_fault",
+    "recover_guide_star_loss",
+    "record_divergence",
+    "create_recorder",
+})
+"""The public members of `ObservationExecution`."""
 
 ROOT_DRIVERS = frozenset({
     "driver",
@@ -163,6 +227,26 @@ def test_the_package_exports_exactly_the_expected_names() -> None:
     assert set(wayfindinglib.__all__) == EXPECTED_EXPORTS
     for name in EXPECTED_EXPORTS:
         assert getattr(wayfindinglib, name) is not None, name
+
+
+def test_planning_offers_exactly_its_pinned_members() -> None:
+    """`ObservationPlanning` offers exactly the pinned methods."""
+    assert _public_names(ObservationPlanning) == PLANNING_MEMBERS
+
+
+def test_execution_offers_exactly_its_pinned_members() -> None:
+    """`ObservationExecution` offers exactly the pinned methods."""
+    assert _public_names(ObservationExecution) == EXECUTION_MEMBERS
+
+
+def test_background_jobs_can_skip_registering_a_job() -> None:
+    """Every `@background_job` method of planning takes `register_job`."""
+    import inspect
+
+    for name in PLANNING_MEMBERS:
+        method = getattr(ObservationPlanning, name)
+        if getattr(method, "__background_job_type__", None) is not None:
+            assert inspect.signature(method).parameters["register_job"].default is True, name
 
 
 def test_control_root_holds_only_the_drivers_and_the_children(control: ObservatoryControl) -> None:

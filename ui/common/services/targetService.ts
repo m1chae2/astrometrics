@@ -7,7 +7,13 @@
 import { callBackend, TargetCameraIndex } from './backendApi';
 import { reportError } from '../utils/reportError';
 import { emitToast } from '../utils/emitToast';
-import { TargetObject, TargetFilesResponse, GroupedFrameStat, FitsHeaderEntry } from '../types/backendTypes';
+import {
+    TargetObject,
+    TargetFilesResponse,
+    GroupedFrameStat,
+    FitsHeaderEntry,
+    ObjectVisibility
+} from '../types/backendTypes';
 
 /**
  * Fetches the pre-shaped file list for a target.
@@ -236,25 +242,14 @@ export async function getFrameStats(targetId: string): Promise<FrameStat[]> {
 }
 
 
-export interface VisibleTarget {
-    id: string;
-    ra: string;
-    dec: string;
-    alt: string;
-    az: string;
-    visible: boolean;
-    rise_time: string;
-    set_time: string;
-}
-
 /**
- * Fetches the list of all currently visible targets.
- * @return List of visible targets.
+ * Fetches the library targets above the horizon now, highest first.
+ * @return Where each visible target is.
  */
-export async function fetchVisibleTargets(): Promise<VisibleTarget[]> {
+export async function fetchVisibleTargets(): Promise<ObjectVisibility[]> {
     try {
         const data = await callBackend("astronomy:visible", {}, { timeoutMs: 30000 });
-        return (data || []) as VisibleTarget[];
+        return data || [];
     } catch (err) {
         console.error('Failed to fetch visible targets', err);
         return [];

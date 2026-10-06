@@ -35,6 +35,12 @@ import astrometricslib
 # with the rest of the repo, so it should be a deliberate edit to this list,
 # not a side effect of moving code around internally.
 EXPECTED_PUBLIC_NAMES = frozenset({
+    "check_choice",
+    "check_include",
+    "registered_job",
+    "reject_unused_arguments",
+    "resolve_target",
+    "to_epoch_seconds",
     "AbstractButler",
     "AbstractCatalogAccess",
     "Activity",

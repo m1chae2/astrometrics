@@ -303,7 +303,7 @@ AGENT_PROMPT = (
     "`jobs_query`. To judge raw spectrum frames (zero order, tilt, clipping "
     "along the spectrum, a predicted peak at another exposure), use `diagnostics_spectral_frame_check`. "
     "To tell whether guiding spoiled a frame, use `observatory_history_frame_guiding`. "
-    "To plan a night over several hours, use `planning_get_visibility_over_time`. "
+    "To plan a night over several hours, use `planning_get_visibility`. "
     "For the live session (pier side, camera temperature, "
     "exposure and dither counts), use `observatory_history_get_live_session_status`; it cannot report the "
     "guide algorithm, because the logs do not record it. Do not try to get around "

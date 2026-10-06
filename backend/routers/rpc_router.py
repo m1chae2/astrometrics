@@ -121,22 +121,22 @@ def _serialize_bulk_delegation_outcome(outcome: Any) -> dict[str, dict[str, str]
     }
 
 
-def _create_sequence_plan(target_name: str, items: list[dict[str, Any]]) -> dict[str, Any]:
+def _create_sequence_plan(target_name: str, items: list[dict[str, Any]]) -> Any:
     """Build an imaging sequence plan with the Wayfinder planning API.
 
     Parameters
     ----------
     target_name : `str`
-        Name of the target the plan is for.
+        The id of the library target the plan is for.
     items : `list` [`dict`]
         The plan items, each with ``count``, ``exposure`` and ``filter``.
 
     Returns
     -------
-    plan : `dict`
+    plan : `SequencePlan`
         The sequence plan.
     """
-    return container.wayfinder.planning.create_sequence_plan(target_name, items)
+    return container.wayfinder.planning.create_plan("sequence", target=target_name, plan_items=items)
 
 
 def _get_session_alignment(session_id: str = "") -> dict:
@@ -340,8 +340,8 @@ class RPCHandlerRegistry:
         self.register("astronomy:get_overlay_stars", ("stellar_service", "get_astrometry_overlay_stars"))
         self.register("astronomy:get_target_status", ("stellar_service", "get_target_status"))
         self.register("astronomy:get_status", ("stellar_service", "get_target_status"))
-        self.register("astronomy:visible", ("stellar_service", "get_visible_targets"))
-        self.register("astronomy:get_visible_targets", ("stellar_service", "get_visible_targets"))
+        self.register("astronomy:visible", ("stellar_service", "list_visible_targets"))
+        self.register("astronomy:get_visible_targets", ("stellar_service", "list_visible_targets"))
         self.register("observatory:connect", ("wayfinder.control.equipment", "connect"))
         self.register(
             "observatory:enter_monitoring_mode",
@@ -381,7 +381,7 @@ class RPCHandlerRegistry:
         self.register("planetarium:get_observer_location", ("telescope_service", "get_observer_location"))
         self.register("planetarium:get_catalog_sources", ("stellar_service", "get_online_catalog_sources"))
         self.register("planetarium:list_catalog_drivers", ("stellar_service", "list_catalog_drivers"))
-        self.register("planetarium:get_deep_catalog_status", ("stellar_service", "get_deep_catalog_status"))
+        self.register("planetarium:get_deep_catalog_status", ("stellar_service", "deep_catalog_status"))
         self.register("planetarium:get_constellation_lines", ("stellar_service", "get_constellation_lines"))
 
         # --- Imaging (Camera) (Infrastructure level) ---
@@ -401,7 +401,7 @@ class RPCHandlerRegistry:
 
         # --- Mosaic (Infrastructure level) ---
         self.register("mosaic:preview", ("mosaic_service", "preview_mosaic"))
-        self.register("mosaic:create", ("mosaic_service", "create_mosaic_targets_rpc"))
+        self.register("mosaic:create", ("mosaic_service", "create_mosaic"))
 
         # --- Sequencer (Infrastructure level) ---
         # --- Observation Execution (wayfindinglib's third root function) ---

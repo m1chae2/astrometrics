@@ -6,7 +6,8 @@
  */
 import { useBackendFetch } from '../../common/hooks/useBackendFetch';
 import { usePollTick } from '../../common/hooks/usePollTick';
-import { fetchVisibleTargets, VisibleTarget } from '../../common/services/targetService';
+import { fetchVisibleTargets } from '../../common/services/targetService';
+import { ObjectVisibility } from '../../common/types/backendTypes';
 
 /** How often to re-poll visible targets, in milliseconds. */
 const VISIBILITY_POLL_INTERVAL_MS = 30000;
@@ -18,7 +19,7 @@ const VISIBILITY_POLL_INTERVAL_MS = 30000;
 export const useTargetVisibility = () => {
     const pollTick = usePollTick(VISIBILITY_POLL_INTERVAL_MS);
 
-    const { data, loading } = useBackendFetch<VisibleTarget[]>(
+    const { data, loading } = useBackendFetch<ObjectVisibility[]>(
         () => fetchVisibleTargets(),
         [pollTick],
         { errorMessage: 'Failed to load visible targets' }

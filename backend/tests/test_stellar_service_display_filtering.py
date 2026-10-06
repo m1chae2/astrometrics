@@ -197,18 +197,17 @@ def test_get_online_catalog_sources_limit_is_optional():  # ruff: ignore[missing
     assert service.wayfinder.planning.get_online_catalog_sources.call_args.kwargs["magnitude_limit"] is None
 
 
-def test_get_deep_catalog_status_adds_the_install_command():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_deep_catalog_status_adds_the_install_command() -> None:
     """Verify the status the UI sees names the command that downloads it."""
     from backend.services.data.stellar_service import DEEP_CATALOG_INSTALL_COMMAND
+    from wayfindinglib import DeepCatalogStatus
 
     service = _make_service()
-    service.wayfinder.planning.get_deep_catalog_status.return_value = {
-        "installed": False,
-        "complete": False,
-        "star_count": 0,
-    }
+    service.wayfinder.planning.deep_catalog_status.return_value = DeepCatalogStatus(
+        installed=False, complete=False, star_count=0, pixels_downloaded=0, size_megabytes=0.0
+    )
 
-    status = service.get_deep_catalog_status()
+    status = service.deep_catalog_status()
 
     assert status["installed"] is False
     assert status["installCommand"] == DEEP_CATALOG_INSTALL_COMMAND
@@ -856,9 +855,7 @@ def test_get_sources_reads_stars_from_summaries_and_loads_only_targets():  # ruf
     sources = service.get_sources(ra=37.95, dec=89.26, radius=2.5)
 
     assert [source["id"] for source in sources] == ["Polaris"]
-    service.wayfinder.planning.get_sources.assert_called_once_with(
-        37.95, 89.26, 2.5, include_catalog=False, include_stars=False
-    )
+    service.wayfinder.planning.get_sources.assert_called_once_with(37.95, 89.26, 2.5, include=[])
     service.wayfinder.planning.get_library_star_summaries.assert_called_once_with(37.95, 89.26, 2.5, None)
 
 

@@ -1,21 +1,19 @@
-"""Backend adapter over wayfindinglib's Observation Execution astrometrics.
+"""Purpose: Serve the observing-session RPC methods.
 
-`ObservationExecution` is an in-process API: several of its operations take
-bundles of injected callables (`SessionRunnerDependencies`,
-`MeridianFlipSteps`) that drive hardware, and those cannot cross a JSON-RPC
-boundary. This service exposes the subset whose inputs are plain data,
-translating between session identifiers on the wire and the
-`ObservationSession` objects the high-level interface expects.
+Description: The UI lists observing sessions, opens one, aborts one, or
+reconciles one after the night. Reading goes through
+`Wayfinder.planning.get_plan`; abort and reconcile go through
+`Wayfinder.execution`, which take the session id and record the result.
 
-The remaining operations -- `advance_session`, `execute_meridian_flip`,
-`recover_fault`, `recover_guide_star_loss`, and `create_recorder` -- need a
-caller that can supply hardware-driving callables. That belongs with whatever
-owns the run loop, not with a request handler; see `target_imaging_executor`,
-which currently runs its own queue rather than delegating here.
+Several `ObservationExecution` operations take bundles of steps that
+drive hardware (`SessionRunnerDependencies`, `MeridianFlipSteps`), which
+cannot cross a JSON-RPC call. `advance_session`, `execute_meridian_flip`,
+`recover_fault`, `recover_guide_star_loss` and `create_recorder` therefore
+belong with whatever owns the run loop, not with a request handler; see
+`target_imaging_executor`, which still runs its own queue.
 """
 
 import logging
-from datetime import UTC, datetime
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -24,84 +22,27 @@ logger = logging.getLogger(__name__)
 class ExecutionService:
     """Expose the data-only parts of Observation Execution over RPC."""
 
-    def __init__(self, wayfinder: Any, config: Any = None):  # ruff: ignore[missing-return-type-special-method]
-        """Initialize the ExecutionService.
+    def __init__(self, wayfinder: Any) -> None:
+        """Keep the Wayfinder whose planning and execution APIs do the work.
 
         Parameters
         ----------
-        wayfinder : `Any`
-            The facade for wayfindinglib, providing the Execution API.
-        config : `Any`, optional
-            Application configuration instance for locating the datastore.
+        wayfinder : `wayfindinglib.Wayfinder`
+            The shared Wayfinder.
         """
         self.wayfinder = wayfinder
 
-        # Its own butler rather than the high-level interface's
-        # private one. Both resolve to the same wayfinding.db, so reads
-        # stay consistent, without this service depending on
-        # ObservationExecution's internals.
-        from wayfindinglib.drivers.butler import DiskButler
-
-        self._butler = DiskButler(app_config=config) if config else DiskButler()
-
-    @property
-    def _execution(self) -> Any:
-        """The Observation Execution astrometrics.
+    def list_sessions(self) -> list[Any]:
+        """Summarize every recorded observation session, newest night first.
 
         Returns
         -------
-        execution : `Any`
-            The `ObservationExecution` branch of the Wayfinder
-            high-level interface.
+        sessions : `list` [`ObservationSessionSummary`]
+            One line per session.
         """
-        return self.wayfinder.execution
+        return self.wayfinder.planning.get_plan()
 
-    def _load_session(self, session_id: str) -> Any:
-        """Load a recorded observation session by identifier.
-
-        Parameters
-        ----------
-        session_id : `str`
-            Identifier of the session to load.
-
-        Returns
-        -------
-        session : `Any`
-            The hydrated `ObservationSession`.
-
-        Raises
-        ------
-        ValueError
-            Raised if no session exists with that identifier.
-        """
-        session = self._butler.get("observation_session", {"session_id": session_id})
-        if session is None:
-            raise ValueError(f"No observation session found with id '{session_id}'")
-        return session
-
-    def list_sessions(self) -> list[dict[str, Any]]:
-        """Summarize every recorded observation session.
-
-        Returns
-        -------
-        sessions : `list` of `dict`
-            One summary per session, newest first, carrying the fields a
-            queue view needs without shipping whole session documents.
-        """
-        sessions = self._butler.get_all("observation_session")
-        summaries = [
-            {
-                "id": session.id,
-                "status": getattr(session.status, "value", str(session.status)),
-                "nightDate": str(getattr(session, "night_date", "")),
-                "entryCount": len(getattr(session, "queue", []) or []),
-            }
-            for session in sessions
-        ]
-        summaries.sort(key=lambda entry: entry["nightDate"], reverse=True)
-        return summaries
-
-    def get_session(self, session_id: str) -> dict[str, Any]:
+    def get_session(self, session_id: str) -> Any:
         """Return one observation session in full.
 
         Parameters
@@ -111,12 +52,12 @@ class ExecutionService:
 
         Returns
         -------
-        session : `dict`
-            The session serialized for transport.
+        session : `ObservationSession`
+            The session.
         """
-        return self._load_session(session_id).model_dump(mode="json", by_alias=True)
+        return self.wayfinder.planning.get_plan(session_id)
 
-    def abort_session(self, session_id: str, reason: str) -> dict[str, Any]:
+    def abort_session(self, session_id: str, reason: str) -> Any:
         """Abort a session, skipping its remaining pending entries.
 
         Parameters
@@ -128,15 +69,13 @@ class ExecutionService:
 
         Returns
         -------
-        session : `dict`
-            The aborted session, serialized for transport.
+        session : `ObservationSession`
+            The aborted, recorded session.
         """
-        session = self._load_session(session_id)
-        logger.info(f"Aborting observation session {session_id}: {reason}")
-        aborted = self._execution.abort_session(session, reason, datetime.now(UTC))
-        return aborted.model_dump(mode="json", by_alias=True)
+        logger.info("Aborting observation session %s: %s", session_id, reason)
+        return self.wayfinder.execution.abort_session(session_id, reason)
 
-    def reconcile_session(self, session_id: str) -> dict[str, Any]:
+    def reconcile_session(self, session_id: str) -> Any:
         """Run post-session reconciliation and record the results.
 
         Parameters
@@ -146,16 +85,11 @@ class ExecutionService:
 
         Returns
         -------
-        session : `dict`
-            The reconciled session, serialized for transport.
+        session : `ObservationSession`
+            The reconciled session.
         """
-        session = self._load_session(session_id)
-        logger.info(f"Reconciling observation session {session_id}")
-        # Reconciliation links the physical images captured by the
-        # execution loop back to the logical target data models in
-        # astrometricslib.
-        reconciled = self._execution.reconcile_session(session)
-        return reconciled.model_dump(mode="json", by_alias=True)
+        logger.info("Reconciling observation session %s", session_id)
+        return self.wayfinder.execution.reconcile_session(session_id)
 
     def record_divergence(
         self,
@@ -202,7 +136,7 @@ class ExecutionService:
         """
         from wayfindinglib.models.policy.delegation import ObservatoryCapability
 
-        record = self._execution.record_divergence(
+        record = self.wayfinder.execution.record_divergence(
             record_id,
             observation_session_id,
             queued_observation_package_id,

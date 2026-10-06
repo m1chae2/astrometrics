@@ -865,16 +865,139 @@ export interface CalibrationStats {
 }
 
 /**
- * Row/column coordinates for a single pane in a mosaic layout.
+ * One panel of a mosaic grid and where its center is.
  */
 export interface MosaicPanel {
+  /** Grid row, counted from 0. */
   row: number;
+  /** Grid column, counted from 0. */
   col: number;
+  /** Right ascension of the center, as hours, minutes and seconds. */
   ra_str: string;
+  /** Declination of the center, as degrees, minutes and seconds. */
   dec_str: string;
+  /** Right ascension of the center, in degrees. */
   ra_deg: number;
+  /** Declination of the center, in degrees. */
   dec_deg: number;
+  /** Short panel name such as "P1_2" (row 1, column 2). */
   panel_id: string;
+}
+
+/**
+ * One stretch of time, such as a span when an object is usable.
+ */
+export interface TimeSpan {
+  /** When the stretch begins, as ISO 8601 text. */
+  start: string;
+  /** When the stretch ends, as ISO 8601 text. */
+  end: string;
+  /** Length of the stretch, in hours. */
+  hours: number;
+}
+
+/**
+ * Where an object stands relative to the meridian at one moment.
+ */
+export interface MeridianStatus {
+  /** Hour angle, from -12 to 12 hours. Negative means east of the meridian. */
+  hour_angle_hours: number;
+  /** True once the object is past the meridian by more than the flip delay. */
+  flip_required: boolean;
+  /** Seconds until the object crosses the meridian. Negative once it has crossed. */
+  time_to_flip_seconds: number;
+}
+
+/**
+ * One meridian crossing inside the span, and when the flip is due.
+ */
+export interface MeridianCrossing {
+  /** When the object crosses the meridian, as ISO 8601 text. */
+  crossing: string;
+  /** When the meridian flip is due, after the configured delay. */
+  flip_due: string;
+}
+
+/**
+ * The smallest and largest angle between an object and the Moon.
+ */
+export interface SeparationRange {
+  /** Smallest separation over the span, in degrees. */
+  minimum_deg: number;
+  /** Largest separation over the span, in degrees. */
+  maximum_deg: number;
+}
+
+/**
+ * One row of the time table for one object.
+ */
+export interface VisibilitySample {
+  /** The moment, as ISO 8601 text. */
+  time: string;
+  /** Altitude of the object. */
+  altitude_deg: number;
+  /** Azimuth of the object, from north through east. */
+  azimuth_deg: number;
+  /** True when the object is above the horizon limit at its azimuth. */
+  clear: boolean;
+  /** Altitude of the Sun. */
+  sun_altitude_deg: number;
+  /** Altitude of the Moon. */
+  moon_altitude_deg: number;
+  /** Angle between the object and the Moon. */
+  moon_separation_deg: number;
+}
+
+/**
+ * How one object moves across the sky over the requested span.
+ */
+export interface VisibilitySpan {
+  /** The highest altitude the object reaches in the span. */
+  highest_altitude_deg: number;
+  /** When it is highest, as ISO 8601 text. */
+  highest_altitude_at: string;
+  /** Each meridian crossing inside the span. */
+  meridian_crossings?: MeridianCrossing[];
+  /** When the object is above the horizon limit. */
+  clear_of_horizon?: TimeSpan[];
+  /** When the object is above the horizon limit and the Sun is below -18 degrees. */
+  usable?: TimeSpan[];
+  /** How close the Moon comes. */
+  moon_separation: SeparationRange;
+  /** The time table, one row per step. Filled with include=["samples"]. */
+  samples?: VisibilitySample[] | null;
+}
+
+/**
+ * Where one object is at the start moment, and over the span if asked.
+ */
+export interface ObjectVisibility {
+  /** The object's id. */
+  id: string;
+  /** The object's common name, when it has one. */
+  name?: string | null;
+  /** Right ascension (J2000), in degrees. */
+  ra_deg: number;
+  /** Declination (J2000), in degrees. */
+  dec_deg: number;
+  /** Altitude at the start moment. */
+  altitude_deg: number;
+  /** Azimuth at the start moment, from north through east. */
+  azimuth_deg: number;
+  /** True when the altitude is above 0 degrees. */
+  above_horizon: boolean;
+  /** True when the object is above the horizon limit at its azimuth. */
+  clear: boolean;
+  /** UTC time of day it rises, or "Circumpolar" or "Never Rises". */
+  rise_utc: string;
+  /** UTC time of day it sets, or "Circumpolar" or "Never Rises". */
+  set_utc: string;
+  /** UTC time of day it crosses the meridian. */
+  transit_utc: string;
+  /** Hour angle and flip status. Filled with include=["meridian"]. */
+  meridian?: MeridianStatus | null;
+  /** Movement over the span. Filled when an end time is given. */
+  span?: VisibilitySpan | null;
 }
 
 /**

@@ -41,7 +41,7 @@ import logging
 import sys
 import time
 
-from astrometricslib import configure_logging
+from astrometricslib import ExternalServiceError, configure_logging
 from wayfindinglib import Wayfinder
 from wayfindinglib.drivers.catalog import deep_star_store
 from wayfindinglib.drivers.catalog.deep_star_catalog_builder import (
@@ -260,22 +260,24 @@ def _run_estimate(planning: object, arguments: argparse.Namespace) -> int:
     """
     print("Counting a sample of chunks (this asks ESA for a few dozen small answers)...")
     try:
-        estimate = planning.estimate_deep_catalog_size(
+        estimate = planning.deep_catalog_status(
+            include=["estimate"],
             healpix_level=arguments.healpix_level,
             magnitude_limit=arguments.magnitude_limit,
             query_timeout_seconds=arguments.timeout_seconds,
             request_delay_seconds=arguments.request_delay_seconds,
-        )
-    except RuntimeError as estimate_error:
+            register_job=False,
+        ).estimate
+    except ExternalServiceError as estimate_error:
         print(f"Could not estimate: {estimate_error}")
         return 1
-    print(f"\nSampled {estimate['pixels_sampled']} of {estimate['pixels_total']:,} chunks.")
+    print(f"\nSampled {estimate.pixels_sampled} of {estimate.pixels_total:,} chunks.")
     print(
-        f"  stars per chunk: mean {estimate['sample_mean']:,.0f}, "
-        f"smallest {estimate['sample_min']:,}, largest {estimate['sample_max']:,}"
+        f"  stars per chunk: mean {estimate.sample_mean:,.0f}, "
+        f"smallest {estimate.sample_min:,}, largest {estimate.sample_max:,}"
     )
-    print(f"  estimated total: about {estimate['estimated_stars']:,.0f} stars")
-    print(f"  estimated disk:  about {estimate['estimated_megabytes']:,.0f} MB")
+    print(f"  estimated total: about {estimate.estimated_stars:,.0f} stars")
+    print(f"  estimated disk:  about {estimate.estimated_megabytes:,.0f} MB")
     print(
         "\nThis is a rough guide: the sky is far denser along the Milky Way than elsewhere, "
         "so the real size can be well off. The 'smallest' and 'largest' above show how much it varies."

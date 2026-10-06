@@ -1292,7 +1292,7 @@ class StellarService:
         # 270,000-star library. Only targets are loaded here. With the
         # catalog on, only the library's stars inside this region are read.
         objects = self.wayfinder.planning.get_sources(
-            ra, dec, radius, include_catalog=include_catalog, include_stars=include_catalog
+            ra, dec, radius, include=["stars", "online"] if include_catalog else []
         )
 
         # These ID sets exist only to tell apart local objects from ones
@@ -1518,7 +1518,7 @@ class StellarService:
                 )
         return results
 
-    def get_deep_catalog_status(self) -> dict:
+    def deep_catalog_status(self) -> dict:
         """Say how much of the downloaded deep-star catalog is installed.
 
         The Planetarium draws faint stars from a copy of Gaia DR3 saved on
@@ -1530,11 +1530,12 @@ class StellarService:
         dict
             ``installed``, ``complete``, ``star_count``, ``pixels_downloaded``,
             ``pixels_total``, ``healpix_level``, ``magnitude_limit`` and
-            ``size_megabytes`` (from ``get_deep_catalog_status`` on the
-            stars API),
+            ``size_megabytes`` (from ``planning.deep_catalog_status``),
             plus ``installCommand``: the command that downloads it.
         """
-        status = dict(self.wayfinder.planning.get_deep_catalog_status())
+        status = self.wayfinder.planning.deep_catalog_status(register_job=False).model_dump(
+            mode="json", exclude={"estimate"}
+        )
         status["installCommand"] = DEEP_CATALOG_INSTALL_COMMAND
         return status
 
@@ -1570,105 +1571,59 @@ class StellarService:
         return self.wayfinder.planning.get_constellation_lines()
 
     def get_visibility(self, objects: list[dict], time: str | None = None) -> list[dict]:
-        """Calculate detailed real-time visibility parameters for objects.
+        """Say where objects are in the sky, for the Planetarium's details.
 
         Parameters
         ----------
-        objects : List[dict]
-            List of objects with 'id' and 'type' keys.
-        time : Optional[str]
-            Observation time. Defaults to now.
+        objects : `list` [`dict`]
+            Each with ``id`` and ``type``. A ``"star"`` is read from the
+            library's stars; any other type is looked up by name in the
+            library, then SIMBAD.
+        time : `str`, optional
+            ISO 8601 moment. Defaults to now.
 
         Returns
         -------
-        List[dict]
-            Visibility status dictionaries.
+        visibility : `list` [`dict`]
+            One `ObjectVisibility` per object found, with its meridian
+            status. A star the library does not hold is left out.
         """
-        from astropy.time import Time
-
-        wayfinder = self.wayfinder
-
-        resolved_objects = []
+        resolved: list[Any] = []
         for object_entry in objects:
-            obj_id = object_entry.get("id")
-            obj_type = object_entry.get("type", "star")
-
-            if obj_type == "star":
-                obj = self.get_object(obj_id)
-                if obj:
-                    resolved_objects.append(obj)
+            if object_entry.get("type", "star") == "star":
+                star = self.get_object(object_entry.get("id"))
+                if star is not None:
+                    resolved.append(star)
             else:
-                try:
-                    # Resolve using sky to handle fallback to SIMBAD for
-                    # uninitialized local targets
-                    obj = wayfinder.planning.resolve_target_coordinates(obj_id)
-                    if obj:
-                        resolved_objects.append(obj)
-                except Exception:
-                    try:
-                        obj = self.astrometrics.targets.get(obj_id)
-                        if obj:
-                            resolved_objects.append(obj)
-                    except Exception as exc:
-                        logger.debug("Could not resolve target '%s' by either lookup: %s", obj_id, exc)
+                resolved.append(object_entry.get("id"))
+        if not resolved:
+            return []
+        report = self.wayfinder.planning.get_visibility(resolved, time=time, include=["meridian"])
+        return [entry.model_dump(mode="json") for entry in report.objects]
 
-        observation_time = Time(time) if time else None
-        return wayfinder.planning.get_visibility(resolved_objects, time_input=observation_time)
-
-    def get_target_status(self, target_id: str) -> dict | None:
-        """Calculate the real-time Alt/Az coordinates and visibility status.
+    def get_target_status(self, target_id: str) -> dict:
+        """Say where one target is in the sky now.
 
         Parameters
         ----------
-        target_id : str
-            Identifier of the target to resolve and evaluate.
+        target_id : `str`
+            The target's id or name, looked up in the library, then SIMBAD.
 
         Returns
         -------
-        Optional[dict]
-            Visibility status dictionary for the target, or None if the
-            target could not be resolved.
+        status : `dict`
+            The target's `ObjectVisibility`.
         """
-        wayfinder = self.wayfinder
-        try:
-            target = wayfinder.planning.resolve_target_coordinates(target_id)
-        except Exception:
-            return None
-        visibility_results = wayfinder.planning.get_visibility([target])
-        return visibility_results[0] if visibility_results else None
+        report = self.wayfinder.planning.get_visibility([target_id])
+        return report.objects[0].model_dump(mode="json")
 
-    def get_visible_targets(self) -> list[dict]:
-        """Return all targets currently above the horizon, sorted by altitude.
+    def list_visible_targets(self) -> list[dict]:
+        """List the library targets above the horizon now, highest first.
 
         Returns
         -------
-        List[dict]
-            Visibility status dictionaries for targets with Alt > 0,
-            sorted by descending altitude.
+        targets : `list` [`dict`]
+            One `ObjectVisibility` per target that is above the horizon.
         """
-        wayfinder = self.wayfinder
-        targets = wayfinder.planning.get_sources(0.0, 0.0, 180.0, include_catalog=False, include_stars=False)
-        visibility_results = wayfinder.planning.get_visibility(targets)
-        visible = [entry for entry in visibility_results if entry.get("above_horizon", False)]
-        for entry in visible:
-            if "altitude" in entry:
-                alt_float = float(entry["altitude"])
-                entry["altitude"] = alt_float
-                entry.setdefault("alt", f"{alt_float:.1f}°")
-                entry.setdefault("alt_deg", alt_float)
-            if "azimuth" in entry:
-                az_float = float(entry["azimuth"])
-                entry["azimuth"] = az_float
-                entry.setdefault("az", f"{az_float:.1f}°")
-            if "id" in entry:
-                entry.setdefault("target_id", str(entry["id"]))
-            if "flip_required" in entry:
-                entry["flip_required"] = bool(entry["flip_required"])
-            if "above_horizon" in entry:
-                entry["above_horizon"] = bool(entry["above_horizon"])
-            if "time_to_flip_seconds" in entry and entry["time_to_flip_seconds"] is not None:
-                entry["time_to_flip_seconds"] = float(entry["time_to_flip_seconds"])
-            if "hour_angle" in entry and entry["hour_angle"] is not None:
-                entry["hour_angle"] = float(entry["hour_angle"])
-        visible.sort(key=lambda entry: entry["altitude"], reverse=True)
-        return visible
+        report = self.wayfinder.planning.get_visibility(clear_only=True)
+        return [entry.model_dump(mode="json") for entry in report.objects]

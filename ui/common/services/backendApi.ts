@@ -26,14 +26,14 @@ import {
     FrameRecord,
     AlignmentAttempt,
     PolarAlignmentStatus,
-    AlignmentSessionSummary
+    AlignmentSessionSummary,
+    ObjectVisibility
 } from '../types/backendTypes';
 
 import {
     PlanetariumSource,
     PlanetariumTarget,
     ObserverLocation,
-    PlanetariumVisibilityItem,
     ConstellationLineSegment
 } from '../types/planetariumTypes';
 
@@ -129,8 +129,8 @@ export interface ActionRegistry {
     "target:get_frame_header": { payload: { target_id: string; frame_path: string }; response: FitsHeaderEntry[] };
 
     // Astronomy & Stellar Library
-    "astronomy:get_status": { payload: { target_id: string }; response: TelescopeStatus };
-    "astronomy:visible": { payload: Record<string, never>; response: Spectrum[] };
+    "astronomy:get_status": { payload: { target_id: string }; response: ObjectVisibility };
+    "astronomy:visible": { payload: Record<string, never>; response: ObjectVisibility[] };
     "astronomy:list": { payload: { target_id?: string; limit?: number; search?: string; filter_type?: string }; response: Spectrum[] };
     "astronomy:count": { payload: { target_id?: string; search?: string; filter_type?: string }; response: number };
     "astronomy:get": { payload: { object_id: string }; response: Spectrum | null };
@@ -145,7 +145,7 @@ export interface ActionRegistry {
     "astronomy:stars_by_spectral_class": { payload: { spectral_class: string }; response: { id: string; name: string; ra: number | null; dec: number | null; magnitude: number | null; spectralType: string; hasSpectra: boolean; hasPhotometry: boolean; selfDeterminedSpectralTypeRms: number | null }[] };
     "planetarium:get_sources": { payload: { ra: number; dec: number; radius: number; limiting_magnitude?: number; include_stars_without_catalog_magnitude?: boolean }; response: PlanetariumSource[] };
     "planetarium:get_targets": { payload: Record<string, never>; response: PlanetariumTarget[] };
-    "planetarium:get_visibility": { payload: { objects: Array<{ id: string; type?: string }>; time?: string }; response: PlanetariumVisibilityItem[] };
+    "planetarium:get_visibility": { payload: { objects: Array<{ id: string; type?: string }>; time?: string }; response: ObjectVisibility[] };
     "planetarium:get_observer_location": { payload: Record<string, never>; response: ObserverLocation };
     "planetarium:get_catalog_sources": { payload: { ra: number; dec: number; radius: number; enabled_drivers: string[]; limiting_magnitude?: number }; response: PlanetariumSource[] };
     "planetarium:get_deep_catalog_status": { payload: Record<string, never>; response: DeepCatalogStatus };

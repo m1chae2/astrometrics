@@ -222,19 +222,18 @@ CLASSIFICATION_RULES = (
     ),
     _rule(r"^processing_acquire_.+_slot$", "change-data", "low", "Takes a work slot (a lock). Check."),
     _rule(r"^star_tune_spectroscopy_calibration$", "change-data", "low", "May store a new calibration."),
-    _rule(r"^planning_(add_to_queue|reorder_queue)$", "change-data", "high", "Changes the saved queue."),
+    _rule(r"^planning_edit_queue$", "change-data", "high", "Changes the saved queue."),
     _rule(
-        r"^planning_(build_deep_star_catalog|create_empty_session|create_mosaic_targets"
-        r"|generate_mosaic_packages)$",
+        r"^planning_(build_deep_star_catalog|create_mosaic)$",
         "change-data",
-        "medium",
+        "high",
         "Builds or stores catalog or plan data.",
     ),
     _rule(
-        r"^planning_(create_observation_package|create_sequence_plan)$",
+        r"^planning_create_plan$",
         "change-data",
-        "low",
-        "Creates a plan object. Check whether it is saved.",
+        "high",
+        "Records packages and sessions. Only kind=sequence writes nothing.",
     ),
     _rule(
         r"^observatory_(safety_apply_promotion_decision|equipment_set_active_.+)$",
@@ -314,10 +313,16 @@ CLASSIFICATION_RULES = (
         "Measures frames and returns statistics. Saves nothing.",
     ),
     _rule(
-        r"^(observatory_history_frame_guiding|planning_get_visibility_over_time)$",
+        r"^(observatory_history_frame_guiding|planning_get_visibility)$",
         "compute",
         "high",
         "Calculates from stored records and the sky. Saves nothing.",
+    ),
+    _rule(
+        r"^planning_deep_catalog_status$",
+        "compute",
+        "high",
+        "Reads the catalog file; the estimate queries the Gaia archive. Saves nothing.",
     ),
     _rule(
         r"^observatory_remote_frame_status$",

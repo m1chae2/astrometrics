@@ -44,13 +44,13 @@ def test_returns_matching_existing_count(isolated_butler):  # ruff: ignore[missi
     )
     isolated_butler.put(stats, "calibration_stats", {"camera_id": "c1"})
 
-    advisory = build_calibration_advisory(isolated_butler, "c1", FrameType.DARK, exposure_sec=300.0)
+    advisory = build_calibration_advisory(isolated_butler, "c1", FrameType.DARK, exposure_seconds=300.0)
     assert advisory.existing_count == 40
 
 
 def test_returns_zero_when_no_matching_entry(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify a zero count is returned, not an error, when no entry matches."""
-    advisory = build_calibration_advisory(isolated_butler, "c1", FrameType.FLAT, exposure_sec=1.0)
+    advisory = build_calibration_advisory(isolated_butler, "c1", FrameType.FLAT, exposure_seconds=1.0)
     assert advisory.existing_count == 0
 
 

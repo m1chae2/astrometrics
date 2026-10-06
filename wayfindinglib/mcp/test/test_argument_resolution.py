@@ -1,9 +1,9 @@
 """Purpose: Unit tests for converting MCP client values into Wayfinder objects.
 
 Description: Covers the converters in `wayfindinglib.mcp.argument_resolution`
-(names to targets and sky objects, ISO strings to astropy times, the
-shared `Astrometrics` handle) and the Wayfinder tools that depend on
-them, which used to fail with `'str' object has no attribute 'id'`.
+(target ids to library targets) and the Wayfinder tools that take names,
+coordinate dictionaries and ISO times, which used to fail with
+`'str' object has no attribute 'id'`.
 """
 
 import types
@@ -11,7 +11,6 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
-from astropy.time import Time
 
 from wayfindinglib.mcp.argument_resolution import build_argument_hooks
 from wayfindinglib.mcp.tool_registry import registry as wayfinding_registry
@@ -144,69 +143,20 @@ def test_an_object_passes_through_unchanged(hooks: Hooks) -> None:
     assert resolvers["target"](already_object) is already_object
 
 
-def test_sky_objects_resolve_names_and_coordinates(hooks: Hooks) -> None:
-    """Names resolve; coordinate dictionaries become stellar objects."""
-    resolvers, _ = hooks
-    resolved = resolvers["objects"](["NGC 7635", {"id": "P1", "ra_deg": 350.2, "dec_deg": 61.2}])
-    assert resolved[0].id == "NGC 7635"
-    assert resolved[1].id == "P1"
-    assert float(resolved[1].right_ascension) == pytest.approx(350.2)
-
-
-def test_a_name_that_cannot_resolve_is_named_in_the_error(hooks: Hooks) -> None:
-    """The failing name appears in the message."""
-    resolvers, _ = hooks
-    with pytest.raises(ValueError, match="Could not resolve 'Nowhere'"):
-        resolvers["objects"](["Nowhere"])
-
-
-def test_a_coordinate_dictionary_missing_a_key_is_explained(hooks: Hooks) -> None:
-    """A dictionary without coordinates explains the expected keys."""
-    resolvers, _ = hooks
-    with pytest.raises(ValueError, match="ra_deg"):
-        resolvers["objects"]([{"id": "P1"}])
-
-
-def test_time_with_an_offset_converts_to_utc(hooks: Hooks) -> None:
-    """22:00 at UTC-6 is 04:00 UTC the next day."""
-    resolvers, _ = hooks
-    parsed = resolvers["time_input"]("2026-10-02T22:00:00-06:00")
-    assert isinstance(parsed, Time)
-    assert parsed.isot == "2026-10-03T04:00:00.000"
-
-
-def test_time_without_an_offset_is_taken_as_utc(hooks: Hooks) -> None:
-    """A naive ISO time is read as UTC."""
-    resolvers, _ = hooks
-    assert resolvers["time_input"]("2026-10-03T04:00:00").isot == "2026-10-03T04:00:00.000"
-
-
-def test_a_bad_time_string_gives_a_clear_error(hooks: Hooks) -> None:
-    """An unreadable time raises `ValueError` with an example."""
-    resolvers, _ = hooks
-    with pytest.raises(ValueError, match="ISO 8601"):
-        resolvers["time_input"]("tomorrow evening")
-
-
-def test_now_is_accepted_as_a_time(hooks: Hooks) -> None:
-    """The word ``now`` gives the current time."""
-    resolvers, _ = hooks
-    assert isinstance(resolvers["time_input"]("now"), Time)
-
-
 def test_no_parameter_is_injected(hooks: Hooks) -> None:
     """The server supplies no parameters; the library holds the handle."""
     _, injected = hooks
     assert injected == {}
 
 
-def test_injected_parameters_are_hidden_from_registered_tool_schemas() -> None:
-    """Clients are not asked for `astrometrics`; the server supplies it."""
+def test_server_only_parameters_are_hidden_from_registered_tool_schemas() -> None:
+    """Clients are not asked for `register_job`; the server decides it."""
     definitions = {t.name: t for t in wayfinding_registry.get_tool_definitions()}
-    schema = definitions["planning_get_target_quality_advisory"].inputSchema
-    assert "astrometrics" not in schema["properties"]
-    assert "astrometrics" not in schema["required"]
-    assert "target_id" in schema["required"]
+    schema = definitions["planning_deep_catalog_status"].inputSchema
+    assert "register_job" not in schema["properties"]
+    assert "include" in schema["properties"]
+    advisory = definitions["planning_get_advisory"].inputSchema
+    assert advisory["required"] == ["kind"]
 
 
 async def test_visibility_accepts_coordinates_and_an_offset_time() -> None:
@@ -215,11 +165,12 @@ async def test_visibility_accepts_coordinates_and_an_offset_time() -> None:
         "planning_get_visibility",
         {
             "objects": [{"id": "M 52", "ra_deg": 351.2, "dec_deg": 61.59}],
-            "time_input": "2026-10-02T22:00:00-06:00",
+            "time": "2026-10-02T22:00:00-06:00",
         },
     )
     assert "M 52" in result[0].text
-    assert "altitude" in result[0].text.lower() or "alt" in result[0].text.lower()
+    assert "altitude_deg" in result[0].text
+    assert "2026-10-03T04:00:00Z" in result[0].text
 
 
 def test_a_target_id_reads_the_catalog_fresh_each_time(

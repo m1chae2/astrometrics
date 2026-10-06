@@ -68,27 +68,6 @@ export interface ObserverLocation {
 }
 
 /**
- * PlanetariumVisibilityItem Interface
- *
- * Defines the visibility results for a specific astronomical source/target.
- */
-export interface PlanetariumVisibilityItem {
-  id: string;
-  name: string;
-  ra: string;
-  dec: string;
-  altitude: number;
-  azimuth: number;
-  hour_angle: number;
-  flip_required: boolean;
-  time_to_flip_seconds: number;
-  rise_time: string;
-  set_time: string;
-  transit_time: string;
-  above_horizon: boolean;
-}
-
-/**
  * ConstellationLineSegment Interface
  *
  * A single stick-figure line segment between two stars in a constellation,

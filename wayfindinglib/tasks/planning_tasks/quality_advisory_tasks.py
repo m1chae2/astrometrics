@@ -1,18 +1,16 @@
-"""Purpose: Target Quality Advisory Computation.
+"""Purpose: Build the quality advisory for one target.
 
-Description: Computed on demand from astrometricslib's public
-high-level interface, never recorded
-(`Wayfinding_Library_Architecture.md` §2.3.2). Reads
-only fields already present on the target's science-side record: the
-`flagged`/`flag_reasons` pair common to every pipeline quality summary,
-and asteroid candidate counts (a candidate counts as confirmed once its
-cascade stage reaches ephemeris match). The variable-star
-cross-reference is deferred -- the science library's own stellar-object
-listing does not yet filter by target identifier, and carrying a
-workaround for that gap into this library's v1 was judged not worthwhile
-(`Wayfinding_Library_Architecture.md` §2.3.2, §4).
+Description: `ObservationPlanning.get_advisory(kind="quality")` uses this
+to sum up what the science library already knows about a target. It is
+computed on demand and never stored. It reads only fields already on the
+target's record: the ``flagged`` and ``flag_reasons`` pair that every
+pipeline quality summary carries, and the asteroid candidate counts (a
+candidate counts as confirmed once it matches a known orbit). The
+variable-star count is always 0 for now, because the star catalog cannot
+yet list a target's stars cheaply.
 """
 
+from astrometricslib import Target
 from wayfindinglib.models.planning.quality_advisory import (
     QualityFlagSummary,
     ScienceOutcomeSummary,
@@ -20,30 +18,19 @@ from wayfindinglib.models.planning.quality_advisory import (
 )
 
 
-def build_target_quality_advisory(astrometrics, target_id: str) -> TargetQualityAdvisory:  # ruff: ignore[missing-type-function-argument]
+def build_target_quality_advisory(target: Target) -> TargetQualityAdvisory:
     """Build a `TargetQualityAdvisory` from a target's existing science record.
 
     Parameters
     ----------
-    astrometrics : `Any`
-        The science library's public high-level interface.
-    target_id : `str`
-        The target to build the advisory for.
+    target : `Target`
+        The library target to build the advisory for.
 
     Returns
     -------
     advisory : `TargetQualityAdvisory`
         Quality flags per pipeline and science outcome counts.
-
-    Raises
-    ------
-    ValueError
-        Raised if `target_id` does not resolve to an existing target.
     """
-    target = astrometrics.targets.get(target_id)
-    if not target:
-        raise ValueError(f"Target {target_id} not found")
-
     quality_flags = []
     for pipeline_name, summary in (
         ("stacking", target.stacking.quality_summary),
@@ -68,7 +55,7 @@ def build_target_quality_advisory(astrometrics, target_id: str) -> TargetQuality
     )
 
     return TargetQualityAdvisory(
-        target_id=target_id,
+        target_id=target.id,
         quality_flags=quality_flags,
         science_outcomes=ScienceOutcomeSummary(
             variable_star_candidate_count=0,  # deferred -- see module docstring

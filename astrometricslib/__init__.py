@@ -27,7 +27,12 @@ except PackageNotFoundError:  # running from a source tree without an install
 from astrometricslib.api import AbstractCatalogAccess, CatalogAccess
 from astrometricslib.drivers.calibration_library import DEFAULT_DARK_TEMPERATURE_TOLERANCE_C
 from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
-from astrometricslib.drivers.job_logging import background_job, capture_job_logs, get_current_job
+from astrometricslib.drivers.job_logging import (
+    background_job,
+    capture_job_logs,
+    get_current_job,
+    registered_job,
+)
 from astrometricslib.drivers.logger_interface import DbLogHandler, LoggerInterface
 from astrometricslib.drivers.provenance_store import ProvenanceStore, export_target_lineage_as_prov_xml
 from astrometricslib.foundation.config import AppConfiguration, get_configuration
@@ -154,6 +159,13 @@ if TYPE_CHECKING:
     from astrometricslib.pipelines.astrometry.utilities.catalog_seeding import (
         derive_field_centers,
     )
+    from astrometricslib.pipelines.shared.api_arguments import (
+        check_choice,
+        check_include,
+        reject_unused_arguments,
+        resolve_target,
+        to_epoch_seconds,
+    )
     from astrometricslib.pipelines.shared.quality.frame_selection import (
         FrameSelection,
         parse_iso_time,
@@ -175,6 +187,11 @@ _DEFERRED_EXPORTS = {
     "Jobs": "astrometricslib.api.jobs",
     "FrameSelection": "astrometricslib.pipelines.shared.quality.frame_selection",
     "parse_iso_time": "astrometricslib.pipelines.shared.quality.frame_selection",
+    "check_choice": "astrometricslib.pipelines.shared.api_arguments",
+    "check_include": "astrometricslib.pipelines.shared.api_arguments",
+    "reject_unused_arguments": "astrometricslib.pipelines.shared.api_arguments",
+    "resolve_target": "astrometricslib.pipelines.shared.api_arguments",
+    "to_epoch_seconds": "astrometricslib.pipelines.shared.api_arguments",
     "select_library_frames": "astrometricslib.pipelines.shared.quality.frame_selection",
     "StellarCatalog": "astrometricslib.api.stars",
     "TargetCatalog": "astrometricslib.api.targets",
@@ -362,6 +379,8 @@ __all__ = [
     "acquire_resource_slot",
     "background_job",
     "capture_job_logs",
+    "check_choice",
+    "check_include",
     "classify_and_sort_fits_files",
     "close_interrupted_jobs",
     "configure_logging",
@@ -380,10 +399,14 @@ __all__ = [
     "observing_night_id",
     "parse_coordinate_string",
     "parse_iso_time",
+    "registered_job",
+    "reject_unused_arguments",
     "require_mounted_storage",
     "resolve_camera_profile",
     "resolve_mounted_path",
+    "resolve_target",
     "safe_json_dumps",
     "select_library_frames",
+    "to_epoch_seconds",
     "to_error_info",
 ]

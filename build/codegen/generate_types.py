@@ -84,6 +84,17 @@ from backend.services.infrastructure.system_status_service import (
     TelescopePulse,
 )
 from wayfindinglib.drivers.indi_interface import TelescopeStatus
+from wayfindinglib.models.planning.mosaic import MosaicPanel
+from wayfindinglib.models.planning.sequence_plan import SequenceItem, SequencePlan
+from wayfindinglib.models.planning.visibility import (
+    MeridianCrossing,
+    MeridianStatus,
+    ObjectVisibility,
+    SeparationRange,
+    TimeSpan,
+    VisibilitySample,
+    VisibilitySpan,
+)
 from wayfindinglib.models.session.observation_session import WeatherSample
 from wayfindinglib.models.session.telemetry import (
     AlignmentAttempt,
@@ -97,13 +108,7 @@ from wayfindinglib.models.session.telemetry import (
     MountPointingModel,
     PolarAlignmentStatus,
 )
-from wayfindinglib.observation import (
-    CalibrationEntry,
-    CalibrationStats,
-    MosaicPanel,
-    SequenceItem,
-    SequencePlan,
-)
+from wayfindinglib.observation import CalibrationEntry, CalibrationStats
 from wayfindinglib.observationlib.observation_session import ObservationSession
 
 
@@ -322,6 +327,13 @@ def render_types() -> str:
         generate_interface(CalibrationEntry, "CalibrationEntry"),
         generate_interface(CalibrationStats, "CalibrationStats"),
         generate_interface(MosaicPanel, "MosaicPanel"),
+        generate_interface(TimeSpan, "TimeSpan"),
+        generate_interface(MeridianStatus, "MeridianStatus"),
+        generate_interface(MeridianCrossing, "MeridianCrossing"),
+        generate_interface(SeparationRange, "SeparationRange"),
+        generate_interface(VisibilitySample, "VisibilitySample"),
+        generate_interface(VisibilitySpan, "VisibilitySpan"),
+        generate_interface(ObjectVisibility, "ObjectVisibility"),
         generate_interface(ExcludedFrame, "ExcludedFrame"),
         generate_interface(TargetSessionContribution, "TargetSessionContribution"),
         generate_interface(ExposureGroupSummary, "ExposureGroupSummary"),

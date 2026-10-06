@@ -237,7 +237,7 @@ class Container:
         # which had no route into the application at all before this.
         from backend.services.observatory.execution_service import ExecutionService
 
-        self.execution_service = ExecutionService(wayfinder=self.wayfinder, config=self.config_service)
+        self.execution_service = ExecutionService(wayfinder=self.wayfinder)
 
         from astrometricslib import StarIdentifier
         from backend.services.observatory.alignment_service import AlignmentService

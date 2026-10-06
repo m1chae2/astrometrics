@@ -15,6 +15,7 @@ import numpy as np
 import pytest
 from astropy.table import MaskedColumn, Table
 
+from astrometricslib import ExternalServiceError
 from wayfindinglib.drivers.catalog import deep_star_catalog_builder, deep_star_store
 from wayfindinglib.drivers.catalog.deep_star_catalog_builder import (
     build_deep_star_catalog,
@@ -439,7 +440,7 @@ def test_size_estimate_with_no_working_counts_raises():  # ruff: ignore[missing-
     archive = _FakeArchive()
     archive.fail_first_calls = 100
 
-    with pytest.raises(RuntimeError, match="nothing to estimate"):
+    with pytest.raises(ExternalServiceError, match="nothing to estimate"):
         estimate_deep_catalog_size(LEVEL, 16.0, sample_count=3, gaia=archive, sleep=_no_sleep)
 
 

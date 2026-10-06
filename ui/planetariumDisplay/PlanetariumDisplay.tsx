@@ -223,14 +223,14 @@ export const PlanetariumDisplay: React.FC = () => {
               ...prev,
               ra: prev.ra,
               dec: prev.dec,
-              altitude: details[0].altitude,
-              azimuth: details[0].azimuth,
-              hourAngle: details[0].hour_angle,
-              flipRequired: details[0].flip_required,
-              timeToFlipSeconds: details[0].time_to_flip_seconds,
-              riseTime: details[0].rise_time,
-              setTime: details[0].set_time,
-              transitTime: details[0].transit_time,
+              altitude: details[0].altitude_deg,
+              azimuth: details[0].azimuth_deg,
+              hourAngle: details[0].meridian?.hour_angle_hours,
+              flipRequired: details[0].meridian?.flip_required,
+              timeToFlipSeconds: details[0].meridian?.time_to_flip_seconds,
+              riseTime: details[0].rise_utc,
+              setTime: details[0].set_utc,
+              transitTime: details[0].transit_utc,
               aboveHorizon: details[0].above_horizon
             };
           });

@@ -5,8 +5,8 @@
     "execution_abort_session": {
       "tool_class": "change-data",
       "category": "planning-sessions",
-      "disposition": "merge",
-      "merge_into": "execution_session",
+      "disposition": "withhold",
+      "merge_into": "",
       "interim_block": ""
     },
     "execution_advance_session": {
@@ -33,8 +33,8 @@
     "execution_reconcile_session": {
       "tool_class": "change-data",
       "category": "planning-sessions",
-      "disposition": "merge",
-      "merge_into": "execution_session",
+      "disposition": "withhold",
+      "merge_into": "",
       "interim_block": ""
     },
     "execution_record_divergence": {
@@ -464,60 +464,46 @@
       "merge_into": "",
       "interim_block": "The assessment section connects through connect_to_telescope, which sends CONNECTION=ON to every INDI device that is off, and enclosure_state returns unknown in the MCP process. Blocked until those sections use the connect-only path."
     },
-    "planning_add_to_queue": {
-      "tool_class": "change-data",
-      "category": "planning-sessions",
-      "disposition": "merge",
-      "merge_into": "planning_manage_plan",
-      "interim_block": ""
-    },
     "planning_build_deep_star_catalog": {
       "tool_class": "change-data",
       "category": "planning-sessions",
-      "disposition": "merge",
-      "merge_into": "planning_deep_catalog",
+      "disposition": "withhold",
+      "merge_into": "",
       "interim_block": ""
     },
     "planning_calculate_panels": {
       "tool_class": "compute",
       "category": "planning-sessions",
-      "disposition": "merge",
-      "merge_into": "planning_plan_mosaic",
-      "interim_block": ""
-    },
-    "planning_create_empty_session": {
-      "tool_class": "change-data",
-      "category": "planning-sessions",
-      "disposition": "merge",
-      "merge_into": "planning_manage_plan",
-      "interim_block": ""
-    },
-    "planning_create_mosaic_targets": {
-      "tool_class": "change-data",
-      "category": "planning-sessions",
-      "disposition": "merge",
-      "merge_into": "planning_plan_mosaic",
-      "interim_block": ""
-    },
-    "planning_create_observation_package": {
-      "tool_class": "change-data",
-      "category": "planning-sessions",
-      "disposition": "merge",
-      "merge_into": "planning_manage_plan",
-      "interim_block": ""
-    },
-    "planning_create_sequence_plan": {
-      "tool_class": "compute",
-      "category": "planning-sessions",
-      "disposition": "drop",
+      "disposition": "keep",
       "merge_into": "",
       "interim_block": ""
     },
-    "planning_estimate_deep_catalog_size": {
+    "planning_create_mosaic": {
+      "tool_class": "change-data",
+      "category": "planning-sessions",
+      "disposition": "withhold",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "planning_create_plan": {
+      "tool_class": "change-data",
+      "category": "planning-sessions",
+      "disposition": "withhold",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "planning_deep_catalog_status": {
       "tool_class": "compute",
       "category": "planning-sessions",
-      "disposition": "merge",
-      "merge_into": "planning_deep_catalog",
+      "disposition": "keep",
+      "merge_into": "",
+      "interim_block": ""
+    },
+    "planning_edit_queue": {
+      "tool_class": "change-data",
+      "category": "planning-sessions",
+      "disposition": "withhold",
+      "merge_into": "",
       "interim_block": ""
     },
     "planning_find_sources": {
@@ -527,18 +513,11 @@
       "merge_into": "",
       "interim_block": ""
     },
-    "planning_generate_mosaic_packages": {
-      "tool_class": "change-data",
-      "category": "planning-sessions",
-      "disposition": "merge",
-      "merge_into": "planning_plan_mosaic",
-      "interim_block": ""
-    },
-    "planning_get_calibration_advisory": {
+    "planning_get_advisory": {
       "tool_class": "observe",
       "category": "planning-sessions",
-      "disposition": "merge",
-      "merge_into": "planning_get_advisory",
+      "disposition": "keep",
+      "merge_into": "",
       "interim_block": ""
     },
     "planning_get_constellation_lines": {
@@ -546,13 +525,6 @@
       "category": "planning-sessions",
       "disposition": "drop",
       "merge_into": "",
-      "interim_block": ""
-    },
-    "planning_get_deep_catalog_status": {
-      "tool_class": "observe",
-      "category": "planning-sessions",
-      "disposition": "merge",
-      "merge_into": "planning_deep_catalog",
       "interim_block": ""
     },
     "planning_get_imaged_field_centers": {
@@ -569,14 +541,14 @@
       "merge_into": "",
       "interim_block": "Returns every star in the circle, which can overflow the 40,000 character reply. Use planning_find_sources, which caps the list, brightest first."
     },
-    "planning_get_meridian_status": {
+    "planning_get_online_catalog_sources": {
       "tool_class": "observe",
       "category": "planning-sessions",
-      "disposition": "merged",
-      "merge_into": "planning_get_visibility_over_time",
+      "disposition": "keep",
+      "merge_into": "",
       "interim_block": ""
     },
-    "planning_get_online_catalog_sources": {
+    "planning_get_plan": {
       "tool_class": "observe",
       "category": "planning-sessions",
       "disposition": "keep",
@@ -590,21 +562,7 @@
       "merge_into": "",
       "interim_block": "Returns whole target records and every star, which overflows the 40,000 character reply. Use planning_find_sources, which caps the list, brightest first."
     },
-    "planning_get_target_quality_advisory": {
-      "tool_class": "observe",
-      "category": "planning-sessions",
-      "disposition": "merge",
-      "merge_into": "planning_get_advisory",
-      "interim_block": ""
-    },
     "planning_get_visibility": {
-      "tool_class": "observe",
-      "category": "planning-sessions",
-      "disposition": "merged",
-      "merge_into": "planning_get_visibility_over_time",
-      "interim_block": ""
-    },
-    "planning_get_visibility_over_time": {
       "tool_class": "observe",
       "category": "planning-sessions",
       "disposition": "keep",
@@ -623,20 +581,6 @@
       "category": "planning-sessions",
       "disposition": "keep",
       "merge_into": "",
-      "interim_block": ""
-    },
-    "planning_plan_observation_session": {
-      "tool_class": "change-data",
-      "category": "planning-sessions",
-      "disposition": "merge",
-      "merge_into": "planning_manage_plan",
-      "interim_block": ""
-    },
-    "planning_reorder_queue": {
-      "tool_class": "change-data",
-      "category": "planning-sessions",
-      "disposition": "merge",
-      "merge_into": "planning_manage_plan",
       "interim_block": ""
     },
     "planning_resolve_target_coordinates": {

@@ -250,20 +250,6 @@ class Sky:
 
         return constellation_operations.get_constellation_line_segments(self)
 
-    def get_meridian_status(
-        self, ra_deg: float, dec_deg: float, time_input: datetime | Time
-    ) -> dict[str, Any]:
-        """Delegate get_meridian_status to visibility_operations.
-
-        Returns
-        -------
-        meridian_status : `dict`
-            Meridian proximity/flip status fields for the object.
-        """
-        from wayfindinglib.tasks.planning_tasks import visibility_operations
-
-        return visibility_operations.get_meridian_status(self, ra_deg, dec_deg, time_input)
-
     def get_object_visibility(
         self, ra_deg: float, dec_deg: float, time_input: datetime | Time
     ) -> dict[str, Any]:
@@ -278,17 +264,3 @@ class Sky:
         from wayfindinglib.tasks.planning_tasks import visibility_operations
 
         return visibility_operations.get_object_visibility(self, ra_deg, dec_deg, time_input)
-
-    def get_visibility(
-        self, objects: list[Target | StellarObject], time_input: datetime | Time | None = None
-    ) -> list[dict[str, Any]]:
-        """Delegate get_visibility to visibility_operations.
-
-        Returns
-        -------
-        visibility : `list` [`dict`]
-            Visibility fields for each object.
-        """
-        from wayfindinglib.tasks.planning_tasks import visibility_operations
-
-        return visibility_operations.get_visibility(self, objects, time_input)

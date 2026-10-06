@@ -1,12 +1,14 @@
-"""Purpose: Calibration Advisory Computation.
+"""Purpose: Count the calibration frames already held for one request.
 
-Description: On-demand lookup of existing calibration frame inventory,
-matched against a requested frame type/exposure/filter. Purely
-informational: unlike quality advisory, it never feeds into placement
-or priority, since a calibration entry's scheduling is bound to the
-science exposures in the same package rather than independently
-scheduled (`Wayfinding_Library_Architecture.md` §2.3.4).
+Description: `ObservationPlanning.get_advisory(kind="calibration")` uses
+this to look up how many dark, bias or flat frames of a given exposure
+and filter the inventory already holds for a camera. It is for
+information only: unlike the quality advisory, it never changes where a
+package is placed or its priority, because calibration exposures are
+scheduled together with the science exposures of their package.
 """
+
+from typing import Any
 
 from astrometricslib import FilterType
 from wayfindinglib.models.equipment_and_site.calibration import (
@@ -18,10 +20,10 @@ from wayfindinglib.models.planning.observation_package import FrameType
 
 
 def build_calibration_advisory(
-    butler,  # ruff: ignore[missing-type-function-argument]
+    butler: Any,
     camera_id: str,
     frame_type: FrameType,
-    exposure_sec: float | None = None,
+    exposure_seconds: float | None = None,
     filter: FilterType | None = None,
 ) -> CalibrationAdvisory:
     """Look up the existing count for a requested calibration entry.
@@ -34,7 +36,7 @@ def build_calibration_advisory(
         The camera whose inventory is checked.
     frame_type : `FrameType`
         The requested calibration frame type (`DARK`, `FLAT`, or `BIAS`).
-    exposure_sec : `float`, optional
+    exposure_seconds : `float`, optional
         The requested exposure time, when it distinguishes matching
         entries (e.g. darks).
     filter : `FilterType`, optional
@@ -58,7 +60,11 @@ def build_calibration_advisory(
 
     existing_count = 0
     for entry in entries:
-        if entry.exposure_sec is not None and exposure_sec is not None and entry.exposure_sec != exposure_sec:
+        if (
+            entry.exposure_sec is not None
+            and exposure_seconds is not None
+            and entry.exposure_sec != exposure_seconds
+        ):
             continue
         if entry.filter is not None and filter is not None and entry.filter != filter:
             continue
@@ -67,7 +73,7 @@ def build_calibration_advisory(
     return CalibrationAdvisory(
         camera_id=camera_id,
         frame_type=frame_type,
-        exposure_sec=exposure_sec,
+        exposure_sec=exposure_seconds,
         filter=filter,
         existing_count=existing_count,
     )

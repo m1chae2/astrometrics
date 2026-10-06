@@ -1,26 +1,24 @@
-"""Purpose: Observation Execution High-Level Interface.
+"""Purpose: `ObservationExecution`, the entry point for running a session.
 
-Description: `ObservationExecution` is the single entry point external
-callers should use for queue advancement, meridian-flip sequencing,
-fault recovery, divergence recording, telemetry recording, and
-post-session reconciliation (`Wayfinding_Library_Architecture.md`
-§2.4.1). Callers should never import `tasks.execution_tasks` directly.
+Description: `Wayfinder.execution` is an `ObservationExecution`. It
+advances a session's queue, runs the meridian flip, recovers from device
+faults and lost guide stars, records divergences and telemetry, and
+reconciles a session after the night. Callers never import
+`wayfindinglib.tasks.execution_tasks` directly.
 
-Per Design Invariant 3 (`Wayfinding_Library_Architecture.md` §2.1.2),
-Execution is the one function permitted to depend on the other two --
-this high-level interface is where that dependency actually appears, since
-`advance_session`'s `SessionRunnerDependencies` bundle is where
-computed actions get issued through `ObservatoryControl`. The bundle
-itself is built by the caller (mirroring `ObservatoryControl
-.execute_safe_state`'s `SafeStateSteps` parameter): this high-level interface
-delegates to the state machine rather than constructing the
-hardware/astrometrics wiring on its own, since that wiring is specific
-to what a given queue entry actually requires.
+Execution is the one part of the library that uses both of the others:
+it runs what planning wrote, through the hardware `control` drives. The
+caller builds the bundles of steps that touch hardware
+(`SessionRunnerDependencies`, `MeridianFlipSteps`) and hands them in, the
+same way `control.safety.execute_safe_state` takes its steps. That
+wiring depends on what each queue entry needs, so this class does not
+build it.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
+from astrometricslib import AppConfiguration, Astrometrics, NotFoundError
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.models.policy.device_state import DeviceSummaryState
 from wayfindinglib.models.policy.recovery import FaultRecord, RecoveryPolicy
@@ -49,22 +47,42 @@ __all__ = [
 
 
 class ObservationExecution:
-    """Synchronous observation-execution API: queue advancement and support."""
+    """Run and recover an observing session.
 
-    def __init__(  # ruff: ignore[missing-return-type-special-method]
-        self, butler: DiskButler | None = None, astrometrics: Any | None = None
-    ):
-        """Initialize the high-level interface with a storage layer.
+    Parameters
+    ----------
+    config : `AppConfiguration`, optional
+        The application configuration. Taken from `butler`, or loaded,
+        when omitted.
+    butler : `DiskButler`, optional
+        Stores sessions and their records. Built over `config` when
+        omitted.
+    astrometrics : `Astrometrics`, optional
+        The science library handle shared with the rest of the
+        `Wayfinder`. Built over `config` on first use when omitted.
+    """
 
-        `astrometrics` is the science library handle shared with the rest of
-        the `Wayfinder`. When omitted, one is built over the butler's
-        configuration on first use.
-        """
-        self._butler = butler or DiskButler()
-        self._astrometrics = astrometrics
+    def __init__(
+        self,
+        config: AppConfiguration | None = None,
+        butler: DiskButler | None = None,
+        *,
+        astrometrics: Astrometrics | None = None,
+    ) -> None:
+        """Store the configuration, storage and shared science handle."""
+        if config is None:
+            if butler is not None:
+                config = butler.config
+            else:
+                from astrometricslib import get_configuration
+
+                config = get_configuration()
+        self._config = config
+        self._butler = butler or DiskButler(app_config=config)
+        self._shared_astrometrics = astrometrics
 
     @property
-    def astrometrics(self) -> Any:
+    def _astrometrics(self) -> Astrometrics:
         """The shared `Astrometrics` handle, built on first use if not given.
 
         Returns
@@ -72,11 +90,34 @@ class ObservationExecution:
         astrometrics : `astrometricslib.Astrometrics`
             The science library handle.
         """
-        if self._astrometrics is None:
-            from astrometricslib import Astrometrics
+        if self._shared_astrometrics is None:
+            self._shared_astrometrics = Astrometrics(self._config)
+        return self._shared_astrometrics
 
-            self._astrometrics = Astrometrics(self._butler.config)
-        return self._astrometrics
+    def _session(self, session: str | ObservationSession) -> ObservationSession:
+        """Turn a session id into the recorded session it names.
+
+        Parameters
+        ----------
+        session : `str` or `ObservationSession`
+            A session id, or a session, which is returned as it is.
+
+        Returns
+        -------
+        session : `ObservationSession`
+            The session.
+
+        Raises
+        ------
+        NotFoundError
+            If no recorded session has that id.
+        """
+        if isinstance(session, ObservationSession):
+            return session
+        found = self._butler.get("observation_session", {"session_id": session})
+        if found is None:
+            raise NotFoundError(f"No observation session {session!r}.", details={"session_id": session})
+        return found
 
     # -- Queue advancement -------------------------------------------------
 
@@ -92,16 +133,29 @@ class ObservationExecution:
         """
         return advance_session(session, deps)
 
-    def abort_session(self, session: ObservationSession, reason: str, now: datetime) -> ObservationSession:
-        """Abort a session: skip remaining pending entries, close it out.
+    def abort_session(
+        self, session: str | ObservationSession, reason: str, now: datetime | None = None
+    ) -> ObservationSession:
+        """Abort a session: skip its pending entries, close it and record it.
+
+        Parameters
+        ----------
+        session : `str` or `ObservationSession`
+            The session, by id or as a session.
+        reason : `str`
+            Why it was aborted, recorded on the session and on each
+            skipped entry.
+        now : `datetime`, optional
+            When it was closed. Defaults to now.
 
         Returns
         -------
         session : `ObservationSession`
-            The session with remaining pending entries skipped and
-            closed out.
+            The aborted, recorded session.
         """
-        return abort_session(session, reason, now)
+        aborted = abort_session(self._session(session), reason, now or datetime.now(UTC))
+        self._butler.put(aborted, "observation_session", {"session_id": aborted.id})
+        return aborted
 
     # -- Meridian flip -------------------------------------------------------
 
@@ -235,12 +289,17 @@ class ObservationExecution:
 
     # -- Post-session reconciliation -----------------------------------------
 
-    def reconcile_session(self, session: ObservationSession) -> ObservationSession:
+    def reconcile_session(self, session: str | ObservationSession) -> ObservationSession:
         """Run both post-session reconciliations, recording the results.
+
+        Parameters
+        ----------
+        session : `str` or `ObservationSession`
+            The session, by id or as a session.
 
         Returns
         -------
         session : `ObservationSession`
             The session after reconciliation, with results recorded.
         """
-        return reconcile_session(self._butler, session, self.astrometrics)
+        return reconcile_session(self._butler, self._session(session), self._astrometrics)

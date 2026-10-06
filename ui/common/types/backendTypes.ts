@@ -1445,8 +1445,7 @@ export interface AsteroidDetectionQualitySummary {
  * No populator exists yet -- schema-ready, empty until an actual
  * weather-station integration is built. Recorded for context in the
  * session's telemetry, distinct from the safety monitor's environmental
- * verdict (`SafetyAssessment`), which must not be best-effort
- * (`Wayfinding_Library_Architecture.md` §2.4.7).
+ * verdict (`SafetyAssessment`), which must not be best-effort.
  */
 export interface WeatherSample {
   time: number;

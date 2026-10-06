@@ -697,8 +697,8 @@ Table 9 maps `wayfindinglib`'s headless Python API functions onto the desktop GU
 | **Ekos Align Module** | `wayfinder.control.mount.compute_pointing_correction()` | Headless plate-solving alignment and pointing error correction ($\Delta \text{RA}, \Delta \text{Dec}$) calculation (`pointing_correction.py`). |
 | **Ekos Focus Module** | `wayfinder.control.imaging.compute_focus_correction()`, `run_autofocus()` | Headless V-curve autofocus fitting and thermal temperature compensation ($dT/dz$) (`focus_correction.py`). |
 | **Ekos Guide Module** | `wayfinder.control.guiding.compute_correction()`, `dither()` | Headless PHD2 guider event stream ingestion, pulse correction calculation, and dither orchestration (`guiding_correction.py`). |
-| **Ekos Scheduler** | `wayfinder.planning.plan_observation_session()` | Headless night window calculation, target visibility scoring, and sequence queue scheduling (`scheduling.py`). |
-| **Ekos Capture Module** | `wayfinder.planning.create_observation_package()` | Declarative request authoring for light and calibration exposure sequences (`observation_package.py`). |
+| **Ekos Scheduler** | `wayfinder.planning.create_plan(kind="scheduled_session")` | Headless night window calculation, target visibility scoring, and sequence queue scheduling (`scheduling.py`). |
+| **Ekos Capture Module** | `wayfinder.planning.create_plan(kind="package")` | Declarative request authoring for light and calibration exposure sequences (`observation_package.py`). |
 | **Ekos Dome & Weather Interlock** | `wayfinder.control.safety.execute_safe_state()`, `safety_monitor` | Headless out-of-process safety monitoring, rain/cloud interlock execution, and emergency parking (`safe_state.py`). |
 | **Ekos Session Recording** | `wayfinder.execution.advance_session()`, `session_recorder` | Live session recording, status progression tracking, and divergence logging against incumbent software (`session_runner.py`). |
 

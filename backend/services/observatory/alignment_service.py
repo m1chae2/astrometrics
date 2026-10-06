@@ -282,7 +282,9 @@ class AlignmentService:
             If the library cannot fit a model: no night was given, or no
             observer location is known.
         """
-        reply = self._observatory.history.query(kind="pointing_model", session_id=session_id)
+        reply = self._observatory.history.query(
+            kind="pointing_model", session_id=session_id, register_job=False
+        )
         if "error" in reply:
             raise InvalidArgumentError(reply["error"])
         return MountPointingModel.model_validate(reply["model"]).model_dump(by_alias=True)

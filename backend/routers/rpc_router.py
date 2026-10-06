@@ -418,7 +418,7 @@ class RPCHandlerRegistry:
         self.register("sequencer:create_plan", _create_sequence_plan)
         self.register("sequencer:add", ("target_imaging_executor", "enqueue_sequence"))
         self.register("sequencer:remove", ("target_imaging_executor", "remove_from_queue"))
-        self.register("sequencer:reorder", ("target_imaging_executor", "reorder_queue"))
+        self.register("sequencer:reorder", ("target_imaging_executor", "reorder"))
         self.register("sequencer:begin", ("target_imaging_executor", "begin_imaging"))
         self.register("sequencer:modify", ("target_imaging_executor", "modify_queue_item"))
 

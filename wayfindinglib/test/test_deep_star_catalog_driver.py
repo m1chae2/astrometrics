@@ -125,7 +125,7 @@ def test_downloaded_stars_come_back_through_the_local_store(tmp_path):  # ruff: 
 
     # Nothing downloaded yet.
     assert driver.query_region(250.0, 36.0, 2.0, 16.0) == []
-    assert deep_star_store.get_deep_catalog_status(config)["installed"] is False
+    assert deep_star_store.read_catalog_status(config)["installed"] is False
 
     deep_star_store.record_downloaded_pixel(
         config,
@@ -139,5 +139,5 @@ def test_downloaded_stars_come_back_through_the_local_store(tmp_path):  # ruff: 
     stars = driver.query_region(250.2, 36.1, 1.0, 15.0)
 
     assert [star.id for star in stars] == ["Gaia DR3 111", "Gaia DR3 222"]
-    assert deep_star_store.get_deep_catalog_status(config)["installed"] is True
+    assert deep_star_store.read_catalog_status(config)["installed"] is True
     assert star_source.find_deep_stars(100.0, -20.0, 0.5, 16.0) == [(333, 100.0, -20.0, 12.0)]

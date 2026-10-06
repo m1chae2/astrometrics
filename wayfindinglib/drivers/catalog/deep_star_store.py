@@ -48,8 +48,8 @@ __all__ = [
     "count_stars_by_grid",
     "find_deep_stars",
     "get_deep_catalog_path",
-    "get_deep_catalog_status",
     "get_downloaded_pixels",
+    "read_catalog_status",
     "record_downloaded_pixel",
     "set_deep_catalog_plan",
 ]
@@ -602,7 +602,7 @@ def count_stars_by_grid(config: Any) -> dict[str, int]:
     return counts
 
 
-def get_deep_catalog_status(config: Any) -> dict[str, Any]:
+def read_catalog_status(config: Any) -> dict[str, Any]:
     """Describe how much of the deep-star catalog is downloaded.
 
     Parameters

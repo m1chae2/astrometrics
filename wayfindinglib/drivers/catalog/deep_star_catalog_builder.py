@@ -43,7 +43,7 @@ __all__ = [
     "MEASURED_BYTES_PER_STAR",
     "build_deep_star_catalog",
     "build_pixel_query",
-    "estimate_deep_catalog_size",
+    "estimate_catalog_size",
     "healpix_pixels_of_points",
     "pixel_source_id_range",
     "pixels_near_circles",
@@ -673,7 +673,7 @@ def build_deep_star_catalog(
     return report
 
 
-def estimate_deep_catalog_size(
+def estimate_catalog_size(
     healpix_level: int = DEFAULT_HEALPIX_LEVEL,
     magnitude_limit: float = DEFAULT_MAGNITUDE_LIMIT,
     sample_count: int = 24,

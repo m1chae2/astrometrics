@@ -231,7 +231,7 @@ def _print_status(config: object) -> None:
     config : `Any`
         The application settings.
     """
-    status = deep_star_store.get_deep_catalog_status(config)
+    status = deep_star_store.read_catalog_status(config)
     print(f"Deep-star catalog: {deep_star_store.get_deep_catalog_path(config)}")
     if status["pixels_total"] is None:
         print("  nothing downloaded yet")
@@ -396,7 +396,7 @@ def run_catalog_build(argv: list[str] | None = None) -> int:
     print(f"Chunks failed: {len(report['pixels_failed']):,}")
     print(f"Time: {_format_duration(report['elapsed_seconds'])}")
     _print_status(config)
-    status = deep_star_store.get_deep_catalog_status(config)
+    status = deep_star_store.read_catalog_status(config)
     if chosen_pixels is not None:
         chosen_are_finished = not report["pixels_failed"] and not report["stopped_early"]
         if chosen_are_finished:

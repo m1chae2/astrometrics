@@ -20,8 +20,8 @@ from wayfindinglib.drivers.catalog.deep_star_store import (
     count_stars_by_grid,
     find_deep_stars,
     get_deep_catalog_path,
-    get_deep_catalog_status,
     get_downloaded_pixels,
+    read_catalog_status,
     record_downloaded_pixel,
     set_deep_catalog_plan,
 )
@@ -250,23 +250,23 @@ def test_recording_a_pixel_twice_does_not_duplicate_its_stars(tmp_path):  # ruff
 
     assert len(find_deep_stars(config, 10.05, 5.05, 2.0, 16.0)) == 2
     assert get_downloaded_pixels(config) == {7}
-    assert get_deep_catalog_status(config)["star_count"] == 2
+    assert read_catalog_status(config)["star_count"] == 2
 
 
 def test_status_reports_progress_and_completeness(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Status says how much of the sky is downloaded, and when all of it is."""
     config = _LibraryConfig(tmp_path)
-    assert get_deep_catalog_status(config)["installed"] is False
+    assert read_catalog_status(config)["installed"] is False
 
     set_deep_catalog_plan(config, healpix_level=0, magnitude_limit=16.0)
-    status = get_deep_catalog_status(config)
+    status = read_catalog_status(config)
     assert status["installed"] is False  # planned, but nothing downloaded yet
     assert status["pixels_total"] == 12
 
     record_downloaded_pixel(
         config, 0, np.array([1], dtype=np.int64), np.array([10.0]), np.array([10.0]), np.array([9.0])
     )
-    status = get_deep_catalog_status(config)
+    status = read_catalog_status(config)
     assert status["installed"] is True
     assert status["complete"] is False
     assert status["pixels_downloaded"] == 1
@@ -281,7 +281,7 @@ def test_status_reports_progress_and_completeness(tmp_path):  # ruff: ignore[mis
             np.array([10.0]),
             np.array([9.0]),
         )
-    assert get_deep_catalog_status(config)["complete"] is True
+    assert read_catalog_status(config)["complete"] is True
 
 
 def test_resuming_with_different_settings_is_refused(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]

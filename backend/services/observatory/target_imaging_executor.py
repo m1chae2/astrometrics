@@ -22,17 +22,17 @@ class TargetImagingExecutor:
         self._background_tasks: set = set()
 
     def enqueue_sequence(self, sequence: dict[str, Any], timing: dict[str, Any]) -> dict[str, str]:
-        """RPC wrapper conforming to add_to_queue signature; returns status.
+        """Add one sequence to the queue for the sequencer:add RPC method.
 
         Returns
         -------
         result : `dict`
             Dict with ``"status"`` set to ``"queued"``.
         """
-        self.add_to_queue(sequence, timing)
+        self._add_to_queue(sequence, timing)
         return {"status": "queued"}
 
-    def add_to_queue(self, sequence: dict[str, Any], timing_point: dict[str, Any]) -> None:
+    def _add_to_queue(self, sequence: dict[str, Any], timing_point: dict[str, Any]) -> None:
         """Add a sequence to the execution queue.
 
         REQ: BKD-2.1: The backend SHALL accept and queue imaging
@@ -85,7 +85,7 @@ class TargetImagingExecutor:
                 return True
         return False
 
-    def reorder_queue(self, sequence_ids: list[str]) -> bool:
+    def reorder(self, sequence_ids: list[str]) -> bool:
         """Reorder the execution queue to match the given sequence IDs.
 
         Returns

@@ -12,7 +12,14 @@ import builtins
 from collections.abc import Callable
 from typing import Any, Literal
 
-from astrometricslib import InvalidArgumentError, NotFoundError, Target, background_job
+from astrometricslib import (
+    InvalidArgumentError,
+    NotFoundError,
+    Target,
+    background_job,
+    get_current_job,
+    registered_job,
+)
 from wayfindinglib.api.control.context import ControlChild
 
 __all__ = ["RemoteControl"]
@@ -246,7 +253,11 @@ class RemoteControl(ControlChild):
 
     @background_job("remote_sync", grace_period_seconds=8.0)
     def sync_logs(
-        self, dry_run: bool = False, download: bool = True, destination_dir: str | None = None
+        self,
+        dry_run: bool = False,
+        download: bool = True,
+        destination_dir: str | None = None,
+        register_job: bool = True,
     ) -> dict[str, Any]:
         """Bring the guide and Ekos logs into the library's database.
 
@@ -266,6 +277,9 @@ class RemoteControl(ControlChild):
         destination_dir : `str`, optional
             Local folder for the logs. ``ekos_logs`` in the wayfinding
             library's data folder when omitted.
+        register_job : `bool`, optional
+            Record a real run as a job in the job history, with its log.
+            Defaults to `True`.
 
         Returns
         -------
@@ -283,10 +297,16 @@ class RemoteControl(ControlChild):
 
         context = self._context
         directory = destination_dir or context.ekos_log_directory()
-        if not download:
-            if dry_run:
-                raise InvalidArgumentError(
-                    "dry_run compares with the observatory computer, so it needs download."
-                )
-            return ekos_log_ingestion.ingest_ekos_logs(context, directory, download=False)
-        return remote_transfer_tasks.sync_remote_logs(context, dry_run, directory)
+        if not download and dry_run:
+            raise InvalidArgumentError(
+                "dry_run compares with the observatory computer, so it needs download."
+            )
+        with registered_job(
+            enabled=register_job and not dry_run and get_current_job() is None,
+            job_type="remote_sync",
+            target_id="logs",
+            package_logger_name="wayfindinglib",
+        ):
+            if not download:
+                return ekos_log_ingestion.ingest_ekos_logs(context, directory, download=False)
+            return remote_transfer_tasks.sync_remote_logs(context, dry_run, directory)

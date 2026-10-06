@@ -73,7 +73,9 @@ Due to the internal nature of these modules, they are deliberately hidden from t
 ### Observation Planning
 *Located in:* `wayfindinglib/tasks/planning_tasks/`
 - **Target visibility and altitude calculation:** `visibility_tasks.py` and `night_window.py`
-- **Mosaic panel generation:** `mosaic_tasks.py`
+- **Mosaic panel layout and creation:** `mosaic_tasks.py` (`calculate_panels`, `create_mosaic`)
 - **Scheduling and optimization:** `scheduling.py`
 - **Archive-informed advising:** `calibration_advisory_tasks.py` and `quality_advisory_tasks.py`
-- **`Sky`/`Observation` facade operations (relocated, unchanged in behavior):** `coordinate_operations.py`, `resolution_operations.py`, `visibility_operations.py`, `catalog_operations.py`, and `constellation_operations.py` back `Sky`'s methods; `planning_operations.py` and `visibility_calculations.py` back `Observation`'s. These moved here from the now-retired `wayfindinglib/skylib/` and `wayfindinglib/observationlib/` packages as a mechanical relocation (no signature or call-shape changes) — the deeper rewrite reconciling them with typed parameters is still deferred. `wayfindinglib/observationlib/` remains, narrowed to the `ObservationSession` domain model and its `session_operations.py` quality-data conduit to astrometricslib, neither of which is a planning-task operation.
+- **Visibility report:** `visibility_report.py` answers `ObservationPlanning.get_visibility`, at one moment for any number of objects or over a night for up to 30, using the hour-angle and rise/set helpers in `visibility_operations.py`.
+- **Sequence plans:** `planning_operations.py` builds the plan the app's sequencer queue runs (`create_plan(kind="sequence")`).
+- **Sky engine operations:** `coordinate_operations.py`, `resolution_operations.py`, `visibility_operations.py`, `catalog_operations.py`, and `constellation_operations.py` back the `Sky` engine's methods (name lookup, catalogs, coordinate sums). `wayfindinglib/observationlib/` holds only the older `ObservationSession` model and its `session_operations.py` conduit to astrometricslib.

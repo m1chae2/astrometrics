@@ -1,6 +1,6 @@
 """Purpose: Build the imaging sequence plan the app's sequencer queue runs.
 
-Description: `create_sequence_plan` turns a list of ``{count, exposure,
+Description: `build_sequence_plan` turns a list of ``{count, exposure,
 filter}`` items for one target into a `SequencePlan`, adding each item's
 duration (count times exposure) and the plan's total. Nothing is stored.
 """
@@ -15,7 +15,7 @@ from wayfindinglib.models.planning.sequence_plan import SequenceItem, SequencePl
 logger = logging.getLogger(__name__)
 
 
-def create_sequence_plan(target_id: str, plan_items: list[dict[str, Any]]) -> SequencePlan:
+def build_sequence_plan(target_id: str, plan_items: list[dict[str, Any]]) -> SequencePlan:
     """Build a sequence plan for one target from plain item dictionaries.
 
     Parameters

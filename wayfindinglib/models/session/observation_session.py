@@ -5,9 +5,9 @@ was planned against, an ordered queue of scheduled observation packages
 and its placement diagnostics (written by Observation Planning), and
 accumulated telemetry, per-entry outcomes, divergence records, fault
 records, and meridian-flip outcomes (written by Observation Execution,
-when present) -- `Wayfinding_Library_Architecture.md` §2.2.2, §2.4.
+when present).
 
-Session field ownership is a Design Invariant (§2.2.3): within one
+Who writes which field is fixed: within one
 session, the queue and its placement diagnostics are written only by
 Planning; execution status, per-entry outcomes, divergence records,
 fault records, and accumulated telemetry are written only by Execution.
@@ -37,9 +37,8 @@ from wayfindinglib.models.session.telemetry import GuidingSample
 class SessionStatus(StrEnum):
     """One observation session's overall lifecycle state.
 
-    `SUSPENDED` did not exist before this revision: an unsafe verdict
-    halts advancement without ending the night, since conditions may
-    clear (`Wayfinding_Library_Architecture.md` §2.4.2).
+    `SUSPENDED` means an unsafe verdict halted advancement without ending
+    the night, since conditions may clear.
     """
 
     PLANNED = "PLANNED"
@@ -72,8 +71,7 @@ class StartTimeMode(StrEnum):
 class InfeasibilityReasonCode(StrEnum):
     """A closed, named reason an observation package could not be placed.
 
-    Per `Wayfinding_Library_Architecture.md` §2.3.2: a closed
-    enumeration, not free text, so a client can branch on the reason
+    A closed enumeration, not free text, so a client can branch on the reason
     and a test can assert one specific diagnosis rather than "some
     failure."
     """
@@ -101,8 +99,7 @@ class WeatherSample(BaseModel):
     No populator exists yet -- schema-ready, empty until an actual
     weather-station integration is built. Recorded for context in the
     session's telemetry, distinct from the safety monitor's environmental
-    verdict (`SafetyAssessment`), which must not be best-effort
-    (`Wayfinding_Library_Architecture.md` §2.4.7).
+    verdict (`SafetyAssessment`), which must not be best-effort.
     """
 
     model_config = ConfigDict(populate_by_name=True)

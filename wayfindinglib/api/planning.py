@@ -38,6 +38,7 @@ from astrometricslib import (
     background_job,
     check_choice,
     check_include,
+    get_current_job,
     registered_job,
     reject_unused_arguments,
     resolve_target,
@@ -926,9 +927,9 @@ class ObservationPlanning:
             )
 
         if kind == "sequence":
-            from wayfindinglib.tasks.planning_tasks.planning_operations import create_sequence_plan
+            from wayfindinglib.tasks.planning_tasks.planning_operations import build_sequence_plan
 
-            return create_sequence_plan(self._target(target).id, plan_items)
+            return build_sequence_plan(self._target(target).id, plan_items)
         if kind == "package":
             resolved = self._target(target)
             package = ObservationPackage(
@@ -989,7 +990,7 @@ class ObservationPlanning:
             The placed queue and the reasons any package was left out.
         """
         from wayfindinglib.tasks.planning_tasks.quality_advisory_tasks import build_target_quality_advisory
-        from wayfindinglib.tasks.planning_tasks.scheduling import plan_observation_session
+        from wayfindinglib.tasks.planning_tasks.scheduling import schedule_session
 
         placements = []
         quality_advisories = {}
@@ -1001,7 +1002,7 @@ class ObservationPlanning:
                 quality_advisories[package.target_id] = build_target_quality_advisory(
                     self._target(package.target_id)
                 )
-        return plan_observation_session(
+        return schedule_session(
             self._astrometrics,
             placements,
             site_profile,
@@ -1177,17 +1178,19 @@ class ObservationPlanning:
             raise InvalidArgumentError(
                 f'{", ".join(given)} apply only with include=["estimate"].', details={"unused": given}
             )
-        status = DeepCatalogStatus.model_validate(deep_star_store.get_deep_catalog_status(self._config))
+        status = DeepCatalogStatus.model_validate(deep_star_store.read_catalog_status(self._config))
         if "estimate" in sections:
-            from wayfindinglib.drivers.catalog.deep_star_catalog_builder import estimate_deep_catalog_size
+            from wayfindinglib.drivers.catalog.deep_star_catalog_builder import estimate_catalog_size
 
+            # Under a job already (the MCP server runs this as one), join it
+            # rather than listing the same work twice.
             with registered_job(
-                enabled=register_job,
+                enabled=register_job and get_current_job() is None,
                 job_type="planning",
                 target_id="deep_catalog",
                 package_logger_name="wayfindinglib",
             ):
-                estimate = estimate_deep_catalog_size(**{
+                estimate = estimate_catalog_size(**{
                     name: value for name, value in settings.items() if value is not None
                 })
             status.estimate = DeepCatalogEstimate.model_validate(estimate)

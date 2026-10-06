@@ -11,7 +11,7 @@ equipment. Only `save_ekos_session_context` writes. The analyses live in
 
 from typing import Any, Literal
 
-from astrometricslib import InvalidArgumentError, Target, background_job
+from astrometricslib import InvalidArgumentError, Target, background_job, get_current_job, registered_job
 from wayfindinglib.api.control.context import ControlChild
 from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
 from wayfindinglib.models.session.ekos_session import EkosSessionContext
@@ -44,6 +44,7 @@ class HistoryControl(ControlChild):
         ekos_file_id: str | None = None,
         include: list[str] | None = None,
         limit: int = 10,
+        register_job: bool = True,
     ) -> dict[str, Any]:
         """Analyse or list past observing nights, in replies of bounded size.
 
@@ -77,6 +78,9 @@ class HistoryControl(ControlChild):
         limit : `int`, optional
             How many of the most recent nights, runs or sessions to cover,
             and how many items of each Ekos section. From 1 to 50.
+        register_job : `bool`, optional
+            Record the analysis as a job in the job history, with its log.
+            Defaults to `True`.
 
         Returns
         -------
@@ -87,9 +91,15 @@ class HistoryControl(ControlChild):
         """
         from wayfindinglib.tasks.control_tasks import night_history
 
-        return night_history.build_night_history(
-            self._context, kind, session_id, ekos_file_id, include, limit
-        )
+        with registered_job(
+            enabled=register_job and get_current_job() is None,
+            job_type="diagnostics",
+            target_id=kind,
+            package_logger_name="wayfindinglib",
+        ):
+            return night_history.build_night_history(
+                self._context, kind, session_id, ekos_file_id, include, limit
+            )
 
     def get_live_session_status(
         self,

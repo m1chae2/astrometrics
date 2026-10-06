@@ -20,7 +20,7 @@ from wayfindinglib.drivers.catalog import deep_star_catalog_builder, deep_star_s
 from wayfindinglib.drivers.catalog.deep_star_catalog_builder import (
     build_deep_star_catalog,
     build_pixel_query,
-    estimate_deep_catalog_size,
+    estimate_catalog_size,
     healpix_pixels_of_points,
     pixel_source_id_range,
     pixels_near_circles,
@@ -183,7 +183,7 @@ def test_full_download_saves_every_pixel_and_reports_it(tmp_path):  # ruff: igno
     assert report["pixels_failed"] == []
     assert report["stars_added"] == PIXEL_COUNT * 5
     assert report["stopped_early"] is False
-    status = deep_star_store.get_deep_catalog_status(config)
+    status = deep_star_store.read_catalog_status(config)
     assert status["complete"] is True
     assert status["star_count"] == PIXEL_COUNT * 5
 
@@ -212,14 +212,14 @@ def test_failed_pixel_is_skipped_then_picked_up_on_the_next_run(tmp_path):  # ru
     assert first["pixels_failed"] == [3]
     assert first["pixels_downloaded"] == PIXEL_COUNT - 1
     assert flaky_archive.calls_by_range_start[bad_start] == 2  # tried twice, then skipped
-    assert deep_star_store.get_deep_catalog_status(config)["complete"] is False
+    assert deep_star_store.read_catalog_status(config)["complete"] is False
 
     healthy_archive = _FakeArchive()
     second = build_deep_star_catalog(config, LEVEL, 16.0, gaia=healthy_archive, sleep=_no_sleep)
 
     assert second["pixels_downloaded"] == 1
     assert len(healthy_archive.queries) == 1
-    assert deep_star_store.get_deep_catalog_status(config)["complete"] is True
+    assert deep_star_store.read_catalog_status(config)["complete"] is True
 
 
 def test_a_transient_failure_is_retried_with_a_growing_wait(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
@@ -257,7 +257,7 @@ def test_run_stops_when_the_archive_keeps_failing(tmp_path):  # ruff: ignore[mis
     assert report["stopped_early"] is True
     assert len(report["pixels_failed"]) == 5
     assert report["pixels_downloaded"] == 0
-    assert deep_star_store.get_deep_catalog_status(config)["installed"] is False
+    assert deep_star_store.read_catalog_status(config)["installed"] is False
 
 
 def test_a_result_at_the_archive_row_limit_is_not_trusted(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
@@ -295,8 +295,8 @@ def test_a_genuinely_empty_chunk_is_saved_as_finished(tmp_path):  # ruff: ignore
     )
 
     assert report["pixels_downloaded"] == PIXEL_COUNT
-    assert deep_star_store.get_deep_catalog_status(config)["complete"] is True
-    assert deep_star_store.get_deep_catalog_status(config)["star_count"] == 0
+    assert deep_star_store.read_catalog_status(config)["complete"] is True
+    assert deep_star_store.read_catalog_status(config)["star_count"] == 0
 
 
 def test_rows_with_missing_values_are_dropped_not_saved(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
@@ -326,7 +326,7 @@ def test_maximum_pixels_stops_a_short_trial_run(tmp_path):  # ruff: ignore[missi
 
     assert report["pixels_downloaded"] == 4
     assert report["stopped_early"] is True
-    assert deep_star_store.get_deep_catalog_status(config)["pixels_downloaded"] == 4
+    assert deep_star_store.read_catalog_status(config)["pixels_downloaded"] == 4
 
 
 def test_catalog_started_with_other_settings_is_refused(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
@@ -402,7 +402,7 @@ def test_size_estimate_scales_a_sample_up_to_the_whole_sky():  # ruff: ignore[mi
     """The estimate is the sample's mean times the number of chunks."""
     archive = _FakeArchive(stars_per_pixel=1000)
 
-    estimate = estimate_deep_catalog_size(LEVEL, 16.0, sample_count=6, gaia=archive, sleep=_no_sleep)
+    estimate = estimate_catalog_size(LEVEL, 16.0, sample_count=6, gaia=archive, sleep=_no_sleep)
 
     assert estimate["pixels_total"] == PIXEL_COUNT
     assert estimate["pixels_sampled"] == 6
@@ -417,7 +417,7 @@ def test_size_estimate_samples_are_spread_across_the_sky():  # ruff: ignore[miss
     """Evenly spaced samples touch every one of the twelve biggest patches."""
     archive = _FakeArchive()
 
-    estimate_deep_catalog_size(4, 16.0, sample_count=24, gaia=archive, sleep=_no_sleep)
+    estimate_catalog_size(4, 16.0, sample_count=24, gaia=archive, sleep=_no_sleep)
 
     starts = sorted(int(ID_RANGE_PATTERN.search(query).group(1)) for query in archive.queries)
     base_pixels = {start >> 59 for start in starts}
@@ -429,7 +429,7 @@ def test_size_estimate_uses_the_counts_that_worked():  # ruff: ignore[missing-re
     archive = _FakeArchive(stars_per_pixel=500)
     archive.fail_first_calls = 2
 
-    estimate = estimate_deep_catalog_size(LEVEL, 16.0, sample_count=6, gaia=archive, sleep=_no_sleep)
+    estimate = estimate_catalog_size(LEVEL, 16.0, sample_count=6, gaia=archive, sleep=_no_sleep)
 
     assert estimate["pixels_sampled"] == 4
     assert estimate["estimated_stars"] == pytest.approx(500 * PIXEL_COUNT)
@@ -441,7 +441,7 @@ def test_size_estimate_with_no_working_counts_raises():  # ruff: ignore[missing-
     archive.fail_first_calls = 100
 
     with pytest.raises(ExternalServiceError, match="nothing to estimate"):
-        estimate_deep_catalog_size(LEVEL, 16.0, sample_count=3, gaia=archive, sleep=_no_sleep)
+        estimate_catalog_size(LEVEL, 16.0, sample_count=3, gaia=archive, sleep=_no_sleep)
 
 
 # Real Gaia DR3 stars from the local Gaia cache, as (source_id, ra, dec).
@@ -586,7 +586,7 @@ def test_building_only_the_chosen_pixels_leaves_the_rest_alone(tmp_path):  # ruf
     assert report["pixels_total"] == 2
     assert report["pixels_downloaded"] == 2
     assert deep_star_store.get_downloaded_pixels(config) == {2, 7}
-    status = deep_star_store.get_deep_catalog_status(config)
+    status = deep_star_store.read_catalog_status(config)
     assert status["installed"] is True
     assert status["complete"] is False
 

@@ -410,7 +410,6 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend"]
 "wayfindinglib/tasks/planning_tasks/catalog_operations.py" = ["blind-except", "error-instead-of-exception"]
 "wayfindinglib/tasks/planning_tasks/planning_operations.py" = ["logging-f-string"]
 "wayfindinglib/tasks/planning_tasks/resolution_operations.py" = ["blind-except"]
-"wayfindinglib/tasks/planning_tasks/visibility_calculations.py" = ["blind-except", "error-instead-of-exception", "logging-f-string"]
 "wayfindinglib/tasks/planning_tasks/visibility_operations.py" = ["blind-except"]
 
 [tool.importlinter]

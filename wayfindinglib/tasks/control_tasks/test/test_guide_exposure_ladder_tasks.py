@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
+from astrometricslib import HardwareError
 from wayfindinglib.tasks.control_tasks.guide_exposure_ladder_tasks import (
     capture_guide_ladder,
     frame_from_blob,
@@ -106,7 +107,7 @@ def test_a_colour_cube_is_reduced_to_its_first_plane() -> None:
 @pytest.mark.parametrize("bad", [None, 42, object()])
 def test_something_else_is_reported_with_what_was_received(bad: Any) -> None:
     """Verify an unreadable frame raises a clear error."""
-    with pytest.raises(ValueError, match="guide"):
+    with pytest.raises(HardwareError, match="guide"):
         frame_from_blob(bad)
 
 
@@ -160,7 +161,7 @@ def test_a_camera_that_never_delivers_is_reported() -> None:
     """Verify waiting for a frame has an end."""
     camera = _Camera(delivers=False)
 
-    with pytest.raises(RuntimeError, match="No new guide frame"):
+    with pytest.raises(HardwareError, match="No new guide frame"):
         capture_guide_ladder(camera.expose, camera.read, [1.0], 2, sleep=lambda _: None)
 
 
@@ -168,5 +169,5 @@ def test_an_exposure_the_camera_refuses_is_reported() -> None:
     """Verify a refused command stops the test with a clear error."""
     camera = _Camera(accepts=False)
 
-    with pytest.raises(RuntimeError, match="did not accept"):
+    with pytest.raises(HardwareError, match="did not accept"):
         capture_guide_ladder(camera.expose, camera.read, [1.0], 2, sleep=lambda _: None)

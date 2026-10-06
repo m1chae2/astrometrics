@@ -32,6 +32,7 @@ back to constructing exactly one `Telescope` from the flat
 
 import logging
 
+from astrometricslib import ConfigurationError
 from wayfindinglib.models.equipment_and_site.equipment import Camera, EquipmentCatalog, GuideScope, Telescope
 
 logger = logging.getLogger(__name__)
@@ -323,7 +324,7 @@ def _validate_protocol(entity_kind: str, entity_name: str, field_name: str, prot
 
     Raises
     ------
-    ValueError
+    ConfigurationError
         Raised if `protocol` is not a key in the corresponding
         protocol-driver registry.
     """
@@ -337,7 +338,7 @@ def _validate_protocol(entity_kind: str, entity_name: str, field_name: str, prot
     }
     valid_protocols = set(registry_by_field[field_name]())
     if protocol not in valid_protocols:
-        raise ValueError(
+        raise ConfigurationError(
             f"{entity_kind} '{entity_name}' has {field_name}='{protocol}', which has no "
             f"registered driver. Valid choices: {sorted(valid_protocols)}"
         )

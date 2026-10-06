@@ -38,6 +38,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from astrometricslib import HardwareError
 from wayfindinglib.analytics.pointing_model import fit_pointing_model
 from wayfindinglib.models.equipment_and_site.guider_calibration import GuiderCalibration
 from wayfindinglib.models.session.telemetry import MountPointingModel
@@ -114,17 +115,17 @@ def run_guider_calibration(
 
     Raises
     ------
-    RuntimeError
+    HardwareError
         If either pulse command reports failure.
     """
     ra_start_xy = steps.measure_guide_star_centroid()
     if not steps.pulse_ra(ra_pulse_duration_sec):
-        raise RuntimeError("RA calibration pulse command failed")
+        raise HardwareError("RA calibration pulse command failed")
     ra_end_xy = steps.measure_guide_star_centroid()
 
     dec_start_xy = steps.measure_guide_star_centroid()
     if not steps.pulse_dec(dec_pulse_duration_sec):
-        raise RuntimeError("Dec calibration pulse command failed")
+        raise HardwareError("Dec calibration pulse command failed")
     dec_end_xy = steps.measure_guide_star_centroid()
 
     return compute_guider_calibration(

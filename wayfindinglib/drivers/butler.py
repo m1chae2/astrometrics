@@ -30,7 +30,7 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 from astrometricslib import Butler as _GenericButler
-from astrometricslib import DatasetSpec
+from astrometricslib import DatasetSpec, InvalidArgumentError
 from wayfindinglib.drivers import local_database
 from wayfindinglib.models.equipment_and_site.calibration import CalibrationStats
 from wayfindinglib.models.equipment_and_site.enclosure import Enclosure
@@ -164,7 +164,7 @@ class DiskButler(AbstractButler):
 
         Raises
         ------
-        ValueError
+        InvalidArgumentError
             Raised if `dataset_type` is not recognized.
         """
         if dataset_type == "observation_session":
@@ -173,7 +173,7 @@ class DiskButler(AbstractButler):
             id_field = _ID_FIELD_FOR.get(dataset_type, "id")
             model_id = selector.get("id") or selector.get(id_field, "")
             return self._generic.get(dataset_type, {"id": model_id})
-        raise ValueError(f"Unknown dataset type: {dataset_type}")
+        raise InvalidArgumentError(f"Unknown dataset type: {dataset_type}")
 
     def get_all(self, dataset_type: str) -> list[Any]:
         """Retrieve every recorded instance of a dataset type.
@@ -191,13 +191,13 @@ class DiskButler(AbstractButler):
 
         Raises
         ------
-        ValueError
+        InvalidArgumentError
             Raised if `dataset_type` is not recognized.
         """
         if dataset_type == "observation_session":
             return self._generic.get_all("observation_session")
         if dataset_type not in _GENERIC_DATASET_TYPES:
-            raise ValueError(f"Unknown generic dataset type: {dataset_type}")
+            raise InvalidArgumentError(f"Unknown generic dataset type: {dataset_type}")
         return self._generic.get_all(dataset_type)
 
     def put(self, obj: Any, dataset_type: str, selector: dict[str, Any]) -> None:
@@ -219,7 +219,7 @@ class DiskButler(AbstractButler):
 
         Raises
         ------
-        ValueError
+        InvalidArgumentError
             Raised if `dataset_type` is not recognized.
         """
         if dataset_type == "observation_session":
@@ -228,7 +228,7 @@ class DiskButler(AbstractButler):
         if dataset_type in _GENERIC_DATASET_TYPES:
             self._generic.put(obj, dataset_type)
             return
-        raise ValueError(f"Write operation not supported on dataset type: {dataset_type}")
+        raise InvalidArgumentError(f"Write operation not supported on dataset type: {dataset_type}")
 
     def exists(self, dataset_type: str, selector: dict[str, Any]) -> bool:
         """Check whether the dataset a selector identifies exists.
@@ -248,9 +248,9 @@ class DiskButler(AbstractButler):
 
         Raises
         ------
-        ValueError
+        InvalidArgumentError
             Raised if `dataset_type` is not recognized.
         """
         if dataset_type != "observation_session" and dataset_type not in _GENERIC_DATASET_TYPES:
-            raise ValueError(f"Unknown dataset type: {dataset_type}")
+            raise InvalidArgumentError(f"Unknown dataset type: {dataset_type}")
         return self.get(dataset_type, selector) is not None

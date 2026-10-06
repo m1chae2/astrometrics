@@ -9,6 +9,7 @@ per-rig-altitude-falls-back-to-global-constraint safety invariant.
 
 import pytest
 
+from astrometricslib import ConfigurationError
 from wayfindinglib.data_access.equipment_catalog_reader import (
     get_active_camera_id,
     get_active_guide_scope_id,
@@ -191,7 +192,7 @@ def test_get_equipment_catalog_raises_on_unregistered_mount_protocol(app_config)
             "mount_protocol": "ascom",
         },
     })
-    with pytest.raises(ValueError, match="ascom"):
+    with pytest.raises(ConfigurationError, match="ascom"):
         get_equipment_catalog(app_config)
 
 
@@ -209,7 +210,7 @@ def test_get_equipment_catalog_raises_on_unregistered_camera_protocol(app_config
             "protocol": "alpaca",
         },
     })
-    with pytest.raises(ValueError, match="alpaca"):
+    with pytest.raises(ConfigurationError, match="alpaca"):
         get_equipment_catalog(app_config)
 
 

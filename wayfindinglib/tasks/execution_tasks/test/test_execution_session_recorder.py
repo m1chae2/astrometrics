@@ -13,7 +13,7 @@ from datetime import date
 
 import pytest
 
-from astrometricslib import AppConfiguration
+from astrometricslib import AppConfiguration, NotFoundError
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.models.session.observation_session import ObservationSession, SessionStatus
 from wayfindinglib.models.session.telemetry import GuidingSample
@@ -127,7 +127,7 @@ def test_save_checkpoint_persists_session_via_butler(butler):  # ruff: ignore[mi
 def test_run_raises_for_a_session_that_does_not_exist(butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify run() raises rather than fabricating a never-planned session."""
     recorder = ObservationSessionRecorder(FakeGuidingService([]), FakeIndiDriver(), butler=butler)
-    with pytest.raises(ValueError, match="not found"):
+    with pytest.raises(NotFoundError, match="not found"):
         recorder.run("does-not-exist")
 
 

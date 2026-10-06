@@ -13,6 +13,7 @@ from datetime import date
 
 import pytest
 
+from astrometricslib import InvalidArgumentError
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.models.equipment_and_site.enclosure import Enclosure, EnclosureType
 from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
@@ -162,14 +163,14 @@ def test_put_overwrites_existing_row_with_same_id(isolated_butler):  # ruff: ign
 
 
 def test_unknown_dataset_type_raises_on_get(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify an unrecognized dataset_type still raises ValueError."""
-    with pytest.raises(ValueError):
+    """Verify an unrecognized dataset_type still raises."""
+    with pytest.raises(InvalidArgumentError):
         isolated_butler.get("not_a_real_dataset_type", {"id": "x"})
 
 
 def test_unknown_dataset_type_raises_on_put(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify put() with an unrecognized dataset_type raises ValueError."""
-    with pytest.raises(ValueError):
+    """Verify put() with an unrecognized dataset_type raises."""
+    with pytest.raises(InvalidArgumentError):
         isolated_butler.put(object(), "not_a_real_dataset_type", {"id": "x"})
 
 

@@ -24,6 +24,7 @@ import re
 import time
 from typing import Any
 
+from astrometricslib import NotFoundError
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.drivers.phd2.phd2_guiding_service import PHD2GuidingService
 from wayfindinglib.models.session.observation_session import ObservationSession, WeatherSample
@@ -130,14 +131,14 @@ class ObservationSessionRecorder:
 
         Raises
         ------
-        ValueError
+        NotFoundError
             If `session_id` does not resolve to an existing session --
             this recorder attaches telemetry to a session Planning
             already created, it does not create one.
         """
         session = self._butler.get("observation_session", {"session_id": session_id})
         if session is None:
-            raise ValueError(f"Session {session_id} not found")
+            raise NotFoundError(f"Session {session_id} not found")
 
         self._guiding_service.poll_external_telemetry()
 

@@ -18,6 +18,7 @@ state at all (`Wayfinding_Library_Architecture.md` §2.1.2, "Safety Is
 Never Shadowed").
 """
 
+from astrometricslib import InvalidArgumentError
 from wayfindinglib.models.policy.delegation import ObservatoryCapability
 from wayfindinglib.models.session.divergence import DivergenceRecord
 
@@ -86,12 +87,14 @@ def record_divergence(
 
     Raises
     ------
-    ValueError
+    InvalidArgumentError
         If `capability` has no independently computed counterpart to
         compare against.
     """
     if capability in UNCOMPARABLE_CAPABILITIES:
-        raise ValueError(f"{capability} has no shadowed counterpart and produces no divergence records")
+        raise InvalidArgumentError(
+            f"{capability} has no shadowed counterpart and produces no divergence records"
+        )
 
     divergence_magnitude = intended_value - observed_value
     return DivergenceRecord(

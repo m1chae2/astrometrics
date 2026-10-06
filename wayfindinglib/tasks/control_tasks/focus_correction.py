@@ -23,6 +23,7 @@ from collections.abc import Callable
 
 import numpy as np
 
+from astrometricslib import InvalidArgumentError
 from wayfindinglib.models.equipment_and_site.focus_model import ApproachDirection
 from wayfindinglib.models.session.correction_config import CorrectionConfig
 from wayfindinglib.models.session.correction_result import FocusCorrection, FocusCurvePoint
@@ -136,13 +137,15 @@ def compute_focus_correction(
 
     Raises
     ------
-    ValueError
+    InvalidArgumentError
         If fewer than 3 points were sampled -- a parabola cannot be
         fit, and this indicates a sampling failure the caller must
         handle, not a normal outcome to silently paper over.
     """
     if len(curve) < 3:
-        raise ValueError(f"compute_focus_correction requires at least 3 sampled points, got {len(curve)}")
+        raise InvalidArgumentError(
+            f"compute_focus_correction requires at least 3 sampled points, got {len(curve)}"
+        )
 
     positions = np.array([point.focuser_position for point in curve], dtype=float)
     fwhms = np.array([point.measured_fwhm_px for point in curve], dtype=float)

@@ -12,6 +12,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from astrometricslib import ConflictError, InvalidArgumentError
 from wayfindinglib.drivers.catalog.deep_star_store import (
     BRIGHT_TIER_MAX_MAGNITUDE,
     COARSE_TILE_HEIGHT_DEGREES,
@@ -77,7 +78,7 @@ def _random_sky(count: int, seed: int) -> tuple[np.ndarray, np.ndarray, np.ndarr
 
 def test_tile_grid_rejects_a_height_that_does_not_divide_the_sky():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Rows of unequal height would leave a gap at the pole."""
-    with pytest.raises(ValueError, match="divide"):
+    with pytest.raises(InvalidArgumentError, match="divide"):
         TileGrid(7.0)
 
 
@@ -290,9 +291,9 @@ def test_resuming_with_different_settings_is_refused(tmp_path):  # ruff: ignore[
     set_deep_catalog_plan(config, healpix_level=4, magnitude_limit=16.0)
 
     set_deep_catalog_plan(config, healpix_level=4, magnitude_limit=16.0)  # same again: fine
-    with pytest.raises(ValueError, match="healpix_level"):
+    with pytest.raises(ConflictError, match="healpix_level"):
         set_deep_catalog_plan(config, healpix_level=5, magnitude_limit=16.0)
-    with pytest.raises(ValueError, match="magnitude_limit"):
+    with pytest.raises(ConflictError, match="magnitude_limit"):
         set_deep_catalog_plan(config, healpix_level=4, magnitude_limit=15.0)
 
 

@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from astrometricslib import ExternalServiceError
 from wayfindinglib.drivers.stellarmate_interface import StellarMateInterface
 
 
@@ -50,7 +51,7 @@ def test_run_command_fails_fast_within_offline_cooldown():  # ruff: ignore[missi
     driver._last_probe_time = time.time()
 
     with patch("subprocess.run") as mock_run:
-        with pytest.raises(RuntimeError, match="cooldown active"):
+        with pytest.raises(ExternalServiceError, match="cooldown active"):
             driver._run_command(["ssh", "test-host", "echo", "hi"])
     mock_run.assert_not_called()
 
@@ -374,14 +375,14 @@ def test_a_host_known_offline_fails_fast_even_after_the_cooldown_and_rechecks_in
 
     with patch.object(driver, "_start_background_probe", lambda: started.append(True)):
         with patch("subprocess.run") as mock_run:
-            with pytest.raises(RuntimeError, match="known offline"):
+            with pytest.raises(ExternalServiceError, match="known offline"):
                 driver._run_command(["ssh", "test-host", "ls"])
             mock_run.assert_not_called()
 
     assert started == [True]
 
 
-def test_the_first_call_probes_once_and_concurrent_calls_share_the_answer():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_the_first_call_probes_once_and_concurrent_calls_share_the_answer() -> None:
     """Many callers at start-up cost one slow probe, not one each."""
     driver = StellarMateInterface(host_alias="test-host")
     calls = []
@@ -397,7 +398,7 @@ def test_the_first_call_probes_once_and_concurrent_calls_share_the_answer():  # 
         """Make one call and keep its error."""
         try:
             driver._run_command(["ssh", "test-host", "ls"])
-        except RuntimeError as error:
+        except ExternalServiceError as error:
             errors.append(str(error))
 
     with patch("subprocess.run", side_effect=slow_failure):

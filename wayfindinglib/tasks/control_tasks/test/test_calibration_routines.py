@@ -8,6 +8,7 @@ is a thin, correctly-parameterized wrapper over `fit_pointing_model`.
 
 import pytest
 
+from astrometricslib import HardwareError, ProcessingError
 from wayfindinglib.models.equipment_and_site.guider_calibration import GuiderCalibration
 from wayfindinglib.tasks.control_tasks.calibration_routines import (
     BacklashCalibrationSteps,
@@ -61,7 +62,7 @@ def test_run_guider_calibration_raises_when_ra_pulse_command_fails():  # ruff: i
         measure_guide_star_centroid=lambda: (0.0, 0.0),
     )
 
-    with pytest.raises(RuntimeError, match="RA calibration pulse"):
+    with pytest.raises(HardwareError, match="RA calibration pulse"):
         run_guider_calibration(steps, "cal-2", "cam-1", "scope-1", arcsec_per_pixel=2.0)
 
 
@@ -74,19 +75,19 @@ def test_run_guider_calibration_raises_when_dec_pulse_command_fails():  # ruff: 
         measure_guide_star_centroid=lambda: next(centroids),
     )
 
-    with pytest.raises(RuntimeError, match="Dec calibration pulse"):
+    with pytest.raises(HardwareError, match="Dec calibration pulse"):
         run_guider_calibration(steps, "cal-3", "cam-1", "scope-1", arcsec_per_pixel=2.0)
 
 
 def test_run_guider_calibration_propagates_no_displacement_value_error():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify a run with no measurable displacement raises ValueError."""
+    """Verify a run with no measurable displacement raises ProcessingError."""
     steps = GuiderCalibrationSteps(
         pulse_ra=lambda duration_sec: True,
         pulse_dec=lambda duration_sec: True,
         measure_guide_star_centroid=lambda: (5.0, 5.0),
     )
 
-    with pytest.raises(ValueError, match="no measurable star displacement"):
+    with pytest.raises(ProcessingError, match="no measurable star displacement"):
         run_guider_calibration(steps, "cal-4", "cam-1", "scope-1", arcsec_per_pixel=2.0)
 
 

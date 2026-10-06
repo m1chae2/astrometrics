@@ -32,7 +32,7 @@ from typing import Any
 
 import numpy as np
 
-from astrometricslib import ExternalServiceError
+from astrometricslib import ExternalServiceError, InvalidArgumentError
 from wayfindinglib.drivers.catalog import deep_star_store
 
 logger = logging.getLogger(__name__)
@@ -147,7 +147,7 @@ def _run_with_daemon_thread_timeout(query_function: Callable[[], Any], timeout_s
 
     Raises
     ------
-    TimeoutError
+    ExternalServiceError
         If the function has not finished within `timeout_seconds`.
     """
     result_queue: queue.Queue = queue.Queue(maxsize=1)
@@ -165,7 +165,7 @@ def _run_with_daemon_thread_timeout(query_function: Callable[[], Any], timeout_s
     try:
         succeeded, payload = result_queue.get(timeout=timeout_seconds)
     except queue.Empty:
-        raise TimeoutError(f"Timed out after {timeout_seconds}s") from None
+        raise ExternalServiceError(f"Timed out after {timeout_seconds}s") from None
 
     if succeeded:
         return payload
@@ -190,14 +190,16 @@ def pixel_source_id_range(healpix_level: int, pixel: int) -> tuple[int, int]:
 
     Raises
     ------
-    ValueError
+    InvalidArgumentError
         If the level or pixel number is out of range.
     """
     if not 0 <= healpix_level <= _GAIA_HEALPIX_LEVEL:
-        raise ValueError(f"HEALPix level must be from 0 to {_GAIA_HEALPIX_LEVEL}, not {healpix_level}.")
+        raise InvalidArgumentError(
+            f"HEALPix level must be from 0 to {_GAIA_HEALPIX_LEVEL}, not {healpix_level}."
+        )
     pixel_count = 12 * 4**healpix_level
     if not 0 <= pixel < pixel_count:
-        raise ValueError(f"Pixel {pixel} is outside 0..{pixel_count - 1} at level {healpix_level}.")
+        raise InvalidArgumentError(f"Pixel {pixel} is outside 0..{pixel_count - 1} at level {healpix_level}.")
     shift = _SOURCE_ID_PIXEL_SHIFT + 2 * (_GAIA_HEALPIX_LEVEL - healpix_level)
     return pixel << shift, (pixel + 1) << shift
 
@@ -258,11 +260,13 @@ def healpix_pixels_of_points(healpix_level: int, ra_degrees: Any, dec_degrees: A
 
     Raises
     ------
-    ValueError
+    InvalidArgumentError
         If the level is out of range.
     """
     if not 0 <= healpix_level <= _GAIA_HEALPIX_LEVEL:
-        raise ValueError(f"HEALPix level must be from 0 to {_GAIA_HEALPIX_LEVEL}, not {healpix_level}.")
+        raise InvalidArgumentError(
+            f"HEALPix level must be from 0 to {_GAIA_HEALPIX_LEVEL}, not {healpix_level}."
+        )
     side = 2**healpix_level  # pixels along one edge of a face
     sin_dec = np.sin(np.radians(np.asarray(dec_degrees, dtype=float)))
     abs_sin_dec = np.abs(sin_dec)
@@ -593,7 +597,7 @@ def build_deep_star_catalog(
 
     Raises
     ------
-    ValueError
+    InvalidArgumentError
         If an earlier catalog was made with other settings, or `pixels`
         names a chunk outside the sky.
     """
@@ -609,7 +613,7 @@ def build_deep_star_catalog(
         wanted_pixels = sorted(set(pixels))
         outside_the_sky = [pixel for pixel in wanted_pixels if not 0 <= pixel < sky_pixel_count]
         if outside_the_sky:
-            raise ValueError(
+            raise InvalidArgumentError(
                 f"Chunks {outside_the_sky[:5]} are outside 0..{sky_pixel_count - 1} at level {healpix_level}."
             )
 

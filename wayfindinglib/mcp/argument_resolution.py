@@ -8,7 +8,8 @@ supplies those conversions and hands them to `register_astrometrics_tools`.
 `planning` methods read names and times themselves, so they need no
 conversion here.
 
-Each converter raises `ValueError` with a plain message when it cannot
+Each converter raises `InvalidArgumentError` (or `NotFoundError` for a
+target that is not in the library) with a plain message when it cannot
 convert. Without that, the raw string would reach the method and fail
 later with an unhelpful `'str' object has no attribute 'id'`.
 """
@@ -18,6 +19,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from astrometricslib import InvalidArgumentError, NotFoundError
 from wayfindinglib import SkyPosition
 
 
@@ -57,7 +59,7 @@ def build_argument_hooks(
 
         Raises
         ------
-        ValueError
+        NotFoundError
             If the library has no target with that id.
         """
         if not isinstance(value, str):
@@ -67,7 +69,7 @@ def build_argument_hooks(
         # about 0.1 s.
         target = wayfinder.astrometrics.targets.get(value, refresh=True)
         if target is None:
-            raise ValueError(
+            raise NotFoundError(
                 f"No target {value!r} in the library. Create it first with target_create, "
                 "or check the spelling against target_list."
             )
@@ -89,7 +91,7 @@ def build_argument_hooks(
 
         Raises
         ------
-        ValueError
+        InvalidArgumentError
             If the dictionary is not a valid position.
         """
         if not isinstance(value, dict):
@@ -97,7 +99,7 @@ def build_argument_hooks(
         try:
             return SkyPosition.model_validate(value)
         except ValidationError as error:
-            raise ValueError(
+            raise InvalidArgumentError(
                 f'{value!r} is not a sky position: use {{"ra_deg": ..., "dec_deg": ...}}. {error}'
             ) from error
 

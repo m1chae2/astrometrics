@@ -326,7 +326,7 @@ def register_astrometrics_tools(
         Converters from what an MCP client can send (a name, an id, an
         ISO time string) to the object a method needs. Keyed by
         parameter name; a converter runs on any tool call that supplies
-        that parameter. A converter raises `ValueError` with a plain
+        that parameter. A converter raises `InvalidArgumentError` with a plain
         message when it cannot convert, so the client sees the reason
         rather than a later `AttributeError`.
     injected_arguments : `dict` [`str`, `Callable`], optional

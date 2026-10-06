@@ -9,6 +9,7 @@ position is approached from one direction -- the cases
 
 import pytest
 
+from astrometricslib import InvalidArgumentError
 from wayfindinglib.models.equipment_and_site.focus_model import ApproachDirection
 from wayfindinglib.models.session.correction_config import CorrectionConfig
 from wayfindinglib.models.session.correction_result import FocusCurvePoint
@@ -81,7 +82,7 @@ def test_requires_at_least_three_points():  # ruff: ignore[missing-return-type-u
     """Verify fewer than 3 sampled points raises rather than proceeding."""
     curve = _v_curve(5000.0, [4900.0, 5000.0])
     config = CorrectionConfig()
-    with pytest.raises(ValueError, match="at least 3"):
+    with pytest.raises(InvalidArgumentError, match="at least 3"):
         compute_focus_correction(
             "run-4", curve, starting_position=4900, trigger_reason="scheduled", config=config
         )

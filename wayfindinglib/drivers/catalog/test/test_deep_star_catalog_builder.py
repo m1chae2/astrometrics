@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 from astropy.table import MaskedColumn, Table
 
-from astrometricslib import ExternalServiceError
+from astrometricslib import ConflictError, ExternalServiceError, InvalidArgumentError
 from wayfindinglib.drivers.catalog import deep_star_catalog_builder, deep_star_store
 from wayfindinglib.drivers.catalog.deep_star_catalog_builder import (
     build_deep_star_catalog,
@@ -157,7 +157,7 @@ def test_a_fine_pixel_lies_inside_its_coarse_parent():  # ruff: ignore[missing-r
 @pytest.mark.parametrize(("level", "pixel"), [(-1, 0), (13, 0), (0, -1), (0, 12), (4, 3072)])
 def test_pixel_source_id_range_rejects_out_of_range_arguments(level, pixel):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """A typo must not silently ask for the wrong part of the sky."""
-    with pytest.raises(ValueError, match=r"HEALPix level|Pixel"):
+    with pytest.raises(InvalidArgumentError, match=r"HEALPix level|Pixel"):
         pixel_source_id_range(level, pixel)
 
 
@@ -334,7 +334,7 @@ def test_catalog_started_with_other_settings_is_refused(tmp_path):  # ruff: igno
     config = _LibraryConfig(tmp_path)
     build_deep_star_catalog(config, LEVEL, 16.0, gaia=_FakeArchive(), sleep=_no_sleep, maximum_pixels=1)
 
-    with pytest.raises(ValueError, match="magnitude_limit"):
+    with pytest.raises(ConflictError, match="magnitude_limit"):
         build_deep_star_catalog(config, LEVEL, 15.0, gaia=_FakeArchive(), sleep=_no_sleep)
 
 
@@ -506,7 +506,7 @@ def test_healpix_pixels_all_have_the_same_area_over_the_whole_sky(level):  # ruf
 
 def test_healpix_pixels_of_points_rejects_a_level_that_does_not_exist():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """A level outside 0..12 raises instead of returning nonsense."""
-    with pytest.raises(ValueError, match="level"):
+    with pytest.raises(InvalidArgumentError, match="level"):
         healpix_pixels_of_points(13, 10.0, 10.0)
 
 
@@ -629,7 +629,7 @@ def test_asking_for_a_pixel_outside_the_sky_is_refused_before_anything_is_saved(
     """A bad chunk number raises and leaves no catalog file behind."""
     config = _LibraryConfig(tmp_path)
 
-    with pytest.raises(ValueError, match="outside"):
+    with pytest.raises(InvalidArgumentError, match="outside"):
         build_deep_star_catalog(
             config, LEVEL, 16.0, gaia=_FakeArchive(), sleep=_no_sleep, pixels=[3, PIXEL_COUNT]
         )

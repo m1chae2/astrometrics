@@ -24,6 +24,8 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Literal
 
+from astrometricslib import InvalidArgumentError
+
 if TYPE_CHECKING:
     from astrometricslib import Target
     from wayfindinglib.api.control.context import ControlContext
@@ -815,7 +817,7 @@ def sync_calibration_folder(context: ControlContext, remote_folder_name: str) ->
 
     Raises
     ------
-    ValueError
+    InvalidArgumentError
         Raised if `remote_folder_name` does not match Bias, Dark, or
         Flat.
     """
@@ -823,7 +825,7 @@ def sync_calibration_folder(context: ControlContext, remote_folder_name: str) ->
 
     kind = CALIBRATION_FOLDER_KINDS.get(remote_folder_name.strip().lower())
     if not kind:
-        raise ValueError(
+        raise InvalidArgumentError(
             f"'{remote_folder_name}' is not a calibration folder; expected one of "
             f"{sorted(CALIBRATION_FOLDER_KINDS)}"
         )

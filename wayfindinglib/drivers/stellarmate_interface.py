@@ -23,7 +23,7 @@ import threading
 import time
 from typing import Any
 
-from astrometricslib import require_mounted_storage
+from astrometricslib import ConfigurationError, ExternalServiceError, require_mounted_storage
 from wayfindinglib.drivers.protocols.remote_transfer_driver import RemoteTransferDriver
 
 logger = logging.getLogger(__name__)
@@ -113,7 +113,7 @@ class StellarMateInterface(RemoteTransferDriver):
 
         Raises
         ------
-        RuntimeError
+        ExternalServiceError
             Raised if the host is known offline, or if the command itself
             fails.
         """
@@ -125,7 +125,7 @@ class StellarMateInterface(RemoteTransferDriver):
         if self._last_connection_status is False:
             if (time.time() - self._last_probe_time) >= _OFFLINE_REPROBE_SECONDS:
                 self._start_background_probe()
-            raise RuntimeError("SSH/Command Failed: Remote host is known offline (cooldown active).")
+            raise ExternalServiceError("SSH/Command Failed: Remote host is known offline (cooldown active).")
 
         return self._execute_command(cmd_list)
 
@@ -144,8 +144,8 @@ class StellarMateInterface(RemoteTransferDriver):
             """Run one connection check and record the answer."""
             try:
                 self._execute_command(["ssh", self.host_alias, "echo", "connected"])
-            except RuntimeError:
-                pass
+            except ExternalServiceError:
+                pass  # _execute_command already recorded the host as offline
             finally:
                 self._background_probe_running = False
 
@@ -166,7 +166,7 @@ class StellarMateInterface(RemoteTransferDriver):
 
         Raises
         ------
-        RuntimeError
+        ExternalServiceError
             Raised if the command fails.
         """
         if cmd_list and cmd_list[0] == "ssh":
@@ -199,7 +199,7 @@ class StellarMateInterface(RemoteTransferDriver):
                 logger.error(f"Stderr: {e.stderr}")
                 self._update_connection_status(True)
 
-            raise RuntimeError(f"SSH/Command Failed: {e.stderr}") from e
+            raise ExternalServiceError(f"SSH/Command Failed: {e.stderr}") from e
 
     def check_connection(self) -> bool:
         """Probe the host connection to check if the telescope is online.
@@ -404,11 +404,11 @@ class StellarMateInterface(RemoteTransferDriver):
 
         Raises
         ------
-        ValueError
+        ConfigurationError
             Raised if no host alias is configured.
         """
         if not self.host_alias:
-            raise ValueError("No host alias configured for remote service.")
+            raise ConfigurationError("No host alias configured for remote service.")
 
         remote_target_name = self._resolve_remote_folder_name(remote_target_name)
         remote_path = f"{self.remote_pictures_path}/{remote_target_name}"

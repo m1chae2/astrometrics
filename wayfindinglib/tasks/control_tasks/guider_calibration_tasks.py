@@ -14,6 +14,7 @@ already exactly known from `EquipmentConfiguration.plate_scale_arcsec_per_px`.
 
 import math
 
+from astrometricslib import ProcessingError
 from wayfindinglib.models.equipment_and_site.guider_calibration import GuiderCalibration
 
 
@@ -68,14 +69,14 @@ def compute_guider_calibration(
 
     Raises
     ------
-    ValueError
+    ProcessingError
         If either pulse produced no measurable star displacement --
         a calibration cannot be derived from a run that moved nothing.
     """
     ra_pixel_distance = _pixel_distance(ra_start_xy, ra_end_xy)
     dec_pixel_distance = _pixel_distance(dec_start_xy, dec_end_xy)
     if ra_pixel_distance <= 0.0 or dec_pixel_distance <= 0.0:
-        raise ValueError("Calibration run produced no measurable star displacement on one or both axes")
+        raise ProcessingError("Calibration run produced no measurable star displacement on one or both axes")
 
     camera_angle_deg = math.degrees(math.atan2(ra_end_xy[1] - ra_start_xy[1], ra_end_xy[0] - ra_start_xy[0]))
 

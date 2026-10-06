@@ -23,6 +23,7 @@ queue entry carries.
 
 from typing import Any
 
+from astrometricslib import ConflictError
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.models.equipment_and_site.calibration import CalibrationEntry, CalibrationStats
 from wayfindinglib.models.planning.observation_package import FrameType
@@ -145,12 +146,14 @@ def reconcile_session(
 
     Raises
     ------
-    ValueError
+    ConflictError
         If `session.status` is not `COMPLETED` or `ABORTED` --
         reconciliation runs only once a session has actually ended.
     """
     if session.status not in _TERMINAL_SESSION_STATUSES:
-        raise ValueError(f"Session {session.id} is not terminal (status={session.status}); cannot reconcile")
+        raise ConflictError(
+            f"Session {session.id} is not terminal (status={session.status}); cannot reconcile"
+        )
 
     all_sessions = butler.get_all("observation_session")
     stats = compute_calibration_stats(session.camera_id, all_sessions)

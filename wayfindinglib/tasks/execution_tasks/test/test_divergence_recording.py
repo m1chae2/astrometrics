@@ -9,6 +9,7 @@ capabilities are rejected -- the cases
 
 import pytest
 
+from astrometricslib import InvalidArgumentError
 from wayfindinglib.models.policy.delegation import ObservatoryCapability
 from wayfindinglib.tasks.execution_tasks.divergence_recording import record_divergence
 
@@ -85,7 +86,7 @@ def test_divergence_magnitude_is_signed_intended_minus_observed():  # ruff: igno
 )
 def test_uncomparable_capabilities_are_rejected(capability):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify MOUNT_CONTROL/CAPTURE_ORCHESTRATION/OBSERVATORY_SAFETY raise."""
-    with pytest.raises(ValueError, match="no shadowed counterpart"):
+    with pytest.raises(InvalidArgumentError, match="no shadowed counterpart"):
         record_divergence(
             "div-5",
             "session-1",

@@ -22,6 +22,8 @@ from typing import Any
 import numpy as np
 from astropy.io import fits
 
+from astrometricslib import HardwareError
+
 FRAME_WAIT_MARGIN_SECONDS = 10.0
 """How long past the exposure to wait for a new frame before giving up."""
 
@@ -46,7 +48,7 @@ def frame_from_blob(blob: Any) -> np.ndarray:
 
     Raises
     ------
-    ValueError
+    HardwareError
         If `blob` is none of those, or holds no image.
     """
     data = _blob_bytes(blob)
@@ -56,12 +58,12 @@ def frame_from_blob(blob: Any) -> np.ndarray:
         with fits.open(io.BytesIO(data), memmap=False) as hdus:
             array = next((hdu.data for hdu in hdus if hdu.data is not None), None)
         if array is None:
-            raise ValueError("The guide camera's frame holds no image data.")
+            raise HardwareError("The guide camera's frame holds no image data.")
     array = np.asarray(array, dtype=float)
     while array.ndim > 2:
         array = array[0]
     if array.ndim != 2:
-        raise ValueError(f"Expected a two-dimensional guide frame, got {array.ndim} dimensions.")
+        raise HardwareError(f"Expected a two-dimensional guide frame, got {array.ndim} dimensions.")
     return array
 
 
@@ -75,11 +77,11 @@ def _blob_bytes(blob: Any) -> Any:
 
     Raises
     ------
-    ValueError
+    HardwareError
         If there is no frame, or the object is not a form the camera returns.
     """
     if blob is None:
-        raise ValueError("The guide camera returned no frame.")
+        raise HardwareError("The guide camera returned no frame.")
     if isinstance(blob, np.ndarray | bytes | bytearray | memoryview):
         return blob if isinstance(blob, np.ndarray) else bytes(blob)
     candidate = blob
@@ -87,10 +89,10 @@ def _blob_bytes(blob: Any) -> Any:
         try:
             candidate = blob[0]
         except (TypeError, IndexError, KeyError) as error:
-            raise ValueError(f"Cannot read a guide frame from a {type(blob).__name__}.") from error
+            raise HardwareError(f"Cannot read a guide frame from a {type(blob).__name__}.") from error
     data = candidate.getblobdata() if hasattr(candidate, "getblobdata") else getattr(candidate, "blob", None)
     if data is None:
-        raise ValueError(f"The guide camera's {type(blob).__name__} holds no data.")
+        raise HardwareError(f"The guide camera's {type(blob).__name__} holds no data.")
     return data if isinstance(data, np.ndarray) else bytes(data)
 
 
@@ -128,7 +130,7 @@ def capture_guide_ladder(
 
     Raises
     ------
-    RuntimeError
+    HardwareError
         If an exposure command is not sent, or no new frame arrives in time.
     """
     ladder: dict[float, list[np.ndarray]] = {}
@@ -137,7 +139,7 @@ def capture_guide_ladder(
         frames = []
         for _ in range(frames_per_exposure):
             if not take_exposure(exposure, gain):
-                raise RuntimeError(f"The guide camera did not accept a {exposure:g} s exposure.")
+                raise HardwareError(f"The guide camera did not accept a {exposure:g} s exposure.")
             waited = 0.0
             while True:
                 sleep(_POLL_SECONDS)
@@ -147,7 +149,7 @@ def capture_guide_ladder(
                 if digest != previous_digest:
                     break
                 if waited > exposure + FRAME_WAIT_MARGIN_SECONDS:
-                    raise RuntimeError(
+                    raise HardwareError(
                         f"No new guide frame arrived within {exposure + FRAME_WAIT_MARGIN_SECONDS:g} s of "
                         f"a {exposure:g} s exposure."
                     )
@@ -169,7 +171,7 @@ def _digest(blob: Any) -> str | None:
         return None
     try:
         data = _blob_bytes(blob)
-    except ValueError:
+    except HardwareError:
         return None
     raw = data.tobytes() if isinstance(data, np.ndarray) else data
     return hashlib.sha1(raw, usedforsecurity=False).hexdigest()

@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 
+from astrometricslib import NotFoundError
 from wayfindinglib.mcp.argument_resolution import build_argument_hooks
 from wayfindinglib.mcp.tool_registry import registry as wayfinding_registry
 
@@ -132,7 +133,7 @@ def test_target_id_resolves_to_the_library_target(hooks: Hooks) -> None:
 def test_an_unknown_target_id_gives_a_clear_error(hooks: Hooks) -> None:
     """An unknown id raises `ValueError` that names the id."""
     resolvers, _ = hooks
-    with pytest.raises(ValueError, match="No target 'Nope'"):
+    with pytest.raises(NotFoundError, match="No target 'Nope'"):
         resolvers["target"]("Nope")
 
 

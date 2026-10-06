@@ -13,6 +13,7 @@ from datetime import date
 
 import pytest
 
+from astrometricslib import ConflictError
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.models.planning.observation_package import ExposureRequest, FrameType
 from wayfindinglib.models.session.observation_session import (
@@ -245,7 +246,7 @@ def test_reconcile_session_raises_for_non_terminal_session(butler):  # ruff: ign
     entry = _entry("entry-1", "M 81", QueueEntryStatus.RUNNING, [])
     session = _session("session-1", "cam-1", SessionStatus.RUNNING, [entry])
 
-    with pytest.raises(ValueError, match="not terminal"):
+    with pytest.raises(ConflictError, match="not terminal"):
         reconcile_session(butler, session, _FakeAstrometrics({}))
 
 

@@ -36,7 +36,7 @@ from typing import Any
 
 import numpy as np
 
-from astrometricslib import connect_db
+from astrometricslib import ConflictError, InvalidArgumentError, connect_db
 
 logger = logging.getLogger(__name__)
 
@@ -130,7 +130,7 @@ class TileGrid:
     def __init__(self, height_degrees: float) -> None:
         row_count = 180.0 / height_degrees
         if abs(row_count - round(row_count)) > 1e-9:
-            raise ValueError(f"Tile height {height_degrees} does not divide 180 degrees evenly.")
+            raise InvalidArgumentError(f"Tile height {height_degrees} does not divide 180 degrees evenly.")
         self.height_degrees = height_degrees
         self.row_count = round(row_count)
         self._column_counts = [self._count_columns(row) for row in range(self.row_count)]
@@ -336,7 +336,7 @@ def set_deep_catalog_plan(config: Any, healpix_level: int, magnitude_limit: floa
 
     Raises
     ------
-    ValueError
+    ConflictError
         If the catalog was already started with different settings.
     """
     wanted = {"healpix_level": str(healpix_level), "magnitude_limit": repr(float(magnitude_limit))}
@@ -348,7 +348,7 @@ def set_deep_catalog_plan(config: Any, healpix_level: int, magnitude_limit: floa
         if saved:
             for key, value in wanted.items():
                 if saved.get(key) != value:
-                    raise ValueError(
+                    raise ConflictError(
                         f"The deep-star catalog at {cache_db_path} was started with {key}="
                         f"{saved.get(key)}, but {value} was requested. Delete the file to start over."
                     )

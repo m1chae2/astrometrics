@@ -41,7 +41,7 @@ import logging
 import sys
 import time
 
-from astrometricslib import ExternalServiceError, configure_logging
+from astrometricslib import ConflictError, ExternalServiceError, InvalidArgumentError, configure_logging
 from wayfindinglib import Wayfinder
 from wayfindinglib.drivers.catalog import deep_star_store
 from wayfindinglib.drivers.catalog.deep_star_catalog_builder import (
@@ -383,7 +383,7 @@ def run_catalog_build(argv: list[str] | None = None) -> int:
             progress_callback=report_pixel,
             pixels=chosen_pixels,
         )
-    except ValueError as settings_error:
+    except (InvalidArgumentError, ConflictError) as settings_error:
         print(f"\n{settings_error}")
         return 2
     except KeyboardInterrupt:

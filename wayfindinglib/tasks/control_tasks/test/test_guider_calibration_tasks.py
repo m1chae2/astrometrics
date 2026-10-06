@@ -7,6 +7,7 @@ from simulated sequences -- the case
 
 import pytest
 
+from astrometricslib import ProcessingError
 from wayfindinglib.tasks.control_tasks.guider_calibration_tasks import compute_guider_calibration
 
 
@@ -49,7 +50,7 @@ def test_recovers_nonzero_camera_angle():  # ruff: ignore[missing-return-type-un
 
 def test_raises_when_ra_axis_produces_no_displacement():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verify an RA pulse with no displacement raises, not divides by zero."""
-    with pytest.raises(ValueError, match="no measurable star displacement"):
+    with pytest.raises(ProcessingError, match="no measurable star displacement"):
         compute_guider_calibration(
             "cal-3",
             "cam-1",

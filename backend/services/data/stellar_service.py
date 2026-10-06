@@ -3,13 +3,21 @@
 import logging
 import math
 import re
+import sqlite3
 import threading
 import time
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
-from astrometricslib import Astrometrics, InvalidArgumentError, StellarObject
+from astrometricslib import (
+    DATA_ERRORS,
+    FITS_READ_ERRORS,
+    Astrometrics,
+    AstrometricsError,
+    InvalidArgumentError,
+    StellarObject,
+)
 from backend.services.data.deletion_archive import archive_record_before_delete
 
 logger = logging.getLogger(__name__)
@@ -214,7 +222,7 @@ def _serialize_target_for_planetarium(target, local_target_ids: set | None = Non
     try:
         ra_deg = parse_coordinate_string(str(target.ra), is_ra=True)
         dec_deg = parse_coordinate_string(str(target.dec), is_ra=False)
-    except Exception as exc:
+    except (InvalidArgumentError, ValueError, TypeError) as exc:
         logger.warning("Failed to parse coordinates for target '%s': %s", target.id, exc)
         return None
 
@@ -293,7 +301,7 @@ def _stored_star_radius_px(astrometrics: Any, star_id: str) -> float | None:
     """
     try:
         star = astrometrics.stars.get(star_id)
-    except Exception as err:
+    except (AstrometricsError, sqlite3.Error) as err:
         logger.debug("Could not load %s for its radius: %s", star_id, err)
         return None
     return getattr(star, "radius_px", None) if star else None
@@ -497,7 +505,7 @@ class StellarService:
             image_path = _overlay_reference_image_path(target_entity)
             image_time = Path(image_path).stat().st_mtime_ns if image_path else 0
             key = (target_id, limit, str(image_path), image_time, self._catalog_version())
-        except Exception:
+        except AstrometricsError, sqlite3.Error, OSError:
             return self._compute_astrometry_overlay_stars(target_id, limit)
 
         cache = self._overlay_cache
@@ -564,7 +572,7 @@ class StellarService:
                     target_entity = targets_api.get(tid)
                     if target_entity:
                         break
-                except Exception as err:
+                except (AstrometricsError, sqlite3.Error) as err:
                     logger.debug("Failed to get target entity for %s: %s", tid, err)
 
         img_path = _overlay_reference_image_path(target_entity) if target_entity else None
@@ -586,9 +594,9 @@ class StellarService:
                         w = WCS(hdr)
                         if w.is_celestial:
                             wcs = w
-                    except Exception:
+                    except DATA_ERRORS:
                         wcs = None
-            except Exception as err:
+            except FITS_READ_ERRORS as err:
                 logger.debug("Could not read WCS from reference image %s: %s", img_path, err)
 
         results: list[dict] = []
@@ -601,7 +609,7 @@ class StellarService:
                     if sums and isinstance(sums, list) and isinstance(sums[0], dict):
                         summaries = sums
                         break
-                except Exception as err:
+                except (AstrometricsError, sqlite3.Error, OSError) as err:
                     logger.debug("Failed to get stellar summaries for %s: %s", tid, err)
 
             if summaries:
@@ -626,7 +634,7 @@ class StellarService:
                             px, py = wcs.all_world2pix(float(s["ra"]), float(s["dec"]), 0)
                             x = float(px)
                             y = float(py)
-                        except Exception as err:
+                        except DATA_ERRORS as err:
                             logger.debug("WCS projection failed for %s: %s", s_id, err)
                             continue
 
@@ -697,7 +705,7 @@ class StellarService:
                     try:
                         px, py = wcs.all_world2pix(float(ra_val), float(dec_val), 0)
                         x, y = float(px), float(py)
-                    except Exception as err:
+                    except DATA_ERRORS as err:
                         logger.debug("WCS projection failed for fallback %s: %s", obj_id, err)
 
             if x is None or y is None:
@@ -1364,7 +1372,7 @@ class StellarService:
                         serialized["global"] = False
                     if serialized:
                         sources.append(serialized)
-            except Exception as exc:
+            except DATA_ERRORS as exc:
                 logger.warning("Failed to serialize celestial object %s: %s", obj.id, exc)
                 continue
 
@@ -1510,7 +1518,7 @@ class StellarService:
                     "stackedImage": None,
                     "fieldOfView": None,
                 })
-            except Exception as serialization_error:
+            except DATA_ERRORS as serialization_error:
                 logger.warning(
                     "Failed to serialize online catalog object %s: %s",
                     obj.id,

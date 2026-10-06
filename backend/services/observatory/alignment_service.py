@@ -8,8 +8,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from astrometricslib import AstrometricsError, InvalidArgumentError
-from astrometricslib.utilities.exceptions import DATA_ERRORS
+from astrometricslib import DATA_ERRORS, AstrometricsError, InvalidArgumentError
 from wayfindinglib import MountPointingModel, ObservatoryControl, SkyPosition
 from wayfindinglib.models.session.telemetry import AlignmentAttempt
 

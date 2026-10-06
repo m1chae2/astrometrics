@@ -31,7 +31,6 @@ from astrometricslib.drivers import simbad_interface
 from astrometricslib.drivers.fits_access import collapse_to_2d
 from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.drivers.plate_solve_interface import PlateSolver
-from astrometricslib.drivers.simbad_interface import ONLINE_QUERY_ERRORS
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.models.stellar_source import StellarObject
@@ -39,7 +38,7 @@ from astrometricslib.pipelines.astrometry.post_processing.assess_match_quality i
 from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_blob_width_from_data
 from astrometricslib.pipelines.astrometry.pre_processing.source_detection import SourceDetector
 from astrometricslib.pipelines.shared.solar_system_targets import is_solar_system_target
-from astrometricslib.utilities.exceptions import DATA_ERRORS, PlateSolveFailedError
+from astrometricslib.utilities.exceptions import DATA_ERRORS, ONLINE_QUERY_ERRORS, PlateSolveFailedError
 
 logger = logging.getLogger(__name__)
 

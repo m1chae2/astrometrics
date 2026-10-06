@@ -7,6 +7,7 @@ results into standard Target/StellarObject domain model instances.
 """
 
 import logging
+import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -16,7 +17,15 @@ import astropy.units as u
 import numpy as np
 from astropy.coordinates import SkyCoord
 
-from astrometricslib import StellarObject, Target, parse_coordinate_string
+from astrometricslib import (
+    DATA_ERRORS,
+    ONLINE_QUERY_ERRORS,
+    AstrometricsError,
+    InvalidArgumentError,
+    StellarObject,
+    Target,
+    parse_coordinate_string,
+)
 from wayfindinglib.drivers.catalog import (
     CatalogDriver,
     DeepStarCatalogDriver,
@@ -165,7 +174,7 @@ def _parse_target_positions(targets: list[Target]) -> list[tuple[str, float, flo
         try:
             ra_deg = parse_coordinate_string(target.ra, is_ra=True)
             dec_deg = parse_coordinate_string(target.dec, is_ra=False)
-        except Exception as parse_error:
+        except InvalidArgumentError as parse_error:
             logger.warning("Failed to parse coordinates for local target %s: %s", target.id, parse_error)
             continue
         positions.append((target.id, ra_deg, dec_deg))
@@ -319,7 +328,7 @@ def astrometrics_catalog(
                 frame="icrs",
             )
             results.extend(_filter_within_radius(candidate_stars, star_coordinates, center, radius_deg))
-        except Exception as batch_error:
+        except DATA_ERRORS as batch_error:
             logger.warning(
                 "Batch coordinate parsing failed for local stellar objects (%s); "
                 "falling back to per-object parsing",
@@ -333,7 +342,7 @@ def astrometrics_catalog(
                     )
                     if center.separation(star_coordinate).deg <= radius_deg:
                         results.append(star)
-                except Exception as parse_error:
+                except DATA_ERRORS as parse_error:
                     logger.warning("Failed to parse coordinates for local star %s: %s", star.id, parse_error)
 
     return results
@@ -395,7 +404,7 @@ def global_catalog(sky, ra_deg: float, dec_deg: float, radius_deg: float) -> lis
 
             try:
                 ra_degrees_value, dec_degrees_value = resolve_simbad_radec(ra_str, dec_str)
-            except Exception as coordinate_error:
+            except DATA_ERRORS as coordinate_error:
                 logger.debug(
                     "Skipping SIMBAD object %s due to invalid coordinates: %s", main_id, coordinate_error
                 )
@@ -416,7 +425,7 @@ def global_catalog(sky, ra_deg: float, dec_deg: float, radius_deg: float) -> lis
                 ra_text, dec_text = format_target_coordinates(ra_degrees_value, dec_degrees_value)
                 results.append(Target(id=main_id, commonName=main_id, ra=ra_text, dec=dec_text))
 
-    except Exception as query_error:
+    except (*ONLINE_QUERY_ERRORS, *DATA_ERRORS) as query_error:
         logger.warning("SIMBAD online query failed or timed out (offline mode): %s", query_error)
 
     return results
@@ -505,7 +514,7 @@ def query_online_catalogs(
                 ra_degrees, dec_degrees, effective_radius, magnitude_limit=magnitude_limit
             )
             return [(driver.driver_name, obj) for obj in objects]
-        except Exception as driver_error:
+        except (AstrometricsError, sqlite3.Error, *ONLINE_QUERY_ERRORS) as driver_error:
             logger.warning(
                 "Catalog driver '%s' query failed: %s",
                 driver.driver_name,
@@ -521,11 +530,11 @@ def query_online_catalogs(
                     if stellar_object.id not in seen_ids:
                         seen_ids.add(stellar_object.id)
                         tagged_results.append((driver_name, stellar_object))
-            except Exception as future_error:
-                logger.warning(
-                    "Unexpected error collecting results from driver '%s': %s",
-                    futures[future],
-                    future_error,
-                )
+            except Exception:
+                # Each driver runs in its own worker thread, and its known
+                # failures are already handled in `_query_driver`. Anything
+                # else is a bug in one driver, so it is logged with its
+                # traceback and the other drivers' results are still used.
+                logger.exception("Unexpected error collecting results from driver '%s'", futures[future])
 
     return tagged_results

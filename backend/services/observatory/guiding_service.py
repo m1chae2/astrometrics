@@ -1,11 +1,13 @@
 """Autoguiding control loop, drift simulation, and RMS telemetry."""
 
 import logging
+import sqlite3
 import threading
 import time
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from astrometricslib import DATA_ERRORS, AstrometricsError
 from wayfindinglib import ObservatoryControl
 from wayfindinglib.drivers.phd2.phd2_client import PHD2Client
 from wayfindinglib.drivers.phd2.phd2_guiding_service import PHD2GuidingService
@@ -212,11 +214,11 @@ class GuidingService:
                                 for s in phd2_samples
                             ]
                             self._logger_interface.record_guiding_samples(records)
-                        except Exception as log_err:
+                        except sqlite3.Error as log_err:
                             logger.debug("Failed to record PHD2 guiding samples: %s", log_err)
 
                     return
-            except Exception as phd2_err:
+            except (RuntimeError, *DATA_ERRORS) as phd2_err:
                 logger.debug("PHD2 telemetry poll skipped: %s", phd2_err)
 
         # 2. Fall back to INDI timed guide pulse queue
@@ -313,9 +315,9 @@ class GuidingService:
                         for s in self._history[-len(coalesced) :]
                     ]
                     self._logger_interface.record_guiding_samples(records)
-                except Exception as log_err:
+                except sqlite3.Error as log_err:
                     logger.debug("Failed to record INDI guiding samples: %s", log_err)
-        except Exception as e:
+        except (AstrometricsError, RuntimeError, *DATA_ERRORS) as e:
             # Handle uninitialized C++ SWIG client in test simulators
             # gracefully
             logger.debug("Passive guiding telemetry polling skipped or failed: %s", e)
@@ -471,8 +473,8 @@ class GuidingService:
                 if len(self._history) > self._max_history:
                     self._history.pop(0)
 
-            except Exception as e:
-                logger.error("Guiding loop error: %s", e)
+            except Exception:
+                logger.exception("Guiding loop error")
                 time.sleep(1)
 
         self._is_guiding = False

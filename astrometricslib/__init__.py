@@ -27,6 +27,7 @@ except PackageNotFoundError:  # running from a source tree without an install
 from astrometricslib.api import AbstractCatalogAccess, CatalogAccess
 from astrometricslib.drivers.calibration_library import DEFAULT_DARK_TEMPERATURE_TOLERANCE_C
 from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
+from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.drivers.job_logging import (
     background_job,
     capture_job_logs,
@@ -144,7 +145,7 @@ from astrometricslib.pipelines.stacking.post_processing.exposure_saturation impo
     SATURATED_FRAME_FRACTION,
 )
 from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
-from astrometricslib.utilities.exceptions import PlateSolveFailedError
+from astrometricslib.utilities.exceptions import DATA_ERRORS, ONLINE_QUERY_ERRORS, PlateSolveFailedError
 from astrometricslib.utilities.observing_night import observing_night_id
 from astrometricslib.utilities.parallel_batch import BatchRunSummary
 from astrometricslib.utilities.pipeline_models import ProcessingJob
@@ -276,7 +277,10 @@ class Astrometrics:
 
 
 __all__ = [
+    "DATA_ERRORS",
     "DEFAULT_DARK_TEMPERATURE_TOLERANCE_C",
+    "FITS_READ_ERRORS",
+    "ONLINE_QUERY_ERRORS",
     "RPC_CODES",
     "SATURATED_BLOB_MINIMUM_PIXELS",
     "SATURATED_FRAME_FRACTION",

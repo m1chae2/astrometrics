@@ -60,8 +60,10 @@ def inspect_api(obj_or_path: Any) -> dict[str, Any]:
                 continue
             try:
                 attr = getattr(obj, attr_name)
-            except Exception as exc:
-                logger.debug("Attribute '%s' inaccessible during inspect_api: %s", attr_name, exc)
+            except Exception:
+                # A property can run any code, so any error is possible.
+                # Listing the API must go on, so the error is only logged.
+                logger.debug("Attribute '%s' inaccessible during inspect_api.", attr_name, exc_info=True)
                 continue
             if callable(attr):
                 method_doc = inspect.getdoc(attr) or ""
@@ -69,7 +71,7 @@ def inspect_api(obj_or_path: Any) -> dict[str, Any]:
                 sig_str = "(*args, **kwargs)"
                 try:
                     sig_str = str(inspect.signature(attr))
-                except Exception as exc:
+                except (ValueError, TypeError) as exc:
                     logger.debug("Signature inaccessible for '%s': %s", attr_name, exc)
                 methods.append({
                     "name": attr_name,
@@ -81,7 +83,7 @@ def inspect_api(obj_or_path: Any) -> dict[str, Any]:
     if callable(obj):
         try:
             sig = str(inspect.signature(obj))
-        except Exception:
+        except ValueError, TypeError:
             sig = "(*args, **kwargs)"
 
     return {
@@ -182,7 +184,7 @@ class ScriptingService:
                     mgr.canvas.toolbar = mgr.toolbar
                 self.active_figure_managers[fignum] = mgr
             return mgr
-        except Exception:
+        except ImportError, ValueError, TypeError, RuntimeError:
             return None
 
     def get_completions(self, text: str) -> list[str]:
@@ -402,7 +404,11 @@ class ScriptingService:
                 else:
                     self.console.push(code_str)
             except Exception:
+                # The error is in the user's own code. Its traceback goes to
+                # the console output, where the user reads it; the server log
+                # keeps a copy at debug level.
                 traceback.print_exc()
+                logger.debug("Console code raised an error.", exc_info=True)
         return buffer.getvalue()
 
     def get_introspection_tree(self) -> list[dict[str, Any]]:
@@ -434,19 +440,22 @@ class ScriptingService:
                         continue
                     try:
                         attr = getattr(obj, attr_name)
-                    except Exception as exc:
-                        logger.debug("Skipping unreadable attribute '%s': %s", attr_name, exc)
+                    except Exception:
+                        # A property runs code, so it can raise anything.
+                        logger.debug("Skipping unreadable attribute '%s'.", attr_name, exc_info=True)
                         continue
                     if callable(attr):
                         method_info = {"name": attr_name, "doc": inspect.getdoc(attr) or "", "args": []}
                         try:
                             sig = inspect.signature(attr)
                             method_info["args"] = [str(param) for param in sig.parameters.values()]
-                        except Exception:
+                        except ValueError, TypeError:
                             method_info["args"] = ["*args", "**kwargs"]
                         obj_info["methods"].append(method_info)
-            except Exception as exc:
-                logger.debug("Failed to introspect methods for one console object: %s", exc)
+            except Exception:
+                # Any object can sit in the console, and its dir() can raise
+                # anything. One bad object must not hide all the others.
+                logger.debug("Failed to introspect methods for one console object.", exc_info=True)
             objects.append(obj_info)
         return objects
 
@@ -620,8 +629,11 @@ class ScriptingService:
                             })
 
             except Exception:
+                # The error is in the caller's own code. It is recorded as
+                # the run's status, and its traceback is returned as stderr.
                 status = "error"
                 traceback.print_exc(file=stderr_buf)
+                logger.debug("Console code raised an error.", exc_info=True)
 
         execution_time_ms = int((time.time() - start_time) * 1000)
 
@@ -710,7 +722,7 @@ class ScriptingService:
                         parts = content.split(delim)
                         if len(parts) >= 2:
                             description = parts[1].strip().split("\n\n")[0]
-                except Exception as exc:
+                except (OSError, ValueError) as exc:
                     logger.debug("Failed to read recipe %s docstring: %s", py_file, exc)
 
                 category = recipe_dir.parent.name
@@ -876,7 +888,7 @@ class ScriptingService:
                     if line.startswith("# "):
                         title = line[2:].strip()
                         break
-            except Exception as exc:
+            except (OSError, ValueError) as exc:
                 logger.debug("Failed reading title for doc topic %s: %s", doc_file, exc)
 
             topic_id = str(doc_file.relative_to(doc_root).as_posix())

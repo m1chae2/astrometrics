@@ -6,10 +6,18 @@ Astrometrics library. # REQ: BKD-5: Data Persistence
 
 import logging
 import os
+import sqlite3
 from collections.abc import Callable
 from typing import Any, ClassVar
 
-from astrometricslib import FilterType, InvalidArgumentError, NotFoundError, ReindexReport, Target
+from astrometricslib import (
+    AstrometricsError,
+    FilterType,
+    InvalidArgumentError,
+    NotFoundError,
+    ReindexReport,
+    Target,
+)
 from backend.services.data.deletion_archive import archive_record_before_delete
 from backend.services.data.image_service import ImageService
 
@@ -201,7 +209,7 @@ class TargetService:
         """
         try:
             self.astrometrics.targets.reindex_frames(target, prune_missing=prune_missing)
-        except Exception as e:
+        except (AstrometricsError, sqlite3.Error, OSError) as e:
             logger.warning("Failed to refresh images for %s: %s", target.id, e)
 
     def update_target(self, target_id: str, updates: dict) -> Target | None:
@@ -309,11 +317,20 @@ class TargetService:
         """Save target database states.
 
         Uses the library's storage controllers.
+
+        Raises
+        ------
+        AstrometricsError
+            Re-raised after logging if the library refuses the save.
+        sqlite3.Error
+            Re-raised after logging if the database write fails.
+        OSError
+            Re-raised after logging if a file cannot be written.
         """
         try:
             self.astrometrics.targets.save()
-        except Exception as e:
-            logger.error("Failed to save target %s: %s", target.id, e)
+        except AstrometricsError, sqlite3.Error, OSError:
+            logger.exception("Failed to save target %s", target.id)
             raise
 
     def read_saved_target(self, target_id: str) -> Target | None:
@@ -333,11 +350,20 @@ class TargetService:
         """Commit all active targets catalog arrays.
 
         Writes them to library storage files.
+
+        Raises
+        ------
+        AstrometricsError
+            Re-raised after logging if the library refuses the save.
+        sqlite3.Error
+            Re-raised after logging if the database write fails.
+        OSError
+            Re-raised after logging if a file cannot be written.
         """
         try:
             self.astrometrics.targets.save()
-        except Exception as e:
-            logger.error("Failed to save targets: %s", e)
+        except AstrometricsError, sqlite3.Error, OSError:
+            logger.exception("Failed to save targets")
             raise
 
     def get_frame_header(self, target_id: str, frame_path: str) -> list[dict[str, str]]:

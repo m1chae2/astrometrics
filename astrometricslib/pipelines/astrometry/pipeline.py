@@ -11,9 +11,11 @@ from typing import Any
 
 from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.foundation.config import AppConfiguration
+from astrometricslib.foundation.errors import ConfigurationError, ExternalServiceError, InvalidArgumentError
 from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 from astrometricslib.pipelines.shared.analysis_context import AnalysisContext, ExtendedSourceHint
 from astrometricslib.pipelines.shared.target_center_hint import resolve_center_hint
+from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -178,7 +180,7 @@ class AstrometryPipeline:
                     if float(target_ra) != 0.0 or float(target_dec) != 0.0:  # ruff: ignore[float-equality-comparison] -- 0.0 placeholder sentinel, not measured
                         ra_hint = float(target_ra)
                         dec_hint = float(target_dec)
-            except Exception as e:
+            except (InvalidArgumentError, ValueError, TypeError) as e:
                 logger.warning(
                     "Could not parse target coordinate strings '%s', '%s': %s", target_ra, target_dec, e
                 )
@@ -204,7 +206,7 @@ class AstrometryPipeline:
                         dec_hint = float(header_dec)
 
                     logger.info("Found FITS header coordinate hints: %s, %s", ra_hint, dec_hint)
-                except Exception as e:
+                except DATA_ERRORS as e:
                     logger.warning("Could not parse FITS header coordinates: %s", e)
 
         return ra_hint, dec_hint
@@ -279,7 +281,7 @@ class AstrometryPipeline:
                 x, y = wcs.world_to_pixel(target_coord)
                 if _is_finite_pixel((x, y)):
                     extraction_center = (x, y)
-            except Exception as e:
+            except DATA_ERRORS as e:
                 logger.warning("WCS target conversion failed: %s", e)
 
         if not extraction_center and (target_ra is not None and target_dec is not None) and wcs:
@@ -290,7 +292,7 @@ class AstrometryPipeline:
                 x, y = wcs.world_to_pixel(coord)
                 if _is_finite_pixel((x, y)):
                     extraction_center = (x, y)
-            except Exception as e:
+            except DATA_ERRORS as e:
                 logger.warning("WCS RA/Dec coordinate conversion failed: %s", e)
 
         return extraction_center
@@ -333,7 +335,7 @@ class AstrometryPipeline:
                         majaxis,
                         extraction_radius_px,
                     )
-            except Exception as e:
+            except DATA_ERRORS as e:
                 logger.warning("Failed to derive extraction radius from WCS/SIMBAD: %s", e)
         return extraction_radius_px
 
@@ -448,7 +450,7 @@ class AstrometryPipeline:
 
             ra_c, dec_c = float(wcs.wcs.crval[0]), float(wcs.wcs.crval[1])
             self.star_identifier._seed_gaia_cache_for_field(ra_c, dec_c, radius_deg=field_radius_deg)
-        except Exception as e:
+        except (ConfigurationError, *DATA_ERRORS) as e:
             logger.warning("Automatic Gaia cache seeding skipped: %s", e)
 
     def check_extended_source(self, object_name: str) -> tuple[bool, Any | None, str | None, float | None]:
@@ -520,7 +522,7 @@ class AstrometryPipeline:
                             pass
 
                 return otype in extended_otypes, coord, otype, majaxis
-        except Exception as e:
+        except (ExternalServiceError, *DATA_ERRORS) as e:
             logger.warning("SIMBAD query failed for object '%s': %s", object_name, e)
 
         return False, None, None, None

@@ -21,6 +21,7 @@ from typing import Any
 from astropy.wcs import WCS, FITSFixedWarning
 
 from astrometricslib.drivers.fits_access import read_header
+from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
 
 logger = logging.getLogger(__name__)
@@ -49,7 +50,7 @@ def resolve_center_hint(ra: str, dec: str) -> tuple[float | None, float | None]:
     try:
         center_ra = parse_coordinate_string(str(ra), is_ra=True)
         center_dec = parse_coordinate_string(str(dec), is_ra=False)
-    except Exception as exc:
+    except InvalidArgumentError as exc:
         logger.debug("Falling back to blind solve, could not parse RA/Dec: %s", exc)
         return None, None
     # 0h0m0s/0d0m0s parses without error as a literal (0.0, 0.0); it is

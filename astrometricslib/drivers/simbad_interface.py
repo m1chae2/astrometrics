@@ -24,19 +24,12 @@ import threading
 from typing import Any
 
 from astroquery.simbad import SimbadClass
-from pyvo.dal.exceptions import DALAccessError
 
 from astrometricslib.foundation.errors import ExternalServiceError
+from astrometricslib.utilities.exceptions import ONLINE_QUERY_ERRORS
 
 logger = logging.getLogger(__name__)
 
-#: The errors an online astroquery catalog query (SIMBAD or Gaia) can raise
-#: when the network or the remote service fails. ``OSError`` covers lost
-#: connections and timeouts, including every `requests` error such as an
-#: HTTP error reply. ``DALAccessError`` is the base of the errors from pyvo,
-#: the table-query library astroquery uses. ``ValueError`` comes from a
-#: reply that is empty or cannot be parsed.
-ONLINE_QUERY_ERRORS: tuple[type[Exception], ...] = (OSError, ValueError, DALAccessError)
 
 # How long to wait on a single SIMBAD HTTP request before giving up.
 #

@@ -2,14 +2,17 @@
 
 import logging
 import os
+import sqlite3
 import threading
 from datetime import datetime
 from typing import Any
 
 from astropy.io import fits
 
-from astrometricslib import FilterType, InvalidArgumentError
+from astrometricslib import FITS_READ_ERRORS, AstrometricsError, FilterType, InvalidArgumentError
 from backend.services.infrastructure.base_service import BaseBackgroundService
+
+logger = logging.getLogger(__name__)
 
 # REQ: IMG-4: Scientific Analysis Pipeline
 # REQ: IMG-4.1: The system SHALL provide automated photometry and
@@ -151,6 +154,10 @@ class AnalysisOrchestrator(BaseBackgroundService):
                         try:
                             return future.result(timeout=0)
                         except Exception as e:
+                            # The job may have raised anything. Its failure
+                            # was logged with a traceback when it happened,
+                            # so here it is only recorded in the reply.
+                            logger.debug("Analysis job %s failed.", job.id, exc_info=True)
                             return {"status": "failed", "jobId": job.id, "error": str(e)}
 
                 # Not tracked in this process's memory (e.g. no Future was
@@ -360,7 +367,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
                             target_id,
                             fit_filter,
                         )
-            except Exception as e:
+            except FITS_READ_ERRORS as e:
                 job_logger.warning("[%s] Could not read FITS header for auto-detection: %s", target_id, e)
 
             if not fallback_is_spec:
@@ -505,10 +512,8 @@ class AnalysisOrchestrator(BaseBackgroundService):
         if not paths:
             try:
                 self._target_service.save_targets()
-            except Exception as save_error:
-                log.error(
-                    "[%s] Failed to record target after master stack analysis: %s", target_id, save_error
-                )
+            except AstrometricsError, sqlite3.Error, OSError:
+                log.exception("[%s] Failed to record target after master stack analysis", target_id)
             log.info(
                 "[%s] Master stack analysis complete. %s spectra extracted from %s stars.",
                 target_id,
@@ -555,8 +560,8 @@ class AnalysisOrchestrator(BaseBackgroundService):
 
         try:
             self._target_service.save_targets()
-        except Exception as save_error:
-            log.error("[%s] Failed to record target after spectroscopy analysis: %s", target_id, save_error)
+        except AstrometricsError, sqlite3.Error, OSError:
+            log.exception("[%s] Failed to record target after spectroscopy analysis", target_id)
 
         log.info(
             "[%s] Spectroscopy analysis complete. %s spectra extracted from %s stars.",
@@ -621,8 +626,8 @@ class AnalysisOrchestrator(BaseBackgroundService):
 
             try:
                 self._target_service.save_targets()
-            except Exception as save_error:
-                log.error("[%s] Failed to record target after photometry analysis: %s", target_id, save_error)
+            except AstrometricsError, sqlite3.Error, OSError:
+                log.exception("[%s] Failed to record target after photometry analysis", target_id)
 
             if self._notification_service:
                 msg = (
@@ -632,6 +637,6 @@ class AnalysisOrchestrator(BaseBackgroundService):
                 self._notification_service.notify(target_id, msg, status="success")
 
             return res
-        except Exception as e:
-            log.error("[%s] Failed to process photometry: %s", target_id, e)
+        except Exception:
+            log.exception("[%s] Failed to process photometry", target_id)
             raise

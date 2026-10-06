@@ -7,6 +7,7 @@ monitor state. REQ: AGENT-1.1
 import logging
 import os
 
+from astrometricslib import AstrometricsError
 from backend.mcp.tool_registry import execute_rpc, get_astrometrics, registry
 
 logger = logging.getLogger(__name__)
@@ -142,7 +143,7 @@ async def read_logs(  # ruff: ignore[unused-async] -- awaited by ToolRegistry.ex
                 content = f.readlines()
                 tail = content[-lines:]
                 return "".join(tail)
-        except Exception as e:
+        except (OSError, ValueError) as e:
             return f"Error reading log: {e!s}"
 
     return f"Error: Could not locate log for {log_type}."
@@ -188,7 +189,7 @@ async def restart_backend():  # ruff: ignore[missing-return-type-undocumented-pu
 
     try:
         await execute_rpc("system:save")
-    except Exception as exc:
+    except AstrometricsError as exc:
         logger.debug("Best-effort system:save before shutdown failed: %s", exc)
 
     script_path = os.path.join(repo_root, "scripts", "linux", "run_backend.sh")
@@ -198,7 +199,7 @@ async def restart_backend():  # ruff: ignore[missing-return-type-undocumented-pu
     try:
         res = subprocess.run([script_path, "restart"], cwd=repo_root, capture_output=True, text=True)
         return f"Backend restart signal sent.\n{res.stdout}\n{res.stderr}"
-    except Exception as e:
+    except (OSError, subprocess.SubprocessError) as e:
         return f"Error: {e!s}"
 
 
@@ -325,7 +326,7 @@ async def inspect_device_reservations():  # ruff: ignore[unused-async] -- awaite
                 is_locked = True
             finally:
                 fh.close()
-        except Exception:
+        except OSError:
             is_locked = True
 
         if not is_locked:
@@ -355,7 +356,7 @@ async def inspect_device_reservations():  # ruff: ignore[unused-async] -- awaite
                                         break
                                 except ValueError, IndexError:
                                     continue
-        except Exception as exc:
+        except OSError as exc:
             logger.debug("Failed to inspect /proc/locks for lock holder: %s", exc)
 
         process_name = None
@@ -372,7 +373,7 @@ async def inspect_device_reservations():  # ruff: ignore[unused-async] -- awaite
                     with open(cmd_path) as f_cmd:
                         cmd_raw = f_cmd.read()
                         command_line = cmd_raw.replace("\x00", " ").strip()
-            except Exception as exc:
+            except OSError as exc:
                 logger.debug("Failed to read holding process's command line: %s", exc)
 
         results[device] = {
@@ -473,5 +474,5 @@ async def evaluate_spectroscopy_script(  # ruff: ignore[unused-async] -- awaited
         }
     except subprocess.TimeoutExpired:
         return {"status": "error", "message": "Spectroscopy evaluation script timed out after 45 seconds."}
-    except Exception as e:
+    except (OSError, subprocess.SubprocessError) as e:
         return {"status": "error", "message": f"Execution failed: {e!s}"}

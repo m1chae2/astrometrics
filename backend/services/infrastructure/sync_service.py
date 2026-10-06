@@ -2,11 +2,18 @@
 
 import logging
 import os
+import sqlite3
 import threading
 from datetime import UTC
 from typing import Any
 
-from astrometricslib import ConfigurationError, InvalidArgumentError, require_mounted_storage
+from astrometricslib import (
+    FITS_READ_ERRORS,
+    AstrometricsError,
+    ConfigurationError,
+    InvalidArgumentError,
+    require_mounted_storage,
+)
 from backend.services.infrastructure import thread_management
 from wayfindinglib import ObservatoryControl
 
@@ -175,8 +182,8 @@ class SyncService:
                 remote_folder, destination_path, log_callback=logger.info
             )
 
-        except Exception as e:
-            logger.error("Error syncing target %s: %s", target_name, e)
+        except AstrometricsError, OSError:
+            logger.exception("Error syncing target %s", target_name)
 
     def _sync_calibration_task(self, sync_type):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
         """Worker task to sync calibration frames."""
@@ -201,8 +208,8 @@ class SyncService:
                 remote_folder, destination_path, log_callback=logger.info
             )
 
-        except Exception as e:
-            logger.error("Error syncing %s: %s", sync_type, e)
+        except AstrometricsError, OSError:
+            logger.exception("Error syncing %s", sync_type)
 
     def sync_telescope_logs(self) -> dict[str, Any]:
         """Download remote PHD2 guide logs and backfill FITS alignment solves.
@@ -239,8 +246,8 @@ class SyncService:
                             # per-file delta) -- the last file's return
                             # value is this run's up-to-date total.
                             guiding_samples_ingested = self._guiding_service.ingest_phd2_log_file(fpath)
-            except Exception as exc:
-                logger.error("Error syncing remote guide logs: %s", exc)
+            except AstrometricsError, OSError, ValueError, sqlite3.Error:
+                logger.exception("Error syncing remote guide logs")
 
         # 2. Extract historical plate-solve alignment errors from local
         # FITS headers
@@ -248,8 +255,8 @@ class SyncService:
             try:
                 frames_path = str(self._config.get_frames_path())
                 fits_solves_recorded = self._extract_fits_header_solves(frames_path)
-            except Exception as exc:
-                logger.error("Error backfilling alignment logs from FITS headers: %s", exc)
+            except AstrometricsError, OSError, sqlite3.Error:
+                logger.exception("Error backfilling alignment logs from FITS headers")
 
         return {
             "status": "success",
@@ -364,7 +371,7 @@ class SyncService:
                                 if dt.tzinfo is None:
                                     dt = dt.replace(tzinfo=UTC)
                                 epoch_time = dt.timestamp()
-                            except Exception:
+                            except ValueError, TypeError:
                                 epoch_time = os.path.getmtime(file_path)
                         else:
                             epoch_time = os.path.getmtime(file_path)
@@ -383,7 +390,7 @@ class SyncService:
                             "timestamp": epoch_time,
                         })
                         recorded += 1
-                except Exception as file_err:
+                except (*FITS_READ_ERRORS, sqlite3.Error) as file_err:
                     logger.debug("Skipping FITS file %s: %s", file_path, file_err)
 
         return recorded

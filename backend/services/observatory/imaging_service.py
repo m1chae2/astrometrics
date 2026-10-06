@@ -181,14 +181,14 @@ class ImagingService:
 
         Raises
         ------
-        RuntimeError
+        HardwareError
             If the underlying INDI camera fails to capture the
             frame.
         """
         logger.info(f"Capturing single light frame for alignment: {exposure}s, ISO={iso}")
         success = self._observatory.imaging.capture_image(exposure)
         if not success:
-            raise RuntimeError("Underlying INDI camera failed to capture frame")
+            raise HardwareError("Underlying INDI camera failed to capture frame")
 
         # Determine the last captured path or return a test path
         # In a real environment, the driver saves the FITS file to

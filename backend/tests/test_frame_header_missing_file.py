@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from astrometricslib import NotFoundError
 from backend.services.data.target_service import TargetService
 
 
@@ -34,10 +35,10 @@ def test_a_missing_file_gives_an_empty_header() -> None:
 
         Raises
         ------
-        FileNotFoundError
+        NotFoundError
             Always.
         """
-        raise FileNotFoundError(path)
+        raise NotFoundError(f"File not found: {path}")
 
     assert _service(missing).get_frame_header("C 2022 E3 ZTF", "/gone.fits") == []
 

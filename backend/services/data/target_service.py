@@ -9,7 +9,7 @@ import os
 from collections.abc import Callable
 from typing import Any, ClassVar
 
-from astrometricslib import FilterType, InvalidArgumentError, ReindexReport, Target
+from astrometricslib import FilterType, InvalidArgumentError, NotFoundError, ReindexReport, Target
 from backend.services.data.deletion_archive import archive_record_before_delete
 from backend.services.data.image_service import ImageService
 
@@ -134,12 +134,12 @@ class TargetService:
 
         Raises
         ------
-        ValueError
+        InvalidArgumentError
             If neither ``target_or_id`` nor ``target_id`` is provided.
         """
         val = target_or_id if target_or_id is not None else target_id
         if val is None:
-            raise ValueError("Required parameter 'target_or_id' or 'target_id' is missing")
+            raise InvalidArgumentError("Required parameter 'target_or_id' or 'target_id' is missing")
         if isinstance(val, str):
             target = self.astrometrics.targets.create(val)
             if ra is not None:
@@ -356,15 +356,15 @@ class TargetService:
 
         Raises
         ------
-        ValueError
+        NotFoundError
             If no target matches ``target_id``.
         """
         target = self.astrometrics.targets.get(target_id)
         if not target:
-            raise ValueError(f"Target not found: {target_id}")
+            raise NotFoundError(f"Target not found: {target_id}")
         try:
             return self.astrometrics.targets.get_header(frame_path, target=target)
-        except FileNotFoundError:
+        except NotFoundError:
             logger.debug("Frame file for %s is missing, returning an empty header: %s", target_id, frame_path)
             return []
 

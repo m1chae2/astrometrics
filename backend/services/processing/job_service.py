@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from astrometricslib import LoggerInterface, ProcessingJob
+from astrometricslib import ConflictError, LoggerInterface, NotFoundError, ProcessingJob
 
 logger = logging.getLogger(__name__)
 
@@ -203,9 +203,9 @@ class JobService:
 
         Raises
         ------
-        ValueError
+        NotFoundError
             If no job exists for ``job_id``.
-        TimeoutError
+        ConflictError
             If the job does not reach a terminal state within
             ``timeout`` seconds.
         """
@@ -215,13 +215,13 @@ class JobService:
         while True:
             job = self.get_job(job_id)
             if not job:
-                raise ValueError(f"Job {job_id} not found")
+                raise NotFoundError(f"Job {job_id} not found")
 
             if job.status in ["completed", "failed", "cancelled"]:
                 return job
 
             if (datetime.now() - start_time).total_seconds() > timeout:
-                raise TimeoutError(f"Job {job_id} timed out after {timeout} seconds")
+                raise ConflictError(f"Job {job_id} is still running after {timeout} seconds.", retryable=True)
 
             await asyncio.sleep(poll_interval)
 

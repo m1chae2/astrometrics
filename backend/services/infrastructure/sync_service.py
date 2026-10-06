@@ -6,7 +6,7 @@ import threading
 from datetime import UTC
 from typing import Any
 
-from astrometricslib import ConfigurationError, require_mounted_storage
+from astrometricslib import ConfigurationError, InvalidArgumentError, require_mounted_storage
 from backend.services.infrastructure import thread_management
 from wayfindinglib import ObservatoryControl
 
@@ -60,25 +60,11 @@ class SyncService:
         -------
         result : `dict`
             Contains ``started`` and ``target_id``.
-
-        Raises
-        ------
-        RuntimeError
-            If the background sync thread fails to start.
         """
-        try:
-            sync_thread = threading.Thread(
-                target=self._sync_target_frames_task, args=[object_id], daemon=True
-            )
-            sync_thread.start()
-
-            thread_management._syncing[object_id] = sync_thread
-
-            return {"started": True, "target_id": object_id}
-
-        except Exception as e:
-            logging.error(f"Failed to start sync for {object_id}: {e}")
-            raise RuntimeError(f"Sync failed to start: {e}") from e
+        sync_thread = threading.Thread(target=self._sync_target_frames_task, args=[object_id], daemon=True)
+        sync_thread.start()
+        thread_management._syncing[object_id] = sync_thread
+        return {"started": True, "target_id": object_id}
 
     def start_sync_calibration(self, sync_type: str) -> dict[str, Any]:
         """Start a background synchronization task for calibration frames.
@@ -90,28 +76,21 @@ class SyncService:
 
         Raises
         ------
-        ValueError
+        InvalidArgumentError
             If `sync_type` is not one of "bias", "dark", or "flat".
-        RuntimeError
-            If the background sync thread fails to start.
         """
         valid_types = ["bias", "dark", "flat"]
         if sync_type not in valid_types:
-            raise ValueError(f"Invalid sync type: {sync_type}")
+            raise InvalidArgumentError(
+                f"Invalid sync type: {sync_type}. Choose one of {valid_types}.",
+                details={"sync_type": sync_type},
+            )
 
-        try:
-            task_id = f"calibration_{sync_type}"
-
-            sync_thread = threading.Thread(target=self._sync_calibration_task, args=[sync_type], daemon=True)
-            sync_thread.start()
-
-            thread_management._syncing[task_id] = sync_thread
-
-            return {"started": True, "type": sync_type, "task_id": task_id}
-
-        except Exception as e:
-            logging.error(f"Failed to start calibration sync for {sync_type}: {e}")
-            raise RuntimeError(f"Sync failed to start: {e}") from e
+        task_id = f"calibration_{sync_type}"
+        sync_thread = threading.Thread(target=self._sync_calibration_task, args=[sync_type], daemon=True)
+        sync_thread.start()
+        thread_management._syncing[task_id] = sync_thread
+        return {"started": True, "type": sync_type, "task_id": task_id}
 
     def sync_all(self, target_list: list[str]) -> dict[str, Any]:
         """Trigger background sync for all calibration types and targets.

@@ -26,7 +26,7 @@ A client sends JSON. A few Wayfinder methods take objects the generic engine can
 
 The `planning` methods read their own inputs, so they need nothing here. `get_visibility` takes `objects` as names or ids (looked up in the library and then in SIMBAD) or `{"id", "ra_deg", "dec_deg"}` dictionaries, and `time` and `end_time` as `"now"` or ISO 8601 strings; an offset such as `-06:00` is honored, and a string with no offset means UTC.
 
-Every converter raises `ValueError` with a plain message, so a client sees the reason instead of an `AttributeError` raised later.
+Every converter raises `InvalidArgumentError` (or `NotFoundError` for a target that is not in the library) with a plain message, so a client sees the reason instead of an `AttributeError` raised later.
 
 For exact behavior, read the code. The code is the source of truth.
 

@@ -76,14 +76,9 @@ def test_to_error_info_keeps_a_category_error() -> None:
     assert info.rpc_code == RPC_CODES["conflict"]
 
 
-def test_to_error_info_reports_a_bare_value_error_as_an_invalid_argument() -> None:
-    """Report a bare `ValueError` as an invalid argument."""
-    info = to_error_info(ValueError("detail must be one of: summary"))
-    assert info.code == "invalid_argument"
-    assert info.message == "detail must be one of: summary"
-
-
-@pytest.mark.parametrize("exc", [KeyError("secret"), RuntimeError("secret path /home/x"), OSError("disk")])
+@pytest.mark.parametrize(
+    "exc", [KeyError("secret"), RuntimeError("secret path /home/x"), OSError("disk"), ValueError("secret")]
+)
 def test_to_error_info_hides_the_text_of_a_bug(exc: BaseException) -> None:
     """Report any other exception as `internal`, with the request id."""
     info = to_error_info(exc, request_id="req42")

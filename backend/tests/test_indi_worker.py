@@ -17,6 +17,7 @@ from typing import Any
 
 import pytest
 
+from astrometricslib import HardwareError
 from backend.services.infrastructure.indi_worker import (
     IndiWorkerClient,
     IndiWorkerProxy,
@@ -140,20 +141,20 @@ def test_concurrent_calls_correlate_to_the_right_response(worker_client) -> None
             assert future.result(timeout=10) == expected
 
 
-def test_a_raised_exception_round_trips_as_a_runtime_error(worker_client) -> None:  # ruff: ignore[missing-type-function-argument]
-    """An exception the worker raises surfaces here as a RuntimeError."""
-    with pytest.raises(RuntimeError, match="deliberate test failure"):
+def test_a_raised_exception_round_trips_as_a_hardware_error(worker_client: IndiWorkerClient) -> None:
+    """An exception the worker raises surfaces here as a HardwareError."""
+    with pytest.raises(HardwareError, match="deliberate test failure"):
         worker_client.call_sync("raise_an_error")
 
 
-def test_a_wedged_call_times_out_and_the_worker_is_restarted(worker_client) -> None:  # ruff: ignore[missing-type-function-argument]
+def test_a_wedged_call_times_out_and_the_worker_is_restarted(worker_client: IndiWorkerClient) -> None:
     """A call that never returns is treated as wedged, not waited on forever.
 
     The call itself still raises, but a subsequent call must succeed
     quickly -- proving the worker was force-killed and respawned rather than
     left stuck, which would otherwise queue every future call behind it.
     """
-    with pytest.raises(RuntimeError, match="timed out"):
+    with pytest.raises(HardwareError, match="timed out"):
         worker_client.call_sync("sleep_forever", timeout=1.0)
 
     assert worker_client.call_sync("echo_after_delay", "still alive", 0.0, timeout=10.0) == "still alive"

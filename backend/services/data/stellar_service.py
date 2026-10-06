@@ -9,7 +9,7 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
-from astrometricslib import Astrometrics, StellarObject
+from astrometricslib import Astrometrics, InvalidArgumentError, StellarObject
 from backend.services.data.deletion_archive import archive_record_before_delete
 
 logger = logging.getLogger(__name__)
@@ -1135,12 +1135,12 @@ class StellarService:
 
         Raises
         ------
-        ValueError
+        InvalidArgumentError
             If neither ``object_id`` nor ``search_term`` is provided.
         """
         term = search_term or object_id
         if not term:
-            raise ValueError("Missing search term or object_id")
+            raise InvalidArgumentError("Missing search term or object_id")
         return self.get_object_fuzzy(term)
 
     def analyze_periodicity(self, object_id: str) -> StellarObject | None:

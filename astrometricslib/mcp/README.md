@@ -30,7 +30,7 @@ Do not edit `tool_manifest.json` by hand. `backend/mcp/tool_inventory.py --write
 A client sends only JSON: names, ids and plain strings. Many methods need domain objects instead, such as a `Target` or an `Astrometrics` handle. `reflection.py` bridges the gap in three ways:
 
 1. A parameter hinted as `Target` that arrives as a string id is looked up in the target catalog. If the catalog has no such target, the call fails with a message that names the id.
-2. `argument_resolvers` convert a parameter by name. A library that registers tools can supply, for example, a converter that turns an ISO time string into an astropy `Time`. A converter raises `ValueError` with a plain message when it cannot convert.
+2. `argument_resolvers` convert a parameter by name. A library that registers tools can supply, for example, a converter that turns an ISO time string into an astropy `Time`. A converter raises `InvalidArgumentError` (or `NotFoundError` for a name that matches nothing) with a plain message when it cannot convert.
 3. `injected_arguments` fill parameters that only the server can build. Such a parameter is hidden from the tool's schema, so a client is never asked for it.
 
 Methods that are slow can be marked with `@background_job`. The server then runs them in a thread and returns a job id if they outlast a short grace period.

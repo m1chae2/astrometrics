@@ -20,7 +20,7 @@ import traceback
 from pathlib import Path
 from typing import Any
 
-from astrometricslib import InvalidArgumentError
+from astrometricslib import InvalidArgumentError, NotFoundError
 from backend.services.infrastructure.agent_code_policy import AGENT_VISIBLE_NAMES, check_agent_code
 
 logger = logging.getLogger(__name__)
@@ -739,7 +739,7 @@ class ScriptingService:
 
         Raises
         ------
-        FileNotFoundError
+        NotFoundError
             If the requested recipe cannot be found.
         """
         for recipe_dir in self._get_recipe_dirs():
@@ -752,7 +752,7 @@ class ScriptingService:
                         "filename": py_file.name,
                         "code": py_file.read_text(encoding="utf-8"),
                     }
-        raise FileNotFoundError(f"Recipe {recipe_id!r} not found.")
+        raise NotFoundError(f"Recipe {recipe_id!r} not found.")
 
     def _get_user_scripts_dir(self) -> Path:
         """Return directory path for user scripts ~/.astrometrics/scripts.
@@ -801,7 +801,7 @@ class ScriptingService:
 
         Raises
         ------
-        FileNotFoundError
+        NotFoundError
             If the requested script does not exist.
         """
         safe_name = Path(filename).name
@@ -809,7 +809,7 @@ class ScriptingService:
             safe_name += ".py"
         script_path = self._get_user_scripts_dir() / safe_name
         if not script_path.exists():
-            raise FileNotFoundError(f"User script {safe_name!r} not found.")
+            raise NotFoundError(f"User script {safe_name!r} not found.")
 
         return {
             "filename": safe_name,
@@ -925,7 +925,7 @@ class ScriptingService:
 
             try:
                 content = self.get_doc_topic(topic["id"])["content"]
-            except FileNotFoundError:
+            except NotFoundError:
                 continue
 
             match_pos = content.lower().find(trimmed)
@@ -954,7 +954,7 @@ class ScriptingService:
 
         Raises
         ------
-        FileNotFoundError
+        NotFoundError
             If the requested documentation file does not exist.
         """
         from .api_doc_generator import get_api_topic_content
@@ -972,10 +972,10 @@ class ScriptingService:
             if fallback_md.exists() and fallback_md.is_file():
                 safe_path = fallback_md
             else:
-                raise FileNotFoundError(f"Documentation topic {topic_id!r} not found.")
+                raise NotFoundError(f"Documentation topic {topic_id!r} not found.")
 
         if not str(safe_path).startswith(str(doc_root)):
-            raise FileNotFoundError(f"Documentation topic {topic_id!r} not found.")
+            raise NotFoundError(f"Documentation topic {topic_id!r} not found.")
 
         content = safe_path.read_text(encoding="utf-8")
         title = safe_path.stem.replace("_", " ").replace("-", " ").title()

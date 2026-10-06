@@ -17,7 +17,13 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from astrometricslib import ConflictError, HardwareError, NotFoundError, PermissionDeniedError
+from astrometricslib import (
+    ConflictError,
+    HardwareError,
+    InvalidArgumentError,
+    NotFoundError,
+    PermissionDeniedError,
+)
 from astrometricslib.foundation.logging import ContextFilter  # ruff: ignore[banned-api]
 from backend.mcp import tool_registry
 from backend.routers import rpc_router
@@ -74,6 +80,28 @@ async def test_execute_raises_the_dedicated_error_for_an_unknown_method(register
     """The registry raises `RPCMethodNotFoundError`, not a bare `KeyError`."""
     with pytest.raises(RPCMethodNotFoundError):
         await rpc_router.rpc_registry.execute("nothing:here", {})
+
+
+@pytest.mark.anyio
+async def test_a_stray_value_error_is_an_internal_error(registered_methods: dict) -> None:
+    """A bare `ValueError` is a bug, so it is reported as internal."""
+
+    def handler() -> None:
+        """Raise the way third-party code does on a bad value.
+
+        Raises
+        ------
+        ValueError
+            Always.
+        """
+        raise ValueError("could not convert string to float: 'secret'")
+
+    registered_methods["test:stray"] = handler
+    response = await rpc_router.handle_rpc(RPCRequest(method="test:stray", id=5))
+    error = _body(response)["error"]
+    assert error["code"] == -32603
+    assert error["data"]["code"] == "internal"
+    assert "secret" not in error["message"]
 
 
 @pytest.mark.anyio
@@ -269,7 +297,7 @@ async def test_backend_call_rpc_refuses_a_destructive_method() -> None:
         (NotFoundError("No target 'M 99'."), -32001, "not_found", False),
         (ConflictError("Device in use."), -32002, "conflict", False),
         (HardwareError("Mount offline."), -32010, "hardware", True),
-        (ValueError("bad value"), -32602, "invalid_argument", False),
+        (InvalidArgumentError("bad value"), -32602, "invalid_argument", False),
     ],
 )
 async def test_a_category_error_is_reported_with_its_error_info(

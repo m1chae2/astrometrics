@@ -14,7 +14,14 @@ from typing import Any
 
 from fastapi import APIRouter
 
-from astrometricslib import ErrorInfo, log_context, new_request_id, to_error_info
+from astrometricslib import (
+    ConfigurationError,
+    ErrorInfo,
+    InvalidArgumentError,
+    log_context,
+    new_request_id,
+    to_error_info,
+)
 from backend.container import container
 from backend.services.rpc_protocol import (
     RPCMethodNotFoundError,
@@ -443,9 +450,11 @@ class RPCHandlerRegistry:
 
         Raises
         ------
-        ValueError
-            If a registered service/method cannot be found, or if a
-            required parameter for the handler is missing.
+        ConfigurationError
+            If the service or method a registration names is not set up
+            in the container.
+        InvalidArgumentError
+            If a required parameter for the handler is missing.
         RPCMethodNotFoundError
             If no handler is registered for `method`.
         """
@@ -459,10 +468,12 @@ class RPCHandlerRegistry:
                 for part in service_name.split("."):
                     service = getattr(service, part, None)
                 if not service:
-                    raise ValueError(f"Service '{service_name}' not found or initialized in Container")
+                    raise ConfigurationError(
+                        f"Service '{service_name}' not found or initialized in Container"
+                    )
                 handler = getattr(service, method_name, None)
                 if not handler:
-                    raise ValueError(f"Method '{method_name}' not found on service '{service_name}'")
+                    raise ConfigurationError(f"Method '{method_name}' not found on service '{service_name}'")
             else:
                 handler = val
 
@@ -482,7 +493,10 @@ class RPCHandlerRegistry:
                 # If param has VAR_KEYWORD or VAR_POSITIONAL, it handles
                 # arbitrary args
                 if param.kind not in (inspect.Parameter.VAR_KEYWORD, inspect.Parameter.VAR_POSITIONAL):
-                    raise ValueError(f"Required parameter '{name}' is missing for method '{method}'")
+                    raise InvalidArgumentError(
+                        f"Required parameter '{name}' is missing for method '{method}'",
+                        details={"parameter": name, "method": method},
+                    )
 
         # If method accepts **kwargs, pass remaining params
         has_var_keyword = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())

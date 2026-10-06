@@ -8,7 +8,13 @@ captured frames associated with targets.
 import logging
 import os
 
-from astrometricslib import ConfigurationError, NotFoundError, Target
+from astrometricslib import (
+    AstrometricsError,
+    ConfigurationError,
+    ExternalServiceError,
+    NotFoundError,
+    Target,
+)
 from backend.services.infrastructure.base_service import BaseBackgroundService
 
 logger = logging.getLogger(__name__)
@@ -382,9 +388,13 @@ class IngestionService(BaseBackgroundService):
 
         Raises
         ------
-        Exception
-            If the remote/local source cannot be resolved or
-            downloaded, or if a calibration/remote download fails.
+        NotFoundError
+            If the remote or local source cannot be found.
+        AstrometricsError
+            If the remote download fails with a named error, which is
+            passed on unchanged.
+        ExternalServiceError
+            If the remote download fails in any other way.
         """
         ingest_type = payload.get("type", "local")
         target_name = payload.get("targetName")
@@ -439,7 +449,7 @@ class IngestionService(BaseBackgroundService):
                 downloaded_folders = list(calibration_files_by_folder.keys())
                 if not downloaded_folders:
                     self._log(job_id, "No calibration folders found on telescope.")
-                    raise Exception("No calibration folders found on telescope.")
+                    raise NotFoundError("No calibration folders found on telescope.")
 
                 # list_remote_files prefixes each calibration file with its
                 # folder ("Dark/foo.fits") so a selection spanning
@@ -503,7 +513,9 @@ class IngestionService(BaseBackgroundService):
 
                 if not remote_target:
                     self._log(job_id, f"Could not find remote folder for '{target_name}'")
-                    raise Exception(f"Could not find remote folder for '{target_name}'")
+                    raise NotFoundError(
+                        f"Could not find remote folder for '{target_name}'", details={"target": target_name}
+                    )
 
                 total_files = (
                     len(selected_files)
@@ -539,14 +551,17 @@ class IngestionService(BaseBackgroundService):
                     )
                     source_dir = os.path.join(config.get_frames_path(), "lights", target_name)
                     self._log(job_id, "Download complete.")
-                except Exception as e:
+                except AstrometricsError as e:
                     self._log(job_id, f"Download failed: {e}")
-                    raise Exception(f"Download failed: {e}") from e
+                    raise
+                except Exception as e:  # rsync or ssh failed in a way the driver did not name
+                    self._log(job_id, f"Download failed: {e}")
+                    raise ExternalServiceError(f"Download failed: {e}") from e
         else:
             source_dir = payload.get("sourcePath")
             if not os.path.exists(source_dir):
                 self._log(job_id, f"Source directory not found: {source_dir}")
-                raise Exception(f"Source directory not found: {source_dir}")
+                raise NotFoundError(f"Source directory not found: {source_dir}", details={"path": source_dir})
 
         # --- 2. Ingestion Logic ---
         if ingest_type != "remote":

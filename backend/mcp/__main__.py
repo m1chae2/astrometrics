@@ -16,7 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from astrometricslib import configure_logging
+from astrometricslib import NotFoundError, configure_logging
 from astrometricslib.mcp.profile import GAP_REPORT_GUIDANCE
 from astrometricslib.mcp.tool_errors import as_call_tool_result
 from backend.mcp.tool_registry import get_astrometrics, registry
@@ -88,7 +88,7 @@ async def read_resource(uri: str) -> str:  # ruff: ignore[unused-async] -- await
 
     Raises
     ------
-    ValueError
+    NotFoundError
         If `uri` does not match a known resource.
     """
     if uri == "astrometrics://notifications":
@@ -109,7 +109,7 @@ async def read_resource(uri: str) -> str:  # ruff: ignore[unused-async] -- await
                 return "[]"
         return "[]"
 
-    raise ValueError(f"Unknown resource: {uri}")
+    raise NotFoundError(f"Unknown resource: {uri}")
 
 
 async def main():  # ruff: ignore[missing-return-type-undocumented-public-function]

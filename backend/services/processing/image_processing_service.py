@@ -5,6 +5,7 @@ import os
 import time
 from typing import Any
 
+from astrometricslib import NotFoundError
 from backend.services.infrastructure.base_service import BaseBackgroundService
 
 # Define stable log directory relative to this file
@@ -277,7 +278,7 @@ def start_siril_processing_task(
 
     Raises
     ------
-    ValueError
+    NotFoundError
         If the target is not in the library.
     """
     from astrometricslib import capture_job_logs
@@ -303,7 +304,7 @@ def start_siril_processing_task(
         # to them.
         target = target_service.get_targets(target_id) if target_service else None
         if target is None:
-            raise ValueError(f"Cannot stack '{target_id}': the target is not in the library.")
+            raise NotFoundError(f"Cannot stack '{target_id}': the target is not in the library.")
         requested_paths = {frame if isinstance(frame, str) else frame.get("path") for frame in image_files}
         frames_to_stack = [frame for frame in target.frames if frame.path in requested_paths]
 

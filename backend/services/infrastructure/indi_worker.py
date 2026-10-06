@@ -38,6 +38,8 @@ from multiprocessing import Queue
 from multiprocessing.process import BaseProcess
 from typing import Any
 
+from astrometricslib import HardwareError
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_CALL_TIMEOUT_SECONDS = 15.0
@@ -262,7 +264,10 @@ class IndiWorkerClient:
             else:
                 type_name, message, tb_str = error
                 future.set_exception(
-                    RuntimeError(f"INDI worker call failed ({type_name}): {message}\n{tb_str}")
+                    HardwareError(
+                        f"INDI worker call failed ({type_name}): {message}",
+                        details={"error_type": type_name, "worker_traceback": tb_str},
+                    )
                 )
 
     def call_sync(
@@ -294,7 +299,7 @@ class IndiWorkerClient:
 
         Raises
         ------
-        RuntimeError
+        HardwareError
             If the call fails on the worker side, or times out.
         """
         with self._restart_lock:
@@ -326,7 +331,7 @@ class IndiWorkerClient:
                     self._process.kill()
                     self._process.join(timeout=2.0)
                 self._start_process()
-            raise RuntimeError(
+            raise HardwareError(
                 f"INDI worker call to {method_name}() timed out after {timeout:.1f}s."
             ) from None
 
@@ -361,7 +366,7 @@ class IndiWorkerClient:
         with self._pending_lock:
             for future in self._pending.values():
                 if not future.done():
-                    future.set_exception(RuntimeError("INDI worker stopped."))
+                    future.set_exception(HardwareError("INDI worker stopped.", retryable=False))
             self._pending.clear()
 
 

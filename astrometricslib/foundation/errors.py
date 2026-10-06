@@ -201,11 +201,10 @@ class ErrorInfo(BaseModel):
 def to_error_info(exc: BaseException, request_id: str | None = None) -> ErrorInfo:
     """Convert any exception to an `ErrorInfo`.
 
-    An `AstrometricsError` keeps its own code, message, and details. A bare
-    `ValueError` is reported as ``invalid_argument``, because code that has not
-    moved to the error family yet raises it for a bad argument. Every other
-    exception is a bug. It gets the code ``internal`` and a generic message,
-    so no internal detail leaks to the caller.
+    An `AstrometricsError` keeps its own code, message, and details. Every
+    other exception, a bare `ValueError` included, is a bug. It gets the code
+    ``internal`` and a generic message, so no internal detail leaks to the
+    caller.
 
     Parameters
     ----------
@@ -227,8 +226,6 @@ def to_error_info(exc: BaseException, request_id: str | None = None) -> ErrorInf
             retryable=exc.retryable,
             request_id=request_id,
         )
-    if isinstance(exc, ValueError):
-        return ErrorInfo(code="invalid_argument", message=str(exc), request_id=request_id)
     reference = f" Reference: {request_id}." if request_id else ""
     return ErrorInfo(
         code="internal",

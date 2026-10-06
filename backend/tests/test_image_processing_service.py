@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from astrometricslib import AppConfiguration, FrameRecord, ProcessingPipelines, Target
+from astrometricslib import AppConfiguration, FrameRecord, NotFoundError, ProcessingPipelines, Target
 from backend.services.processing.image_processing_service import (
     start_siril_processing_task,
 )
@@ -118,7 +118,7 @@ def test_worker_refuses_a_target_that_is_not_in_the_library() -> None:
     """An unknown target raises instead of stacking nothing."""
     target_service = _target_service(None)
 
-    with patch(STAGE) as stage, pytest.raises(ValueError, match="not in the library"):
+    with patch(STAGE) as stage, pytest.raises(NotFoundError, match="not in the library"):
         start_siril_processing_task(
             job_id="job-4",
             target_id="Nowhere",

@@ -9,7 +9,7 @@ import os
 from collections.abc import Callable
 from typing import Any, ClassVar
 
-from astrometricslib import FilterType, ReindexReport, Target
+from astrometricslib import FilterType, InvalidArgumentError, ReindexReport, Target
 from backend.services.data.deletion_archive import archive_record_before_delete
 from backend.services.data.image_service import ImageService
 
@@ -166,16 +166,24 @@ class TargetService:
         Returns
         -------
         result : `dict`
-            Status dictionary with ``status`` (and ``frame`` on success,
-            or ``message`` on failure).
+            ``{"status": "success"}``, plus ``frame`` when a FITS file
+            was indexed.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If ``image_file`` is neither a path nor an object with a
+            ``path`` attribute.
         """
+        path = image_file if isinstance(image_file, str) else getattr(image_file, "path", None)
+        if not isinstance(path, str):
+            raise InvalidArgumentError(
+                "The image file must be a file path.", details={"target_id": target_id}
+            )
+
         target = self.astrometrics.targets.get(target_id)
         if not target:
             target = self.astrometrics.targets.create(target_id)
-
-        path = image_file if isinstance(image_file, str) else getattr(image_file, "path", None)
-        if not isinstance(path, str):
-            return {"status": "error", "message": "Invalid target data input."}
 
         if os.path.splitext(path)[1].lower() in self.PROCESSED_IMAGE_EXTENSIONS:
             target.stacking.processed_image = path

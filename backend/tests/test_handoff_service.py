@@ -12,6 +12,7 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
+from astrometricslib import ConfigurationError, ExternalServiceError, NotFoundError
 from backend.services.infrastructure.handoff_service import HandoffService
 
 
@@ -57,18 +58,28 @@ def test_handoff_service_update_and_broadcast() -> None:
 def test_handoff_service_beam_missing_cli(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify beam returns friendly status when KDE Connect CLI is absent.
+    """Verify beam raises ConfigurationError when KDE Connect CLI is absent.
 
     Ensures that when neither gsconnect-cli nor kdeconnect-cli is installed,
-    a graceful error structure is returned without raising exceptions.
+    the error names both programs and carries the deep link in its details.
     """
     monkeypatch.setattr("shutil.which", lambda _cmd: None)
     service = HandoffService()
-    result = service.beam_to_device(target="M42", mode="Planetarium")
+    with pytest.raises(ConfigurationError, match="Neither gsconnect-cli nor kdeconnect-cli") as caught:
+        service.beam_to_device(target="M42", mode="Planetarium")
 
-    assert result["success"] is False
-    assert "Neither gsconnect-cli nor kdeconnect-cli" in result["message"]
-    assert "target=M42" in result["deep_link"]
+    assert "target=M42" in caught.value.details["deep_link"]
+
+
+def test_handoff_service_beam_cli_failure_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify beam raises ExternalServiceError when the CLI exits non-zero."""
+    monkeypatch.setattr("shutil.which", lambda _cmd: "/usr/bin/kdeconnect-cli")
+    monkeypatch.setattr("subprocess.run", MagicMock(return_value=MagicMock(returncode=1, stderr="no device")))
+
+    with pytest.raises(ExternalServiceError, match="no device"):
+        HandoffService().beam_to_device(target="M42")
 
 
 def test_handoff_service_beam_executes_cli(
@@ -229,8 +240,8 @@ def test_share_file_to_device(
     service = HandoffService()
 
     # Reject missing file
-    missing = service.share_file_to_device("/nonexistent/photo.png")
-    assert missing["success"] is False
+    with pytest.raises(NotFoundError, match="does not exist"):
+        service.share_file_to_device("/nonexistent/photo.png")
 
     # Accept existing file and run CLI
     sample_file = tmp_path / "stacked_m31.png"
@@ -275,3 +286,14 @@ def test_device_alert_endpoints_via_testclient(client: TestClient) -> None:
     data = res_alert.json()
     assert data["success"] is True
     assert data["alert"]["title"] == "Sequence Completed"
+
+
+def test_share_file_endpoint_reports_missing_file_as_404(client: TestClient) -> None:
+    """Verify the REST route sends a missing file as a 404 ErrorInfo reply."""
+    res = client.post("/api/handoff/share-file", json={"file_path": "/nonexistent/photo.png"})
+
+    assert res.status_code == 404
+    error = res.json()["error"]
+    assert error["code"] == "not_found"
+    assert "does not exist" in error["message"]
+    assert error["requestId"]

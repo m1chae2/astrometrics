@@ -7,7 +7,10 @@ topic reading, and editor buffer synchronization.
 
 from pathlib import Path
 
-from backend.services.infrastructure.scripting_service import ScriptingService
+import pytest
+
+from astrometricslib import InvalidArgumentError
+from backend.services.infrastructure.scripting_service import ScriptingService, inspect_api
 
 
 def test_scripting_service_workspace_manifest() -> None:
@@ -187,3 +190,9 @@ def test_get_figure_manager_provides_toolbar() -> None:
     assert mgr.toolbar.mode == "zoom rect"
 
     plt.close(fig)
+
+
+def test_inspect_api_rejects_none() -> None:
+    """inspect_api raises InvalidArgumentError when given None."""
+    with pytest.raises(InvalidArgumentError, match="no object to inspect"):
+        inspect_api(None)

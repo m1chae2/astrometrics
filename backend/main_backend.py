@@ -35,10 +35,15 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from astrometricslib import (
+    AstrometricsError,
+    ConfigurationError,
+    ErrorInfo,
     StorageNotMountedError,
     close_interrupted_jobs,
     get_configuration,
+    new_request_id,
     require_mounted_storage,
+    to_error_info,
 )
 from backend.container import container
 
@@ -222,11 +227,81 @@ app.add_middleware(
 # scripting_service is now in container
 
 
+#: HTTP status for each error code on the plain REST routes. The RPC route
+#: always answers with status 200 and puts the error code in the reply.
+HTTP_STATUS_BY_CODE: dict[str, int] = {
+    "invalid_argument": 400,
+    "permission_denied": 403,
+    "not_found": 404,
+    "conflict": 409,
+    "processing": 422,
+    "internal": 500,
+    "hardware": 502,
+    "external_service": 502,
+    "configuration": 503,
+    "storage": 503,
+}
+
+
+def _error_response(request: Request, info: ErrorInfo) -> JSONResponse:
+    """Build the JSON reply for a failed REST request.
+
+    Parameters
+    ----------
+    request : `~fastapi.Request`
+        The request that failed.
+    info : `ErrorInfo`
+        The error to send.
+
+    Returns
+    -------
+    response : `~fastapi.responses.JSONResponse`
+        ``{"error": ErrorInfo}`` with the HTTP status for the error's
+        code, and CORS headers set by hand for allowed origins.
+    """
+    response = JSONResponse(
+        status_code=HTTP_STATUS_BY_CODE.get(info.code, 500),
+        content={"error": info.model_dump(by_alias=True)},
+    )
+    # Set CORS headers by hand so the frontend can still read the error.
+    origin = request.headers.get("origin")
+    if origin in origins:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+    return response
+
+
+@app.exception_handler(AstrometricsError)
+# ruff: ignore[unused-async] -- required async signature for FastAPI's
+# exception_handler decorator, which awaits this handler.
+async def expected_error_handler(request: Request, exc: AstrometricsError) -> JSONResponse:
+    """Turn an expected error from a REST route into an error reply.
+
+    Parameters
+    ----------
+    request : `~fastapi.Request`
+        The incoming request during which the error was raised.
+    exc : `AstrometricsError`
+        The error that was raised.
+
+    Returns
+    -------
+    response : `~fastapi.responses.JSONResponse`
+        The error reply built by `_error_response`.
+    """
+    info = to_error_info(exc, new_request_id())
+    logger.warning("%s %s failed (%s): %s", request.method, request.url.path, info.code, info.message)
+    return _error_response(request, info)
+
+
 @app.exception_handler(Exception)
 # ruff: ignore[unused-async] -- required async signature for FastAPI's
 # exception_handler decorator, which awaits this handler.
-async def global_exception_handler(request: Request, exc: Exception):  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Catch any unhandled exception and return a JSON 500 response.
+async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Turn an unexpected exception into a generic 500 error reply.
+
+    The reply carries a request id but no internal detail. The log keeps
+    the traceback under the same id.
 
     Parameters
     ----------
@@ -238,22 +313,17 @@ async def global_exception_handler(request: Request, exc: Exception):  # ruff: i
     Returns
     -------
     response : `~fastapi.responses.JSONResponse`
-        A 500 response with ``{"status": "error", "error": str(exc)}``
-        as its body, with CORS headers set manually for allowed
-        origins.
+        The ``internal`` error reply built by `_error_response`.
     """
-    logger.error(f"Global error: {exc}", exc_info=True)
-    response = JSONResponse(
-        status_code=500,
-        content={"status": "error", "error": str(exc)},
+    info = to_error_info(exc, new_request_id())
+    logger.error(
+        "%s %s raised an unexpected error (request %s)",
+        request.method,
+        request.url.path,
+        info.request_id,
+        exc_info=exc,
     )
-    # Manual CORS headers for exceptions to avoid frontend being
-    # blinded by CORS on 500
-    origin = request.headers.get("origin")
-    if origin in origins:
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-    return response
+    return _error_response(request, info)
 
 
 # Import Routers
@@ -457,6 +527,10 @@ async def update_handoff_state(payload: HandoffStateUpdate) -> dict[str, Any]:
     return {}
 
 
+#: Message for a handoff call made while the handoff service is not running.
+_HANDOFF_UNAVAILABLE = "The handoff service is not running, so no phone can be reached."
+
+
 @app.post("/api/handoff/beam")
 async def beam_to_device(target: str | None = None, mode: str | None = None) -> dict[str, Any]:
     """Beam the current target or view to a paired phone via GSConnect.
@@ -472,14 +546,15 @@ async def beam_to_device(target: str | None = None, mode: str | None = None) -> 
     -------
     result : `dict`
         Status of the beam dispatch attempt.
+
+    Raises
+    ------
+    ConfigurationError
+        If the handoff service is not running.
     """
-    if container.handoff_service:
-        return container.handoff_service.beam_to_device(target=target, mode=mode)
-    return {
-        "success": False,
-        "message": "HandoffService is unavailable",
-        "deep_link": f"astrometrics://handoff?mode={mode or 'Planetarium'}",
-    }
+    if not container.handoff_service:
+        raise ConfigurationError(_HANDOFF_UNAVAILABLE)
+    return container.handoff_service.beam_to_device(target=target, mode=mode)
 
 
 @app.get("/api/handoff/devices")
@@ -519,16 +594,21 @@ async def dispatch_device_alert(payload: DeviceAlertRequest) -> dict[str, Any]:
     -------
     result : `dict`
         Status and delivered communication channels.
+
+    Raises
+    ------
+    ConfigurationError
+        If the handoff service is not running.
     """
-    if container.handoff_service:
-        return container.handoff_service.send_device_alert(
-            title=payload.title,
-            message=payload.message,
-            priority=payload.priority,
-            ring_device=payload.ring_device,
-            device_id=payload.device_id,
-        )
-    return {"success": False, "message": "HandoffService is unavailable"}
+    if not container.handoff_service:
+        raise ConfigurationError(_HANDOFF_UNAVAILABLE)
+    return container.handoff_service.send_device_alert(
+        title=payload.title,
+        message=payload.message,
+        priority=payload.priority,
+        ring_device=payload.ring_device,
+        device_id=payload.device_id,
+    )
 
 
 class ShareFileRequest(BaseModel):
@@ -551,13 +631,18 @@ async def share_file_to_device(payload: ShareFileRequest) -> dict[str, Any]:
     -------
     result : `dict`
         Status of the file beam attempt.
+
+    Raises
+    ------
+    ConfigurationError
+        If the handoff service is not running.
     """
-    if container.handoff_service:
-        return container.handoff_service.share_file_to_device(
-            file_path=payload.file_path,
-            device_id=payload.device_id,
-        )
-    return {"success": False, "message": "HandoffService is unavailable"}
+    if not container.handoff_service:
+        raise ConfigurationError(_HANDOFF_UNAVAILABLE)
+    return container.handoff_service.share_file_to_device(
+        file_path=payload.file_path,
+        device_id=payload.device_id,
+    )
 
 
 @app.get("/api/ready")

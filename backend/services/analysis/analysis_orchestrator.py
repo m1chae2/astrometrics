@@ -8,7 +8,7 @@ from typing import Any
 
 from astropy.io import fits
 
-from astrometricslib import FilterType
+from astrometricslib import FilterType, InvalidArgumentError
 from backend.services.infrastructure.base_service import BaseBackgroundService
 
 # REQ: IMG-4: Scientific Analysis Pipeline
@@ -115,14 +115,17 @@ class AnalysisOrchestrator(BaseBackgroundService):
 
         return {"status": "started", "jobId": job_id, "logFile": log_file}
 
-    def get_analysis_results(self, target_id: str, filter_type: str | None = None):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def get_analysis_results(self, target_id: str, filter_type: str | None = None) -> dict[str, Any] | None:
         """Get the results of the analysis job if complete.
 
         Returns
         -------
         result : `dict` or `None`
             The job result/status dict, or `None` if no analysis
-            job exists for the target.
+            job exists for the target. A job that failed is reported
+            as ``{"status": "failed", "jobId": ..., "error": ...}``,
+            where ``error`` is the job's error message. The call itself
+            still succeeds, because the job's state is the answer.
         """
         # Fix: Priority 1 - Use JobService to find the MOST RECENT
         # analysis job for this target
@@ -148,7 +151,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
                         try:
                             return future.result(timeout=0)
                         except Exception as e:
-                            return {"status": "error", "error": str(e)}
+                            return {"status": "failed", "jobId": job.id, "error": str(e)}
 
                 # Not tracked in this process's memory (e.g. no Future was
                 # ever submitted here) -- fall back to the DB-recorded
@@ -158,7 +161,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
                 if job.status == "completed":
                     return {"status": "finished", "jobId": job.id}
                 elif job.status == "failed":
-                    return {"status": "error", "error": job.message}
+                    return {"status": "failed", "jobId": job.id, "error": job.message}
                 elif job.status in ("started", "running"):
                     return {"status": "started", "jobId": job.id}
 
@@ -178,7 +181,15 @@ class AnalysisOrchestrator(BaseBackgroundService):
                 return self.cancel_processing(active[0].id)
         return False
 
-    def _start_analysis_task(self, job_id, target_id, image_files, filter_type, type="photometry", **kwargs):  # ruff: ignore[missing-type-function-argument, missing-type-kwargs, missing-return-type-private-function]
+    def _start_analysis_task(
+        self,
+        job_id: str,
+        target_id: str,
+        image_files: Any,
+        filter_type: str | None,
+        type: str = "photometry",
+        **kwargs: Any,
+    ) -> dict[str, Any]:
         """Unified analysis worker.
 
         Runs either spectroscopy extraction or photometry analysis (or
@@ -194,8 +205,12 @@ class AnalysisOrchestrator(BaseBackgroundService):
         result : `dict`
             The result dict from the spectroscopy or photometry
             pipeline; a combined `{"photometry": ..., "spectroscopy":
-            ...}` dict if a single batch contained both frame types;
-            or an error dict if no usable paths/filter were found.
+            ...}` dict if a single batch contained both frame types.
+
+        Notes
+        -----
+        The body raises `InvalidArgumentError` if no usable paths or
+        filter were found. The job runner then marks the job failed.
         """
         # The job row already exists here -- it was created before this
         # worker started -- so this only needs the log-capture half.
@@ -214,15 +229,15 @@ class AnalysisOrchestrator(BaseBackgroundService):
         ) as job_logger:
             return self._run_analysis_task_body(job_logger, job_id, target_id, image_files, filter_type, type)
 
-    def _run_analysis_task_body(  # ruff: ignore[missing-return-type-private-function]
+    def _run_analysis_task_body(
         self,
-        job_logger,  # ruff: ignore[missing-type-function-argument]
-        job_id,  # ruff: ignore[missing-type-function-argument]
-        target_id,  # ruff: ignore[missing-type-function-argument]
-        image_files,  # ruff: ignore[missing-type-function-argument]
-        filter_type,  # ruff: ignore[missing-type-function-argument]
-        type="photometry",  # ruff: ignore[missing-type-function-argument]
-    ):
+        job_logger: logging.Logger,
+        job_id: str,
+        target_id: str,
+        image_files: Any,
+        filter_type: str | None,
+        type: str = "photometry",
+    ) -> dict[str, Any]:
         """Body of `_start_analysis_task`, run with job logging attached.
 
         Split out purely so `_start_analysis_task` can guarantee the
@@ -234,6 +249,12 @@ class AnalysisOrchestrator(BaseBackgroundService):
         -------
         result : `dict`
             Same as `_start_analysis_task`.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If no image files were given (outside photometry mode), or
+            if the filter is not one the analysis supports.
         """
         job_logger.info(f"[{target_id}] Background analysis worker started for {target_id} (Job: {job_id})")
 
@@ -276,7 +297,10 @@ class AnalysisOrchestrator(BaseBackgroundService):
         job_logger.info(f"[{target_id}] Analysis task for {target_id} found {len(paths)} files")
 
         if not paths and type != "photometry":
-            return {"status": "error", "message": "No paths provided for analysis"}
+            raise InvalidArgumentError(
+                "No image files were given for analysis. Pick at least one frame.",
+                details={"target_id": target_id},
+            )
 
         # Only the test double of `Astrometrics` carries an image pipeline;
         # the real library runs its own inside `process_target`.
@@ -373,7 +397,10 @@ class AnalysisOrchestrator(BaseBackgroundService):
                 job_id, target_id, light_paths, pipeline, filter_type, logger=job_logger
             )
 
-        return {"status": "error", "message": f"Unsupported filter: {filter_type}"}
+        raise InvalidArgumentError(
+            f"The filter {filter_type!r} is not supported for analysis.",
+            details={"target_id": target_id, "filter_type": filter_type},
+        )
 
     def _update_job_progress(self, job_id, target_id, current, total, filter_type=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
         if self._job_service:

@@ -10,9 +10,15 @@ import threading
 import time
 from typing import Any
 
+from astrometricslib import ConfigurationError, ExternalServiceError, NotFoundError
 from backend.services.infrastructure.socket_manager import SocketManager
 
 logger = logging.getLogger(__name__)
+
+#: Message for a computer that has neither phone-link program installed.
+_NO_PHONE_LINK_MESSAGE = (
+    "Neither gsconnect-cli nor kdeconnect-cli is installed, so the phone cannot be reached."
+)
 
 
 class HandoffService:
@@ -131,7 +137,15 @@ class HandoffService:
         Returns
         -------
         result : `dict`
-            Status and metadata of the beam dispatch attempt.
+            ``success`` (always `True`), a ``message``, and the
+            ``deep_link`` that was sent.
+
+        Raises
+        ------
+        ConfigurationError
+            If neither phone-link program is installed.
+        ExternalServiceError
+            If the phone-link program fails or cannot be run.
         """
         import shutil
         import subprocess
@@ -142,27 +156,25 @@ class HandoffService:
             deep_link += f"&target={target}"
 
         if not kdeconnect_bin:
-            return {
-                "success": False,
-                "message": ("Neither gsconnect-cli nor kdeconnect-cli found in PATH"),
-                "deep_link": deep_link,
-            }
+            raise ConfigurationError(_NO_PHONE_LINK_MESSAGE, details={"deep_link": deep_link})
 
+        cmd = [kdeconnect_bin, "--open-url", deep_link]
         try:
-            cmd = [kdeconnect_bin, "--open-url", deep_link]
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=5, check=False)
-            return {
-                "success": proc.returncode == 0,
-                "message": ("Dispatched to GSConnect/KDE Connect" if proc.returncode == 0 else proc.stderr),
-                "deep_link": deep_link,
-            }
-        except Exception as exc:
-            logger.warning("Failed to beam to device: %s", exc)
-            return {
-                "success": False,
-                "message": str(exc),
-                "deep_link": deep_link,
-            }
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise ExternalServiceError(
+                f"Could not run the phone-link program: {exc}", details={"deep_link": deep_link}
+            ) from exc
+        if proc.returncode != 0:
+            raise ExternalServiceError(
+                f"The phone-link program could not open the link: {proc.stderr.strip()}",
+                details={"deep_link": deep_link},
+            )
+        return {
+            "success": True,
+            "message": "Dispatched to GSConnect/KDE Connect",
+            "deep_link": deep_link,
+        }
 
     def list_paired_devices(self) -> list[dict[str, Any]]:
         """Enumerate paired companion devices via GSConnect or KDE Connect.
@@ -310,39 +322,45 @@ class HandoffService:
         Returns
         -------
         result : `dict`
-            Dispatch status and CLI outcome.
+            ``success`` (always `True`), a ``message``, and the
+            ``file_path`` that was shared.
+
+        Raises
+        ------
+        NotFoundError
+            If ``file_path`` does not exist.
+        ConfigurationError
+            If neither phone-link program is installed.
+        ExternalServiceError
+            If the phone-link program fails or cannot be run.
         """
         import os
         import shutil
         import subprocess
 
         if not os.path.exists(file_path):
-            return {
-                "success": False,
-                "message": f"Target file does not exist: {file_path}",
-            }
+            raise NotFoundError(f"The file {file_path} does not exist.", details={"file_path": file_path})
 
         kdeconnect_bin = shutil.which("kdeconnect-cli") or shutil.which("gsconnect-cli")
         if not kdeconnect_bin:
-            return {
-                "success": False,
-                "message": ("Neither gsconnect-cli nor kdeconnect-cli found in PATH"),
-            }
+            raise ConfigurationError(_NO_PHONE_LINK_MESSAGE, details={"file_path": file_path})
 
+        cmd = [kdeconnect_bin, "--share", file_path]
+        if device_id:
+            cmd.extend(["--device", device_id])
         try:
-            cmd = [kdeconnect_bin, "--share", file_path]
-            if device_id:
-                cmd.extend(["--device", device_id])
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10, check=False)
-            return {
-                "success": proc.returncode == 0,
-                "message": ("Shared file to device" if proc.returncode == 0 else proc.stderr),
-                "file_path": file_path,
-            }
-        except Exception as exc:
-            logger.warning("Failed to share file to device: %s", exc)
-            return {
-                "success": False,
-                "message": str(exc),
-                "file_path": file_path,
-            }
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise ExternalServiceError(
+                f"Could not run the phone-link program: {exc}", details={"file_path": file_path}
+            ) from exc
+        if proc.returncode != 0:
+            raise ExternalServiceError(
+                f"The phone-link program could not share the file: {proc.stderr.strip()}",
+                details={"file_path": file_path},
+            )
+        return {
+            "success": True,
+            "message": "Shared file to device",
+            "file_path": file_path,
+        }

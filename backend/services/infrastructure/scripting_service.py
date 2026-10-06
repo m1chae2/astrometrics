@@ -20,6 +20,7 @@ import traceback
 from pathlib import Path
 from typing import Any
 
+from astrometricslib import InvalidArgumentError
 from backend.services.infrastructure.agent_code_policy import AGENT_VISIBLE_NAMES, check_agent_code
 
 logger = logging.getLogger(__name__)
@@ -38,9 +39,14 @@ def inspect_api(obj_or_path: Any) -> dict[str, Any]:
     info : `dict[str, Any]`
         Structured dictionary containing name, docstring, type, and
         callable method signatures.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If ``obj_or_path`` is ``None``.
     """
     if obj_or_path is None:
-        return {"error": "Target object is None"}
+        raise InvalidArgumentError("There is no object to inspect. Pass an object, not None.")
 
     obj = obj_or_path
     obj_name = getattr(obj, "__name__", str(obj))

@@ -6,7 +6,7 @@ import threading
 from datetime import UTC
 from typing import Any
 
-from astrometricslib import require_mounted_storage
+from astrometricslib import ConfigurationError, require_mounted_storage
 from backend.services.infrastructure import thread_management
 from wayfindinglib import ObservatoryControl
 
@@ -136,11 +136,15 @@ class SyncService:
         Returns
         -------
         summary : `dict`
-            The sync task summary, or an error status if no
-            `ObservatoryControl` is configured.
+            The sync task summary.
+
+        Raises
+        ------
+        ConfigurationError
+            If no `ObservatoryControl` is configured.
         """
         if not self._observatory:
-            return {"status": "error", "message": "ObservatoryControl not available"}
+            raise ConfigurationError("Observatory control is not set up, so there is no remote to sync from.")
 
         target_list = self._observatory.remote.list("folders")
         target_list = [t for t in target_list if t not in ["Bias", "Dark", "Flat"]]

@@ -14,7 +14,9 @@ import contextlib
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from astrometricslib import BatchRunSummary, FrameRecord, Target
+import pytest
+
+from astrometricslib import BatchRunSummary, FrameRecord, InvalidArgumentError, Target
 from backend.services.analysis.analysis_orchestrator import AnalysisOrchestrator
 
 
@@ -217,3 +219,27 @@ class TestStartAnalysisTaskClassification:
 
         orchestrator._run_spectroscopy_analysis.assert_called_once()
         orchestrator._run_photometry_analysis.assert_not_called()
+
+
+class TestAnalysisFailures:
+    """Verify analysis failures raise, and failed jobs report as data."""
+
+    def test_no_paths_for_spectroscopy_raises_invalid_argument(self) -> None:
+        """An empty spectroscopy batch raises InvalidArgumentError."""
+        orchestrator = _make_orchestrator()
+        orchestrator._target_service.get_targets.return_value = None
+
+        with pytest.raises(InvalidArgumentError, match="No image files"):
+            orchestrator._start_analysis_task("job1", "EmptyTarget", [], None, type="spectroscopy")
+
+    def test_failed_job_reports_failed_status_with_message(self) -> None:
+        """A failed job in the job table reads back as status "failed"."""
+        orchestrator = _make_orchestrator()
+        orchestrator._job_service = MagicMock()
+        orchestrator._job_service.get_jobs_for_target.return_value = [
+            SimpleNamespace(id="job9", status="failed", message="Plate solve failed")
+        ]
+
+        result = orchestrator.get_analysis_results("FailedTarget")
+
+        assert result == {"status": "failed", "jobId": "job9", "error": "Plate solve failed"}

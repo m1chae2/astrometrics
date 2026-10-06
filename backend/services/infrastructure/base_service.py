@@ -3,6 +3,7 @@
 import os
 import threading
 import uuid
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -32,12 +33,22 @@ class BaseBackgroundService:
                 jobs_payload.append({"target_id": j.target_id, "job_id": j.id, "status": j.status})
             self._astrometrics_service.update_processing_jobs(jobs_payload)
 
-    def _submit_job(self, target_id, job_type, task_fn, *args, log_file_path=None, **kwargs):  # ruff: ignore[missing-type-function-argument, missing-type-args, missing-type-kwargs, missing-return-type-private-function]
+    def _submit_job(
+        self,
+        target_id: str,
+        job_type: str,
+        task_fn: Callable[..., Any],
+        *args: Any,
+        log_file_path: str | None = None,
+        **kwargs: Any,
+    ) -> str:
         """Create a job record, submit the task, and return its id.
 
         Creates a `ProcessingJob` in the database (when a job service
         is configured), submits the task to the thread pool, and
-        returns the job id.
+        returns the job id. A task fails by raising. A task that
+        returns a falsy value (such as `None` for "no output") is also
+        recorded as failed.
 
         Returns
         -------
@@ -58,21 +69,22 @@ class BaseBackgroundService:
         job_id = job.id
 
         # Wrap task to update database on completion/failure
-        def job_wrapper(jid, tid, *a, **k):  # ruff: ignore[missing-type-function-argument, missing-type-args, missing-type-kwargs, missing-return-type-private-function]
+        def job_wrapper(jid: str, tid: str, *a: Any, **k: Any) -> Any:
+            """Run the task and record how it ended in the job table.
+
+            Returns
+            -------
+            result : `Any`
+                Whatever the task returned.
+            """
             try:
                 # Add log_file_path to kwargs if provided
                 if log_file_path:
                     k["log_file_path"] = log_file_path
                 result = task_fn(jid, tid, *a, **k)
 
-                # Determine status based on result
-                status = "completed"
-                if not result:
-                    status = "failed"
-                elif isinstance(result, dict) and result.get("status") == "error":
-                    status = "failed"
-                elif isinstance(result, dict) and result.get("status") == "failed":
-                    status = "failed"
+                # A task fails by raising; a falsy result means no output.
+                status = "completed" if result else "failed"
 
                 self._job_service.update_job(jid, status=status, progress=100.0)
                 self._update_central_processing_jobs()
@@ -165,11 +177,7 @@ class BaseBackgroundService:
                         try:
                             # result() shouldn't block if done() is true
                             res = future.result(timeout=0)
-                            status = "finished"
-                            if not res:
-                                status = "failed"
-                            elif isinstance(res, dict) and res.get("status") in ["error", "failed"]:
-                                status = "failed"
+                            status = "finished" if res else "failed"
                         except Exception:
                             status = "failed"
                 else:

@@ -195,8 +195,7 @@ class StellarMateInterface(RemoteTransferDriver):
                     logger.debug("SSH Connection Failed: %s", e.stderr.strip())
                 self._update_connection_status(False)
             else:
-                logger.error("Command failed: %s", cmd_list)
-                logger.error("Stderr: %s", e.stderr)
+                logger.exception("Command failed: %s\nStderr: %s", cmd_list, e.stderr)
                 self._update_connection_status(True)
 
             raise ExternalServiceError(f"SSH/Command Failed: {e.stderr}") from e

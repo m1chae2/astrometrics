@@ -320,9 +320,9 @@ class IndiWorkerClient:
         except TimeoutError:
             with self._pending_lock:
                 self._pending.pop(request_id, None)
-            logger.error(
-                "INDI worker call to %s() did not respond within %.1fs; "
-                "assuming it is wedged and restarting it.",
+            logger.exception(
+                "INDI worker call to %s() did not respond within %.1fs; assuming it is wedged and "
+                "restarting it.",
                 method_name,
                 timeout,
             )

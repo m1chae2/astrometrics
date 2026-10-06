@@ -330,8 +330,8 @@ def start_siril_processing_task(
                     target, frames=frames_to_stack, kind=kind, log_file=log_file_path, register_job=False
                 )
             final_path = stack_result.stacked_path
-        except ProcessingError as error:
-            logger.error("Stacking %s made no stack: %s", target_id, error)
+        except ProcessingError:
+            logger.exception("Stacking %s made no stack", target_id)
             final_path = None
 
         if notification_service:

@@ -367,7 +367,7 @@ def global_catalog(sky, ra_deg: float, dec_deg: float, radius_deg: float) -> lis
     try:
         from astroquery.simbad import Simbad
     except ImportError:
-        logger.error("astroquery is not installed. Cannot query global catalog.")
+        logger.exception("astroquery is not installed. Cannot query global catalog.")
         return results
 
     custom_simbad = Simbad()

@@ -1159,7 +1159,7 @@ class StarIdentifier:
         try:
             result_table = _run_with_daemon_thread_timeout(_run_gaia_query, timeout_seconds=30)
         except ExternalServiceError:
-            logger.error("Gaia query timed out after 30s.")
+            logger.exception("Gaia query timed out after 30s.")
             _record_gaia_failure("cone search timed out after 30s")
             return None
         except Exception as e:

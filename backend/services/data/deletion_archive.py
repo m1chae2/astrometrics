@@ -51,8 +51,8 @@ def archive_record_before_delete(
             json.dumps({"kind": record_kind, "id": record_id, "record": record_data}, default=str, indent=1),
             encoding="utf-8",
         )
-    except OSError as error:
-        logger.error("Could not archive %s %r before deleting it: %s", record_kind, record_id, error)
+    except OSError:
+        logger.exception("Could not archive %s %r before deleting it", record_kind, record_id)
         return None
     logger.info("Archived %s %r to %s before deleting it.", record_kind, record_id, archive_path)
     return archive_path

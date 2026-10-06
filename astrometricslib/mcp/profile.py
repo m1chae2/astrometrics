@@ -118,8 +118,8 @@ def load_manifest(path: Path) -> dict[str, Any] | None:
     """
     try:
         manifest = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as error:
-        logger.error("Cannot read the MCP tool manifest %s: %s", path, error)
+    except OSError, ValueError:
+        logger.exception("Cannot read the MCP tool manifest %s", path)
         return None
     if not isinstance(manifest, dict) or not isinstance(manifest.get("tools"), dict):
         logger.error("The MCP tool manifest %s has no 'tools' table.", path)

@@ -313,8 +313,8 @@ def _backup_catalog_database(astrometrics: Astrometrics) -> str | None:
     backup_path = f"{db_path}.{time.strftime('%Y%m%d_%H%M%S')}.bak"
     try:
         shutil.copy2(db_path, backup_path)
-    except OSError as backup_error:
-        logger.error("Could not back up %s before writing: %s", db_path, backup_error)
+    except OSError:
+        logger.exception("Could not back up %s before writing", db_path)
         return None
     return backup_path
 

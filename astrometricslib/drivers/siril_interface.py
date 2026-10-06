@@ -1429,6 +1429,8 @@ class ImageProcessing:
                     try:
                         result_line = status_queue.get(timeout=SIRIL_COMMAND_TIMEOUT_SECONDS)
                     except queue.Empty:
+                        result_line = None
+                    if result_line is None:
                         if job_logger:
                             job_logger.error("Timed out waiting for Siril to finish command: %r", cmd)
                         break

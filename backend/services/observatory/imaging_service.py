@@ -114,10 +114,10 @@ class ImagingService:
                 self.job_service.update_job(job_id, status_message=f"Selecting filter {filter_name}...")
                 try:
                     self._observatory.imaging.set_filter(filter_name)
-                except (ValueError, HardwareError) as filter_error:
+                except ValueError, HardwareError:
                     # Capturing in whatever filter happened to be in place
                     # would silently mislabel the frames, so fail instead.
-                    logger.error("Job %s: Could not select filter %s: %s", job_id, filter_name, filter_error)
+                    logger.exception("Job %s: Could not select filter %s", job_id, filter_name)
                     self.job_service.update_job(
                         job_id, status="failed", status_message=f"Could not select filter {filter_name}"
                     )

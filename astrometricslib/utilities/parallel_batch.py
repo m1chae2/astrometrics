@@ -115,7 +115,7 @@ def _run_worker_with_captured_output(
 
     Executes inside a worker process. Buffering each item's output here,
     rather than writing straight to the terminal, is what lets the parent
-    print each item's output as one contiguous block instead of
+    log each item's output as one contiguous block instead of
     interleaving lines from concurrently-running items.
 
     Log records are captured alongside stdout. Worker processes never run
@@ -394,7 +394,9 @@ def run_parallel_batch(
 
                     processed_item_ids.add(item_id)
                     if captured_output:
-                        print(captured_output, end="")
+                        # Pass the worker's output on as one block, so lines
+                        # from items that ran at the same time stay apart.
+                        logger.info("Output from %s:\n%s", item_id, captured_output.rstrip("\n"))
 
                     summary.results[item_id] = result
                     item_status = result.get("status")

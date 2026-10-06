@@ -325,7 +325,7 @@ class IndiInterface(IndiClient):
 
         Useful when hostname changes.
         """
-        print("Reloading INDI connection...")
+        logger.info("Reloading INDI connection...")
         # Force refresh config in the injected object (it might have
         # been updated via API). But usually the config object stays
         # the same, its state changes.
@@ -336,7 +336,7 @@ class IndiInterface(IndiClient):
         if self.isServerConnected():
             current_host = self.getHost()
             if current_host != self.hostname:
-                print(f"Hostname changed from {current_host} to {self.hostname}. Reconnecting...")
+                logger.info("Hostname changed from %s to %s. Reconnecting...", current_host, self.hostname)
                 self.disconnectServer()
                 # self.setServer is called in _load_config
 
@@ -345,7 +345,7 @@ class IndiInterface(IndiClient):
                 time.sleep(0.5)
                 self.connect_to_server()
             else:
-                print("Hostname unchanged.")
+                logger.debug("Hostname unchanged.")
                 # Optional: Verify connection anyway?
                 pass
         else:
@@ -369,13 +369,13 @@ class IndiInterface(IndiClient):
         if not self.connection_manager.is_host_resolvable(self.getHost(), self.getPort()):
             # Skips the client's own connect call, which would wait about five
             # seconds on the name lookup while holding the INDI worker.
-            print(f"No indiserver running on {self.getHost()}:{self.getPort()}")
+            logger.warning("No indiserver running on %s:%s", self.getHost(), self.getPort())
             self._reset_status()
             return None
 
         if not self.connectServer():
             # Only print if we haven't already logged this recently
-            print(f"No indiserver running on {self.getHost()}:{self.getPort()}")
+            logger.warning("No indiserver running on %s:%s", self.getHost(), self.getPort())
             self._reset_status()
             return None
 
@@ -482,7 +482,7 @@ class IndiInterface(IndiClient):
 
     def serverDisconnected(self, code):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
         """Handle the server-disconnected callback."""
-        print(f"INDI Server disconnected (code {code})")
+        logger.warning("INDI Server disconnected (code %s)", code)
         self._reset_status()
 
     def _reset_status(self) -> None:
@@ -533,7 +533,7 @@ class IndiInterface(IndiClient):
                 except Exception as connect_error:
                     # Ignore connection errors for individual devices,
                     # keep trying others
-                    print(f"Error connecting device '{device_name}': {connect_error}")
+                    logger.warning("Error connecting device '%s': %s", device_name, connect_error)
 
         connection_status = "Disconnected"
         tracking_status = "Not Tracking"
@@ -1060,7 +1060,7 @@ class IndiInterface(IndiClient):
                 try:
                     self._calculate_horizontal_coordinates(telescope, telescope_coordinates)
                 except Exception as coord_error:
-                    print(f"Error calculating horizontal coordinates: {coord_error}")
+                    logger.warning("Error calculating horizontal coordinates: %s", coord_error)
 
         if "RA" not in self.status:
             self.status["RA"] = "Unknown"
@@ -1657,7 +1657,7 @@ class IndiInterface(IndiClient):
                 property_info["elements"] = elements
                 result[property_name] = property_info
             except Exception as property_error:
-                print(f"Error processing property: {property_error}")
+                logger.warning("Error processing property: %s", property_error)
 
         return result
 
@@ -1708,7 +1708,7 @@ class IndiInterface(IndiClient):
                     self.sendNewSwitch(property_vector)
                     return True
         except Exception as property_error:
-            print(f"Error setting property {property_name}: {property_error}")
+            logger.warning("Error setting property %s: %s", property_name, property_error)
 
         return False
 
@@ -1723,7 +1723,7 @@ class IndiInterface(IndiClient):
         try:
             self.mount_controller.set_tracking(telescope_device, False)
         except Exception as tracking_error:
-            print(f"Error enforcing default tracking: {tracking_error}")
+            logger.warning("Error enforcing default tracking: %s", tracking_error)
 
     def unpark(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Unparks the telescope.

@@ -33,6 +33,7 @@ instead of every call site needing to know which pipeline wants which
 subset of arguments.
 """
 
+import logging
 import os
 import threading
 import time
@@ -52,6 +53,8 @@ from astrometricslib.pipelines.shared.frame_grouping import (
     split_standard_and_spectral_frames,
 )
 from astrometricslib.pipelines.spectroscopy.runner import run_spectroscopy_analysis
+
+logger = logging.getLogger(__name__)
 
 # -- Stacking, as a tracked job with a hard timeout --------------------
 
@@ -189,10 +192,12 @@ def stack_frames_with_timeout(
 
     if stacking_thread.is_alive():
         lock_wait_seconds = siril_interface.get_siril_lock_wait_seconds()
-        print(
-            f"[{target.id}] Stacking timed out after {timeout_seconds} seconds "
-            f"of working time ({lock_wait_seconds:.0f}s of Siril-lock wait excluded). "
-            f"Abandoning this stack."
+        logger.warning(
+            "[%s] Stacking timed out after %s seconds of working time (%.0fs of Siril-lock wait "
+            "excluded). Abandoning this stack.",
+            target.id,
+            timeout_seconds,
+            lock_wait_seconds,
         )
         # A timeout is a quality event, not just a log line: recorded on
         # the target's existing stack summary when there is one, so the
@@ -433,9 +438,9 @@ def run_full_pipeline(
         A dictionary mapping the stack type ("standard" or "spectral")
         to the final saved image file path.
     """
-    print("\n==========================================")
-    print(f"STARTING BATCH PROCESSING FOR TARGET: {target.id}")
-    print("==========================================")
+    logger.info("==========================================")
+    logger.info("STARTING BATCH PROCESSING FOR TARGET: %s", target.id)
+    logger.info("==========================================")
 
     camera_frames = select_frames_for_processing(target, camera_name, focal_length_mm)
     if camera_frames is None:
@@ -463,7 +468,7 @@ def run_full_pipeline(
         _run_photometry_stage(target, astrometrics, camera_frames, max_workers, max_concurrent_jobs)
         _save_target(target, astrometrics)
     elif standard_frames:
-        print(f"[{target.id}] Standard stacking failed; skipping astrometry and photometry.")
+        logger.warning("[%s] Standard stacking failed; skipping astrometry and photometry.", target.id)
 
     # 4. Spectroscopy Analysis (only when this target actually has a
     # SPEC stack)
@@ -471,9 +476,9 @@ def run_full_pipeline(
         _run_spectroscopy_stage(target, astrometrics, spectral_frames, max_concurrent_jobs)
         _save_target(target, astrometrics)
     elif spectral_frames:
-        print(f"[{target.id}] Spectral stacking failed; skipping spectroscopy.")
+        logger.warning("[%s] Spectral stacking failed; skipping spectroscopy.", target.id)
 
-    print(f"[{target.id}] Processing completed and metadata saved successfully.")
+    logger.info("[%s] Processing completed and metadata saved successfully.", target.id)
 
     return stack_outputs
 
@@ -494,8 +499,8 @@ def _save_target(target: Target, astrometrics: Any) -> None:
         # Target-scoped write (safe under concurrent callers), unlike a
         # full-catalog resync.
         astrometrics.catalog_access.put(target, "target_record", {})
-    except Exception as save_error:
-        print(f"[{target.id}] Failed to save target after pipeline stage: {save_error}")
+    except Exception:
+        logger.exception("[%s] Failed to save target after pipeline stage", target.id)
 
 
 def _stack_camera_frames(
@@ -518,7 +523,7 @@ def _stack_camera_frames(
         Maps the stack type ("standard" or "spectral") to the final
         saved image file path, for whichever kind(s) stacked
         successfully. A kind present in the input but absent from the
-        result failed to stack; the reason is printed at the point of
+        result failed to stack; the reason is logged at the point of
         failure.
     """
     stack_outputs: dict[str, str] = {}
@@ -531,8 +536,8 @@ def _stack_camera_frames(
     # The driver is the right place for the lock because it protects
     # every Siril launch, not just the ones started by this batch script.
     if standard_frames and spectral_frames:
-        print(
-            f"[{target.id}] Target contains mixed frames. Stacking standard and spectral frames separately."
+        logger.info(
+            "[%s] Target contains mixed frames. Stacking standard and spectral frames separately.", target.id
         )
 
     for kind, frames in (("standard", standard_frames), ("spectral", spectral_frames)):
@@ -542,19 +547,22 @@ def _stack_camera_frames(
             # Caught broadly and deliberately: this kind's failure, whatever
             # its cause, must not take down the other kind's stack.
             stacked_path = stack_frames_with_timeout(target, frames)
-        except Exception as stacking_error:
-            print(f"[{target.id}] {kind.capitalize()} stacking raised an error: {stacking_error!r}")
+        except Exception:
+            logger.exception("[%s] %s stacking raised an error", target.id, kind.capitalize())
             continue
         if not stacked_path or not os.path.exists(stacked_path):
-            print(f"[{target.id}] {kind.capitalize()} stacking pipeline returned no valid output path.")
+            logger.warning(
+                "[%s] %s stacking pipeline returned no valid output path.", target.id, kind.capitalize()
+            )
             continue
-        print(f"[{target.id}] {kind.capitalize()} stacking succeeded: {stacked_path}")
+        logger.info("[%s] %s stacking succeeded: %s", target.id, kind.capitalize(), stacked_path)
         stack_outputs[kind] = stacked_path
 
     if not standard_frames and not spectral_frames:
-        print(
-            f"[{target.id}] No valid frames matching camera '{camera_name}' found for stacking. "
-            "Skipping stacking step."
+        logger.warning(
+            "[%s] No valid frames matching camera '%s' found for stacking. Skipping stacking step.",
+            target.id,
+            camera_name,
         )
 
     return stack_outputs
@@ -573,15 +581,16 @@ def _run_astrometry_stage(target: Target, astrometrics: Any) -> dict[str, Any]:
     ProcessingError
         If astrometry analysis failed to produce a result.
     """
-    print(f"[{target.id}] Running Astrometry Analysis...")
+    logger.info("[%s] Running Astrometry Analysis...", target.id)
     astrometry_results = analyze_target(
         target, pipeline_type="astrometry", catalog_access=astrometrics.catalog_access
     )
     if astrometry_results is None:
         raise ProcessingError("Astrometry analysis failed.")
-    print(
-        f"[{target.id}] Astrometry Analysis complete. "
-        f"Resolved WCS: {astrometry_results.get('wcs') is not None}"
+    logger.info(
+        "[%s] Astrometry Analysis complete. Resolved WCS: %s",
+        target.id,
+        astrometry_results.get("wcs") is not None,
     )
     return astrometry_results
 
@@ -600,7 +609,7 @@ def _run_photometry_stage(
     photometry_results : `dict`
         The photometry pipeline's result dict.
     """
-    print(f"[{target.id}] Running Photometry/Variability Analysis...")
+    logger.info("[%s] Running Photometry/Variability Analysis...", target.id)
     with acquire_resource_slot(astrometrics.config, "job", max_concurrent_jobs):
         photometry_results = analyze_target(
             target,
@@ -609,8 +618,10 @@ def _run_photometry_stage(
             catalog_access=astrometrics.catalog_access,
             max_workers=max_workers,
         )
-    print(
-        f"[{target.id}] Photometry Analysis complete. Stars found: {photometry_results.get('starsFound', 0)}"
+    logger.info(
+        "[%s] Photometry Analysis complete. Stars found: %s",
+        target.id,
+        photometry_results.get("starsFound", 0),
     )
     return photometry_results
 
@@ -629,14 +640,14 @@ def _run_spectroscopy_stage(
         If spectroscopy analysis failed to produce a result.
     """
     if not spectral_frames:
-        print(f"[{target.id}] No SPEC frames found for this target. Skipping spectroscopy analysis.")
+        logger.info("[%s] No SPEC frames found for this target. Skipping spectroscopy analysis.", target.id)
         return
 
-    print(f"[{target.id}] Running Spectroscopy Analysis...")
+    logger.info("[%s] Running Spectroscopy Analysis...", target.id)
     with acquire_resource_slot(astrometrics.config, "job", max_concurrent_jobs):
         spectroscopy_results = analyze_target(
             target, pipeline_type="spectroscopy", limit=10, catalog_access=astrometrics.catalog_access
         )
     if spectroscopy_results is None:
         raise ProcessingError("Spectroscopy analysis failed.")
-    print(f"[{target.id}] Spectroscopy Analysis complete.")
+    logger.info("[%s] Spectroscopy Analysis complete.", target.id)

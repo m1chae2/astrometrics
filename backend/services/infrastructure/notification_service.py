@@ -26,7 +26,7 @@ class NotificationService:
             with open(self.storage_path, "w") as f:
                 json.dump([], f)
 
-    def notify(self, target_id: str, message: str, status: str = "info"):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def notify(self, target_id: str, message: str, status: str = "info") -> None:
         """Add a notification to the queue."""
         notification = {
             "id": f"{target_id}_{int(time.time())}",
@@ -47,8 +47,8 @@ class NotificationService:
                 f.seek(0)
                 f.truncate()
                 json.dump(data, f, indent=2)
-        except Exception as e:
-            print(f"Failed to write notification: {e}")
+        except OSError, json.JSONDecodeError:
+            logger.exception("Failed to write notification")
 
     def get_notifications(self, unread_only: bool = True) -> list[dict[str, Any]]:
         """Retrieve notifications.
@@ -66,10 +66,11 @@ class NotificationService:
                 if unread_only:
                     return [n for n in data if not n.get("read")]
                 return data
-        except Exception:
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("Could not read notifications from %s: %s", self.storage_path, exc)
             return []
 
-    def mark_as_read(self, notification_id: str):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def mark_as_read(self, notification_id: str) -> None:
         """Mark a specific notification as read."""
         try:
             with open(self.storage_path, "r+") as f:
@@ -80,5 +81,5 @@ class NotificationService:
                 f.seek(0)
                 f.truncate()
                 json.dump(data, f, indent=2)
-        except Exception as exc:
+        except (OSError, json.JSONDecodeError) as exc:
             logger.debug("Failed to mark notification '%s' as read: %s", notification_id, exc)

@@ -8,11 +8,14 @@ the one place that logic lives, so every pipeline answers the question
 the same way.
 """
 
+import logging
 import os
 from typing import Any
 
 from astrometricslib.foundation.enums import FilterType
 from astrometricslib.models.target import FrameRecord
+
+logger = logging.getLogger(__name__)
 
 
 def select_frames_for_camera(target: Any, camera_name: str) -> list:
@@ -199,9 +202,11 @@ def select_frames_for_processing(
             if (frame_configuration_key(frame) or "").endswith(requested_key_suffix)
         ]
         if not selected_frames:
-            print(
-                f"[{target.id}] No frames at {focal_length_mm:g}mm for camera '{camera_name}'. "
-                "Skipping all processing steps."
+            logger.warning(
+                "[%s] No frames at %gmm for camera '%s'. Skipping all processing steps.",
+                target.id,
+                focal_length_mm,
+                camera_name,
             )
             return None
         unassignable = frames_missing_focal_length(target, camera_name)
@@ -209,16 +214,18 @@ def select_frames_for_processing(
             # Never dropped silently: a frame with no FOCALLEN cannot be
             # grouped, and on this library that is 602 frames. See
             # scripts/backfill_focal_length.
-            print(
-                f"[{target.id}] {len(unassignable)} frame(s) excluded: no FOCALLEN recorded, "
-                "so their optic is unknown."
+            logger.warning(
+                "[%s] %s frame(s) excluded: no FOCALLEN recorded, so their optic is unknown.",
+                target.id,
+                len(unassignable),
             )
         camera_frames = selected_frames
 
     if not camera_frames:
-        print(
-            f"[{target.id}] No frames matching camera '{camera_name}' found for this target. "
-            "Skipping all processing steps."
+        logger.warning(
+            "[%s] No frames matching camera '%s' found for this target. Skipping all processing steps.",
+            target.id,
+            camera_name,
         )
         return None
 
@@ -238,7 +245,7 @@ def split_standard_and_spectral_frames(
     standard_frames, spectral_frames : `list` [`FrameRecord`]
         The non-SPEC and SPEC frames, respectively.
     """
-    print(f"[{target.id}] Stacking frames...")
+    logger.info("[%s] Stacking frames...", target.id)
     target_frames = [
         frame
         for frame in camera_frames

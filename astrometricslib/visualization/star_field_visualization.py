@@ -4,6 +4,8 @@ Description: Combines 2D star fields and 1D analysis visualization layers
 into interactive 2-panel views.
 """
 
+import logging
+
 import matplotlib.pyplot as plt
 
 from astrometricslib.models.stellar_source import StellarObject
@@ -22,6 +24,8 @@ from .layers import (
 )
 from .spectroscopy_field_access import get_spectroscopy_field as _get_spectroscopy_field
 from .visualization_config import VisualizationConfig
+
+logger = logging.getLogger(__name__)
 
 
 class _AnalysisView:
@@ -103,7 +107,7 @@ class _AnalysisView:
     def plot(self, block: bool = True, add_buttons: bool = True, limit: int | None = None):  # ruff: ignore[missing-return-type-private-function]
         """Launch the interactive visualization window."""
         if not self.stellar_objects:
-            print("No stars to display.")
+            logger.info("No stars to display.")
             return
 
         # 1. Render Image Layer

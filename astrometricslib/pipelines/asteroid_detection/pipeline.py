@@ -392,14 +392,17 @@ class AsteroidDetectionPipeline:
             self._detect_frame_sources(frames, stack_wcs, reference_star_index)
         )
 
-        print(
-            f"  [Asteroid Detection] Detected {len(frame_detections)} total point sources "
-            f"across {frames_with_wcs_estimate} frames."
+        logger.info(
+            "  [Asteroid Detection] Detected %s total point sources across %s frames.",
+            len(frame_detections),
+            frames_with_wcs_estimate,
         )
-        print("  [Asteroid Detection] Running spatial-temporal track persistence chaining...")
+        logger.info("  [Asteroid Detection] Running spatial-temporal track persistence chaining...")
         detector = MovingObjectDetector(self.config)
         candidates = detector.detect_candidates(target_id, frame_detections)
-        print(f"  [Asteroid Detection] Chaining completed: {len(candidates)} track candidates generated.")
+        logger.info(
+            "  [Asteroid Detection] Chaining completed: %s track candidates generated.", len(candidates)
+        )
 
         candidates = self._cross_match_ephemeris(candidates, frame_detections, stack_wcs, stack_header)
 
@@ -514,9 +517,10 @@ class AsteroidDetectionPipeline:
             for future in as_completed(futures):
                 completed += 1
                 if completed % 5 == 0 or completed == total_light:
-                    print(
-                        f"  [Asteroid Detection] Scanned {completed}/{total_light} "
-                        "frames for point sources..."
+                    logger.info(
+                        "  [Asteroid Detection] Scanned %s/%s frames for point sources...",
+                        completed,
+                        total_light,
                     )
                 status, detections = future.result()
                 if status == "read_failed":

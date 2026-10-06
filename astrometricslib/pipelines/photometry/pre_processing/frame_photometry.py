@@ -9,6 +9,7 @@ frames. They are module-level functions rather than methods because
 and needs to be picklable/forkable independent of any analyzer instance.
 """
 
+import logging
 from datetime import datetime
 from typing import Any
 
@@ -22,6 +23,8 @@ from astrometricslib.pipelines.shared.quality.saturation import (
     compute_saturated_pixel_fraction,
     is_saturation_significant,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _read_exposure_seconds(header: Any) -> float:
@@ -283,6 +286,6 @@ def _process_single_frame_worker(
 
         return path, (timestamp, fluxes_dict, delta_x_shift, delta_y_shift, global_background, airmass)
 
-    except Exception as e:
-        print(f"Error processing {path}: {e}")
+    except Exception:
+        logger.exception("Error processing %s", path)
         return path, None

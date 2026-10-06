@@ -49,7 +49,7 @@ def test_process_target_does_not_hang_when_siril_dies_at_launch(
     def fake_run_siril_headless(self, command_pipe, output_pipe, **kwargs: object):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
         # Stands in for a Siril that crashes immediately: a real process
         # that exits right away, having opened neither FIFO.
-        process = subprocess.Popen(["true"])
+        process = subprocess.Popen(["true"], stdout=subprocess.PIPE)
         self.subprocesses.append(process)
         process.wait()
         return process

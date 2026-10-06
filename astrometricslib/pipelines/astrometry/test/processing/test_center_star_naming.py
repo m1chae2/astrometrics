@@ -15,6 +15,7 @@ from unittest.mock import MagicMock
 import pytest
 from astropy.table import Column, MaskedColumn, Table
 
+from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.astrometry.processing import star_identifier as star_identifier_module
 from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
@@ -217,7 +218,7 @@ def test_with_no_magnitudes_an_unknown_name_takes_the_nearest(monkeypatch: pytes
 
 def test_a_failed_name_lookup_falls_back_to_the_nearest(monkeypatch: pytest.MonkeyPatch) -> None:
     """A failed lookup says nothing, so the nearest entry is used."""
-    identifier = _identifier(monkeypatch, _alhena_field(), RuntimeError("no network"))
+    identifier = _identifier(monkeypatch, _alhena_field(), ExternalServiceError("no network"))
 
     star = _run(identifier, "Alhena")
 

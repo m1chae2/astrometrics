@@ -15,6 +15,7 @@ is supposed to.
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+import pytest
 from scipy.ndimage import zoom
 
 from astrometricslib.pipelines.astrometry.processing.star_identifier import (
@@ -240,13 +241,33 @@ def test_mono_frame_detection_survives_a_measurement_exception():  # ruff: ignor
 
     with patch(
         "astrometricslib.pipelines.astrometry.processing.star_identifier.measure_blob_width_from_data",
-        side_effect=RuntimeError("boom"),
+        side_effect=ValueError("too few sources to measure"),
     ):
         sources, unique_sources = identifier.detect_stars(data, is_color_frame=False)
 
     assert sources == []
     assert unique_sources == []
     assert identifier.detector.fwhm == 4.0  # ruff: ignore[float-equality-comparison]
+
+
+def test_mono_frame_detection_does_not_hide_a_bug_in_the_measurement() -> None:
+    """Verify an error that is not about the data still reaches the caller.
+
+    Only the errors that unusable data can raise are caught. A coding
+    mistake, such as an ``AttributeError``, must show up instead of being
+    treated as a failed measurement.
+    """
+    identifier = _make_identifier()
+    data = np.zeros((4, 4))
+
+    with (
+        patch(
+            "astrometricslib.pipelines.astrometry.processing.star_identifier.measure_blob_width_from_data",
+            side_effect=AttributeError("a coding mistake"),
+        ),
+        pytest.raises(AttributeError),
+    ):
+        identifier.detect_stars(data, is_color_frame=False)
 
 
 def test_binning_suppresses_demosaic_false_positives_on_a_real_detector():  # ruff: ignore[missing-return-type-undocumented-public-function]

@@ -15,6 +15,7 @@ the database, replacing temporary labels so duplicates are not saved.
 import logging
 import math
 import queue
+import sqlite3
 import threading
 import warnings
 from collections.abc import Callable
@@ -30,6 +31,7 @@ from astrometricslib.drivers import simbad_interface
 from astrometricslib.drivers.fits_access import collapse_to_2d
 from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.drivers.plate_solve_interface import PlateSolver
+from astrometricslib.drivers.simbad_interface import ONLINE_QUERY_ERRORS
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.models.stellar_source import StellarObject
@@ -37,7 +39,7 @@ from astrometricslib.pipelines.astrometry.post_processing.assess_match_quality i
 from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_blob_width_from_data
 from astrometricslib.pipelines.astrometry.pre_processing.source_detection import SourceDetector
 from astrometricslib.pipelines.shared.solar_system_targets import is_solar_system_target
-from astrometricslib.utilities.exceptions import PlateSolveFailedError
+from astrometricslib.utilities.exceptions import DATA_ERRORS, PlateSolveFailedError
 
 logger = logging.getLogger(__name__)
 
@@ -268,7 +270,10 @@ def _run_with_daemon_thread_timeout(query_function: Callable[[], Any], timeout_s
             result_queue.put((True, query_function()))
         except BaseException as query_error:
             # Caught broadly and re-raised on the caller's thread below via
-            # `raise payload` -- nothing here is swallowed.
+            # `raise payload` -- nothing here is swallowed. The traceback is
+            # also kept at debug level, in case the caller has given up
+            # waiting and never raises it.
+            logger.debug("The background query raised an error.", exc_info=True)
             result_queue.put((False, query_error))
 
     threading.Thread(target=_run_and_report, daemon=True).start()
@@ -570,7 +575,7 @@ class StarIdentifier:
 
         try:
             blob_width = measure_blob_width_from_data(data) if data is not None else None
-        except Exception as width_error:
+        except DATA_ERRORS as width_error:
             logger.debug(
                 "Could not measure the detection kernel width, keeping the configured default: %s",
                 width_error,
@@ -607,7 +612,7 @@ class StarIdentifier:
         if not focal_len or focal_len <= 0:
             try:
                 focal_len = self.config.get_focal_length_mm()
-            except Exception:
+            except ValueError:
                 focal_len = None
 
         if focal_len and focal_len > 0 and pixel_size and pixel_size > 0:
@@ -700,12 +705,7 @@ class StarIdentifier:
         # without having to read the configuration first.
         identification_limit = maximum_identified_stars
         if identification_limit is None:
-            try:
-                identification_limit = self.config.get_maximum_identified_stars()
-            except Exception:
-                # A configuration stub without this getter must not stop
-                # a solve; no limit is the documented default anyway.
-                identification_limit = None
+            identification_limit = self.config.get_maximum_identified_stars()
         if isinstance(identification_limit, int) and identification_limit > 0:
             if len(unique_sources) > identification_limit:
                 logger.info(
@@ -810,7 +810,7 @@ class StarIdentifier:
                 fov_y = pixel_scales[1] * height
                 radius_deg = max(fov_x, fov_y) / 2.0 * 1.1  # 10% buffer
                 radius_deg = min(radius_deg, 1.0)  # Cap at 1 degree
-            except Exception as e:
+            except DATA_ERRORS as e:
                 logger.warning("Failed to calculate FOV from WCS: %s", e)
 
         logger.info(
@@ -828,8 +828,8 @@ class StarIdentifier:
                 votable_fields=("flux(V)", "flux(B)", "sp_type", "ids", "ra(d)", "dec(d)", "otype"),
                 row_limit=5000,  # Prevent massive result sets
             )
-        except Exception as e:
-            logger.error("SIMBAD query failed: %s", e)
+        except ExternalServiceError, ValueError:
+            logger.exception("SIMBAD query failed")
             return None, None
 
         if result_table is None or len(result_table) == 0:
@@ -870,8 +870,8 @@ class StarIdentifier:
                 dec_vals = dec_vals * u.deg
 
             simbad_coords = SkyCoord(ra=ra_vals, dec=dec_vals)
-        except Exception as e:
-            logger.error("SkyCoord creation failed: %s", e)
+        except DATA_ERRORS:
+            logger.exception("SkyCoord creation failed")
             return None, None
 
         return result_table, simbad_coords
@@ -922,7 +922,7 @@ class StarIdentifier:
             if catalog_store.is_region_cached(config, region_key):
                 logger.debug("Gaia region '%s' already cached.", region_key)
                 return 0
-        except Exception as e:
+        except (sqlite3.Error, OSError) as e:
             logger.warning("Error checking cached_regions: %s", e)
 
         # Use the same safety switch as the main search. We still check the
@@ -961,7 +961,7 @@ class StarIdentifier:
             )
             _record_gaia_failure("bulk seed timed out after 45s")
             return 0
-        except Exception as e:
+        except ONLINE_QUERY_ERRORS as e:
             logger.warning("Gaia bulk seed query failed: %s", e)
             _record_gaia_failure(f"bulk seed failed: {e}")
             return 0
@@ -991,7 +991,7 @@ class StarIdentifier:
                 dec_center,
             )
             return len(to_insert)
-        except Exception as e:
+        except (*DATA_ERRORS, sqlite3.Error, OSError) as e:
             logger.warning("Failed to record Gaia DR3 sources to cache: %s", e)
             return 0
 
@@ -1099,7 +1099,7 @@ class StarIdentifier:
                 )
                 gaia_coords = SkyCoord(ra=np.array(ras) * u.deg, dec=np.array(decs) * u.deg)
                 return result_table, gaia_coords
-        except Exception as e:
+        except (*DATA_ERRORS, sqlite3.Error, OSError) as e:
             logger.warning("Failed checking local Gaia SQLite cache: %s", e)
 
         return None
@@ -1162,8 +1162,8 @@ class StarIdentifier:
             logger.exception("Gaia query timed out after 30s.")
             _record_gaia_failure("cone search timed out after 30s")
             return None
-        except Exception as e:
-            logger.error("Gaia query failed: %s", e)
+        except ONLINE_QUERY_ERRORS as e:
+            logger.exception("Gaia query failed")
             _record_gaia_failure(f"cone search failed: {e}")
             return None
 
@@ -1199,7 +1199,7 @@ class StarIdentifier:
 
                 catalog_store.insert_gaia_sources(config, to_insert)
                 logger.info("Cached %s Gaia DR3 sources locally in %s.", len(to_insert), cache_db_path)
-        except Exception as cache_err:
+        except (*DATA_ERRORS, sqlite3.Error, OSError) as cache_err:
             logger.warning("Failed to cache Gaia sources locally: %s", cache_err)
 
     @staticmethod
@@ -1231,8 +1231,8 @@ class StarIdentifier:
                 ra=ra_vals * u.deg,
                 dec=dec_vals * u.deg,
             )
-        except Exception as e:
-            logger.error("Gaia SkyCoord creation failed: %s", e)
+        except DATA_ERRORS:
+            logger.exception("Gaia SkyCoord creation failed")
             return None
 
     def identify_stars_with_wcs(
@@ -1277,7 +1277,7 @@ class StarIdentifier:
         try:
             ra_center = wcs.wcs.crval[0]
             dec_center = wcs.wcs.crval[1]
-        except Exception:
+        except DATA_ERRORS:
             logger.warning("Could not determine field center from WCS; skipping SIMBAD identification.")
             return stellar_objects
 
@@ -1340,8 +1340,8 @@ class StarIdentifier:
             try:
                 ra, dec = wcs.wcs_pix2world(x, y, 0)
                 sky_positions[id(stellar_object)] = (float(ra), float(dec))
-            except Exception as e:
-                logger.error("Failed to project pixel (%s, %s) to sky: %s", x, y, e)
+            except DATA_ERRORS as e:
+                logger.warning("Failed to project pixel (%s, %s) to sky: %s", x, y, e)
 
         query_radius_deg = None
         if sky_positions:
@@ -1479,7 +1479,7 @@ class StarIdentifier:
                 fov_x = pixel_scales[0] * width
                 fov_y = pixel_scales[1] * height
                 radius_deg = min(max(fov_x, fov_y) / 2.0 * 1.1, 1.0)
-            except Exception as exc:
+            except DATA_ERRORS as exc:
                 logger.debug("Could not derive search radius from WCS pixel scale: %s", exc)
 
         gaia_table, gaia_coords = self._query_gaia_region(ra_center, dec_center, radius_deg)
@@ -1656,7 +1656,7 @@ class StarIdentifier:
                 float(matched_position.ra.deg),
                 float(matched_position.dec.deg),
             )
-        except Exception as e:
+        except DATA_ERRORS as e:
             logger.warning("Failed to match hint coordinates against SIMBAD results: %s", e)
 
     def _choose_center_catalog_entry(
@@ -1789,14 +1789,14 @@ class StarIdentifier:
             # astroquery raises IndexError, not an empty result, for a name
             # SIMBAD does not know.
             return "unresolved", None
-        except Exception as lookup_error:
+        except ExternalServiceError as lookup_error:
             logger.warning("SIMBAD name lookup for %r failed: %s", target_name, lookup_error)
             return "error", None
         if table is None or len(table) == 0:
             return "unresolved", None
         try:
             return "resolved", SkyCoord(float(table["ra"][0]) * u.deg, float(table["dec"][0]) * u.deg)
-        except Exception as column_error:
+        except DATA_ERRORS as column_error:
             logger.warning(
                 "SIMBAD name lookup for %r returned no usable position: %s", target_name, column_error
             )

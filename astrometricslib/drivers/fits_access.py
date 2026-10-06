@@ -21,6 +21,22 @@ iers.conf.auto_max_age = None
 
 logger = logging.getLogger(__name__)
 
+#: The errors that reading a FITS file can raise because of the file or its
+#: contents. ``OSError`` covers a missing, unreadable, or cut-off file.
+#: ``ValueError``, ``TypeError``, ``IndexError``, and ``KeyError`` come from a
+#: damaged header, a missing keyword, or an unexpected block layout.
+#: ``VerifyError`` comes from astropy's own header checks. Code that reads a
+#: file it did not write catches this tuple instead of every exception, so a
+#: real bug still shows up.
+FITS_READ_ERRORS: tuple[type[Exception], ...] = (
+    OSError,
+    ValueError,
+    TypeError,
+    IndexError,
+    KeyError,
+    fits.VerifyError,
+)
+
 
 @contextmanager
 def open_primary_hdu(path: str) -> Generator[fits.hdu.base._BaseHDU]:
@@ -114,7 +130,7 @@ def frame_dimensions(path: str) -> tuple[int, int] | None:
     try:
         header = read_header(path)
         return (int(header["NAXIS1"]), int(header["NAXIS2"]))
-    except Exception as read_error:
+    except FITS_READ_ERRORS as read_error:
         logger.debug("Could not read dimensions of %s: %s", path, read_error)
         return None
 
@@ -140,7 +156,7 @@ def frame_uses_color_filter_array(path: str) -> bool | None:
     """
     try:
         header = read_header(path)
-    except Exception as read_error:
+    except FITS_READ_ERRORS as read_error:
         logger.debug("Could not read header of %s for CFA detection: %s", path, read_error)
         return None
     bayer_pattern = header.get("BAYERPAT")

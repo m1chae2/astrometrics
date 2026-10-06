@@ -12,6 +12,7 @@ import os
 import queue
 import shutil
 import signal
+import sqlite3
 import subprocess
 import tempfile
 import threading
@@ -21,12 +22,13 @@ from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
+from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.drivers.siril_output_parsing import (
     parse_negative_pixel_percentage,
     parse_registration_totals,
     parse_stacked_image_count,
 )
-from astrometricslib.foundation.errors import ExternalServiceError
+from astrometricslib.foundation.errors import ConfigurationError, ExternalServiceError
 
 # Declares this module's own public surface. Without it, sphinx-automodapi
 # documents every imported name too, which is what produced the
@@ -395,7 +397,7 @@ def siril_process_lock(
 
             configuration = get_configuration()
             slot_count = configuration.get_max_concurrent_jobs()
-        except Exception as configuration_error:
+        except (ConfigurationError, OSError, ValueError) as configuration_error:
             # A missing configuration must not make Siril unrunnable;
             # one slot is the safe reading, matching the old behaviour.
             logger.debug("Could not read max_concurrent_jobs, using 1 slot: %s", configuration_error)
@@ -756,15 +758,15 @@ class ImageProcessing:
             pgid = os.getpgid(process.pid)
             try:
                 os.killpg(pgid, signal.SIGTERM)
-            except Exception as exc:
+            except OSError as exc:
                 logger.debug("SIGTERM to process group %s failed (likely already exited): %s", pgid, exc)
             time.sleep(0.2)
             try:
                 os.killpg(pgid, signal.SIGKILL)
-            except Exception as exc:
+            except OSError as exc:
                 logger.debug("SIGKILL to process group %s failed (likely already exited): %s", pgid, exc)
             process.wait(timeout=2)
-        except Exception:
+        except OSError, subprocess.TimeoutExpired:
             log("Process group termination completed.")
 
         if workdir and os.path.exists(workdir):
@@ -779,7 +781,7 @@ class ImageProcessing:
                             stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL,
                         )
-                    except Exception as exc:
+                    except (OSError, subprocess.SubprocessError) as exc:
                         logger.debug("fuser cleanup failed for pipe '%s': %s", pipe, exc)
                 # Safety net for sandboxed processes linked to workdir pipes
                 subprocess.run(
@@ -787,7 +789,7 @@ class ImageProcessing:
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                 )
-            except Exception as exc:
+            except (OSError, subprocess.SubprocessError) as exc:
                 logger.debug("Failed to force-kill lingering Siril processes for '%s': %s", workdir, exc)
 
     def _is_fits_file_readable(self, path: str) -> bool:
@@ -814,7 +816,7 @@ class ImageProcessing:
                 if hdu.data is None:
                     return False
             return True
-        except Exception:
+        except FITS_READ_ERRORS:
             return False
 
     def restore_cached_calibration_masters(
@@ -1114,7 +1116,7 @@ class ImageProcessing:
                     # for the spectral registration-quality check.
                     self.last_run_diagnostics.setdefault("symlinked_light_paths", []).append(path)
                     light_idx += 1
-                except Exception as e:
+                except OSError as e:
                     log(f"Error symlinking light {path}: {e}")
 
             # Populate calibrations from the first matching frame
@@ -1191,7 +1193,7 @@ class ImageProcessing:
                         master_exp = float(header.get("EXPTIME", exp))
                         master_temp = header.get("CCD-TEMP", header.get("SET-TEMP"))
                         master_temp = float(master_temp) if master_temp is not None else None
-                    except Exception:
+                    except FITS_READ_ERRORS:
                         return
 
                     if check_exposure:
@@ -1250,7 +1252,7 @@ class ImageProcessing:
                     try:
                         os.symlink(item, os.path.join(target_folder, "darks", f"dark_{dark_idx:05d}.fits"))
                         dark_idx += 1
-                    except Exception as e:
+                    except OSError as e:
                         log(f"Error symlinking dark {item}: {e}")
 
                 bias_frame_paths = library.get_bias_frames(camera=cam, iso=iso, offset=offset)
@@ -1263,7 +1265,7 @@ class ImageProcessing:
                     try:
                         os.symlink(item, os.path.join(target_folder, "biases", f"bias_{bias_idx:05d}.fits"))
                         bias_idx += 1
-                    except Exception as e:
+                    except OSError as e:
                         log(f"Error symlinking bias {item}: {e}")
 
                 flat_frame_paths = library.get_flat_frames(
@@ -1278,7 +1280,7 @@ class ImageProcessing:
                     try:
                         os.symlink(item, os.path.join(target_folder, "flats", f"flat_{flat_idx:05d}.fits"))
                         flat_idx += 1
-                    except Exception as e:
+                    except OSError as e:
                         log(f"Error symlinking flat {item}: {e}")
 
             return target_folder
@@ -1443,9 +1445,9 @@ class ImageProcessing:
                         break
                 pipe.write("exit\n")
                 pipe.flush()
-        except Exception as e:
+        except ExternalServiceError, OSError:
             if job_logger:
-                job_logger.error("Pipe write error: %s", e)
+                job_logger.exception("Pipe write error")
 
     def read_output(
         self,
@@ -1626,9 +1628,9 @@ class ImageProcessing:
                     elif "status: error" in line:
                         return None
                 return None
-        except Exception as e:
+        except ExternalServiceError, OSError, ValueError:
             if job_logger:
-                job_logger.error("Pipe read error: %s", e)
+                job_logger.exception("Pipe read error")
             return None
 
     def process_target(
@@ -1734,7 +1736,7 @@ class ImageProcessing:
             try:
                 logs_path = self.config.get_logs_path()
                 log_file = os.path.join(str(logs_path), f"stack_{work_directory_name(id, output_file)}.log")
-            except Exception:
+            except ConfigurationError, OSError:
                 log_file = "siril.log"
 
         handler = logging.FileHandler(log_file, mode="w")
@@ -1755,7 +1757,7 @@ class ImageProcessing:
             # is the frames path unless the configuration sets another disk.
             stacks_path = self.config.get_stacks_path()
             library_dest = os.path.join(stacks_path, "lights", id)
-        except Exception:
+        except ConfigurationError, OSError:
             library_dest = None
 
         if not camera_filter and isinstance(image_files, list) and len(image_files) > 0:
@@ -1906,11 +1908,11 @@ class ImageProcessing:
                                     if job:
                                         job.progress_current = int(val)
                                         self.job_repository.upsert_job(job)
-                                except Exception as exc:
+                                except (ValueError, sqlite3.Error) as exc:
                                     logger.debug("Failed to parse/record Siril progress line: %s", exc)
-                except Exception as e:
+                except OSError:
                     if job_logger:
-                        job_logger.error("Error in Siril stdout reader thread: %s", e)
+                        job_logger.exception("Error in Siril stdout reader thread")
 
             log_reader_thread = threading.Thread(target=read_siril_stdout, daemon=True)
             log_reader_thread.start()
@@ -2260,7 +2262,7 @@ class ImageProcessing:
                             exp = f.get("exposure") if isinstance(f, dict) else getattr(f, "exposure", "0")
                             try:
                                 total_exp += float(exp)
-                            except Exception as exc:
+                            except (ValueError, TypeError) as exc:
                                 logger.debug("Skipping unparsable exposure value '%s': %s", exp, exc)
 
                     if total_exp > 0:
@@ -2271,8 +2273,8 @@ class ImageProcessing:
                                 f"Total exposure time summed from {len(image_files)} frames."
                             )
                         job_logger.info("Updated stacked header: EXPTIME=%ss", total_exp)
-                except Exception as e:
-                    job_logger.error("Failed to update stacked header EXPTIME: %s", e)
+                except FITS_READ_ERRORS:
+                    job_logger.exception("Failed to update stacked header EXPTIME")
 
             # Wait for log reader thread to finish reading all output
             log_reader_thread.join(timeout=10)
@@ -2300,7 +2302,7 @@ class ImageProcessing:
                 try:
                     shutil.rmtree(target_folder)
                     job_logger.info("Removed temporary work directory: %s", target_folder)
-                except Exception as cleanup_error:
+                except OSError as cleanup_error:
                     job_logger.warning(
                         "Failed to remove temporary work directory %s: %s", target_folder, cleanup_error
                     )
@@ -2582,5 +2584,5 @@ class ImageProcessing:
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,
             )
-        except Exception as exc:
+        except (OSError, ValueError) as exc:
             logger.debug("Failed to launch Siril GUI for '%s': %s", file_path, exc)

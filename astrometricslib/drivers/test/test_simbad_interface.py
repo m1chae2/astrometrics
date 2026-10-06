@@ -22,8 +22,10 @@ import threading
 from typing import Any
 
 import pytest
+from pyvo.dal.exceptions import DALServiceError
 
 from astrometricslib.drivers import simbad_interface
+from astrometricslib.foundation.errors import ExternalServiceError
 
 
 class _FakeSession:
@@ -273,10 +275,25 @@ def test_the_lock_is_released_when_a_query_raises(monkeypatch: pytest.MonkeyPatc
         simbad_interface, "_client", _FakeSimbad(result=ConnectionError("SIMBAD unreachable"))
     )
 
-    with pytest.raises(ConnectionError):
+    with pytest.raises(ExternalServiceError):
         simbad_interface.query_object("M 13")
 
     assert not simbad_interface.SIMBAD_LOCK.locked()
+
+
+def test_a_service_error_is_reported_as_an_external_service_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A SIMBAD server error reaches the caller as `ExternalServiceError`.
+
+    The original error stays attached as the cause, so the log still shows
+    what the server said.
+    """
+    service_error = DALServiceError("SIMBAD returned HTTP 503")
+    monkeypatch.setattr(simbad_interface, "_client", _FakeSimbad(result=service_error))
+
+    with pytest.raises(ExternalServiceError) as raised:
+        simbad_interface.query_region("coord", radius="0.5d")
+
+    assert raised.value.__cause__ is service_error
 
 
 def test_concurrent_queries_do_not_interleave_configuration(

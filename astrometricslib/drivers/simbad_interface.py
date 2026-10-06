@@ -14,7 +14,9 @@ lock. `test_simbad_interface.py` enforces the import rule.
 
 Callers use `query_region` and `query_object`; both take `SIMBAD_LOCK`,
 configure the client and query it without releasing it in between, so a
-second caller can never observe a half-applied configuration.
+second caller can never observe a half-applied configuration. A failed
+query (no network, a server error, or a reply that cannot be read) is
+raised as `ExternalServiceError`, so callers catch one error category.
 """
 
 import logging
@@ -22,8 +24,19 @@ import threading
 from typing import Any
 
 from astroquery.simbad import SimbadClass
+from pyvo.dal.exceptions import DALAccessError
+
+from astrometricslib.foundation.errors import ExternalServiceError
 
 logger = logging.getLogger(__name__)
+
+#: The errors an online astroquery catalog query (SIMBAD or Gaia) can raise
+#: when the network or the remote service fails. ``OSError`` covers lost
+#: connections and timeouts, including every `requests` error such as an
+#: HTTP error reply. ``DALAccessError`` is the base of the errors from pyvo,
+#: the table-query library astroquery uses. ``ValueError`` comes from a
+#: reply that is empty or cannot be parsed.
+ONLINE_QUERY_ERRORS: tuple[type[Exception], ...] = (OSError, ValueError, DALAccessError)
 
 # How long to wait on a single SIMBAD HTTP request before giving up.
 #
@@ -144,11 +157,21 @@ def query_region(
     -------
     result_table : `astropy.table.Table` or `None`
         The matching rows, or `None` if SIMBAD returned nothing.
+
+    Raises
+    ------
+    ExternalServiceError
+        If SIMBAD could not be reached or its reply could not be read.
     """
     with SIMBAD_LOCK:
         client = _get_client()
         _configure(client, votable_fields, row_limit)
-        return client.query_region(coordinates, radius=radius)
+        try:
+            return client.query_region(coordinates, radius=radius)
+        except ONLINE_QUERY_ERRORS as query_error:
+            raise ExternalServiceError(
+                "The SIMBAD region search failed.", details={"radius": radius}
+            ) from query_error
 
 
 def query_object(object_name: str, *, votable_fields: tuple[str, ...] = ()) -> Any:
@@ -165,8 +188,18 @@ def query_object(object_name: str, *, votable_fields: tuple[str, ...] = ()) -> A
     -------
     result_table : `astropy.table.Table` or `None`
         The matching row, or `None` if the name did not resolve.
+
+    Raises
+    ------
+    ExternalServiceError
+        If SIMBAD could not be reached or its reply could not be read.
     """
     with SIMBAD_LOCK:
         client = _get_client()
         _configure(client, votable_fields, None)
-        return client.query_object(object_name)
+        try:
+            return client.query_object(object_name)
+        except ONLINE_QUERY_ERRORS as query_error:
+            raise ExternalServiceError(
+                "The SIMBAD name lookup failed.", details={"object_name": object_name}
+            ) from query_error

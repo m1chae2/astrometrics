@@ -6,7 +6,7 @@ This folder holds small, generic helpers used across the library that do not bel
 
 - `config_loader.py`, `config_schema.py` — load, save, and validate the application's TOML configuration file (`astrometrics.config.toml`), and the pydantic models describing its shape.
 - `enums.py` — shared enumerations (filter types and similar) used across the domain models.
-- `exceptions.py` — the library's own exception classes.
+- `exceptions.py` — the library's own exception classes, and `DATA_ERRORS`, the built-in errors that measuring unusable data can raise. Code that measures data catches that tuple instead of every exception.
 - `coordinate_parsing.py` — parses astronomical coordinate strings (right ascension, declination) into decimal degrees.
 - `camera_names.py` — compares camera names that may be written differently in different places (a header, a config section, a UI field) to decide whether they refer to the same camera.
 - `observatory_setups.py` — the optics an observatory owns, and which camera is paired with which optic.

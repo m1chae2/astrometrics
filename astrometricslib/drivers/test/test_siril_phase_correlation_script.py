@@ -12,6 +12,7 @@ Reuses the same Siril-stubbing convention as
 `test_siril_frame_filter_placement.py`.
 """
 
+import io
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -53,7 +54,9 @@ def captured_calibration_script(tmp_path, monkeypatch):  # ruff: ignore[missing-
         siril_interface.ImageProcessing, "create_named_pipes", lambda self, base: ("cmd", "out")
     )
     monkeypatch.setattr(
-        siril_interface.ImageProcessing, "run_siril_headless", lambda self, *a, **k: MagicMock()
+        siril_interface.ImageProcessing,
+        "run_siril_headless",
+        lambda self, *a, **k: MagicMock(stdout=io.BytesIO()),
     )
     monkeypatch.setattr(siril_interface.ImageProcessing, "read_output", lambda self, *a, **k: None)
     monkeypatch.setattr(siril_interface.ImageProcessing, "_kill_process_tree", lambda self, *a, **k: None)

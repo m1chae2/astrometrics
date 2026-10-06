@@ -289,12 +289,12 @@ class ObservationPlanning:
 
     # -- Sky browsing (name lookup and catalogs) ----------------------------
 
-    def resolve_target_coordinates(self, target_name: str) -> Target | StellarObject:
+    def resolve_target_coordinates(self, name: str) -> Target | StellarObject:
         """Resolve a target or star by name, through the library or SIMBAD.
 
         Parameters
         ----------
-        target_name : `str`
+        name : `str`
             A target id or common name, or a star name.
 
         Returns
@@ -302,9 +302,9 @@ class ObservationPlanning:
         resolved : `Target` or `StellarObject`
             The whole record of the object found.
         """
-        return self._sky_engine.resolve_target_coordinates(target_name)
+        return self._sky_engine.resolve_target_coordinates(name)
 
-    def lookup_coordinates(self, target_name: str) -> dict[str, Any]:
+    def lookup_coordinates(self, name: str) -> dict[str, Any]:
         """Find where a named object is, from the library or SIMBAD.
 
         Gives a short answer. `resolve_target_coordinates` returns the
@@ -313,7 +313,7 @@ class ObservationPlanning:
 
         Parameters
         ----------
-        target_name : `str`
+        name : `str`
             A target id, a common name, or a star name.
 
         Returns
@@ -324,7 +324,7 @@ class ObservationPlanning:
         """
         from astrometricslib import parse_coordinate_string
 
-        found = self._sky_engine.resolve_target_coordinates(target_name)
+        found = self._sky_engine.resolve_target_coordinates(name)
         if isinstance(found, StellarObject):
             return {
                 "id": found.id,

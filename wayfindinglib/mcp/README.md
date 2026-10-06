@@ -19,12 +19,12 @@ Do not edit `tool_manifest.json` by hand. The script `backend/mcp/tool_inventory
 
 ## What `argument_resolution.py` converts
 
-A client sends JSON. Several Wayfinder methods take objects and have no type hints, so the generic engine cannot convert for them. This file supplies the conversions.
+A client sends JSON. A few Wayfinder methods take objects the generic engine cannot build from JSON, so this file supplies the conversions.
 
 - `target` (a library target): an id such as `"M 52"`. A remote folder name such as `"M_52"` also matches. An id the library does not have fails with a message that names it.
-- `objects` (a list of sky objects): each item is a name or id, looked up in the library and then in SIMBAD, or a dictionary `{"id", "ra_deg", "dec_deg"}` for a known position.
-- `time_input` (a time): `"now"` or an ISO 8601 string. An offset such as `-06:00` is honored, and a string with no offset means UTC.
-- `astrometrics` (the science library handle): the server supplies it. Tools that take it do not list it in their schema.
+- `position` and `destination` (a sky position): a dictionary `{"ra_deg", "dec_deg"}` becomes a `SkyPosition`.
+
+The `planning` methods read their own inputs, so they need nothing here. `get_visibility` takes `objects` as names or ids (looked up in the library and then in SIMBAD) or `{"id", "ra_deg", "dec_deg"}` dictionaries, and `time` and `end_time` as `"now"` or ISO 8601 strings; an offset such as `-06:00` is honored, and a string with no offset means UTC.
 
 Every converter raises `ValueError` with a plain message, so a client sees the reason instead of an `AttributeError` raised later.
 
